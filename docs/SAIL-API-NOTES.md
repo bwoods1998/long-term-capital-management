@@ -12,7 +12,7 @@ Read the core inference support matrix, scheduling, retries, rate limits, usage 
 - Start with `deepseek-ai/DeepSeek-V4-Flash-0731`, explicitly using `asap`, after checking the account's model catalog.
 - Use `POST /v1/responses`, with structured `text.format.type=json_schema`. JSON shape is not proof of financial correctness: validate values, units, periods, and evidence against reference answers.
 - Download and extract public filing text locally. File/document input and hosted file-search tools are not available through this inference interface. Web-search tool declarations can be silently removed for compatibility, so do not assume they performed research.
-- Begin with one request, then a bounded evaluation set. Reserve a conservative per-request allowance before submission; the initial experiment budget is $1 of the user's $5 credit. The budget mechanism is a planned runner feature, not implemented yet.
+- Begin with one request, then a bounded evaluation set. Reserve a conservative per-request allowance before submission; the initial experiment budget is $1 of the user's $5 credit. The v1 runner now holds a permanent one-cent allowance per logical trial in SQLite, with atomic reservations against $1; this is a local control, not a provider-enforced account cap.
 - Use a fresh persisted UUID per intended trial and reuse it only for retries of that same trial. Persist the response ID and resume polling rather than resubmitting.
 - Keep pricing estimates and provider-reported spending separate; reconcile them after billing catches up.
 
