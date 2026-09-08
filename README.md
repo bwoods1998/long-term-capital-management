@@ -1,59 +1,42 @@
-# Inference Economics Lab
+# Portfolio Agent
 
-A small lab for learning how AI workloads connect to financial decisions. V1 measures one financial extraction through Sail: correctness, time, tokens, and estimated cost. Python standard library only; no cloud VM required.
+Building a persistent AI investor with Sail and Charles Schwab. A personal experiment in research, portfolio management, and the cost of useful intelligence.
 
-## Start here
+**Early development.** Financial extraction and cost measurement work today. Brokerage connectivity, portfolio management, and the public dashboard are planned. No brokerage orders can be placed by the current code.
 
-Read [Lesson 1](lessons/01-first-experiment.md), then inspect the request without spending anything:
+## The vision
+
+One small portfolio, with a living record of why each position exists, what would change the thesis, and what the agent spends investigating it. Research can span hours or days, resume after interruptions, and return when new evidence arrives.
+
+The owner controls assignments, budgets, and any future trading permissions. Public visitors see selected research and results through a separate read-only view. The first implementation will be for one owner.
+
+The question: **Can an agent maintain a coherent investment strategy over time—and justify its research costs?**
+
+## Start reading
+
+- [Project roadmap](docs/ROADMAP.md): milestones and tomorrow's starting point.
+- [Architecture](docs/ARCHITECTURE.md): research, brokerage, and public-view boundaries.
+- [Learning path](lessons/README.md): what to understand at each stage.
+- [Lesson 1](lessons/01-first-experiment.md) and [first result](lessons/01-result.md): the working foundation.
+- [Run the existing experiment](docs/EXPERIMENTS.md): setup, commands, and spending controls.
+
+## What works now
+
+A Python program extracts five financial facts from a small public filing table, checks values and evidence, and records token usage and estimated cost. The first trial passed all five facts at an estimated $0.00011808. One development example is not a benchmark of investment ability.
 
 ```sh
 python3 lab.py preview
-```
-
-Set up a private key and verify access if you have not already:
-
-```sh
-python3 scripts/setup_key.py
-python3 scripts/check_connection.py
-```
-
-The setup command hides input and writes an owner-readable `.env` excluded from Git. The connection check performs only read-only requests. Neither prints the key.
-
-Run one paid trial with your own prediction:
-
-```sh
-python3 lab.py run --prediction 'I expect all five facts correct for less than one cent.'
-```
-
-The program prints a run ID and saves its request, source, reference answers, response, and usage in `.data/runs.sqlite`. If the job is still pending or submission was interrupted, use the same ID:
-
-```sh
-python3 lab.py resume RUN_ID
-python3 lab.py report RUN_ID
-```
-
-Resume retrieves accepted work; an uncertain submission reuses its original idempotency key within 23 hours. After that it refuses to resubmit and requires manual reconciliation. An incomplete response is terminal and still may incur charges. No automatic new trials or cloud resources are created.
-
-## Budget and measurement
-
-Each intended trial permanently holds a one-cent allowance in SQLite against a $1 local budget. Reservations are atomic and survive failures/restarts. They are deliberately not released after cheap successes, keeping this first version conservative. Keep the database: deleting it also deletes the budget history.
-
-The allowance is a local spending control, not a provider-enforced account cap. It covers this fixed small prompt, model, output cap, and the September 7, 2026 price snapshot with a wide margin. Recheck prices before future experiments; provider price changes, other applications, or separate databases are outside this control. The runner also checks reported credit before a new trial, but billing data can lag.
-
-Actual usage is priced separately using uncached input, cached input, and output. Cost is an estimate, not a reconciled invoice. Missing usage stays unknown. One-cent allowances are not actual spending. The first experiment measures client-observed wall time, including polling and any resume delay, not GPU time.
-
-## What counts as correct?
-
-All five facts must have the right value, USD currency, millions unit, fiscal period, and exact source row. Source data and reference answers are in [the fixture](data/msft-2025.json), transcribed from [Microsoft's annual report](https://www.microsoft.com/investor/reports/ar25/). The answer key is not part of the model prompt. A completed response with all checks passed is a successful task.
-
-One easy development example cannot establish model quality. Next: controlled synthetic changes, then a held-out dataset, then repeat trials and model/window comparisons. Financial extraction is our initial workload for learning infrastructure economics.
-
-## Verification and references
-
-```sh
 python3 -m unittest discover -s tests -v
 ```
 
-Tests cover incorrect years/units/evidence, cache accounting, concurrent budget limits, uncertain submissions, and terminal-response handling.
+Both commands run locally without API calls. Python 3.10+; no third-party packages required for the current experiment.
 
-[API notes](docs/SAIL-API-NOTES.md) explain the implementation choices. The [source manifest](docs/sail-source-manifest.json) identifies the archived vendor documentation. Keys, runs, reports, and vendor snapshots remain ignored by Git.
+Sail credentials are stored in an owner-readable, Git-ignored `.env`. Local runs and documentation snapshots stay in ignored `.data/`. Preserve that directory: it includes the experiment's persistent budget history. No Schwab credentials are needed at this stage.
+
+## How it grows
+
+Read-only portfolio reconciliation → one persistent investment thesis → scheduled research with traces and cost controls → simulated trade proposals → owner-approved live orders → optionally, a precisely bounded autonomous mandate.
+
+Sail inference supplies model calls; Sailboxes and Voyages can later supply execution and tracing. We build the memory, planner, evaluations, and financial controls. Each new capability must earn its complexity through a useful experiment.
+
+Research costs and investment results will be reported separately. Public market-data display depends on the applicable data permissions. This is a personal software experiment, with no customer funds or public trading controls.
