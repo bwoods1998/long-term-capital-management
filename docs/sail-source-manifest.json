@@ -1,0 +1,725 @@
+{
+  "retrieved": "2026-09-07",
+  "sources": [
+    {
+      "url": "https://docs.sailresearch.com/index.md",
+      "file": "index.md",
+      "bytes": 7922,
+      "sha256": "70f394580d2a890f68fe063da098d79bc22b928dc65a9f970d7e0a7157cce357"
+    },
+    {
+      "url": "https://docs.sailresearch.com/quickstart.md",
+      "file": "quickstart.md",
+      "bytes": 6253,
+      "sha256": "efabbcd9acd4f75ea4cc202d7c62f30e507cdf2eb11f215a134d92af6c960f3d"
+    },
+    {
+      "url": "https://docs.sailresearch.com/ai-quickstart.md",
+      "file": "ai-quickstart.md",
+      "bytes": 5074,
+      "sha256": "2eee317b30707ee8f98b53b98b293b6cf7b3bdf59e51caedfc844239ead60401"
+    },
+    {
+      "url": "https://docs.sailresearch.com/models.md",
+      "file": "models.md",
+      "bytes": 70406,
+      "sha256": "1ef0c0ae2e77dfd8beeab1db7209e87d75ea0f976eb93077eeefd34bf4995920"
+    },
+    {
+      "url": "https://docs.sailresearch.com/pricing.md",
+      "file": "pricing.md",
+      "bytes": 75264,
+      "sha256": "9610be2042028a8344d50cce491552b5644bff117a02688c2b7354f3ce49de66"
+    },
+    {
+      "url": "https://docs.sailresearch.com/completion-windows.md",
+      "file": "completion-windows.md",
+      "bytes": 7588,
+      "sha256": "ccacdaa0af399489d39d709df36c31f1764442594752b1824e747c98edc406b2"
+    },
+    {
+      "url": "https://docs.sailresearch.com/rate-limits.md",
+      "file": "rate-limits.md",
+      "bytes": 2544,
+      "sha256": "a31b7aaa88e2f3c22f9ce96188c9e0f73d7be7802800922013537f3e1cb9e334"
+    },
+    {
+      "url": "https://docs.sailresearch.com/supercache.md",
+      "file": "supercache.md",
+      "bytes": 4669,
+      "sha256": "ee4b0c4adea865f9e7e1c9bfc2154fd682c6099c5257b005e6ef32f01eb346b5"
+    },
+    {
+      "url": "https://docs.sailresearch.com/images.md",
+      "file": "images.md",
+      "bytes": 5742,
+      "sha256": "660b85c9cea444d17335e8fb49f54125b6504be24d101feacbf905aa4b35a48a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/loras.md",
+      "file": "loras.md",
+      "bytes": 7059,
+      "sha256": "199330cd1bcebfc8e40a4fb28bf1f198ebefbbde45da3d34f3142c009c605e1c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/tinker.md",
+      "file": "tinker.md",
+      "bytes": 9238,
+      "sha256": "2fcfc19bd88eb2fb6bc66cdc7fa2154970d6d7a3d727ddefcbeb2d2f6d58489d"
+    },
+    {
+      "url": "https://docs.sailresearch.com/webhooks.md",
+      "file": "webhooks.md",
+      "bytes": 5219,
+      "sha256": "69219f17399703ae9afc2a88a31f83cf088e5a4cbae5f1b35ac7b334ad050b9c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/support.md",
+      "file": "support.md",
+      "bytes": 33060,
+      "sha256": "872252226d100859c92207fc8dce3f37ec394542a4ce4fd26c4a6be129a56666"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes.md",
+      "file": "sailboxes.md",
+      "bytes": 5041,
+      "sha256": "cd425eafbb8102fb8a25c18650cdabbb0efa55ef30d687137df4d239d69433a0"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-getting-help.md",
+      "file": "sailboxes-getting-help.md",
+      "bytes": 957,
+      "sha256": "17b01f6a85a562ad3e028d35a035d1130637c48cdd05979496bd88a9445c0e41"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-images.md",
+      "file": "sailboxes-images.md",
+      "bytes": 12097,
+      "sha256": "96261d594c3d87f22bd47775d6d5ec5112571d9d62a3c5a28f97cbbf24e0f870"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-credentials.md",
+      "file": "sailboxes-credentials.md",
+      "bytes": 9600,
+      "sha256": "45b49a1d08215f807bfdc79f119aed04675d535e799559b51c4ed3d402ff246b"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-network-policy.md",
+      "file": "sailboxes-network-policy.md",
+      "bytes": 8821,
+      "sha256": "6730dc0181508f6bbe7579f1f50f169c12616a9585cb686401ec8ed81c3b034e"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-access-control.md",
+      "file": "sailboxes-access-control.md",
+      "bytes": 9306,
+      "sha256": "2d3499921ca3806e735276af10cd5c0d1d805d19a2e22a913838ec2de0ad25e6"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-custom-domains.md",
+      "file": "sailboxes-custom-domains.md",
+      "bytes": 7381,
+      "sha256": "c89a6d3bad7c6f60df3e13f3460e272c481f926d3e80078a4158ab37bfbb929b"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-autosleep.md",
+      "file": "sailboxes-autosleep.md",
+      "bytes": 6104,
+      "sha256": "4e5b124bcee231e95ae9de323a98047a74d173f44540fc44336a20b733b56ef6"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-forking.md",
+      "file": "sailboxes-forking.md",
+      "bytes": 5963,
+      "sha256": "3f30a11b639399590cff1937fb24f85779a50bf1a8ad74c1a93d4412fa648a71"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-http-api.md",
+      "file": "sailboxes-http-api.md",
+      "bytes": 11175,
+      "sha256": "0559cf32083bef10b27e963174729e701f0baa9d31a922cd3aafd1789142d1c0"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-billing.md",
+      "file": "sailboxes-billing.md",
+      "bytes": 3171,
+      "sha256": "fb6e77705d2ad7c2567375531464e78ca658ac6f4c3a61d6c8f31d1a5347a2bf"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-pricing.md",
+      "file": "sailboxes-pricing.md",
+      "bytes": 2325,
+      "sha256": "71a20754cdebdb8378e74602866dbf5c719b853f6331b3f6bf73a5372c675c4a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/reference/cli.md",
+      "file": "reference__cli.md",
+      "bytes": 24220,
+      "sha256": "616ad99c8ae04374ac7abc000839e3d231780bb8bd8e406240eac8801cf8f3d5"
+    },
+    {
+      "url": "https://docs.sailresearch.com/agents.md",
+      "file": "agents.md",
+      "bytes": 6753,
+      "sha256": "1df6698167eeccec37152696c37bbb64eb5695429c5eed144686525e0af86a71"
+    },
+    {
+      "url": "https://docs.sailresearch.com/mcp-server.md",
+      "file": "mcp-server.md",
+      "bytes": 2481,
+      "sha256": "1e80633bd0429c21e0983a40dab7eda2ce7b620a7dd099e368daee067b4c2eae"
+    },
+    {
+      "url": "https://docs.sailresearch.com/opencode.md",
+      "file": "opencode.md",
+      "bytes": 4118,
+      "sha256": "58dc731b0e9aa27af8fcc4549fad77a0018fcc625a9b463e51c6067c103916b9"
+    },
+    {
+      "url": "https://docs.sailresearch.com/requests_at_scale.md",
+      "file": "requests_at_scale.md",
+      "bytes": 8901,
+      "sha256": "aeeee9663cc1f0088211245164b73500e3e10714c25315e3361eb08024101a94"
+    },
+    {
+      "url": "https://docs.sailresearch.com/tinker-rl.md",
+      "file": "tinker-rl.md",
+      "bytes": 10988,
+      "sha256": "3f61556e1f1a45fbedfaf4971d1cfba3a015a57f39f002131703e855afff569c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/harbor.md",
+      "file": "harbor.md",
+      "bytes": 5893,
+      "sha256": "93c37ec1ba9a714c4ba3efdfc324abdc8e44c66e605dc84f9e3f0a78bf43bda7"
+    },
+    {
+      "url": "https://docs.sailresearch.com/migrate.md",
+      "file": "migrate.md",
+      "bytes": 10617,
+      "sha256": "231c7b81f7a1532fb302dafed94d238f0e72bcee875dad47b62cc89b0e0bc471"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailboxes-migrating.md",
+      "file": "sailboxes-migrating.md",
+      "bytes": 4825,
+      "sha256": "5d8a4b8d2e957aba1103965f19c6dd77ef1b3227e192a5b05bdcee9a95791d99"
+    },
+    {
+      "url": "https://docs.sailresearch.com/voyages.md",
+      "file": "voyages.md",
+      "bytes": 8780,
+      "sha256": "face5c21acd9555c2e5f144eeac4204cd9188315f0b25de5b281d692b7b9d8ec"
+    },
+    {
+      "url": "https://docs.sailresearch.com/voyages-quickstart.md",
+      "file": "voyages-quickstart.md",
+      "bytes": 5291,
+      "sha256": "889e6892f8dd8366a8acc8c50329cb499cf130954dc4b9f1fc3a684e7b69bd50"
+    },
+    {
+      "url": "https://docs.sailresearch.com/voyages-patterns.md",
+      "file": "voyages-patterns.md",
+      "bytes": 5924,
+      "sha256": "7e0d231b5873a6a24412da83d94533c1e60b9fd10646361f0b6f8283fee8df98"
+    },
+    {
+      "url": "https://docs.sailresearch.com/security.md",
+      "file": "security.md",
+      "bytes": 3678,
+      "sha256": "9f4d7a0625f2c1125a6df0793af5fd7551e7a90a6f97a9f3b8b13de4e8e6b52a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/dpa.md",
+      "file": "dpa.md",
+      "bytes": 15171,
+      "sha256": "ac0edbc6af5d183812faf454b62ebd6e518d05a28f2acc17fde34441ada22054"
+    },
+    {
+      "url": "https://docs.sailresearch.com/trust-center.md",
+      "file": "trust-center.md",
+      "bytes": 604,
+      "sha256": "478f1d927fcdb348e733d7faa6bc0f575c97e368510caabb66d1c4da17d6c747"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/models-api/list-supported-models.md",
+      "file": "api-reference__models-api__list-supported-models.md",
+      "bytes": 2981,
+      "sha256": "f44f9f2008fd3be0d45e69171eb8aaaa14f206ddbb3efefca0a669a1d98b8c22"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/responses-api/create-a-response.md",
+      "file": "api-reference__responses-api__create-a-response.md",
+      "bytes": 18818,
+      "sha256": "bf73de9563a250a53a6e5a815b46b12f31d3a8206c041497faa8bbb46a5b8e94"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/responses-api/retrieve-a-response.md",
+      "file": "api-reference__responses-api__retrieve-a-response.md",
+      "bytes": 10265,
+      "sha256": "e9eefd693d8e33909dd00d65a4c16dbf01f491a46e397ead5cb080f26fb03dcd"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/chat-completions-api/create-a-chat-completion.md",
+      "file": "api-reference__chat-completions-api__create-a-chat-completion.md",
+      "bytes": 17147,
+      "sha256": "90a903526dc6a997606949d3d83f5144d8f83992d97b654cec20dd24e5bdc69c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/messages-api/create-an-anthropic-message.md",
+      "file": "api-reference__messages-api__create-an-anthropic-message.md",
+      "bytes": 19724,
+      "sha256": "e8989e1a273c80476e020b5314bfc5ca3a7b2dbcbc60e1989eaef35b605c8565"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/messages-api/retrieve-a-message.md",
+      "file": "api-reference__messages-api__retrieve-a-message.md",
+      "bytes": 8065,
+      "sha256": "dfc6fed7816f5f8d0a0f63a5ba7c5ac8b7db9a939c39a0df385b7833d340ddbb"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/messages-api/count-tokens-for-an-anthropic-message.md",
+      "file": "api-reference__messages-api__count-tokens-for-an-anthropic-message.md",
+      "bytes": 15862,
+      "sha256": "1138b394a09fde3d3f502d35c2a6ee2de3c97c85e5b0e25d3005a47397e3aff7"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/batches-api/list-batches.md",
+      "file": "api-reference__batches-api__list-batches.md",
+      "bytes": 4300,
+      "sha256": "0693b989d74f46615b80d2ab47e49ab11c1f57553319207307832dd1d2c4811e"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/batches-api/create-a-batch.md",
+      "file": "api-reference__batches-api__create-a-batch.md",
+      "bytes": 6664,
+      "sha256": "5361d5ce1de130f1565d00bcc497286ae14454519484773b7440a7a326328dcf"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/batches-api/get-batch-status.md",
+      "file": "api-reference__batches-api__get-batch-status.md",
+      "bytes": 4516,
+      "sha256": "23b9447eeb467fc4c2bd4b3206d8a9c0e2f4e87dc22d8a051b8b7740c7c7f07f"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/batches-api/get-batch-request-result.md",
+      "file": "api-reference__batches-api__get-batch-request-result.md",
+      "bytes": 10927,
+      "sha256": "cec8d7ac418770a473316502be945a68e09612e6fb2e8e162e1870fb1a4af37f"
+    },
+    {
+      "url": "https://docs.sailresearch.com/usage.md",
+      "file": "usage.md",
+      "bytes": 2905,
+      "sha256": "02e1a82241e6e9853766b7aae7cb300c4dbba8b1a85c1dba7c512a5f48b57a98"
+    },
+    {
+      "url": "https://docs.sailresearch.com/usage-endpoints.md",
+      "file": "usage-endpoints.md",
+      "bytes": 36549,
+      "sha256": "04801ff143d182105e57f283062d4a8f53a0380cc4ed44a2648c9881c47f66a3"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailbox-sdk.md",
+      "file": "sailbox-sdk.md",
+      "bytes": 98617,
+      "sha256": "9b190da4662bc404636a4f7727f16d6712978518c6be8c0949def2c6ea59ce7a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailbox-sdk-images.md",
+      "file": "sailbox-sdk-images.md",
+      "bytes": 17216,
+      "sha256": "45e0a50f8760a180d9e9546179d5f6bdd0fb0a37b83f979348af72c49b291c36"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailbox-sdk-apps.md",
+      "file": "sailbox-sdk-apps.md",
+      "bytes": 2946,
+      "sha256": "f41e9ff1ae764277423889c61d60980652dc9a08a4cec3da0de46a9328105881"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailbox-sdk-errors.md",
+      "file": "sailbox-sdk-errors.md",
+      "bytes": 7746,
+      "sha256": "1650e54aa357d49601b11bf57205b6cf4296f3f687ac979c4567978b0c5a09ae"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/identity/whoami.md",
+      "file": "api-reference__identity__whoami.md",
+      "bytes": 8666,
+      "sha256": "b4ac50ead2828a1d4c60bb331ea148e431c941e0417cbf861001c07d5af869e1"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/apps/find-or-create-an-app.md",
+      "file": "api-reference__apps__find-or-create-an-app.md",
+      "bytes": 11648,
+      "sha256": "52f11e0c819cd774715becad2562c10d09a7f85329158ee8de20f523681e087f"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/apps/list-apps.md",
+      "file": "api-reference__apps__list-apps.md",
+      "bytes": 9107,
+      "sha256": "bcdf532016c0f7a85221481231d23baecae9e8ba527b77bd4fcf0bd51f59ec43"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/secrets/list-secrets.md",
+      "file": "api-reference__secrets__list-secrets.md",
+      "bytes": 9295,
+      "sha256": "0a6a8d7b8b0de60ad1b536bf91e76a8582effbd0298576d6f8c18df8866a70ca"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/secrets/get-a-secret.md",
+      "file": "api-reference__secrets__get-a-secret.md",
+      "bytes": 10268,
+      "sha256": "064863908b1731f736de369d5e093e6c4c9250bdcd0230d1f103280bcc9df110"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/secrets/set-a-secret.md",
+      "file": "api-reference__secrets__set-a-secret.md",
+      "bytes": 11116,
+      "sha256": "b1d2d63f34b09618a484a57c23cca9c57d8d2d19bf9e07a74b09550dfafb1ee6"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/secrets/delete-a-secret.md",
+      "file": "api-reference__secrets__delete-a-secret.md",
+      "bytes": 9930,
+      "sha256": "bbb62a171aedf4613d3321d19207b4dc6af399a27ee24cfb330c833496dbd8f9"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/secrets/list-policies-using-a-secret.md",
+      "file": "api-reference__secrets__list-policies-using-a-secret.md",
+      "bytes": 10837,
+      "sha256": "2007a63701578bee7909d5343ccafec9d01c7677f09f638422021b1d5679b591"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/list-http-policies.md",
+      "file": "api-reference__http-policies__list-http-policies.md",
+      "bytes": 12357,
+      "sha256": "8234d4821959b6bfc22d1fe8f55a69c51f018fe68f0e4541fb48c8621886606c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/create-an-http-policy.md",
+      "file": "api-reference__http-policies__create-an-http-policy.md",
+      "bytes": 36816,
+      "sha256": "32c095b0db0175a2c3a173b39597a560c2a9983f541580f7f92b3450df4bf3e0"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/get-an-http-policy.md",
+      "file": "api-reference__http-policies__get-an-http-policy.md",
+      "bytes": 34666,
+      "sha256": "22d67a3e695c0b57e6894df98dad2cea5108d0f3cdc074aa0d6bd9bfeb0a36e6"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/delete-an-http-policy.md",
+      "file": "api-reference__http-policies__delete-an-http-policy.md",
+      "bytes": 9487,
+      "sha256": "b407a026c298e43a98e48451e0c150d1cb7e9b3f79d81dd1d9d1a9c9c695fc4d"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/rename-an-http-policy.md",
+      "file": "api-reference__http-policies__rename-an-http-policy.md",
+      "bytes": 36165,
+      "sha256": "92f9d0a8acbabccbe858a21d501d71a7c17ec6158c69c5f09a474c102acc810d"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/get-a-sailboxs-http-policy.md",
+      "file": "api-reference__http-policies__get-a-sailboxs-http-policy.md",
+      "bytes": 34790,
+      "sha256": "0abe020e2ad8bdf206141ce5be79ea4b0aad565d5e56c068b547e45e829dd198"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/attach-an-http-policy.md",
+      "file": "api-reference__http-policies__attach-an-http-policy.md",
+      "bytes": 11688,
+      "sha256": "23f2de431d77ed18580167d3f4b9ec462d3c68efddb241d45b70d137d4e1c007"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/http-policies/clear-a-sailboxs-http-policy.md",
+      "file": "api-reference__http-policies__clear-a-sailboxs-http-policy.md",
+      "bytes": 10294,
+      "sha256": "89473b973a4be2296483f8c4f238e55681fd6d7a387c43f21a0b3c71fcffb082"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/list-sailboxes.md",
+      "file": "api-reference__lifecycle__list-sailboxes.md",
+      "bytes": 23641,
+      "sha256": "2990fdbb772e265b54fce84359a0789f9353eebd2a810fd1516174dd42347e0c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/create-a-sailbox.md",
+      "file": "api-reference__lifecycle__create-a-sailbox.md",
+      "bytes": 44795,
+      "sha256": "f67af32d522b2fa69df1839a5e078cdd09397de29bbfd241ca819456ccaf3ff2"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/retrieve-a-sailbox.md",
+      "file": "api-reference__lifecycle__retrieve-a-sailbox.md",
+      "bytes": 19551,
+      "sha256": "49f577d108af968c1c1863a836e816382f205e40b9aff16bb29a1a2b3e6f543c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/pause-a-sailbox.md",
+      "file": "api-reference__lifecycle__pause-a-sailbox.md",
+      "bytes": 15107,
+      "sha256": "44de20134725e1f9361849f42372a347a07afe837936f8c8e80f8f920e683fe6"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/sleep-a-sailbox.md",
+      "file": "api-reference__lifecycle__sleep-a-sailbox.md",
+      "bytes": 15503,
+      "sha256": "d4fff1bc2b2e7e95de2786a022d5d5b55a60f6a2c4fde8910e3b6dcfdf3ad79c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/resume-a-sailbox.md",
+      "file": "api-reference__lifecycle__resume-a-sailbox.md",
+      "bytes": 16173,
+      "sha256": "4baafe71449e1a9a577a45534deea101719a8ac285b769d74ed1768dc04298ba"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/schedule-a-wake.md",
+      "file": "api-reference__lifecycle__schedule-a-wake.md",
+      "bytes": 15700,
+      "sha256": "608a8eaa48d0d303ade85c2e6d17bb79d2b22e613d26aa32a5073fed30bf9277"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/set-the-automatic-sleep-preference.md",
+      "file": "api-reference__lifecycle__set-the-automatic-sleep-preference.md",
+      "bytes": 16256,
+      "sha256": "66d610c9032d72608a92e6bf83e4376a4cbd5b136bb168d0c585da013f46a520"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/upgrade-a-sailbox.md",
+      "file": "api-reference__lifecycle__upgrade-a-sailbox.md",
+      "bytes": 16158,
+      "sha256": "4ba4363f279c73129b616f6fdfee51602d2c9a745740f2f2962b7c62cda3605d"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/lifecycle/terminate-a-sailbox.md",
+      "file": "api-reference__lifecycle__terminate-a-sailbox.md",
+      "bytes": 14835,
+      "sha256": "c40c6f335112a60bbbb9b7ebbe34ec9ee2016604a0985da6f5b532a30bcd377e"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/exec/run-a-command.md",
+      "file": "api-reference__exec__run-a-command.md",
+      "bytes": 16070,
+      "sha256": "dc1d5d182efc75507d3af0fbf7849a0be637c12e9711a5d2217b4e8c73f422bf"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/exec/wait-for-an-exec.md",
+      "file": "api-reference__exec__wait-for-an-exec.md",
+      "bytes": 12857,
+      "sha256": "38a406c5ee3b4b221b2c51d650677e4a48eb7571f47d169e9a6a173b01e65c8f"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/exec/write-exec-stdin.md",
+      "file": "api-reference__exec__write-exec-stdin.md",
+      "bytes": 13238,
+      "sha256": "7ced5fe4e7205b52e781c7e85a642f3c6867841acd66496cf4c9f823328cd10f"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/exec/cancel-an-exec.md",
+      "file": "api-reference__exec__cancel-an-exec.md",
+      "bytes": 12844,
+      "sha256": "b5ae3e7bfcf6db7b4ece2e81cf88354692fc2dbbc81c47b2738de2a507aef60a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/exec/resize-an-exec-pty.md",
+      "file": "api-reference__exec__resize-an-exec-pty.md",
+      "bytes": 12532,
+      "sha256": "469c6c5dd5af62f037d98c910f6e9ccd340f7e37a2236142aa9b30a3a74e0538"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/exec/resync-an-exec-pty.md",
+      "file": "api-reference__exec__resync-an-exec-pty.md",
+      "bytes": 12126,
+      "sha256": "a543a22a41eac40c8bf142b0088e6f13523d80cd57ac1b12e83ed8e14d70657c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/files/read-a-file.md",
+      "file": "api-reference__files__read-a-file.md",
+      "bytes": 11912,
+      "sha256": "1e68ecdcb8f52e58b000af991d07a53b4d1c01a53e75af5ceb58fa24c3fa7946"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/files/write-a-file.md",
+      "file": "api-reference__files__write-a-file.md",
+      "bytes": 12922,
+      "sha256": "147a8a1e1c6b6937b94f0c7cc34cb5283322223c5d56e2d4c39f398ccf9fda44"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/checkpoints/checkpoint-a-sailbox.md",
+      "file": "api-reference__checkpoints__checkpoint-a-sailbox.md",
+      "bytes": 15505,
+      "sha256": "9052dac6655bbfbae15b783c76c559e1e1ef3a838822c0b39fb10291ff406518"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/checkpoints/start-a-sailbox-from-a-checkpoint.md",
+      "file": "api-reference__checkpoints__start-a-sailbox-from-a-checkpoint.md",
+      "bytes": 17033,
+      "sha256": "d9998fecd896cad437764384fd94e085f70a98c54cf43f2bb767a3b4545ac429"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/list-published-ports.md",
+      "file": "api-reference__networking__list-published-ports.md",
+      "bytes": 11833,
+      "sha256": "103233c58df37d63b8a21cd11c790d0db7ab6f9377df9e158d0b25c7e10af8f8"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/publish-a-port.md",
+      "file": "api-reference__networking__publish-a-port.md",
+      "bytes": 18286,
+      "sha256": "80744acc95589f9346dec7cbdbae79878f7293953c34c7d1fec3c3caea2ec3b5"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/retrieve-a-published-port.md",
+      "file": "api-reference__networking__retrieve-a-published-port.md",
+      "bytes": 11476,
+      "sha256": "e20da6089756572cb8408e9c67cc8442fb5181f669c66f3a17f0762ec2a4ecb4"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/unpublish-a-port.md",
+      "file": "api-reference__networking__unpublish-a-port.md",
+      "bytes": 11834,
+      "sha256": "6d516f8c6994fa662a3d0a5fa38112978bb9d3cb435197135cc616b24c03063a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/get-custom-domain-dns-targets.md",
+      "file": "api-reference__networking__get-custom-domain-dns-targets.md",
+      "bytes": 9705,
+      "sha256": "9c5583c2188b280d5cbc6d0d78f97461a362dfde35bb33d6277fa1f2464d047c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/list-custom-domains.md",
+      "file": "api-reference__networking__list-custom-domains.md",
+      "bytes": 11877,
+      "sha256": "dea459c63254841e6c170a086822715812ba92bc2d4cc2b39cb7eb05f33790ab"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/add-a-custom-domain.md",
+      "file": "api-reference__networking__add-a-custom-domain.md",
+      "bytes": 16515,
+      "sha256": "07a2ef74c71e6fedc0d7cdfe1d4b9a94a87aa788ebdf29510f1c533b6a7e9251"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/remove-a-custom-domain.md",
+      "file": "api-reference__networking__remove-a-custom-domain.md",
+      "bytes": 11852,
+      "sha256": "f23fab5920d555489c915ba1098889b4f55c943cb8270f68bd96626591185792"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/networking/get-headers-that-identify-a-sailbox.md",
+      "file": "api-reference__networking__get-headers-that-identify-a-sailbox.md",
+      "bytes": 11375,
+      "sha256": "2d414bed0699d0fd696867d87d61db76c5ee30ebc53b383150b241d7cb104562"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/volumes/list-volumes.md",
+      "file": "api-reference__volumes__list-volumes.md",
+      "bytes": 10683,
+      "sha256": "d1742164ef4c98c068b40e6a28cbaa9674b7ac4b886f5035a83b6f1301fc1c04"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/volumes/create-a-volume.md",
+      "file": "api-reference__volumes__create-a-volume.md",
+      "bytes": 13769,
+      "sha256": "373ef9dbcbe16c691a7c467fa4475a07806595425b2fae8a121b5d6922aad76a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/volumes/delete-a-volume.md",
+      "file": "api-reference__volumes__delete-a-volume.md",
+      "bytes": 11164,
+      "sha256": "368f4086576511366c51f5a5c988535ad1710dcbf7364391d5fce20e213dda2c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/ssh-access/get-your-ssh-certificate-authority.md",
+      "file": "api-reference__ssh-access__get-your-ssh-certificate-authority.md",
+      "bytes": 8604,
+      "sha256": "c0938d3fd9562155402941a87dd703e95ccf9fad97874a943d85ee9f717f70cf"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/ssh-access/issue-an-ssh-certificate.md",
+      "file": "api-reference__ssh-access__issue-an-ssh-certificate.md",
+      "bytes": 11176,
+      "sha256": "1b7a891dd8be634f03ec2903528399326bdaf122b3e3aa74472345385c6f922b"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/usage/get-resource-usage-over-time.md",
+      "file": "api-reference__usage__get-resource-usage-over-time.md",
+      "bytes": 11025,
+      "sha256": "eabc81024db445ac144da45ef2c5e68c12ffb0f75bf21ae5e3ccc7d6848d0787"
+    },
+    {
+      "url": "https://docs.sailresearch.com/api-reference/usage/get-sailbox-spend.md",
+      "file": "api-reference__usage__get-sailbox-spend.md",
+      "bytes": 14742,
+      "sha256": "3ad15568fe52ef30ec1c4559b9e694de28715ecff2b6dd5e1df6b56d3ec5515a"
+    },
+    {
+      "url": "https://docs.sailresearch.com/voyages-sdk.md",
+      "file": "voyages-sdk.md",
+      "bytes": 20159,
+      "sha256": "449e0da174f2da8ea650b72ca9f08b9df627b613144a97c82ffa730a01669ba3"
+    },
+    {
+      "url": "https://docs.sailresearch.com/voyages-sdk-inference.md",
+      "file": "voyages-sdk-inference.md",
+      "bytes": 8297,
+      "sha256": "cbbb6ca1fdd920b73d7873c3b9423092f780f5c5094981ae0a769a858d09e290"
+    },
+    {
+      "url": "https://docs.sailresearch.com/voyages-sdk-errors.md",
+      "file": "voyages-sdk-errors.md",
+      "bytes": 3454,
+      "sha256": "41b2f65336357568bfad6c43e65b221c7c413f4066c5f5cf1b2c8379acca180c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sdk-tinker.md",
+      "file": "sdk-tinker.md",
+      "bytes": 15653,
+      "sha256": "a69865baccf217a0183ad7c4f9797583aecfc2d53a52632d9c50ff1c4e895a44"
+    },
+    {
+      "url": "https://docs.sailresearch.com/reference/python-sdk.md",
+      "file": "reference__python-sdk.md",
+      "bytes": 151351,
+      "sha256": "f34a994e437dc5c7512215aa3c96cbf7244ac5fa9f5eac44c058780c972dfd8c"
+    },
+    {
+      "url": "https://docs.sailresearch.com/reference/typescript-sdk.md",
+      "file": "reference__typescript-sdk.md",
+      "bytes": 347490,
+      "sha256": "48ea64a73c30fbe28afce428efaae31cc48f2c2a9551ab766cb88fd2594b9fa7"
+    },
+    {
+      "url": "https://docs.sailresearch.com/reference/rust-sdk.md",
+      "file": "reference__rust-sdk.md",
+      "bytes": 5214,
+      "sha256": "2e4fc91ae51cfd29f62e48a8fa006c2622de468ab27c759b478cffd3a83acd2e"
+    },
+    {
+      "url": "https://docs.sailresearch.com/reference/sdk-configuration.md",
+      "file": "reference__sdk-configuration.md",
+      "bytes": 4498,
+      "sha256": "205c403045fa48836551538312488ee25a847bba69b4ce832e918641080722af"
+    },
+    {
+      "url": "https://docs.sailresearch.com/openapi.json",
+      "file": "openapi.json",
+      "bytes": 98599,
+      "sha256": "f89aa5b652b0e2adbee090972b5652c9a6daf2e16697cc0361e0a4d4cb03866d"
+    },
+    {
+      "url": "https://docs.sailresearch.com/sailbox-openapi.json",
+      "file": "sailbox-openapi.json",
+      "bytes": 503058,
+      "sha256": "5f7d8a27069f32c5caac91180a70df0be3d67de5bdd1ddacf1fad4738740e316"
+    },
+    {
+      "url": "https://docs.sailresearch.com/idempotency.md",
+      "file": "idempotency.md",
+      "sha256": "0c6d0d48f2e3f653bf2470a57a88f504bc46cc4cd231435523268804cf1653f7",
+      "bytes": 5952
+    }
+  ]
+}
