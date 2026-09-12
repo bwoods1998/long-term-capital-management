@@ -15,6 +15,8 @@ import uuid
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
 
+from sail_tracking import inference_headers
+
 ROOT = Path(__file__).resolve().parent
 MODEL = 'deepseek-ai/DeepSeek-V4-Flash-0731'
 RATES = {'input': '0.09', 'cached': '0.02', 'output': '0.18'}
@@ -134,6 +136,8 @@ def api(method, route, body=None, request_id=None, expected_key_fingerprint=None
     headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
     if request_id:
         headers['Idempotency-Key'] = request_id
+    if route == '/v1/responses' or route.startswith('/v1/responses/'):
+        headers.update(inference_headers())
     payload = json.dumps(body, sort_keys=True).encode() if body is not None else None
     req = Request('https://api.sailresearch.com' + route, data=payload, headers=headers, method=method)
     try:

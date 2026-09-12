@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-09-12",
+  "purpose": "Audit notes for the initial registered primary-source captures; not model instructions or automatically approved thesis evidence.",
+  "initial_captures": [
+    {
+      "id": "fy26-results",
+      "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+      "published_at": "2026-07-29",
+      "fetched_at": "2026-09-12T22:38:09Z",
+      "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8",
+      "normalized_characters": 26406
+    },
+    {
+      "id": "fy26-call",
+      "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+      "published_at": "2026-07-29",
+      "fetched_at": "2026-09-12T22:37:57Z",
+      "sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "normalized_characters": 60703
+    }
+  ],
+  "verified_research_leads": [
+    {
+      "id": "fy27-lease-classification-comparability",
+      "source_id": "fy26-call",
+      "query": "estimated useful lives",
+      "passage_id": "p:9146a19e995889bca4eba9cd:28864:30664",
+      "start": 28864,
+      "end": 30664,
+      "management_statement": "Management said that, starting in FY2027, estimated useful lives of datacenters and office buildings would increase from 15 to 25 years. It expected more future datacenter leases to qualify as operating leases rather than finance leases. Because its reported capital expenditures include finance leases but exclude operating leases, the classification change affects the reported spending outlook. Management said its calendar-year 2026 investment expectations were otherwise unchanged.",
+      "research_implication": "A change in reported capital expenditures can reflect lease classification as well as investment activity. Compare cash PP&E, finance leases and operating lease commitments separately, and keep fiscal-year and calendar-year periods distinct. This passage describes management guidance, not a realized reduction in investment or evidence of AI returns."
+    }
+  ]
+}

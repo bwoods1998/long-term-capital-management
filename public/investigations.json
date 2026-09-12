@@ -1,0 +1,401 @@
+{
+  "schema_version": 1,
+  "published_at": "2026-09-12T23:14:39Z",
+  "investigations": [
+    {
+      "id": "e0ebbe16-2336-4938-b61e-10e223e218a7",
+      "question": "Do changes in reported capital expenditures imply a change in underlying infrastructure investment commitments?",
+      "mode": "tools",
+      "created_at": "2026-09-12T23:01:26Z",
+      "completed_at": "2026-09-12T23:10:14Z",
+      "evidence_cutoff": "2026-09-12",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "critic_model": "moonshotai/Kimi-K3",
+      "result": {
+        "change_assessment": "new_evidence",
+        "changes": [
+          "Newly read lease-accounting guidance adds a distinction between reported capex and investment plans."
+        ],
+        "claims": [
+          {
+            "evidence_ids": [
+              "p:9146a19e995889bca4eba9cd:28800:30600"
+            ],
+            "text": "Management extended the estimated useful lives of datacenters and office buildings, and said this causes more future datacenter leases to shift from finance to operating classification.",
+            "source_ids": [
+              "fy26-call"
+            ]
+          },
+          {
+            "evidence_ids": [
+              "p:9146a19e995889bca4eba9cd:28800:30600",
+              "cash-versus-capex"
+            ],
+            "text": "Finance leases count within reported capital expenditures while operating leases do not, so the same underlying build can present as a lower capex figure after reclassification.",
+            "source_ids": [
+              "fy26-call"
+            ]
+          },
+          {
+            "evidence_ids": [
+              "p:9146a19e995889bca4eba9cd:28800:30600"
+            ],
+            "text": "Management said its calendar-year investment expectations were unchanged apart from the useful-life effect; this is management’s outlook, not an independent measure of actual construction commitments.",
+            "source_ids": [
+              "fy26-call"
+            ]
+          },
+          {
+            "evidence_ids": [
+              "ppe-2026",
+              "ppe-2025",
+              "p:9146a19e995889bca4eba9cd:21600:23400"
+            ],
+            "text": "Reported cash property outlays rose sharply year over year while a single quarter's total capex exceeded its cash property component because of finance leases.",
+            "source_ids": [
+              "fy26-call",
+              "fy26-results"
+            ]
+          }
+        ],
+        "headline": "Lease accounting can change reported capex without a stated investment cut",
+        "invalidation": [
+          "A disclosed decline in datacenter construction or long-term purchase commitments would show commitments changing for economic reasons, not just classification.",
+          "Evidence that the reclassification coincided with an actual reduction in build activity would weaken the conclusion that commitments were unchanged.",
+          "A subsequent rise in both cash property outlays and total commitments together could not be explained by lease classification alone."
+        ],
+        "open_questions": [
+          "Whether the finance-to-operating lease shift also reflects any change in how datacenters are built or controlled rather than only accounting presentation.",
+          "Whether cash property outlays will continue rising or level off under the revised lease classification in the next fiscal year.",
+          "Whether total capital expenditures including finance leases for the full fiscal year reconcile to the reported cash property figure."
+        ],
+        "summary": "Management’s outlook illustrates how lease classification can lower reported capex without a stated cut to investment plans. Actual construction commitments and cash spending still require separate checks."
+      },
+      "critique_summary": "Automated critique passed with no flagged issues.",
+      "reviewer": "AI Builder",
+      "reviewed_at": "2026-09-12T23:14:38Z",
+      "sources": [
+        {
+          "id": "fy26-results",
+          "title": "Microsoft FY2026 results · Cash flow statements (unaudited)",
+          "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+          "published_at": "2026-07-29"
+        },
+        {
+          "id": "fy26-call",
+          "title": "Microsoft FY2026 earnings call · Management commentary",
+          "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+          "published_at": "2026-07-29"
+        }
+      ],
+      "steps": [
+        {
+          "at": "2026-09-12T23:01:27Z",
+          "kind": "started",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:01:46Z",
+          "kind": "model_reserved",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:01:54Z",
+          "kind": "tools_completed",
+          "model": null,
+          "tools": [
+            "list_sources",
+            "read_source",
+            "read_source"
+          ],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:00Z",
+          "kind": "model_reserved",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:09Z",
+          "kind": "tools_completed",
+          "model": null,
+          "tools": [
+            "read_source",
+            "read_source"
+          ],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:14Z",
+          "kind": "model_reserved",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:24Z",
+          "kind": "tools_completed",
+          "model": null,
+          "tools": [
+            "calculate",
+            "calculate"
+          ],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:29Z",
+          "kind": "model_reserved",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:50Z",
+          "kind": "tools_completed",
+          "model": null,
+          "tools": [
+            "save_hypothesis"
+          ],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:02:56Z",
+          "kind": "model_reserved",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:03:03Z",
+          "kind": "report_saved",
+          "model": null,
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:03:08Z",
+          "kind": "model_reserved",
+          "model": "moonshotai/Kimi-K3",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:03:12Z",
+          "kind": "critique_saved",
+          "model": null,
+          "tools": [],
+          "verdict": "pass"
+        },
+        {
+          "at": "2026-09-12T23:10:05Z",
+          "kind": "editorial_amendment",
+          "model": null,
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:10:12Z",
+          "kind": "model_reserved",
+          "model": "moonshotai/Kimi-K3",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:10:14Z",
+          "kind": "critique_saved",
+          "model": null,
+          "tools": [],
+          "verdict": "pass"
+        }
+      ],
+      "metrics": {
+        "tool_calls": 8,
+        "successful_tools": 8,
+        "source_count": 2,
+        "passage_count": 9,
+        "elapsed_seconds": 528.053,
+        "estimated_usd": "0.069444196",
+        "known_estimated_usd": "0.069444196",
+        "unknown_runs": 0,
+        "reserved_usd": "3",
+        "model_calls": 7
+      },
+      "source_versions": [
+        {
+          "source_id": "fy26-call",
+          "sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+          "fetched_at": "2026-09-12T22:37:57Z"
+        },
+        {
+          "source_id": "fy26-results",
+          "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8",
+          "fetched_at": "2026-09-12T22:38:09Z"
+        }
+      ]
+    },
+    {
+      "id": "bfad4223-594b-46d9-af61-1c579638f45a",
+      "question": "Do changes in reported capital expenditures imply a change in underlying infrastructure investment commitments?",
+      "mode": "single_pass",
+      "created_at": "2026-09-12T23:01:27Z",
+      "completed_at": "2026-09-12T23:12:46Z",
+      "evidence_cutoff": "2026-09-12",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "critic_model": "moonshotai/Kimi-K3",
+      "result": {
+        "change_assessment": "qualified",
+        "changes": [
+          "The prior cash-flow question is narrowed to whether cash property outlays reveal changes in infrastructure commitments."
+        ],
+        "claims": [
+          {
+            "evidence_ids": [
+              "ppe-2026",
+              "ppe-2025"
+            ],
+            "text": "Company-wide cash spending on property and equipment rose sharply from the prior fiscal year to the current fiscal year.",
+            "source_ids": [
+              "fy26-results"
+            ]
+          },
+          {
+            "evidence_ids": [
+              "ocf-2026",
+              "ocf-2025",
+              "cash-after-ppe-2026",
+              "cash-after-ppe-2025"
+            ],
+            "text": "Company-wide operating cash flow also rose, but the calculated cash remainder after property outlays fell.",
+            "source_ids": [
+              "fy26-results"
+            ]
+          },
+          {
+            "evidence_ids": [
+              "cash-versus-capex"
+            ],
+            "text": "Management cautioned that cash paid for property and equipment is distinct from capital expenditures including finance leases, so the cash measure alone does not capture the full infrastructure commitment.",
+            "source_ids": [
+              "fy26-call"
+            ]
+          },
+          {
+            "evidence_ids": [
+              "investment-outlook"
+            ],
+            "text": "Management expected capital expenditures to grow in the following fiscal year, but this is a forward-looking statement, not a realized result.",
+            "source_ids": [
+              "fy26-call"
+            ]
+          }
+        ],
+        "headline": "Cash property outlays rise, but full commitment change is unproven",
+        "invalidation": [
+          "Realized total capital expenditures including finance leases that were flat or falling would invalidate an inference of increased underlying commitments.",
+          "Evidence that finance-lease additions moved opposite to cash property outlays would weaken the link between reported cash outlays and total commitments.",
+          "Segment-level data separating AI infrastructure from other capital spending would be needed to change the inference."
+        ],
+        "open_questions": [
+          "Whether finance-lease capital expenditures changed in the same direction as cash property outlays remains unresolved.",
+          "Whether the expected future growth in capital expenditures will appear in realized total investment commitments cannot be determined from these documents.",
+          "The supplied evidence cannot isolate AI-specific infrastructure commitments from company-wide spending."
+        ],
+        "summary": "Reported company-wide cash property outlays rose sharply, but management says this cash measure excludes finance leases and therefore does not fully represent infrastructure commitments. The evidence is consistent with, but cannot confirm, an increase in underlying commitments because the finance-lease portion and realized future capital expenditures are not shown."
+      },
+      "critique_summary": "Automated critique passed with no flagged issues.",
+      "reviewer": "AI Builder",
+      "reviewed_at": "2026-09-12T23:14:39Z",
+      "sources": [
+        {
+          "id": "fy26-results",
+          "published_at": "2026-07-29",
+          "title": "Microsoft FY2026 results · Cash flow statements (unaudited)",
+          "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast"
+        },
+        {
+          "id": "fy26-call",
+          "published_at": "2026-07-29",
+          "title": "Microsoft FY2026 earnings call · Management commentary",
+          "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4"
+        }
+      ],
+      "steps": [
+        {
+          "at": "2026-09-12T23:01:27Z",
+          "kind": "started",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:03:37Z",
+          "kind": "model_reserved",
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:03:59Z",
+          "kind": "report_saved",
+          "model": null,
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:04:03Z",
+          "kind": "model_reserved",
+          "model": "moonshotai/Kimi-K3",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:04:05Z",
+          "kind": "critique_saved",
+          "model": null,
+          "tools": [],
+          "verdict": "pass"
+        },
+        {
+          "at": "2026-09-12T23:12:32Z",
+          "kind": "editorial_amendment",
+          "model": null,
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:12:42Z",
+          "kind": "model_reserved",
+          "model": "moonshotai/Kimi-K3",
+          "tools": [],
+          "verdict": null
+        },
+        {
+          "at": "2026-09-12T23:12:46Z",
+          "kind": "critique_saved",
+          "model": null,
+          "tools": [],
+          "verdict": "pass"
+        }
+      ],
+      "metrics": {
+        "tool_calls": 0,
+        "successful_tools": 0,
+        "source_count": 0,
+        "passage_count": 0,
+        "elapsed_seconds": 678.777,
+        "estimated_usd": "0.02526756",
+        "known_estimated_usd": "0.02526756",
+        "unknown_runs": 0,
+        "reserved_usd": "2.2",
+        "model_calls": 3
+      },
+      "source_versions": []
+    }
+  ]
+}

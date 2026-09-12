@@ -28,6 +28,26 @@ BUDGET_CENTS = 200
 RESERVE_CENTS = 20
 MAX_REQUEST_BYTES = 40000
 MAX_OUTPUT_TOKENS = 16384
+TASK_MAX_REQUEST_BYTES = 96000
+TASK_PURPOSES = {'thesis', 'investigate', 'critique', 'evaluation', 'replay'}
+TASK_PROFILES = {
+    'deepseek-ai/DeepSeek-V4-Pro-0813': {
+        'completion_window': 'flex', 'reasoning_effort': 'medium', 'max_output_tokens': 16384,
+        'reserve_cents': 20, 'rates': {'input': '0.66', 'cached': '0.022', 'output': '1.98'},
+        'pricing_date': '2026-09-12', 'background': True},
+    'moonshotai/Kimi-K3': {
+        'completion_window': 'asap', 'reasoning_effort': 'medium', 'max_output_tokens': 8192,
+        'reserve_cents': 100, 'rates': {'input': '3', 'cached': '0.30', 'output': '15'},
+        'pricing_date': '2026-09-12', 'background': False},
+    'deepseek-ai/DeepSeek-V4-Flash-0731': {
+        'completion_window': 'asap', 'reasoning_effort': 'medium', 'max_output_tokens': 8192,
+        'reserve_cents': 10, 'rates': {'input': '0.09', 'cached': '0.02', 'output': '0.18'},
+        'pricing_date': '2026-09-12', 'background': False},
+    'moonshotai/Kimi-K2.6': {
+        'completion_window': 'flex', 'reasoning_effort': 'medium', 'max_output_tokens': 16384,
+        'reserve_cents': 20, 'rates': {'input': '0.35', 'cached': '0.10', 'output': '2'},
+        'pricing_date': '2026-09-12', 'background': True},
+}
 TERMINAL = {'completed', 'incomplete', 'failed', 'cancelled'}
 STATUSES = TERMINAL | {'queued', 'in_progress'}
 
@@ -237,6 +257,66 @@ def validate_envelope(body):
         raise ValueError('Request outside the v1 spending envelope')
 
 
+def _task_profile(model):
+    if not isinstance(model, str) or model not in TASK_PROFILES:
+        raise ValueError('Research model is not in the approved task profiles')
+    return TASK_PROFILES[model]
+
+
+def _validate_tools(tools):
+    if not isinstance(tools, list) or len(tools) > 8:
+        raise ValueError('Expected at most eight client function tools')
+    names = set()
+    for tool in tools:
+        if (not isinstance(tool, dict) or not {'type', 'name', 'parameters'} <= set(tool) or
+                set(tool) - {'type', 'name', 'parameters', 'description', 'strict'} or
+                tool['type'] != 'function' or not isinstance(tool['name'], str) or
+                not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,63}', tool['name']) or tool['name'] in names or
+                not isinstance(tool['parameters'], dict) or tool['parameters'].get('type') != 'object' or
+                len(encoded(tool['parameters']).encode()) > 16000 or
+                ('strict' in tool and type(tool['strict']) is not bool)):
+            raise ValueError('Invalid or oversized client function schema')
+        if 'description' in tool:
+            require_text(tool['description'], 2000, 'function description')
+        names.add(tool['name'])
+
+
+def validate_task_envelope(body):
+    if not isinstance(body, dict):
+        raise ValueError('Expected a research request object')
+    profile = _task_profile(body.get('model'))
+    required = {'model', 'input', 'max_output_tokens', 'reasoning', 'background', 'metadata', 'text'}
+    value = body.get('input')
+    if (set(body) not in (required, required | {'tools'}) or
+            not (isinstance(value, str) and bool(value.strip()) or
+                 isinstance(value, list) and 1 <= len(value) <= 200 and all(isinstance(item, dict) for item in value)) or
+            type(body.get('max_output_tokens')) is not int or body['max_output_tokens'] != profile['max_output_tokens'] or
+            body.get('reasoning') != {'effort': profile['reasoning_effort']} or
+            body.get('metadata') != {'completion_window': profile['completion_window']} or
+            body.get('background') is not profile['background'] or
+            body.get('text') != {'format': {'type': 'text'}} or
+            len(json.dumps(body, sort_keys=True, allow_nan=False).encode()) > TASK_MAX_REQUEST_BYTES):
+        raise ValueError('Request outside the approved research profile or spending envelope')
+    if 'tools' in body:
+        _validate_tools(body['tools'])
+    return profile
+
+
+def build_task_request(model, input, tools=None):
+    """Construct one bounded model call. Function execution belongs to the caller."""
+    profile = _task_profile(model)
+    body = {'model': model, 'input': input, 'max_output_tokens': profile['max_output_tokens'],
+            'reasoning': {'effort': profile['reasoning_effort']}, 'background': profile['background'],
+            'metadata': {'completion_window': profile['completion_window']},
+            'text': {'format': {'type': 'text'}}}
+    if tools is not None:
+        body['tools'] = tools
+    # Own the request snapshot: later mutations of caller histories/tools cannot change it.
+    body = json.loads(encoded(body))
+    validate_task_envelope(body)
+    return body
+
+
 def database(path=None):
     location = Path(path) if path is not None else ROOT / '.data/portfolio.sqlite'
     location.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +332,7 @@ def database(path=None):
             request TEXT NOT NULL, packet_json TEXT NOT NULL, packet_sha256 TEXT NOT NULL,
             parent_id TEXT, prediction TEXT NOT NULL, rates TEXT NOT NULL, pricing_date TEXT NOT NULL,
             response_id TEXT, response TEXT, observed_seconds REAL, error TEXT,
-            key_fingerprint TEXT);
+            key_fingerprint TEXT, purpose TEXT NOT NULL DEFAULT 'thesis', task_key TEXT);
         CREATE TABLE IF NOT EXISTS revisions (
             id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
             parent_id TEXT REFERENCES revisions(id), created REAL NOT NULL,
@@ -263,6 +343,8 @@ def database(path=None):
         CREATE TABLE IF NOT EXISTS head (
             singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision_id TEXT REFERENCES revisions(id));
         INSERT OR IGNORE INTO head(singleton,revision_id) VALUES(1,NULL);
+        CREATE TABLE IF NOT EXISTS budget_settings (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1), total_cents INTEGER NOT NULL CHECK(total_cents>=0));
         CREATE TRIGGER IF NOT EXISTS immutable_revision_update BEFORE UPDATE ON revisions
             BEGIN SELECT RAISE(ABORT, 'Thesis revisions are immutable'); END;
         CREATE TRIGGER IF NOT EXISTS immutable_revision_delete BEFORE DELETE ON revisions
@@ -272,9 +354,33 @@ def database(path=None):
         CREATE TRIGGER IF NOT EXISTS immutable_review_delete BEFORE DELETE ON reviews
             BEGIN SELECT RAISE(ABORT, 'Thesis reviews are immutable'); END;
     ''')
-    if 'key_fingerprint' not in {column[1] for column in db.execute('PRAGMA table_info(runs)')}:
-        db.execute('ALTER TABLE runs ADD COLUMN key_fingerprint TEXT')
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        columns = {column[1] for column in db.execute('PRAGMA table_info(runs)')}
+        for name, definition in [('key_fingerprint', 'TEXT'), ('purpose', "TEXT NOT NULL DEFAULT 'thesis'"), ('task_key', 'TEXT')]:
+            if name not in columns:
+                db.execute('ALTER TABLE runs ADD COLUMN ' + name + ' ' + definition)
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS unique_run_task ON runs(task_key) WHERE task_key IS NOT NULL')
     return db
+
+
+def budget_limit(db):
+    row = db.execute('SELECT total_cents FROM budget_settings WHERE singleton=1').fetchone()
+    return row['total_cents'] if row else BUDGET_CENTS
+
+
+def set_budget_limit(db, total_cents):
+    """Explicitly change the cumulative reservation limit; never reset prior spending."""
+    if type(total_cents) is not int or not 0 <= total_cents <= 2**63 - 1:
+        raise ValueError('Budget must be a nonnegative integer number of cents')
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
+        if total_cents < held:
+            raise ValueError('The budget cannot be lower than existing reservations')
+        db.execute('INSERT INTO budget_settings(singleton,total_cents) VALUES(1,?) '
+                   'ON CONFLICT(singleton) DO UPDATE SET total_cents=excluded.total_cents', (total_cents,))
+    return total_cents
 
 
 def current(db):
@@ -301,8 +407,8 @@ def reserve(db, body, packet, prediction, parent_id=None):
         if parent and json.loads(parent['packet_json'])['id'] != packet['id']:
             raise ValueError('This v1 database holds one thesis; packet ID must match')
         held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
-        if held + RESERVE_CENTS > BUDGET_CENTS:
-            raise ValueError('Local $2.00 research budget exhausted; no request submitted')
+        if held + RESERVE_CENTS > budget_limit(db):
+            raise ValueError('Local research budget exhausted; no request submitted')
         db.execute('''INSERT INTO runs(id,created,reserved_cents,request,packet_json,packet_sha256,
                     parent_id,prediction,rates,pricing_date) VALUES(?,?,?,?,?,?,?,?,?,?)''',
                    (run_id, time.time(), RESERVE_CENTS, encoded(body), encoded(packet), digest(packet),
@@ -310,16 +416,60 @@ def reserve(db, body, packet, prediction, parent_id=None):
     return run_id
 
 
-def preflight():
+def reserve_task(db, body, packet, task_key, purpose, parent_id=None):
+    """Reserve a stable workflow step once, retaining its original request and rates."""
+    require_text(task_key, 256, 'task key')
+    if any(character.isspace() for character in task_key) or not isinstance(purpose, str) or purpose not in TASK_PURPOSES:
+        raise ValueError('Invalid research task identity or purpose')
+    if parent_id is not None:
+        require_text(parent_id, 80, 'parent revision')
+    validate_packet(packet)
+    request_json, packet_json = encoded(body), encoded(packet)
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        existing = db.execute('SELECT * FROM runs WHERE task_key=?', (task_key,)).fetchone()
+        if existing:
+            if (existing['request'] != request_json or existing['packet_json'] != packet_json or
+                    existing['parent_id'] != parent_id or existing['purpose'] != purpose):
+                raise ValueError('Task key collision: its request, evidence, parent or purpose changed')
+            return existing['id']
+        profile = validate_task_envelope(body)
+        parent = current(db)
+        if purpose == 'thesis' and (parent['id'] if parent else None) != parent_id:
+            raise ValueError('Reviewed thesis changed; a stale task cannot start a new thesis draft')
+        if parent_id is not None:
+            ancestor = db.execute('SELECT packet_json FROM revisions WHERE id=?', (parent_id,)).fetchone()
+            if ancestor is None or json.loads(ancestor['packet_json'])['id'] != packet['id']:
+                raise ValueError('Unknown parent revision or mismatched evidence packet identity')
+        held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
+        if held + profile['reserve_cents'] > budget_limit(db):
+            raise ValueError('Local research budget exhausted; no request submitted')
+        run_id = str(uuid.uuid4())
+        db.execute('''INSERT INTO runs(id,created,reserved_cents,request,packet_json,packet_sha256,
+                    parent_id,prediction,rates,pricing_date,purpose,task_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   (run_id, time.time(), profile['reserve_cents'], request_json, packet_json, digest(packet),
+                    parent_id, '', encoded(profile['rates']), profile['pricing_date'], purpose, task_key))
+    return run_id
+
+
+def _preflight_model(model, reserve_cents):
     models = api('GET', '/v1/models')
-    if MODEL not in {m.get('id') for m in models.get('data', []) if isinstance(m, dict)}:
+    if model not in {m.get('id') for m in models.get('data', []) if isinstance(m, dict)}:
         raise ValueError('Configured research model is not listed')
     summary = api('GET', '/v2/usage/summary?range=period')
     balance = summary.get('balance')
     if (summary.get('available') is not True or summary.get('has_metronome_customer') is not True or
             summary.get('balance_unavailable') is not False or type(balance) not in (int, float) or
-            not Decimal(str(balance)).is_finite() or balance < RESERVE_CENTS):
+            not Decimal(str(balance)).is_finite() or balance < reserve_cents):
         raise ValueError('Could not confirm sufficient reported Sail credit')
+
+
+def preflight():
+    _preflight_model(MODEL, RESERVE_CENTS)
+
+
+def preflight_task(model):
+    _preflight_model(model, _task_profile(model)['reserve_cents'])
 
 
 def get_run(db, run_id):
@@ -331,6 +481,9 @@ def get_run(db, run_id):
 
 def finalize(db, run_id):
     row = get_run(db, run_id)
+    if row['purpose'] != 'thesis':
+        # Tool calls, critique JSON and evaluation answers are private workflow outputs.
+        return None
     existing = db.execute('SELECT id FROM revisions WHERE run_id=?', (run_id,)).fetchone()
     if existing:
         return existing['id']
@@ -433,6 +586,7 @@ def status(db, run_id=None):
         revision = db.execute('SELECT r.*,v.reviewed,v.reviewer FROM revisions r LEFT JOIN reviews v ON v.revision_id=r.id WHERE run_id=?', (row['id'],)).fetchone()
         response = json.loads(row['response'] or '{}')
         item = {'run_id': row['id'], 'created_at': iso(row['created']),
+                'purpose': row['purpose'], 'task_key': row['task_key'],
                 'status': response.get('status', 'submission_unconfirmed'),
                 'revision_id': revision['id'] if revision else None,
                 'reviewed': bool(revision and revision['reviewed']),
@@ -444,7 +598,8 @@ def status(db, run_id=None):
         output.append(item)
     head = current(db)
     return {'current_reviewed_revision': head['id'] if head else None,
-            'local_budget_usd': '2.00', 'runs': output, 'brokerage': 'not_connected'}
+            'local_budget_usd': format(Decimal(budget_limit(db)) / 100, '.2f'),
+            'runs': output, 'brokerage': 'not_connected'}
 
 
 def review(db, revision_id, reviewer):
@@ -454,6 +609,8 @@ def review(db, revision_id, reviewer):
         row = db.execute('SELECT * FROM revisions WHERE id=?', (revision_id,)).fetchone()
         if row is None:
             raise ValueError('Unknown revision ID')
+        if get_run(db, row['run_id'])['purpose'] != 'thesis':
+            raise ValueError('Only a thesis run can be reviewed for publication')
         if db.execute('SELECT 1 FROM reviews WHERE revision_id=?', (revision_id,)).fetchone():
             return revision_id
         parent = current(db)
@@ -476,11 +633,13 @@ def public_snapshot(db):
         if revision_id in seen:
             raise ValueError('Invalid revision history')
         seen.add(revision_id)
-        row = db.execute('''SELECT r.*,v.reviewed,v.reviewer,u.request AS inference_request
+        row = db.execute('''SELECT r.*,v.reviewed,v.reviewer,u.request AS inference_request,u.purpose AS run_purpose
                             FROM revisions r JOIN reviews v ON v.revision_id=r.id
                             JOIN runs u ON u.id=r.run_id WHERE r.id=?''', (revision_id,)).fetchone()
         if row is None:
             raise ValueError('Reviewed history is incomplete')
+        if row['run_purpose'] != 'thesis':
+            raise ValueError('Non-thesis research cannot enter the public thesis history')
         packet = validate_packet(json.loads(row['packet_json']))
         if digest(packet) != row['packet_sha256']:
             raise ValueError('Evidence packet integrity check failed')
@@ -549,6 +708,7 @@ def main():
     command.add_argument('revision_id')
     command.add_argument('--reviewer', required=True)
     commands.add_parser('export').add_argument('path', type=Path)
+    commands.add_parser('budget', help='Inspect or explicitly change the cumulative local reservation limit').add_argument('--limit-usd')
     args = parser.parse_args()
     with closing(database(args.database)) as db, db:
         if args.command in ['init', 'preview', 'research']:
@@ -561,7 +721,8 @@ def main():
                 return
             if args.command == 'preview':
                 print(json.dumps(body, indent=2, ensure_ascii=False))
-                print('No API calls. Research reserves $0.20 against the separate $2.00 local budget.')
+                print('No API calls. Research reserves $0.20 against a cumulative local budget of $' +
+                      format(Decimal(budget_limit(db)) / 100, '.2f') + '.')
                 return
             preflight()
             run_id = reserve(db, body, packet, args.prediction, parent['id'] if parent else None)
@@ -573,6 +734,19 @@ def main():
             result = status(db, args.run_id)
         elif args.command == 'review':
             result = {'reviewed_revision': review(db, args.revision_id, args.reviewer)}
+        elif args.command == 'budget':
+            if args.limit_usd is not None:
+                try:
+                    amount = Decimal(args.limit_usd)
+                    cents = amount * 100
+                    if not amount.is_finite() or amount < 0 or cents != cents.to_integral_value():
+                        raise ValueError
+                    set_budget_limit(db, int(cents))
+                except (ValueError, ArithmeticError):
+                    raise ValueError('Budget must be a nonnegative dollar amount in whole cents, at least existing reservations') from None
+            held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
+            result = {'local_budget_usd': format(Decimal(budget_limit(db)) / 100, '.2f'),
+                      'reserved_usd': format(Decimal(held) / 100, '.2f')}
         else:
             snapshot = export(db, args.path)
             result = {'exported': str(args.path), 'reviewed_revisions': len(snapshot['thesis']['revisions'])}
