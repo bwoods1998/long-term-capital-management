@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "msft-ai-infrastructure",
+  "symbol": "MSFT",
+  "company": "Microsoft",
+  "question": "Can AI investment turn into durable cash flow?",
+  "evidence_as_of": "2026-07-29",
+  "sources": [
+    {
+      "id": "fy26-results",
+      "title": "Microsoft FY2026 results · Cash flow statements (unaudited)",
+      "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+      "published_at": "2026-07-29"
+    },
+    {
+      "id": "fy26-call",
+      "title": "Microsoft FY2026 earnings call · Management commentary",
+      "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+      "published_at": "2026-07-29"
+    }
+  ],
+  "facts": [
+    {"id": "ocf-2026", "label": "Operating cash flow", "value": 182935, "unit": "USD millions", "period": "FY2026", "source_id": "fy26-results"},
+    {"id": "ocf-2025", "label": "Operating cash flow", "value": 136162, "unit": "USD millions", "period": "FY2025", "source_id": "fy26-results"},
+    {"id": "ppe-2026", "label": "Cash PP&E spending", "value": 115948, "unit": "USD millions", "period": "FY2026", "source_id": "fy26-results"},
+    {"id": "ppe-2025", "label": "Cash PP&E spending", "value": 64551, "unit": "USD millions", "period": "FY2025", "source_id": "fy26-results"},
+    {"id": "cash-after-ppe-2026", "label": "Cash after PP&E (calculated)", "value": 66987, "unit": "USD millions", "period": "FY2026", "source_id": "fy26-results"},
+    {"id": "cash-after-ppe-2025", "label": "Cash after PP&E (calculated)", "value": 71611, "unit": "USD millions", "period": "FY2025", "source_id": "fy26-results"}
+  ],
+  "context": [
+    {
+      "id": "calculation-scope",
+      "text": "Cash after PP&E is calculated here as operating cash flow less the cash outflow for additions to property and equipment. PP&E spending is displayed as a positive amount. These are company-wide fiscal-year amounts, not AI-only cash flows or total capital expenditures including finance leases.",
+      "source_id": "fy26-results"
+    },
+    {
+      "id": "margin-pressure",
+      "text": "Management attributed lower Microsoft Cloud gross margin percentage to the mix shift toward Azure, AI infrastructure investment, and increased product usage, partially offset by efficiency gains. This is management's explanation, not an independently established causal decomposition.",
+      "source_id": "fy26-call"
+    },
+    {
+      "id": "investment-outlook",
+      "text": "Management expected capital expenditures to grow in the following fiscal year, citing demand signals. This is a forward-looking statement, not a realized result or a guarantee of investment returns.",
+      "source_id": "fy26-call"
+    },
+    {
+      "id": "cash-versus-capex",
+      "text": "Management distinguished capital expenditures including finance leases from cash paid for property and equipment. Cash PP&E alone does not measure the full infrastructure commitment.",
+      "source_id": "fy26-call"
+    }
+  ]
+}

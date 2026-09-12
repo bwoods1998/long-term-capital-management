@@ -15,7 +15,7 @@ The `expected` values are reference answers checked by the builder against the s
 ## Follow the code in four steps
 
 1. `build_request` in `lab.py`: turns the passage and output requirements into an HTTP request. Run `python3 lab.py preview` to see it for free. `max_output_tokens` limits generation; it is not a requested answer length.
-2. `reserve` and `execute`: save a trial before sending it, then submit and poll for its result. Background mode means the work can continue after our connection ends. The saved request ID lets us retrieve that work again.
+2. `reserve` and `execute`: save a trial before sending it, then submit and retrieve its result. The original September 7 experiment used background mode, allowing work to continue after our connection ended. Under the September 12 API contract, new DeepSeek Flash ASAP requests use foreground mode; the saved response ID still supports retrieval. The newer thesis workflow uses background Flex. See [V1](../docs/V1.md) for its recovery rules.
 3. `grade`: compares five facts with reference answers. Each fact must have the right value, currency, unit, period, and exact source row. Valid JSON does not establish financial correctness. Exact-row grading is deliberately strict and can reject harmless formatting differences.
 4. `estimate_cost`: converts token counts into an estimated dollar expense using a dated price snapshot. The provider's invoice is a separate measurement.
 

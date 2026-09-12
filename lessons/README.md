@@ -1,15 +1,18 @@
 # Learning Portfolio Agent
 
-For each milestone: predict what will happen, inspect the evidence, explain the result, then decide the next experiment. The owner should understand the financial assumptions and operating controls even when AI helps write the code.
+Read [Lesson 2](02-thesis-with-memory.md) before opening its [measured result](02-result.md).
 
-| Stage | Technical lesson | Financial lesson | Your exercise |
+Predict, inspect, explain, then choose the next experiment. AI can help write the code; understanding its evidence, accounting, and controls is the useful part.
+
+| Stage | Technical lesson | Financial lesson | Exercise |
 |---|---|---|---|
 | [First extraction](01-first-experiment.md) | Requests, structured outputs, evaluation, token accounting | Cost per successful task | Verify the five facts and explain why one passing example is weak evidence |
-| Read-only account | OAuth, API permissions, dated snapshots, reconciliation | Cash, positions, orders, fills, settlement | Reconcile a snapshot to the brokerage view |
-| Persistent thesis | Evidence stores, versioned state, agent tools | Assumptions and falsifiable investment theses | Define what evidence would change your mind |
-| Long-running research | Queues, checkpoints, caching, deadlines, tracing | Research budgets and diminishing returns | Compare the same assignment under two spending policies |
-| Simulated execution | State machines, retries, partial fills, fault testing | Exposure, transaction costs, benchmark design | Explain what should happen after an uncertain order response |
-| Live controls | Authentication, authorization, audit trails | Mandates, limits, operational risk | Trace a proposal through every enforced check |
-| Later infrastructure experiments | GPU serving, throughput, utilization, capacity | Customer versus provider economics | Model when dedicated compute becomes economical |
+| [Thesis with memory](02-thesis-with-memory.md) | Persistent state, source IDs, immutable revisions, review and export | Cash generation versus investment; limits of evidence | Predict the conclusion, inspect a draft, and define what would change your mind |
+| Offline brokerage exercise | Exact decimal arithmetic, orders versus fills, reconciliation | Deposits are not investment profit | Explain the unfilled share and account for the demo's P&L |
+| Next: read-only account | OAuth, permissions, dated observations, reconciliation | Cash, positions, settlement, income | Reconcile a private snapshot to the brokerage view |
+| Later: research across time | Retrieval, queues, checkpoints, caching, tracing | Research budgets and diminishing returns | Compare the same assignment under two spending policies |
+| Later: simulated execution | State machines, uncertain responses, fault testing | Exposure, costs, benchmark design | Explain what to do after an ambiguous order response |
+| Later: live controls | Authentication, authorization, audit trails | Mandates and operational risk | Trace a proposal through every enforced check |
+| Later: infrastructure experiments | GPU serving, throughput, utilization, capacity | Customer versus provider economics | Model when dedicated compute becomes economical |
 
-Read [the first measured result](01-result.md) after making your own prediction. Our next session begins with that exercise, then the read-only account model. No need to study every future stage tonight.
+Read [the first measured result](01-result.md) after making your own prediction. Then work through [Lesson 2](02-thesis-with-memory.md). The [V1 guide](../docs/V1.md) has the full command sequence and current limits; no need to study every future stage at once.

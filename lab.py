@@ -18,7 +18,7 @@ from urllib.error import HTTPError, URLError
 ROOT = Path(__file__).resolve().parent
 MODEL = 'deepseek-ai/DeepSeek-V4-Flash-0731'
 RATES = {'input': '0.09', 'cached': '0.02', 'output': '0.18'}
-PRICING_DATE = '2026-09-07'
+PRICING_DATE = '2026-09-12'
 BUDGET_CENTS = 100
 RESERVE_CENTS = 1
 TERMINAL = {'completed', 'incomplete', 'failed', 'cancelled'}
@@ -44,13 +44,15 @@ def build_request(case):
               'For each metric, copy its entire source data row exactly into evidence. '
               'Return only the requested JSON.\n\nSOURCE:\n' + case['passage'])
     return {'model': MODEL, 'input': prompt, 'max_output_tokens': 2048,
-            'background': True, 'metadata': {'completion_window': 'asap'},
+            'background': False, 'metadata': {'completion_window': 'asap'},
             'text': {'format': {'type': 'json_schema', 'name': 'financial_facts',
                                 'strict': True, 'schema': schema}}}
 
 
 def estimate_cost(usage, rates=RATES):
     """USD estimate. Cached input is already part of input, not extra tokens."""
+    if not isinstance(usage, dict) or not isinstance(usage.get('input_tokens_details') or {}, dict):
+        raise ValueError('Missing or inconsistent token accounting')
     i, o = usage.get('input_tokens'), usage.get('output_tokens')
     c = (usage.get('input_tokens_details') or {}).get('cached_tokens', 0)
     if any(type(v) is not int or v < 0 for v in (i, o, c)) or c > i:
@@ -114,14 +116,22 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def api(method, route, body=None, request_id=None):
+def load_api_key():
     path = ROOT / '.env'
     if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError('Expected an owner-readable regular .env file')
     keys = [s.partition('=')[2] for s in path.read_text().splitlines() if s.startswith('SAIL_API_KEY=')]
     if len(keys) != 1 or not keys[0]:
         raise ValueError('Missing SAIL_API_KEY')
-    headers = {'Authorization': 'Bearer ' + keys[0], 'Content-Type': 'application/json'}
+    return keys[0]
+
+
+def api(method, route, body=None, request_id=None, expected_key_fingerprint=None):
+    key = load_api_key()
+    if (expected_key_fingerprint is not None and
+            hashlib.sha256(key.encode()).hexdigest() != expected_key_fingerprint):
+        raise ValueError('Sail credential changed; refusing ambiguous submission under a different key')
+    headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
     if request_id:
         headers['Idempotency-Key'] = request_id
     payload = json.dumps(body, sort_keys=True).encode() if body is not None else None

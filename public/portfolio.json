@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "published_at": "2026-09-12T20:16:26Z",
+  "project": {
+    "name": "Portfolio Agent",
+    "repository": "https://github.com/bwoods1998/portfolio-agent",
+    "mode": "research"
+  },
+  "thesis": {
+    "id": "msft-ai-infrastructure",
+    "symbol": "MSFT",
+    "company": "Microsoft",
+    "question": "Can AI investment turn into durable cash flow?",
+    "revisions": [
+      {
+        "id": "41d753a0-1e1c-40a4-b401-10548f62d7e1",
+        "parent_id": null,
+        "created_at": "2026-09-12T20:15:02Z",
+        "evidence_as_of": "2026-07-29",
+        "assumptions": [
+          "The calculated cash-after-property outlay metric is a company-wide cash-flow proxy, not an AI-only or total capital expenditure including finance leases measure."
+        ],
+        "changes": [
+          "This is the initial evidence-based view, reflecting only the supplied fiscal-year cash-flow facts and management commentary."
+        ],
+        "claims": [
+          {
+            "evidence_ids": [
+              "ocf-2026",
+              "ocf-2025"
+            ],
+            "text": "Company-wide operating cash flow increased from the prior fiscal year to the current fiscal year."
+          },
+          {
+            "evidence_ids": [
+              "ppe-2026",
+              "ppe-2025"
+            ],
+            "text": "Company-wide cash property-and-equipment outlays rose more sharply over the same comparison."
+          },
+          {
+            "evidence_ids": [
+              "cash-after-ppe-2026",
+              "cash-after-ppe-2025"
+            ],
+            "text": "The calculated company-wide cash remainder after property-and-equipment outlays was lower in the current fiscal year than in the prior fiscal year."
+          }
+        ],
+        "headline": "Company-wide cash after property outlays narrows as outlays rise",
+        "invalidation": [
+          "Segment-level or AI-specific cash-flow evidence showing a different pattern, or a subsequent rise in the calculated company-wide cash remainder, would require changing the view."
+        ],
+        "next_review": "Review when subsequent cash-flow disclosures or segment-level information become available that can separate company-wide results from AI-specific effects.",
+        "open_questions": [
+          "Whether the current company-wide increase in property-and-equipment cash outlays will produce durable company-wide operating cash flow remains unresolved."
+        ],
+        "stance": "watch",
+        "summary": "Company-wide operating cash flow rose between the prior and current fiscal years, but cash property-and-equipment outlays rose more sharply. The calculated cash remainder after those outlays fell, and the evidence does not isolate AI-specific spending or returns.",
+        "research": {
+          "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+          "completion_window": "flex",
+          "reasoning_effort": "medium"
+        },
+        "sources": [
+          {
+            "id": "fy26-results",
+            "published_at": "2026-07-29",
+            "title": "Microsoft FY2026 results · Cash flow statements (unaudited)",
+            "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast"
+          },
+          {
+            "id": "fy26-call",
+            "published_at": "2026-07-29",
+            "title": "Microsoft FY2026 earnings call · Management commentary",
+            "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4"
+          }
+        ],
+        "facts": [
+          {
+            "id": "ocf-2026",
+            "label": "Operating cash flow",
+            "period": "FY2026",
+            "source_id": "fy26-results",
+            "unit": "USD millions",
+            "value": 182935
+          },
+          {
+            "id": "ocf-2025",
+            "label": "Operating cash flow",
+            "period": "FY2025",
+            "source_id": "fy26-results",
+            "unit": "USD millions",
+            "value": 136162
+          },
+          {
+            "id": "ppe-2026",
+            "label": "Cash PP&E spending",
+            "period": "FY2026",
+            "source_id": "fy26-results",
+            "unit": "USD millions",
+            "value": 115948
+          },
+          {
+            "id": "ppe-2025",
+            "label": "Cash PP&E spending",
+            "period": "FY2025",
+            "source_id": "fy26-results",
+            "unit": "USD millions",
+            "value": 64551
+          },
+          {
+            "id": "cash-after-ppe-2026",
+            "label": "Cash after PP&E (calculated)",
+            "period": "FY2026",
+            "source_id": "fy26-results",
+            "unit": "USD millions",
+            "value": 66987
+          },
+          {
+            "id": "cash-after-ppe-2025",
+            "label": "Cash after PP&E (calculated)",
+            "period": "FY2025",
+            "source_id": "fy26-results",
+            "unit": "USD millions",
+            "value": 71611
+          }
+        ],
+        "context": [
+          {
+            "id": "calculation-scope",
+            "source_id": "fy26-results",
+            "text": "Cash after PP&E is calculated here as operating cash flow less the cash outflow for additions to property and equipment. PP&E spending is displayed as a positive amount. These are company-wide fiscal-year amounts, not AI-only cash flows or total capital expenditures including finance leases."
+          },
+          {
+            "id": "margin-pressure",
+            "source_id": "fy26-call",
+            "text": "Management attributed lower Microsoft Cloud gross margin percentage to the mix shift toward Azure, AI infrastructure investment, and increased product usage, partially offset by efficiency gains. This is management's explanation, not an independently established causal decomposition."
+          },
+          {
+            "id": "investment-outlook",
+            "source_id": "fy26-call",
+            "text": "Management expected capital expenditures to grow in the following fiscal year, citing demand signals. This is a forward-looking statement, not a realized result or a guarantee of investment returns."
+          },
+          {
+            "id": "cash-versus-capex",
+            "source_id": "fy26-call",
+            "text": "Management distinguished capital expenditures including finance leases from cash paid for property and equipment. Cash PP&E alone does not measure the full infrastructure commitment."
+          }
+        ],
+        "reviewed_at": "2026-09-12T20:16:25Z",
+        "reviewer": "AI Builder"
+      }
+    ]
+  },
+  "costs": {
+    "estimated_usd": "0.04144626",
+    "billed_usd": null,
+    "completed_runs": 3,
+    "unknown_runs": 0,
+    "reserved_usd": "1"
+  },
+  "portfolio": {
+    "status": "not_connected"
+  }
+}

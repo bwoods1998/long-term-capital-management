@@ -1,4 +1,12 @@
-# Sail API review — September 7, 2026
+# Sail API review
+
+## September 12, 2026 update
+
+Portfolio Agent V1 adds a checked evidence packet, reviewed memory, and a public export; see [V1](V1.md). Its first reviewed thesis uses DeepSeek V4 Pro, Flex, medium reasoning, and ordinary text output with an explicit JSON contract and strict local validation. Initial constrained-output attempts exposed incomplete responses and local validation failures. A structurally valid draft also failed substantive review; all attempts count toward cost. See the [development results](../lessons/02-result.md), or run `python3 portfolio.py preview` for the current request.
+
+Current documentation says ASAP-only models reject background requests. The legacy DeepSeek extraction now uses foreground ASAP; the September 7 result remains a historical observation. Models and rates have also changed. Check the [catalog](https://docs.sailresearch.com/models), [pricing](https://docs.sailresearch.com/pricing), and [completion windows](https://docs.sailresearch.com/completion-windows) before changing configuration. The notes below preserve the September 7 review, not a claim that every contract remains current.
+
+## September 7, 2026 review
 
 ## Review scope
 

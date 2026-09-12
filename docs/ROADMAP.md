@@ -1,60 +1,56 @@
 # Portfolio Agent roadmap
 
-This is a staged plan, not a list of capabilities already implemented. A new stage starts only after the previous stage has usable evidence. No launch dates or profit targets are assumed.
+Build one useful loop, measure it, then expand its authority. These stages describe the working foundation and future experiments, without promising returns or launch dates.
 
 ## 0. Measured extraction — working
 
-- A sourced financial table and local answer key.
-- A single bounded Sail request, persistent budget allowance, and restart-safe retrieval.
-- Correctness, token accounting, estimated expense, and six offline tests.
+`lab.py` extracts a financial table through Sail and checks values, units, periods, and evidence. A private ledger preserves requests, budget allowances, usage, and dated results. The [first lesson](../lessons/01-first-experiment.md) explains why one passing example is not a benchmark.
 
-Read Lesson 1 and explain the first result before expanding the workload. Next evaluation work includes controlled synthetic changes and unfamiliar held-out documents.
+## 1. One thesis with memory and a public ledger — working V1
 
-## 1. Know the account — next
+`portfolio.py` takes a checked evidence packet, asks Sail for a bounded research draft, and saves it privately. A new invocation includes the last reviewed thesis and its evidence. Revisions are immutable; explicit review advances the current thesis. The public [research page](https://blakewoods.us/portfolio/) serves an exported snapshot of reviewed history, source facts, and estimated research expenses.
 
-Privately connect to one owner-selected Schwab account for balances, holdings, transactions, and orders, subject to its approved API capabilities. Use a dedicated connector that exposes only reads at this stage; do not assume the token itself is technically read-only.
+The first packet examines Microsoft's company-wide cash generation and infrastructure investment. It does not establish AI-only returns. `brokerage.py demo` separately reconciles a synthetic account, including partial fills and external funding.
 
-Store normalized snapshots with timestamps, units, and provenance. Reconcile cash and positions against the owner's brokerage view. Make missing, stale, or incomplete data explicit. Inspect authentication expiry and reauthorization requirements in current account-accessible documentation.
+This version runs when invoked locally. There is no scheduler, automatic document retrieval, Schwab connection, or trade execution. Start with [Lesson 2](../lessons/02-thesis-with-memory.md) and the [V1 instructions](V1.md).
 
-Done when we can reproduce a dated portfolio snapshot and explain every discrepancy. No live order submission, public raw snapshots, or research-agent access to credentials.
+## 2. Know the account — next
 
-**Tomorrow's first session:** review the existing extraction lesson; map holdings, cash, transactions, orders, and fills; inspect the Schwab app's permissions and documentation; then build a mocked read-only connector before using real credentials. Enter any future secret through a private terminal prompt.
+Inspect the owner's approved Schwab API product and account-accessible authentication documentation. Build a private adapter for available balances, positions, transactions, orders, and fills. Keep its read operations separate; do not assume the credential itself is technically read-only.
 
-## 2. Maintain one thesis
+Extend the synthetic accounting contract using real documented fields. Handle timestamps, freshness, settlement, income, corporate actions, and discrepancies as the supported data requires. Reconcile a dated snapshot to the brokerage view before using it in research.
 
-Choose one holding or watchlist instrument. Save its thesis, evidence, assumptions, open questions, invalidation conditions, and next review event. New evidence creates a new version rather than overwriting the record.
-
-Done when the agent can resume its work in a new process, cite source passages, distinguish observation from interpretation, and explain what changed. It may recommend holding cash or taking no action.
+Done when cash and positions can be explained and incomplete or stale data is visible. Account records stay private. Confirm display permissions separately before exporting any account-derived metrics.
 
 ## 3. Research across time
 
-Add a durable task queue and checkpointed investigations. Introduce Sailboxes when isolated calculation or persistent execution is needed, Voyages when multi-step traces become useful, and completion-window comparisons on the same workload. Each investigation has a budget and a clear stopping condition.
+Add controlled retrieval, a durable task queue, review triggers, and checkpointed investigations. Introduce Sailboxes when isolated code execution is useful and Voyages when multistep traces help explain the work. Each assignment has a budget and a stopping condition.
 
-Done when a deliberately interrupted assignment resumes without repeating paid work, losing evidence, or silently claiming completion. Measure end-to-end cost, quality, latency, and owner interventions. Sleeping between events is part of persistence; continuous token generation is not the objective.
+Done when an interrupted investigation resumes without duplicating paid work or losing evidence, and new evidence produces an inspectable revision. Measure source support, latency, cost, and owner interventions. Sleeping between events is compatible with a persistent agent.
 
-## 4. Simulated execution and public replay
+## 4. Compare decisions and compute budgets
 
-Translate a thesis into structured proposed orders. Compare with a declared baseline in a clearly labeled simulator, including fill assumptions, transaction costs, deposits, and corporate actions as applicable. Exercise rejections, partial fills, ambiguous submissions, and duplicate commands with fixtures.
+Run the same assignments under different model, scheduling, and spending policies. Use held-out evidence tasks and explicit baselines. Check whether more computation improves supported conclusions enough to justify its expense.
 
-Build a separate public read model: selected thesis summaries, decision history, quality measures, and operating costs. Confirm data-display rights before publishing prices or account-derived metrics. Distinguish simulations from real results and from the website's fictional $WOODS exchange.
+Add a clearly labeled simulator for proposed portfolio decisions, with declared fill assumptions, fees, external cashflows, and a benchmark. Exercise partial fills, rejections, ambiguous responses, and duplicate commands before connecting any order path.
 
-Done when a visitor can follow a historical decision, while public requests have no route to the brokerage or an unbounded inference budget.
+Extend the public ledger with selected decision outcomes and measured operating costs. Keep simulated and live results distinct, including from the personal site's fictional $WOODS exchange.
 
 ## 5. Owner-approved live execution
 
-Define the account, allowed instruments, cash constraints, maximum exposure, order size/frequency, and permitted order types. Approvals bind to an exact order proposal and expire. Recheck current state before placement. Keep order and fill reconciliation separate from the research agent.
+Define a narrow mandate: account, permitted instruments and order types, cash constraints, exposure, order size, and frequency. Strong owner authentication approves an exact proposal with an expiry. A separate deterministic service rechecks current state and limits before submission.
 
-Done when controlled small live orders reconcile correctly and uncertain outcomes stop new execution. Stopping new orders, cancelling open orders, and liquidating positions are separate controls. Strong owner authentication is required.
+Done when small authorized orders reconcile correctly and an uncertain outcome blocks additional execution until resolved. Stopping new orders, cancelling open orders, and liquidating positions remain separate actions.
 
-## 6. Bounded autonomy — optional later
+## 6. Bounded autonomy and deeper economics — optional later
 
-The owner may explicitly authorize a versioned mandate after reviewing simulation and execution evidence. A deterministic service enforces it. The agent cannot enlarge its own authority, change risk limits, deploy code, or expose secrets. Strategy versions retain prospective results; no rewriting losing histories.
+An explicitly authorized, versioned mandate may eventually permit limited action. The agent cannot enlarge its authority, change risk limits, deploy code, or reveal secrets. Keep prospective results for every strategy version, including unsuccessful ones.
 
-Explore whether additional research improves measurable decisions at acceptable cost. Fine-tuning is optional and follows a robust evaluation dataset; a small portfolio's noisy returns are not sufficient training evidence.
+Use measured workloads to explore GPU throughput, utilization, capacity costs, and hypothetical provider economics. Customer API spending does not reveal Sail's internal costs or margins. Fine-tuning follows a reliable evaluation dataset; a small portfolio's noisy returns are not a sufficient training signal.
 
 ## Measures of progress
 
-- Engineering: recovery correctness, stale-data detection, reconciled orders, and manual interventions.
-- Research: factual accuracy, source support, hypothesis revisions, and cost per accepted result.
-- Economics: inference and execution expenses, incremental value of extra research, and modeled infrastructure costs.
-- Portfolio: cash-flow-adjusted performance, a declared benchmark, drawdown, turnover, and separately recorded project expenses. Investment returns alone do not establish agent skill.
+- Research: supported claims, factual accuracy, useful revisions, and cost per accepted result.
+- Engineering: correct recovery, stale-data detection, reconciliation, and required interventions.
+- Economics: workload expenses, forecast variance, and the incremental value of extra research.
+- Portfolio, once connected: cash-flow-adjusted performance, a declared benchmark, drawdown, turnover, and separately recorded project expenses.

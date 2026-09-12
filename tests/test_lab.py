@@ -1,4 +1,5 @@
 import concurrent.futures
+from contextlib import closing
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -37,11 +38,11 @@ class LabTests(unittest.TestCase):
         with self.assertRaises(ValueError): lab.estimate_cost({})
 
     def test_concurrent_reservations_cannot_exceed_budget(self):
-        with lab.database(self.path) as db:
+        with closing(lab.database(self.path)) as db, db:
             db.execute('INSERT INTO runs(id,created,reserved_cents,request,case_json,prediction,rates,pricing_date) VALUES(?,?,?,?,?,?,?,?)',
                        ('previous', 0, 99, '{}', '{}', '', '{}', '2026-09-07'))
         def attempt(_):
-            with lab.database(self.path) as db:
+            with closing(lab.database(self.path)) as db, db:
                 try:
                     lab.reserve(db, lab.build_request(self.case), self.case, 'test')
                     return True
@@ -50,7 +51,7 @@ class LabTests(unittest.TestCase):
             self.assertEqual(sum(pool.map(attempt, range(8))), 1)
 
     def test_uncertain_submission_reuses_same_id_and_body(self):
-        with lab.database(self.path) as db:
+        with closing(lab.database(self.path)) as db, db:
             rid = lab.reserve(db, lab.build_request(self.case), self.case, 'test')
             with patch.object(lab, 'api', side_effect=RuntimeError('network uncertain')) as api, patch.object(lab, 'report'), patch('builtins.print'):
                 lab.execute(db, rid)
@@ -63,7 +64,7 @@ class LabTests(unittest.TestCase):
                 api.assert_not_called()
 
     def test_resume_uses_get_and_terminal_incomplete_does_not_resubmit(self):
-        with lab.database(self.path) as db:
+        with closing(lab.database(self.path)) as db, db:
             rid = lab.reserve(db, lab.build_request(self.case), self.case, 'test')
             db.execute('UPDATE runs SET response_id=? WHERE id=?', ('resp_test', rid))
             result = {'id': 'resp_test', 'status': 'incomplete', 'output': None}
