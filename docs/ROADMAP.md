@@ -12,11 +12,13 @@ Build one useful loop, measure it, then expand its authority. These stages descr
 
 The first packet examines Microsoft's company-wide cash generation and infrastructure investment. It does not establish AI-only returns. `brokerage.py demo` separately reconciles a synthetic account, including partial fills and external funding.
 
-This version runs when invoked locally. There is no scheduler, automatic document retrieval, Schwab connection, or trade execution. Start with [Lesson 2](../lessons/02-thesis-with-memory.md) and the [V1 instructions](V1.md).
+This version runs when invoked locally. There is no scheduler, automatic document retrieval, or trade execution. Start with [Lesson 2](../lessons/02-thesis-with-memory.md) and the [V1 instructions](V1.md).
 
-## 2. Know the account — next
+## 2. Know the account — private connector ready for owner verification
 
-Inspect the owner's approved Schwab API product and account-accessible authentication documentation. Build a private adapter for available balances, positions, transactions, orders, and fills. Keep its read operations separate; do not assume the credential itself is technically read-only.
+`schwab_connect.py` supports browser consent and a private balances-and-positions snapshot through the community SDK. Offline tests cover OAuth and failure recovery; live verification requires owner authorization and the first account read. See [setup](SCHWAB-SETUP.md) and [Lesson 3](../lessons/03-schwab-access.md). The connector blocks order requests; the registered app may carry broader permissions.
+
+Next, verify the returned account fields and add private observations of transactions, orders, and fills as needed, using the account-accessible documentation.
 
 Extend the synthetic accounting contract using real documented fields. Handle timestamps, freshness, settlement, income, corporate actions, and discrepancies as the supported data requires. Reconcile a dated snapshot to the brokerage view before using it in research.
 

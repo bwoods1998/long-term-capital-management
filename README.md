@@ -4,7 +4,7 @@ An AI investor that remembers its reasoning. A personal experiment in research, 
 
 [Research ledger](https://blakewoods.us/portfolio/) · [V1 runbook](docs/V1.md) · [Learning path](lessons/README.md)
 
-**V1: research only.** One persistent thesis, dated evidence, private drafts, explicit review, and a public decision history. Sail supplies inference; local Python and SQLite preserve the work. The brokerage demo uses synthetic data. Schwab connectivity and trading are future capabilities; no code here can submit brokerage orders.
+**V1: research with an optional private account connector.** One persistent thesis, dated evidence, private drafts, explicit review, and a public decision history. Sail supplies inference; local Python and SQLite preserve the work. Schwab authorization and account reads require the owner's consent; no code here can submit brokerage orders. The public ledger contains research only.
 
 ## The vision
 
@@ -17,7 +17,8 @@ The question: **Can an agent maintain a coherent investment strategy over time�
 ## Start reading
 
 - [V1 runbook](docs/V1.md): preview, predict, research, review, export.
-- [Prepare Schwab access](docs/SCHWAB-SETUP.md): save app credentials privately before account authorization.
+- [Private Schwab access](docs/SCHWAB-SETUP.md): authorize locally and read a private account snapshot.
+- [Lesson 3](lessons/03-schwab-access.md): app credentials, account consent, and token refresh.
 - [A thesis with memory](lessons/02-thesis-with-memory.md): the next learning exercise.
 - [First thesis results](lessons/02-result.md): five attempts, one accepted view, and their costs.
 - [Project roadmap](docs/ROADMAP.md): milestones and next steps.
@@ -39,9 +40,9 @@ python3 brokerage.py demo
 python3 -m unittest discover -s tests -v
 ```
 
-These commands run locally without API calls. Python 3.10+; no third-party packages required. The brokerage demo implements our internal accounting contract, not Schwab's API schema.
+These commands run locally without API calls. Python 3.10+; no third-party packages required for research or the synthetic demo. The demo implements our internal accounting contract, not Schwab's API schema. The optional real-account connector uses separately pinned community SDK dependencies in `.venv`; see [setup](docs/SCHWAB-SETUP.md).
 
-Sail credentials are stored in an owner-readable, Git-ignored `.env`. Local runs and documentation snapshots stay in ignored `.data/`. Preserve that directory: it includes the experiment's persistent budget history. No Schwab credentials are needed at this stage.
+Sail credentials are stored in an owner-readable, Git-ignored `.env`. Local runs, documentation snapshots, and private Schwab state stay in ignored `.data/`. Preserve that directory: it includes the experiment's persistent budget history. Research does not require Schwab credentials or account authorization.
 
 ## How it grows
 
