@@ -17,6 +17,7 @@ The question: **Can an agent maintain a coherent investment strategy over timeâ€
 ## Start reading
 
 - [V1 runbook](docs/V1.md): preview, predict, research, review, export.
+- [Prepare Schwab access](docs/SCHWAB-SETUP.md): save app credentials privately before account authorization.
 - [A thesis with memory](lessons/02-thesis-with-memory.md): the next learning exercise.
 - [First thesis results](lessons/02-result.md): five attempts, one accepted view, and their costs.
 - [Project roadmap](docs/ROADMAP.md): milestones and next steps.
