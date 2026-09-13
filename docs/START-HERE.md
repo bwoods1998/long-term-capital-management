@@ -5,6 +5,10 @@ runs are reviewed observations; the evidence replay uses fictional companies.
 Neither is a portfolio return. Visitors read saved artifacts and cannot start paid
 work.
 
+The [build record](BUILD-RECORD.md) lists what is working, measured costs, and the
+current checkpoint. The [cash-flow explorer](https://blakewoods.us/portfolio/#cashflow)
+lets you inspect the checked annual reconciliation directly.
+
 ## Understand one loop
 
 The agent receives a question and checked facts, chooses permitted source queries
@@ -38,6 +42,8 @@ research task: two independent analysts, three reconciliations, synthesis, criti
 and revision. Its sixty-four numerical targets distinguish financial values from
 units, periods, and source coverage. A passing arithmetic check still does not
 establish a sound explanation or approve publication.
+Its [observed results](DOSSIER-RESULTS.md) show how a missing passage became an
+unsupported zero, and why a later perfect numeric score still did not approve prose.
 
 For a financial review exercise, [audit the net effect](REVIEW-CASE.md). The agent
 and its critic highlighted two positive cash-flow contributions while overlooking

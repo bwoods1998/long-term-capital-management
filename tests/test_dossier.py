@@ -98,6 +98,44 @@ class DossierTests(unittest.TestCase):
             self.db.execute("UPDATE dossiers SET sha256='corrupt'")
         self.db.rollback()
 
+    def test_followup_preserves_original_failures_and_complete_evidence_across_both_stages(self):
+        identifier = self.create()
+        for _ in range(11):
+            d.advance(self.db, identifier)
+        with patch.object(d, 'parse_report', side_effect=ValueError('Missing evidence')):
+            d.advance(self.db, identifier)
+        original = [dict(row) for row in self.db.execute('SELECT * FROM dossier_steps ORDER BY rowid')]
+        original_runs = [dict(row) for row in self.db.execute('SELECT * FROM runs ORDER BY created,id')]
+        call_count = len(self.calls)
+        follow = d.followup(self.db, identifier, '2026-09-13T04:30:00Z')
+        self.assertEqual(len(self.calls), call_count)
+        frozen = d.protocol(self.db, follow)
+        self.assertEqual(frozen['max_reservation_cents'], 120)
+        self.assertEqual(frozen['parent_protocol_sha256'], p.digest(d.protocol(self.db, identifier)))
+        for stage in frozen['stages']:
+            selected = d._sources_for(stage, frozen, {'only-prior': {'report': self.report()}})
+            self.assertTrue(set(self.rubric['source_spans']).issubset(selected))
+            self.assertTrue(set(self.call_ids).issubset(selected))
+        for _ in range(2):
+            self.assertEqual(d.advance(self.db, follow)['state'], 'advanced')
+        self.assertEqual(d.advance(self.db, follow)['state'], 'awaiting_review')
+        self.assertEqual(d.status(self.db, follow)['held_usd'], '1.2')
+        self.assertEqual([dict(row) for row in self.db.execute(
+            'SELECT * FROM dossier_steps WHERE dossier_id=? ORDER BY rowid', (identifier,))], original)
+        keys = [row['id'] for row in original_runs]
+        self.assertEqual([dict(row) for row in self.db.execute(
+            'SELECT * FROM runs WHERE id IN (' + ','.join('?' for _ in keys) + ') ORDER BY created,id', keys)], original_runs)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            d.followup(self.db, identifier, '2026-09-13T04:30:00Z')
+
+    def test_followup_requires_completed_original_and_rejects_outside_deadline(self):
+        identifier = self.create()
+        with self.assertRaisesRegex(ValueError, 'fully observed'):
+            d.followup(self.db, identifier, '2026-09-13T04:30:00Z')
+        with self.assertRaisesRegex(ValueError, 'original dossier window'):
+            d.followup(self.db, identifier, '2026-09-13T05:01:00Z')
+        self.assertEqual(len(self.calls), 0)
+
     def test_expected_answers_are_withheld_from_initial_and_reconciliation_requests(self):
         frozen = d.protocol(self.db, self.create())
         parents = {'cashflow-pro': {'report': self.report(), 'grade': d.grade(self.report(), self.rubric, 'cashflow')}}

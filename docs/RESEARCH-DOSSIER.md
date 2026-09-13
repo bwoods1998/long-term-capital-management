@@ -5,10 +5,10 @@ and investment commitments fit together—and which conclusions the disclosures
 cannot support. It puts multiple models through a connected research task, with
 source evidence and arithmetic carried into reconciliation, synthesis, and critique.
 
-This is a planned bounded protocol. A saved request, a completed stage, and a useful
-research result are different outcomes. Results must be reported from the durable
-ledger after execution; this document does not assume that the models will finish,
-agree, or produce a publishable conclusion.
+The first twelve-stage run and a separate two-stage follow-up are complete.
+[Measured results](DOSSIER-RESULTS.md) preserve the failed final revision and the
+follow-up's narrower improvement. A saved request, a completed stage, and a useful
+research result are different outcomes; neither automated score approves publication.
 
 ## The research problem
 
@@ -100,6 +100,12 @@ would bring cumulative holds to $94.60 under the explicitly increased $95 infere
 ceiling, leaving room below the separate $100 overall authorization for other
 already recorded product costs. These are authorization ceilings, not bills, and
 unused historical reservations are not refunded or reused.
+
+After the original run exposed lost evidence, one separately frozen two-call
+follow-up received a $1.20 allowance. The explicitly revised cumulative inference
+ceiling was $96; all fourteen admissions brought holds to $95.80. Earlier history
+remains intact and the overall authorized ceiling stays $100. This is a closed
+follow-up, not permission to keep creating revisions until one passes.
 
 Separate dossier profiles use Pro Flex and Kimi K3 ASAP, each with at most 32,768
 output tokens. Ordinary investigation profiles retain their earlier limits.

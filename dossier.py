@@ -122,6 +122,49 @@ def protocol(db, identifier):
     return value
 
 
+def followup(db, parent_id, deadline):
+    """One prospective two-call source-continuity proof; never reset a run."""
+    parent = protocol(db, parent_id)
+    end = datetime.fromisoformat(deadline.replace('Z', '+00:00'))
+    if end.tzinfo is None or not time.time() < end.timestamp() <= parent['deadline']:
+        raise ValueError('Follow-up must finish within the original dossier window')
+    if parent['schema_version'] != 1:
+        raise ValueError('Only the original dossier can seed this one follow-up')
+    rows = {row['stage_id']: row for row in db.execute('SELECT * FROM dossier_steps WHERE dossier_id=?', (parent_id,))}
+    if len(rows) != len(parent['stages']) or any(not row['result'] for row in rows.values()):
+        raise ValueError('Original dossier must be fully observed first')
+    seed = {key: json.loads(rows[key]['result']) for key in ('synthesis', 'critic')}
+    if any(not item.get('report') for item in seed.values()):
+        raise ValueError('The original synthesis and critic must have valid saved reports')
+    final = json.loads(rows['revision']['result'])
+    if final.get('report') is not None:
+        raise ValueError('This follow-up is for the observed invalid final revision')
+    stages = [
+        {'id': 'source-complete-revision', 'theme': 'all', 'kind': 'revision', 'model': PRO,
+         'parents': ['synthesis', 'critic']},
+        {'id': 'source-complete-critic', 'theme': 'all', 'kind': 'critic', 'model': KIMI,
+         'parents': ['source-complete-revision']},
+    ]
+    frozen = {**deepcopy(parent), 'schema_version': 2, 'deadline': end.timestamp(), 'stages': stages,
+              'seed_results': seed, 'parent_protocol_sha256': p.digest(parent),
+              'source_policy': 'complete-review-packet-v1', 'max_reservation_cents': 120,
+              'intervention': 'Retain every authored review passage in both stages; missing evidence is not zero.',
+              'code_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    # Validate the prospective initial request before admitting any paid work.
+    request(stages[0], frozen, seed)
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT COUNT(*) FROM dossiers').fetchone()[0] != 1:
+            raise ValueError('The single source-continuity follow-up already exists')
+        held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
+        if held + 120 > p.budget_limit(db):
+            raise ValueError('Insufficient unchanged-history budget for the full follow-up')
+        identifier = str(uuid.uuid4())
+        db.execute('INSERT INTO dossiers VALUES(?,?,?,?)',
+                   (identifier, time.time(), p.encoded(frozen), p.digest(frozen)))
+    return identifier
+
+
 def parse_report(response, library):
     text = ''.join(part.get('text', '') for item in response.get('output', [])
                    if isinstance(item, dict) for part in item.get('content', [])
@@ -195,7 +238,7 @@ def grade(value, rubric, theme):
 
 def _sources_for(stage, frozen, parents):
     library = frozen['library']
-    if stage['kind'] == 'reconcile':
+    if stage['kind'] == 'reconcile' or frozen.get('source_policy') == 'complete-review-packet-v1':
         # Revisit the independently selected passages plus the authored audit's
         # source locations. No reference quantities or expected answers enter.
         cited = set(frozen['rubric']['source_spans'])
@@ -243,6 +286,14 @@ def request(stage, frozen, parents):
         'Do the arithmetic explicitly, then provide compact numeric results and the financial interpretation. '
         'The oracle is withheld. Citation membership and numeric matches do not prove semantic correctness.\n'
         'STAGE: ' + stage['kind'] + '\n')
+    if frozen.get('source_policy') == 'complete-review-packet-v1':
+        instructions += (
+            'SOURCE-CONTINUITY FOLLOW-UP: Both stages receive the complete verified review packet '
+            'plus prior cited passages. A previous stage lost relevant source evidence. Missing evidence '
+            'is not a zero value. Reinspect all requested figures against this packet; do not carry '
+            'forward a placeholder from prior reports. If evidence remains missing, state the limitation '
+            'explicitly rather than inventing a quantity. Do not explain a discrepancy as likely rounding '
+            'unless the source supports that cause; an unresolved difference must stay unresolved.\n')
     if stage['kind'] == 'analyst':
         instructions += 'Work independently; no other analyst conclusions are supplied.\n'
     elif stage['kind'] == 'reconcile':
@@ -280,7 +331,8 @@ def advance(db, identifier):
             continue
         if time.time() >= frozen['deadline']:
             return {'state': 'deadline', 'stage': stage['id']}
-        parents = {key: json.loads(rows[key]['result']) for key in stage['parents']}
+        parents = {key: json.loads(rows[key]['result']) if key in rows else
+                   deepcopy(frozen.get('seed_results', {})[key]) for key in stage['parents']}
         key = 'dossier:' + identifier + ':' + stage['id']
         purpose = 'critique' if stage['kind'] == 'critic' else 'investigate'
         if row:
@@ -358,6 +410,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('create').add_argument('--deadline', default=END)
+    command = commands.add_parser('followup')
+    command.add_argument('parent_id')
+    command.add_argument('--deadline', required=True)
     for name in ('status', 'advance', 'run'):
         command = commands.add_parser(name)
         command.add_argument('id')
@@ -367,6 +422,8 @@ def main():
     with closing(p.database()) as db:
         if args.command == 'create':
             print(p.encoded({'id': create(db, args.deadline)}))
+        elif args.command == 'followup':
+            print(p.encoded({'id': followup(db, args.parent_id, args.deadline)}))
         elif args.command == 'status':
             print(p.encoded(status(db, args.id)))
         else:

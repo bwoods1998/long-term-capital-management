@@ -1,0 +1,815 @@
+{
+  "schema_version": 1,
+  "kind": "independent_post_hoc_financial_dossier_review",
+  "reviewed_at": "2026-09-13T04:07:14Z",
+  "review_method": "Independent assistant audit of immutable completed stages, exact financial values and original source captures; no new inference.",
+  "protocol_sha256": "5f4c9723139d187998b44b52089f1f71313a5608f29c4d07f61eba7856af6a3d",
+  "protocol_created_at": "2026-09-13T03:51:53Z",
+  "rubric_sha256": "a5760084e2735d92b2cbf7881e0bade59ea83332baa7fa183963ba29d20d2caa",
+  "source_sha256": {
+    "fy26-call": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+    "fy26-results": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8"
+  },
+  "all_planned_stages_terminal": true,
+  "planned_stages": 12,
+  "original_results_and_grades_unchanged": true,
+  "final_report_sha256": "a07952905a539f9170cb9134e9975a56330c7753607890a36c248651705091c1",
+  "final_report_hash_basis": "Canonical JSON of the raw structured revision, which failed the frozen parser; this is not an approved report.",
+  "official_final_report_present": false,
+  "stages": [
+    {
+      "stage": "cashflow-pro",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "5d9bfea52b5db601f0b6ab35f52ac6f5b101dab70a780249a28fbbf5f54819af",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 43,
+        "total": 43
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 43,
+        "numeric_values_matching": 43,
+        "units_matching": 43,
+        "periods_matching": 43,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 43
+      }
+    },
+    {
+      "stage": "cashflow-kimi",
+      "model": "moonshotai/Kimi-K3",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "4ffbcaba19c13023572515a87004dfcf14b8eb57160531372e631f72ab64e2d5",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 25,
+        "total": 43
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 43,
+        "numeric_values_matching": 43,
+        "units_matching": 43,
+        "periods_matching": 43,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "other_long_term_assets_fy2026",
+              "other_long_term_assets_fy2025",
+              "accounts_payable_fy2026",
+              "accounts_payable_fy2025",
+              "unearned_revenue_fy2026",
+              "unearned_revenue_fy2025",
+              "income_taxes_fy2026",
+              "income_taxes_fy2025",
+              "other_current_liabilities_fy2026",
+              "other_current_liabilities_fy2025",
+              "other_long_term_liabilities_fy2026",
+              "other_long_term_liabilities_fy2025",
+              "operating_cash_flow_fy2026",
+              "operating_cash_flow_fy2025",
+              "operating_cash_flow_change",
+              "accounts_payable_contribution_change",
+              "unearned_revenue_contribution_change",
+              "selected_positive_contribution_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 25
+      }
+    },
+    {
+      "stage": "investment-pro",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "b0bc203bc49232cc4d5fe33eb2e83bb5ddf85b7b45a45e6259454301e1e1b62a",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 8,
+        "total": 14
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 14,
+        "numeric_values_matching": 14,
+        "units_matching": 14,
+        "periods_matching": 14,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "cash_ppe_fy2026",
+              "cash_ppe_fy2025",
+              "cash_after_ppe_fy2026",
+              "cash_after_ppe_fy2025",
+              "cash_ppe_change",
+              "cash_after_ppe_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 8
+      }
+    },
+    {
+      "stage": "investment-kimi",
+      "model": "moonshotai/Kimi-K3",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "a869e88450814eaa8cb696ccb96ae9e1ee2b0695bf401deb52f1a024fa8cff59",
+      "frozen_schema_valid": false,
+      "frozen_numeric_provenance_grade": null,
+      "schema_failure_diagnostic": [
+        {
+          "code": "headline_too_long",
+          "observed_characters": 225,
+          "maximum": 200
+        }
+      ],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 14,
+        "numeric_values_matching": 12,
+        "units_matching": 14,
+        "periods_matching": 14,
+        "missing_metric_ids": [],
+        "numeric_errors": [
+          {
+            "metric_id": "reported_component_sum_fy2026_q4",
+            "observed": "21",
+            "checked_value": "41.4"
+          },
+          {
+            "metric_id": "component_minus_reported_capex_fy2026_q4",
+            "observed": "-20",
+            "checked_value": "0.4"
+          }
+        ],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "cash_ppe_fy2026",
+              "cash_ppe_fy2025",
+              "cash_after_ppe_fy2026",
+              "cash_after_ppe_fy2025",
+              "cash_ppe_change",
+              "cash_after_ppe_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 6
+      }
+    },
+    {
+      "stage": "demand-pro",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "2df103fd803192a9bce8b80ad2ac25468097e26861e30c9d7c00969bc644e88e",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 4,
+        "total": 7
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 7,
+        "numeric_values_matching": 7,
+        "units_matching": 7,
+        "periods_matching": 7,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-call:21600:23400"
+            ],
+            "metric_ids": [
+              "commercial_rpo",
+              "commercial_rpo_growth_including_openai"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-call:25200:27000"
+            ],
+            "metric_ids": [
+              "azure_revenue_growth_fy2026_q4"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 4
+      }
+    },
+    {
+      "stage": "demand-kimi",
+      "model": "moonshotai/Kimi-K3",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "8bb0b9f9dd6170230fb4f3998d98e670662dba5d7c4f60d84142261d8ea3cbb5",
+      "frozen_schema_valid": false,
+      "frozen_numeric_provenance_grade": null,
+      "schema_failure_diagnostic": [
+        {
+          "code": "unexpected_top_level_fields",
+          "extra_field_count": 1,
+          "missing_field_count": 0
+        }
+      ],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 7,
+        "numeric_values_matching": 7,
+        "units_matching": 7,
+        "periods_matching": 7,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-call:21600:23400"
+            ],
+            "metric_ids": [
+              "commercial_rpo",
+              "commercial_rpo_growth_including_openai"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 5
+      }
+    },
+    {
+      "stage": "cashflow-reconcile",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "5d533aca1c7d378bdd91514a48b0653b2c0e74d1a8175e8343f784cd3bd2fbd3",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 27,
+        "total": 43
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 43,
+        "numeric_values_matching": 43,
+        "units_matching": 43,
+        "periods_matching": 43,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "accounts_payable_fy2026",
+              "accounts_payable_fy2025",
+              "unearned_revenue_fy2026",
+              "unearned_revenue_fy2025",
+              "income_taxes_fy2026",
+              "income_taxes_fy2025",
+              "other_current_liabilities_fy2026",
+              "other_current_liabilities_fy2025",
+              "other_long_term_liabilities_fy2026",
+              "other_long_term_liabilities_fy2025",
+              "operating_cash_flow_fy2026",
+              "operating_cash_flow_fy2025",
+              "operating_cash_flow_change",
+              "accounts_payable_contribution_change",
+              "unearned_revenue_contribution_change",
+              "selected_positive_contribution_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 27
+      }
+    },
+    {
+      "stage": "investment-reconcile",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "935bb9135af617b4477cfd0aac143bfa0f8f2a0ca588382ef8edb27f880724e7",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 8,
+        "total": 14
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 14,
+        "numeric_values_matching": 14,
+        "units_matching": 14,
+        "periods_matching": 14,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "cash_ppe_fy2026",
+              "cash_ppe_fy2025",
+              "cash_after_ppe_fy2026",
+              "cash_after_ppe_fy2025",
+              "cash_ppe_change",
+              "cash_after_ppe_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 8
+      }
+    },
+    {
+      "stage": "demand-reconcile",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "0aa30003cf5222dea6e46118fd9e135a3136066d05fa0e0b6afd446dc2d92bf1",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 4,
+        "total": 7
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 7,
+        "numeric_values_matching": 7,
+        "units_matching": 7,
+        "periods_matching": 7,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-call:21600:23400"
+            ],
+            "metric_ids": [
+              "commercial_rpo",
+              "commercial_rpo_growth_including_openai"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-call:25200:27000"
+            ],
+            "metric_ids": [
+              "azure_revenue_growth_fy2026_q4"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 4
+      }
+    },
+    {
+      "stage": "synthesis",
+      "model": "moonshotai/Kimi-K3",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "0795e9e7e9f7bac944c3f95373d4e0a6e6a63fc6637854d5d3e4ba0853e30931",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 39,
+        "total": 64
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 64,
+        "numeric_values_matching": 64,
+        "units_matching": 64,
+        "periods_matching": 64,
+        "missing_metric_ids": [],
+        "numeric_errors": [],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-call:21600:23400"
+            ],
+            "metric_ids": [
+              "commercial_rpo",
+              "commercial_rpo_growth_including_openai"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-call:25200:27000"
+            ],
+            "metric_ids": [
+              "azure_revenue_growth_fy2026_q4"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "accounts_payable_fy2026",
+              "accounts_payable_fy2025",
+              "unearned_revenue_fy2026",
+              "unearned_revenue_fy2025",
+              "income_taxes_fy2026",
+              "income_taxes_fy2025",
+              "other_current_liabilities_fy2026",
+              "other_current_liabilities_fy2025",
+              "other_long_term_liabilities_fy2026",
+              "other_long_term_liabilities_fy2025",
+              "operating_cash_flow_fy2026",
+              "operating_cash_flow_fy2025",
+              "operating_cash_flow_change",
+              "accounts_payable_contribution_change",
+              "unearned_revenue_contribution_change",
+              "selected_positive_contribution_change",
+              "cash_ppe_fy2026",
+              "cash_ppe_fy2025",
+              "cash_after_ppe_fy2026",
+              "cash_after_ppe_fy2025",
+              "cash_ppe_change",
+              "cash_after_ppe_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 39
+      }
+    },
+    {
+      "stage": "critic",
+      "model": "moonshotai/Kimi-K3",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "66dff860409e9446a0ff3a59bbc8a75f9c69218e0eec747510891c8d224eae72",
+      "frozen_schema_valid": true,
+      "frozen_numeric_provenance_grade": {
+        "passed": 57,
+        "total": 64
+      },
+      "schema_failure_diagnostic": [],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 64,
+        "numeric_values_matching": 63,
+        "units_matching": 64,
+        "periods_matching": 63,
+        "missing_metric_ids": [],
+        "numeric_errors": [
+          {
+            "metric_id": "azure_revenue_growth_fy2026_q4",
+            "observed": "0",
+            "checked_value": "43"
+          }
+        ],
+        "unit_errors": [],
+        "period_errors": [
+          {
+            "metric_id": "accounts_payable_fy2025",
+            "observed_period": "FY2026",
+            "checked_period": "FY2025"
+          }
+        ],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-call:21600:23400"
+            ],
+            "metric_ids": [
+              "commercial_rpo",
+              "commercial_rpo_growth_including_openai"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-call:25200:27000"
+            ],
+            "metric_ids": [
+              "azure_revenue_growth_fy2026_q4"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-results:19800:21600"
+            ],
+            "metric_ids": [
+              "cash_ppe_fy2026",
+              "cash_ppe_fy2025",
+              "cash_ppe_change"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 57
+      }
+    },
+    {
+      "stage": "revision",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider_status": "completed",
+      "raw_structured_report_sha256": "a07952905a539f9170cb9134e9975a56330c7753607890a36c248651705091c1",
+      "frozen_schema_valid": false,
+      "frozen_numeric_provenance_grade": null,
+      "schema_failure_diagnostic": [
+        {
+          "code": "empty_metric_citations",
+          "metric_ids": [
+            "azure_revenue_growth_fy2026_q4"
+          ]
+        }
+      ],
+      "financial_diagnostic": {
+        "classification": "post_hoc_diagnostic_not_a_replacement_grade",
+        "expected_metrics": 64,
+        "numeric_values_matching": 63,
+        "units_matching": 64,
+        "periods_matching": 64,
+        "missing_metric_ids": [],
+        "numeric_errors": [
+          {
+            "metric_id": "azure_revenue_growth_fy2026_q4",
+            "observed": "0",
+            "checked_value": "43"
+          }
+        ],
+        "unit_errors": [],
+        "period_errors": [],
+        "required_source_coverage_omissions": [
+          {
+            "missing_group": [
+              "fy26-call:21600:23400"
+            ],
+            "metric_ids": [
+              "commercial_rpo",
+              "commercial_rpo_growth_including_openai"
+            ]
+          },
+          {
+            "missing_group": [
+              "fy26-call:25200:27000"
+            ],
+            "metric_ids": [
+              "azure_revenue_growth_fy2026_q4"
+            ]
+          }
+        ],
+        "empty_metric_citation_ids": [
+          "azure_revenue_growth_fy2026_q4"
+        ],
+        "invented_metric_citation_count": 0,
+        "known_but_not_selected_metric_citation_count": 0,
+        "extra_metric_count": 0,
+        "fields_matching_value_unit_period_and_required_sources": 61
+      }
+    }
+  ],
+  "independent_final_bridge_checks": [
+    {
+      "id": "full_ocf_fy2026",
+      "reported": "182935",
+      "sum_of_reported_components": "182935",
+      "matches": true
+    },
+    {
+      "id": "full_ocf_fy2025",
+      "reported": "136162",
+      "sum_of_reported_components": "136162",
+      "matches": true
+    },
+    {
+      "id": "full_ocf_growth_bridge",
+      "reported": "46773",
+      "sum_of_reported_components": "46773",
+      "matches": true
+    }
+  ],
+  "azure_evidence_lineage": [
+    {
+      "stage": "demand-pro",
+      "frozen_schema_valid": true,
+      "observed_value": "43",
+      "checked_value": "43",
+      "primary_passage_available_in_request": true,
+      "required_primary_passage_cited": false,
+      "empty_citations": false
+    },
+    {
+      "stage": "demand-kimi",
+      "frozen_schema_valid": false,
+      "observed_value": "43",
+      "checked_value": "43",
+      "primary_passage_available_in_request": true,
+      "required_primary_passage_cited": true,
+      "empty_citations": false
+    },
+    {
+      "stage": "demand-reconcile",
+      "frozen_schema_valid": true,
+      "observed_value": "43",
+      "checked_value": "43",
+      "primary_passage_available_in_request": true,
+      "required_primary_passage_cited": false,
+      "empty_citations": false
+    },
+    {
+      "stage": "synthesis",
+      "frozen_schema_valid": true,
+      "observed_value": "43",
+      "checked_value": "43",
+      "primary_passage_available_in_request": false,
+      "required_primary_passage_cited": false,
+      "empty_citations": false
+    },
+    {
+      "stage": "critic",
+      "frozen_schema_valid": true,
+      "observed_value": "0",
+      "checked_value": "43",
+      "primary_passage_available_in_request": false,
+      "required_primary_passage_cited": false,
+      "empty_citations": false
+    },
+    {
+      "stage": "revision",
+      "frozen_schema_valid": false,
+      "observed_value": "0",
+      "checked_value": "43",
+      "primary_passage_available_in_request": false,
+      "required_primary_passage_cited": false,
+      "empty_citations": true
+    }
+  ],
+  "substantive_review": [
+    {
+      "criterion_id": "complete_annual_bridge",
+      "assessment": "supported",
+      "finding": "All nine operating asset/liability rows are present. Both annual OCF reconciliations and the full change bridge recompute correctly; the grouping is described more broadly than current working capital."
+    },
+    {
+      "criterion_id": "offsets_and_attribution",
+      "assessment": "supported",
+      "finding": "The selected payable/unearned-revenue improvement of 8622 is offset by 8167 from the remaining seven rows, leaving 455. These figures are USD millions and do not explain most of the 46773 total OCF increase."
+    },
+    {
+      "criterion_id": "cash_flow_quality",
+      "assessment": "needs_qualification",
+      "finding": "The report distinguishes accounting adjustments from recurring cash. It nevertheless labels the deferred-tax swing timing-related without the tax-footnote evidence needed to identify its drivers; possible reversals should remain explicitly unquantified."
+    },
+    {
+      "criterion_id": "outflow_and_measure_scope",
+      "assessment": "supported",
+      "finding": "Positive cash PP&E denotes spending. The cash remainder is defined at company level and is distinguished from total capital commitments and AI-specific returns."
+    },
+    {
+      "criterion_id": "rounded_quarter_gap",
+      "assessment": "needs_qualification",
+      "finding": "The quarterly component sum and 0.4 USD billion difference are numerically correct. Calling the unresolved difference likely rounding assigns an explanation the captures do not establish, while another sentence says no cause is inferred."
+    },
+    {
+      "criterion_id": "classification_vs_activity",
+      "assessment": "supported",
+      "finding": "The report identifies the FY 2027 datacenter/office-building useful-life change and future lease classification effect, and attributes unchanged underlying calendar-year investment expectations to management."
+    },
+    {
+      "criterion_id": "leases_and_cash_flow",
+      "assessment": "supported",
+      "finding": "The report retains management commentary that operating lease payments partly offset quarterly OCF growth; it does not treat all lease payments as excluded from OCF."
+    },
+    {
+      "criterion_id": "demand_attribution_and_scope",
+      "assessment": "needs_qualification",
+      "finding": "The RPO values, OpenAI inclusion/exclusion, recognition timing and sequential-growth distinction match the full captures. Two RPO metric citations omit the required source chunk. The Azure growth statement is also lost downstream; that specific failure is recorded separately."
+    },
+    {
+      "criterion_id": "backlog_is_not_roi",
+      "assessment": "supported",
+      "finding": "Contracted backlog is distinguished from cash collection and AI returns. The report does not convert weighted revenue-recognition duration into investment payback."
+    },
+    {
+      "criterion_id": "margin_counterevidence",
+      "assessment": "needs_qualification",
+      "finding": "The reported 65 percent Cloud margin and year-over-year pressure match the source. Preserve explicit management attribution for mix, infrastructure and efficiency explanations rather than presenting them as independently established causes."
+    },
+    {
+      "criterion_id": "roi_unknown_not_false",
+      "assessment": "supported",
+      "finding": "The report identifies missing attributable AI cash flows and invested capital and distinguishes an unknown return from a negative return."
+    },
+    {
+      "criterion_id": "testable_next_disclosures",
+      "assessment": "supported_with_limit",
+      "finding": "Tax, lease, backlog-conversion and AI-allocation follow-ups are concrete, with FY 2027-quarter and CY 2026 checkpoints. Its request to locate the Azure figure is unnecessary for this dossier: the full frozen corpus already contains it."
+    }
+  ],
+  "material_findings": [
+    {
+      "id": "missing_evidence_became_zero",
+      "severity": "material",
+      "finding": "The full frozen transcript reports Azure growth of 43 percent. Downstream source selection omitted that passage. The critic replaced 43 with 0 and the revision retained 0 with empty citations, explicitly explaining it as a schema placeholder. This is a real unsupported numeric output and an evidence-continuity failure, not an invented citation ID."
+    },
+    {
+      "id": "invalid_peer_not_seen_by_reconciler",
+      "severity": "methodology",
+      "finding": "Investment-Kimi has two numerical errors in a separate raw-output audit, but its overlong headline excluded the entire report from the next stage. Reconciliation therefore cannot be credited with correcting those specific seen errors. Demand-Kimi likewise remained unavailable after its schema failure."
+    },
+    {
+      "id": "higher_grade_not_monotonic_financial_quality",
+      "severity": "methodology",
+      "finding": "Critic strict coverage improved relative to synthesis while introducing the wrong Azure value and a fiscal-period error. Revision repaired the period and many citation omissions but retained the unsupported Azure placeholder. More passing fields did not mean every financial fact improved."
+    },
+    {
+      "id": "unverified_rounding_explanation",
+      "severity": "qualification",
+      "finding": "Keep the 0.4 USD billion component difference unresolved; the final text speculates about rounding while also denying a causal inference."
+    }
+  ],
+  "publication_recommendation": {
+    "decision": "withhold_research_report",
+    "reason": "The final revision fails its frozen citation contract, includes an unsupported zero in place of a disclosed growth rate, and needs substantive qualifications.",
+    "public_safe_output": "Measured experiment outcomes and this explicitly labeled diagnostic audit may be shared; they do not make the raw revision approved research.",
+    "follow_up_rule": "Any later repair must retain this complete original record and use a separately frozen protocol; do not overwrite grades or treat a new answer as a replacement sample."
+  },
+  "limitations": [
+    "Diagnostic counts describe repeated fields across a dependent development pipeline, not independent financial-accuracy samples.",
+    "Correct numbers and required citation groups do not independently establish semantic support for every sentence.",
+    "The final numeric contract had no explicit unavailable state; a fabricated numeric placeholder is not a valid substitute.",
+    "Synthesis and later stages received parent-cited passages, unlike reconciliation which also received the full authored review packet.",
+    "No investment recommendation, portfolio return, trade or model-security guarantee was evaluated."
+  ],
+  "rubric_sha256_basis": "canonical JSON via portfolio.digest"
+}

@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "kind": "measured_dossier_followup",
+  "state": "closed_measured_record",
+  "parent_protocol_sha256": "5f4c9723139d187998b44b52089f1f71313a5608f29c4d07f61eba7856af6a3d",
+  "source_policy": "complete-review-packet-v1",
+  "seed_results_sha256": "178295b90b1f39d67bd4b84500dff70be31fe6e4b9b3ce2ef538b0c9a376c1d6",
+  "protocol_schema_version": 2,
+  "exported_at": "2026-09-13T04:14:28Z",
+  "protocol_sha256": "fc5a9deff3210439896e92ed2658be27dc7fa0e554d5c4a9e3c1112ef1652457",
+  "rubric_sha256": "a5760084e2735d92b2cbf7881e0bade59ea83332baa7fa183963ba29d20d2caa",
+  "dossier_implementation_sha256": "a5a6a6bf1cbd9bbc35d6693be3048b614e45eb31a2cdf2f39f8e1c868e8fe886",
+  "sources": [
+    {
+      "id": "fy26-call",
+      "title": "Microsoft FY2026 earnings call · Management commentary",
+      "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+      "published_at": "2026-07-29",
+      "fetched_at": "2026-09-12T22:37:57Z",
+      "sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084"
+    },
+    {
+      "id": "fy26-results",
+      "title": "Microsoft FY2026 results · Cash flow statements (unaudited)",
+      "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+      "published_at": "2026-07-29",
+      "fetched_at": "2026-09-12T22:38:09Z",
+      "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8"
+    }
+  ],
+  "stages": [
+    {
+      "stage": "source-complete-revision",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "kind": "revision",
+      "theme": "all",
+      "completion_window": "flex",
+      "status": "completed",
+      "contract_valid": true,
+      "grading": {
+        "graded": true,
+        "expected_metrics": 64,
+        "total": 64,
+        "strict_passed": 62,
+        "numeric_passed": 64,
+        "provenance_passed": 62,
+        "error_counts": {
+          "missing": 0,
+          "period": 0,
+          "source_coverage": 2,
+          "unit": 0,
+          "value": 0
+        }
+      },
+      "usage": {
+        "input_tokens": 21721,
+        "cached_input_tokens": 5120,
+        "output_tokens": 15417
+      },
+      "estimated_usd": "0.04159496",
+      "reserved_usd": "0.2",
+      "observed_wall_seconds": 73.526
+    },
+    {
+      "stage": "source-complete-critic",
+      "model": "moonshotai/Kimi-K3",
+      "kind": "critic",
+      "theme": "all",
+      "completion_window": "asap",
+      "status": "completed",
+      "contract_valid": true,
+      "grading": {
+        "graded": true,
+        "expected_metrics": 64,
+        "total": 64,
+        "strict_passed": 64,
+        "numeric_passed": 64,
+        "provenance_passed": 64,
+        "error_counts": {
+          "missing": 0,
+          "period": 0,
+          "source_coverage": 0,
+          "unit": 0,
+          "value": 0
+        }
+      },
+      "usage": {
+        "input_tokens": 14954,
+        "cached_input_tokens": 0,
+        "output_tokens": 5412
+      },
+      "estimated_usd": "0.126042",
+      "reserved_usd": "1",
+      "observed_wall_seconds": 28.843
+    }
+  ],
+  "aggregate": {
+    "logical_requests": 2,
+    "distinct_accepted_responses": 2,
+    "terminal_states": {
+      "completed": 2
+    },
+    "contract_valid_stages": 2,
+    "graded_stages": 2,
+    "ungraded_stages": 0,
+    "graded_metric_checks": 128,
+    "strict_metric_passes": 126,
+    "numeric_metric_passes": 128,
+    "provenance_metric_passes": 126,
+    "error_counts": {
+      "missing": 0,
+      "period": 0,
+      "source_coverage": 2,
+      "unit": 0,
+      "value": 0
+    },
+    "known_estimated_usd": "0.16763696",
+    "estimated_usd": "0.16763696",
+    "unknown_usage_stages": 0,
+    "reserved_usd": "1.2",
+    "usage": {
+      "known_input_tokens": 36675,
+      "known_cached_input_tokens": 5120,
+      "known_output_tokens": 20829,
+      "unknown_stages": 0
+    }
+  },
+  "semantic_review": "Independent substantive review required; this measured export does not publish or approve model prose.",
+  "notes": [
+    "Authored development dossier after known failures, not a held-out financial benchmark or portfolio return.",
+    "Grades are the stored frozen grades. Invalid reports remain ungraded; this export does not reparse or repair them.",
+    "Numeric counts require value, unit and period. Provenance counts require the frozen source-coverage groups. Missing metrics fail both.",
+    "Citation coverage is not entailment. Independent substantive review is required, including for a final revision.",
+    "Each stage is additional measured work; repeated metrics across stages are not independent financial facts.",
+    "Token-price estimates are not reconciled bills. Reservations are allowances, and unknown usage is not zero.",
+    "Observed wall time runs from reservation to terminal observation, including queues, polling and interruptions; it is not an inference-latency benchmark.",
+    "Model and completion-window choices differ; these results compare full configurations, not an isolated model or scheduler effect.",
+    "Protocol and rubric hashes use the project canonical JSON encoding; source and implementation hashes use their saved bytes."
+  ]
+}

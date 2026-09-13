@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "company": "Microsoft",
+  "unit": "USD millions",
+  "scope": "company_wide",
+  "basis": "annual_unaudited",
+  "source": {
+    "id": "fy26-results",
+    "title": "Microsoft FY2026 results \u00b7 Cash flow statements (unaudited)",
+    "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+    "published_at": "2026-07-29",
+    "fetched_at": "2026-09-12T22:38:09Z",
+    "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8"
+  },
+  "provenance": {
+    "rubric_sha256": "21649dd53e1b00e10c2092e4aec40b318197879c8d1e21ad2507f2d13f9632fa",
+    "audit_sha256": "5d7b663f800ad7910409dbfbb915fd42fccec4b7eb8422fca5737a50577b9621"
+  },
+  "groups": [
+    {
+      "id": "net_income",
+      "FY2025": "101832",
+      "FY2026": "133749"
+    },
+    {
+      "id": "depreciation_amortization_other",
+      "FY2025": "29433",
+      "FY2026": "38534"
+    },
+    {
+      "id": "stock_based_compensation",
+      "FY2025": "11974",
+      "FY2026": "12405"
+    },
+    {
+      "id": "investment_gains_losses_adjustment",
+      "FY2025": "5329",
+      "FY2026": "-11047"
+    },
+    {
+      "id": "deferred_income_taxes_adjustment",
+      "FY2025": "-7056",
+      "FY2026": "14189"
+    },
+    {
+      "id": "operating_assets_liabilities_total",
+      "FY2025": "-5350",
+      "FY2026": "-4895"
+    }
+  ],
+  "details": [
+    {
+      "id": "accounts_receivable",
+      "FY2025": "-10581",
+      "FY2026": "-12737"
+    },
+    {
+      "id": "inventories",
+      "FY2025": "309",
+      "FY2026": "-461"
+    },
+    {
+      "id": "other_current_assets",
+      "FY2025": "-3044",
+      "FY2026": "-2627"
+    },
+    {
+      "id": "other_long_term_assets",
+      "FY2025": "-2950",
+      "FY2026": "-3964"
+    },
+    {
+      "id": "accounts_payable",
+      "FY2025": "569",
+      "FY2026": "5268"
+    },
+    {
+      "id": "unearned_revenue",
+      "FY2025": "5438",
+      "FY2026": "9361"
+    },
+    {
+      "id": "income_taxes",
+      "FY2025": "-38",
+      "FY2026": "-1875"
+    },
+    {
+      "id": "other_current_liabilities",
+      "FY2025": "5922",
+      "FY2026": "6847"
+    },
+    {
+      "id": "other_long_term_liabilities",
+      "FY2025": "-975",
+      "FY2026": "-4707"
+    }
+  ],
+  "totals": {
+    "FY2025": "136162",
+    "FY2026": "182935"
+  }
+}
