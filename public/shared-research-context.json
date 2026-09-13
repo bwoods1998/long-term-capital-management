@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "kind": "shared-research-context",
+  "state": "finished",
+  "protocol_sha256": "277c9a1f265bb39225d319a035b218218b1ceb87aea8f148115afe3f1500a182",
+  "prefix_sha256": "9aedbce645d3e99f3a43f18f6218feaa4b3487bb28fe50dcb93d43b68e26680a",
+  "model": "moonshotai/Kimi-K2.6",
+  "planned_requests": 10,
+  "admitted_requests": 10,
+  "terminal_requests": 10,
+  "known_estimated_usd": "0.58887954",
+  "unknown_usage_requests": 0,
+  "gross_reserved_usd": "4.4",
+  "maximum_reservation_usd": "4.4",
+  "original_write_outcome": "write_unconfirmed",
+  "read_continuation": {
+    "kind": "incomplete-write-read-attempt-v1",
+    "receipt_sha256": "48ea2d7330ad324fdd979c0cfba6c3d4fc01115224779cab01ad9d96d34393ae",
+    "authorized_at": "2026-09-13T05:40:31Z",
+    "declared_reads": 9,
+    "basis": "Reported write tokens justify original read attempts; retention remains to be observed."
+  },
+  "stages": [
+    {
+      "id": "write",
+      "phase": "write",
+      "symbol": null,
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "incomplete",
+        "estimated_usd": "0.51841595",
+        "usage": {
+          "input_tokens": 15113,
+          "cached_tokens": 0,
+          "output_tokens": 8192,
+          "supercached_tokens": 0,
+          "written_tokens": 14336
+        },
+        "same_usage_regular_hit_usd": "0.02167355",
+        "same_usage_superread_miss_usd": "0.02167355",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "nvda",
+      "phase": "read",
+      "symbol": "NVDA",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00818576",
+        "usage": {
+          "input_tokens": 15195,
+          "cached_tokens": 15041,
+          "output_tokens": 3959,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.009476",
+        "same_usage_superread_miss_usd": "0.01306",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "tsm",
+      "phase": "read",
+      "symbol": "TSM",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00735091",
+        "usage": {
+          "input_tokens": 15194,
+          "cached_tokens": 15043,
+          "output_tokens": 3542,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.00864115",
+        "same_usage_superread_miss_usd": "0.01222515",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "avgo",
+      "phase": "read",
+      "symbol": "AVGO",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00601596",
+        "usage": {
+          "input_tokens": 15197,
+          "cached_tokens": 15043,
+          "output_tokens": 2874,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.0073062",
+        "same_usage_superread_miss_usd": "0.0108902",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "ceg",
+      "phase": "read",
+      "symbol": "CEG",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00662466",
+        "usage": {
+          "input_tokens": 15199,
+          "cached_tokens": 15043,
+          "output_tokens": 3178,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.0079149",
+        "same_usage_superread_miss_usd": "0.0114989",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "vrt",
+      "phase": "read",
+      "symbol": "VRT",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00751431",
+        "usage": {
+          "input_tokens": 15198,
+          "cached_tokens": 15043,
+          "output_tokens": 3623,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.00880455",
+        "same_usage_superread_miss_usd": "0.01238855",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "msft",
+      "phase": "read",
+      "symbol": "MSFT",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.01058056",
+        "usage": {
+          "input_tokens": 15193,
+          "cached_tokens": 15043,
+          "output_tokens": 5157,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.0118708",
+        "same_usage_superread_miss_usd": "0.0154548",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "amzn",
+      "phase": "read",
+      "symbol": "AMZN",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00589926",
+        "usage": {
+          "input_tokens": 15195,
+          "cached_tokens": 15043,
+          "output_tokens": 2816,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.0071895",
+        "same_usage_superread_miss_usd": "0.0107735",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "googl",
+      "phase": "read",
+      "symbol": "GOOGL",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00936126",
+        "usage": {
+          "input_tokens": 15195,
+          "cached_tokens": 15043,
+          "output_tokens": 4547,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.0106515",
+        "same_usage_superread_miss_usd": "0.0142355",
+        "write_confirmed": false
+      }
+    },
+    {
+      "id": "meta",
+      "phase": "read",
+      "symbol": "META",
+      "admitted": true,
+      "terminal": true,
+      "measurement": {
+        "provider_status": "completed",
+        "estimated_usd": "0.00893091",
+        "usage": {
+          "input_tokens": 15194,
+          "cached_tokens": 15043,
+          "output_tokens": 4332,
+          "supercached_tokens": 14336,
+          "written_tokens": 0
+        },
+        "same_usage_regular_hit_usd": "0.01022115",
+        "same_usage_superread_miss_usd": "0.01380515",
+        "write_confirmed": false
+      }
+    }
+  ],
+  "research_publication": "private_pending_separate_review",
+  "comparison_basis": "Same observed token counts repriced assuming either regular-cache hits or misses for Supercache reads; not an observed alternate run.",
+  "limitations": [
+    "A read within this run does not verify the full twenty-four-hour lifetime.",
+    "Successful caching does not verify the financial research.",
+    "This short pilot is not a claim that the write cost breaks even."
+  ]
+}

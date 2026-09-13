@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "saved_at": "2026-09-13T05:56:51Z",
+  "state": "checkpoint",
+  "current_focus": {
+    "company": "Microsoft",
+    "symbol": "MSFT",
+    "question": "Can cash generation keep pace with infrastructure investment?"
+  },
+  "next_milestone": "Compare the shared spending risks across these companies.",
+  "costs": {
+    "inference_known_usd": "2.294631562",
+    "inference_unknown_requests": 1,
+    "compute_known_usd": "0.01504778",
+    "compute_unknown_items": 0
+  },
+  "reviewed": {
+    "theses": 1,
+    "investigations": 2
+  },
+  "sail": [
+    {
+      "product": "inference",
+      "status": "used",
+      "detail": "Research, critique, and a shared nine-company Supercache trial, with recorded usage and costs.",
+      "docs_url": "https://docs.sailresearch.com/agents"
+    },
+    {
+      "product": "voyages",
+      "status": "used",
+      "detail": "Workflow traces connect model calls, tools and saved research stages.",
+      "docs_url": "https://docs.sailresearch.com/voyages-sdk"
+    },
+    {
+      "product": "sailbox",
+      "status": "used",
+      "detail": "Six verified evidence operations survived sleep and resume in an isolated Sailbox; the resource is terminated.",
+      "docs_url": "https://docs.sailresearch.com/sailboxes"
+    }
+  ],
+  "links": [
+    {
+      "label": "Current project state",
+      "href": "https://github.com/bwoods1998/portfolio-agent/blob/main/docs/CURRENT-STATE.md"
+    },
+    {
+      "label": "Sail integrations",
+      "href": "https://github.com/bwoods1998/portfolio-agent/blob/main/docs/SAIL-PRODUCTS.md"
+    }
+  ]
+}

@@ -1,0 +1,178 @@
+[
+  {
+    "id": "dev-cash-remainder",
+    "category": "arithmetic",
+    "as_of": "2026-06-30",
+    "claim": "Cedar Compute had USD 27 million of FY2025 company cash flow remaining after cash PP&E outlays.",
+    "evidence": [
+      {
+        "id": "cedar-cash",
+        "text": "Fictional Cedar Compute reported FY2025 company operating cash flow of USD 84 million and cash PP&E outlays of USD 57 million.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/cedar-cash"
+      }
+    ],
+    "expected": {
+      "verdict": "supported",
+      "required_evidence_groups": [
+        [
+          "cedar-cash"
+        ]
+      ],
+      "rationale": "84 minus 57 equals 27; the claim retains the annual company-wide scope."
+    }
+  },
+  {
+    "id": "dev-ai-isolation",
+    "category": "scope",
+    "as_of": "2026-06-30",
+    "claim": "This packet establishes Alder Cloud earned USD 40 million of AI-only cash profit in FY2025.",
+    "evidence": [
+      {
+        "id": "alder-company",
+        "text": "Fictional Alder Cloud reported company-wide FY2025 operating cash flow of USD 70 million and cash PP&E outlays of USD 30 million. No AI-only cash-flow allocation is disclosed.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/alder-company"
+      }
+    ],
+    "expected": {
+      "verdict": "unsupported",
+      "required_evidence_groups": [
+        [
+          "alder-company"
+        ]
+      ],
+      "rationale": "A company cash remainder is not isolated AI cash profit, and the claim says this packet establishes it."
+    }
+  },
+  {
+    "id": "dev-forecast-certainty",
+    "category": "forecast",
+    "as_of": "2026-06-30",
+    "claim": "Birch Networks is guaranteed to realize USD 500 million of revenue next year because of its backlog.",
+    "evidence": [
+      {
+        "id": "birch-backlog",
+        "text": "Fictional Birch Networks has USD 500 million of orders in backlog. Customers may cancel orders without penalty. Management expects most orders to ship next year.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/birch-backlog"
+      }
+    ],
+    "expected": {
+      "verdict": "unsupported",
+      "required_evidence_groups": [
+        [
+          "birch-backlog"
+        ]
+      ],
+      "rationale": "Cancellable orders and a management expectation do not guarantee realized revenue."
+    }
+  },
+  {
+    "id": "dev-future-publication",
+    "category": "cutoff",
+    "as_of": "2026-06-30",
+    "claim": "Maple Power generated positive operating cash flow in FY2026.",
+    "evidence": [
+      {
+        "id": "maple-late",
+        "text": "Fictional Maple Power reported positive FY2026 operating cash flow of USD 12 million.",
+        "published_at": "2026-07-15",
+        "source_url": "https://example.invalid/synthetic/maple-late"
+      }
+    ],
+    "expected": {
+      "verdict": "insufficient",
+      "required_evidence_groups": [],
+      "rationale": "The only source was published after the cutoff, so the underlying proposition is unanswerable here."
+    }
+  },
+  {
+    "id": "dev-unit-conversion",
+    "category": "units",
+    "as_of": "2026-06-30",
+    "claim": "Pine Applications reported FY2025 revenue of USD 1.25 billion.",
+    "evidence": [
+      {
+        "id": "pine-units",
+        "text": "Fictional Pine Applications reported FY2025 revenue of USD 1,250 million.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/pine-units"
+      }
+    ],
+    "expected": {
+      "verdict": "supported",
+      "required_evidence_groups": [
+        [
+          "pine-units"
+        ]
+      ],
+      "rationale": "1,250 million equals 1.25 billion."
+    }
+  },
+  {
+    "id": "dev-period-mismatch",
+    "category": "period",
+    "as_of": "2026-06-30",
+    "claim": "Spruce Cooling reported annual FY2025 net income of USD 18 million.",
+    "evidence": [
+      {
+        "id": "spruce-quarter",
+        "text": "Fictional Spruce Cooling reported net income of USD 18 million for the three months ended December 31, 2025; annual FY2025 net income was USD 63 million.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/spruce-quarter"
+      }
+    ],
+    "expected": {
+      "verdict": "unsupported",
+      "required_evidence_groups": [
+        [
+          "spruce-quarter"
+        ]
+      ],
+      "rationale": "The claim assigns a quarterly amount to an annual period that has a different reported amount."
+    }
+  },
+  {
+    "id": "dev-complete-bridge",
+    "category": "offsets",
+    "as_of": "2026-06-30",
+    "claim": "The complete listed FY2025 operating-asset/liability cash adjustments for Aspen Chips sum to negative USD 5 million.",
+    "evidence": [
+      {
+        "id": "aspen-adjustments",
+        "text": "Fictional Aspen Chips lists these FY2025 cash-flow adjustments, in USD millions: receivables -14, inventory -3, payables +12. These are the complete operating-asset/liability adjustments for the year.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/aspen-adjustments"
+      }
+    ],
+    "expected": {
+      "verdict": "supported",
+      "required_evidence_groups": [
+        [
+          "aspen-adjustments"
+        ]
+      ],
+      "rationale": "The complete sum is -14-3+12=-5; selected favorable entries do not replace the full bridge."
+    }
+  },
+  {
+    "id": "dev-lease-cash-missing",
+    "category": "missing-disclosure",
+    "as_of": "2026-06-30",
+    "claim": "Willow Foundry paid more cash for finance leases in FY2025 than in FY2024.",
+    "evidence": [
+      {
+        "id": "willow-additions",
+        "text": "Fictional Willow Foundry recognized USD 20 million of new finance-lease assets in FY2025 and USD 15 million in FY2024. The packet does not disclose cash payments on finance leases.",
+        "published_at": "2026-06-20",
+        "source_url": "https://example.invalid/synthetic/willow-additions"
+      }
+    ],
+    "expected": {
+      "verdict": "insufficient",
+      "required_evidence_groups": [],
+      "rationale": "Newly recognized lease assets do not determine the missing comparative cash payments."
+    }
+  }
+]

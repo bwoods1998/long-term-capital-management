@@ -1,67 +1,55 @@
-# A short tour of the working project
+# Explore Portfolio Agent
 
-Start with the [public research page](https://blakewoods.us/portfolio/). Its research
-runs are reviewed observations; the evidence replay uses fictional companies.
-Neither is a portfolio return. Visitors read saved artifacts and cannot start paid
-work.
+Start with the [project page](https://blakewoods.us/portfolio/). Explore nine companies
+across chips, networking, power and cooling, cloud, and applications. The question
+is where AI spending becomes durable cash flow—and how much depends on the same
+spending cycle. This is a research universe, not a live portfolio.
 
-The [build record](BUILD-RECORD.md) lists what is working, measured costs, and the
-current checkpoint. The [cash-flow explorer](https://blakewoods.us/portfolio/#cashflow)
-lets you inspect the checked annual reconciliation directly.
+Microsoft is the first reviewed case. The other companies have source-backed
+profiles; that does not mean their investment cases have been reviewed. The
+[current state](CURRENT-STATE.md) distinguishes completed work from the next test.
 
-## Understand one loop
+## Follow one useful finding
 
-The agent receives a question and checked facts, chooses permitted source queries
-and calculations, saves a hypothesis, and writes a report. A second model critiques
-it. Explicit review decides whether it becomes public and can seed later research.
-SQLite preserves the evidence, requests, costs, and stopping point. Sail provides
-inference and private workflow traces.
+Open **Case** on the [project page](https://blakewoods.us/portfolio/). Change
+cash-generation and investment growth to see how they affect the cash remaining
+after property purchases. The baseline is Microsoft's checked FY2026 result;
+the sliders change assumptions, not a forecast.
 
-Read [Lesson 4](../lessons/04-research-loop.md), then inspect
-[what the first investigation found](INVESTIGATION-RESULTS.md). The useful finding
-was an accounting qualification: management's change to reported capex did not by
-itself establish a change in underlying investment commitments.
+The [first case](CURRENT-CASE.md) explains the finding and what could change it.
+The [full source audit](REVIEW-CASE.md) preserves the accounting detail.
 
-## Try three predictions
+## Reproduce the arithmetic locally
 
-Before opening the results, write down your answers:
-
-1. A shorter evidence notebook saves input tokens. Must it reduce the whole bill?
-   Check the [timeline replay](TRAJECTORY-REPLAY.md).
-2. An identical prompt is almost entirely cached. Must its next answer cost less
-   or finish faster? Check the [scheduling and cache pilot](POLICY-EXPERIMENT.md).
-3. A test reports no fully passing answers. Does that prove the model failed its
-   financial reasoning? Check the [source-instruction pilot](ROBUSTNESS.md), which
-   exposed both an underspecified unit contract and real scale omissions.
-
-The point is to separate an observation from the explanation we want to give it.
-The raw failures remain in each experiment's record.
-
-The [financial dossier](RESEARCH-DOSSIER.md) carries that discipline into a larger
-research task: two independent analysts, three reconciliations, synthesis, critique,
-and revision. Its sixty-four numerical targets distinguish financial values from
-units, periods, and source coverage. A passing arithmetic check still does not
-establish a sound explanation or approve publication.
-Its [observed results](DOSSIER-RESULTS.md) show how a missing passage became an
-unsupported zero, and why a later perfect numeric score still did not approve prose.
-
-For a financial review exercise, [audit the net effect](REVIEW-CASE.md). The agent
-and its critic highlighted two positive cash-flow contributions while overlooking
-offsets in the full table. Check the arithmetic, then rewrite the summary.
-
-## Inspect your saved work
+From a clone of this repository, use Python 3.10+ to read the committed figures:
 
 ```sh
-python3 operations.py
-python3 research_queue.py status
-python3 source_watch.py status
+python3 - <<'PY'
+import json
+from decimal import Decimal as D
+with open('public/cashflow-bridge.json') as source:
+    bridge = json.load(source)
+change = sum(D(row['FY2026']) - D(row['FY2025']) for row in bridge['details'])
+print('All nine contribution changes:', change, bridge['unit'])
+print('Operating cash-flow growth:',
+      D(bridge['totals']['FY2026']) - D(bridge['totals']['FY2025']), bridge['unit'])
+PY
 ```
 
-These commands do not submit model calls. The [operations guide](OPERATIONS.md)
-explains completed requests, reviewed research, unknown usage, and spending holds.
-The source inbox detects changed pages; accepting a candidate still does not make
-its numbers checked facts or buy another investigation.
+This returns **455** and **46,773**, respectively. It needs no API key, account,
+private database, or downloaded source cache. The source dates and link are in the
+same JSON file. Explain why selected positive rows would tell a different story.
+Before comparing another company, check its currency, fiscal period, and definition
+of cash investment; similar labels can represent different measurements.
 
-For the next hands-on exercise, use [Lesson 5](../lessons/05-research-across-time.md).
-Predict how one changed disclosure should revise the agent's prior view, then
-compare its actual update. No API spending is needed to read the saved experiment.
+For the code, `python3 -m unittest discover -s tests -v` runs the offline test suite.
+The [optional exercises](../lessons/README.md) go deeper into cash flow, model costs,
+and memory; they are not prerequisites for exploring the project.
+
+## Build or run an agent
+
+The [reference index](README.md) links the research runner, setup, and current roadmap.
+Paid execution requires your own Sail key and an explicit budget. The repository
+contains public results, not the owner's private run history. Commands in the
+[operations guide](OPERATIONS.md) inspect an existing local ledger; a fresh clone
+has no saved runs to resume.

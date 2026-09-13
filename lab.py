@@ -52,13 +52,13 @@ def build_request(case):
                                 'strict': True, 'schema': schema}}}
 
 
-def estimate_cost(usage, rates=RATES, metadata=None):
+def estimate_cost(usage, rates=RATES, metadata=None, *, supercache_contract=None):
     """USD estimate including automatic Supercache reads, without double counting.
 
-    These request profiles prohibit Supercache writes. A positive write count has
-    no approved accounting contract here, so its cost stays unknown rather than
-    silently receiving the ordinary input price. Absent counters preserve legacy
-    ordinary-cache accounting; malformed or partial counters are not assumed zero.
+    The default contract still prohibits writes. Only a separately frozen caller
+    may request 'write-24h-v1' or 'read-24h-v1'; response metadata cannot opt itself
+    into write accounting. Written input is removed from ordinary input before
+    pricing it at 100 times the input rate. Explicit contracts require all counters.
     """
     if not isinstance(usage, dict) or not isinstance(usage.get('input_tokens_details') or {}, dict):
         raise ValueError('Missing or inconsistent token accounting')
@@ -70,16 +70,22 @@ def estimate_cost(usage, rates=RATES, metadata=None):
         raise ValueError('Invalid provider usage metadata')
     metadata = metadata or {}
     names = ('supercached_input_tokens', 'supercache_write_input_tokens')
-    supercached = 0
+    if supercache_contract not in (None, 'write-24h-v1', 'read-24h-v1'):
+        raise ValueError('Unknown Supercache accounting contract')
+    if supercache_contract and (not all(name in metadata for name in names) or
+                               'cached_tokens' not in (usage.get('input_tokens_details') or {})):
+        raise ValueError('Explicit Supercache accounting requires complete counters')
+    supercached, written = 0, 0
     if any(name in metadata for name in names):
         if any(not isinstance(metadata.get(name), str) or
                not re.fullmatch(r'\d{1,16}', metadata[name]) for name in names):
             raise ValueError('Incomplete or malformed Supercache accounting')
         supercached, written = (int(metadata[name]) for name in names)
-        if supercached > c or written != 0:
+        if supercached > c or written > i-c or (written != 0 and supercache_contract != 'write-24h-v1'):
             raise ValueError('Inconsistent or unapproved Supercache accounting')
-    return ((i-c)*Decimal(rates['input']) + (c-supercached)*Decimal(rates['cached']) +
+    return ((i-c-written)*Decimal(rates['input']) + (c-supercached)*Decimal(rates['cached']) +
             supercached*Decimal(rates['cached'])*Decimal('0.1') +
+            written*100*Decimal(rates['input']) +
             o*Decimal(rates['output'])) / Decimal(1_000_000)
 
 

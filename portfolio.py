@@ -5,7 +5,7 @@ Standard library only. No brokerage connection or trading capability.
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, localcontext
 import hashlib
 import json
 from pathlib import Path
@@ -29,7 +29,7 @@ RESERVE_CENTS = 20
 MAX_REQUEST_BYTES = 40000
 MAX_OUTPUT_TOKENS = 16384
 TASK_MAX_REQUEST_BYTES = 96000
-TASK_PURPOSES = {'thesis', 'investigate', 'critique', 'evaluation', 'replay', 'policy_probe', 'robustness'}
+TASK_PURPOSES = {'thesis', 'investigate', 'critique', 'evaluation', 'replay', 'policy_probe', 'robustness', 'cache_research'}
 TASK_PROFILES = {
     'deepseek-ai/DeepSeek-V4-Pro-0813': {
         'completion_window': 'flex', 'reasoning_effort': 'medium', 'max_output_tokens': 16384,
@@ -52,6 +52,13 @@ TASK_PROFILES = {
 DOSSIER_PROFILES = {
     model: {**TASK_PROFILES[model], 'rates': dict(TASK_PROFILES[model]['rates']), 'max_output_tokens': 32768}
     for model in ('deepseek-ai/DeepSeek-V4-Pro-0813', 'moonshotai/Kimi-K3')
+}
+SUPERCACHE_MODEL = 'moonshotai/Kimi-K2.6'
+SUPERCACHE_PROFILES = {
+    phase: {'completion_window': 'flex', 'reasoning_effort': 'medium', 'max_output_tokens': 8192,
+            'background': True, 'reserve_cents': hold, 'pricing_date': '2026-09-13',
+            'rates': {'input': '0.35', 'cached': '0.10', 'output': '2'}}
+    for phase, hold in [('write', 350), ('read', 10)]
 }
 POLICY_PROBE_MODEL = 'deepseek-ai/DeepSeek-V4-Pro-0813'
 POLICY_PROBE_MAX_REQUEST_BYTES = 48000
@@ -318,9 +325,25 @@ def validate_task_envelope(body):
     metadata = body.get('metadata')
     probe = isinstance(metadata, dict) and 'policy_probe' in metadata
     dossier = isinstance(metadata, dict) and 'dossier' in metadata
-    if probe and dossier:
+    supercache = isinstance(metadata, dict) and 'supercache_pilot' in metadata
+    if sum((probe, dossier, supercache)) > 1:
         raise ValueError('A request cannot combine separate experiment envelopes')
-    if probe:
+    if supercache:
+        phase = metadata.get('supercache_phase')
+        if (not isinstance(phase, str) or phase not in SUPERCACHE_PROFILES or body.get('model') != SUPERCACHE_MODEL or
+                not isinstance(body.get('prompt_cache_key'), str) or
+                not re.fullmatch(r'supercache-[0-9a-f]{64}', body['prompt_cache_key'])):
+            raise ValueError('Request outside the shared research context contract')
+        profile = SUPERCACHE_PROFILES[phase]
+        value = body.get('input')
+        if (not isinstance(value, list) or len(value) != 2 or
+                any(not isinstance(item, dict) or set(item) != {'role', 'content'} or
+                    not isinstance(item['content'], str) or not item['content'].strip() for item in value) or
+                value[0]['role'] != 'system' or value[1]['role'] != 'user' or
+                len(value[0]['content'].encode()) < 8192 or
+                body['prompt_cache_key'] != 'supercache-' + hashlib.sha256(value[0]['content'].encode()).hexdigest()):
+            raise ValueError('Shared research context requires an exact substantial prefix')
+    elif probe:
         version = metadata.get('policy_probe')
         probe_model = POLICY_PROBE_REPLACEMENT_MODEL if version == 'v2' else POLICY_PROBE_MODEL
         probe_profiles = POLICY_PROBE_REPLACEMENT_PROFILES if version == 'v2' else POLICY_PROBE_PROFILES
@@ -340,11 +363,15 @@ def validate_task_envelope(body):
     else:
         profile = _task_profile(body.get('model'))
     required = {'model', 'input', 'max_output_tokens', 'reasoning', 'background', 'metadata', 'text'}
-    allowed_keys = ((required | {'prompt_cache_key'},) if probe else
+    allowed_keys = ((required | {'prompt_cache_key'},) if probe or supercache else
                     (required,) if dossier else (required, required | {'tools'}))
     expected_metadata = ({'completion_window': profile['completion_window'], 'policy_probe': metadata['policy_probe']}
                          if probe else {'completion_window': profile['completion_window'], 'dossier': 'v1'}
                          if dossier else {'completion_window': profile['completion_window']})
+    if supercache:
+        expected_metadata = {'completion_window': 'flex', 'supercache_pilot': 'v1', 'supercache_phase': phase}
+        if phase == 'write':
+            expected_metadata['supercache_write'] = '24h'
     value = body.get('input')
     if (set(body) not in allowed_keys or
             not (isinstance(value, str) and bool(value.strip()) or
@@ -391,6 +418,39 @@ def build_dossier_request(model, input):
     return body
 
 
+def build_supercache_request(prefix, question, phase):
+    if not isinstance(phase, str) or phase not in SUPERCACHE_PROFILES:
+        raise ValueError('Unknown shared-context request phase')
+    require_text(prefix, TASK_MAX_REQUEST_BYTES, 'shared prefix')
+    require_text(question, 6000, 'research question')
+    profile = SUPERCACHE_PROFILES[phase]
+    metadata = {'completion_window': 'flex', 'supercache_pilot': 'v1', 'supercache_phase': phase}
+    if phase == 'write':
+        metadata['supercache_write'] = '24h'
+    body = {'model': SUPERCACHE_MODEL, 'input': [{'role': 'system', 'content': prefix},
+                                               {'role': 'user', 'content': question}],
+            'max_output_tokens': profile['max_output_tokens'], 'reasoning': {'effort': 'medium'},
+            'background': True, 'metadata': metadata, 'text': {'format': {'type': 'text'}},
+            'prompt_cache_key': 'supercache-' + hashlib.sha256(prefix.encode()).hexdigest()}
+    validate_task_envelope(body)
+    return body
+
+
+def _supercache_cost_contract(request):
+    metadata = request.get('metadata', {})
+    if not isinstance(metadata, dict):
+        raise ValueError('Invalid frozen request metadata')
+    if 'supercache_pilot' not in metadata:
+        return None
+    phase = metadata.get('supercache_phase')
+    expected = {'completion_window': 'flex', 'supercache_pilot': 'v1', 'supercache_phase': phase}
+    if phase == 'write':
+        expected['supercache_write'] = '24h'
+    if not isinstance(phase, str) or phase not in SUPERCACHE_PROFILES or metadata != expected or request.get('model') != SUPERCACHE_MODEL:
+        raise ValueError('Unrecognized frozen Supercache cost contract')
+    return phase + '-24h-v1'
+
+
 def database(path=None):
     location = Path(path) if path is not None else ROOT / '.data/portfolio.sqlite'
     location.parent.mkdir(parents=True, exist_ok=True)
@@ -419,6 +479,35 @@ def database(path=None):
         INSERT OR IGNORE INTO head(singleton,revision_id) VALUES(1,NULL);
         CREATE TABLE IF NOT EXISTS budget_settings (
             singleton INTEGER PRIMARY KEY CHECK(singleton=1), total_cents INTEGER NOT NULL CHECK(total_cents>=0));
+        CREATE TABLE IF NOT EXISTS budget_policies (
+            id TEXT PRIMARY KEY, version TEXT NOT NULL UNIQUE, created REAL NOT NULL,
+            body TEXT NOT NULL, sha256 TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS budget_settlements (
+            id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
+            response_id TEXT NOT NULL UNIQUE, created REAL NOT NULL,
+            body TEXT NOT NULL, sha256 TEXT NOT NULL);
+        CREATE TRIGGER IF NOT EXISTS immutable_budget_policy_update BEFORE UPDATE ON budget_policies
+            BEGIN SELECT RAISE(ABORT, 'Budget policy receipts are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS immutable_budget_policy_delete BEFORE DELETE ON budget_policies
+            BEGIN SELECT RAISE(ABORT, 'Budget policy receipts are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS immutable_budget_settlement_update BEFORE UPDATE ON budget_settlements
+            BEGIN SELECT RAISE(ABORT, 'Budget settlements are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS immutable_budget_settlement_delete BEFORE DELETE ON budget_settlements
+            BEGIN SELECT RAISE(ABORT, 'Budget settlements are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS immutable_settled_run_delete BEFORE DELETE ON runs
+            WHEN EXISTS(SELECT 1 FROM budget_settlements WHERE run_id=OLD.id)
+            BEGIN SELECT RAISE(ABORT, 'Settled request identities are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS immutable_settled_run_update BEFORE UPDATE ON runs
+            WHEN EXISTS(SELECT 1 FROM budget_settlements WHERE run_id=OLD.id) AND
+              (OLD.id IS NOT NEW.id OR OLD.created IS NOT NEW.created OR
+               OLD.reserved_cents IS NOT NEW.reserved_cents OR OLD.request IS NOT NEW.request OR
+               OLD.packet_json IS NOT NEW.packet_json OR OLD.packet_sha256 IS NOT NEW.packet_sha256 OR
+               OLD.parent_id IS NOT NEW.parent_id OR OLD.prediction IS NOT NEW.prediction OR
+               OLD.rates IS NOT NEW.rates OR OLD.pricing_date IS NOT NEW.pricing_date OR
+               OLD.response_id IS NOT NEW.response_id OR OLD.response IS NOT NEW.response OR
+               OLD.key_fingerprint IS NOT NEW.key_fingerprint OR OLD.purpose IS NOT NEW.purpose OR
+               OLD.task_key IS NOT NEW.task_key)
+            BEGIN SELECT RAISE(ABORT, 'Settled request identities are immutable'); END;
         CREATE TRIGGER IF NOT EXISTS immutable_revision_update BEFORE UPDATE ON revisions
             BEGIN SELECT RAISE(ABORT, 'Thesis revisions are immutable'); END;
         CREATE TRIGGER IF NOT EXISTS immutable_revision_delete BEFORE DELETE ON revisions
@@ -443,15 +532,237 @@ def budget_limit(db):
     return row['total_cents'] if row else BUDGET_CENTS
 
 
+SETTLED_BUDGET_POLICY = 'settled-estimates-v1'
+
+
+def _accounting_object(text):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Duplicate accounting field')
+            result[key] = value
+        return result
+    def nonfinite(value):
+        raise ValueError('Nonfinite accounting value')
+    if not isinstance(text, str) or len(text.encode()) > 2_000_000:
+        raise ValueError('Invalid saved accounting object')
+    value = json.loads(text, object_pairs_hook=unique, parse_constant=nonfinite)
+    if not isinstance(value, dict):
+        raise ValueError('Expected saved accounting object')
+    return value
+
+
+def _accounting_receipt(row):
+    body = _accounting_object(row['body'])
+    if (str(uuid.UUID(row['id'])) != row['id'] or uuid.UUID(row['id']).version != 4 or
+            type(row['created']) not in (int, float) or not 0 < row['created'] < 1e12 or
+            digest({'id': row['id'], 'created': row['created'], 'body': body}) != row['sha256']):
+        raise ValueError('Invalid budget receipt identity or hash')
+    return body
+
+
+def _budget_policy(db):
+    exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='budget_policies'").fetchone()
+    if not exists:
+        return None
+    rows = db.execute('SELECT * FROM budget_policies').fetchall()
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise ValueError('Unknown budget policy history')
+    row = rows[0]
+    body = _accounting_receipt(row)
+    if (row['version'] != SETTLED_BUDGET_POLICY or
+            set(body) != {'schema_version', 'policy', 'reviewer', 'activated_at',
+                          'ceiling_cents', 'gross_reserved_cents', 'basis'} or
+            type(body['schema_version']) is not int or body['schema_version'] != 1 or body['policy'] != row['version'] or
+            body['activated_at'] != iso(row['created']) or
+            body['basis'] != 'validated terminal usage at frozen token prices; estimates, not bills' or
+            any(type(body[key]) is not int or body[key] < 0 for key in ('ceiling_cents', 'gross_reserved_cents'))):
+        raise ValueError('Invalid budget policy receipt')
+    require_text(body['reviewer'], 80, 'budget reviewer')
+    return row
+
+
+def activate_budget_policy(db, reviewer, policy=SETTLED_BUDGET_POLICY):
+    """Explicit prospective opt-in. Neither the ceiling nor any old hold is changed."""
+    require_text(reviewer, 80, 'budget reviewer')
+    if policy != SETTLED_BUDGET_POLICY:
+        raise ValueError('Unsupported budget policy')
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        existing = _budget_policy(db)
+        if existing:
+            if _accounting_receipt(existing)['reviewer'] != reviewer:
+                raise ValueError('Budget activation already has a different reviewer')
+            return existing['id']
+        now, identifier = time.time(), str(uuid.uuid4())
+        gross = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
+        body = {'schema_version': 1, 'policy': policy, 'reviewer': reviewer,
+                'activated_at': iso(now), 'ceiling_cents': budget_limit(db),
+                'gross_reserved_cents': gross,
+                'basis': 'validated terminal usage at frozen token prices; estimates, not bills'}
+        db.execute('INSERT INTO budget_policies VALUES(?,?,?,?,?)',
+                   (identifier, policy, now, encoded(body),
+                    digest({'id': identifier, 'created': now, 'body': body})))
+        return identifier
+
+
+def _settlement_facts(row):
+    """Validate a known terminal response without reading keys or current prices."""
+    request, response = _accounting_object(row['request']), _accounting_object(row['response'])
+    packet, rates = _accounting_object(row['packet_json']), _accounting_object(row['rates'])
+    model = request.get('model')
+    response_id = row['response_id']
+    if (not isinstance(response_id, str) or not re.fullmatch(r'resp_[A-Za-z0-9_-]+', response_id) or
+            response.get('id') != response_id or response.get('status') not in TERMINAL or
+            not isinstance(model, str) or len(model) > 200 or
+            not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', model) or
+            not isinstance(response.get('model'), str) or
+            response.get('model') not in {model, RESPONSE_MODEL_ALIASES.get(model)} or
+            not isinstance(row['key_fingerprint'], str) or not re.fullmatch(r'[0-9a-f]{64}', row['key_fingerprint']) or
+            digest(packet) != row['packet_sha256'] or
+            type(row['reserved_cents']) is not int or row['reserved_cents'] <= 0 or
+            type(request.get('max_output_tokens')) is not int or request['max_output_tokens'] <= 0):
+        raise ValueError('Terminal response identity, model or original binding is unconfirmed')
+    if (set(rates) != {'input', 'cached', 'output'} or
+            any(not isinstance(value, str) or not re.fullmatch(r'\d{1,12}(?:\.\d{1,12})?', value)
+                for value in rates.values())):
+        raise ValueError('Invalid frozen token prices')
+    datetime.strptime(row['pricing_date'], '%Y-%m-%d')
+    usage = response.get('usage')
+    if not isinstance(usage, dict):
+        raise ValueError('Usage remains unknown; retain reservation')
+    for field in ('input_tokens', 'output_tokens'):
+        if type(usage.get(field)) is not int or not 0 <= usage[field] <= 2**63 - 1:
+            raise ValueError('Invalid token accounting')
+    if 'total_tokens' in usage and (type(usage['total_tokens']) is not int or
+                                   usage['total_tokens'] != usage['input_tokens'] + usage['output_tokens']):
+        raise ValueError('Inconsistent total token accounting')
+    with localcontext() as context:
+        context.prec = 80
+        cost = estimate_cost(usage, rates, response.get('metadata'),
+                             supercache_contract=_supercache_cost_contract(request))
+    if not cost.is_finite() or cost < 0:
+        raise ValueError('Invalid terminal cost estimate')
+    identity_fields = ('id', 'created', 'reserved_cents', 'request', 'packet_json', 'packet_sha256',
+                       'parent_id', 'prediction', 'rates', 'pricing_date', 'response_id', 'response',
+                       'key_fingerprint', 'purpose', 'task_key')
+    return {'run_id': row['id'], 'response_id': response_id, 'response_status': response['status'],
+            'requested_model': model, 'reported_model': response['model'],
+            'request_sha256': hashlib.sha256(row['request'].encode()).hexdigest(),
+            'response_sha256': hashlib.sha256(row['response'].encode()).hexdigest(),
+            'packet_sha256': row['packet_sha256'], 'rates': rates, 'pricing_date': row['pricing_date'],
+            'reserved_cents': row['reserved_cents'], 'estimated_usd': format(cost, 'f'),
+            'run_identity_sha256': digest({key: row[key] for key in identity_fields})}
+
+
+def settle_run(db, run_id):
+    """Append one immutable estimated-cost receipt; unknown and excessive costs stay held."""
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        policy = _budget_policy(db)
+        if policy is None:
+            raise ValueError('Explicit settled-estimates-v1 activation is required')
+        row = get_run(db, run_id)
+        facts = _settlement_facts(row)
+        if Decimal(facts['estimated_usd']) > Decimal(row['reserved_cents']) / 100:
+            raise ValueError('Observed cost exceeds its reservation; reconciliation required')
+        if db.execute('SELECT COUNT(*) FROM runs WHERE response_id=?', (row['response_id'],)).fetchone()[0] != 1:
+            raise ValueError('Accepted response identity is shared by multiple requests')
+        body = {'schema_version': 1, 'policy_id': policy['id'], 'basis': 'estimated_token_prices_v1', 'facts': facts}
+        existing = db.execute('SELECT * FROM budget_settlements WHERE run_id=?', (run_id,)).fetchone()
+        if existing:
+            if encoded(_accounting_receipt(existing)) != encoded(body) or existing['response_id'] != row['response_id']:
+                raise ValueError('Saved settlement no longer matches its request')
+            return existing['id']
+        now, identifier = time.time(), str(uuid.uuid4())
+        if now < max(row['created'], policy['created']):
+            raise ValueError('Settlement predates its request or activation')
+        db.execute('INSERT INTO budget_settlements VALUES(?,?,?,?,?,?)',
+                   (identifier, run_id, row['response_id'], now, encoded(body),
+                    digest({'id': identifier, 'created': now, 'body': body})))
+        return identifier
+
+
+def budget_accounting(db):
+    """Read-only accounting; respect the caller's transaction and never settle automatically."""
+    policy = _budget_policy(db)
+    rows = db.execute('SELECT * FROM runs ORDER BY created,id').fetchall()
+    exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='budget_settlements'").fetchone()
+    settlements = {r['run_id']: r for r in db.execute('SELECT * FROM budget_settlements')} if exists else {}
+    if settlements and policy is None or set(settlements) - {r['id'] for r in rows}:
+        raise ValueError('Settlement has no policy or original request')
+    with localcontext() as context:
+        context.prec = 80
+        gross = sum((Decimal(r['reserved_cents']) / 100 for r in rows), Decimal(0))
+        settled, open_holds, excess = Decimal(0), Decimal(0), Decimal(0)
+        breaches = 0
+        for row in rows:
+            hold = Decimal(row['reserved_cents']) / 100
+            saved = settlements.get(row['id'])
+            if saved:
+                facts = _settlement_facts(row)
+                expected = {'schema_version': 1, 'policy_id': policy['id'],
+                            'basis': 'estimated_token_prices_v1', 'facts': facts}
+                if (encoded(_accounting_receipt(saved)) != encoded(expected) or saved['response_id'] != row['response_id'] or
+                        saved['created'] < max(row['created'], policy['created']) or
+                        sum(r['response_id'] == row['response_id'] for r in rows) != 1 or
+                        Decimal(facts['estimated_usd']) > hold):
+                    raise ValueError('Settlement changed or exceeds the original reservation')
+                settled += Decimal(facts['estimated_usd'])
+            else:
+                open_holds += hold
+                if policy:
+                    try:
+                        cost = Decimal(_settlement_facts(row)['estimated_usd'])
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                    if cost > hold:
+                        excess += cost - hold
+                        breaches += 1
+        committed = settled + open_holds + excess if policy else gross
+        return {'policy': SETTLED_BUDGET_POLICY if policy else 'gross-reservations-v1',
+                'ceiling_usd': format(Decimal(budget_limit(db)) / 100, 'f'),
+                'gross_historical_reserved_usd': format(gross, 'f'),
+                'settled_estimated_usd': format(settled, 'f'), 'settled_requests': len(settlements),
+                'open_reservations_usd': format(open_holds, 'f'),
+                'over_reservation_usd': format(excess, 'f'), 'over_reservation_requests': breaches,
+                'committed_usd': format(committed, 'f'),
+                'available_usd': format(max(Decimal(0), Decimal(budget_limit(db)) / 100 - committed), 'f'),
+                'admissions_blocked': bool(breaches or committed > Decimal(budget_limit(db)) / 100),
+                'basis': 'token-price estimates plus unsettled reservations; not reconciled billing'}
+
+
+def committed_cents(db):
+    accounting = budget_accounting(db)
+    if accounting['admissions_blocked']:
+        raise ValueError('Budget reconciliation required before new admissions')
+    with localcontext() as context:
+        context.prec = 80
+        return Decimal(accounting['committed_usd']) * 100
+
+
+def require_budget_capacity(db, additional_cents):
+    """Check within the caller's reservation transaction; never reserve or commit."""
+    if type(additional_cents) is not int or additional_cents < 0:
+        raise ValueError('Invalid additional reservation')
+    with localcontext() as context:
+        context.prec = 80
+        if committed_cents(db) + additional_cents > budget_limit(db):
+            raise ValueError('Local research budget exhausted; no request submitted')
+
+
 def set_budget_limit(db, total_cents):
-    """Explicitly change the cumulative reservation limit; never reset prior spending."""
+    """Explicitly change the active policy's ceiling without resetting any history."""
     if type(total_cents) is not int or not 0 <= total_cents <= 2**63 - 1:
         raise ValueError('Budget must be a nonnegative integer number of cents')
     with db:
         db.execute('BEGIN IMMEDIATE')
-        held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
+        held = committed_cents(db)
         if total_cents < held:
-            raise ValueError('The budget cannot be lower than existing reservations')
+            raise ValueError('The budget cannot be lower than existing commitments')
         db.execute('INSERT INTO budget_settings(singleton,total_cents) VALUES(1,?) '
                    'ON CONFLICT(singleton) DO UPDATE SET total_cents=excluded.total_cents', (total_cents,))
     return total_cents
@@ -480,14 +791,84 @@ def reserve(db, body, packet, prediction, parent_id=None):
             raise ValueError('Reviewed thesis changed; preview again before starting a new run')
         if parent and json.loads(parent['packet_json'])['id'] != packet['id']:
             raise ValueError('This v1 database holds one thesis; packet ID must match')
-        held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
-        if held + RESERVE_CENTS > budget_limit(db):
-            raise ValueError('Local research budget exhausted; no request submitted')
+        require_budget_capacity(db, RESERVE_CENTS)
         db.execute('''INSERT INTO runs(id,created,reserved_cents,request,packet_json,packet_sha256,
                     parent_id,prediction,rates,pricing_date) VALUES(?,?,?,?,?,?,?,?,?,?)''',
                    (run_id, time.time(), RESERVE_CENTS, encoded(body), encoded(packet), digest(packet),
                     parent_id, prediction, encoded(RATES), PRICING_DATE))
     return run_id
+
+
+def supercache_implementation_hashes():
+    return {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+            for name in ('supercache_experiment.py', 'portfolio.py', 'lab.py')}
+
+
+def supercache_continuation_body(db, campaign, frozen, write, reviewer, created):
+    """Bind a supervised READ attempt to one recorded, output-limited prefix write."""
+    require_text(reviewer, 80, 'continuation reviewer')
+    response = _accounting_object(write['response'])
+    facts = _settlement_facts(write)
+    stage = frozen['stages'][0]
+    profile = frozen['profiles']['write']
+    saved = db.execute('SELECT result FROM shared_context_steps WHERE campaign_id=? AND stage_id=? AND run_id=?',
+                       (campaign['id'], 'write', write['id'])).fetchone()
+    expiry = min(frozen['deadline'], write['created'] + 23 * 3600)
+    if (digest(frozen) != campaign['sha256'] or len(frozen['stages']) != 10 or
+            any(s['phase'] != 'read' for s in frozen['stages'][1:]) or
+            frozen['max_reservation_cents'] != 440 or
+            write['task_key'] != f'shared-context:{campaign["id"]}:write' or
+            write['purpose'] != 'cache_research' or write['parent_id'] is not None or
+            write['request'] != encoded(stage['request']) or digest(stage['request']) != stage['request_sha256'] or
+            write['packet_json'] != encoded(frozen['packet']) or
+            write['rates'] != encoded(profile['rates']) or write['pricing_date'] != profile['pricing_date'] or
+            write['reserved_cents'] != profile['reserve_cents'] or
+            db.execute('SELECT COUNT(*) FROM runs WHERE response_id=?', (write['response_id'],)).fetchone()[0] != 1 or
+            response.get('status') != 'incomplete' or
+            response.get('incomplete_details') != {'reason': 'max_output_tokens'} or
+            response.get('error') not in (None, {}) or
+            response['usage']['output_tokens'] != stage['request']['max_output_tokens'] or
+            int(response['metadata']['supercache_write_input_tokens']) < 1025 or
+            Decimal(facts['estimated_usd']) > Decimal(write['reserved_cents']) / 100 or
+            type(created) not in (int, float) or not write['created'] <= created < expiry or
+            not saved or not saved[0]):
+        raise ValueError('Only the recorded output-limited write can authorize its nine original reads')
+    recorded = _accounting_object(saved[0])
+    if (recorded['response_sha256'] != facts['response_sha256'] or
+            recorded['measurement']['write_confirmed'] is not False or
+            recorded['measurement']['estimated_usd'] != facts['estimated_usd']):
+        raise ValueError('Original incomplete write result must remain unchanged')
+    return {'schema_version': 1, 'kind': 'incomplete-write-read-attempt-v1',
+            'campaign_id': campaign['id'], 'protocol_sha256': campaign['sha256'],
+            'prefix_sha256': frozen['prefix_sha256'], 'reviewer': reviewer, 'created': created,
+            'expires': expiry, 'write_facts': facts,
+            'original_result_sha256': hashlib.sha256(saved[0].encode()).hexdigest(),
+            'usage_sha256': digest(response['usage']),
+            'declared_read_sha256': {s['id']: s['request_sha256'] for s in frozen['stages'][1:]},
+            'max_reservation_cents': frozen['max_reservation_cents'],
+            'authorized_code_sha256': supercache_implementation_hashes(),
+            'basis': 'Reported write tokens justify original read attempts; retention remains to be observed.'}
+
+
+def supercache_continuation(db, campaign, frozen, write, *, require_current_code=True):
+    """Read-only receipt verification, safe inside the reservation transaction."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shared_context_continuations'").fetchone():
+        return None
+    row = db.execute('SELECT * FROM shared_context_continuations WHERE campaign_id=?', (campaign['id'],)).fetchone()
+    if row is None:
+        return None
+    body = _accounting_object(row['receipt'])
+    if (not isinstance(body.get('authorized_code_sha256'), dict) or
+            set(body['authorized_code_sha256']) != {'supercache_experiment.py', 'portfolio.py', 'lab.py'} or
+            any(not isinstance(v, str) or not re.fullmatch(r'[0-9a-f]{64}', v)
+                for v in body['authorized_code_sha256'].values())):
+        raise ValueError('Invalid continuation implementation identities')
+    expected = supercache_continuation_body(db, campaign, frozen, write, body['reviewer'], body['created'])
+    if not require_current_code:
+        expected['authorized_code_sha256'] = body['authorized_code_sha256']
+    if digest(body) != row['sha256'] or body != expected or body['created'] > time.time():
+        raise ValueError('Incomplete-write continuation receipt differs from its frozen evidence or code')
+    return body
 
 
 def reserve_task(db, body, packet, task_key, purpose, parent_id=None):
@@ -512,6 +893,44 @@ def reserve_task(db, body, packet, task_key, purpose, parent_id=None):
             raise ValueError('Dossier requests are private investigation or critique work only')
         if (purpose == 'policy_probe') != ('policy_probe' in body['metadata']):
             raise ValueError('Policy probe request and ledger purpose must agree')
+        if (purpose == 'cache_research') != ('supercache_pilot' in body['metadata']):
+            raise ValueError('Shared-context request and ledger purpose must agree')
+        if purpose == 'cache_research':
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shared_context_campaigns'").fetchone():
+                raise ValueError('An explicitly prepared shared-context protocol is required')
+            campaigns = db.execute('SELECT * FROM shared_context_campaigns').fetchall()
+            if len(campaigns) != 1:
+                raise ValueError('One shared-context protocol is required')
+            campaign = campaigns[0]
+            frozen = _accounting_object(campaign['protocol'])
+            declared = [stage for stage in frozen['stages']
+                        if task_key == f'shared-context:{campaign["id"]}:{stage["id"]}']
+            if (digest(frozen) != campaign['sha256'] or len(declared) != 1 or
+                    encoded(declared[0]['request']) != request_json or
+                    declared[0]['request_sha256'] != digest(body) or
+                    encoded(frozen['packet']) != packet_json or
+                    frozen['profiles'][body['metadata']['supercache_phase']] != profile or
+                    time.time() >= frozen['deadline']):
+                raise ValueError('Request is not an unexpired declared shared-context task')
+            previous = db.execute("SELECT * FROM runs WHERE purpose='cache_research'").fetchall()
+            writes = [r for r in previous if _supercache_cost_contract(_accounting_object(r['request'])) == 'write-24h-v1']
+            phase = body['metadata']['supercache_phase']
+            if (phase == 'write' and previous or phase == 'read' and (len(writes) != 1 or len(previous) >= 13) or
+                    sum(r['reserved_cents'] for r in previous) + profile['reserve_cents'] > min(470, frozen['max_reservation_cents'])):
+                raise ValueError('The one-write, twelve-read shared-context allowance is exhausted')
+            if phase == 'read':
+                write = writes[0]
+                written_request = _accounting_object(write['request'])
+                facts = _settlement_facts(write)
+                returned = _accounting_object(write['response'])
+                continuation = (supercache_continuation(db, campaign, frozen, write)
+                                if facts['response_status'] != 'completed' else None)
+                if (body['input'][0] != written_request['input'][0] or
+                        time.time() - write['created'] >= 23 * 3600 or
+                        (facts['response_status'] != 'completed' and continuation is None) or
+                        Decimal(facts['estimated_usd']) > Decimal(write['reserved_cents']) / 100 or
+                        int(returned['metadata']['supercache_write_input_tokens']) < 1025):
+                    raise ValueError('Confirmed unexpired shared-prefix write is required before reads')
         parent = current(db)
         if purpose == 'thesis' and (parent['id'] if parent else None) != parent_id:
             raise ValueError('Reviewed thesis changed; a stale task cannot start a new thesis draft')
@@ -519,9 +938,7 @@ def reserve_task(db, body, packet, task_key, purpose, parent_id=None):
             ancestor = db.execute('SELECT packet_json FROM revisions WHERE id=?', (parent_id,)).fetchone()
             if ancestor is None or json.loads(ancestor['packet_json'])['id'] != packet['id']:
                 raise ValueError('Unknown parent revision or mismatched evidence packet identity')
-        held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
-        if held + profile['reserve_cents'] > budget_limit(db):
-            raise ValueError('Local research budget exhausted; no request submitted')
+        require_budget_capacity(db, profile['reserve_cents'])
         run_id = str(uuid.uuid4())
         db.execute('''INSERT INTO runs(id,created,reserved_cents,request,packet_json,packet_sha256,
                     parent_id,prediction,rates,pricing_date,purpose,task_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
@@ -670,7 +1087,8 @@ def run_cost(row):
     if response.get('status') not in TERMINAL:
         return None
     try:
-        return estimate_cost(response.get('usage') or {}, json.loads(row['rates']), response.get('metadata'))
+        return estimate_cost(response.get('usage') or {}, json.loads(row['rates']), response.get('metadata'),
+                             supercache_contract=_supercache_cost_contract(json.loads(row['request'])))
     except (ValueError, TypeError):
         return None
 
@@ -805,7 +1223,12 @@ def main():
     command.add_argument('revision_id')
     command.add_argument('--reviewer', required=True)
     commands.add_parser('export').add_argument('path', type=Path)
-    commands.add_parser('budget', help='Inspect or explicitly change the cumulative local reservation limit').add_argument('--limit-usd')
+    command = commands.add_parser('budget', help='Inspect accounting or explicitly activate a versioned budget policy')
+    options = command.add_mutually_exclusive_group()
+    options.add_argument('--limit-usd')
+    options.add_argument('--activate-policy', choices=[SETTLED_BUDGET_POLICY])
+    command.add_argument('--reviewer')
+    commands.add_parser('settle', help='Append a checked terminal cost estimate; no API call').add_argument('run_id')
     args = parser.parse_args()
     with closing(database(args.database)) as db, db:
         if args.command in ['init', 'preview', 'research']:
@@ -832,6 +1255,10 @@ def main():
         elif args.command == 'review':
             result = {'reviewed_revision': review(db, args.revision_id, args.reviewer)}
         elif args.command == 'budget':
+            if bool(args.activate_policy) != bool(args.reviewer):
+                raise ValueError('Policy activation requires an explicit reviewer')
+            if args.activate_policy:
+                activate_budget_policy(db, args.reviewer, args.activate_policy)
             if args.limit_usd is not None:
                 try:
                     amount = Decimal(args.limit_usd)
@@ -840,10 +1267,13 @@ def main():
                         raise ValueError
                     set_budget_limit(db, int(cents))
                 except (ValueError, ArithmeticError):
-                    raise ValueError('Budget must be a nonnegative dollar amount in whole cents, at least existing reservations') from None
+                    raise ValueError('Budget must be a nonnegative whole-cent amount, at least existing commitments') from None
             held = db.execute('SELECT COALESCE(SUM(reserved_cents),0) FROM runs').fetchone()[0]
             result = {'local_budget_usd': format(Decimal(budget_limit(db)) / 100, '.2f'),
-                      'reserved_usd': format(Decimal(held) / 100, '.2f')}
+                      'reserved_usd': format(Decimal(held) / 100, '.2f'),
+                      'accounting': budget_accounting(db)}
+        elif args.command == 'settle':
+            result = {'settlement_id': settle_run(db, args.run_id), 'accounting': budget_accounting(db)}
         else:
             snapshot = export(db, args.path)
             result = {'exported': str(args.path), 'reviewed_revisions': len(snapshot['thesis']['revisions'])}

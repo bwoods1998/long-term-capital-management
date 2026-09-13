@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "saved_at": "2026-09-13T05:21:23Z",
+  "nodes": [
+    {
+      "symbol": "NVDA",
+      "company": "NVIDIA",
+      "layer": "chips_fabrication",
+      "status": "profiled",
+      "role": "Designs accelerated computing platforms combining GPUs, CPUs, networking, and software for AI data centers.",
+      "question": "Can demand for training and inference sustain cash generation as customers add capacity and alternative accelerators?",
+      "sources": [
+        {
+          "label": "Data center platform",
+          "url": "https://www.nvidia.com/en-us/data-center/"
+        },
+        {
+          "label": "Q2 FY2027 results",
+          "url": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2027"
+        }
+      ]
+    },
+    {
+      "symbol": "TSM",
+      "company": "TSMC",
+      "layer": "chips_fabrication",
+      "status": "profiled",
+      "role": "Manufactures semiconductors for chip designers, including products used in high-performance computing.",
+      "question": "Can manufacturing expansion convert AI chip demand into durable cash flow without leaving excess capacity?",
+      "sources": [
+        {
+          "label": "Company overview",
+          "url": "https://www.tsmc.com/english/aboutTSMC"
+        },
+        {
+          "label": "Q2 2026 results",
+          "url": "https://pr.tsmc.com/english/news/3326"
+        }
+      ]
+    },
+    {
+      "symbol": "AVGO",
+      "company": "Broadcom",
+      "layer": "networking",
+      "status": "profiled",
+      "role": "Supplies custom AI accelerator technology and Ethernet connectivity for large AI compute clusters.",
+      "question": "How durable are custom-chip and networking cash flows if a few major customers change their infrastructure plans?",
+      "sources": [
+        {
+          "label": "AI silicon and networking partnership",
+          "url": "https://investors.broadcom.com/news-releases/news-release-details/broadcom-announces-extended-partnership-meta-deploy-technology"
+        },
+        {
+          "label": "Q3 FY2026 results",
+          "url": "https://investors.broadcom.com/news-releases/news-release-details/broadcom-inc-announces-third-quarter-fiscal-year-2026-financial"
+        }
+      ]
+    },
+    {
+      "symbol": "CEG",
+      "company": "Constellation Energy",
+      "layer": "power_cooling",
+      "status": "profiled",
+      "role": "Generates and supplies electricity, including nuclear power, for customers facing growing energy demand.",
+      "question": "Can long-term power contracts turn data-center demand into durable cash flow after the cost of expanding supply?",
+      "sources": [
+        {
+          "label": "Business overview",
+          "url": "https://www.constellationenergy.com/about/business-overview.html"
+        },
+        {
+          "label": "Q2 2026 results",
+          "url": "https://www.constellationenergy.com/news/2026/08/constellation-reports-second-quarter-2026-results.html"
+        }
+      ]
+    },
+    {
+      "symbol": "VRT",
+      "company": "Vertiv",
+      "layer": "power_cooling",
+      "status": "profiled",
+      "role": "Provides power, cooling, and services for data centers and other digital infrastructure.",
+      "question": "Can demand for denser AI data centers become cash generation after manufacturing expansion and working-capital needs?",
+      "sources": [
+        {
+          "label": "Power and cooling overview",
+          "url": "https://www.vertiv.com/en-us/about/about-us/"
+        },
+        {
+          "label": "Q2 2026 results",
+          "url": "https://investors.vertiv.com/news/news-details/2026/Vertiv-Reports-Strong-Second-Quarter-2026-with-Diluted-EPS-Growth-of-53-Adjusted-Diluted-EPS-Growth-of-60-Raises-Full-Year-2026-Guidance-Across-All-Key-Metrics/default.aspx"
+        }
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "company": "Microsoft",
+      "layer": "cloud",
+      "status": "reviewed",
+      "role": "Provides cloud infrastructure, AI models, and tools for building enterprise applications through Azure.",
+      "question": "Can operating cash generation catch up with infrastructure spending without relying on accounting reclassification?",
+      "sources": [
+        {
+          "label": "Azure AI platform",
+          "url": "https://azure.microsoft.com/en-us/solutions/ai"
+        },
+        {
+          "label": "FY2026 results",
+          "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast"
+        }
+      ]
+    },
+    {
+      "symbol": "AMZN",
+      "company": "Amazon",
+      "layer": "cloud",
+      "status": "profiled",
+      "role": "Provides managed AI models, training, inference, and computing infrastructure through AWS.",
+      "question": "Will AI infrastructure investment produce cash returns alongside AWS growth, after equipment spending and other commitments?",
+      "sources": [
+        {
+          "label": "AWS AI services",
+          "url": "https://aws.amazon.com/ai/"
+        },
+        {
+          "label": "Q2 2026 results",
+          "url": "https://www.aboutamazon.com/news/company-news/amazon-earnings-q2-2026-report"
+        }
+      ]
+    },
+    {
+      "symbol": "GOOGL",
+      "company": "Alphabet",
+      "layer": "cloud",
+      "status": "profiled",
+      "role": "Provides cloud AI models and enterprise services through Google Cloud, alongside its wider Google businesses.",
+      "question": "Can AI demand and product adoption generate cash fast enough to support infrastructure investment across Google?",
+      "sources": [
+        {
+          "label": "Google Cloud AI platform",
+          "url": "https://cloud.google.com/ai"
+        },
+        {
+          "label": "Q2 2026 CEO remarks",
+          "url": "https://blog.google/company-news/inside-google/message-ceo/alphabet-earnings-q2-2026/"
+        }
+      ]
+    },
+    {
+      "symbol": "META",
+      "company": "Meta Platforms",
+      "layer": "applications",
+      "status": "profiled",
+      "role": "Uses AI for recommendations, advertising, and consumer products, supported by its own data-center infrastructure.",
+      "question": "Do AI improvements in engagement and advertising generate enough incremental cash to support rising infrastructure costs?",
+      "sources": [
+        {
+          "label": "AI in apps and advertising",
+          "url": "https://about.fb.com/news/2026/01/2026-ai-drives-performance/"
+        },
+        {
+          "label": "Q2 2026 results",
+          "url": "https://investor.atmeta.com/investor-news/press-release-details/2026/Meta-Reports-Second-Quarter-2026-Results/default.aspx"
+        },
+        {
+          "label": "AI data centers",
+          "url": "https://about.fb.com/news/2026/08/why-meta-builds-its-own-data-centers/"
+        }
+      ]
+    }
+  ]
+}

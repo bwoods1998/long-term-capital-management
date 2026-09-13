@@ -1,72 +1,27 @@
 # Portfolio Agent
 
-An AI investor that remembers its reasoning. A personal experiment in research, portfolio management, and the cost of useful intelligence.
+An AI research agent following where AI spending becomes durable cash flow.
 
-[Research ledger](https://blakewoods.us/portfolio/) · [Start here](docs/START-HERE.md) · [Learning path](lessons/README.md)
+The goal is a living research record across the AI industry: what the agent believes, the evidence behind it, what would change its mind, and how the companies depend on one another. I'm building it with AI agents on a revived 2019 MacBook, using Sail for inference and cloud execution.
 
-**V1: an investigator with evidence and memory.** The agent searches registered primary sources, checks calculations, saves hypotheses, and submits a report to a separate critic. Reviewed work becomes a public research record and memory for future assignments. Sail supplies inference and tracing; Python and SQLite preserve requests, evidence, and spending through interruptions. The optional private account connector remains separate; no code here submits brokerage orders.
+[Explore the project](https://blakewoods.us/portfolio/) · [Start here](docs/START-HERE.md) · [Current state](docs/CURRENT-STATE.md) · [Technical reference](docs/README.md)
 
-## The vision
+## What works
 
-One small portfolio, with a living record of why each position exists, what would change the thesis, and what the agent spends investigating it. Research can span hours or days, resume after interruptions, and return when new evidence arrives.
+The research universe spans chips and fabrication (NVIDIA, TSMC), networking (Broadcom), power and cooling (Constellation, Vertiv), cloud (Microsoft, Amazon, Alphabet), and applications (Meta). These are research subjects, not holdings. Microsoft is the first reviewed case; the others have verified company profiles and collected issuer disclosures.
 
-The owner controls assignments, budgets, and any future trading permissions. Public visitors see selected research and results through a separate read-only view. The first implementation will be for one owner.
+The agent reads sources, checks calculations, remembers reviewed findings, and submits drafts to a critic. A bounded cloud test preserved remote tool execution through a restart; its final report failed the response-format check and remained unpublished. Review still determines what becomes public.
 
-The question: **Can an agent maintain a coherent investment strategy over time—and justify its research costs?**
+A separate improvement loop generates and tests critic prompts. Its first candidate fixed one validation mistake but introduced another, so it automatically kept the current method. Nine company questions also reused one Sail Supercache evidence corpus; results and costs are in the current-state record.
 
-## Start reading
+The website serves saved research and interactive evidence. Visitors cannot start paid work. There is no connected account, trading, or investment-return history; Schwab integration is paused.
 
-- [Research loop](docs/RESEARCH-LOOP.md) and [Lesson 4](lessons/04-research-loop.md): tools, evidence memory, critique, and recovery.
-- [First investigation results](docs/INVESTIGATION-RESULTS.md): what retrieval added and which failures changed the code.
-- [Financial research dossier](docs/RESEARCH-DOSSIER.md): two analysts reconcile a full cash-flow bridge, investment commitments, and demand evidence across twelve connected stages.
-- [Measured model comparisons](docs/EVALUATION-RESULTS.md): all attempts, costs, and limits of the development test.
-- [Evidence timeline replay](docs/TRAJECTORY-REPLAY.md): fictional disclosures test memory, corrections, and abstention across sequential agent updates.
-- [Source-update inbox](docs/SOURCE-WATCH.md): notice changed documents without buying unnecessary research.
-- [Reviewed source handoff](docs/SOURCE-CURATION.md): bind checked facts to exact source versions before a new assignment.
-- [Bounded research queue](docs/RESEARCH-QUEUE.md): freeze explicit assignments and resume them within shared spending limits.
-- [Applied Sail products](docs/SAIL-PRODUCTS.md): live Voyages and a measured Sailbox persistence experiment.
-- [Scheduling and cache results](docs/POLICY-EXPERIMENT.md): measured reuse, output costs, and preserved failures.
-- [Approved-source instruction test](docs/ROBUSTNESS.md): an audit of units, evidence scope, and adversarial source text.
-- [Read-only operations](docs/OPERATIONS.md): inspect request costs and review outcomes without advancing work.
-- [An honest scoreboard](docs/PERFORMANCE.md): synthetic exercises separate portfolio returns from deposits, fees, and research expenses.
-- [V1 runbook](docs/V1.md): preview, predict, research, review, export.
-- [Private Schwab access](docs/SCHWAB-SETUP.md): authorize locally and read a private account snapshot.
-- [Lesson 3](lessons/03-schwab-access.md): app credentials, account consent, and token refresh.
-- [A thesis with memory](lessons/02-thesis-with-memory.md): the next learning exercise.
-- [First thesis results](lessons/02-result.md): five attempts, one accepted view, and their costs.
-- [Project roadmap](docs/ROADMAP.md): milestones and next steps.
-- [Architecture](docs/ARCHITECTURE.md): research, brokerage, and public-view boundaries.
-- [Learning path](lessons/README.md): what to understand at each stage.
-- [Lesson 1](lessons/01-first-experiment.md) and [first result](lessons/01-result.md): the working foundation.
-- [Run the existing experiment](docs/EXPERIMENTS.md): setup, commands, and spending controls.
+## What we've learned
 
-## What works now
+Microsoft's annual operating cash flow rose by $46.773 billion, while cash property spending rose by $51.397 billion. The difference fell by $4.624 billion. Company-wide growth alone cannot establish AI-only returns.
 
-The first thesis asks whether Microsoft's AI investment can turn into durable cash flow. A checked [evidence packet](data/thesis/msft-ai-infrastructure.json) supplies company-wide financial facts and attributed management commentary. The investigator can read beyond that packet: its first reviewed run found how lease classification changes reported capex without establishing a change in actual construction commitments. A single-pass comparison, rejected attempt, and editorial corrections preserve what extra research did and did not accomplish. Public visitors read precomputed snapshots and cannot launch paid work.
+Correct numbers also need complete evidence and a supported explanation. Earlier experiments lost a source between stages; restoring it improved the numbers without resolving every interpretive error.
 
-The model comparison uses sixteen authored cases, repeated across three models, plus a separate uniform-critic experiment. A sequential synthetic replay tests whether agents update their prior beliefs when evidence changes. These are development tests, not benchmarks of investment performance. The [Sailbox proof](data/experiments/sailbox-validation-2026-09-12.json) tested isolated execution and recovery after sleep/pause/resume with synthetic request state; it did not place live inference or trading inside the VM.
+## Next
 
-A local queue runs up to two explicitly assigned investigations, each with a maximum $3 reservation. Enqueue freezes checked evidence without making API calls; the controller preserves request identities through pauses and restarts. A source-curation bundle now carries separately reviewed facts and their exact source versions into an assignment. The handoff has an offline synthetic proof; the live watch has found no substantive financial update to curate. The original two job slots remain consumed, and completed research still requires explicit review and publication.
-
-The first two queued assignments reached different boundaries: one passed critique but needed corrections in independent review; the other exhausted its four research turns while requesting calculations and never produced a report. That second job stopped for attention without a retry or a higher turn limit.
-
-The original extraction experiment remains available. Its first trial passed five facts in one response at an estimated $0.00011808; one development example is not a benchmark of investment ability.
-
-```sh
-python3 portfolio.py init
-python3 portfolio.py preview
-python3 brokerage.py demo
-python3 -m unittest discover -s tests -v
-```
-
-These commands run locally without API calls. Python 3.10+; no third-party packages required for research or the synthetic demo. The demo implements our internal accounting contract, not Schwab's API schema. The optional real-account connector uses separately pinned community SDK dependencies in `.venv`; see [setup](docs/SCHWAB-SETUP.md).
-
-Sail credentials are stored in an owner-readable, Git-ignored `.env`. Local runs, documentation snapshots, and private Schwab state stay in ignored `.data/`. Preserve that directory: it includes the experiment's persistent budget history. Research does not require Schwab credentials or account authorization.
-
-## How it grows
-
-One persistent thesis and a public ledger → controlled research comparisons and private read-only portfolio reconciliation → scheduled research with traces and cost controls → simulated trade proposals → owner-approved live orders → optionally, a precisely bounded autonomous mandate.
-
-Sail inference supplies model calls, Voyages trace live workflows, and Sailbox execution has a measured persistence proof. A local source monitor detects candidate updates; explicit curation binds selected captures to checked facts; the bounded queue runs frozen assignments. Broader source coverage, an observed substantive update through that handoff, and portfolio decisions are subsequent work. Each new capability must earn its complexity through a useful experiment.
-
-Research costs and investment results will be reported separately. Public market-data display depends on the applicable data permissions. This is a personal software experiment, with no customer funds or public trading controls.
+Connect the company cases: whose spending supports whose revenue, where cash conversion weakens, and which apparent diversification depends on the same spending cycle. Gradually automate the routine research while preserving evidence, dated revisions, explicit spending limits, and review.

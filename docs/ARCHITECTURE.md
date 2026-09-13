@@ -1,82 +1,90 @@
 # Architecture
 
-## Working V1
-
-The current system is a local research workflow with durable evidence, reviewed memory, and a public static ledger. A model-driven investigator can retrieve registered primary sources and calculate with checked facts. A bounded local source monitor checks for changes; a durable queue runs explicitly assigned research. An optional private account connector is separate from research and publication.
+The project follows public companies across the AI stack: what the evidence says,
+what remains uncertain, and what would change the view. Microsoft is the first
+reviewed case. The other eight companies have sourced profiles and bounded
+research questions; they are not holdings or fully reviewed investment cases.
 
 ```mermaid
-flowchart TD
-    Sources[Public source documents] --> Packet[Manually checked evidence packet]
-    Packet --> Research[Local thesis or investigator controller]
-    Packet --> Queue[Explicit bounded assignment queue]
-    Sources --> Watch[Source-update inbox]
-    Watch --> Bundle[Checked provenance and bundle review]
-    Bundle --> Queue
-    Queue --> Research
-    Sources --> Tools[Registered source tools and calculator]
-    Research <--> Tools
-    Research <--> Sail[Sail inference]
-    Research <--> Store[Private SQLite run and revision ledger]
-    Research --> Critic[Independent critique and bounded repair]
-    Critic --> Review
-    Store --> Review[Explicit local review]
-    Review --> Head[Current reviewed thesis]
-    Head --> Research
-    Review --> Reports[Reviewed investigations]
-    Reports --> Research
-    Reports --> Export
-    Research --> Voyage[Private Sail Voyage trace]
-    Head --> Export[Allowlisted JSON export]
-    Export --> Site[Public read-only page at /portfolio/]
-    Fixture[Synthetic brokerage fixture] --> Demo[Offline reconciliation exercise]
+flowchart LR
+    Sources[Issuer disclosures] --> Evidence[Frozen evidence and source dates]
+    Evidence --> Agent[Research controller]
+    Agent <--> Sail[Sail inference]
+    Agent <--> Tools[Local tools or isolated Sailbox]
+    Agent <--> Ledger[Private request and memory ledger]
+    Agent --> Critic[Evidence critic and bounded repair]
+    Critic --> Review[Publication review]
+    Review --> Site[Saved public website]
+    Review --> Agent
+    Agent --> Voyage[Voyages trace]
+    Failures[Recorded failures] --> Candidate[Candidate research method]
+    Candidate --> Gate[Separate development and validation checks]
+    Gate --> Champion[Promote or retain current method]
 ```
 
-### Evidence and memory
+## Evidence and research
 
-`data/thesis/` holds checked public source facts, context, dates, and stable citation IDs. The request includes this packet plus the previous reviewed thesis and its original packet. The investigator also freezes up to three reviewed investigations as starting memory. It must recheck earlier conclusions against evidence; prior memory is not a new disclosure. V1 asks for qualitative interpretations; numeric facts on the public page come from the packet.
+Checked facts preserve units, periods, arithmetic, and source IDs. Registered
+source captures preserve publication/retrieval dates, hashes, and exact passage
+positions. Source text is evidence, never permission to execute instructions.
 
-`research_sources.py` allows two fixed issuer documents. Captures preserve publication and retrieval dates, hashes, and normalized text. Tool results contain exact slices with hash-and-offset citation IDs. Retrieval ranks query coverage and term rarity; calculations accept only compatible fact IDs, units, and periods. Source text is data and cannot expand tool permissions. When context grows, a deterministic notebook preserves all observed passages, calculations, and hypotheses while removing duplicated transcript content. Full provider responses remain in the private ledger.
+The investigator chooses bounded source reads and calculations, saves hypotheses
+and invalidation conditions, and drafts a report. Its next invocation resumes
+saved requests and evidence. Context compaction preserves observed passages,
+calculations, and hypotheses while removing repeated transcript text.
 
-The model returns a private draft. Local checks enforce its schema and citation IDs, but cannot establish that a source supports a claim. An independent critic sees the evidence and prior memory; it can request one automatic repair. An explicit editorial amendment preserves the original and requires a new critique. Explicit review checks substance and permits publication. Thesis reviews advance the thesis head; investigation reviews freeze separate reports for public export and future memory. Competing thesis drafts cannot overwrite a newer reviewed parent.
+The original live tool registry covers two Microsoft documents. The broader
+nine-company corpus is a separately frozen research input; listing a company
+on the website does not silently add it to the live source monitor.
 
-`watch`, `hold`, and `review` describe research views, not account positions or trade instructions. The next-review field is a proposed trigger, not a scheduled task.
+An independent critic may request one repair. Schema and citation checks cannot
+prove arbitrary prose correct, so research publication has a separate review
+boundary. New investigations accept a single optional JSON fence under a frozen
+format policy; this does not repair content or change historical results.
 
-`source_watch.py` records new captures separately from the investigator's frozen cache. Durable due times, failure backoff, immutable observations, content comparison, and local curation prevent repeated page fetches from becoming duplicate research. It ignores one observed ephemeral request-trace line for comparison while retaining full raw captures. Accepting a source candidate does not revise checked facts or start a paid assignment. See [the source inbox](SOURCE-WATCH.md).
+[Research loop](RESEARCH-LOOP.md) · [Source inbox](SOURCE-WATCH.md) ·
+[Checked source handoff](SOURCE-CURATION.md)
 
-`source_curation.py` freezes manually checked packets with exact source versions and item-level provenance. Source acceptance and factual bundle approval are separate immutable records. The handoff checks arithmetic, hashes, observation dates, and current substantive content; the reviewer still checks accounting meaning. A newer changed page cannot silently substitute for an approved snapshot. See [the source handoff](SOURCE-CURATION.md).
+## Execution and memory
 
-`research_queue.py` accepts up to two explicit local assignments. Enqueue freezes a checked packet with baseline captures, or copies a separately reviewed curation bundle, together with model profiles and schedule. It makes no Sail call. Reviewed memory freezes when the investigation is first created. A single controller runs due jobs with stable investigation/request identities, pause checks, deadlines, and a maximum $3 reservation per job inside the shared ledger. It cannot review, publish, or import unchecked source-watch candidates. Bundle freshness is checked atomically at first enqueue; recovery thereafter uses the job's frozen inputs. The original two slots remain consumed. See [the queue protocol](RESEARCH-QUEUE.md).
+The MacBook currently owns the authoritative SQLite ledger and credentials.
+The [Sailbox worker](CLOUD-WORKER.md) executes allowlisted tools against uploaded
+public evidence, without credentials or network access. Receipts survive sleep
+and are verified locally. It does not yet host the complete controller.
 
-`trajectory_replay.py` uses separate fictional evidence and the same financial ledger to test sequential memory. Each next episode freezes the actual prior typed model state, without reference answers or grades. Deterministic admission rejects duplicate, future-dated, and unapproved records before inference. Full history and a current notebook see the same eligible evidence with different historical context. Neither synthetic answers nor evaluation results can enter real-company thesis history.
+Reviewed research can inform later investigations. Draft experiments and critic
+benchmarks cannot become company facts. The original assignment queue has two
+permanent pilot slots; a new experiment never resets their history.
 
-### Requests and cost
+[Queue protocol](RESEARCH-QUEUE.md) · [Sail products](SAIL-PRODUCTS.md)
 
-The model, completion window, and reasoning allowance are explicit in each saved request. `portfolio.py preview` displays the thesis configuration without an API call. Every model step reserves its profile's conservative allowance before submission. Thesis, investigator, critic, and evaluation calls share one durable configurable limit; `portfolio.py budget` reports it. The ledger keeps unsuccessful and uncertain runs too. Stable workflow task keys prevent a repeated step from becoming a second reservation.
+## Requests, improvement, and costs
 
-The request body and idempotency key survive process restarts. Once a response ID is known, resume retrieves it. Uncertain resubmission is refused after 23 hours or if the credential has changed. Terminal incomplete or invalid output does not trigger an automatic paid redraft. A client timeout does not cancel accepted provider work.
+Every model request freezes its body, model, completion window, rates, and
+allowance before submission. Recovery keeps the original request identity and
+retrieves a known response. Missing usage or an uncertain submission is not free.
 
-Cost estimates use the run's dated rates and reported usage. Automatic Supercache reads are separated from ordinary cached tokens when the provider supplies both counters. Supercache writes are prohibited by the request profiles; an unexpected positive write count stays unpriced rather than receiving an ordinary input rate. Unfinished work and malformed or missing usage remain unknown; failed or incomplete terminal work with valid usage still contributes to cost. Provider-billed expense is a separate, not-yet-reconciled measurement. Local allowances do not cap spending in other applications or survive deletion of their database history.
+The [settlement policy](BUDGET.md) replaces a completed request's conservative
+hold with a validated usage estimate through an immutable receipt. Historical
+requests remain unchanged. Shared-context caching uses a separate explicit
+write/read cost contract inside this same ledger.
 
-### Public boundary
+The improvement gate compares a candidate evidence-critic prompt with the
+current prompt on fixed development and separately authored validation cases.
+It can promote the prompt only under its frozen no-regression rule. This is
+bounded method selection, not permission to edit arbitrary code, alter tests,
+change budgets, publish reports, or trade. See [current state](CURRENT-STATE.md)
+for what has actually run.
 
-The personal-site Worker serves the thesis snapshot, reviewed investigations, and compact evaluation summaries at the read-only research page. Exports construct named fields; they exclude private predictions, prompts, raw provider responses, full source captures, errors, and account identifiers. The critic's explanatory prose is not published as verified evidence; its displayed status is derived from the verdict and issue count. Exporting does not deploy the site. Artifacts and their diffs are reviewed before publication.
+## Public and account boundaries
 
-A visitor reads precomputed data and cannot launch inference, inspect private state, or place an order. The public page carries no Sail or brokerage credentials. Source dates remain visible so old evidence is not mistaken for a new observation.
+The website serves allowlisted saved JSON. Visitors cannot launch model requests
+or access private prompts, full captures, credentials, or account identifiers.
+Technical experiment results live on GitHub; the page highlights companies and
+the first checked cash-flow scenario. Deployment is separate from research.
 
-### Private storage and the brokerage exercise
-
-`.data/portfolio.sqlite` contains research runs, immutable revisions, review records, and the current head. `.env` contains the Sail credential; both paths are ignored by Git. A nonsecret credential fingerprint binds uncertain retries to the original API-key scope.
-
-`brokerage.py` reads an explicitly synthetic fixture and prints its reconciliation without network access or saved output. Its normalized internal contract is not Schwab's schema. Requested quantities belong to orders; only executed fills move holdings and cash. External deposits and withdrawals are excluded from P&L. Book cash does not mean settled cash or buying power.
-
-`lab.py` remains the earlier extraction and accounting experiment, with its own private ledger and dated result. It is separate from the thesis workflow.
-
-## Future boundaries
-
-A private Schwab adapter supports owner authorization and account reads; it is separate from the research runtime. Live account verification and richer reconciliation remain necessary before account observations inform decisions. Settlement, corporate actions, and public display permissions require their own work.
-
-The local assignment queue could later use Sailboxes for execution. The current measured Sailbox proof runs isolated offline tests and restores synthetic accepted-request state through sleep/pause/resume. Live Voyages already trace research and evaluation steps. Sail supplies inference, runtime, and telemetry; our code owns memory, orchestration, evaluation, and policy. Persistent work requires durable records even if a VM wakes without its prior processes.
-
-Any future order service must be separate from research. It will accept structured proposals only after strong owner authentication and deterministic checks of authority, instrument, quantity, current cash and positions, freshness, exposure, and open orders. External documents cannot grant permissions. Never assume Sail's idempotency guarantees apply to Schwab.
-
-Public performance will require reconciled data, appropriate display rights, external-cashflow handling, and explicit separation of simulated and live outcomes. Project expenses remain visible separately from brokerage P&L. See the [roadmap](ROADMAP.md) for the staged plan.
+Schwab is disconnected. Future execution will require a separate structured
+order service with an owner-defined mandate, deterministic exposure and order
+checks, reconciliation, and a stop control. Research prose cannot grant itself
+account access. The existing performance calculator uses synthetic fixtures;
+there are no live trades or reported investment returns.

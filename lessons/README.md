@@ -1,25 +1,28 @@
-# Learning Portfolio Agent
+# Optional exercises
 
-Read [Lesson 2](02-thesis-with-memory.md) before opening its [measured result](02-result.md).
-For the latest work, read [the investigator](04-research-loop.md), then
-[research across time](05-research-across-time.md).
+Pick the question you want to understand. Each exercise connects a piece of the
+working project to the evidence or accounting behind it; there is no required
+course sequence.
 
-Predict, inspect, explain, then choose the next experiment. AI can help write the code; understanding its evidence, accounting, and controls is the useful part.
+For the first reviewed company case, start with **[the complete cash-flow bridge](07-financial-dossier.md)**.
+Read Microsoft's figures, predict the explanation, then compare it with the result.
+The same evidence and accounting habits will guide the wider AI-stack research universe.
 
-| Stage | Technical lesson | Financial lesson | Exercise |
-|---|---|---|---|
-| [First extraction](01-first-experiment.md) | Requests, structured outputs, evaluation, token accounting | Cost per successful task | Verify the five facts and explain why one passing example is weak evidence |
-| [Thesis with memory](02-thesis-with-memory.md) | Persistent state, source IDs, immutable revisions, review and export | Cash generation versus investment; limits of evidence | Predict the conclusion, inspect a draft, and define what would change your mind |
-| Offline brokerage exercise | Exact decimal arithmetic, orders versus fills, reconciliation | Deposits are not investment profit | Explain the unfilled share and account for the demo's P&L |
-| [Private account access](03-schwab-access.md) | OAuth, permissions, dated observations | Account authorization versus app credentials | Explain the login, refresh, and private snapshot boundaries |
-| [An investigator with tools](04-research-loop.md) | Retrieval, evidence notebooks, critic checks, checkpoints, tracing | Accounting presentation versus investment commitments; incremental research cost | Audit the cited passage and explain why a passing critic still needs review |
-| Next: account reconciliation | Exact accounting and dated observations | Cash, positions, settlement, income | Reconcile a private snapshot to the brokerage view |
-| [Research across time](05-research-across-time.md) | Sequential model memory, corrections, process recovery, source updates | Input savings versus total cost; cache break-even | Predict Cedar's correction, audit the measured bill, and explain recovery |
-| [Deposits are not returns](06-portfolio-returns.md) | Exact valuation boundaries and aligned observations | Funding, fees, time-weighted return, and benchmark comparison | Explain why a rising balance can have zero investment return |
-| [Reviewed source handoff](../docs/SOURCE-CURATION.md) | Versioned provenance, immutable bundles, and durable queues | Column selection, sign conventions, and useful wakeups | Explain why accepting a page does not approve its financial facts |
-| [Read the whole cash-flow bridge](07-financial-dossier.md) | Independent analysts, reconciliation, and separate numerical/source/meaning checks | Profit versus cash flow; lease commitments; demand versus returns | Reconcile all nine operating asset/liability rows and challenge the dossier's explanation |
-| Later: simulated execution | State machines, uncertain responses, fault testing | Exposure, costs, benchmark design | Explain what to do after an ambiguous order response |
-| Later: live controls | Authentication, authorization, audit trails | Mandates and operational risk | Trace a proposal through every enforced check |
-| Later: infrastructure experiments | GPU serving, throughput, utilization, capacity | Customer versus provider economics | Model when dedicated compute becomes economical |
+| Question | Exercise |
+|---|---|
+| How do we know an extracted fact is correct? | [First extraction](01-first-experiment.md), then [its result](01-result.md) |
+| What should an investment thesis remember? | [Thesis with memory](02-thesis-with-memory.md), then [its result](02-result.md) |
+| Why does a researched answer still need review? | [An investigator with tools](04-research-loop.md) |
+| How should an agent respond when evidence changes? | [Research across time](05-research-across-time.md) |
+| Why isn't a growing account balance necessarily a return? | [Deposits are not returns](06-portfolio-returns.md) |
+| Do the favorable cash-flow rows tell the whole story? | [The complete cash-flow bridge](07-financial-dossier.md) |
+| When is a changed source ready to use? | [Reviewed source handoff](../docs/SOURCE-CURATION.md) |
 
-Read [the first measured result](01-result.md) after making your own prediction. Then work through [Lesson 2](02-thesis-with-memory.md). The [V1 guide](../docs/V1.md) has the full command sequence and current limits; no need to study every future stage at once.
+The financial and saved-result exercises can be read without buying model calls.
+Commands that run new inference are identified in their guides. Commands for saved
+run IDs require the owner's local history or your own earlier run.
+
+[Private account access](03-schwab-access.md) remains available as a reference;
+brokerage integration is paused. The [roadmap](../docs/ROADMAP.md) covers future
+portfolio and infrastructure work. For the overall project, return to
+[Start here](../docs/START-HERE.md) or the [technical index](../docs/README.md).

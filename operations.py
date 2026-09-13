@@ -15,7 +15,7 @@ import time
 import portfolio as p
 
 ROOT = Path(__file__).resolve().parent
-PURPOSES = ('thesis', 'investigate', 'critique', 'evaluation', 'replay', 'policy_probe', 'robustness')
+PURPOSES = ('thesis', 'investigate', 'critique', 'evaluation', 'replay', 'policy_probe', 'robustness', 'cache_research')
 PROVIDER_STATES = {'completed', 'failed', 'cancelled', 'incomplete', 'queued', 'in_progress'}
 INVESTIGATION_STATES = {'research', 'critique', 'repair', 'recheck', 'editorial_recheck',
                         'awaiting_review', 'needs_attention', 'expired'}
@@ -80,6 +80,7 @@ def snapshot(db, now=None):
         result = {'schema_version': 1, 'generated_at': p.iso(now),
                   'scope': 'portfolio_research_ledger',
                   'inference': _cost(rows),
+                  'budget': p.budget_accounting(db),
                   'purposes': [{'purpose': purpose, **_cost([r for r in rows if r['purpose'] == purpose])}
                                for purpose in PURPOSES if any(r['purpose'] == purpose for r in rows)],
                   'investigations': None, 'queue': None, 'source_watch': None,
