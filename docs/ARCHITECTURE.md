@@ -17,7 +17,7 @@ flowchart LR
 
 ## Research and improvement
 
-[`service.py`](../portfolio_runtime/service.py) preserves the paper account while creating immutable research epochs. Each epoch records its source cutoff, model profiles, policy version, deadline and spending allocation. Daily source captures retain original observations; previously published findings are never rewritten to match a later conclusion.
+[`service.py`](../portfolio_runtime/service.py) preserves the paper account while creating immutable research epochs. Each epoch records its source cutoff, model profiles, policy version, deadline and credit reservation. Daily source captures retain original observations; previously published findings are never rewritten to match a later conclusion.
 
 The universe is S&P 500 stocks plus cash. Membership currently comes from a community-maintained list; financial facts come from SEC Companyfacts and selected primary filings. Source periods, units, tags, accessions and hashes are retained. Missing sector-specific or valuation evidence remains missing. Delayed Yahoo observations support research and the daily-bar paper adapter; they are not brokerage quotes.
 
@@ -37,7 +37,7 @@ Daily constituent refresh and market accounting continue independently of resear
 
 The frozen Sailbox bundle contains application code and public evidence. Credentials are injected by the provider only on allowed HTTPS routes; brokerage credentials are excluded. The service and its bootstrap hold process locks to prevent duplicate writers.
 
-The [Cloudflare supervisor](../control-plane/supervisor.mjs) runs independently of the Mac and the Sail agent. It controls admission, checks credit and progress, restarts the same machine's process, and sends exception or completion emails. A technical weekly ceiling bounds exposure; actual research pace depends on available credit and useful new evidence. Unknown request costs retain their allowance. More funding does not automatically increase research intensity.
+The [Cloudflare supervisor](../control-plane/supervisor.mjs) runs independently of the Mac and the Sail agent. It controls admission, checks credit and progress, restarts the same machine's process, and sends exception or completion emails. Research uses available Sail credit without preset session or weekly dollar caps. Outstanding requests and remaining host costs stay reserved; top-ups fund subsequent sessions automatically. Evidence and novelty checks govern repeated work.
 
 The service uses one durable Voyage event sequence across all epochs; an hourly research completion does not terminate the week's trace. Public activity and private health distinguish deliberate waiting from a stalled process.
 

@@ -4,6 +4,7 @@ export const API = 'https://sailbox-api.sailresearch.com';
 export const INFERENCE = 'https://api.sailresearch.com';
 const iso = ms => new Date(ms).toISOString();
 const finite = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+const availableCredit = c => c.spending_mode==='available_credit';
 export const dollars = value => { if (typeof value !== 'number' && (typeof value !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value))) throw new Error('invalid_money'); const n = Number(value); if (!finite(n)) throw new Error('invalid_money'); return n; };
 const grant = value => (Math.floor(Math.max(0,value) * 1e8) / 1e8).toFixed(8);
 const failureCode = error => error?.message === 'Illegal invocation' ? 'fetch_illegal_invocation'
@@ -15,18 +16,23 @@ export function validateConfig(c) {
     || !/^sb_[0-9a-f-]{36}$/.test(c.box_id || '') || !/^[a-f0-9]{64}$/.test(c.manifest_sha256 || '')) throw new Error('invalid_config');
   const start = Date.parse(c.starts_at), end = Date.parse(c.ends_at);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 8 * 86400000) throw new Error('invalid_window');
-  for (const name of ['weekly_total_usd','weekly_inference_usd','cloud_budget_usd','credit_floor_usd']) dollars(c[name]);
-  if (dollars(c.weekly_total_usd) <= 0 || dollars(c.weekly_total_usd) > 10000
+  for (const name of ['cloud_budget_usd','credit_floor_usd']) dollars(c[name]);
+  if (dollars(c.cloud_budget_usd)<=0||dollars(c.credit_floor_usd)<1) throw new Error('invalid_budget');
+  if (c.spending_mode!==undefined&&!availableCredit(c)) throw new Error('invalid_spending_mode');
+  if (availableCredit(c)) {
+    if (Object.hasOwn(c,'weekly_total_usd')||Object.hasOwn(c,'weekly_inference_usd')) throw new Error('fixed_budget_in_credit_mode');
+  } else if (dollars(c.weekly_total_usd) <= 0 || dollars(c.weekly_total_usd) > 10000
     || dollars(c.weekly_inference_usd) + dollars(c.cloud_budget_usd) > dollars(c.weekly_total_usd)
     || dollars(c.credit_floor_usd) < 1) throw new Error('invalid_budget');
   if (Object.keys(c).some(k => !['schema_version','service_id','box_id','manifest_sha256','starts_at','ends_at',
-    'weekly_total_usd','weekly_inference_usd','cloud_budget_usd','credit_floor_usd','rehearsal'].includes(k))) throw new Error('unknown_config');
+    'weekly_total_usd','weekly_inference_usd','cloud_budget_usd','credit_floor_usd','rehearsal','spending_mode'].includes(k))) throw new Error('unknown_config');
   if (c.rehearsal !== undefined) {
     const r=c.rehearsal, a=Date.parse(r?.starts_at), b=Date.parse(r?.ends_at);
-    if (!r || Object.keys(r).sort().join(',')!=='ends_at,inference_budget_usd,session_inference_budget_usd,starts_at'
-      || !Number.isFinite(a)||!Number.isFinite(b)||b-a<3600000||b-a>8*3600000||b>start||end-a>7*86400000
-      || dollars(r.inference_budget_usd)<=0||dollars(r.inference_budget_usd)>Math.min(10,dollars(c.weekly_inference_usd))
-      || dollars(r.session_inference_budget_usd)<=0||dollars(r.session_inference_budget_usd)>Math.min(2,dollars(r.inference_budget_usd))) throw new Error('invalid_rehearsal');
+    const fields=availableCredit(c)?'ends_at,starts_at':'ends_at,inference_budget_usd,session_inference_budget_usd,starts_at';
+    if (!r || Object.keys(r).sort().join(',')!==fields
+      || !Number.isFinite(a)||!Number.isFinite(b)||b-a<3600000||b-a>8*3600000||b>start||end-a>7*86400000) throw new Error('invalid_rehearsal');
+    if (!availableCredit(c)&&(dollars(r.inference_budget_usd)<=0||dollars(r.inference_budget_usd)>Math.min(10,dollars(c.weekly_inference_usd))
+      || dollars(r.session_inference_budget_usd)<=0||dollars(r.session_inference_budget_usd)>Math.min(2,dollars(r.inference_budget_usd)))) throw new Error('invalid_rehearsal');
   }
   return c;
 }
@@ -37,23 +43,35 @@ export function creditDecision(summary, c, health = {}, at = Date.now(), cloudRe
   const reserved = Math.max(committed, dollars(health.inference?.reserved_usd ?? committed));
   const known = dollars(health.inference?.known_cost_usd ?? health.inference_known_usd ?? 0);
   const outstanding = Math.max(0, committed - known);
-  const absolute = Math.max(0, Math.min(dollars(c.weekly_inference_usd), known + balance - dollars(c.credit_floor_usd) - dollars(cloudRemaining)));
+  const ceiling=availableCredit(c)?Infinity:dollars(c.weekly_inference_usd);
+  const absolute = Math.max(0, Math.min(ceiling, known + balance - dollars(c.credit_floor_usd) - dollars(cloudRemaining)));
   const usable = Math.max(0, absolute - reserved);
   const requestRoom = Math.max(0, absolute - committed);
   const hours = Math.max(1, (Date.parse(c.ends_at) - Math.max(at, Date.parse(c.starts_at))) / 3600000);
   // A technical ceiling is not a forecast of purposeful spending. Use the
   // guest's current evaluated research intensity when it is available.
   const proposedRate = health.funding?.planned_inference_usd_per_day;
-  const plannedPerDay = finite(proposedRate) ? Math.min(proposedRate, Math.max(0, dollars(c.weekly_inference_usd) - reserved) / hours * 24)
+  const plannedPerDay = availableCredit(c)?0:finite(proposedRate) ? Math.min(proposedRate, Math.max(0, dollars(c.weekly_inference_usd) - reserved) / hours * 24)
     : Math.min(24, Math.max(0, dollars(c.weekly_inference_usd) - reserved) / hours * 24);
   const measuredPerDay = finite(summary.avg_cost_per_day) ? summary.avg_cost_per_day / 100 : 0;
   const burn = Math.max(plannedPerDay, measuredPerDay);
   const runway = burn > 0 ? Math.max(0, balance - outstanding - dollars(c.credit_floor_usd) - cloudRemaining) / burn : null;
-  const exhausted = dollars(c.weekly_inference_usd) - committed < .1;
+  const exhausted = !availableCredit(c)&&dollars(c.weekly_inference_usd) - committed < .1;
   return {allow:requestRoom >= .1, reason:requestRoom >= .1 ? 'ready' : exhausted ? 'authorization_exhausted' : 'credit_low', balance_usd:balance,
     outstanding_usd:outstanding, usable_usd:usable, runway_days:runway,
     max_inference_committed_usd:grant(absolute), max_additional_inference_usd:grant(usable),
     warn:requestRoom < .1 || (runway !== null && runway < 2)};
+}
+export function hostReserve(usage, box, c, at) {
+  const rates=usage.rates||{}, keys=['vcpu_second_usd_nanos','memory_gib_second_usd_nanos','state_disk_gib_second_usd_nanos'];
+  if (box?.sailbox_id!==c.box_id||keys.some(k=>!Number.isSafeInteger(rates[k])||rates[k]<0)
+    ||['vcpu_count','memory_mib','state_disk_size_gib'].some(k=>!Number.isSafeInteger(box[k])||box[k]<=0)) throw new Error('compute_reserve_unavailable');
+  // Reserve the actual resource ceilings through the fixed shutdown boundary.
+  // This is a funding reservation, never a stop at an arbitrary dollar amount.
+  const seconds=Math.max(0,Math.ceil((Date.parse(c.ends_at)+300000-at)/1000));
+  const value=(rates[keys[0]]*box.vcpu_count+rates[keys[1]]*box.memory_mib/1024+rates[keys[2]]*box.state_disk_size_gib)*seconds/1e9;
+  if (!finite(value)) throw new Error('compute_reserve_unavailable');
+  return value;
 }
 export async function boundedText(response, maximum = 256 * 1024) {
   const reader = response.body?.getReader(); if (!reader) return '';
@@ -243,16 +261,22 @@ export class Supervisor {
         const nanos = row?.estimated_total_cost_usd_nanos;
         if (usage.pricing_configured !== true || !finite(nanos)) throw new Error('compute_spend_unavailable');
         control.compute_used_usd = Math.max(control.compute_used_usd || 0,nanos/1e9);
+        if (availableCredit(c)) {
+          const box=await this.json('/v1/sailboxes/'+c.box_id);
+          control.compute_reserve_usd=hostReserve(usage,box,c,at);
+        }
         control.spend_checked_at=at;
       } catch (error) { latest.compute_status='unavailable';latest.compute_reason_code=failureCode(error); }
     }
-    const computeKnown = control.spend_checked_at !== undefined;
-    const computeExhausted = computeKnown && control.compute_used_usd >= dollars(c.cloud_budget_usd);
+    const computeKnown = finite(control.compute_used_usd);
+    const computeExhausted = !availableCredit(c) && computeKnown && control.compute_used_usd >= dollars(c.cloud_budget_usd);
     latest.compute_used_usd=control.compute_used_usd ?? null;
+    const cloudRemaining=availableCredit(c)?Math.max(0,control.compute_reserve_usd??dollars(c.cloud_budget_usd)):Math.max(0,dollars(c.cloud_budget_usd)-(control.compute_used_usd||0));
+    latest.compute_reserved_usd=cloudRemaining;
     let credit;
-    try { credit = creditDecision(summary,c,previous?.health || {},at,Math.max(0,dollars(c.cloud_budget_usd)-(control.compute_used_usd||0))); }
+    try { credit = creditDecision(summary,c,previous?.health || {},at,cloudRemaining); }
     catch { credit = creditDecision(null,c); }
-    if (rehearsalActive) {
+    if (rehearsalActive&&!availableCredit(c)) {
       try {
         const h=previous?.health||{}, r=h.rehearsal?.inference||{};
         const remaining=Math.max(0,dollars(c.rehearsal.inference_budget_usd)-dollars(r.committed_usd??0));
@@ -263,7 +287,7 @@ export class Supervisor {
         if (remaining<.1) credit={...credit,allow:false,reason:'rehearsal_budget_exhausted',warn:false};
       } catch {credit={...credit,allow:false,reason:'billing_unavailable'};}
     }
-    if (!computeKnown) credit = {...credit,allow:false,reason:'billing_unavailable'};
+    if (!computeKnown||(availableCredit(c)&&(latest.compute_status==='unavailable'||!finite(control.compute_reserve_usd)))) credit = {...credit,allow:false,reason:'billing_unavailable',max_inference_committed_usd:'0',max_additional_inference_usd:'0'};
     latest.credit=credit;
     // One notice per funding episode. A low balance must not send a second runway email.
     const fundingIssue = credit.reason!=='rehearsal_budget_exhausted'&&(!credit.allow || (credit.warn && at>=start));

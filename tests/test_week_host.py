@@ -7,7 +7,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from types import SimpleNamespace
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -16,6 +16,7 @@ spec = importlib.util.spec_from_file_location("week_host", SCRIPTS / "week_host.
 week_host = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(week_host)
 from portfolio_runtime.ledger import PortfolioLedger
+from portfolio_runtime.contracts import timestamp
 
 
 class PreparationTests(unittest.TestCase):
@@ -118,6 +119,62 @@ class PreparationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     week_host.prepare(Path(directory) / "new", total=total, starts=start, ends=end, seed=directory)
             key.assert_not_called()
+
+    def test_available_credit_has_no_inference_caps_and_rehearsal_is_times_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);seed=self.inputs(root)
+            rehearsal={'starts_at':'2026-09-13T19:20:00Z','ends_at':'2026-09-14T00:20:00Z'}
+            with patch.object(week_host,'ROOT',root),patch.object(week_host,'load_api_key',return_value='test-key'):
+                config=week_host.prepare(root/'week',starts='2026-09-14T04:00:00Z',ends='2026-09-19T04:00:00Z',seed=seed,rehearsal=rehearsal)
+            self.assertEqual(config['spending_mode'],'available_credit')
+            self.assertTrue({'weekly_total_usd','weekly_inference_budget_usd','session_inference_budget_usd'}.isdisjoint(config))
+            self.assertEqual(config['rehearsal'],rehearsal)
+            (root/'week/host').mkdir()
+            (root/'week/host/host.json').write_text(json.dumps({'sailbox_id':'sb-test','manifest_sha256':'a'*64}))
+            enrolled=week_host.enrollment(root/'week')
+            self.assertEqual(enrolled['spending_mode'],'available_credit')
+            self.assertTrue({'weekly_total_usd','weekly_inference_usd'}.isdisjoint(enrolled))
+            self.assertEqual(enrolled['credit_floor_usd'],'2')
+
+    def test_available_mode_rejects_disguised_caps_before_credentials(self):
+        with tempfile.TemporaryDirectory() as directory,patch.object(week_host,'load_api_key') as key:
+            for options in ({'total':'100'}, {'rehearsal':{'starts_at':'2026-09-13T19:20:00Z','ends_at':'2026-09-14T00:20:00Z','inference_budget_usd':'10'}}):
+                with self.assertRaises(ValueError):
+                    week_host.prepare(Path(directory)/'new',starts='2026-09-14T04:00:00Z',ends='2026-09-19T04:00:00Z',seed=directory,spending_mode='available_credit',**options)
+            key.assert_not_called()
+
+    def test_resource_reserve_uses_actual_rates_and_retries_exact_frozen_amount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);seed=self.inputs(root)
+            (root/'portfolio_runtime').mkdir()
+            (root/'portfolio_runtime/runner.py').write_text('# Resource-envelope fixture; never executed.\n')
+            with patch.object(week_host,'ROOT',root),patch.object(week_host,'load_api_key',return_value='test-key'):
+                config=week_host.prepare(root/'week',starts='2026-09-14T04:00:00Z',ends='2026-09-19T04:00:00Z',seed=seed)
+                rates={'vcpu_second_usd_nanos':10000,'memory_gib_second_usd_nanos':10000,'state_disk_gib_second_usd_nanos':1000,'s_creation_usd_nanos':100000000}
+                api=Mock(return_value={'rates':rates})
+                at=timestamp('2026-09-13T19:00:00Z')
+                with patch('host_runtime.time.time',return_value=at.timestamp()),patch('portfolio_runtime.sail_host.now',return_value=at):
+                    updated=week_host.reserve_cloud(root/'week',config,api)
+                self.assertGreater(float(updated['cloud_budget_usd']),7.5)  # Resource funding is not the old arbitrary ceiling.
+                self.assertEqual(api.call_count,1)
+                # Reproduce the interrupted receipt-first/config-second save.
+                (root/'week/run.json').write_text(json.dumps(config))
+                restored=week_host.reserve_cloud(root/'week',config,api)
+                self.assertEqual(restored,updated)
+                self.assertEqual(json.loads((root/'week/run.json').read_text()),updated)
+                self.assertEqual(api.call_count,1)
+                with self.assertRaises(ValueError):
+                    week_host.reserve_cloud(root/'week',{**updated,'week_ends_at':'2026-09-19T05:00:00Z'},api)
+
+    def test_cli_defaults_to_available_credit_without_budget(self):
+        arguments=['week_host.py','prepare','--directory','/tmp/unused-portfolio-cli-test','--starts-at','2026-09-14T04:00:00Z',
+                   '--ends-at','2026-09-19T04:00:00Z','--seed','/tmp/unused-seed',
+                   '--rehearsal-starts-at','2026-09-13T19:20:00Z','--rehearsal-ends-at','2026-09-14T00:20:00Z']
+        with patch.object(sys,'argv',arguments),patch.object(week_host,'prepare',return_value={}) as prepare,patch('builtins.print'):
+            week_host.main()
+        self.assertEqual(prepare.call_args.kwargs['spending_mode'],'available_credit')
+        self.assertIsNone(prepare.call_args.kwargs['total'])
+        self.assertEqual(set(prepare.call_args.kwargs['rehearsal']),{'starts_at','ends_at'})
 
 
 if __name__ == "__main__":

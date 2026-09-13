@@ -121,6 +121,38 @@ class ProviderTests(unittest.TestCase):
         self.assertGreater(observed[0], Decimal(0))
         self.assertEqual(self.client.totals()["requests"], 1)
 
+    def test_available_credit_releases_full_snapshot_but_requires_live_reservation_authority(self):
+        config = {**self.config, "spending_mode": "available_credit", "inference_budget_usd": "175.25"}
+        client = p.Client(self.path.parent/"credit.sqlite", config, transport=self.script, clock=lambda: self.at)
+        self.assertEqual(client.allowance(), Decimal("175.25"))
+        body = p.body_for("k3", "source"*10000, "review", max_output=16384)
+        with self.assertRaises(p.AdmissionClosed):
+            client.submit_intent("critical", "k3", body)
+        with self.assertRaises(p.AdmissionClosed):
+            client.allocate("branch", "1")
+        observed = []
+        client.reservation_guard = lambda value: observed.append(value) or True
+        identity = client.submit_intent("critical", "k3", body)
+        self.assertGreater(observed[0], Decimal("0.3"))  # Old$2 initial release cannot fit this.
+        client.reservation_guard = lambda value: False
+        self.assertEqual(client.submit_intent("critical", "k3", body), identity)
+        with self.assertRaises(p.AdmissionClosed):
+            client.submit_intent("another", "k3", body)
+        self.assertEqual(client.totals()["requests"], 1)
+        with self.assertRaises(ValueError):
+            p.Client(client.path, {**config, "spending_mode": "capped", "inference_budget_usd": "100"}, transport=self.script)
+
+    def test_available_credit_snapshot_still_bounds_aggregate_reservations(self):
+        config = {**self.config, "spending_mode": "available_credit", "inference_budget_usd": ".5"}
+        client = p.Client(self.path.parent/"credit.sqlite", config, transport=self.script, clock=lambda: self.at)
+        client.reservation_guard = lambda amount: True
+        body = p.body_for("k3", "source"*10000, "review", max_output=16384)
+        client.submit_intent("first", "k3", body)
+        with self.assertRaises(p.AdmissionClosed):
+            client.submit_intent("second", "k3", body)
+        with self.assertRaises(ValueError):
+            p.Client(client.path, {**config, "spending_mode": "capped"}, transport=self.script)
+
     def test_never_dispatched_crash_gap_retires_at_drain_cutoff(self):
         identity = self.intent()
         self.at = self.config["ends_epoch"] + 86400

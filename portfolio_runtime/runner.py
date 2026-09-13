@@ -51,7 +51,10 @@ def read_config(path):
     if not 60 <= c["ends_epoch"] - c["started_epoch"] <= 8 * 3600:
         raise ValueError("Research window outside bounded range")
     amount = Decimal(str(c["inference_budget_usd"]))
-    if not amount.is_finite() or not 0 < amount <= 100:
+    mode = c.get("spending_mode", "capped")
+    if mode not in ("capped", "available_credit"):
+        raise ValueError("Unknown spending authority")
+    if not amount.is_finite() or amount <= 0 or (mode == "capped" and amount > 100):
         raise ValueError("Expected an explicit research allocation")
     from .contracts import timestamp, identifier
 
@@ -613,10 +616,9 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
             rows = client.observations()
             # Recover all accepted response IDs before planning fresh work after a restart.
             inflight = [r for r in rows if r["status"] not in TERMINAL]
-            concurrency = min(
-                config.get("max_concurrency", 32),
-                [1, 4, 8, 16, 24, 32][min(5, int(elapsed // 900))],
-            )
+            concurrency = config.get("max_concurrency", 32)
+            if config.get("spending_mode") != "available_credit":
+                concurrency = min(concurrency, [1, 4, 8, 16, 24, 32][min(5, int(elapsed // 900))])
             if any(
                 r.get("error") == "provider_http_429" and at - r["updated"] < 120
                 for r in rows

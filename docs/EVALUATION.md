@@ -10,7 +10,7 @@ Paper returns begin with sourced observations and dated decisions. Deposits are 
 
 Subsequent allocation reviews receive the original thesis, targets, observed account return and matching index-relative outcome. They can investigate mistaken assumptions and propose falsifiable changes for the next decision. These are uncontrolled observations: successive closes overlap, market conditions change, and good returns can follow poor reasoning. They are not independent trials or causal attribution. **There is no outcome-trained investment policy or demonstrated investment improvement yet.**
 
-New outcomes can trigger another bounded investment review, regardless of whether returns were positive or negative. They do not justify raising research intensity above the initial exploration allowance. A future investment-policy promotion needs a predeclared challenger, genuinely prospective comparable decisions, sufficient independent market periods and a fixed cost-aware evaluator. Source-extraction scores and a handful of profitable trades cannot substitute for that evidence.
+New outcomes can trigger another investment review, regardless of whether returns were positive or negative. Reviews draw on available Sail credit; more spending does not change the evidence needed to establish improvement. A future investment-policy promotion needs a predeclared challenger, prospective comparable decisions, sufficient independent market periods and a fixed evaluator that accounts for costs. Source-extraction scores and a handful of profitable trades cannot substitute for that evidence.
 
 Source checks are not investment skill. They cannot establish sound business reasoning, valuation completeness or forecast accuracy. Historical replay tests software behavior; it is not an out-of-sample investment record because a model may know later events. Short-term P&L never rewards a research-policy change.
 
@@ -38,7 +38,7 @@ The sign test assumes independent pairs. Distinct companies reduce repeated-comp
 
 A deterministic fifth of company symbols is reserved for **audit only**. Those paired outcomes are recorded separately and never select or roll back a policy. Trial outputs are excluded from ordinary research memory and follow-up questions. Candidates and selection rules are fixed before future evidence dates arrive.
 
-Promotion creates an immutable policy version, applied only to the next research epoch. New dated pairs continue comparing the promoted policy with its predecessor. A qualifying forward regression rolls back to the original policy. This first implementation allows one promotion and one rollback; it cannot edit its evaluator, add policies, change budgets, alter the portfolio mandate or modify the benchmark. Ties, missing evidence and inconclusive results preserve the current policy.
+Promotion creates an immutable policy version, applied only to the next research epoch. New dated pairs continue comparing the promoted policy with its predecessor. A qualifying forward regression rolls back to the original policy. This first implementation allows one promotion and one rollback; it cannot edit its evaluator, add policies, change funding authority, alter the portfolio mandate or modify the benchmark. Ties, missing evidence and inconclusive results preserve the current policy.
 
 ## Sail comparisons
 

@@ -9,7 +9,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime, time as daytime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 import fcntl
 import hashlib
 import json
@@ -36,8 +36,7 @@ def stamp(epoch):
 def read_config(path):
     config = json.loads(Path(path).read_text())
     required = {"schema_version", "service_id", "state_dir", "week_starts_at",
-                "week_ends_at", "weekly_inference_budget_usd",
-                "session_inference_budget_usd", "session_seconds", "account_created_at",
+                "week_ends_at", "session_seconds", "account_created_at",
                 "key_fingerprint", "initial_evidence_path", "admission_path"}
     if not isinstance(config, dict) or not required <= config.keys() or config["schema_version"] != 1:
         raise ValueError("Incomplete weekday service contract")
@@ -50,24 +49,36 @@ def read_config(path):
         raise ValueError("An explicit one-week envelope is required")
     if timestamp(config["account_created_at"]) > start:
         raise ValueError("Paper account must exist before the service window")
-    for key in ("weekly_inference_budget_usd", "session_inference_budget_usd"):
-        value = Decimal(str(config[key]))
-        if not value.is_finite() or not 0 < value <= (100 if key.startswith("session") else 100000):
-            raise ValueError("Invalid inference allocation")
-    if Decimal(config["session_inference_budget_usd"]) > Decimal(config["weekly_inference_budget_usd"]):
-        raise ValueError("An epoch cannot exceed the weekly allocation")
+    mode = config.get("spending_mode", "capped")
+    if mode not in ("capped", "available_credit"):
+        raise ValueError("Unknown spending authority")
+    caps = {"weekly_inference_budget_usd", "session_inference_budget_usd"}
+    if mode == "available_credit":
+        if caps & config.keys():
+            raise ValueError("Available-credit service must not declare fixed inference caps")
+    else:
+        if not caps <= config.keys():
+            raise ValueError("Capped service requires explicit inference allocations")
+        for key in caps:
+            value = Decimal(str(config[key]))
+            if not value.is_finite() or not 0 < value <= (100 if key.startswith("session") else 100000):
+                raise ValueError("Invalid inference allocation")
+        if Decimal(config["session_inference_budget_usd"]) > Decimal(config["weekly_inference_budget_usd"]):
+            raise ValueError("An epoch cannot exceed the weekly allocation")
     if "rehearsal" in config:
         rehearsal = config["rehearsal"]
-        if not isinstance(rehearsal, dict) or set(rehearsal) != {"starts_at", "ends_at", "inference_budget_usd", "session_inference_budget_usd"}:
+        fields = {"starts_at", "ends_at"} | ({"inference_budget_usd", "session_inference_budget_usd"} if mode == "capped" else set())
+        if not isinstance(rehearsal, dict) or set(rehearsal) != fields:
             raise ValueError("Invalid rehearsal contract")
         begins, ends = timestamp(rehearsal["starts_at"]), timestamp(rehearsal["ends_at"])
         if not timedelta(hours=1) <= ends-begins <= timedelta(hours=8) or ends > start:
             raise ValueError("Rehearsal must be 1–8 hours and end before the week starts")
         if timestamp(config["account_created_at"]) > begins:
             raise ValueError("Paper account must exist before rehearsal")
-        budget, cap = (Decimal(str(rehearsal[key])) for key in ("inference_budget_usd", "session_inference_budget_usd"))
-        if not budget.is_finite() or not cap.is_finite() or not 0 < cap <= budget <= Decimal(config["weekly_inference_budget_usd"]) or cap > 100:
-            raise ValueError("Rehearsal must fit inside the inference envelope")
+        if mode == "capped":
+            budget, cap = (Decimal(str(rehearsal[key])) for key in ("inference_budget_usd", "session_inference_budget_usd"))
+            if not budget.is_finite() or not cap.is_finite() or not 0 < cap <= budget <= Decimal(config["weekly_inference_budget_usd"]) or cap > 100:
+                raise ValueError("Rehearsal must fit inside the inference envelope")
     if type(config["session_seconds"]) is not int or not 600 <= config["session_seconds"] <= 28800:
         raise ValueError("Each research epoch is bounded to 10 minutes–8 hours")
     for key in ("state_dir", "initial_evidence_path", "admission_path", "seed_dir"):
@@ -126,6 +137,7 @@ class Service:
                  refresher=None, market_factory=YahooMarketData, policy_factory=None, trace_factory=None,
                  disk_free=None):
         self.config, self.clock, self.sleeper, self.executor = config, clock, sleeper, executor
+        self.available_credit = config.get("spending_mode") == "available_credit"
         self.root = Path(config["state_dir"])
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.refresher = refresher or self._refresh
@@ -296,8 +308,9 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                  "status": status, "completed_at": completed_at}
         if not public:
             totals = self.totals("rehearsal")
-            state.update(inference_budget_usd=self.rehearsal["inference_budget_usd"], inference=totals,
-                         unsettled_requests=totals["unsettled_requests"])
+            state.update(inference=totals, unsettled_requests=totals["unsettled_requests"])
+            if not self.available_credit:
+                state["inference_budget_usd"] = self.rehearsal["inference_budget_usd"]
         return state
 
     def update_rehearsal(self):
@@ -322,10 +335,12 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                   "progress_at": stamp(self.progress_at), "stage": self.stage,
                   "progress_timeout_seconds": 1800 if self.stage in ("refreshing_sources", "paper_reconciliation") else 600,
                   "reason_code": self.reason,
-                  "weekly_inference_budget_usd": self.config["weekly_inference_budget_usd"],
+                  "spending_mode": self.config.get("spending_mode", "capped"),
                   "funding": self.funding_plan,
                   "storage": {"free_bytes": self.disk_free(), "minimum_free_bytes": 1024**3},
                   "inference": self.totals()}
+        if not self.available_credit:
+            result["weekly_inference_budget_usd"] = self.config["weekly_inference_budget_usd"]
         if self.rehearsal:
             result["rehearsal"] = self.rehearsal_state()
         # A dedicated writer prevents partial/overlapping atomic replacements
@@ -433,12 +448,13 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                     observed_at=stamp(self.clock()))
 
     def _funding_plan(self, mode, reason, *, latest_receipt=None):
-        initial = Decimal(self.config["session_inference_budget_usd"])
-        cap = min(initial, Decimal("1.5")) if mode == "maintenance" else initial
+        initial = None if self.available_credit else Decimal(self.config["session_inference_budget_usd"])
+        cap = None if initial is None else min(initial, Decimal("1.5")) if mode == "maintenance" else initial
         interval = max(21600, self.config["session_seconds"]) if mode == "maintenance" else self.config["session_seconds"]
         return {"schema_version": 1, "mode": mode, "reason_code": reason,
-                "epoch_cap_usd": format(cap, "f"), "minimum_interval_seconds": interval,
-                "planned_inference_usd_per_day": float(cap*Decimal(86400)/Decimal(interval)),
+                "spending_mode": self.config.get("spending_mode", "capped"),
+                "epoch_cap_usd": format(cap, "f") if cap is not None else None, "minimum_interval_seconds": interval,
+                "planned_inference_usd_per_day": float(cap*Decimal(86400)/Decimal(interval)) if cap is not None else None,
                 "expansion_eligible": False,
                 "expansion_blocker": "prospective_investment_policy_comparator_not_implemented",
                 "investment_roi_proven": False, "latest_value_receipt": latest_receipt}
@@ -782,6 +798,18 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         if window is None:
             return Decimal(0)
         all_reserved = Decimal(self.totals()["reserved_usd"])
+        if self.available_credit:
+            doc = self.admission()
+            if not doc["allow_new_research"] or doc.get("stop_requested"):
+                return Decimal(0)
+            try:
+                additional = Decimal(str(doc["max_additional_inference_usd"]))
+                absolute = Decimal(str(doc["max_inference_committed_usd"]))
+                if not additional.is_finite() or not absolute.is_finite():
+                    return Decimal(0)
+                return max(Decimal(0), min(additional, absolute-all_reserved))
+            except (KeyError, ValueError, ArithmeticError):
+                return Decimal(0)
         envelope = Decimal(self.config["weekly_inference_budget_usd"])
         rehearsal_reserved = Decimal(self.totals("rehearsal")["reserved_usd"]) if self.rehearsal else Decimal(0)
         if window[0] == "rehearsal":
@@ -828,17 +856,17 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         evidence = self.daily_evidence()
         self.funding_plan = self.choose_funding(evidence)
         if phase == "rehearsal":
-            cap = min(Decimal(self.funding_plan["epoch_cap_usd"]), Decimal(self.rehearsal["session_inference_budget_usd"]))
+            cap = None if self.available_credit else min(Decimal(self.funding_plan["epoch_cap_usd"]), Decimal(self.rehearsal["session_inference_budget_usd"]))
             interval = self.config["session_seconds"]
-            self.funding_plan = {**self.funding_plan, "epoch_cap_usd": format(cap, "f"), "research_window": "rehearsal",
+            self.funding_plan = {**self.funding_plan, "epoch_cap_usd": format(cap, "f") if cap is not None else None, "research_window": "rehearsal",
                 "minimum_interval_seconds": interval,
-                "planned_inference_usd_per_day": float(cap*Decimal(86400)/Decimal(interval))}
+                "planned_inference_usd_per_day": float(cap*Decimal(86400)/Decimal(interval)) if cap is not None else None}
         if self.funding_plan["mode"] == "maintenance":
             with self.connect() as db:
                 last = db.execute("SELECT max(created) FROM epochs").fetchone()[0]
             if last is not None and now-last < self.funding_plan["minimum_interval_seconds"]:
                 return None
-        allowance = min(Decimal(self.funding_plan["epoch_cap_usd"]), self.allowance())
+        allowance = self.allowance() if self.available_credit else min(Decimal(self.funding_plan["epoch_cap_usd"]), self.allowance())
         additional = self.admission().get("max_additional_inference_usd")
         if additional is not None:
             try:
@@ -848,10 +876,16 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                 allowance = min(allowance, limit)
             except (ValueError, ArithmeticError):
                 return None
-        if allowance < Decimal("0.10"):
+        if allowance <= 0 or (not self.available_credit and allowance < Decimal("0.10")):
             return None
         evidence = self._enrich_prices(evidence)
         now = int(self.clock())
+        if self.available_credit:
+            # Source capture can take minutes. Freeze the latest credit grant,
+            # not a balance observed before that work or before a top-up.
+            allowance = self.allowance().quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+            if allowance <= 0:
+                return None
         end = min(int(anchor+(slot+1)*self.config["session_seconds"]), int(window_end),
                   int(datetime.combine(local.date()+timedelta(days=1), daytime(), NEW_YORK).timestamp()))
         if end-now < 360 or self.active_window(now) != window or not self.admission_allowed():
@@ -874,6 +908,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                   "wave_seconds": self.config.get("wave_seconds", 600),
                   "min_wave_seconds": 300, "research_policy": self.lab.policy(),
                   "funding_plan": self.funding_plan, "research_window": phase}
+        if self.available_credit:
+            config["spending_mode"] = "available_credit"
         for key in ("publish_url", "publish_token_path", "voyage_id", "voyage_headers"):
             if self.config.get(key):
                 config[key] = self.config[key]

@@ -224,7 +224,10 @@ class Client:
     def __init__(self, path, config, *, transport=None, clock=time.time):
         config = json.loads(canonical(config))
         budget = Decimal(str(config["inference_budget_usd"]))
-        if not budget.is_finite() or not 0 < budget <= 100:
+        mode = config.get("spending_mode", "capped")
+        if mode not in ("capped", "available_credit"):
+            raise ValueError("Unknown spending authority")
+        if not budget.is_finite() or budget <= 0 or (mode == "capped" and budget > 100):
             raise ValueError("Invalid frozen inference allowance")
         if (
             any(
@@ -276,6 +279,8 @@ CREATE TABLE IF NOT EXISTS allocations (id TEXT PRIMARY KEY,reserved TEXT NOT NU
                 )
             }
         )
+        if "spending_mode" in config:
+            frozen["spending_mode"] = config["spending_mode"]
         with db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute(
@@ -367,6 +372,11 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
     def allowance(self, at=None):
         at = self.clock() if at is None else at
         c = self.config
+        if c.get("spending_mode") == "available_credit":
+            # This is the fresh supervisor-funded credit snapshot, not a
+            # preset dollar budget. Every new request still needs live credit
+            # authority and its exact conservative reservation.
+            return Decimal(c["inference_budget_usd"])
         fraction = max(
             Decimal(0),
             min(
@@ -398,6 +408,10 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
             self._admission_open(db)
             if Decimal(self.totals(db)["committed_usd"]) + amount > self.allowance():
                 raise AdmissionClosed("Run budget unavailable")
+            if self.config.get("spending_mode") == "available_credit":
+                guard = getattr(self, "reservation_guard", None)
+                if guard is None or guard(amount) is not True:
+                    raise AdmissionClosed("External spending authority unavailable")
             db.execute(
                 "INSERT INTO allocations(id,reserved) VALUES (?,?)",
                 (identity, str(amount)),
@@ -493,7 +507,7 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
             if Decimal(self.totals(db)["committed_usd"]) + reserve > self.allowance(at):
                 raise AdmissionClosed("Paced allowance unavailable")
             guard = getattr(self, "reservation_guard", None)
-            if guard is not None and guard(reserve) is not True:
+            if (self.config.get("spending_mode") == "available_credit" and guard is None) or (guard is not None and guard(reserve) is not True):
                 raise AdmissionClosed("External spending authority unavailable")
             identity = "pa-" + str(uuid.uuid4())
             db.execute(

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {Supervisor,creditDecision,validateConfig,parseExec,boundedText} from '../supervisor.mjs';
+import {Supervisor,creditDecision,validateConfig,parseExec,boundedText,hostReserve} from '../supervisor.mjs';
 const start=Date.parse('2026-09-14T04:00:00Z');
 const config=()=>({schema_version:1,service_id:'week-20260914',box_id:'sb_00000000-0000-0000-0000-000000000001',manifest_sha256:'a'.repeat(64),starts_at:new Date(start).toISOString(),ends_at:'2026-09-19T04:00:00Z',weekly_total_usd:'100',weekly_inference_usd:'92.5',cloud_budget_usd:'7.5',credit_floor_usd:'2'});
 class Storage{
@@ -18,6 +18,13 @@ class Storage{
  }
 }
 const billing={balance:12000,balance_unavailable:false,has_metronome_customer:true,avg_cost_per_day:1000};
+const rates={vcpu_second_usd_nanos:4167,memory_gib_second_usd_nanos:2222,state_disk_gib_second_usd_nanos:194};
+function availableConfig() {
+ const c={...rehearsalConfig(),spending_mode:'available_credit'};
+ delete c.weekly_total_usd;delete c.weekly_inference_usd;
+ delete c.rehearsal.inference_budget_usd;delete c.rehearsal.session_inference_budget_usd;
+ return c;
+}
 test('billing units, pending reservations, unknown balance, and actionable runway',()=>{
  const h={inference:{known_cost_usd:'5',committed_usd:'15'}};
  let d=creditDecision(billing,config(),h,start);assert.equal(d.balance_usd,120);assert.equal(d.usable_usd,77.5);assert.equal(d.allow,true);
@@ -86,7 +93,11 @@ function harness({at=start,running=true,balance=billing,compute=0,health={}}={})
  const c=new Supervisor(s,{EMAIL:{async send(message){sent.push(message);return {messageId:'test-message'};}}},{now:()=>state.at,fetcher:async(url,options={})=>{
   calls.push({url,options});
   if(url.includes('/usage/summary')){if(state.brokenBilling)throw Error('billing_network');return Response.json(state.balance);}
-  if(url.includes('/spend?'))return Response.json({pricing_configured:true,sailboxes:[{sailbox_id:config().box_id,estimated_total_cost_usd_nanos:state.compute*1e9}]});
+  if(url.includes('/spend?'))return Response.json({pricing_configured:true,rates:state.brokenRates?{}:rates,sailboxes:[{sailbox_id:config().box_id,estimated_total_cost_usd_nanos:state.compute*1e9}]});
+  if(url.endsWith('/v1/sailboxes/'+config().box_id)){
+   if(state.brokenMetadata)throw Error('metadata_network');
+   return Response.json({sailbox_id:config().box_id,vcpu_count:1,memory_mib:2048,state_disk_size_gib:32});
+  }
   if(url.includes('/files?'))return new Response('{}');
   if(url.endsWith('/sleep'))return Response.json({status:'sleeping'});
   if(url.endsWith('/exec')){
@@ -106,6 +117,61 @@ function harness({at=start,running=true,balance=billing,compute=0,health={}}={})
 }
 
 const rehearsalConfig=()=>({...config(),rehearsal:{starts_at:new Date(start-8*3600000).toISOString(),ends_at:new Date(start-3*3600000).toISOString(),inference_budget_usd:'10',session_inference_budget_usd:'2'}});
+
+test('available-credit configuration has no fixed week or rehearsal dollar authority',()=>{
+ const c=availableConfig();assert.equal(validateConfig(c).spending_mode,'available_credit');
+ for(const change of [{weekly_inference_usd:'100'},{weekly_total_usd:'100'},
+   {rehearsal:{...c.rehearsal,inference_budget_usd:'10'}},{spending_mode:'anything'}])assert.throws(()=>validateConfig({...c,...change}));
+});
+
+test('available-credit grants subtract outstanding and reserved work, and top-ups expand headroom',()=>{
+ const c=availableConfig(), h={inference:{known_cost_usd:'300',committed_usd:'325',reserved_usd:'350'}};
+ const d=creditDecision({...billing,balance:25000},c,h,start,7);
+ assert.equal(d.max_inference_committed_usd,'541.00000000');assert.equal(d.max_additional_inference_usd,'191.00000000');
+ assert.equal(d.outstanding_usd,25);assert.equal(d.allow,true);
+ const topup=creditDecision({...billing,balance:35000},c,h,start,7);
+ assert.equal(topup.max_additional_inference_usd,'291.00000000');
+ const empty=creditDecision({...billing,balance:3400},c,h,start,7);
+ assert.equal(empty.allow,false);assert.equal(empty.reason,'credit_low');
+ assert.equal(creditDecision({...billing,balance_unavailable:true},c,h,start,7).allow,false);
+});
+
+test('available-credit runway uses observed burn rather than balance or proposed spending',()=>{
+ const c=availableConfig(), h={funding:{planned_inference_usd_per_day:1000000}};
+ const d=creditDecision({...billing,balance:12000,avg_cost_per_day:100},c,h,start,7);
+ assert.equal(d.runway_days,111);assert.equal(d.warn,false);
+ const idle=creditDecision({...billing,avg_cost_per_day:0},c,h,start,7);
+ assert.equal(idle.runway_days,null);assert.equal(idle.warn,false);
+});
+
+test('dynamic host reservation uses real resource ceilings through the shutdown grace',()=>{
+ const c=availableConfig(), box={sailbox_id:c.box_id,vcpu_count:1,memory_mib:2048,state_disk_size_gib:32};
+ const reserve=hostReserve({rates},box,c,start);
+ assert.equal(reserve,(4167+2*2222+32*194)*(5*86400+300)/1e9);
+ assert.equal(hostReserve({rates},box,c,Date.parse(c.ends_at)+300000),0);
+ assert.throws(()=>hostReserve({rates:{}},box,c,start),/reserve/);
+ assert.throws(()=>hostReserve({rates},{...box,sailbox_id:'other'},c,start),/reserve/);
+});
+
+test('available-credit rehearsal is not capped at ten dollars and compute reserve overrun does not stop it',async()=>{
+ const c=availableConfig(), at=start-7*3600000;
+ const f=harness({at,compute:9,health:{inference:{known_cost_usd:'300',committed_usd:'301',reserved_usd:'302'},rehearsal:{inference:{known_cost_usd:'30',committed_usd:'31'}}}});
+ await f.c.configure(c);await f.c.tick();
+ assert.equal(f.files()[0].allow_new_research,true);assert(Number(f.files()[0].max_additional_inference_usd)>100);
+ assert.equal(f.files()[0].stop_requested,false);assert.equal((await f.s.get('control')).budget_parked,undefined);
+ assert((await f.s.get('latest')).compute_reserved_usd>6);
+ assert(!f.commands().some(c=>Array.isArray(c.command)&&c.command.at(-1)==='/workspace/host-stop.py'));
+});
+
+test('missing current host rates or metadata closes credit admission without blocking stop or recovery',async()=>{
+ for(const flag of ['brokenRates','brokenMetadata']) {
+   const f=harness({running:false});f.state[flag]=true;await f.c.configure(availableConfig());await f.c.tick();
+   assert.equal(f.files()[0].allow_new_research,false);assert.equal(f.files()[0].max_additional_inference_usd,'0');
+   assert(f.commands().some(c=>typeof c.command==='string'&&c.command.includes('host-boot')));
+   await f.c.pause(true);f.state.running=true;await f.c.tick();
+   assert(f.commands().some(c=>Array.isArray(c.command)&&c.command.at(-1)==='/workspace/host-stop.py'));
+ }
+});
 test('rehearsal config preserves the week and accepts only a bounded explicit prelude',()=>{
  const c=rehearsalConfig();assert.equal(validateConfig(c).starts_at,config().starts_at);
  for(const change of [{ends_at:c.starts_at,starts_at:new Date(start-9*3600000).toISOString()},

@@ -28,13 +28,13 @@ Inspect `capture.json` before launch. A partial source bank is not complete cove
 
 [`scripts/week_host.py`](../scripts/week_host.py) separates preparation, provisioning, and enrollment. Use `--help` for its current arguments. Preparation freezes an explicit service window, spending policy, evidence and a stopped seed. Provisioning installs the reviewed code and verifies the seed; enrollment arms the independent supervisor only after a readiness receipt matches the installed manifest.
 
-There is no project-wide $100 default. Each deployment records its authorized allowance and pacing rules. Additional inference should be supported by useful coverage, resolved questions or measured experimental results. A larger account balance does not by itself demonstrate benefit or justify more work. Frozen accounting and risk limits remain separate from the research policy being tested.
+Preparation defaults to `spending_mode: available_credit`: no fixed daily, session, rehearsal or weekly inference cap, and no gradual release of request dollars. Each research session freezes a fresh available-credit grant; every new request still checks the live grant and outstanding reservations. Top-ups become available automatically to subsequent sessions. Useful new research and decision reviews determine work; balance alone is not evidence of value. Explicit `--spending-mode capped --budget …` remains available for a deliberately bounded experiment.
 
-An optional rehearsal adds a separately capped research window before the scheduled week, using the same paper ledger. Sunday research cannot create Sunday market fills. After the window ends, accepted requests settle before one completion email; the service then waits for the original weekday start. The rehearsal does not shorten the week or create another portfolio.
+An optional rehearsal adds a timed research window before the scheduled week, using the same paper ledger and credit policy. Set `--rehearsal-starts-at` and `--rehearsal-ends-at`; available-credit mode takes no dollar caps. Sunday research cannot create Sunday market fills. After the window ends, accepted requests settle before one completion email; the service then waits for the original weekday start. The rehearsal does not shorten the week or create another portfolio.
 
 The supervisor's private secrets are `SAIL_API_KEY`, `ADMIN_TOKEN` and `BACKUP_TOKEN`. The guest receives route-scoped credential injection for inference, publication and backup uploads. It cannot read private backups, change supervisor settings, access brokerage credentials, or make live orders. The site has its own private publication token and accepts only the public schema.
 
-Weekday Sailboxes use 1 vCPU, 2 GiB memory and a 32 GiB disk ceiling; one-off experiments retain 8 GiB. Provisioning checks current rates against the full resource ceilings through the shutdown grace period. Below 1 GiB of free disk, the service stops admitting new research while continuing receipt recovery. Capacity and billing checks are separate from evidence of useful inference.
+Weekday Sailboxes use 1 vCPU, 2 GiB memory and a 32 GiB disk ceiling; one-off experiments retain 8 GiB. Before freezing an available-credit host, provisioning replaces the offline cloud estimate with a reserve calculated from current provider rates through the final deadline and shutdown grace. This funds the resource commitment; it is not an inference-spending cap. Below 1 GiB of free disk, the service stops admitting new research while continuing receipt recovery.
 
 Inspect or control the enrolled service through its private API:
 
@@ -54,7 +54,7 @@ Service heartbeat and main-thread progress are separate. A live heartbeat thread
 
 Email reports low funding, billing failures, unrecovered progress failures, backup problems and week completion. Routine research sessions do not each send another completion email. Provider acceptance is recorded separately from inbox delivery; ambiguous sends are retained without automatic duplication. The previously tested one-off run notifier remains separate from the weekday supervisor.
 
-A low-funding pause can recover after a top-up within the enrolled authority. Owner pauses, the service deadline, accounting problems and exhausted authorizations require their respective resolution; a deposit does not override them. Shutdown has a fixed boundary. If outstanding requests or backups remain unresolved, the alert reports that reconciliation is needed instead of claiming a clean completion.
+A low-funding pause recovers automatically after a top-up. Inference retains cloud funding and a small balance floor; accepted requests retain their conservative cost reservations until settled. Owner pauses, the service deadline and accounting problems still require their respective resolution. Shutdown has a fixed boundary. If outstanding requests or backups remain unresolved, the alert reports that reconciliation is needed instead of claiming a clean completion.
 
 ## Public record
 

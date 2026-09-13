@@ -320,6 +320,119 @@ class ServiceTests(unittest.TestCase):
                                     "inference_budget_usd": "10", "session_inference_budget_usd": "2"}
         return self.config["rehearsal"]
 
+    def available_credit_config(self):
+        self.config["spending_mode"] = "available_credit"
+        self.config.pop("weekly_inference_budget_usd")
+        self.config.pop("session_inference_budget_usd")
+        if "rehearsal" in self.config:
+            self.config["rehearsal"] = {k: v for k, v in self.config["rehearsal"].items() if k in ("starts_at", "ends_at")}
+
+    def test_available_credit_contract_omits_all_fixed_inference_caps(self):
+        self.rehearsal_config()
+        self.available_credit_config()
+        path = self.root/"config.json"
+        save(path, self.config)
+        self.assertEqual(read_config(path), self.config)
+        for changed in ({**self.config, "weekly_inference_budget_usd": "100"},
+                        {**self.config, "spending_mode": "unlimited"},
+                        {**self.config, "rehearsal": {**self.config["rehearsal"], "inference_budget_usd": "10"}}):
+            save(path, changed)
+            with self.assertRaises(ValueError):
+                read_config(path)
+
+    def test_available_credit_uses_full_fresh_balance_and_topups_next_epoch(self):
+        self.available_credit_config()
+        self.at = timestamp(MONDAY).timestamp()
+        service = self.service()
+        self.admit(max_additional_inference_usd="175.25", max_inference_committed_usd="175.25")
+        with service.locked():
+            service.tick()
+        first = self.runs[0]
+        self.assertEqual(Decimal(first["inference_budget_usd"]), Decimal("175.25"))
+        self.assertEqual(first["spending_mode"], "available_credit")
+        client = Client(Path(first["state_dir"])/"requests.sqlite", first, transport=lambda *a: None, clock=lambda: first["started_epoch"])
+        self.assertEqual(client.allowance(), Decimal("175.25"))
+        health = service.health()
+        self.assertNotIn("weekly_inference_budget_usd", health)
+        self.assertIsNone(health["funding"]["epoch_cap_usd"])
+        self.assertIsNone(health["funding"]["planned_inference_usd_per_day"])
+        self.admit(max_additional_inference_usd="425.25", max_inference_committed_usd="425.25")
+        resumed = self.service()
+        with resumed.locked():
+            resumed.tick()
+        self.assertEqual(Decimal(self.runs[1]["inference_budget_usd"]), Decimal("425.25"))
+        self.assertEqual(json.loads((Path(first["state_dir"])/"config.json").read_text()), first)
+
+    def test_available_credit_never_releases_unknown_holds_or_ignores_live_drop(self):
+        self.available_credit_config()
+        self.at = timestamp(MONDAY).timestamp()
+        self.admit(max_additional_inference_usd="175", max_inference_committed_usd="175")
+        service = self.service()
+        service.initialize()
+        identity, config = service.prepare_epoch()
+        client = Client(Path(config["state_dir"])/"requests.sqlite", config, transport=lambda *a: None, clock=lambda: self.at)
+        client.reservation_guard = service.reservation_allowed
+        from portfolio_runtime.provider import body_for, AdmissionClosed
+        body = body_for("k3", "source"*10000, "review", max_output=16384)
+        self.admit(max_additional_inference_usd=".5", max_inference_committed_usd=".5")
+        request = client.submit_intent("accepted", "k3", body)
+        with self.assertRaises(AdmissionClosed):
+            client.submit_intent("second", "k3", body)
+        self.admit(max_additional_inference_usd="0", max_inference_committed_usd=".1")
+        self.assertEqual(client.submit_intent("accepted", "k3", body), request)
+        with self.assertRaises(AdmissionClosed):
+            client.submit_intent("third", "k3", body)
+        with client.connect() as db:
+            db.execute("UPDATE requests SET status='completed',response_id='resp_unknown',error='terminal_usage_unsettled' WHERE id=?", (request,))
+        with service.connect() as db:
+            db.execute("UPDATE epochs SET status='drained_unsettled' WHERE id=?", (identity,))
+        held = Decimal(service.totals()["committed_usd"])
+        self.at = config["ends_epoch"]
+        self.admit(max_additional_inference_usd="10", max_inference_committed_usd="10")
+        _, following = service.prepare_epoch()
+        self.assertEqual(Decimal(following["inference_budget_usd"]), Decimal(10)-held)
+        self.assertEqual(Decimal(service.totals()["reserved_usd"]), 10)
+
+    def test_available_credit_refreshes_grant_after_slow_sources_and_keeps_value_gate(self):
+        self.rehearsal_config()
+        self.available_credit_config()
+        self.config["adaptive_spending"] = True
+        self.at = timestamp(self.config["rehearsal"]["starts_at"]).timestamp()
+        service = self.service()
+        service.initialize()
+        self.admit(max_additional_inference_usd="25", max_inference_committed_usd="25")
+        def slow_capture(data):
+            self.at += 60
+            self.admit(max_additional_inference_usd="200", max_inference_committed_usd="200")
+            return data
+        with patch.object(service, "_enrich_prices", side_effect=slow_capture):
+            _, config = service.prepare_epoch()
+        self.assertEqual(Decimal(config["inference_budget_usd"]), 200)
+        for _ in range(3):
+            self.admit(max_additional_inference_usd="200", max_inference_committed_usd="200")
+            with service.locked():
+                service.tick()
+        self.assertEqual(self.runs[2]["funding_plan"]["mode"], "maintenance")
+        self.assertIsNone(self.runs[2]["funding_plan"]["epoch_cap_usd"])
+        self.assertEqual(Decimal(self.runs[2]["inference_budget_usd"]), 200)
+        self.assertEqual(self.runs[2]["funding_plan"]["minimum_interval_seconds"], 3600)
+        self.assertNotIn("inference_budget_usd", service.health()["rehearsal"])
+
+    def test_available_credit_requires_fresh_complete_grant(self):
+        self.available_credit_config()
+        self.at = timestamp(MONDAY).timestamp()
+        service = self.service()
+        service.initialize()
+        for extra in ({}, {"max_additional_inference_usd": "100"},
+                      {"max_additional_inference_usd": "NaN", "max_inference_committed_usd": "100"},
+                      {"max_additional_inference_usd": "100", "max_inference_committed_usd": "-1"}):
+            self.admit(**extra)
+            self.assertEqual(service.allowance(), 0)
+            self.assertIsNone(service.prepare_epoch())
+        self.admit(max_additional_inference_usd="100", max_inference_committed_usd="100")
+        self.at += 181
+        self.assertEqual(service.allowance(), 0)
+
     def test_rehearsal_contract_requires_bounded_pre_week_envelope(self):
         rehearsal = self.rehearsal_config()
         path = self.root/"config.json"
@@ -787,6 +900,36 @@ class DecisionBoundaryTests(unittest.TestCase):
     completed = runtime_fixtures.RunnerTests.completed
     checked_allocation = runtime_fixtures.RunnerTests.checked_allocation
     ledger = runtime_fixtures.RunnerTests.ledger
+
+    def test_available_credit_uses_configured_concurrency_immediately_legacy_still_warms_up(self):
+        for mode, expected in (("available_credit", 8), ("capped", 1)):
+            with self.subTest(mode=mode):
+                directory = self.root/mode
+                config = {**self.config, "state_dir": str(directory), "spending_mode": mode,
+                          "max_concurrency": 8, "fetch_filings": False}
+                research = Research(directory/"research.sqlite", self.data)
+                for i in range(10):
+                    research.add("task-"+str(i), 0, "company", "AAPL", "kimi_flex", "source", "question", max_output=16)
+                with research.connect() as db:
+                    db.execute("INSERT INTO waves VALUES(0,?,?)", (self.at, "{}"))
+                calls, guards = [], []
+                def transport(method, route, body, identity):
+                    calls.append(identity)
+                    return {"id": "resp_"+identity, "status": "queued", "model": body["model"]}
+                client = Client(directory/"requests.sqlite", config, transport=transport, clock=lambda: self.at)
+                client.reservation_guard = lambda amount: guards.append(amount) or True
+                controller = SimpleNamespace(trace=None, initialize_epoch=lambda *a: None,
+                    admission_allowed=lambda: True, should_stop=lambda: False, paper_sync=lambda ledger: None,
+                    cache_ready=lambda research: False, checkpoint=lambda c,l,r,cl,p: p)
+                with (patch.object(runner, "initialize", return_value=(client, research, self.ledger())),
+                      patch.object(runner, "ThreadPoolExecutor", ImmediatePool),
+                      patch.object(runner.time, "time", side_effect=lambda: self.at),
+                      patch.object(runner, "utc_now", side_effect=lambda: stamp(self.at))):
+                    runner.run(config, self.data, once=True, controller=controller)
+                self.assertEqual(client.totals()["requests"], expected)
+                self.assertEqual(len(calls), expected)
+                self.assertEqual(len(guards), expected)
+
     def test_due_precommitted_open_cannot_be_superseded_by_new_postopen_research(self):
         first = self.checked_allocation(wave=0)
         with self.ledger() as ledger, patch.object(runner, "utc_now", return_value="2026-09-13T15:00:00Z"):
