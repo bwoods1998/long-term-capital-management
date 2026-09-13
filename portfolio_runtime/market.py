@@ -272,9 +272,12 @@ def parse_chart(raw, ticker, *, captured_at, source=None):
                 raise ValueError("Corporate-action records must be a bounded mapping")
             for key, action in mapping.items():
                 effective_at = _epoch(action["date"])
-                if key != str(action["date"]) or timestamp(effective_at) > timestamp(
-                    captured_at
-                ):
+                # Yahoo can index a dividend under a nearby session timestamp
+                # instead of its explicit effective date (observed for Visa).
+                # Preserve that mapping in the exact raw source; action.date
+                # remains authoritative for the existing accounting guards.
+                if (not isinstance(key, str) or not key.isascii() or not key.isdecimal()
+                    or timestamp(effective_at) > timestamp(captured_at)):
                     raise ValueError(
                         "Corporate-action dates must be identified and already observed"
                     )

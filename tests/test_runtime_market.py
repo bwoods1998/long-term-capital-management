@@ -156,6 +156,66 @@ class MarketAdapterTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 parse_chart(raw(fixture(events=events)), 'AAPL', captured_at=MONDAY_CAPTURE)
 
+    def test_historical_visa_mapping_key_uses_explicit_date_and_allows_monday_portfolio_fill(self):
+        # Exact observed Visa event: outer key Aug 12, explicit date Aug 11.
+        events = {'dividends': {'1786541400': {'date': 1786455000, 'amount': 0.67}}}
+        snapshot = parse_chart(raw(fixture('V', monday=False, events=events)), 'V', captured_at=SUNDAY)
+        self.assertEqual(snapshot.actions[0]['effective_at'], '2026-08-11T13:30:00Z')
+        self.assertEqual(snapshot.actions[0]['amount'], '0.67')
+        self.assertLess(timestamp(snapshot.actions[0]['effective_at']), timestamp(SUNDAY))
+        with PortfolioLedger(self.path / 'visa.sqlite', created_at=SUNDAY) as ledger:
+            ledger.register_universe(UniverseSnapshot(snapshot_id='visa-universe', effective_at='2026-09-11T00:00:00Z',
+                captured_at=SUNDAY, symbols=('AAPL', 'V'), source=CALENDAR_SOURCE, expires_at='2026-09-20T00:00:00Z'))
+            ledger.propose('visa-decision', decided_at=SUNDAY, targets={'AAPL': '0.1', 'V': '0.04'},
+                universe_id='visa-universe', evidence_refs=['saved-price-source'], expected_open_at=MONDAY_OPEN,
+                calendar_source=CALENDAR_SOURCE)
+            market = FixtureMarket(self.path, now=SUNDAY,
+                fixtures={'AAPL': fixture(monday=False), 'V': fixture('V', monday=False, events=events)})
+            quote = market.snapshot_price('V')
+            self.assertEqual(quote['as_of'], '2026-09-11T20:00:00Z')
+            self.assertEqual(market.fill_pending(ledger)['status'], 'waiting_for_market')
+            self.assertEqual(ledger.public_state()['history'], [])
+            market.now = MONDAY_CAPTURE
+            market.fixtures = {'AAPL': fixture(), 'V': fixture('V', events=events)}
+            self.assertEqual(market.fill_pending(ledger)['status'], 'filled')
+            state = ledger.public_state()
+            self.assertEqual({holding['symbol'] for holding in state['holdings']}, {'AAPL', 'V'})
+            self.assertEqual(state['history'][0]['at'], MONDAY_OPEN)
+            cash = state['cash']
+            market.now = MONDAY_CLOSE_CAPTURE
+            market.fixtures = {'AAPL': fixture(closed=True), 'V': fixture('V', closed=True, events=events)}
+            self.assertEqual(market.mark_close(ledger)['status'], 'marked')
+            self.assertEqual(ledger.public_state()['cash'], cash)
+            self.assertFalse(any(event['kind'] == 'action_flag' for event in ledger.events()))
+
+    def test_mismatched_action_keys_cannot_bypass_future_malformed_or_held_action_guards(self):
+        future = epoch('2026-09-15T13:30:00Z')
+        current = epoch(MONDAY_OPEN)
+        for events in (
+            {'dividends': {str(future + 86400): {'date': future, 'amount': 0.67}}},
+            {'dividends': {str(current + 86400): {'date': current, 'amount': None}}},
+            {'splits': {str(current + 86400): {'date': current, 'numerator': 2, 'denominator': 0}}},
+        ):
+            with self.assertRaises(ValueError):
+                parse_chart(raw(fixture(events=events)), 'AAPL', captured_at=MONDAY_CAPTURE)
+        for kind, details in (('dividends', {'amount': 0.67}), ('splits', {'numerator': 2, 'denominator': 1})):
+            with self.subTest(kind=kind):
+                path = self.path / ('held-' + kind + '.sqlite')
+                with PortfolioLedger(path, created_at=SUNDAY) as ledger:
+                    ledger.register_universe(UniverseSnapshot(snapshot_id='universe', effective_at='2026-09-11T00:00:00Z',
+                        captured_at=SUNDAY, symbols=('AAPL',), source=CALENDAR_SOURCE, expires_at='2026-09-20T00:00:00Z'))
+                    self.propose(ledger)
+                    market = FixtureMarket(self.path, now=MONDAY_CAPTURE, fixtures={'AAPL': fixture()})
+                    market.fill_pending(ledger)
+                    action_at = epoch('2026-09-14T14:00:00Z')
+                    market.fixtures['AAPL'] = fixture(closed=True, events={kind: {
+                        str(action_at + 86400): {'date': action_at, **details}}})
+                    market.now = MONDAY_CLOSE_CAPTURE
+                    with self.assertRaisesRegex(ValueError, 'corporate action'):
+                        market.mark_close(ledger)
+                    self.assertEqual(ledger.public_state()['status'], 'suspended')
+                    self.assertEqual(len(ledger.public_state()['history']), 1)
+
     def test_fetch_is_bounded_readonly_and_captures_exact_source_bytes(self):
         body = raw(fixture(monday=False))
         requests = []
