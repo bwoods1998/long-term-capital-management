@@ -134,6 +134,25 @@ test('written admission timestamps round-trip through the actual Python guest pa
  }
 });
 
+test('repeated guest errors alert despite fresh heartbeat and advancing progress',async()=>{
+ for(const reason of ['runtime_error','data_unavailable']){
+  const f=harness({health:{status:'needs_attention',reason_code:reason}});
+  await f.c.configure(config());
+  for(let tick=0;tick<5;tick++){
+   if(tick)f.advance(60000);
+   f.state.health.heartbeat_at=new Date(f.state.at).toISOString();
+   f.state.health.progress_at=new Date(f.state.at).toISOString();
+   const result=await f.c.tick();
+   assert.equal(result.status,'needs_attention');
+  }
+  assert.equal(f.sent.length,1);
+  assert.match(f.sent[0].subject,/service needs attention/);
+  assert.ok(f.sent[0].text.includes('Reason: '+reason+'.'));
+  assert.equal((await f.s.get('mail:'+config().service_id+':service:'+reason)).state,'accepted');
+  assert.equal(f.commands().filter(c=>Array.isArray(c.command)&&['/workspace/host-stop.py','force-stop'].includes(c.command.at(-1))).length,0);
+ }
+});
+
 test('available-credit configuration has no fixed week or rehearsal dollar authority',()=>{
  const c=availableConfig();assert.equal(validateConfig(c).spending_mode,'available_credit');
  for(const change of [{weekly_inference_usd:'100'},{weekly_total_usd:'100'},
