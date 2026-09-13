@@ -153,6 +153,40 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             p.Client(client.path, {**config, "spending_mode": "capped"}, transport=self.script)
 
+    def test_available_credit_rechecks_first_dispatch_but_preserves_ambiguous_and_accepted_recovery(self):
+        config = {**self.config, "spending_mode": "available_credit"}
+        client = p.Client(self.path.parent/"credit.sqlite", config, transport=self.script, clock=lambda: self.at)
+        client.reservation_guard = lambda amount: True
+        body = p.body_for("kimi_flex", "evidence", "question")
+        identity = client.submit_intent("one", "kimi_flex", body)
+        original = client.rows()[0]
+        restarted = p.Client(client.path, config, transport=self.script, clock=lambda: self.at)
+        self.assertEqual(restarted.step(identity), original)  # No restored authority yet.
+        checked = []
+        restarted.reservation_guard = lambda amount: checked.append(amount) or False
+        self.assertEqual(restarted.step(identity), original)
+        self.assertEqual(checked, [Decimal(0)])
+        self.assertEqual(self.script.calls, [])
+        restarted.reservation_guard = lambda amount: True
+        self.script.replies = [TimeoutError("ambiguous"), response("queued"), response()]
+        self.assertEqual(restarted.step(identity)["attempts"], 1)
+        restarted.reservation_guard = lambda amount: self.fail("Already-attempted recovery must retain its identity")
+        self.assertEqual(restarted.step(identity)["status"], "queued")
+        self.assertEqual(restarted.step(identity)["status"], "completed")
+        self.assertEqual([call[0] for call in self.script.calls], ["POST", "POST", "GET"])
+        self.assertEqual(self.script.calls[0], self.script.calls[1])
+
+    def test_available_credit_revoked_never_dispatched_hold_still_cancels_at_deadline(self):
+        config = {**self.config, "spending_mode": "available_credit"}
+        client = p.Client(self.path.parent/"credit.sqlite", config, transport=self.script, clock=lambda: self.at)
+        client.reservation_guard = lambda amount: True
+        identity = client.submit_intent("one", "kimi_flex", p.body_for("kimi_flex", "evidence", "question"))
+        client.reservation_guard = lambda amount: False
+        self.at = config["ends_epoch"]
+        row = client.step(identity)
+        self.assertEqual((row["status"], row["cost"], row["attempts"]), ("cancelled", "0", 0))
+        self.assertEqual(self.script.calls, [])
+
     def test_never_dispatched_crash_gap_retires_at_drain_cutoff(self):
         identity = self.intent()
         self.at = self.config["ends_epoch"] + 86400

@@ -556,6 +556,13 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                     db.execute("UPDATE requests SET status='cancelled',cost='0',updated=?,error='never_dispatched_before_deadline' WHERE id=? AND response_id IS NULL AND attempts=0",
                                (self.clock(), identity))
                     return dict(db.execute("SELECT * FROM requests WHERE id=?", (identity,)).fetchone())
+            if self.config.get("spending_mode") == "available_credit" and not row["response_id"] and row["attempts"] == 0:
+                # A crash may separate reservation from the first paid POST.
+                # This existing hold already counts toward global commitments;
+                # recheck authority without reserving or counting it twice.
+                guard = getattr(self, "reservation_guard", None)
+                if guard is None or guard(Decimal(0)) is not True:
+                    return row
             if not row["response_id"] and (
                 self.clock() - row["created"] > 23 * 3600 or row["attempts"] >= 10
             ):
