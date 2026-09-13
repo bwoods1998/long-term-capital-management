@@ -57,7 +57,14 @@ completion windows, so their comparison cannot isolate model or scheduler effect
 The original short-case evaluation and timeline replay keep their separate frozen
 caps; every experiment also uses the same cumulative money ledger.
 
-## Run locally
+## Session procedure
+
+These commands document the completed September 12–13 pilot. Its one-time task
+allowance has been consumed, and new admissions also stop at September 13, 05:10
+UTC. A later deadline argument cannot extend that window. Read the
+[saved results](../public/robustness.json) and the grader diagnosis below, or run
+the offline tests. A future paid comparison needs a new bounded protocol that
+preserves this experiment and its spending history.
 
 Creating freezes fixtures, requests, prompt, and our parser/grader/controller plus
 transport implementation hashes. Creation and status do not make model calls:

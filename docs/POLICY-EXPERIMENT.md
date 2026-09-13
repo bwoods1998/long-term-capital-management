@@ -115,7 +115,14 @@ not fully controlled. Three imbalanced blocks cannot establish a universal speed
 The useful result is a visible set of matched observations, uncertainty, and
 cost arithmetic to guide the next experiment.
 
-## Commands and recovery
+## Session procedure and recovery
+
+These commands document the completed September 12–13 pilot and its single
+permitted replacement. That replacement has already run. New admissions also
+stop at September 13, 05:10 UTC; a later deadline argument cannot extend the
+window. The [saved results](../public/policy-experiment.json) and offline tests
+remain available without paid requests. A future comparison needs a new bounded
+protocol that preserves both existing attempts and their spending history.
 
 Creation is local. A replacement is allowed only after the original v1 protocol
 has an explicit closure, and only if prior admissions plus the new tasks fit the

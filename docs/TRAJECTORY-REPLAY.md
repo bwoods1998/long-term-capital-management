@@ -53,7 +53,15 @@ unapproved record contains a hostile instruction; blocking it demonstrates the
 provenance gate, **not** model resistance to instructions inside an approved source.
 The fixtures are released through a condensed local replay, not a live issuer feed.
 
-## Run and recover
+## Session procedure and recovery
+
+These commands document the completed September 12–13 pilot. Its one-time task
+allowance has been consumed, and new admissions also stop at September 13, 05:10
+UTC. A later deadline argument cannot extend that window. To explore the results
+now, use the [saved replay](../public/trajectory-replay.json) and
+[Lesson 5](../lessons/05-research-across-time.md); neither requires another model
+call. A future paid comparison needs a new bounded protocol that preserves this
+experiment and its spending history.
 
 Creating and inspecting a campaign makes no provider calls:
 
