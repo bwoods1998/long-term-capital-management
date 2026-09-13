@@ -51,6 +51,8 @@ For a runtime update, pause and verify a fresh backup before installing reviewed
 
 ## Funding, progress and notifications
 
+The [September 13 rehearsal audit](runs/2026-09-13-rehearsal-audit.md) records the latest deployed corrections, live verification and remaining limits before the scheduled paper week.
+
 Cloudflare checks actual Sail billing, reserves for unsettled requests and cloud usage, and grants short-lived spending authority. Missing or stale authority prevents new requests. The guest also enforces the grant at request reservation, preserving existing commitments rather than pretending failed or unfinished work was free.
 
 Service heartbeat and main-thread progress are separate. A live heartbeat thread cannot conceal a stalled research controller. Recovery first requests a graceful stop; a verified bootstrap and its specific service child can be terminated after the recovery grace period. Restart reuses saved request identities and the same portfolio. Unknown create or request outcomes are not permission to start duplicates.
