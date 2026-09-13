@@ -312,7 +312,8 @@ export class Supervisor {
     const forceAt = ended ? end+300000 : stopping ? Date.parse(control.stop_started_at)+300000 : Infinity;
     try {
       const reason = ended?'week_complete':control.paused?'manual_pause':computeExhausted?'cloud_budget_exhausted':at<start||rehearsalGap||credit.reason==='rehearsal_budget_exhausted'?'scheduled_wait':credit.reason==='ready'?null:credit.reason==='credit_low'?'funding_needed':'recovering';
-      const admission = {schema_version:1,service_id:c.service_id,updated_at:iso(at),
+      // The guest's immutable contracts require canonical whole-second UTC.
+      const admission = {schema_version:1,service_id:c.service_id,updated_at:iso(at).replace(/\.\d{3}Z$/, 'Z'),
         allow_new_research:credit.allow && !stopping && at>=start && !rehearsalGap,reason_code:reason,
         max_inference_committed_usd:credit.max_inference_committed_usd,
         max_additional_inference_usd:credit.max_additional_inference_usd,

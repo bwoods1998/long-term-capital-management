@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {Supervisor,creditDecision,validateConfig,parseExec,boundedText,hostReserve} from '../supervisor.mjs';
 const start=Date.parse('2026-09-14T04:00:00Z');
 const config=()=>({schema_version:1,service_id:'week-20260914',box_id:'sb_00000000-0000-0000-0000-000000000001',manifest_sha256:'a'.repeat(64),starts_at:new Date(start).toISOString(),ends_at:'2026-09-19T04:00:00Z',weekly_total_usd:'100',weekly_inference_usd:'92.5',cloud_budget_usd:'7.5',credit_floor_usd:'2'});
@@ -117,6 +118,21 @@ function harness({at=start,running=true,balance=billing,compute=0,health={}}={})
 }
 
 const rehearsalConfig=()=>({...config(),rehearsal:{starts_at:new Date(start-8*3600000).toISOString(),ends_at:new Date(start-3*3600000).toISOString(),inference_budget_usd:'10',session_inference_budget_usd:'2'}});
+
+test('written admission timestamps round-trip through the actual Python guest parser',async()=>{
+ for(const millis of [123,999]) {
+  const at=start+millis, f=harness({at});
+  await f.c.configure(availableConfig());await f.c.tick();
+  const admission=f.files()[0];
+  assert.equal(admission.allow_new_research,true);
+  const parsed=execFileSync('python3',['-c',
+   'from portfolio_runtime.contracts import timestamp; import sys; print(int(timestamp(sys.argv[1]).timestamp()))',admission.updated_at],
+   {cwd:new URL('../..',import.meta.url),encoding:'utf8'});
+  assert.equal(Number(parsed),Math.floor(at/1000));
+  const age=at-Number(parsed)*1000;
+  assert(age>=0&&age<1000); // Never future-dated, and inside the guest freshness bound.
+ }
+});
 
 test('available-credit configuration has no fixed week or rehearsal dollar authority',()=>{
  const c=availableConfig();assert.equal(validateConfig(c).spending_mode,'available_credit');
