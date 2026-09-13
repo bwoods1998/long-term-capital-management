@@ -12,6 +12,6 @@ The experiment: does a persistent agent make better decisions when it can spend 
 
 - Paper ledger implemented; no live trades or investment performance yet.
 - Dated SEC financial facts captured for all 503 securities in the current research universe.
-- Preparing the first five-hour hosted run: adaptive research, competing allocations and measured Sail comparisons.
+- Hosted research is underway. The [live portfolio](https://blakewoods.us/portfolio/) shows the latest work and checkpoint; [run notes](docs/runs/2026-09-13.md) record the first sustained experiment.
 
 [Run and inspect](docs/OPERATIONS.md) · [Roadmap](docs/ROADMAP.md)
