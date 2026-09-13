@@ -32,7 +32,9 @@ A local [source-update inbox](SOURCE-WATCH.md) now records fresh captures, filte
 
 The [durable local queue](RESEARCH-QUEUE.md) now accepts up to two explicit assignments with frozen evidence, due times, deadlines, and at most $3 reserved per job. One controller resumes the same investigation and request identities. It neither admits source candidates automatically nor reviews or publishes completed work.
 
-Next: improve the manual handoff from a curated source candidate to checked facts and a new assignment. The current research source cache is frozen; repeatedly reading it does not discover a new filing, and the queue cannot import candidate captures. Broaden source registration and schedule only work with a useful trigger. Sleeping between events is compatible with a persistent agent.
+The [reviewed source handoff](SOURCE-CURATION.md) now binds each fact and commentary item to selected source versions, freezes a private bundle, and requires a separate factual approval before enqueue. An offline synthetic integration proof covers that route; the live watch has not produced a substantive financial update to use it. Existing assignments retain their old sources, and the two pilot slots remain consumed.
+
+Next: curate an actual useful disclosure update, broaden source registration, and define a subsequent bounded queue protocol without resetting earlier history. Repeatedly reading a frozen cache does not discover a new filing. Schedule work only for a useful trigger; sleeping between events is compatible with a persistent agent.
 
 ## 4. Compare decisions and compute budgets
 

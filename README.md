@@ -21,6 +21,7 @@ The question: **Can an agent maintain a coherent investment strategy over time�
 - [Measured model comparisons](docs/EVALUATION-RESULTS.md): all attempts, costs, and limits of the development test.
 - [Evidence timeline replay](docs/TRAJECTORY-REPLAY.md): fictional disclosures test memory, corrections, and abstention across sequential agent updates.
 - [Source-update inbox](docs/SOURCE-WATCH.md): notice changed documents without buying unnecessary research.
+- [Reviewed source handoff](docs/SOURCE-CURATION.md): bind checked facts to exact source versions before a new assignment.
 - [Bounded research queue](docs/RESEARCH-QUEUE.md): freeze explicit assignments and resume them within shared spending limits.
 - [Applied Sail products](docs/SAIL-PRODUCTS.md): live Voyages and a measured Sailbox persistence experiment.
 - [Scheduling and cache results](docs/POLICY-EXPERIMENT.md): measured reuse, output costs, and preserved failures.
@@ -44,7 +45,7 @@ The first thesis asks whether Microsoft's AI investment can turn into durable ca
 
 The model comparison uses sixteen authored cases, repeated across three models, plus a separate uniform-critic experiment. A sequential synthetic replay tests whether agents update their prior beliefs when evidence changes. These are development tests, not benchmarks of investment performance. The [Sailbox proof](data/experiments/sailbox-validation-2026-09-12.json) tested isolated execution and recovery after sleep/pause/resume with synthetic request state; it did not place live inference or trading inside the VM.
 
-A local queue now runs up to two explicitly assigned investigations, each with a maximum $3 reservation. Enqueue freezes checked evidence without making API calls; the controller preserves request identities through pauses and restarts. Source candidates still require a manual checked-packet handoff, and completed work still requires explicit review and publication.
+A local queue runs up to two explicitly assigned investigations, each with a maximum $3 reservation. Enqueue freezes checked evidence without making API calls; the controller preserves request identities through pauses and restarts. A source-curation bundle now carries separately reviewed facts and their exact source versions into an assignment. The handoff has an offline synthetic proof; the live watch has found no substantive financial update to curate. The original two job slots remain consumed, and completed research still requires explicit review and publication.
 
 The first two queued assignments reached different boundaries: one passed critique but needed corrections in independent review; the other exhausted its four research turns while requesting calculations and never produced a report. That second job stopped for attention without a retry or a higher turn limit.
 
@@ -65,6 +66,6 @@ Sail credentials are stored in an owner-readable, Git-ignored `.env`. Local runs
 
 One persistent thesis and a public ledger → controlled research comparisons and private read-only portfolio reconciliation → scheduled research with traces and cost controls → simulated trade proposals → owner-approved live orders → optionally, a precisely bounded autonomous mandate.
 
-Sail inference supplies model calls, Voyages trace live workflows, and Sailbox execution has a measured persistence proof. A local source monitor detects candidate updates; the bounded queue runs explicit assignments without changing reviewed evidence. Broader source coverage, a curated source-to-assignment handoff, and portfolio decisions are subsequent work. Each new capability must earn its complexity through a useful experiment.
+Sail inference supplies model calls, Voyages trace live workflows, and Sailbox execution has a measured persistence proof. A local source monitor detects candidate updates; explicit curation binds selected captures to checked facts; the bounded queue runs frozen assignments. Broader source coverage, an observed substantive update through that handoff, and portfolio decisions are subsequent work. Each new capability must earn its complexity through a useful experiment.
 
 Research costs and investment results will be reported separately. Public market-data display depends on the applicable data permissions. This is a personal software experiment, with no customer funds or public trading controls.

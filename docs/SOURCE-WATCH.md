@@ -58,13 +58,15 @@ or authorize publication. A changed number still needs its units, period,
 definition, and source checked before it enters a new packet. Decisions are final
 for that content version; a later genuinely different capture has its own record.
 
-The [durable local queue](RESEARCH-QUEUE.md) now runs explicitly enqueued bounded
-assignments. It freezes checked packets and registered baseline captures; it never
-imports candidates from this inbox. Moving an accepted capture into checked facts
-and a supported source baseline remains a manual curation handoff. The current
-source reader remains frozen, so rerunning an old assignment alone does not consume
-newer evidence. Neither candidate acceptance nor queue completion reviews or
-publishes a research report.
+The [reviewed source handoff](SOURCE-CURATION.md) can now bind an accepted
+substantive capture to a manually checked packet and exact item-level provenance.
+That private bundle needs its own factual approval before the
+[durable local queue](RESEARCH-QUEUE.md) can copy it into a new assignment.
+The queue never directly imports an unchecked candidate. Existing jobs and the
+baseline cache remain frozen, so rerunning an old assignment alone does not
+consume newer evidence. Neither candidate acceptance, bundle approval, nor queue
+completion reviews or publishes the resulting research report. This route has
+an offline synthetic proof; the live watch has not supplied a substantive update.
 
 ## What is measured
 

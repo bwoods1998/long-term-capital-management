@@ -12,8 +12,10 @@ through the queue. Existing research and private account state remain separate.
 
 ## Enqueue explicitly
 
-The checked packet and both registered source captures must already exist. The
-queue reads the frozen baseline cache; source-watch candidates are never inputs.
+For a baseline assignment, the checked packet and both registered source captures
+must already exist. The queue reads the frozen baseline cache. A separately
+approved [curation bundle](SOURCE-CURATION.md) supplies an alternative set of
+checked inputs; raw source-watch candidates are never direct inputs.
 Choose a stable nonsecret job key and explicit timezone-aware due/deadline values:
 
 ```sh
@@ -32,6 +34,18 @@ artifacts, source hashes, question, model profiles, limits, and schedule private
 in the shared SQLite ledger. Reusing the key with identical inputs returns the
 same job; changed inputs produce a collision error. Later cache changes cannot
 refresh that job's evidence.
+
+For a reviewed source update, replace `--packet ...` with `--bundle BUNDLE_ID`.
+The two inputs are mutually exclusive. Enqueue validates the approval receipt and
+current substantive source content, then saves the selected packet, complete
+source snapshots, and receipt in one transaction. It does not copy facts from the
+old packet or fill missing captures from the baseline cache. The bundle's checked
+evidence date remains the assignment's cutoff; enqueue does not make it fresher.
+
+The current pilot's two durable slots have already been consumed. These commands
+describe the supported assignment contract; they do not grant a third job. The
+new bundle route has an isolated synthetic integration proof and creates no new
+live paid assignment in this session.
 
 **Evidence freezes at enqueue; reviewed memory freezes when the investigation is
 first created.** Memory can therefore be newer than the packet. It remains a dated
@@ -78,6 +92,13 @@ before creating an investigation. A crash between creation and attachment finds
 that same UUID and accepts it only if it is pristine and matches the assignment.
 Frozen sources enter the investigation before its first paid step. A transaction
 attaches the queue identity and source state together.
+
+An identical existing job key returns its frozen assignment before consulting
+live bundle freshness. Later source changes can block a new enqueue, but cannot
+replace the evidence of an existing job or its accepted request. Curated jobs
+validate their saved receipt against their saved packet and snapshots, without
+reloading the current source inbox or bundle record. Legacy assignments retain
+their original serialized inputs, hashes, and derived investigation identities.
 
 The investigator's normal request ledger still owns idempotency and known response
 IDs. A resumed queue retrieves known accepted work. An uncertain submission retains

@@ -110,6 +110,15 @@ def _get(db, job_key):
             data['deadline'] != row['deadline'] or row['investigation_id'] !=
             str(uuid.uuid5(NAMESPACE, job_key + ':' + row['input_sha256']))):
         raise ValueError('Queued assignment integrity check failed')
+    if data.get('schema_version') == 2:
+        import source_curation as curation
+        curation.validate_receipt(data['curation_receipt'], packet=data['packet'],
+                                  snapshots=data['snapshots'], evidence_cutoff=data['evidence_cutoff'],
+                                  as_of=p.iso(row['created']))
+        if not (data['bundle_id'] == data['request']['bundle_id'] == data['curation_receipt']['bundle_id']):
+            raise ValueError('Queued curation identity changed')
+    elif data.get('schema_version') != 1:
+        raise ValueError('Unrecognized queued assignment version')
     return row, data
 
 
@@ -119,16 +128,23 @@ def _event(db, job_key, kind):
 
 
 def enqueue(db, job_key, question, *, packet=None, model=ANALYST, critic_model=CRITIC,
-            max_turns=4, due, deadline, root=ROOT):
+            max_turns=4, due, deadline, root=ROOT, bundle_id=None):
     initialize(db)
     if not isinstance(job_key, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}', job_key):
         raise ValueError('Use a stable, nonsecret assignment key of at most eighty characters')
     p.require_text(question, 400, 'research question')
     due, deadline = timestamp(due), timestamp(deadline)
     profiles, limit = _profiles(model, critic_model, max_turns)
-    checked = p.validate_packet(deepcopy(packet if packet is not None else p.load_packet()))
+    if bundle_id is not None:
+        if packet is not None:
+            raise ValueError('Choose a checked packet or a reviewed curation bundle, not both')
+        p.require_text(bundle_id, 80, 'curation bundle identity')
+        checked = None
+    else:
+        checked = p.validate_packet(deepcopy(packet if packet is not None else p.load_packet()))
     request = {'question': question, 'model': model, 'critic_model': critic_model,
-               'max_turns': max_turns, 'due': due, 'deadline': deadline, 'packet': checked}
+               'max_turns': max_turns, 'due': due, 'deadline': deadline}
+    request.update({'bundle_id': bundle_id} if bundle_id is not None else {'packet': checked})
     with lock(db):
         existing = db.execute('SELECT 1 FROM research_queue_jobs WHERE job_key=?', (job_key,)).fetchone()
         if existing:
@@ -139,27 +155,50 @@ def enqueue(db, job_key, question, *, packet=None, model=ANALYST, critic_model=C
         now = time.time()
         if not now < deadline <= now + 24 * 3600 or due > deadline:
             raise ValueError('Use a future deadline within one day and a due time no later than it')
-        cutoff = p.iso(now)[:10]
-        store = sources.SourceStore(root)
-        snapshots = {}
-        for source in checked['sources']:
-            identifier = source['id']
-            registered = sources.allowed_source(identifier)
-            if source != {key: registered[key] for key in source}:
-                raise ValueError('Checked packet source does not match the registered identity')
-        for identifier in sources.SOURCE_REGISTRY:
-            artifact = store._read(store.path / (identifier + '.json'), cutoff)
-            if artifact['id'] != identifier:
-                raise ValueError('Frozen source filename does not match its identity')
-            snapshots[identifier] = artifact
-        data = {'schema_version': 1, 'request': request, **request, 'profiles': profiles,
-                'max_reserved_cents': limit, 'evidence_cutoff': cutoff, 'snapshots': snapshots}
-        encoded, digest = p.encoded(data), p.digest(data)
-        investigation_id = str(uuid.uuid5(NAMESPACE, job_key + ':' + digest))
         with db:
             db.execute('BEGIN IMMEDIATE')
             if db.execute('SELECT COUNT(*) FROM research_queue_jobs').fetchone()[0] >= MAX_JOBS:
                 raise ValueError('This queue permits at most two durable assignments; history is not reset')
+            cutoff = p.iso(now)[:10]
+            receipt = None
+            if bundle_id is not None:
+                import source_curation as curation
+                # The same write transaction freezes both freshness validation
+                # and assignment insertion relative to source-watch updates.
+                bundle = curation.load_reviewed(db, bundle_id, as_of=p.iso(now), require_current=True)
+                checked = p.validate_packet(deepcopy(bundle['packet']))
+                snapshots = deepcopy(bundle['snapshots'])
+                cutoff, receipt = bundle['evidence_cutoff'], deepcopy(bundle['receipt'])
+                if (set(snapshots) != set(sources.SOURCE_REGISTRY) or
+                        {source['id'] for source in checked['sources']} != set(snapshots)):
+                    raise ValueError('A curated assignment must freeze every registered source')
+                curation.validate_receipt(receipt, packet=checked, snapshots=snapshots,
+                                          evidence_cutoff=cutoff, as_of=p.iso(now))
+                if receipt['bundle_id'] != bundle_id:
+                    raise ValueError('Curation bundle identity changed before enqueue')
+            else:
+                store = sources.SourceStore(root)
+                snapshots = {}
+                for identifier in sources.SOURCE_REGISTRY:
+                    artifact = store._read(store.path / (identifier + '.json'), cutoff)
+                    if artifact['id'] != identifier:
+                        raise ValueError('Frozen source filename does not match its identity')
+                    snapshots[identifier] = artifact
+            for source in checked['sources']:
+                registered = sources.allowed_source(source['id'])
+                if source != {key: registered[key] for key in source}:
+                    raise ValueError('Checked packet source does not match the registered identity')
+            for identifier, artifact in snapshots.items():
+                sources.validate_snapshot(artifact, cutoff=cutoff)
+                if identifier != artifact['id']:
+                    raise ValueError('Frozen source identity does not match its snapshot')
+            data = {'schema_version': 1 if receipt is None else 2, 'request': request, **request,
+                    'packet': checked, 'profiles': profiles, 'max_reserved_cents': limit,
+                    'evidence_cutoff': cutoff, 'snapshots': snapshots}
+            if receipt is not None:
+                data['curation_receipt'] = receipt
+            encoded, digest = p.encoded(data), p.digest(data)
+            investigation_id = str(uuid.uuid5(NAMESPACE, job_key + ':' + digest))
             db.execute('''INSERT INTO research_queue_jobs
                 (job_key,created,due,deadline,input_json,input_sha256,investigation_id)
                 VALUES(?,?,?,?,?,?,?)''', (job_key, now, due, deadline, encoded, digest, investigation_id))
@@ -301,6 +340,8 @@ def status(db, job_key=None):
                      'reserved_usd': str(Decimal(sum(run['reserved_cents'] for run in runs)) / 100),
                      'known_estimated_usd': str(sum((cost for cost in known if cost is not None), Decimal(0))),
                      'unknown_runs': sum(cost is None for cost in known), 'model_calls': len(runs)})
+        if data['schema_version'] == 2:
+            jobs[-1]['curation_bundle_id'] = data['curation_receipt']['bundle_id']
     return {'schema_version': 1, 'jobs': jobs, 'publication': 'unchanged', 'review': 'manual', 'maximum_jobs': MAX_JOBS}
 
 
@@ -365,7 +406,9 @@ def main():
     enqueue_parser = commands.add_parser('enqueue')
     enqueue_parser.add_argument('job_key')
     enqueue_parser.add_argument('--question', required=True)
-    enqueue_parser.add_argument('--packet', type=Path, required=True)
+    evidence_input = enqueue_parser.add_mutually_exclusive_group(required=True)
+    evidence_input.add_argument('--packet', type=Path)
+    evidence_input.add_argument('--bundle', dest='bundle_id')
     enqueue_parser.add_argument('--due', required=True)
     enqueue_parser.add_argument('--deadline', required=True)
     enqueue_parser.add_argument('--model', default=ANALYST)
@@ -379,7 +422,9 @@ def main():
     args = parser.parse_args()
     with closing(initialize(p.database())) as db:
         if args.command == 'enqueue':
-            result = enqueue(db, args.job_key, args.question, packet=json.loads(args.packet.read_text()),
+            result = enqueue(db, args.job_key, args.question,
+                             packet=json.loads(args.packet.read_text()) if args.packet else None,
+                             bundle_id=args.bundle_id,
                              model=args.model, critic_model=args.critic_model, max_turns=args.max_turns,
                              due=args.due, deadline=args.deadline)
         elif args.command in {'pause', 'resume'}:

@@ -9,6 +9,9 @@ flowchart TD
     Sources[Public source documents] --> Packet[Manually checked evidence packet]
     Packet --> Research[Local thesis or investigator controller]
     Packet --> Queue[Explicit bounded assignment queue]
+    Sources --> Watch[Source-update inbox]
+    Watch --> Bundle[Checked provenance and bundle review]
+    Bundle --> Queue
     Queue --> Research
     Sources --> Tools[Registered source tools and calculator]
     Research <--> Tools
@@ -40,7 +43,9 @@ The model returns a private draft. Local checks enforce its schema and citation 
 
 `source_watch.py` records new captures separately from the investigator's frozen cache. Durable due times, failure backoff, immutable observations, content comparison, and local curation prevent repeated page fetches from becoming duplicate research. It ignores one observed ephemeral request-trace line for comparison while retaining full raw captures. Accepting a source candidate does not revise checked facts or start a paid assignment. See [the source inbox](SOURCE-WATCH.md).
 
-`research_queue.py` accepts up to two explicit local assignments. Enqueue freezes the checked packet, registered baseline captures, model profiles, and schedule without calling Sail. Reviewed memory freezes when the investigation is first created. A single controller runs due jobs with stable investigation/request identities, pause checks, deadlines, and a maximum $3 reservation per job inside the shared ledger. It stops for review or attention and cannot review, publish, or import source-watch candidates. The source-candidate-to-checked-packet handoff remains manual; queued evidence cannot refresh itself. See [the queue protocol](RESEARCH-QUEUE.md).
+`source_curation.py` freezes manually checked packets with exact source versions and item-level provenance. Source acceptance and factual bundle approval are separate immutable records. The handoff checks arithmetic, hashes, observation dates, and current substantive content; the reviewer still checks accounting meaning. A newer changed page cannot silently substitute for an approved snapshot. See [the source handoff](SOURCE-CURATION.md).
+
+`research_queue.py` accepts up to two explicit local assignments. Enqueue freezes a checked packet with baseline captures, or copies a separately reviewed curation bundle, together with model profiles and schedule. It makes no Sail call. Reviewed memory freezes when the investigation is first created. A single controller runs due jobs with stable investigation/request identities, pause checks, deadlines, and a maximum $3 reservation per job inside the shared ledger. It cannot review, publish, or import unchecked source-watch candidates. Bundle freshness is checked atomically at first enqueue; recovery thereafter uses the job's frozen inputs. The original two slots remain consumed. See [the queue protocol](RESEARCH-QUEUE.md).
 
 `trajectory_replay.py` uses separate fictional evidence and the same financial ledger to test sequential memory. Each next episode freezes the actual prior typed model state, without reference answers or grades. Deterministic admission rejects duplicate, future-dated, and unapproved records before inference. Full history and a current notebook see the same eligible evidence with different historical context. Neither synthetic answers nor evaluation results can enter real-company thesis history.
 

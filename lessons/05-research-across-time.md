@@ -108,8 +108,10 @@ Useful wakeups matter too. The [source watcher](../docs/SOURCE-WATCH.md) found t
 two Microsoft pages changed their request trace identifiers between downloads.
 Those differences were noise, not new financial disclosures. A narrow, versioned
 filter ignores only that known line while preserving raw captures and changed
-financial figures. Accepted source changes still require curation; a durable
-assignment-queue handoff is separate work, not a result established by this replay.
+financial figures. Accepted source changes still require curation. The separate
+[reviewed bundle handoff](../docs/SOURCE-CURATION.md) now has an offline synthetic
+integration proof; it is not a result established by this replay or a live new
+financial disclosure.
 
 Choose one harder next case: a wrong prior belief, conflicting approved sources,
 or a missing correction. Write the expected behavior before asking any model.
