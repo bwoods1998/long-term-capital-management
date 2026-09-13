@@ -109,7 +109,7 @@ transport authentication/idempotency headers, and event delivery failure. These 
 local contract tests; an actual recorded workflow and dashboard inspection are needed
 to claim successful live telemetry.
 
-At 01:04 UTC on September 13, a [read-only lifecycle reconciliation](../../data/experiments/voyage-reconciliation-2026-09-13.json)
+At 01:04 UTC on September 13, a [read-only lifecycle reconciliation](../../experiments/data/experiments/voyage-reconciliation-2026-09-13.json)
 confirmed all thirteen known Voyages on the server: ten completed and three failed,
 with matching identities, workflow hashes, and local status. All known traces had
 confirmed local delivery flags. The check sent only lifecycle GETs and left the
@@ -125,7 +125,7 @@ retried. This trace uncertainty is separate from inference usage and billing.
 ## Observed Sailbox validation — September 12, 2026
 
 The clean-VM experiment completed. The public-safe result artifact is
-[`data/experiments/sailbox-validation-2026-09-12.json`](../../data/experiments/sailbox-validation-2026-09-12.json).
+[`data/experiments/sailbox-validation-2026-09-12.json`](../../experiments/data/experiments/sailbox-validation-2026-09-12.json).
 The controller and guest runner are `sail_sandbox.py` and
 `scripts/sandbox_validation.py`. Preparation freezes an exact file allowlist and
 SHA-256 manifest; it never copies the working directory recursively.

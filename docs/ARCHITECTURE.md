@@ -1,96 +1,43 @@
 # Architecture
 
-The project follows public companies across the AI stack: what the evidence says,
-what remains uncertain, and what would change the view. Microsoft is the first
-reviewed case. All nine now have source-checked cash bridges and completed experimental research workflows. They are not holdings or fully reviewed investment cases.
+One persistent coordinator maintains the portfolio and research state. Research branches can investigate alternatives; only the coordinator can admit a paper allocation. The public site reads a small saved projection.
 
-```mermaid
-flowchart LR
-    Sources[Issuer disclosures] --> Evidence[Frozen evidence and source dates]
-    Evidence --> Agent[Research controller]
-    Agent <--> Sail[Sail inference]
-    Agent <--> Tools[Local tools or isolated Sailbox]
-    Agent <--> Ledger[Private request and memory ledger]
-    Agent --> Critic[Evidence critic and bounded repair]
-    Critic --> Review[Publication review]
-    Review --> Site[Saved public website]
-    Review --> Agent
-    Agent --> Voyage[Voyages trace]
-    Failures[Recorded failures] --> Candidate[Candidate research method]
-    Candidate --> Gate[Separate development and validation checks]
-    Gate --> Champion[Promote or retain current method]
-```
+| Component | Responsibility |
+|---|---|
+| [`evidence.py`](../portfolio_runtime/evidence.py) | Capture dated constituents and SEC financial facts, preserving sources, periods and hashes. |
+| [`runner.py`](../portfolio_runtime/runner.py) | Pace research waves to a wall-clock deadline, recover requests and publish checkpoints. |
+| [`research.py`](../portfolio_runtime/research.py) | Choose unresolved questions, retain prior work and compare research methods. |
+| [`provider.py`](../portfolio_runtime/provider.py) | Freeze Sail requests, reserve cost and recover accepted responses by identity. |
+| [`ledger.py`](../portfolio_runtime/ledger.py) | Record paper decisions, fills, cash, holdings and sourced valuations. |
+| [`sail_host.py`](../portfolio_runtime/sail_host.py) | Provision restricted Sailboxes, preserve state through restart and isolate research forks. |
+| Public checkpoint | Publish portfolio state and template-based progress without raw model responses or credentials. |
 
-## Evidence and research
+## Evidence and decisions
 
-Checked facts preserve units, periods, arithmetic, and source IDs. Registered
-source captures preserve publication/retrieval dates, hashes, and exact passage
-positions. Source text is evidence, never permission to execute instructions.
+The initial universe contains 503 listed securities, captured on September 13, 2026. Membership comes from a [community-maintained list](https://en.wikipedia.org/wiki/List_of_S%26P_500_companies); financial observations come from the [SEC Companyfacts API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces). All 503 captures succeeded.
 
-The investigator chooses bounded source reads and calculations, saves hypotheses
-and invalidation conditions, and drafts a report. Its next invocation resumes
-saved requests and evidence. Context compaction preserves observed passages,
-calculations, and hypotheses while removing repeated transcript text.
+These are selected whole-company US-GAAP facts, not complete filings or a licensed constituent feed. Delayed Yahoo Finance observations from September 11 accompany the research bank; they are valuation inputs, not executable quotes. Custom tags, segments and industry-specific measures may be missing. Annual, quarterly, year-to-date and balance-sheet observations retain their original periods. A filing captured later cannot silently enter an earlier evidence cutoff.
 
-The original live tool registry covers two Microsoft documents. The broader
-nine-company corpus is a separately frozen research input; listing a company
-on the website does not silently add it to the live source monitor.
+The first sustained run starts with this frozen bank. Later waves address coverage gaps and questions raised by previous work, with bounded retrieval of pre-cutoff annual filings for deeper evidence. Every new capture retains its original source and hash. Memory carries earlier analyses and failures; numerical claims are checked against the original observations. Passing that check does not establish a sound valuation or justify a trade.
 
-An independent critic may request one repair. Schema and citation checks cannot
-prove arbitrary prose correct, so research publication has a separate review
-boundary. New investigations accept a single optional JSON fence under a frozen
-format policy; this does not repair content or change historical results.
+Proposals specify a complete target portfolio, leaving any unallocated weight in cash. The current mandate is long-only, no leverage, at most 20% per stock, with $100,000 of **virtual** starting capital. Deterministic ledger checks apply independently of model confidence.
 
-[Research loop](RESEARCH-LOOP.md) · [Source inbox](SOURCE-WATCH.md) ·
-[Checked source handoff](SOURCE-CURATION.md)
+## Paper execution and performance
 
-## Execution and memory
+A proposal is not a fill. Paper execution requires a still-valid constituent snapshot, a sourced market session and prices available after the decision. Quote execution buys at the ask and sells at the bid. The separate daily-bar path uses a later session's opening price with fixed modeled slippage; it is not an intraday fill simulation.
 
-The MacBook currently owns the authoritative SQLite ledger and credentials.
-The [Sailbox worker](CLOUD-WORKER.md) executes allowlisted tools against uploaded
-public evidence, without credentials or network access. Receipts survive sleep
-and are verified locally. It does not yet host the complete controller.
+The ledger records fees, external funding and exact decimal amounts. Time-weighted returns exclude external deposits from investment gains. Benchmark comparisons require matching S&P 500 total-return observations. The paper adapter validates Yahoo Finance’s specific `^SP500TR` index feed, keeps its source hash and synchronizes opening and closing observations with portfolio valuations; it does not claim licensed exchange data. Missing benchmark data stays missing; an ETF or a price-only index is not substituted. Research expenses are tracked outside portfolio returns.
 
-Reviewed research can inform later investigations. Draft experiments and critic
-benchmarks cannot become company facts. The original assignment queue has two
-permanent pilot slots; a new experiment never resets their history.
+Unresolved corporate actions can suspend execution and invalidate current marks. Sunday research may produce a pending allocation, but cannot produce a Sunday regular-session fill. Historical or synthetic prices are never presented as a live track record.
 
-[Queue protocol](RESEARCH-QUEUE.md) · [Sail products](SAIL-PRODUCTS.md)
+## Persistence and publication
 
-## Requests, improvement, and costs
+Separate SQLite journals hold requests, research and paper events. Request bodies, model profiles and reservation identities are immutable. Recovery retrieves an accepted response; uncertain usage retains its reservation. A completed provider response can still fail source checks.
 
-Every model request freezes its body, model, completion window, rates, and
-allowance before submission. Recovery keeps the original request identity and
-retrieves a known response. Missing usage or an uncertain submission is not free.
+The Sailbox adapter installs a frozen bundle and starts a managed process with a deadline. A separate watchdog on the owner's computer checks progress and restarts that process on the same cloud disk if needed. The cloud image has no verified native boot service: recovery and timely resource cleanup depend on the watchdog remaining available. A live readiness test verified credential injection, restricted routes, sleep/wake, process restart and restoration of a compressed SQLite backup.
 
-The [settlement policy](BUDGET.md) replaces a completed request's conservative
-hold with a validated usage estimate through an immutable receipt. Historical
-requests remain unchanged. Shared-context caching uses a separate explicit
-write/read cost contract inside this same ledger.
+Research forks start from a sterile checkpoint, receive separate assignments and reserved allowances, and have no publication authority. The first fork experiment compares full-universe context with a smaller context selected for five identical company questions. The coordinator's restricted egress policy permits its provider, public-source and publication routes. Credentials are injected into permitted requests outside the guest environment.
 
-The improvement gate compares a candidate evidence-critic prompt with the
-current prompt on fixed development and separately authored validation cases.
-It can promote the prompt only under its frozen no-regression rule. This is
-bounded method selection, not permission to edit arbitrary code, alter tests,
-change budgets, publish reports, or trade. See [current state](CURRENT-STATE.md)
-for what has actually run.
+The website accepts only a validated checkpoint. Public reads cannot start inference or submit paper orders. It shows the last publication time, pending allocations separately from holdings, and returns only after sourced observations exist. The Schwab connection is paused; there is no live execution service.
 
-## Public and account boundaries
-
-The website serves allowlisted saved JSON. Visitors cannot launch model requests
-or access private prompts, full captures, credentials, or account identifiers.
-Technical experiment results live on GitHub; the page highlights companies and
-the nine-company cash explorer and one measured research checkpoint. Deployment is separate from research.
-
-The current page has two independent inputs:
-
-- `public/cash-map.json` is a curated financial record. The site validates all current/prior arithmetic, allowed issuer URLs and the exact dataset hash in `data/research/cash-map-review.json` before building.
-- `scripts/export_presentation.py` reads one saved campaign through a read-only database snapshot. It exports allowlisted counts, check results and known cost estimates to `public/agent-state.json`. Model prose, request IDs and private trace links are excluded.
-
-The final campaign publisher can refresh the typed checkpoint. It cannot alter the cash map or turn a draft into an approved financial claim. A private publication hold permits an active editor to take over a concurrent deployment without changing the frozen research protocol.
-
-Schwab is disconnected. Future execution will require a separate structured
-order service with an owner-defined mandate, deterministic exposure and order
-checks, reconciliation, and a stop control. Research prose cannot grant itself
-account access. The existing performance calculator uses synthetic fixtures;
-there are no live trades or reported investment returns.
+[Experiment design](EVALUATION.md) · [Operations](OPERATIONS.md)

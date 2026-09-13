@@ -68,4 +68,4 @@ The owner-provided official OAuth guide established exact callback matching, acc
 
 Official entry points: [OAuth guide](https://developer.schwab.com/user-guides/get-started/authenticate-with-oauth), [Individual Trader API documentation](https://developer.schwab.com/products/trader-api--individual/details/documentation/Retail%20Trader%20API%20Production). Implementation reference: [schwab-py source](https://github.com/alexgolec/schwab-py).
 
-For the concepts behind the flow, read [Lesson 3: private account access](../lessons/03-schwab-access.md).
+For the concepts behind the flow, read [Lesson 3: private account access](history/lessons/03-schwab-access.md).

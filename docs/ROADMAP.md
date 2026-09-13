@@ -1,41 +1,24 @@
-# Where Portfolio Agent goes next
+# Roadmap
 
-The aim is a research view across the AI industry that improves as evidence changes:
-company cases, their shared dependencies, and a dated explanation of each revision.
-The agent should handle more routine research as its evidence and review improve.
+**Objective:** a persistent Sail-powered portfolio manager that can outperform the S&P 500 Total Return Index, with a public decision and performance record.
 
-## Now
+## Implemented
 
-Nine companies have source-checked current and prior cash-flow bridges. The latest experiment completed independent analysis, opposing review and revisions across the same universe, with a shared spending-risk map retained for review. Eight final company outputs passed the mechanical checks; that does not approve their interpretations.
+- Dated 503-security universe and SEC financial-fact captures.
+- Persistent research and request journals, source checks and paired experiment planning.
+- Paper ledger with constituent/exposure checks, pending orders, sourced execution and return accounting.
+- Restricted Sailbox hosting adapter and a concise public checkpoint.
 
-The website presents the financial explorer and a dated experiment result. Sail supplies inference, shared context, persistent cloud checks and tracing. The authoritative controller remains on the MacBook. Brokerage integration is paused; no trades or portfolio returns exist. [Current measurements](CURRENT-STATE.md).
+## Next: five hours of continuous research
 
-## Next
+Run the hosted coordinator against the frozen source bank. Build the initial paper allocation, carry unresolved questions into later waves, test memory and scheduling alternatives, and measure actual cache and infrastructure behavior. Verify that the process keeps making useful progress until its deadline. No investment performance exists yet.
 
-Connect the cases with source-backed questions: which companies fund capacity,
-which receive that spending, and which customer, financing, or power constraints
-could affect several layers together. Distinguish reported results from management
-forecasts, and reconcile fiscal periods and cash-flow definitions before comparison.
+## Then: a forward portfolio record
 
-Carry a case across a useful new disclosure: capture the source, review its
-facts, and explain which earlier conclusions change and which remain intact. The
-source inbox and reviewed handoff exist; they have not yet processed a substantive
-live financial update. Reduce routine human work through bounded research cycles;
-source collection, model confidence, and a critic pass do not confer factual approval.
+Ingest new disclosures and tradable market observations, reconcile fills and corporate actions, and maintain the portfolio across days. Compare decisions with a simpler research baseline using the same arriving information. Publish meaningful changes and outcomes.
 
-Measure supported claims, meaningful revisions, corrections, and research cost.
-Extend autonomy when those measures support it.
+## Live execution
 
-## Later
+Connect Schwab after the account opens. Add order submission, reconciliation and recovery under the same investment mandate. Keep research forks separate from the sole execution service.
 
-Add simulated portfolio proposals and a benchmark with deposits, fees, and research
-expenses accounted for separately. When brokerage access resumes, first reconcile
-private account observations. Any future live execution needs its own explicit
-permissions and controls.
-
-Training and larger infrastructure experiments follow a reviewed research dataset
-and an evaluation set kept separate from development examples. Portfolio outcomes
-may eventually provide another observation; they cannot replace evidence review.
-
-The [reference index](README.md) holds implementation guides. The dated
-[build record](BUILD-RECORD.md) preserves earlier experiments and checkpoints.
+Training a research policy comes later, after enough evaluated examples exist to demonstrate improvement on unseen tasks.

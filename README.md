@@ -1,27 +1,17 @@
 # Portfolio Agent
 
-**Follow the AI dollar.**
+**Building an autonomous portfolio manager on Sail to outperform the S&P 500.**
 
-An agent investigating where the AI buildout turns into cash flow—from chips and power to cloud and applications. Built with [Sail](https://sailresearch.com), with a public record of evidence, changing views and research costs.
+The agent researches companies, maintains investment theses and allocates a paper portfolio across S&P 500 stocks and cash. The benchmark is the **S&P 500 Total Return Index**. Live execution through Charles Schwab comes later.
 
-[Explore the project](https://blakewoods.us/portfolio/) · [Current results](docs/CURRENT-STATE.md) · [How it works](docs/SAIL-PRODUCTS.md)
+The experiment: does a persistent agent make better decisions when it can spend more time researching, remember earlier work and test competing explanations? Sail supplies the inference and cloud infrastructure; the project records the decisions, failures and cost.
 
-## Try it
+[Public portfolio](https://blakewoods.us/portfolio/) · [Architecture](docs/ARCHITECTURE.md) · [Evaluation](docs/EVALUATION.md)
 
-Choose one of nine companies on the website. Compare its latest cash-flow figures with the prior period, then change the assumptions.
+## Current state
 
-For example, Microsoft generated **about $46.8B more operating cash** in FY2026, but cash property spending rose **about $51.4B**. Cash remaining after those purchases fell **about $4.6B**. Growth and cash generation are different questions. [Sources and definitions →](docs/AI-STACK.md)
+- Paper ledger implemented; no live trades or investment performance yet.
+- Dated SEC financial facts captured for all 503 securities in the current research universe.
+- Preparing the first five-hour hosted run: adaptive research, competing allocations and measured Sail comparisons.
 
-## What works
-
-- **Nine source-checked cash bridges.** Original currencies, periods and capital-spending definitions stay attached to the figures.
-- **A complete research experiment.** Three models read, challenge and revise company cases. The latest run used 80 requests, shared evidence, persistent cloud checks and a workflow trace.
-- **An honest result.** Both judges preferred NVIDIA’s revision; its mechanical checks still failed. Model agreement cannot replace verification.
-
-The explorer’s financial figures were reviewed separately. Agent drafts remain research, not approved investment conclusions. [Results and limits →](docs/NIGHT-SHIFT.md)
-
-## Next
-
-Turn new disclosures into a dated record of what changed, why it matters and which shared spending risks remain. Evaluate those changes against unseen evidence, then test the agent’s decisions in a small live portfolio, with returns, drawdowns and research costs kept visible. **Schwab is not connected; no live trades yet.**
-
-[Reproduce the figures](docs/START-HERE.md) · [Technical reference](docs/README.md)
+[Run and inspect](docs/OPERATIONS.md) · [Roadmap](docs/ROADMAP.md)
