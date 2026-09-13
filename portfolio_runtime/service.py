@@ -124,10 +124,14 @@ def request_totals(path):
         return empty
     with sqlite3.connect("file:"+str(path)+"?mode=ro", uri=True, factory=ClosingConnection) as db:
         rows = db.execute("SELECT reserved,cost,status FROM requests").fetchall()
+        allocations = (db.execute("SELECT reserved,cost FROM allocations").fetchall()
+                       if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='allocations'").fetchone() else [])
     known = sum((Decimal(cost) for _, cost, _ in rows if cost is not None), Decimal(0))
     committed = sum((Decimal(cost if cost is not None else reserved) for reserved, cost, _ in rows), Decimal(0))
+    known += sum((Decimal(cost) for _, cost in allocations if cost is not None), Decimal(0))
+    committed += sum((Decimal(cost if cost is not None else reserved) for reserved, cost in allocations), Decimal(0))
     return {"known_cost_usd": format(known, "f"), "committed_usd": format(committed, "f"),
-            "unsettled_requests": sum(cost is None for _, cost, _ in rows),
+            "unsettled_requests": sum(cost is None for _, cost, _ in rows)+sum(cost is None for _, cost in allocations),
             "requests": len(rows), "completed": sum(status == "completed" for _, _, status in rows),
             "pending_requests": sum(status not in TERMINAL for _, _, status in rows)}
 
@@ -158,6 +162,9 @@ class Service:
         self._last_recovery = 0
         self._paper_issue = False
         self._exhausted_ambiguous_requests = 0
+        self._scheduler_wait_reason = None
+        self._latest_public_decision = None
+        self._latest_decision_loaded = False
         self.progress_at = self.clock()
         self.stage = "initializing"
         self.lab = None
@@ -286,9 +293,10 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             totals = request_totals(Path(config["state_dir"]) / "requests.sqlite")
             result["known_cost_usd"] += Decimal(totals["known_cost_usd"])
             result["committed_usd"] += Decimal(totals["committed_usd"])
-            # Release unused allowance only after terminal reconciliation.
+            # Available-credit sessions reserve actual requests, including
+            # unknown costs. A dated credit snapshot is not money committed.
             result["reserved_usd"] += (Decimal(totals["committed_usd"])
-                                       if row["status"] in ("complete", "drained_unsettled", "parked_unsettled") else Decimal(row["reserved"]))
+                                       if self.available_credit or row["status"] in ("complete", "drained_unsettled", "parked_unsettled") else Decimal(row["reserved"]))
             for key in ("requests", "completed", "unsettled_requests", "pending_requests"):
                 result[key] += totals[key]
             if row["status"] == "parked_unsettled":
@@ -422,7 +430,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         input_bound = len(research.prefix("shared").encode())+4608
         estimated_write_hold = (Decimal(input_bound)*Decimal(PROFILES["kimi_flex"][2])*100
                                 +Decimal(256)*Decimal(PROFILES["kimi_flex"][4]))/1_000_000
-        research.enable_cache_write = estimated_write_hold <= Decimal(config["inference_budget_usd"])*Decimal("0.35")
+        cache_credit = self.allowance() if self.available_credit else Decimal(config["inference_budget_usd"])
+        research.enable_cache_write = estimated_write_hold <= cache_credit*Decimal("0.35")
         save(Path(config["state_dir"])/"cache-policy.json", {
             "schema_version": 1, "new_write_economical": research.enable_cache_write,
             "estimated_conservative_write_hold_usd": format(estimated_write_hold, "f"),
@@ -540,6 +549,17 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                        "interpretation": "New source-checked business evidence is research coverage, not demonstrated investment skill."}
             db.execute("INSERT OR IGNORE INTO value_receipts VALUES(?,?,?)", (epoch_id, canonical(receipt), self.clock()))
         save(Path(config["state_dir"])/"value-receipt.json", receipt)
+        # Historical cost analysis runs once at a settled epoch boundary,
+        # never in the admission guard or on every minute's checkpoint.
+        from .evaluation import cache_economics
+        try:
+            def progress():
+                self.progress_at, self.stage = self.clock(), "evaluating_cache"
+            economics = cache_economics(sorted((self.root/"epochs").glob("*/requests.sqlite")), progress=progress)
+            save(self.root/"cache-economics.json", {**economics, "observed_at": stamp(self.clock()), "latest_closed_epoch": epoch_id})
+            save(self.root/"cache-economics-health.json", {"observed_at": stamp(self.clock()), "status": "complete"})
+        except (OSError, ValueError, sqlite3.Error):
+            save(self.root/"cache-economics-health.json", {"observed_at": stamp(self.clock()), "status": "measurement_unavailable"})
 
     def choose_funding(self, evidence):
         if not self.config.get("adaptive_spending"):
@@ -660,6 +680,34 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         self._exhausted_ambiguous_requests = len(unique)
         return {row["profile"] for row in unique.values()}
 
+    def observe_scheduler_state(self, rows, waiting, *, admission_blocked=False):
+        if any(row["status"] not in TERMINAL for row in rows):
+            self._scheduler_wait_reason = None
+        else:
+            self._scheduler_wait_reason = "funding_needed" if waiting and admission_blocked else "scheduled_wait"
+
+    def preserve_latest_decision(self, projection):
+        candidates = [projection.get("latest_decision"), self._latest_public_decision]
+        if not self._latest_decision_loaded:
+            paths = [self.root/"public.json", *sorted((self.root/"epochs").glob("*/public.json"))]
+            for path in paths:
+                try:
+                    candidates.append(json.loads(path.read_text()).get("latest_decision"))
+                except (OSError, ValueError, AttributeError):
+                    continue
+            self._latest_decision_loaded = True
+        valid = []
+        for candidate in candidates:
+            try:
+                if candidate and timestamp(candidate["at"]).timestamp() <= self.clock():
+                    valid.append(candidate)
+            except (ValueError, TypeError, KeyError):
+                continue
+        if valid:
+            self._latest_public_decision = max(valid, key=lambda item: timestamp(item["at"]))
+            projection["latest_decision"] = self._latest_public_decision
+        return projection
+
     def checkpoint(self, config, ledger, research, client, projection):
         self.progress_at, self.stage = self.clock(), "researching"
         self.paper_sync(ledger)
@@ -682,6 +730,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             self.status, self.reason = "waiting", self._admission_reason(admission)
         elif self._exhausted_ambiguous_requests:
             self.status, self.reason = "needs_attention", "recovering"
+        elif self._scheduler_wait_reason:
+            self.status, self.reason = "waiting", self._scheduler_wait_reason
         else:
             self.status, self.reason = "running", None
         self.next_wake = min(self.end, self.clock()+60)
@@ -695,6 +745,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         if activity:
             activity.update(completed_requests=totals["completed"], total_requests=totals["requests"],
                             reserved_cost_usd=format(Decimal(totals["committed_usd"])-Decimal(totals["known_cost_usd"]), "f"))
+        self.preserve_latest_decision(projection)
         save(self.root / "public.json", projection)
         self.health()
         return projection
@@ -979,6 +1030,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             activity["heartbeat_at"] = stamp(self.clock())
             activity.update(completed_requests=totals["completed"], total_requests=totals["requests"],
                             reserved_cost_usd=format(Decimal(totals["committed_usd"])-Decimal(totals["known_cost_usd"]), "f"))
+        self.preserve_latest_decision(projection)
         runner.publish(self.config, projection)
 
     def tick(self):
@@ -1000,12 +1052,13 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                 self._idle_projection()
                 self.health()
                 return self.status
-            if totals["pending_requests"]:
+            if totals["pending_requests"] or totals["unsettled_requests"]:
                 self.status, self.reason, self.next_wake, self.stage = "needs_attention", "recovering", None, "settlement_incomplete"
                 self.terminal = True
                 self._idle_projection()
+                self.stage = "settlement_incomplete"
                 if self.trace:
-                    self.trace.event("week:terminal", "voyage.failed", {"reason_code": "settlement_incomplete", "pending_requests": totals["pending_requests"]})
+                    self.trace.event("week:terminal", "voyage.failed", {"reason_code": "settlement_incomplete", "pending_requests": totals["pending_requests"], "unsettled_requests": totals["unsettled_requests"]})
                     self.trace.flush()
                 self.health()
                 return self.status

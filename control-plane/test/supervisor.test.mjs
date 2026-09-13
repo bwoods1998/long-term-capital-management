@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
-import {Supervisor,creditDecision,validateConfig,parseExec,boundedText,hostReserve} from '../supervisor.mjs';
+import {Supervisor,creditDecision,validateConfig,parseExec,boundedText,hostReserve,RELEASE_PROBE} from '../supervisor.mjs';
 const start=Date.parse('2026-09-14T04:00:00Z');
 const config=()=>({schema_version:1,service_id:'week-20260914',box_id:'sb_00000000-0000-0000-0000-000000000001',manifest_sha256:'a'.repeat(64),starts_at:new Date(start).toISOString(),ends_at:'2026-09-19T04:00:00Z',weekly_total_usd:'100',weekly_inference_usd:'92.5',cloud_budget_usd:'7.5',credit_floor_usd:'2'});
 class Storage{
@@ -275,7 +275,7 @@ test('funded bounded rehearsal avoids irrelevant weekly runway warnings while lo
  assert.equal(f.sent.length,0);
  const g=harness({at:start-7*3600000,balance:{...billing,balance:500,avg_cost_per_day:11100}});
  await g.c.configure(c);await g.c.tick();assert.equal(g.files()[0].allow_new_research,false);
- assert(g.sent.some(m=>/funding needed/.test(m.subject)));
+ assert(g.sent.some(m=>/paused for funding/.test(m.subject)));
 });
 
 test('unsettled rehearsal never sends completion and still recovers receipts during the gap',async()=>{
@@ -366,7 +366,7 @@ test('SQLite transaction rolls back replacement and top-level alarm together aft
  assert.equal(await f.s.get('replacement_count'),undefined);
 });
 
-async function releaseHarness() {
+async function releaseHarness({sharedObjects=false}={}) {
  const f=harness({at:start-3600000,running:false});
  const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)
    ?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
@@ -385,7 +385,7 @@ async function releaseHarness() {
  for(const [path,value] of Object.entries({'host-manifest.json':canonical(host),'config/run.json':runRaw,
    'state/paper.sqlite':'paper fixture with pending decision','state/seed/research.sqlite':'immutable research fixture',
    'state/epochs/one/requests.sqlite':'pending inference holds','state/seed/requests.sqlite':'old receipts'})) {
-   const raw=Buffer.from(value), zip=gzipSync(raw), h=hash(zip), key=old.service_id+'/'+snapshot+'/'+h+'.gz';
+   const raw=Buffer.from(value), zip=gzipSync(raw), h=hash(zip), key=old.service_id+'/'+(sharedObjects?'snapshot-prior-confirmed':snapshot)+'/'+h+'.gz';
    rows.push({path,...descriptor(raw),compressed_sha256:h,compressed_bytes:zip.length,object_key:key});packed.set(key,zip);
  }
  const backup={schema_version:1,service_id:old.service_id,snapshot_id:snapshot,completed_at:at,files:rows};
@@ -409,7 +409,7 @@ async function releaseHarness() {
    if(path==='/workspace/host-manifest.json')return live;
    assert.equal(path,'/workspace/config/run.json');return run;};
  f.c.exec=async(c,command)=>{assert.equal(c.box_id,old.box_id);
-   assert.deepEqual(command,['python3','/workspace/portfolio_runtime/supervisor_guest.py','probe']);return probe;};
+   assert.deepEqual(command,['python3','-c',RELEASE_PROBE]);return probe;};
  const body={previous_manifest_sha256:old.manifest_sha256,manifest_sha256:probe.manifest_sha256,previous_backup_manifest_key:key};
  return {...f,body,old,host,run,live,probe,admission,resources,packed,rows,
    refresh(){body.manifest_sha256=hash(canonical(live));probe.manifest_sha256=body.manifest_sha256;}};
@@ -443,7 +443,7 @@ test('release rejects active writers, changed service contracts and missing or s
    async f=>{f.body.service_id='other-service';},
    async f=>{f.c.env.BACKUPS.head=async()=>null;},
    async f=>{f.probe.running=true;},
-   async f=>{f.probe.manifest_sha256='f'.repeat(64);},
+   async f=>{f.body.manifest_sha256='f'.repeat(64);},
    async f=>{f.admission.allow_new_research=true;},
    async f=>{f.admission.stop_requested=false;},
    async f=>{f.admission.service_id='different-service';},
@@ -455,12 +455,24 @@ test('release rejects active writers, changed service contracts and missing or s
    async f=>{delete f.live.files['data/evidence.json'];f.refresh();},
    async f=>{f.live.files['config/run.json'].sha256='f'.repeat(64);f.refresh();},
    async f=>{f.live.files['data/evidence.json'].sha256='f'.repeat(64);f.refresh();},
-   async f=>{f.live.files['portfolio_runtime/supervisor_guest.py'].sha256='f'.repeat(64);f.refresh();},
  ]) {
    const f=await releaseHarness();await mutate(f);await assert.rejects(()=>f.c.release(f.body));
    assert.deepEqual(await f.s.get('config'),f.old);
    assert.equal(await f.s.get('release-archive:'+f.old.service_id+':'+f.old.manifest_sha256),undefined);
  }
+});
+
+test('release accepts verified same-service shared backup objects and does not run newly installed helper code',async()=>{
+ const f=await releaseHarness({sharedObjects:true});
+ f.live.files['portfolio_runtime/supervisor_guest.py'].sha256='f'.repeat(64);f.refresh();
+ await f.c.release(f.body);
+ assert.equal((await f.s.get('config')).manifest_sha256,f.body.manifest_sha256);
+ assert.deepEqual((await f.s.get('release:'+f.old.service_id+':'+f.body.manifest_sha256)).changed_files,
+   ['portfolio_runtime/provider.py','portfolio_runtime/supervisor_guest.py']);
+ assert(!RELEASE_PROBE.includes('portfolio_runtime'));assert(!RELEASE_PROBE.includes('exec('));
+ const proof=execFileSync('python3',['-c',
+   "import fcntl,json,pathlib,subprocess,sys,tempfile\nwith tempfile.TemporaryDirectory() as tmp:\n p=pathlib.Path(tmp)/'lock';p.touch()\n code=sys.argv[1].replace('/workspace/state/coordinator.lock',str(p))\n assert json.loads(subprocess.check_output([sys.executable,'-c',code]))=={'running':False}\n with p.open('r+') as f:\n  fcntl.flock(f,fcntl.LOCK_EX)\n  assert json.loads(subprocess.check_output([sys.executable,'-c',code]))=={'running':True}\nprint('verified')",RELEASE_PROBE],{encoding:'utf8'});
+ assert.equal(proof.trim(),'verified');
 });
 
 test('release checks compressed and uncompressed backup bytes instead of trusting metadata',async()=>{
@@ -520,8 +532,33 @@ test('successful silent host stop is accepted and one low-credit episode sends o
  assert(f.commands().some(c=>Array.isArray(c.command)&&c.command.at(-1)==='/workspace/host-stop.py'));
  assert.equal((await f.s.get('latest')).status,'stopping');
  const g=harness({balance:{...billing,balance:200}});await g.c.configure(config());await g.c.tick();g.advance(60000);await g.c.tick();
- assert.equal(g.sent.filter(m=>/funding needed/.test(m.subject)).length,1);
+ assert.equal(g.sent.filter(m=>/funding/.test(m.subject)).length,1);
  assert.equal(g.files()[0].allow_new_research,false);
+});
+
+test('an early runway warning cannot suppress the later blocked-funding email, and top-ups reset that episode',async()=>{
+ const f=harness({balance:{...billing,balance:2000,avg_cost_per_day:100000}});
+ await f.c.configure(availableConfig());await f.c.tick();
+ assert.equal(f.sent.filter(m=>/Sail funding needed/.test(m.subject)).length,1);
+ assert.equal(f.files().at(-1).allow_new_research,true);
+ f.state.balance={...billing,balance:100,avg_cost_per_day:100000};f.advance(60000);await f.c.tick();
+ assert.equal(f.files().at(-1).allow_new_research,false);
+ assert.equal(f.sent.filter(m=>/research paused for funding/.test(m.subject)).length,1);
+ f.advance(60000);await f.c.tick();assert.equal(f.sent.filter(m=>/research paused for funding/.test(m.subject)).length,1);
+ f.state.balance={...billing,balance:500000,avg_cost_per_day:100000};f.advance(60000);await f.c.tick();
+ assert.equal(f.files().at(-1).allow_new_research,true);
+ f.state.balance={...billing,balance:100,avg_cost_per_day:100000};f.advance(60000);await f.c.tick();
+ assert.equal(f.sent.filter(m=>/research paused for funding/.test(m.subject)).length,2);
+});
+
+test('week completion does not claim settlement while terminal request cost holds remain unknown',async()=>{
+ const end=Date.parse(config().ends_at),f=harness({at:end,running:false,
+   health:{inference:{pending_requests:0,unsettled_requests:2,known_cost_usd:'10',committed_usd:'12'}}});
+ await f.c.configure(availableConfig());await f.c.tick();f.advance(120000);await f.c.tick();
+ assert.equal((await f.s.get('latest')).status,'needs_attention');
+ assert.equal((await f.s.get('control')).finished,true);
+ assert(f.sent.some(m=>m.text.includes('unsettled_requests_retained')));
+ assert(!f.sent.some(m=>m.subject.includes('week complete')));
 });
 
 test('billing outage revokes admission but does not block a requested stop',async()=>{

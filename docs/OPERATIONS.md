@@ -28,7 +28,7 @@ Inspect `capture.json` before launch. A partial source bank is not complete cove
 
 [`scripts/week_host.py`](../scripts/week_host.py) separates preparation, provisioning, and enrollment. Use `--help` for its current arguments. Preparation freezes an explicit service window, spending policy, evidence and a stopped seed. Provisioning installs the reviewed code and verifies the seed; enrollment arms the independent supervisor only after a readiness receipt matches the installed manifest.
 
-Preparation defaults to `spending_mode: available_credit`: no fixed daily, session, rehearsal or weekly inference cap, and no gradual release of request dollars. Each research session freezes a fresh available-credit grant; every new request still checks the live grant and outstanding reservations. Top-ups become available automatically to subsequent sessions. Useful new research and decision reviews determine work; balance alone is not evidence of value. Explicit `--spending-mode capped --budget …` remains available for a deliberately bounded experiment.
+Preparation defaults to `spending_mode: available_credit`: no fixed daily, session, rehearsal or weekly inference cap, and no gradual release of request dollars. Each session records its initial credit snapshot for audit; every new request checks the live grant and actual outstanding reservations. The snapshot does not cap that hour. Top-ups and released reservations become available within the current session. Useful new research and decision reviews determine work; balance alone is not evidence of value. Explicit `--spending-mode capped --budget …` remains available for a deliberately bounded experiment.
 
 An optional rehearsal adds a timed research window before the scheduled week, using the same paper ledger and credit policy. Set `--rehearsal-starts-at` and `--rehearsal-ends-at`; available-credit mode takes no dollar caps. Sunday research cannot create Sunday market fills. After the window ends, accepted requests settle before one completion email; the service then waits for the original weekday start. The rehearsal does not shorten the week or create another portfolio.
 
@@ -62,6 +62,8 @@ A low-funding pause recovers automatically after a top-up. Inference retains clo
 ## Public record
 
 The [portfolio page](https://blakewoods.us/portfolio/) reads saved checkpoints and refreshes once a minute while visible. It distinguishes running research, deliberate waiting and a service needing attention. Visitors cannot start inference or submit trades.
+
+Coverage is labeled per session; request counts and costs accumulate across the service. The latest reviewed allocation persists across hourly boundaries. A checkpoint with no admitted work reports waiting, including an explicit credit wait when funding prevents the queued work.
 
 [Research history](https://blakewoods.us/portfolio/research/) contains immutable final investment explanations, exact filing references, open questions and proposed decisions. Unsuccessful adjacent requests share a collapsed row; each individual record and timestamp remains accessible. Only settled terminal observations enter the journal. Admission and observed completion times are not hidden model-stage timestamps. Raw prompts, internal reasoning and account details stay private.
 

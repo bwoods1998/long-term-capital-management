@@ -381,10 +381,9 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
         at = self.clock() if at is None else at
         c = self.config
         if c.get("spending_mode") == "available_credit":
-            # This is the fresh supervisor-funded credit snapshot, not a
-            # preset dollar budget. Every new request still needs live credit
-            # authority and its exact conservative reservation.
-            return Decimal(c["inference_budget_usd"])
+            # The frozen snapshot is an audit receipt, not an hourly cap.
+            # Every reservation and first dispatch requires live authority.
+            return None
         fraction = max(
             Decimal(0),
             min(
@@ -414,7 +413,8 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                     raise ValueError("Allocation changed")
                 return
             self._admission_open(db)
-            if Decimal(self.totals(db)["committed_usd"]) + amount > self.allowance():
+            allowance = self.allowance()
+            if allowance is not None and Decimal(self.totals(db)["committed_usd"]) + amount > allowance:
                 raise AdmissionClosed("Run budget unavailable")
             if self.config.get("spending_mode") == "available_credit":
                 guard = getattr(self, "reservation_guard", None)
@@ -512,7 +512,8 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                 return old["id"]
             at = self.clock()
             self._admission_open(db)
-            if Decimal(self.totals(db)["committed_usd"]) + reserve > self.allowance(at):
+            allowance = self.allowance(at)
+            if allowance is not None and Decimal(self.totals(db)["committed_usd"]) + reserve > allowance:
                 raise AdmissionClosed("Paced allowance unavailable")
             guard = getattr(self, "reservation_guard", None)
             if (self.config.get("spending_mode") == "available_credit" and guard is None) or (guard is not None and guard(reserve) is not True):

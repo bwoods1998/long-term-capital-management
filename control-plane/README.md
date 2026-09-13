@@ -15,3 +15,5 @@ In `available_credit` mode, fresh Sail credit funds research after outstanding r
 - `PUT /v1/backups/<service>/<snapshot>/<sha256>.gz`: private backup upload.
 
 Run offline checks with `node --test control-plane/test/*.test.mjs`. Deploy with `wrangler deploy --config control-plane/wrangler.jsonc`. See [operations](../docs/OPERATIONS.md) for enrollment, recovery and limits.
+
+Private snapshots preserve exact market receipts in daily bundles and reuse confirmed immutable objects across snapshots. See [backup verification and restore](../docs/BACKUPS.md). Funding emails distinguish an early runway warning from a later pause for insufficient available credit.

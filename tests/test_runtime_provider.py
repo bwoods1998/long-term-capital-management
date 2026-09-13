@@ -158,7 +158,7 @@ class ProviderTests(unittest.TestCase):
     def test_available_credit_releases_full_snapshot_but_requires_live_reservation_authority(self):
         config = {**self.config, "spending_mode": "available_credit", "inference_budget_usd": "175.25"}
         client = p.Client(self.path.parent/"credit.sqlite", config, transport=self.script, clock=lambda: self.at)
-        self.assertEqual(client.allowance(), Decimal("175.25"))
+        self.assertIsNone(client.allowance())
         body = p.body_for("k3", "source"*10000, "review", max_output=16384)
         with self.assertRaises(p.AdmissionClosed):
             client.submit_intent("critical", "k3", body)
@@ -176,14 +176,24 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             p.Client(client.path, {**config, "spending_mode": "capped", "inference_budget_usd": "100"}, transport=self.script)
 
-    def test_available_credit_snapshot_still_bounds_aggregate_reservations(self):
-        config = {**self.config, "spending_mode": "available_credit", "inference_budget_usd": ".5"}
+    def test_available_credit_topup_expands_same_epoch_without_changing_snapshot(self):
+        config = {**self.config, "spending_mode": "available_credit", "inference_budget_usd": ".02838372"}
         client = p.Client(self.path.parent/"credit.sqlite", config, transport=self.script, clock=lambda: self.at)
-        client.reservation_guard = lambda amount: True
+        live_credit = Decimal(".5")
+        client.reservation_guard = lambda amount: Decimal(client.totals()["committed_usd"])+amount <= live_credit
         body = p.body_for("k3", "source"*10000, "review", max_output=16384)
-        client.submit_intent("first", "k3", body)
+        first = client.submit_intent("first", "k3", body)
         with self.assertRaises(p.AdmissionClosed):
             client.submit_intent("second", "k3", body)
+        live_credit = Decimal("2")
+        client.submit_intent("second", "k3", body)
+        self.assertEqual(client.submit_intent("first", "k3", body), first)
+        self.assertEqual(client.config["inference_budget_usd"], ".02838372")
+        self.assertEqual(client.totals()["requests"], 2)
+        self.assertEqual(client.totals()["unsettled_requests"], 2)
+        live_credit = Decimal("0")
+        with self.assertRaises(p.AdmissionClosed):
+            client.allocate("branch", "1")
         with self.assertRaises(ValueError):
             p.Client(client.path, {**config, "spending_mode": "capped"}, transport=self.script)
 

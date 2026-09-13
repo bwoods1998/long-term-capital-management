@@ -138,34 +138,81 @@ class RunnerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_exhausted_ambiguous_requests_keep_holds_but_allow_another_profile(self):
-        self.config.update(spending_mode="available_credit", max_concurrency=8,
-                           ends_epoch=EPOCH+3600)
+        self.config.update(
+            spending_mode="available_credit", max_concurrency=8, ends_epoch=EPOCH + 3600
+        )
         calls = []
+
         def transport(method, path, body, identity):
             calls.append((method, body["model"]))
             return {"id": "resp_other", "status": "queued", "model": body["model"]}
-        client = Client(self.root/"requests.sqlite", self.config, transport=transport, clock=lambda: self.at)
+
+        client = Client(
+            self.root / "requests.sqlite",
+            self.config,
+            transport=transport,
+            clock=lambda: self.at,
+        )
         client.reservation_guard = lambda amount: True
         for i in range(8):
-            task = "exhausted-"+str(i)
-            self.research.add(task, 0, "company", "AAPL", "kimi_flex", "source", "question", max_output=16)
+            task = "exhausted-" + str(i)
+            self.research.add(
+                task,
+                0,
+                "company",
+                "AAPL",
+                "kimi_flex",
+                "source",
+                "question",
+                max_output=16,
+            )
             with self.research.connect() as db:
-                body = json.loads(db.execute("SELECT body FROM tasks WHERE id=?", (task,)).fetchone()[0])
+                body = json.loads(
+                    db.execute("SELECT body FROM tasks WHERE id=?", (task,)).fetchone()[
+                        0
+                    ]
+                )
             identity = client.submit_intent(task, "kimi_flex", body)
             self.research.attach(task, identity)
         with client.connect() as db:
-            db.execute("UPDATE requests SET attempts=10,error='provider_transport_unconfirmed'")
+            db.execute(
+                "UPDATE requests SET attempts=10,error='provider_transport_unconfirmed'"
+            )
         before = client.rows()
-        self.research.add("same-profile", 0, "company", "MSFT", "kimi_flex", "source", "question", max_output=16)
-        self.research.add("other-profile", 0, "company", "MSFT", "pro_asap", "source", "question", max_output=16)
+        self.research.add(
+            "same-profile",
+            0,
+            "company",
+            "MSFT",
+            "kimi_flex",
+            "source",
+            "question",
+            max_output=16,
+        )
+        self.research.add(
+            "other-profile",
+            0,
+            "company",
+            "MSFT",
+            "pro_asap",
+            "source",
+            "question",
+            max_output=16,
+        )
         with self.research.connect() as db:
             db.execute("INSERT INTO waves VALUES(0,?,?)", (self.at, "{}"))
-        with (patch.object(r, "initialize", return_value=(client, self.research, self.ledger())),
-              patch.object(r, "ThreadPoolExecutor", ImmediatePool),
-              patch.object(r.time, "time", side_effect=lambda: self.at),
-              patch.object(r, "utc_now", return_value=AT)):
+        with (
+            patch.object(
+                r, "initialize", return_value=(client, self.research, self.ledger())
+            ),
+            patch.object(r, "ThreadPoolExecutor", ImmediatePool),
+            patch.object(r.time, "time", side_effect=lambda: self.at),
+            patch.object(r, "utc_now", return_value=AT),
+        ):
             r.run(self.config, self.data, once=True)
-        self.assertEqual(calls, [("POST", body_for("pro_asap", "", "", max_output=16)["model"])])
+        self.assertEqual(
+            calls, [("POST", body_for("pro_asap", "", "", max_output=16)["model"])]
+        )
         self.assertEqual(client.totals()["requests"], 9)
         after = {row["id"]: row for row in client.rows()}
         for old in before:
@@ -174,55 +221,143 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(client.totals()["unsettled_requests"], 9)
 
     def test_final_live_attempt_and_accepted_flex_keep_slots_without_false_stall(self):
-        rows = [{"id": "final", "profile": "kimi_flex", "status": "prepared",
-                 "response_id": None, "attempts": 10, "created": EPOCH},
-                {"id": "accepted", "profile": "kimi_flex", "status": "queued",
-                 "response_id": "resp_flex", "attempts": 50, "created": EPOCH},
-                {"id": "never-sent", "profile": "pro_asap", "status": "prepared",
-                 "response_id": None, "attempts": 0, "created": EPOCH-86400}]
-        work = r.request_schedule(rows, at=EPOCH+60, live_ids={"final"})
+        rows = [
+            {
+                "id": "final",
+                "profile": "kimi_flex",
+                "status": "prepared",
+                "response_id": None,
+                "attempts": 10,
+                "created": EPOCH,
+            },
+            {
+                "id": "accepted",
+                "profile": "kimi_flex",
+                "status": "queued",
+                "response_id": "resp_flex",
+                "attempts": 50,
+                "created": EPOCH,
+            },
+            {
+                "id": "never-sent",
+                "profile": "pro_asap",
+                "status": "prepared",
+                "response_id": None,
+                "attempts": 0,
+                "created": EPOCH - 86400,
+            },
+        ]
+        work = r.request_schedule(rows, at=EPOCH + 60, live_ids={"final"})
         self.assertEqual(work["occupied"], {"final", "accepted", "never-sent"})
         self.assertEqual(work["exhausted"], [])
         self.assertEqual(work["blocked_profiles"], set())
-        settled_attempt = r.request_schedule(rows, at=EPOCH+60)
+        settled_attempt = r.request_schedule(rows, at=EPOCH + 60)
         self.assertEqual(settled_attempt["occupied"], {"accepted", "never-sent"})
         self.assertEqual(settled_attempt["blocked_profiles"], {"kimi_flex"})
-        aged = r.request_schedule([{**rows[0], "attempts": 1}], at=EPOCH+86400)
+        aged = r.request_schedule([{**rows[0], "attempts": 1}], at=EPOCH + 86400)
         self.assertEqual(len(aged["exhausted"]), 1)
 
-    def test_full_constituent_evidence_over_eight_megabytes_preserves_every_source_observation(self):
+    def test_new_window_triplets_share_16384_output_bound_and_preserve_prior_intents(
+        self,
+    ):
+        from portfolio_runtime.evaluation import _window_body
+
+        self.research.add(
+            "prior-window",
+            0,
+            "window_pair",
+            "AAPL",
+            "kimi_flex",
+            "old source",
+            "old question",
+            max_output=8192,
+        )
+        with self.research.connect() as db:
+            previous = db.execute(
+                "SELECT body FROM tasks WHERE id='prior-window'"
+            ).fetchone()[0]
+        self.research.plan_wave(1, size=1)
+        with self.research.connect() as db:
+            bodies = [
+                json.loads(row[0])
+                for row in db.execute(
+                    "SELECT body FROM tasks WHERE kind='window_pair' AND wave=1"
+                )
+            ]
+            self.assertEqual(
+                db.execute("SELECT body FROM tasks WHERE id='prior-window'").fetchone()[
+                    0
+                ],
+                previous,
+            )
+        self.assertEqual(len(bodies), 3)
+        self.assertEqual({body["max_output_tokens"] for body in bodies}, {16384})
+        self.assertEqual(len({canonical(_window_body(body)) for body in bodies}), 1)
+        self.assertEqual(
+            {body["metadata"]["completion_window"] for body in bodies},
+            {"asap", "balanced", "flex"},
+        )
+
+    def test_full_constituent_evidence_over_eight_megabytes_preserves_every_source_observation(
+        self,
+    ):
         from portfolio_runtime.evidence import TAGS
+
         data = evidence()
         companies = []
         for i in range(503):
-            ticker = ''.join(chr(65+(i//divisor)%26) for divisor in (676,26,1))
+            ticker = "".join(chr(65 + (i // divisor) % 26) for divisor in (676, 26, 1))
             company = deepcopy(data["companies"][0])
-            company.update(symbol=ticker, cik=str(i+1).zfill(10), captured_at=AT, cutoff=AT[:10])
-            company["facts"] = {metric: [{"tag": tags[0], "unit": "shares" if metric == "shares" else "USD",
-                "observations": [{"start": f"{year}-01-01", "end": f"{year}-12-31", "val": 1000000000+year+i,
-                    "filed": f"{year+1}-02-15", "form": "10-K", "accn": f"0000000001-{year%100:02}-000001",
-                    "fy": year, "fp": "FY", "period_kind": "annual"} for year in range(2020,2026)]}]
-                for metric,tags in TAGS.items()}
+            company.update(
+                symbol=ticker, cik=str(i + 1).zfill(10), captured_at=AT, cutoff=AT[:10]
+            )
+            company["facts"] = {
+                metric: [
+                    {
+                        "tag": tags[0],
+                        "unit": "shares" if metric == "shares" else "USD",
+                        "observations": [
+                            {
+                                "start": f"{year}-01-01",
+                                "end": f"{year}-12-31",
+                                "val": 1000000000 + year + i,
+                                "filed": f"{year + 1}-02-15",
+                                "form": "10-K",
+                                "accn": f"0000000001-{year % 100:02}-000001",
+                                "fy": year,
+                                "fp": "FY",
+                                "period_kind": "annual",
+                            }
+                            for year in range(2020, 2026)
+                        ],
+                    }
+                ]
+                for metric, tags in TAGS.items()
+            }
             companies.append(company)
         data["companies"] = companies
-        data["universe"]["companies"] = [{"symbol":c["symbol"],"cik":c["cik"]} for c in companies]
-        raw = (json.dumps(data,sort_keys=True,indent=2)+"\n").encode()
+        data["universe"]["companies"] = [
+            {"symbol": c["symbol"], "cik": c["cik"]} for c in companies
+        ]
+        raw = (json.dumps(data, sort_keys=True, indent=2) + "\n").encode()
         self.assertGreater(len(raw), 8_000_000)
         self.assertLess(len(raw), r.MAX_EVIDENCE_BYTES)
         Path(self.config["evidence_path"]).write_bytes(raw)
         self.config["evidence_sha256"] = hashlib.sha256(raw).hexdigest()
-        path = self.root/"config.json"
+        path = self.root / "config.json"
         path.write_text(canonical(self.config))
         config, restored = r.read_config(path)
         self.assertEqual(config["evidence_sha256"], hashlib.sha256(raw).hexdigest())
         self.assertEqual(restored, data)
-        research = Research(self.root/"full-research.sqlite", restored)
-        research.plan_wave(0,size=1)
-        self.assertEqual(len(research.companies),503)
-        self.assertTrue(all(len(task["body"].encode()) <= 500000 for task in research.waiting()))
+        research = Research(self.root / "full-research.sqlite", restored)
+        research.plan_wave(0, size=1)
+        self.assertEqual(len(research.companies), 503)
+        self.assertTrue(
+            all(len(task["body"].encode()) <= 500000 for task in research.waiting())
+        )
 
     def test_evidence_size_and_hash_failures_are_distinct_and_bounded(self):
-        path = self.root/"config.json"
+        path = self.root / "config.json"
         path.write_text(canonical(self.config))
         evidence_path = Path(self.config["evidence_path"])
         with evidence_path.open("ab") as source:

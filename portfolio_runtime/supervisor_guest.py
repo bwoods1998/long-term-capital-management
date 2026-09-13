@@ -101,8 +101,57 @@ def artifact_paths(root):
             items.append(path)
     for path in (root/'config/run.json',root/'host-manifest.json',root/'data/sp500-evidence.json'):
         if path.is_file() and not path.is_symlink():items.append(path)
-    if len(items)>4000:raise ValueError('snapshot_file_limit')
+    if len(items)>100_000:raise ValueError('snapshot_file_limit')
     return sorted(items,key=lambda p: (p.name!='paper.sqlite',p.suffix!='.sqlite',str(p)))
+
+def market_bundles(root, paths, temporary):
+    """Pack exact immutable price responses and metadata without losing provenance."""
+    groups={};ordinary=[]
+    for path in paths:
+        relative=path.relative_to(root)
+        if len(relative.parts)==3 and relative.parts[:2]==('state','market') and path.suffix=='.json':
+            match=re.search(r'-(\d{8})T\d{6}Z-',path.name)
+            day=match.group(1) if match else 'legacy'
+            groups.setdefault(day,[]).append(path)
+        else:ordinary.append((relative,path,{}))
+    for day, members in sorted(groups.items()):
+        target=temporary/f'market-{day}.sqlite'
+        with closing(sqlite3.connect(target)) as db,db:
+            db.execute('CREATE TABLE bundle_config(version INTEGER NOT NULL)')
+            db.execute('INSERT INTO bundle_config VALUES(1)')
+            db.execute('CREATE TABLE receipts(path TEXT PRIMARY KEY,sha256 TEXT NOT NULL,payload BLOB NOT NULL)')
+            for path in sorted(members):
+                if path.stat().st_size>2_000_000:raise ValueError('market_receipt_too_large')
+                raw=path.read_bytes();json.loads(raw)
+                db.execute('INSERT INTO receipts VALUES(?,?,?)',(str(path.relative_to(root)),digest(raw),raw))
+        ordinary.append((Path('backup-bundles')/target.name,target,{'format':'market-receipts-v1','members':len(members)}))
+    if len(ordinary)>4000:raise ValueError('snapshot_file_limit')
+    return ordinary
+
+def restore_market_receipts(archive, root):
+    """Expand a verified backup bundle offline; never overwrite a different receipt.
+
+    First verify the archive's compressed/raw manifest hashes as for every other
+    artifact. A full restore copies ordinary artifacts to their recorded paths,
+    then calls this function for each row with format='market-receipts-v1'.
+    """
+    archive=Path(archive).resolve();root=Path(root).resolve();count=0
+    with closing(sqlite3.connect(archive.as_uri()+'?mode=ro&immutable=1',uri=True)) as db:
+        if db.execute('PRAGMA quick_check').fetchall()!=[('ok',)] or db.execute('SELECT version FROM bundle_config').fetchall()!=[(1,)]:
+            raise ValueError('bundle_integrity_failed')
+        for name,expected,raw in db.execute('SELECT path,sha256,payload FROM receipts ORDER BY path'):
+            if not re.fullmatch(r'state/market/[A-Za-z0-9_.^-]+\.json',name) or not isinstance(raw,bytes) or len(raw)>2_000_000 or digest(raw)!=expected:
+                raise ValueError('bundle_integrity_failed')
+            json.loads(raw);target=root/name
+            if any(p.is_symlink() for p in (target,*target.parents) if p!=root.parent):raise ValueError('unsafe_restore_path')
+            target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            if target.exists():
+                if target.read_bytes()!=raw:raise ValueError('restore_receipt_changed')
+            else:
+                with target.open('xb') as output:output.write(raw)
+                target.chmod(0o600)
+            count+=1
+    return {'restored_market_receipts':count}
 
 def upload(url,path,hash_value,*,opener=None):
     # Only our dedicated supervisor accepts a private artifact; no redirect following.
@@ -132,7 +181,13 @@ def backup(root=ROOT,*,uploader=upload,clock=time.time):
         try:
             with tempfile.TemporaryDirectory(prefix='portfolio-snapshot-') as tmp:
                 tmp=Path(tmp)
-                for i,path in enumerate(artifact_paths(root)):
+                sources=market_bundles(root,artifact_paths(root),tmp)
+                receipts_path=state/'.backup-uploads.sqlite'
+                with closing(sqlite3.connect(receipts_path)) as receipts,receipts:
+                    receipts.execute('CREATE TABLE IF NOT EXISTS uploads(sha256 TEXT PRIMARY KEY,bytes INTEGER NOT NULL,object_key TEXT NOT NULL)')
+                    receipts.execute('CREATE TABLE IF NOT EXISTS sources(sha256 TEXT PRIMARY KEY,bytes INTEGER NOT NULL,compressed_sha256 TEXT NOT NULL,compressed_bytes INTEGER NOT NULL,object_key TEXT NOT NULL)')
+                receipts_path.chmod(0o600)
+                for i,(relative,path,extra) in enumerate(sources):
                     if clock()>until:raise TimeoutError('backup_deadline')
                     source=path;temporary=tmp/(str(i)+'.sqlite')
                     if path.suffix=='.sqlite':
@@ -143,21 +198,43 @@ def backup(root=ROOT,*,uploader=upload,clock=time.time):
                                 db.backup(copied,pages=1024,progress=progress)
                                 if copied.execute('PRAGMA quick_check').fetchone()!=('ok',):raise ValueError('snapshot_integrity')
                         source=temporary
+                    rawhash=hashlib.sha256();size=0
+                    with source.open('rb') as original:
+                        while part:=original.read(1024*1024):rawhash.update(part);size+=len(part)
+                    raw_digest=rawhash.hexdigest()
+                    with closing(sqlite3.connect(receipts_path)) as receipts:
+                        saved=receipts.execute('SELECT bytes,compressed_sha256,compressed_bytes,object_key FROM sources WHERE sha256=?',(raw_digest,)).fetchone()
+                    if (saved and saved[0]==size and re.fullmatch('[a-f0-9]{64}',saved[1]) and 0<saved[2]<=MAX_ARTIFACT
+                        and re.fullmatch(re.escape(service)+r'/[a-z0-9-]{8,80}/'+saved[1]+r'\.gz',saved[3])):
+                        rows.append({'path':str(relative),'bytes':size,'sha256':raw_digest,'object_key':saved[3],
+                                     'compressed_sha256':saved[1],'compressed_bytes':saved[2],**extra})
+                        temporary.unlink(missing_ok=True)
+                        continue
                     target=tmp/(str(i)+'.gz');rawhash=hashlib.sha256();size=0
-                    with source.open('rb') as original,gzip.open(target,'wb',compresslevel=6) as compressed:
-                        while part:=original.read(1024*1024):rawhash.update(part);size+=len(part);compressed.write(part)
+                    with source.open('rb') as original,target.open('wb') as output:
+                        # Stable bytes permit reuse of an already confirmed
+                        # immutable object across later snapshot manifests.
+                        with gzip.GzipFile(filename='',fileobj=output,mode='wb',compresslevel=6,mtime=0) as compressed:
+                            while part:=original.read(1024*1024):rawhash.update(part);size+=len(part);compressed.write(part)
                     if target.stat().st_size>MAX_ARTIFACT:raise ValueError('artifact_too_large')
                     hashed=hashlib.sha256()
                     with target.open('rb') as handle:
                         while part:=handle.read(1024*1024):hashed.update(part)
-                    h=hashed.hexdigest();key=f'{service}/{snapshot}/{h}.gz'
-                    uploader(destination+'/'+key,target,h)
-                    rows.append({'path':str(path.relative_to(root)),'bytes':size,'sha256':rawhash.hexdigest(),
-                                 'object_key':key,'compressed_sha256':h,'compressed_bytes':target.stat().st_size})
+                    h=hashed.hexdigest();key=f'{service}/{snapshot}/{h}.gz';compressed_size=target.stat().st_size
+                    with closing(sqlite3.connect(receipts_path)) as receipts,receipts:
+                        saved=receipts.execute('SELECT bytes,object_key FROM uploads WHERE sha256=?',(h,)).fetchone()
+                        if saved and saved[0]==compressed_size and re.fullmatch(re.escape(service)+r'/[a-z0-9-]{8,80}/'+h+r'\.gz',saved[1]):
+                            key=saved[1]
+                        else:
+                            uploader(destination+'/'+key,target,h)
+                            receipts.execute('INSERT OR REPLACE INTO uploads VALUES(?,?,?)',(h,compressed_size,key))
+                        receipts.execute('INSERT OR REPLACE INTO sources VALUES(?,?,?,?,?)',(rawhash.hexdigest(),size,h,compressed_size,key))
+                    rows.append({'path':str(relative),'bytes':size,'sha256':rawhash.hexdigest(),
+                                 'object_key':key,'compressed_sha256':h,'compressed_bytes':compressed_size,**extra})
                     target.unlink();temporary.unlink(missing_ok=True)
                 manifest={'schema_version':1,'service_id':service,'snapshot_id':snapshot,'started_at':started,
                           'completed_at':utc(),'consistent_across_databases':False,'files':rows,
-                          'recovery':'Stop writers, verify hashes and reconcile provider requests before restoring authority.'}
+                          'recovery':'Stop writers, verify hashes, expand market-receipts-v1 bundles with restore_market_receipts, and reconcile provider requests before restoring authority.'}
                 data=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode();h=digest(data)
                 target=tmp/'manifest.json';target.write_bytes(data);key=f'{service}/{snapshot}/{h}.json'
                 uploader(destination+'/'+key,target,h)

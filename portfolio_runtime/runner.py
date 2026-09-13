@@ -698,6 +698,7 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
                             },
                         )
                 outstanding = len(work["occupied"])
+                admission_blocked = False
                 for task in waiting:
                     if outstanding >= concurrency:
                         break
@@ -717,6 +718,7 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
                             cache=task["cache"],
                         )
                     except AdmissionClosed:
+                        admission_blocked = True
                         if controller and task["kind"] in ("allocation", "portfolio_critic"):
                             # Cheap company tasks must not consume each newly
                             # released dollar while a critical review waits for
@@ -727,6 +729,8 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
                     if identity not in futures:
                         futures[identity] = pool.submit(client.step, identity)
                         outstanding += 1
+                if controller and hasattr(controller, "observe_scheduler_state"):
+                    controller.observe_scheduler_state(client.observations(), research.waiting(), admission_blocked=admission_blocked)
             if at - last_publish >= 60 or remaining <= 0 or once:
                 # Settled critiques still affect the final paper allocation while
                 # admission is closed; this submits no additional inference.

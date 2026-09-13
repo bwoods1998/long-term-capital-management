@@ -50,6 +50,10 @@ Promotion creates an immutable policy version, applied only to the next research
 | [Sailboxes](https://docs.sailresearch.com/sailboxes) and [forks](https://docs.sailresearch.com/sailboxes-forking) | Can isolated research survive interruption without duplicated work or changed inputs? Compare scoped context on matched questions. |
 | [Voyages](https://docs.sailresearch.com/voyages) | Can the recorded trace connect requests, research and recovery? Configuring a trace does not establish successful delivery. |
 
+Window comparisons normalize only the required transport difference: ASAP runs synchronously; Balanced and Flex run in the background. Prompts, model, reasoning settings and output limits must still match. New triplets share a 16,384-token output limit; earlier truncated attempts remain in their original cohorts.
+
+Cache economics span every epoch, counting each write charge once. Actual Supercache read tokens are also repriced against each request's frozen ordinary cached-input rate, separately from observed paired controls. This same-token counterfactual includes the write charge before reporting a net result; missing receipts prevent a complete savings claim. Conditional break-even assumes useful reads of the same still-valid prefixes, not extra requests created to recover sunk costs.
+
 The initial fork design compares five company questions under full-universe and selected context. Its receipts must distinguish completed comparisons from proposed work; this is a bounded test, not a general conclusion about long context. Current policy changes use the stricter prospective process above. Tinker training and LoRA serving are not implemented.
 
 Every report should separate completed work, source failures, unsettled requests, measured cost and open questions. Unknown usage retains its reservation. Cloud compute and storage require separate reconciliation. Request volume and spending are workload measures, not quality scores.

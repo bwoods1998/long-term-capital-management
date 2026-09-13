@@ -4,6 +4,64 @@ from pathlib import Path
 from unittest.mock import patch, call
 from portfolio_runtime import supervisor_guest as g
 class BackupTests(unittest.TestCase):
+ def test_five_day_market_receipts_pack_restore_and_reuse_confirmed_objects(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root=Path(directory);(root/'config').mkdir();(root/'state/market').mkdir(parents=True)
+   (root/'config/run.json').write_text(json.dumps({'service_id':'week-20260914','backup_url':'https://portfolio-supervisor.example.workers.dev/v1/backups'}))
+   (root/'host-manifest.json').write_text('{}')
+   originals={}
+   # 120 hourly epochs x 50 price/metadata receipts exceeds the former
+   # 4,000-file cap without requiring large, synthetic research databases.
+   for day in range(14,19):
+    for hour in range(24):
+     for index in range(25):
+      name=f'S{index}-202609{day}T{hour:02d}0000Z-{index:016x}'
+      for suffix,body in (('.json',{'price':index+hour+1,'source':'saved exact response'}),
+                          ('.meta.json',{'captured_at':f'2026-09-{day}T{hour:02d}:00:00Z'})):
+       path=Path('state/market')/(name+suffix);raw=json.dumps(body).encode();(root/path).write_bytes(raw);originals[str(path)]=raw
+   uploaded={};calls=[]
+   def uploader(url,path,h):
+    raw=path.read_bytes();self.assertEqual(hashlib.sha256(raw).hexdigest(),h);uploaded[url]=raw;calls.append(url)
+   first=g.backup(root,uploader=uploader);manifest=json.loads(uploaded[next(k for k in calls if k.endswith('.json'))])
+   bundles=[row for row in manifest['files'] if row.get('format')=='market-receipts-v1']
+   self.assertEqual(len(bundles),5);self.assertEqual(sum(r['members'] for r in bundles),6000)
+   self.assertLess(first['files'],10)
+   restored=root/'restored';restored.mkdir()
+   for row in bundles:
+    packed=next(raw for key,raw in uploaded.items() if key.endswith(row['object_key']))
+    raw=gzip.decompress(packed);self.assertEqual(hashlib.sha256(raw).hexdigest(),row['sha256'])
+    archive=root/Path(row['path']).name;archive.write_bytes(raw)
+    self.assertEqual(g.restore_market_receipts(archive,restored)['restored_market_receipts'],row['members'])
+    self.assertEqual(g.restore_market_receipts(archive,restored)['restored_market_receipts'],row['members'])
+   self.assertEqual({str(p.relative_to(restored)):p.read_bytes() for p in (restored/'state/market').iterdir()},originals)
+   calls.clear()
+   with patch.object(g.gzip,'GzipFile',wraps=g.gzip.GzipFile) as compress:
+    second=g.backup(root,uploader=uploader)
+    self.assertLessEqual(compress.call_count,1) # Unchanged source hashes bypass repeated compression too.
+   later=json.loads(uploaded[next(k for k in calls if k.endswith('.json'))])
+   self.assertNotEqual(first['manifest_key'],second['manifest_key'])
+   self.assertEqual([r['object_key'] for r in later['files'] if r.get('format')=='market-receipts-v1'],[r['object_key'] for r in bundles])
+   self.assertLessEqual(len(calls),2) # Changed health + manifest; all original receipts reuse R2 objects.
+
+ def test_unconfirmed_upload_is_retried_and_bundle_restore_rejects_tampering(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root=Path(directory);(root/'config').mkdir();(root/'state/market').mkdir(parents=True)
+   (root/'config/run.json').write_text(json.dumps({'service_id':'week-20260914','backup_url':'https://portfolio-supervisor.example.workers.dev/v1/backups'}))
+   (root/'state/market/AAPL-20260914T120000Z-0000000000000000.json').write_text('{"price":1}')
+   calls=[]
+   def uncertain(url,path,h):calls.append(h);raise OSError('receipt missing')
+   with self.assertRaises(OSError):g.backup(root,uploader=uncertain)
+   with closing(sqlite3.connect(root/'state/.backup-uploads.sqlite')) as db:self.assertEqual(db.execute('SELECT count(*) FROM uploads').fetchone()[0],0)
+   uploads={}
+   def uploader(url,path,h):uploads[url]=path.read_bytes()
+   g.backup(root,uploader=uploader)
+   self.assertTrue(any(hashlib.sha256(raw).hexdigest()==calls[0] for raw in uploads.values()))
+   manifest=json.loads(next(raw for url,raw in uploads.items() if url.endswith('.json')))
+   row=next(r for r in manifest['files'] if r.get('format')=='market-receipts-v1')
+   archive=root/'archive.sqlite';archive.write_bytes(gzip.decompress(next(raw for url,raw in uploads.items() if url.endswith(row['object_key']))))
+   with closing(sqlite3.connect(archive)) as db,db:db.execute("UPDATE receipts SET payload=?",(b'{"price":2}',))
+   with self.assertRaisesRegex(ValueError,'bundle_integrity_failed'):g.restore_market_receipts(archive,root/'restore')
+
  def test_complete_daily_packet_restores_every_company_without_redundant_uploads(self):
   with tempfile.TemporaryDirectory() as directory:
    root=Path(directory);(root/'config').mkdir();(root/'state').mkdir()

@@ -7,11 +7,12 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import shutil
 import tempfile
 import tracemalloc
 import unittest
 
-from portfolio_runtime.evaluation import evaluate
+from portfolio_runtime.evaluation import evaluate, cache_economics
 
 
 def encoded(value):
@@ -44,7 +45,7 @@ def body(
     return {
         "model": model,
         "max_output_tokens": max_output,
-        "background": True,
+        "background": window != "asap",
         "metadata": {"completion_window": window},
         "prompt_cache_key": "key-" + prefix,
         "input": [
@@ -74,6 +75,109 @@ class RuntimeEvaluationTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def cache_profiles(self):
+        with sqlite3.connect(self.request_path) as db:
+            db.execute("CREATE TABLE metadata(key TEXT,value TEXT)")
+            db.execute(
+                "INSERT INTO metadata VALUES('profiles',?)",
+                (
+                    encoded(
+                        {
+                            "kimi_flex": [
+                                "moonshotai/Kimi-K2.6",
+                                "flex",
+                                "0.35",
+                                "0.10",
+                                "2.00",
+                            ]
+                        }
+                    ),
+                ),
+            )
+
+    def test_service_cache_economics_counts_prior_epoch_write_once_without_false_profit(
+        self,
+    ):
+        self.cache_profiles()
+        self.add(
+            "cache_write",
+            cache="write",
+            cost="2.94",
+            written=84000,
+            input_tokens=84000,
+            cached=0,
+        )
+        old = Path(self.temp.name) / "previous.sqlite"
+        shutil.copy2(self.request_path, old)
+        with sqlite3.connect(self.request_path) as db:
+            db.execute("DELETE FROM requests")
+        self.add(
+            "company",
+            cache="read",
+            cost="0.02",
+            supercached=84000,
+            input_tokens=85000,
+            cached=84000,
+        )
+        duplicate = Path(self.temp.name) / "read-copy.sqlite"
+        shutil.copy2(self.request_path, duplicate)
+        before = [file_hash(p) for p in (old, self.request_path, duplicate)]
+        progress = []
+        result = cache_economics(
+            [old, self.request_path, duplicate, old],
+            progress=lambda: progress.append(True),
+        )
+        self.assertEqual(len(progress), 3)
+        self.assertEqual(result["requests"], 2)
+        self.assertEqual(result["duplicate_requests"], 1)
+        self.assertEqual(result["known_write_cost_usd"], "2.94")
+        self.assertEqual(result["write_plus_read_known_cost_usd"], "2.96")
+        self.assertEqual(
+            result["ordinary_cached_input_counterfactual_savings_usd"], "0.00756"
+        )
+        self.assertEqual(
+            result["net_after_all_write_costs_counterfactual_usd"], "-2.93244"
+        )
+        self.assertEqual(result["conditional_total_reads_to_amortize_writes"], 389)
+        self.assertEqual(result["conditional_additional_reads_to_amortize_writes"], 388)
+        self.assertTrue(result["cache_accounting_complete"])
+        self.assertNotIn("PRIVATE RAW MODEL THESIS", encoded(result))
+        self.assertEqual(
+            before, [file_hash(p) for p in (old, self.request_path, duplicate)]
+        )
+        missing_write = cache_economics([self.request_path])
+        self.assertTrue(missing_write["write_provenance_missing"])
+        self.assertIsNone(missing_write["net_after_all_write_costs_counterfactual_usd"])
+
+    def test_service_cache_missing_receipts_or_rates_never_claim_complete_savings(self):
+        self.add(
+            "cache_write",
+            cache="write",
+            cost=None,
+            status="incomplete",
+            written=84000,
+            input_tokens=84000,
+            cached=0,
+        )
+        self.add(
+            "company", cache="read", supercached=84000, input_tokens=85000, cached=84000
+        )
+        result = cache_economics([self.request_path])
+        self.assertEqual(result["frozen_rates_unavailable"], 1)
+        self.assertEqual(result["cache_costs_unsettled"], 1)
+        self.assertFalse(result["cache_accounting_complete"])
+        self.assertIsNone(result["conditional_total_reads_to_amortize_writes"])
+        self.assertIsNone(result["net_after_all_write_costs_counterfactual_usd"])
+
+    def test_service_cache_conflicting_duplicate_request_receipts_are_rejected(self):
+        self.add("company", cache="read")
+        other = Path(self.temp.name) / "changed.sqlite"
+        shutil.copy2(self.request_path, other)
+        with sqlite3.connect(other) as db:
+            db.execute("UPDATE requests SET cost='0.9'")
+        with self.assertRaisesRegex(ValueError, "Conflicting duplicate"):
+            cache_economics([self.request_path, other])
 
     def add(
         self,
@@ -246,6 +350,37 @@ class RuntimeEvaluationTests(unittest.TestCase):
         windows = self.result()["completion_windows"]
         self.assertEqual(windows["duplicate_arm_groups"], 1)
         self.assertEqual(windows["matched_triplets"], 0)
+
+    def test_window_transport_normalization_preserves_semantic_and_invalid_mode_differences(
+        self,
+    ):
+        changes = [
+            {"background": "false"},
+            {"background": True},
+            {"model": "different-model"},
+            {"max_output_tokens": 16384},
+            {"reasoning": {"effort": "high"}},
+        ]
+        for wave, change in enumerate(changes):
+            for window in ("asap", "balanced", "flex"):
+                value = body(window)
+                value["reasoning"] = {"effort": "medium"}
+                if window == "asap":
+                    value.update(change)
+                self.add(
+                    "window_pair",
+                    wave=wave,
+                    profile="kimi_" + window,
+                    request_body=value,
+                )
+        windows = self.result()["completion_windows"]
+        self.assertEqual(windows["matched_triplets"], 0)
+        self.assertEqual(windows["nonidentical_input_groups"], len(changes))
+        for pair in windows["paired_comparisons"]:
+            self.assertEqual(
+                pair["matched_inputs"],
+                len(changes) if pair["left"] == "balanced" else 0,
+            )
 
     def test_memory_comparison_requires_same_facts_and_nonempty_persistent_history(
         self,

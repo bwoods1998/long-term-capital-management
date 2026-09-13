@@ -352,7 +352,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(Decimal(first["inference_budget_usd"]), Decimal("175.25"))
         self.assertEqual(first["spending_mode"], "available_credit")
         client = Client(Path(first["state_dir"])/"requests.sqlite", first, transport=lambda *a: None, clock=lambda: first["started_epoch"])
-        self.assertEqual(client.allowance(), Decimal("175.25"))
+        self.assertIsNone(client.allowance())
         health = service.health()
         self.assertNotIn("weekly_inference_budget_usd", health)
         self.assertIsNone(health["funding"]["epoch_cap_usd"])
@@ -392,7 +392,56 @@ class ServiceTests(unittest.TestCase):
         self.admit(max_additional_inference_usd="10", max_inference_committed_usd="10")
         _, following = service.prepare_epoch()
         self.assertEqual(Decimal(following["inference_budget_usd"]), Decimal(10)-held)
-        self.assertEqual(Decimal(service.totals()["reserved_usd"]), 10)
+        self.assertEqual(Decimal(service.totals()["reserved_usd"]), held)
+
+    def test_stale_three_cent_snapshot_cannot_strand_fresh_live_credit(self):
+        self.available_credit_config()
+        self.at = timestamp(MONDAY).timestamp()
+        self.admit(max_additional_inference_usd=".02838372", max_inference_committed_usd=".02838372")
+        service = self.service()
+        service.initialize()
+        _, config = service.prepare_epoch()
+        self.assertEqual(config["inference_budget_usd"], "0.02838372")
+        client = Client(Path(config["state_dir"])/"requests.sqlite", config, transport=lambda *a: None, clock=lambda: self.at)
+        client.reservation_guard = service.reservation_allowed
+        from portfolio_runtime.provider import body_for, AdmissionClosed
+        body = body_for("k3", "source"*10000, "review", max_output=16384)
+        with self.assertRaises(AdmissionClosed):
+            client.submit_intent("research", "k3", body)
+        self.assertEqual(service.totals()["reserved_usd"], "0")
+        self.admit(max_additional_inference_usd="100", max_inference_committed_usd="100")
+        request = client.submit_intent("research", "k3", body)
+        held = Decimal(service.totals()["committed_usd"])
+        self.assertGreater(held, Decimal(config["inference_budget_usd"]))
+        self.assertEqual(Decimal(service.totals()["reserved_usd"]), held)
+        self.assertEqual(client.rows()[0]["id"], request)
+        self.assertEqual(config["inference_budget_usd"], "0.02838372")
+        client.allocate("branch-hold", "10")
+        self.assertEqual(Decimal(service.totals()["reserved_usd"]), held+10)
+        self.admit(max_additional_inference_usd="0", max_inference_committed_usd=str(held+10))
+        with self.assertRaises(AdmissionClosed):
+            client.submit_intent("more-research", "k3", body)
+
+    def test_scheduler_distinguishes_waiting_for_credit_from_active_work(self):
+        service = self.service()
+        service.observe_scheduler_state([], ["allocation"], admission_blocked=True)
+        self.assertEqual(service._scheduler_wait_reason, "funding_needed")
+        service.observe_scheduler_state([], ["allocation"])
+        self.assertEqual(service._scheduler_wait_reason, "scheduled_wait")
+        service.observe_scheduler_state([{"status": "in_progress"}], ["allocation"], admission_blocked=True)
+        self.assertIsNone(service._scheduler_wait_reason)
+        service.observe_scheduler_state([{"status": "completed"}], [])
+        self.assertEqual(service._scheduler_wait_reason, "scheduled_wait")
+
+    def test_latest_decision_survives_empty_hourly_projection_and_restart(self):
+        service = self.service()
+        first = {"at": stamp(self.at-60), "action": "hold", "summary": "Earlier reviewed decision", "sources": []}
+        save(service.root/"epochs/earlier/public.json", {"latest_decision": first})
+        projection = service.preserve_latest_decision({"latest_decision": None})
+        self.assertEqual(projection["latest_decision"], first)
+        newer = {**first, "at": stamp(self.at), "summary": "Newer reviewed decision"}
+        self.assertEqual(service.preserve_latest_decision({"latest_decision": newer})["latest_decision"], newer)
+        self.assertEqual(service.preserve_latest_decision({"latest_decision": first})["latest_decision"], newer)
 
     def test_available_credit_refreshes_grant_after_slow_sources_and_keeps_value_gate(self):
         self.rehearsal_config()
@@ -626,6 +675,11 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(service.totals()["unsettled_requests"], 1)
         self.assertEqual(Decimal(service.totals()["reserved_usd"]), held)
         self.assertNotEqual(self.runs[0]["run_id"], json.loads(row["config"])["run_id"])
+        self.at = timestamp(SATURDAY).timestamp()+600
+        with service.locked():
+            service.tick()
+        self.assertEqual((service.status, service.reason, service.terminal), ("needs_attention", "recovering", True))
+        self.assertEqual(service.health()["stage"], "settlement_incomplete")
 
     def test_supercache_age_uses_original_request_clock_not_heartbeat(self):
         service = self.service()

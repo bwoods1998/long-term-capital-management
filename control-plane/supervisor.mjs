@@ -2,7 +2,9 @@
 import {createHash} from 'node:crypto';
 export const API = 'https://sailbox-api.sailresearch.com';
 export const INFERENCE = 'https://api.sailresearch.com';
+export const RELEASE_PROBE = "import fcntl,json\nfrom pathlib import Path\nrunning=False\nwith Path('/workspace/state/coordinator.lock').open('r+') as lock:\n try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)\n except BlockingIOError:running=True\nprint(json.dumps({'running':running}))\n";
 const iso = ms => new Date(ms).toISOString();
+const backupObjectKey = (service,row) => new RegExp('^'+service+'/[a-z0-9-]{8,80}/'+row.compressed_sha256+'\\.gz$').test(row.object_key||'');
 const finite = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const availableCredit = c => c.spending_mode==='available_credit';
 export const dollars = value => { if (typeof value !== 'number' && (typeof value !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value))) throw new Error('invalid_money'); const n = Number(value); if (!finite(n)) throw new Error('invalid_money'); return n; };
@@ -136,12 +138,14 @@ export class Supervisor {
     const key = 'mail:' + id; if (await this.s.get(key)) return;
     const titles = {credit_low:'Sail funding needed',billing_unavailable:'Sail balance unavailable',
       failure:'Portfolio service needs attention',recovered:'Portfolio service recovered',backup:'Portfolio backup needs attention',
-      complete:'Portfolio week complete',paused:'Portfolio service paused',rehearsal:'Portfolio rehearsal complete'};
+      complete:'Portfolio week complete',paused:'Portfolio service paused',rehearsal:'Portfolio rehearsal complete',
+      funding_blocked:'Portfolio research paused for funding'};
     const lines = [titles[kind] + '.', ''];
     if (details.reason && /^[a-z0-9_]{1,64}$/.test(details.reason)) lines.push('Reason: ' + details.reason + '.');
     if (finite(details.balance_usd)) lines.push('Sail balance: $' + details.balance_usd.toFixed(2) + '.');
     if (finite(details.runway_days)) lines.push('Estimated research runway: ' + details.runway_days.toFixed(1) + ' days.');
-    if (kind === 'credit_low') lines.push('Add Sail credit to keep research running. The service detects funding automatically; no restart is needed: https://app.sailresearch.com/');
+    if (kind === 'credit_low' || kind === 'funding_blocked') lines.push('Add Sail credit to keep research running. The service detects funding automatically; no restart is needed: https://app.sailresearch.com/');
+    if (kind === 'funding_blocked') lines.push('New research is waiting for available credit. Existing request reconciliation and paper accounting continue.');
     if (kind === 'recovered') lines.push('Cloud supervision is healthy again. The service will continue within its scheduled window.');
     if (kind === 'rehearsal') {
       lines.push('The rehearsal has ended and its inference requests are settled. The same paper portfolio continues into the scheduled week.');
@@ -206,7 +210,7 @@ export class Supervisor {
         ||manifest.snapshot_id!==key.split('/')[1]||!Array.isArray(manifest.files)||!manifest.files.length||manifest.files.length>4000) throw new Error('backup_integrity_failed');
       for (const name of ['paper.sqlite','research.sqlite','requests.sqlite']) if (!manifest.files.some(row=>['state/'+name,'state/seed/'+name].includes(row.path))) throw new Error('backup_missing_ledger');
       for(let i=0;i<manifest.files.length;i+=20) await Promise.all(manifest.files.slice(i,i+20).map(async row=>{
-        if (!/^[a-f0-9]{64}$/.test(row.compressed_sha256||'')||row.object_key!==prior.service_id+'/'+manifest.snapshot_id+'/'+row.compressed_sha256+'.gz'
+        if (!/^[a-f0-9]{64}$/.test(row.compressed_sha256||'')||!backupObjectKey(prior.service_id,row)
           ||!Number.isSafeInteger(row.compressed_bytes)||row.compressed_bytes<1) throw new Error('backup_integrity_failed');
         const head=await this.env.BACKUPS.head(row.object_key);
         if (!head||head.size!==row.compressed_bytes||head.customMetadata?.sha256!==row.compressed_sha256) throw new Error('backup_artifact_missing');
@@ -270,7 +274,7 @@ export class Supervisor {
         if (typeof row.path!=='string' || row.path.startsWith('/') || row.path.split('/').some(p=>!p||p==='.'||p==='..')
           || paths.has(row.path) || !hashPattern.test(row.sha256||'') || !Number.isSafeInteger(row.bytes) || row.bytes<1
           || !hashPattern.test(row.compressed_sha256||'') || !Number.isSafeInteger(row.compressed_bytes) || row.compressed_bytes<1
-          || row.object_key!==prior.service_id+'/'+backupManifest.snapshot_id+'/'+row.compressed_sha256+'.gz') throw new Error('backup_integrity_failed');
+          || !backupObjectKey(prior.service_id,row)) throw new Error('backup_integrity_failed');
         paths.add(row.path);
       }
       for (const name of ['paper.sqlite','research.sqlite','requests.sqlite'])
@@ -311,8 +315,7 @@ export class Supervisor {
       if (oldHost.value.deadline!==nextHost.deadline || canonical(Object.keys(oldHost.value.files).sort())!==canonical(Object.keys(nextHost.files).sort()))
         throw new Error('release_contract_changed');
       const changed=Object.keys(nextHost.files).filter(path=>canonical(nextHost.files[path])!==canonical(oldHost.value.files[path]));
-      if (!changed.length || changed.some(path=>!/^portfolio_runtime\/[a-zA-Z0-9_]+\.py$/.test(path)
-        || path==='portfolio_runtime/supervisor_guest.py')) throw new Error('release_contract_changed');
+      if (!changed.length || changed.some(path=>!/^portfolio_runtime\/[a-zA-Z0-9_]+\.py$/.test(path))) throw new Error('release_contract_changed');
       const runDescriptor=oldHost.value.files['config/run.json'];
       if (!runDescriptor || runDescriptor.sha256!==oldRun.row.sha256 || runDescriptor.bytes!==oldRun.row.bytes
         || oldRun.value.kind!=='weekday_service' || oldRun.value.service_id!==prior.service_id) throw new Error('release_contract_changed');
@@ -322,9 +325,10 @@ export class Supervisor {
       if (box.sailbox_id!==prior.box_id || box.vcpu_count!==1 || box.memory_mib!==2048 || box.state_disk_size_gib!==32)
         throw new Error('release_resources_changed');
       const admission=await this.file(prior,'/workspace/config/admission.json');
-      const probe=await this.exec(prior,['python3','/workspace/portfolio_runtime/supervisor_guest.py','probe']);
+      // Do not execute newly installed runtime code before authorizing it.
+      const probe=await this.exec(prior,['python3','-c',RELEASE_PROBE]);
       if (admission.service_id!==prior.service_id || admission.allow_new_research!==false || admission.stop_requested!==true
-        || probe.running!==false || probe.manifest_sha256!==body.manifest_sha256) throw new Error('release_not_stopped');
+        || probe.running!==false) throw new Error('release_not_stopped');
       const at=iso(this.now());
       await this.s.transaction(async store=>{
         await store.put(archiveKey,{at,config:prior,manifest:oldHost.value,control,latest,backup_manifest_key:key});
@@ -403,10 +407,17 @@ export class Supervisor {
     latest.credit=credit;
     // One notice per funding episode. A low balance must not send a second runway email.
     const fundingIssue = credit.reason!=='rehearsal_budget_exhausted'&&(!credit.allow || (credit.warn && at>=start));
+    const fundsBlocked = credit.reason==='credit_low' && !credit.allow;
     if (fundingIssue && !control.credit_alerted && !ended && !control.paused) {
-      await this.alert(c.service_id+':credit:'+(control.credit_episode||0),credit.reason==='billing_unavailable'?'billing_unavailable':credit.reason==='authorization_exhausted'?'failure':'credit_low', {...credit,reason:credit.reason});
+      if (!fundsBlocked) await this.alert(c.service_id+':credit:'+(control.credit_episode||0),credit.reason==='billing_unavailable'?'billing_unavailable':credit.reason==='authorization_exhausted'?'failure':'credit_low', {...credit,reason:credit.reason});
       control.credit_alerted=true;
     } else if (!fundingIssue && control.credit_alerted) {control.credit_alerted=false;control.credit_episode=(control.credit_episode||0)+1;}
+    if (fundsBlocked && !control.funding_blocked_alerted && at>=start && !ended && !control.paused) {
+      await this.alert(c.service_id+':funding-blocked:'+(control.funding_blocked_episode||0),'funding_blocked',credit);
+      control.funding_blocked_alerted=true;
+    } else if (credit.allow && control.funding_blocked_alerted) {
+      control.funding_blocked_alerted=false;control.funding_blocked_episode=(control.funding_blocked_episode||0)+1;
+    }
     if (control.parked && control.paused && !ended) {latest.status='paused';return save();}
     if (control.budget_parked && !ended) {latest.status='needs_attention';latest.reason_code='cloud_budget_exhausted';return save();}
     if (control.sleep_until && at < Date.parse(control.sleep_until) && !control.paused && !ended && !computeExhausted) {
@@ -483,7 +494,8 @@ export class Supervisor {
       const finalBackup=Number.isFinite(backupTime)&&backupTime>=Date.parse(control.stop_started_at || 0)&&!backup.running;
       if (stopping && !probe.running && finalBackup && stopAge>=120000) {
         await sleep();
-        const settled=Number.isFinite(requestPending)&&requestPending===0;
+        const unsettled=Number(health.inference?.unsettled_requests??requestPending);
+        const settled=Number.isFinite(requestPending)&&requestPending===0&&Number.isFinite(unsettled)&&unsettled===0;
         if (ended) {
           control.finished=true;latest.status=settled?'complete':'needs_attention';
           await this.alert(c.service_id+':complete',settled?'complete':'failure',{reason:settled?'week_complete':'unsettled_requests_retained',health});await this.s.deleteAlarm();

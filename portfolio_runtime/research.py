@@ -140,12 +140,12 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                 if symbol:
                     prior = db.execute(
                         "SELECT id,kind,result,grade,cutoff FROM prior_work WHERE symbol=? AND kind IN ('company','memory_review') ORDER BY created DESC LIMIT ?",
-                        (symbol, limit-len(rows)),
+                        (symbol, limit - len(rows)),
                     ).fetchall()
                 else:
                     prior = db.execute(
                         "SELECT id,kind,result,grade,cutoff FROM prior_work WHERE kind IN ('allocation','portfolio_critic','memory_review') ORDER BY created DESC LIMIT ?",
-                        (limit-len(rows),),
+                        (limit - len(rows),),
                     ).fetchall()
         result = [
             {
@@ -156,18 +156,30 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
             }
             for r in rows
         ]
-        return result + [{"id": r["id"], "kind": r["kind"],
-                          "result": json.loads(r["result"]), "grade": json.loads(r["grade"]),
-                          "historical_cutoff": r["cutoff"],
-                          "notice": "Prior hypothesis, not source evidence; recheck against current packet."}
-                         for r in prior]
+        return result + [
+            {
+                "id": r["id"],
+                "kind": r["kind"],
+                "result": json.loads(r["result"]),
+                "grade": json.loads(r["grade"]),
+                "historical_cutoff": r["cutoff"],
+                "notice": "Prior hypothesis, not source evidence; recheck against current packet.",
+            }
+            for r in prior
+        ]
 
     @staticmethod
     def source_fingerprint(company):
         # HTTP capture timestamps and unrelated SEC metadata are not new facts.
         price = company.get("research_price") or {}
-        return hashlib.sha256(canonical({"facts": company.get("facts", {}),
-            "price": {k: price.get(k) for k in ("price", "as_of", "currency")}}).encode()).hexdigest()
+        return hashlib.sha256(
+            canonical(
+                {
+                    "facts": company.get("facts", {}),
+                    "price": {k: price.get(k) for k in ("price", "as_of", "currency")},
+                }
+            ).encode()
+        ).hexdigest()
 
     def carry_history(self, paths):
         """Import bounded immutable memory; never copy requests or trial outputs.
@@ -181,13 +193,19 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                 path = Path(path)
                 if not path.is_file() or path.resolve() == self.path.resolve():
                     continue
-                with sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, factory=ClosingConnection) as source:
+                with sqlite3.connect(
+                    "file:" + str(path) + "?mode=ro",
+                    uri=True,
+                    factory=ClosingConnection,
+                ) as source:
                     source.row_factory = sqlite3.Row
                     rows = source.execute(
                         "SELECT id,symbol,kind,result,grade,body,created FROM tasks WHERE status='complete' AND kind IN ('company','allocation','portfolio_critic','memory_review') ORDER BY created DESC LIMIT 1600"
                     ).fetchall()
                 for row in rows:
-                    if row["kind"] not in allowed or (row["symbol"] and row["symbol"] not in self.companies):
+                    if row["kind"] not in allowed or (
+                        row["symbol"] and row["symbol"] not in self.companies
+                    ):
                         continue
                     result = json.loads(row["result"])
                     if not isinstance(result, dict):
@@ -200,16 +218,38 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                     company = packet.get("evidence") or {}
                     cutoff = company.get("captured_at") or company.get("cutoff")
                     fingerprint = self.source_fingerprint(company)
-                    identity = "prior-" + hashlib.sha256((str(path) + ":" + row["id"]).encode()).hexdigest()[:40]
-                    grade = grade_result(result, self.companies,
-                                         allocation=row["kind"] == "allocation")
-                    target.execute("INSERT OR IGNORE INTO prior_work VALUES(?,?,?,?,?,?,?,?)",
-                        (identity, row["symbol"], row["kind"], row["result"], canonical(grade),
-                         cutoff, fingerprint, row["created"]))
+                    identity = (
+                        "prior-"
+                        + hashlib.sha256(
+                            (str(path) + ":" + row["id"]).encode()
+                        ).hexdigest()[:40]
+                    )
+                    grade = grade_result(
+                        result, self.companies, allocation=row["kind"] == "allocation"
+                    )
+                    target.execute(
+                        "INSERT OR IGNORE INTO prior_work VALUES(?,?,?,?,?,?,?,?)",
+                        (
+                            identity,
+                            row["symbol"],
+                            row["kind"],
+                            row["result"],
+                            canonical(grade),
+                            cutoff,
+                            fingerprint,
+                            row["created"],
+                        ),
+                    )
                     question = packet.get("question")
-                    if row["kind"] == "company" and row["symbol"] and isinstance(question, str):
-                        target.execute("INSERT OR IGNORE INTO prior_questions VALUES(?,?,?,?)",
-                            (identity, row["symbol"], question, fingerprint))
+                    if (
+                        row["kind"] == "company"
+                        and row["symbol"]
+                        and isinstance(question, str)
+                    ):
+                        target.execute(
+                            "INSERT OR IGNORE INTO prior_questions VALUES(?,?,?,?)",
+                            (identity, row["symbol"], question, fingerprint),
+                        )
 
     def choose(self, limit):
         with self.connect() as db:
@@ -220,8 +260,12 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                 )
             }
             if self.bounded_novelty:
-                for row in db.execute("SELECT symbol,source_fingerprint,count(*) n FROM prior_questions GROUP BY symbol,source_fingerprint"):
-                    if row["symbol"] in self.companies and row["source_fingerprint"] == self.source_fingerprint(self.companies[row["symbol"]]):
+                for row in db.execute(
+                    "SELECT symbol,source_fingerprint,count(*) n FROM prior_questions GROUP BY symbol,source_fingerprint"
+                ):
+                    if row["symbol"] in self.companies and row[
+                        "source_fingerprint"
+                    ] == self.source_fingerprint(self.companies[row["symbol"]]):
                         counts[row["symbol"]] = counts.get(row["symbol"], 0) + row["n"]
             unresolved = []
             for r in db.execute(
@@ -276,8 +320,12 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
             return selected
         seen = {}
         with self.connect() as db:
-            for row in db.execute("SELECT symbol,question,source_fingerprint FROM prior_questions"):
-                seen.setdefault((row["symbol"], row["source_fingerprint"]), set()).add(row["question"])
+            for row in db.execute(
+                "SELECT symbol,question,source_fingerprint FROM prior_questions"
+            ):
+                seen.setdefault((row["symbol"], row["source_fingerprint"]), set()).add(
+                    row["question"]
+                )
             for row in db.execute("SELECT symbol,body FROM tasks WHERE kind='company'"):
                 packet = json.loads(json.loads(row["body"])["input"][-1]["content"])
                 key = (row["symbol"], self.source_fingerprint(packet["evidence"]))
@@ -288,7 +336,11 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
         for sym, question in selected + [(s, q) for s, q, _ in unresolved]:
             key = (sym, self.source_fingerprint(self.companies[sym]))
             questions = seen.get(key, set())
-            if len(questions) < 3 and question not in questions and sym not in {s for s, _ in eligible}:
+            if (
+                len(questions) < 3
+                and question not in questions
+                and sym not in {s for s, _ in eligible}
+            ):
                 eligible.append((sym, question))
         for sym in symbols:
             if len(eligible) >= limit:
@@ -296,7 +348,11 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
             key = (sym, self.source_fingerprint(self.companies[sym]))
             questions = seen.get(key, set())
             question = "Assess the business economics, cash generation, balance-sheet resilience and missing valuation evidence. Identify what would change an investment decision."
-            if len(questions) < 3 and question not in questions and sym not in {s for s, _ in eligible}:
+            if (
+                len(questions) < 3
+                and question not in questions
+                and sym not in {s for s, _ in eligible}
+            ):
                 eligible.append((sym, question))
         return eligible[:limit]
 
@@ -319,9 +375,15 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
             if not grade_result(result, self.companies)["source_check_passed"]:
                 continue
             seen.add(row["symbol"])
-            checked.append({"symbol": row["symbol"], "result": result,
-                            "research_id": row["id"], "historical_cutoff": row["cutoff"],
-                            "interpretation": "Numerical claims rechecked against current sources; investment conclusion remains a hypothesis."})
+            checked.append(
+                {
+                    "symbol": row["symbol"],
+                    "result": result,
+                    "research_id": row["id"],
+                    "historical_cutoff": row["cutoff"],
+                    "interpretation": "Numerical claims rechecked against current sources; investment conclusion remains a hypothesis.",
+                }
+            )
             if len(checked) == 36:
                 break
         return checked
@@ -335,8 +397,15 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
         picks = self.choose(size)
         checked = self.checked_for_allocation()
         with self.connect() as db:
-            prior_allocation = db.execute("SELECT 1 FROM tasks WHERE kind='allocation' LIMIT 1").fetchone()
-        outcome_only = not picks and self.outcome_review_requested and not prior_allocation and bool(checked)
+            prior_allocation = db.execute(
+                "SELECT 1 FROM tasks WHERE kind='allocation' LIMIT 1"
+            ).fetchone()
+        outcome_only = (
+            not picks
+            and self.outcome_review_requested
+            and not prior_allocation
+            and bool(checked)
+        )
         if not picks and not outcome_only:
             return 0
         planned = []
@@ -433,10 +502,22 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                 )
         # Completion-window experiments use the SAME task/source packet for all arms.
         pair = picks[0][0] if picks else None
-        question = canonical({"task": "research",
-            "question": "Reconcile annual versus YTD cash flow and identify the most consequential financing risk.",
-            "evidence": self.companies[pair]}) if pair else None
-        for profile in (("kimi_asap", "kimi_balanced", "kimi_flex") if self.enable_experiments and picks else ()):
+        question = (
+            canonical(
+                {
+                    "task": "research",
+                    "question": "Reconcile annual versus YTD cash flow and identify the most consequential financing risk.",
+                    "evidence": self.companies[pair],
+                }
+            )
+            if pair
+            else None
+        )
+        for profile in (
+            ("kimi_asap", "kimi_balanced", "kimi_flex")
+            if self.enable_experiments and picks
+            else ()
+        ):
             add(
                 f"w{number:02}-window-{profile}",
                 number,
@@ -445,7 +526,7 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                 profile,
                 self.prefix("window-control"),
                 question,
-                max_output=8192,
+                max_output=16384,
             )
         # Allocation proposals use accumulated, checked research. K3 serves as an
         # independent capital-allocation critic, not a source of numerical truth.
@@ -457,8 +538,12 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                     "checked_research": checked[:36],
                     "prior_portfolio_research": self.latest(limit=3),
                     "paper_portfolio": getattr(self, "portfolio_context", None),
-                    "observed_investment_outcomes": getattr(self, "investment_outcomes", []),
-                    "trigger": "new_actual_investment_outcome" if outcome_only else "accumulated_company_research",
+                    "observed_investment_outcomes": getattr(
+                        self, "investment_outcomes", []
+                    ),
+                    "trigger": "new_actual_investment_outcome"
+                    if outcome_only
+                    else "accumulated_company_research",
                 }
             )
             add(
@@ -471,7 +556,13 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                 shared,
                 max_output=16384,
             )
-        if picks and number == 2 and not cache_ready and self.enable_cache_write and self.enable_experiments:
+        if (
+            picks
+            and number == 2
+            and not cache_ready
+            and self.enable_cache_write
+            and self.enable_experiments
+        ):
             add(
                 "cache-write-v1",
                 number,

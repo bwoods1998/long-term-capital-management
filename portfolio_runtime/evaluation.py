@@ -6,7 +6,7 @@ credentials, request identifiers or account information enters this projection.
 """
 
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_EVEN, localcontext
+from decimal import Decimal, ROUND_HALF_EVEN, ROUND_CEILING, localcontext
 import hashlib
 import json
 import math
@@ -319,8 +319,14 @@ def _paired(pairs, left, right):
 def _window_body(body):
     if not isinstance(body, dict) or not isinstance(body.get("metadata"), dict):
         return None
+    window = body["metadata"].get("completion_window")
+    if window not in WINDOWS or body.get("background") is not (window != "asap"):
+        return None
     normalized = {**body, "metadata": dict(body["metadata"])}
     normalized["metadata"].pop("completion_window", None)
+    # Foreground ASAP and background Balanced/Flex are the declared transport
+    # treatment. Keep model, prompts, reasoning, cache identity and output limit.
+    normalized.pop("background")
     return normalized
 
 
@@ -669,6 +675,192 @@ def evaluate(request_db, research_db):
     with localcontext() as context:
         context.prec = 80
         return _evaluate(request_db, research_db)
+
+
+def cache_economics(request_paths, *, progress=None):
+    """Count cache writes once across epochs; reprice actual read token counts.
+
+    This is a same-token counterfactual against ordinary cached input, not an
+    independently observed alternate workload or a claim of investment ROI.
+    """
+    with localcontext() as context:
+        context.prec = 80
+        return _cache_economics(request_paths, progress=progress)
+
+
+def _cache_economics(request_paths, *, progress=None):
+    seen = {}
+    counts = {
+        key: 0
+        for key in (
+            "requests",
+            "duplicate_requests",
+            "write_requests",
+            "supercache_read_requests",
+            "supercached_tokens",
+            "written_tokens",
+            "read_requests_without_hit",
+            "cache_usage_unavailable",
+            "cache_costs_unsettled",
+            "frozen_rates_unavailable",
+            "unsettled_requests",
+        )
+    }
+    write_cost, read_cost, savings = Decimal(0), Decimal(0), Decimal(0)
+    priced_reads = 0
+    for path in sorted({Path(path).resolve() for path in request_paths}):
+        db = sqlite3.connect(
+            "file:" + quote(str(path), safe="/") + "?mode=ro", uri=True
+        )
+        db.row_factory = sqlite3.Row
+        try:
+            db.execute("BEGIN")
+            names = {
+                row[0]
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            profile_row = (
+                db.execute("SELECT value FROM metadata WHERE key='profiles'").fetchone()
+                if "metadata" in names
+                else None
+            )
+            profiles = _decode(profile_row[0]) if profile_row else {}
+            profiles = profiles if isinstance(profiles, dict) else {}
+            # Select declared cache work and actual automatic Supercache hits.
+            # Ordinary prompt bodies can total gigabytes across a week; fetch
+            # them only for priced reads or rare duplicate-identity validation.
+            query = """SELECT id,profile,cache,response,status,cost FROM requests
+WHERE cache IN ('write','read') OR CASE WHEN json_valid(response)
+THEN COALESCE(CAST(json_extract(response,'$.metadata.supercached_input_tokens') AS INTEGER),0)>0 ELSE 0 END
+LIMIT 100001"""
+            for row in db.execute(query):
+                row = dict(row)
+                frozen = profiles.get(row["profile"])
+                digest = hashlib.sha256(
+                    _json({**row, "frozen_profile": frozen}).encode()
+                ).hexdigest()
+                if row["id"] in seen:
+                    previous_digest, previous_path = seen[row["id"]]
+                    if previous_digest != digest:
+                        raise ValueError("Conflicting duplicate cache request receipts")
+                    previous = sqlite3.connect(
+                        "file:" + quote(str(previous_path), safe="/") + "?mode=ro",
+                        uri=True,
+                    )
+                    try:
+                        old_body = previous.execute(
+                            "SELECT body FROM requests WHERE id=?", (row["id"],)
+                        ).fetchone()[0]
+                    finally:
+                        previous.close()
+                    current_body = db.execute(
+                        "SELECT body FROM requests WHERE id=?", (row["id"],)
+                    ).fetchone()[0]
+                    if old_body != current_body:
+                        raise ValueError("Conflicting duplicate cache request intents")
+                    counts["duplicate_requests"] += 1
+                    continue
+                seen[row["id"]] = (digest, path)
+                counts["requests"] += 1
+                if counts["requests"] > 100000:
+                    raise ValueError("Cache accounting request bound exceeded")
+                cost = _money(row["cost"]) if row["status"] in TERMINAL else None
+                counts["unsettled_requests"] += cost is None
+                tokens = _usage(row)
+                is_write = row["cache"] == "write" or bool(
+                    tokens and tokens["written_tokens"]
+                )
+                is_read = bool(tokens and tokens["supercached_tokens"])
+                if row["cache"] in ("write", "read") and tokens is None:
+                    counts["cache_usage_unavailable"] += 1
+                if is_write or is_read or row["cache"] == "read":
+                    counts["cache_costs_unsettled"] += cost is None
+                if is_write:
+                    counts["write_requests"] += 1
+                    if cost is not None:
+                        write_cost += cost
+                if tokens:
+                    counts["written_tokens"] += tokens["written_tokens"]
+                    counts["supercached_tokens"] += tokens["supercached_tokens"]
+                    counts["read_requests_without_hit"] += (
+                        row["cache"] == "read" and not is_read
+                    )
+                if not is_read:
+                    continue
+                counts["supercache_read_requests"] += 1
+                if cost is not None:
+                    read_cost += cost
+                body = _decode(
+                    db.execute(
+                        "SELECT body FROM requests WHERE id=?", (row["id"],)
+                    ).fetchone()[0]
+                )
+                valid_profile = (
+                    isinstance(frozen, list)
+                    and len(frozen) == 5
+                    and isinstance(body, dict)
+                    and body.get("model") == frozen[0]
+                    and (body.get("metadata") or {}).get("completion_window")
+                    == frozen[1]
+                )
+                rate = _money(frozen[3]) if valid_profile else None
+                if rate is None:
+                    counts["frozen_rates_unavailable"] += 1
+                    continue
+                savings += (
+                    Decimal(tokens["supercached_tokens"])
+                    * rate
+                    * Decimal("0.9")
+                    / 1000000
+                )
+                priced_reads += 1
+        finally:
+            db.close()
+            if progress is not None:
+                progress()
+    write_missing = (
+        counts["supercache_read_requests"] > 0 and counts["write_requests"] == 0
+    )
+    complete = not write_missing and not any(
+        counts[key]
+        for key in (
+            "cache_usage_unavailable",
+            "cache_costs_unsettled",
+            "frozen_rates_unavailable",
+            "unsettled_requests",
+        )
+    )
+    per_read = savings / priced_reads if priced_reads else Decimal(0)
+    break_even = (
+        int((write_cost / per_read).to_integral_value(rounding=ROUND_CEILING))
+        if complete and write_cost and per_read > 0
+        else None
+    )
+    return {
+        "schema_version": 1,
+        "scope": "service_cache_economics",
+        **counts,
+        "known_write_cost_usd": _text(write_cost),
+        "known_read_cost_usd": _text(read_cost),
+        "write_plus_read_known_cost_usd": _text(write_cost + read_cost),
+        "priced_read_requests": priced_reads,
+        "ordinary_cached_input_counterfactual_savings_usd": _text(savings),
+        "net_after_all_write_costs_counterfactual_usd": _text(savings - write_cost)
+        if complete
+        else None,
+        "write_provenance_missing": write_missing,
+        "cache_accounting_complete": complete,
+        "conditional_total_reads_to_amortize_writes": break_even,
+        "conditional_additional_reads_to_amortize_writes": max(
+            0, break_even - priced_reads
+        )
+        if break_even is not None
+        else None,
+        "investment_roi_assessed": False,
+        "interpretation": "Declared cache work and actual automatic Supercache hits only. Read tokens are repriced at each frozen ordinary cached-input rate, with all known write costs counted once. This is not an observed alternate run. Break-even assumes the observed read mix repeats while its prefixes remain valid; no extra reads are justified solely to amortize a sunk write.",
+    }
 
 
 def _evaluate(request_db, research_db):
