@@ -67,12 +67,35 @@ def force_stop(root=ROOT):
     return {'stopped':not locked(root/'state/coordinator.lock')}
 
 def artifact_paths(root):
-    state=root/'state';items=[]
+    state=root/'state';items=[];assembled_days={}
     for path in state.rglob('*'):
         if not path.is_file() or path.is_symlink():continue
         relative=path.relative_to(state)
         # Exclude large re-fetchable raw source caches and temporary snapshots.
         if any(part.startswith('.') or part in ('filings','raw','snapshots') for part in relative.parts):continue
+        if (len(relative.parts)==4 and relative.parts[0]=='evidence'
+            and re.fullmatch(r'\d{4}-\d{2}-\d{2}',relative.parts[1])
+            and relative.parts[2]=='companies' and path.suffix=='.json'):
+            day=path.parent.parent
+            if day not in assembled_days:
+                assembled_days[day]={}
+                assembled=day/'evidence.json'
+                try:
+                    if assembled.is_file() and not assembled.is_symlink() and assembled.stat().st_size<=MAX_ARTIFACT:
+                        packet=json.loads(assembled.read_text())
+                        companies=packet['companies'];members=packet['universe']['companies']
+                        records={company['symbol']:company for company in companies}
+                        symbols={company['symbol'] for company in members}
+                        if len(records)==len(companies)==len(members)==len(symbols) and set(records)==symbols:
+                            assembled_days[day]=records
+                except (OSError,ValueError,KeyError,TypeError):pass
+            # Keep partial captures and any cache that differs from the complete
+            # packet. The retained assembled file must contain the exact record.
+            record=assembled_days[day].get(path.stem)
+            if record is not None and path.stat().st_size<=MAX_ARTIFACT:
+                try:
+                    if json.loads(path.read_text())==record:continue
+                except (OSError,ValueError):pass
         if path.suffix in ('.sqlite','.json'):
             if path.stat().st_size > 1_500_000_000:raise ValueError('database_too_large')
             items.append(path)

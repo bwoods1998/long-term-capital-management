@@ -1,9 +1,56 @@
-import hashlib,json,signal,sqlite3,tempfile,unittest
+import gzip,hashlib,json,signal,sqlite3,tempfile,unittest
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch, call
 from portfolio_runtime import supervisor_guest as g
 class BackupTests(unittest.TestCase):
+ def test_complete_daily_packet_restores_every_company_without_redundant_uploads(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root=Path(directory);(root/'config').mkdir();(root/'state').mkdir()
+   (root/'config/run.json').write_text(json.dumps({'service_id':'week-20260914','backup_url':'https://portfolio-supervisor.example.workers.dev/v1/backups'}))
+   (root/'host-manifest.json').write_text('{}')
+   complete=root/'state/evidence/2026-09-13';partial=root/'state/evidence/2026-09-14'
+   records=[{'symbol':symbol,'cik':str(i).zfill(10),'captured_at':'2026-09-13T19:00:00Z',
+             'facts':{'cash':[{'tag':'CashAndCashEquivalentsAtCarryingValue','unit':'USD',
+                              'observations':[{'val':100+i,'end':'2026-06-30'}]}]}}
+            for i,symbol in enumerate(('AAPL','MSFT','NVDA'),1)]
+   packet={'companies':records,'universe':{'companies':[{'symbol':r['symbol']} for r in records]}}
+   for day in (complete,partial):
+    (day/'companies').mkdir(parents=True)
+    for record in records:(day/'companies'/f"{record['symbol']}.json").write_text(json.dumps(record))
+    (day/'universe.json').write_text(json.dumps(packet['universe']))
+    (day/'capture.json').write_text(json.dumps({'captured':len(records)}))
+   (complete/'evidence.json').write_text(json.dumps(packet))
+   epoch=root/'state/epochs/rehearsal-00';epoch.mkdir(parents=True)
+   (epoch/'evidence.json').write_text(json.dumps(packet))
+   uploaded={}
+   def uploader(url,path,hash_value):uploaded[url]=path.read_bytes()
+   g.backup(root,uploader=uploader)
+   manifest=json.loads(next(data for url,data in uploaded.items() if url.endswith('.json')))
+   files={item['path']:item for item in manifest['files']}
+   for record in records:
+    self.assertNotIn(f"state/evidence/2026-09-13/companies/{record['symbol']}.json",files)
+    self.assertIn(f"state/evidence/2026-09-14/companies/{record['symbol']}.json",files)
+   for name in ('state/evidence/2026-09-13/evidence.json','state/evidence/2026-09-13/universe.json',
+                'state/evidence/2026-09-13/capture.json','state/epochs/rehearsal-00/evidence.json'):
+    self.assertIn(name,files)
+   item=files['state/evidence/2026-09-13/evidence.json']
+   raw=gzip.decompress(next(data for url,data in uploaded.items() if url.endswith(item['object_key'])))
+   self.assertEqual(hashlib.sha256(raw).hexdigest(),item['sha256'])
+   self.assertEqual(json.loads(raw)['companies'],records)
+
+ def test_incomplete_or_changed_assembled_company_records_never_hide_cache_files(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root=Path(directory);day=root/'state/evidence/2026-09-13';(day/'companies').mkdir(parents=True)
+   path=day/'companies/AAPL.json';record={'symbol':'AAPL','facts':{'cash':100}}
+   path.write_text(json.dumps(record))
+   for packet in ({'companies':[record],'universe':{'companies':[{'symbol':'AAPL'},{'symbol':'MSFT'}]}},
+                  {'companies':[{'symbol':'AAPL','facts':{'cash':99}}],'universe':{'companies':[{'symbol':'AAPL'}]}}):
+    (day/'evidence.json').write_text(json.dumps(packet))
+    self.assertIn(path,g.artifact_paths(root))
+   (day/'evidence.json').write_text('{unfinished')
+   self.assertIn(path,g.artifact_paths(root))
+
  def test_snapshots_are_checked_and_manifest_committed_after_artifacts(self):
   with tempfile.TemporaryDirectory() as directory:
    root=Path(directory);(root/'config').mkdir();(root/'state').mkdir()
