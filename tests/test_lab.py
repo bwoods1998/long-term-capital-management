@@ -50,6 +50,23 @@ class LabTests(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             self.assertEqual(sum(pool.map(attempt, range(8))), 1)
 
+    def test_supercache_reads_are_subset_of_cached_input_and_writes_stay_unknown(self):
+        usage = {'input_tokens': 4609, 'input_tokens_details': {'cached_tokens': 3072}, 'output_tokens': 100}
+        rates = {'input': '0.66', 'cached': '0.022', 'output': '1.98'}
+        metadata = {'supercached_input_tokens': '2048', 'supercache_write_input_tokens': '0'}
+        wanted = (Decimal(1537) * Decimal('.66') + Decimal(1024) * Decimal('.022') +
+                  Decimal(2048) * Decimal('.0022') + Decimal(100) * Decimal('1.98')) / 1_000_000
+        self.assertEqual(lab.estimate_cost(usage, rates, metadata), wanted)
+        self.assertEqual(lab.estimate_cost(usage, rates, {
+            'supercached_input_tokens': '0', 'supercache_write_input_tokens': '0'}), lab.estimate_cost(usage, rates))
+        for bad in [{'supercached_input_tokens': '0'}, {'supercache_write_input_tokens': '0'},
+                    {**metadata, 'supercached_input_tokens': '3073'},
+                    {**metadata, 'supercached_input_tokens': -1},
+                    {**metadata, 'supercached_input_tokens': 'NaN'},
+                    {**metadata, 'supercache_write_input_tokens': '1025'}]:
+            with self.subTest(metadata=bad), self.assertRaises(ValueError):
+                lab.estimate_cost(usage, rates, bad)
+
     def test_uncertain_submission_reuses_same_id_and_body(self):
         with closing(lab.database(self.path)) as db, db:
             rid = lab.reserve(db, lab.build_request(self.case), self.case, 'test')

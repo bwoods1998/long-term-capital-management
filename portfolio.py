@@ -29,7 +29,7 @@ RESERVE_CENTS = 20
 MAX_REQUEST_BYTES = 40000
 MAX_OUTPUT_TOKENS = 16384
 TASK_MAX_REQUEST_BYTES = 96000
-TASK_PURPOSES = {'thesis', 'investigate', 'critique', 'evaluation', 'replay'}
+TASK_PURPOSES = {'thesis', 'investigate', 'critique', 'evaluation', 'replay', 'policy_probe', 'robustness'}
 TASK_PROFILES = {
     'deepseek-ai/DeepSeek-V4-Pro-0813': {
         'completion_window': 'flex', 'reasoning_effort': 'medium', 'max_output_tokens': 16384,
@@ -47,6 +47,27 @@ TASK_PROFILES = {
         'completion_window': 'flex', 'reasoning_effort': 'medium', 'max_output_tokens': 16384,
         'reserve_cents': 20, 'rates': {'input': '0.35', 'cached': '0.10', 'output': '2'},
         'pricing_date': '2026-09-12', 'background': True},
+}
+POLICY_PROBE_MODEL = 'deepseek-ai/DeepSeek-V4-Pro-0813'
+POLICY_PROBE_MAX_REQUEST_BYTES = 48000
+POLICY_PROBE_PROFILES = {
+    window: {'completion_window': window, 'reasoning_effort': 'medium',
+             'max_output_tokens': 16384, 'background': True, 'reserve_cents': 20,
+             'pricing_date': '2026-09-12', 'rates': rates}
+    for window, rates in {
+        'asap': {'input': '1.32', 'cached': '0.044', 'output': '3.96'},
+        'flex': {'input': '0.66', 'cached': '0.022', 'output': '1.98'},
+    }.items()
+}
+POLICY_PROBE_REPLACEMENT_MODEL = 'moonshotai/Kimi-K2.6'
+POLICY_PROBE_REPLACEMENT_PROFILES = {
+    window: {'completion_window': window, 'reasoning_effort': 'medium',
+             'max_output_tokens': 16384, 'background': True, 'reserve_cents': 20,
+             'pricing_date': '2026-09-12', 'rates': rates}
+    for window, rates in {
+        'balanced': {'input': '0.45', 'cached': '0.20', 'output': '3'},
+        'flex': {'input': '0.35', 'cached': '0.10', 'output': '2'},
+    }.items()
 }
 TERMINAL = {'completed', 'incomplete', 'failed', 'cancelled'}
 STATUSES = TERMINAL | {'queued', 'in_progress'}
@@ -284,18 +305,37 @@ def _validate_tools(tools):
 def validate_task_envelope(body):
     if not isinstance(body, dict):
         raise ValueError('Expected a research request object')
-    profile = _task_profile(body.get('model'))
+    metadata = body.get('metadata')
+    probe = isinstance(metadata, dict) and 'policy_probe' in metadata
+    if probe:
+        version = metadata.get('policy_probe')
+        probe_model = POLICY_PROBE_REPLACEMENT_MODEL if version == 'v2' else POLICY_PROBE_MODEL
+        probe_profiles = POLICY_PROBE_REPLACEMENT_PROFILES if version == 'v2' else POLICY_PROBE_PROFILES
+        window = metadata.get('completion_window')
+        if (version not in ('v1', 'v2') or body.get('model') != probe_model or not isinstance(window, str) or
+                window not in probe_profiles or
+                metadata != {'completion_window': window, 'policy_probe': version} or
+                not isinstance(body.get('prompt_cache_key'), str) or
+                not re.fullmatch(r'policy-[0-9a-f]{64}', body['prompt_cache_key'])):
+            raise ValueError('Request outside the frozen policy probe contract')
+        profile = probe_profiles[window]
+    else:
+        profile = _task_profile(body.get('model'))
     required = {'model', 'input', 'max_output_tokens', 'reasoning', 'background', 'metadata', 'text'}
+    allowed_keys = (required | {'prompt_cache_key'},) if probe else (required, required | {'tools'})
+    expected_metadata = ({'completion_window': profile['completion_window'], 'policy_probe': metadata['policy_probe']}
+                         if probe else {'completion_window': profile['completion_window']})
     value = body.get('input')
-    if (set(body) not in (required, required | {'tools'}) or
+    if (set(body) not in allowed_keys or
             not (isinstance(value, str) and bool(value.strip()) or
                  isinstance(value, list) and 1 <= len(value) <= 200 and all(isinstance(item, dict) for item in value)) or
             type(body.get('max_output_tokens')) is not int or body['max_output_tokens'] != profile['max_output_tokens'] or
             body.get('reasoning') != {'effort': profile['reasoning_effort']} or
-            body.get('metadata') != {'completion_window': profile['completion_window']} or
+            metadata != expected_metadata or
             body.get('background') is not profile['background'] or
             body.get('text') != {'format': {'type': 'text'}} or
-            len(json.dumps(body, sort_keys=True, allow_nan=False).encode()) > TASK_MAX_REQUEST_BYTES):
+            len(json.dumps(body, sort_keys=True, allow_nan=False).encode()) >
+            (POLICY_PROBE_MAX_REQUEST_BYTES if probe else TASK_MAX_REQUEST_BYTES)):
         raise ValueError('Request outside the approved research profile or spending envelope')
     if 'tools' in body:
         _validate_tools(body['tools'])
@@ -434,6 +474,8 @@ def reserve_task(db, body, packet, task_key, purpose, parent_id=None):
                 raise ValueError('Task key collision: its request, evidence, parent or purpose changed')
             return existing['id']
         profile = validate_task_envelope(body)
+        if (purpose == 'policy_probe') != ('policy_probe' in body['metadata']):
+            raise ValueError('Policy probe request and ledger purpose must agree')
         parent = current(db)
         if purpose == 'thesis' and (parent['id'] if parent else None) != parent_id:
             raise ValueError('Reviewed thesis changed; a stale task cannot start a new thesis draft')
@@ -574,7 +616,7 @@ def run_cost(row):
     if response.get('status') not in TERMINAL:
         return None
     try:
-        return estimate_cost(response.get('usage') or {}, json.loads(row['rates']))
+        return estimate_cost(response.get('usage') or {}, json.loads(row['rates']), response.get('metadata'))
     except (ValueError, TypeError):
         return None
 
@@ -676,6 +718,7 @@ def public_snapshot(db):
             'project': {'name': 'Portfolio Agent', 'repository': 'https://github.com/bwoods1998/portfolio-agent', 'mode': 'research'},
             'thesis': {key: packet[key] for key in ['id', 'symbol', 'company', 'question']} | {'revisions': revisions},
             'costs': {'estimated_usd': format(known_cost, 'f') if not unknown else None,
+                      'known_estimated_usd': format(known_cost, 'f'),
                       'billed_usd': None, 'completed_runs': completed, 'unknown_runs': unknown,
                       'reserved_usd': format(Decimal(reserved) / 100, 'f')},
             'portfolio': {'status': 'not_connected'}}

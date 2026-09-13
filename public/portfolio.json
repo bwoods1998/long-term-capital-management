@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "published_at": "2026-09-12T23:23:54Z",
+  "published_at": "2026-09-13T00:41:53Z",
   "project": {
     "name": "Portfolio Agent",
     "repository": "https://github.com/bwoods1998/portfolio-agent",
@@ -153,11 +153,12 @@
     ]
   },
   "costs": {
-    "estimated_usd": "0.524700184",
+    "estimated_usd": null,
+    "known_estimated_usd": "0.822814434",
     "billed_usd": null,
-    "completed_runs": 151,
-    "unknown_runs": 0,
-    "reserved_usd": "69.8"
+    "completed_runs": 252,
+    "unknown_runs": 1,
+    "reserved_usd": "88.2"
   },
   "portfolio": {
     "status": "not_connected"

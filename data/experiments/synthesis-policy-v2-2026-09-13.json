@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "status": "finished",
+  "frozen_at": "2026-09-13T00:38:27Z",
+  "protocol_sha256": "02cd34ccad88eec58bf6084c7427115b83beb0692892359c5c526e805818aa8c",
+  "protocol": {
+    "kind": "single_investigation_synthesis_policy_proof",
+    "planned_investigations": 1,
+    "investigation_id": "35c81173-f185-4302-9083-ce5123a2a54d",
+    "baseline_investigation_id": "7fbd34c1-71e7-5305-b3c4-cb5f06b2fb84",
+    "baseline_outcome": "Research turn limit reached after four tool-producing research turns; no report.",
+    "baseline_turn_policy": "legacy-tools-v0",
+    "turn_policy": "prerequisites-last-v2",
+    "question": "How do working-capital movements and investment commitments affect confidence in durable cash generation? Separate realized company-wide cash flows, accounting changes, and attributed management expectations.",
+    "mode": "tools",
+    "max_research_turns": 4,
+    "max_tool_turns": 3,
+    "max_model_requests": 7,
+    "max_reserved_usd": "3.00",
+    "allowance_scope": "Existing shared portfolio ledger; no reset, refund, or budget increase.",
+    "max_automatic_repairs": 1,
+    "editorial_recheck_allowed": false,
+    "new_assignment_after_terminal_failure_allowed": false,
+    "deadline": "2026-09-13T05:10:00Z",
+    "analyst": "deepseek-ai/DeepSeek-V4-Pro-0813",
+    "critic": "moonshotai/Kimi-K3",
+    "profiles": {
+      "deepseek-ai/DeepSeek-V4-Pro-0813": {
+        "completion_window": "flex",
+        "reasoning_effort": "medium",
+        "max_output_tokens": 16384,
+        "reserve_cents": 20,
+        "rates": {
+          "input": "0.66",
+          "cached": "0.022",
+          "output": "1.98"
+        },
+        "pricing_date": "2026-09-12",
+        "background": true
+      },
+      "moonshotai/Kimi-K3": {
+        "completion_window": "asap",
+        "reasoning_effort": "medium",
+        "max_output_tokens": 8192,
+        "reserve_cents": 100,
+        "rates": {
+          "input": "3",
+          "cached": "0.30",
+          "output": "15"
+        },
+        "pricing_date": "2026-09-12",
+        "background": false
+      }
+    },
+    "packet": {
+      "path": "data/thesis/msft-ai-infrastructure.json",
+      "sha256": "5b9e0e2b265f13f89c82d7a1a1e263a05a3ce2d479784673b9b3cb51ef2fe3c7",
+      "evidence_as_of": "2026-07-29"
+    },
+    "evidence_cutoff": "2026-09-13",
+    "sources": [
+      {
+        "id": "fy26-call",
+        "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+        "published_at": "2026-07-29",
+        "fetched_at": "2026-09-12T22:37:57Z",
+        "sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084"
+      },
+      {
+        "id": "fy26-results",
+        "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+        "published_at": "2026-07-29",
+        "fetched_at": "2026-09-12T22:38:09Z",
+        "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8"
+      }
+    ],
+    "prior_memory": {
+      "policy": "Exact frozen prior reviewed memory from the baseline investigation; no intervening drafts.",
+      "parent_sha256": "01e32700c335a99e9ffa6682e069c0a3f1763239ee9243f27d2116ab4cd78b4e",
+      "investigations_sha256": "13c10a4ed831c292561c9dd40267a85134c096f8fd3451c239731be96ccc0a6b"
+    },
+    "implementation_sha256": "c2da63f4b0eef7adb9b04e7c7b29401a6151cdeae9e9f154fb8f558f4c9f6423",
+    "measurement": [
+      "Report produced within four research requests",
+      "Only missing prerequisite tools offered on last gathering request",
+      "All returned tools declared by the frozen request before any tool executes",
+      "Required passage/calculation/hypothesis checks before synthesis",
+      "No-tool synthesis request when ready",
+      "Critic outcome and independent substantive review",
+      "All attempts, estimated usage cost, unknown usage, permanent reservations"
+    ],
+    "publication": "No automatic review, export, or deployment. Raw provider responses and source text remain private.",
+    "comparison_limit": "One new proof after two observed failures, with a deliberately changed action policy. Same question and starting evidence do not establish a causal quality improvement or cost saving.",
+    "previous_policy_proof_id": "0bda88a5-703c-46b1-a9c4-f257d382d67d",
+    "last_gathering_tools": "Only missing prerequisite categories: read_source, calculate, save_hypothesis. Model chooses relevant arguments; no dummy checks. With none missing, synthesize early without tools.",
+    "stop_after_this_proof": "No further paid protocols, replacement investigations, or enlarged limits after this result."
+  },
+  "outcome": {
+    "phase": "awaiting_review",
+    "research_requests": 4,
+    "critic_requests": 1,
+    "tool_calls": 6,
+    "successful_tool_calls": 6,
+    "passages": 6,
+    "research_tool_sequence": [
+      {
+        "declared_tools": [
+          "list_sources",
+          "read_source",
+          "get_evidence",
+          "calculate",
+          "save_hypothesis"
+        ],
+        "returned_tools": [
+          "list_sources",
+          "calculate",
+          "calculate"
+        ]
+      },
+      {
+        "declared_tools": [
+          "list_sources",
+          "read_source",
+          "get_evidence",
+          "calculate",
+          "save_hypothesis"
+        ],
+        "returned_tools": [
+          "read_source",
+          "read_source"
+        ]
+      },
+      {
+        "declared_tools": [
+          "save_hypothesis"
+        ],
+        "returned_tools": [
+          "save_hypothesis"
+        ]
+      },
+      {
+        "declared_tools": [],
+        "returned_tools": []
+      }
+    ],
+    "report_produced": true,
+    "critic_verdict": "pass",
+    "independent_content_review": "Qualifications required before publication; critic pass is not substantive approval.",
+    "report_published": false,
+    "costs": {
+      "estimated_usd": "0.055899868",
+      "known_estimated_usd": "0.055899868",
+      "unknown_runs": 0,
+      "reserved_usd": "1.8",
+      "model_calls": 5
+    },
+    "interpretation": "This run completed the structural prerequisites and produced a report, unlike the two earlier attempts. One follow-up does not establish a causal policy effect or adequate research quality. No further paid protocol or editorial request was started."
+  }
+}

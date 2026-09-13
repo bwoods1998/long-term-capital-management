@@ -235,14 +235,29 @@ class PortfolioTests(unittest.TestCase):
             rid = self.reserve(db)
             rev = self.finish(db, rid)
             p.review(db, rev, 'Builder')
-            self.assertEqual(Decimal(p.public_snapshot(db)['costs']['estimated_usd']), Decimal('0.0011902'))
+            complete = p.public_snapshot(db)['costs']
+            self.assertEqual(Decimal(complete['estimated_usd']), Decimal('0.0011902'))
+            self.assertEqual(complete['known_estimated_usd'], complete['estimated_usd'])
+            failed = self.reserve(db)
+            with patch.object(p, 'api', return_value=self.response(status='failed', response_id='resp_failed')):
+                p.execute(db, failed)
             uncertain = self.reserve(db)
             with patch.object(p, 'api', side_effect=RuntimeError('unknown')):
                 p.execute(db, uncertain)
             result = p.public_snapshot(db)
             self.assertIsNone(result['costs']['estimated_usd'])
+            self.assertEqual(Decimal(result['costs']['known_estimated_usd']), Decimal('0.0023804'))
             self.assertEqual(result['costs']['unknown_runs'], 1)
-            self.assertEqual(result['costs']['reserved_usd'], '0.4')
+            self.assertEqual(result['costs']['completed_runs'], 1)
+            self.assertEqual(result['costs']['reserved_usd'], '0.6')
+            self.assertLessEqual(Decimal(result['costs']['known_estimated_usd']),
+                                 Decimal(result['costs']['reserved_usd']))
+            with db:
+                db.execute('UPDATE runs SET response=NULL')
+            unknown = p.public_snapshot(db)['costs']
+            self.assertIsNone(unknown['estimated_usd'])
+            self.assertEqual(unknown['known_estimated_usd'], '0')
+            self.assertEqual(unknown['unknown_runs'], 3)
 
     def test_malformed_or_provisional_accounting_is_unknown_not_zero(self):
         with self.database(self.path) as db:

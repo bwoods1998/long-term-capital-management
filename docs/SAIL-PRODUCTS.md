@@ -16,6 +16,43 @@ The budget is a cumulative reservation limit shared with earlier thesis calls. R
 it does not erase reservations. Prices were checked against Sail's current
 [inference pricing](https://docs.sailresearch.com/pricing).
 
+## Cache economics before enabling another product
+
+The completed 128-task evaluation reported 19,088 cached input tokens. Its
+Supercache read and write counters were present and zero in every response, so
+ordinary cached-input pricing applies to those results. Sail's
+[routing hint](https://docs.sailresearch.com/support#prompt-cache-routing) can
+improve locality but does not guarantee a hit.
+
+[Supercache](https://docs.sailresearch.com/supercache) preserves a written prefix
+for 24 hours. Its documented write price is 100 times normal input, while its
+read price is one tenth of ordinary cached input. That makes the expected number
+of reuses central to the decision.
+
+For a fixed prefix of `N` million tokens, suppose the first ordinary request is
+uncached, every subsequent ordinary request hits cache, all reads occur within
+24 hours, and output usage is identical. Let `I` be the normal input rate, `C`
+the cached rate, and `R` the number of subsequent reads:
+
+```text
+ordinary cost = N × (I + R × C)
+Supercache cost = N × (100 × I + R × 0.1 × C)
+break-even R = 99 × I / (0.9 × C)
+```
+
+At the current [Pro Flex rates](https://docs.sailresearch.com/pricing), `I = $0.66`
+and `C = $0.022` per million tokens. Break-even is **3,300 subsequent reads**;
+the next read produces a saving under these assumptions. This treats the
+documented write price as the total input charge for written tokens. If the
+ordinary comparison would also hit cache on the initial request, the threshold
+is higher: `(100 × I − C) / (0.9 × C)`, or 3,333 whole subsequent reads. Ordinary
+cache misses would lower the threshold, while unused or changing prefixes can
+make the upfront write cost unrecoverable.
+
+This workload has not demonstrated that level of reuse within a day. No
+Supercache write was enabled. Before any future activation, its distinct token
+counters and write charges must enter the same reservation and cost ledger.
+
 ## Voyages: a trace of the actual investigation
 
 Install the optional dependency with `.venv/bin/python -m pip install -r requirements-sail.txt`.
@@ -110,8 +147,10 @@ shared $0.25 allowance. The controller also checked current returned rates befor
 creation, held an aggregate thirty-minute deadline, and used a separate local
 watchdog for cleanup. These observations are not a provider-enforced account cap.
 The [spend API](https://docs.sailresearch.com/api-reference/usage/get-sailbox-spend.md)
-reports nanodollars; the inference usage API reports cents. No later billing reread
-was performed because the user stopped the session for a permissions restart.
+reports nanodollars; the inference usage API reports cents. A later read-only
+reconciliation at 23:29 UTC confirmed both resources remained terminated and the
+reported costs were unchanged: $0.010 combined finalized cost and zero active
+estimated cost. No additional resource was created.
 
 The checkpoint had a five-minute TTL. Its eventual expiry was not separately
 observed. A longer running-versus-sleeping cost comparison remains unperformed;

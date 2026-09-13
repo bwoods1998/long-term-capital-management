@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "status": "finished",
+  "frozen_at": "2026-09-13T00:27:24Z",
+  "protocol_sha256": "a46914bbd208a4a8851e182f07e978d1f686b35b8559564279280e447e5fa63d",
+  "protocol": {
+    "kind": "single_investigation_synthesis_policy_proof",
+    "planned_investigations": 1,
+    "investigation_id": "0bda88a5-703c-46b1-a9c4-f257d382d67d",
+    "baseline_investigation_id": "7fbd34c1-71e7-5305-b3c4-cb5f06b2fb84",
+    "baseline_outcome": "Research turn limit reached after four tool-producing research turns; no report.",
+    "baseline_turn_policy": "legacy-tools-v0",
+    "turn_policy": "synthesis-last-v1",
+    "question": "How do working-capital movements and investment commitments affect confidence in durable cash generation? Separate realized company-wide cash flows, accounting changes, and attributed management expectations.",
+    "mode": "tools",
+    "max_research_turns": 4,
+    "max_tool_turns": 3,
+    "max_model_requests": 7,
+    "max_reserved_usd": "3.00",
+    "allowance_scope": "Existing shared portfolio ledger; no reset, refund, or budget increase.",
+    "max_automatic_repairs": 1,
+    "editorial_recheck_allowed": false,
+    "new_assignment_after_terminal_failure_allowed": false,
+    "deadline": "2026-09-13T05:10:00Z",
+    "analyst": "deepseek-ai/DeepSeek-V4-Pro-0813",
+    "critic": "moonshotai/Kimi-K3",
+    "profiles": {
+      "deepseek-ai/DeepSeek-V4-Pro-0813": {
+        "completion_window": "flex",
+        "reasoning_effort": "medium",
+        "max_output_tokens": 16384,
+        "reserve_cents": 20,
+        "rates": {
+          "input": "0.66",
+          "cached": "0.022",
+          "output": "1.98"
+        },
+        "pricing_date": "2026-09-12",
+        "background": true
+      },
+      "moonshotai/Kimi-K3": {
+        "completion_window": "asap",
+        "reasoning_effort": "medium",
+        "max_output_tokens": 8192,
+        "reserve_cents": 100,
+        "rates": {
+          "input": "3",
+          "cached": "0.30",
+          "output": "15"
+        },
+        "pricing_date": "2026-09-12",
+        "background": false
+      }
+    },
+    "packet": {
+      "path": "data/thesis/msft-ai-infrastructure.json",
+      "sha256": "5b9e0e2b265f13f89c82d7a1a1e263a05a3ce2d479784673b9b3cb51ef2fe3c7",
+      "evidence_as_of": "2026-07-29"
+    },
+    "evidence_cutoff": "2026-09-13",
+    "sources": [
+      {
+        "id": "fy26-call",
+        "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+        "published_at": "2026-07-29",
+        "fetched_at": "2026-09-12T22:37:57Z",
+        "sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084"
+      },
+      {
+        "id": "fy26-results",
+        "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+        "published_at": "2026-07-29",
+        "fetched_at": "2026-09-12T22:38:09Z",
+        "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8"
+      }
+    ],
+    "prior_memory": {
+      "policy": "Exact frozen prior reviewed memory from the baseline investigation; no intervening drafts.",
+      "parent_sha256": "01e32700c335a99e9ffa6682e069c0a3f1763239ee9243f27d2116ab4cd78b4e",
+      "investigations_sha256": "13c10a4ed831c292561c9dd40267a85134c096f8fd3451c239731be96ccc0a6b"
+    },
+    "implementation_sha256": "4dd89237859052a9e22ce87da9637cf9de15d0de2a0de6efb7cfc3b12ba5639d",
+    "measurement": [
+      "Report produced within four research requests",
+      "Required passage/calculation/hypothesis checks before synthesis",
+      "Final research request excludes tools",
+      "Critic outcome and independent substantive review",
+      "All attempts, estimated usage cost, unknown usage, permanent reservations"
+    ],
+    "publication": "No automatic review, export, or deployment. Raw provider responses and source text remain private.",
+    "comparison_limit": "One follow-up after an observed failure; identical question and starting evidence do not isolate a causal policy or model-quality effect."
+  },
+  "outcome": {
+    "phase": "needs_attention",
+    "research_requests": 3,
+    "tool_calls": 5,
+    "successful_tool_calls": 5,
+    "passages": 10,
+    "missing_prerequisites": [
+      "successful calculation",
+      "saved hypothesis"
+    ],
+    "report_produced": false,
+    "critic_requests": 0,
+    "final_synthesis_request_submitted": false,
+    "costs": {
+      "estimated_usd": "0.006013744",
+      "known_estimated_usd": "0.006013744",
+      "unknown_runs": 0,
+      "reserved_usd": "0.6",
+      "model_calls": 3
+    },
+    "interpretation": "The prerequisite gate stopped before a fourth request; no report or improvement in research quality was established. One observed follow-up is not a causal comparison."
+  }
+}

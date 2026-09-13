@@ -12,7 +12,7 @@ Build one useful loop, measure it, then expand its authority. These stages descr
 
 The first packet examines Microsoft's company-wide cash generation and infrastructure investment. It does not establish AI-only returns. `brokerage.py demo` separately reconciles a synthetic account, including partial fills and external funding.
 
-This version runs when invoked locally. Registered-source retrieval now works in the investigator described below; a scheduler and trade execution remain future work. Start with [Lesson 2](../lessons/02-thesis-with-memory.md) and the [V1 instructions](V1.md).
+This version runs when invoked locally. Registered-source retrieval and a bounded assignment queue now work in the investigator described below; an always-on host and trade execution remain future work. Start with [Lesson 2](../lessons/02-thesis-with-memory.md) and the [V1 instructions](V1.md).
 
 ## 2. Know the account — private connector ready for owner verification
 
@@ -28,13 +28,19 @@ Done when cash and positions can be explained and incomplete or stale data is vi
 
 Controlled retrieval, checkpointed investigations, exact evidence passages, deterministic calculations, hypotheses, independent critique, and explicit editorial review now work. Reviewed conclusions seed the next assignment. Voyages trace live model/tool stages. A Sailbox experiment demonstrated clean-VM validation and saved-state recovery through sleep/pause/resume. Each assignment has request, tool, budget, and deadline limits. See [Lesson 4](../lessons/04-research-loop.md).
 
-Next: a durable assignment queue, source-update intake, and review triggers. The current source cache is frozen; repeatedly reading it does not discover a new filing. Test evidence changes and memory drift over multiple research episodes, then schedule only work with a useful trigger. Sleeping between events is compatible with a persistent agent.
+A local [source-update inbox](SOURCE-WATCH.md) now records fresh captures, filters observed request metadata noise, and supports explicit curation. It preserves the research cache and buys no inference. A [synthetic timeline replay](TRAJECTORY-REPLAY.md) tests evolving agent beliefs, changed evidence, and recovery across real process invocations.
+
+The [durable local queue](RESEARCH-QUEUE.md) now accepts up to two explicit assignments with frozen evidence, due times, deadlines, and at most $3 reserved per job. One controller resumes the same investigation and request identities. It neither admits source candidates automatically nor reviews or publishes completed work.
+
+Next: improve the manual handoff from a curated source candidate to checked facts and a new assignment. The current research source cache is frozen; repeatedly reading it does not discover a new filing, and the queue cannot import candidate captures. Broaden source registration and schedule only work with a useful trigger. Sleeping between events is compatible with a persistent agent.
 
 ## 4. Compare decisions and compute budgets
 
 A three-model development regression and a separate uniform-critic comparison now measure verdicts, citation checks, abstention, and incremental cost. [Results](EVALUATION-RESULTS.md) retain errors and unknown costs. These authored cases are not held out, and model comparisons also differ in completion window. Next use harder, independently reviewed cases and matched scheduling policies to test whether more computation improves supported conclusions enough to justify its expense.
 
 Add a clearly labeled simulator for proposed portfolio decisions, with declared fill assumptions, fees, external cashflows, and a benchmark. Exercise partial fills, rejections, ambiguous responses, and duplicate commands before connecting any order path.
+
+An offline [performance calculator](PERFORMANCE.md) now provides the accounting foundation: exact pre/post-funding valuations, chained time-weighted returns, an aligned synthetic benchmark, and separately recorded project expenses. It does not infer real account performance or simulate an investment strategy.
 
 Extend the public ledger with selected decision outcomes and measured operating costs. Keep simulated and live results distinct, including from the personal site's fictional $WOODS exchange.
 

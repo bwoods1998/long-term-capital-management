@@ -23,6 +23,8 @@ import sail_tracking as tracking
 ROOT = Path(__file__).resolve().parent
 ANALYST = 'deepseek-ai/DeepSeek-V4-Pro-0813'
 CRITIC = 'moonshotai/Kimi-K3'
+SYNTHESIS_POLICY = 'synthesis-last-v1'
+TURN_POLICY = 'prerequisites-last-v2'
 QUESTION = 'Do changes in reported capital expenditures imply a change in underlying infrastructure investment commitments?'
 STOPPED = {'awaiting_review', 'reviewed', 'needs_attention', 'expired'}
 REPORT_KEYS = {'headline', 'summary', 'claims', 'changes', 'open_questions', 'invalidation', 'change_assessment'}
@@ -123,7 +125,61 @@ def _prompt(state):
         'PREVIOUS REVIEWED MEMORY: ' + ledger.encoded(state['parent_memory']) + '\n'
         'PRIOR REVIEWED INVESTIGATIONS (dated hypotheses and conclusions to recheck, not new evidence; '
         'do not cite an old passage until a tool returns it in this run): ' +
-        ledger.encoded(state.get('research_memory', [])))
+        ledger.encoded(state.get('research_memory', [])) +
+        ('\nTURN POLICY: ' + state['turn_policy'] + '. The final research turn is reserved for synthesis, '
+         'with no tools. Gather the required passage, calculation, and hypothesis before that turn. '
+         'You may finish earlier once the evidence is sufficient.'
+         if state.get('turn_policy') in {SYNTHESIS_POLICY, TURN_POLICY} and state['mode'] == 'tools' else '') +
+        (' The last gathering turn permits only tools for missing prerequisites; choose relevant arguments '
+         'and combine independent checks. Do not use meaningless calculations or unsupported hypotheses '
+         'just to satisfy the controller.'
+         if state.get('turn_policy') == TURN_POLICY and state['mode'] == 'tools' else ''))
+
+
+def _missing_checks(state):
+    return [label for label, present in (
+        ('source passage', bool(state['passages'])),
+        ('successful calculation', any(item['name'] == 'calculate' and item['success']
+                                       for item in state['tool_results'])),
+        ('saved hypothesis', bool(state['hypotheses'])),
+    ) if not present]
+
+
+def _research_input(state):
+    """Add current turn controls only to a new request; keep stored history intact."""
+    tools = [*sources.TOOLS, HYPOTHESIS_TOOL] if state['mode'] == 'tools' else None
+    if 'turn_policy' not in state:
+        return state['conversation'], tools
+    if state['turn_policy'] not in {SYNTHESIS_POLICY, TURN_POLICY}:
+        raise ValueError('Unrecognized research turn policy')
+    remaining = state['max_turns'] - state['turn']
+    tool_turns = max(0, remaining - 1) if state['mode'] == 'tools' else 0
+    control = (f'TURN POLICY: {state["turn_policy"]}. Remaining research turns including this request: {remaining}. '
+               f'Remaining turns that permit tools: {tool_turns}. ')
+    if state['mode'] == 'single_pass' or remaining == 1:
+        tools = None
+        control += ('Synthesize the final report now using only evidence already available. Tools are unavailable. '
+                    'Return the required report JSON and preserve unresolved questions; do not invent missing evidence.')
+    elif state['turn_policy'] == TURN_POLICY and remaining == 2:
+        missing = _missing_checks(state)
+        categories = {'source passage': 'read_source', 'successful calculation': 'calculate',
+                      'saved hypothesis': 'save_hypothesis'}
+        names = {categories[label] for label in missing}
+        tools = [tool for tool in tools if tool['name'] in names] or None
+        if missing:
+            control += ('This is the last gathering turn. Missing required checks: ' + ', '.join(missing) +
+                        '. Only tools for those checks are available. Use question-relevant arguments and '
+                        'combine independent checks in this request. Do not perform dummy calculations or '
+                        'save unsupported hypotheses merely to satisfy a check.')
+        else:
+            control += ('All required checks are present. Synthesize the report now using the available '
+                        'evidence; no additional tools are available. Preserve unresolved questions.')
+    else:
+        control += ('Gather any missing required checks before the final synthesis turn: ' +
+                    ', '.join(_missing_checks(state) or ['none']) + '. '
+                    'Combine independent tool requests when useful; avoid repeating completed checks. '
+                    'Return the report early if the evidence is sufficient.')
+    return [*state['conversation'], {'role': 'user', 'content': control}], tools
 
 
 def research_memory(db):
@@ -141,13 +197,19 @@ def research_memory(db):
 
 
 def start(db, question=QUESTION, model=ANALYST, critic_model=CRITIC, max_turns=8,
-          deadline=None, packet=None, mode='tools'):
+          deadline=None, packet=None, mode='tools', investigation_id=None):
     setup(db)
     ledger.require_text(question, 400, 'research question')
     if model not in ledger.TASK_PROFILES or critic_model not in ledger.TASK_PROFILES:
         raise ValueError('Use a registered model profile')
     if type(max_turns) is not int or not 2 <= max_turns <= 12 or mode not in {'tools', 'single_pass'}:
         raise ValueError('Invalid research limits')
+    if investigation_id is not None:
+        try:
+            if str(uuid.UUID(investigation_id)) != investigation_id:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError('Use a canonical investigation UUID') from None
     now = time.time()
     deadline = now + 6 * 3600 if deadline is None else deadline
     if not now < deadline <= now + 24 * 3600:
@@ -155,11 +217,12 @@ def start(db, question=QUESTION, model=ANALYST, critic_model=CRITIC, max_turns=8
     parent = ledger.current(db)
     packet = ledger.validate_packet(deepcopy(packet or ledger.load_packet()))
     state = {
-        'schema_version': 1, 'id': str(uuid.uuid4()), 'created': now, 'deadline': deadline,
+        'schema_version': 1, 'id': investigation_id or str(uuid.uuid4()), 'created': now, 'deadline': deadline,
         'question': question, 'model': model, 'critic_model': critic_model, 'max_turns': max_turns,
         'mode': mode, 'cutoff': ledger.iso(now)[:10], 'parent_id': parent['id'] if parent else None,
         'parent_memory': ledger.memory(parent), 'packet': packet, 'phase': 'research', 'turn': 0,
         'research_memory': research_memory(db),
+        'turn_policy': TURN_POLICY,
         'conversation': [], 'snapshots': {}, 'passages': {}, 'hypotheses': [], 'tool_results': [],
         'run_ids': [], 'draft': None, 'critique': None, 'initial_draft': None,
         'completed': None, 'error': None,
@@ -358,11 +421,21 @@ def compact_memory(db, state):
     return True
 
 
+def _managed(db, state):
+    return bool(state.get('queue_job_key') or (
+        db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_queue_jobs'").fetchone() and
+        db.execute('SELECT 1 FROM research_queue_jobs WHERE investigation_id=?', (state['id'],)).fetchone()))
+
+
 def advance(db, investigation_id, store=None, poll_seconds=0):
     setup(db)
     store = store or sources.SourceStore(ROOT)
     with lock(db):
         state = get(db, investigation_id)
+        queued = _managed(db, state)
+        if queued:
+            from research_queue import require_admission
+            require_admission(db, state)
         if state['phase'] in STOPPED:
             return status(db, investigation_id)
         if time.time() >= state['deadline']:
@@ -382,12 +455,20 @@ def advance(db, investigation_id, store=None, poll_seconds=0):
             # Recovery reuses the frozen accepted body, even after code upgrades.
             body = json.loads(existing['request'])
         else:
+            if phase == 'research' and state.get('turn_policy') in {SYNTHESIS_POLICY, TURN_POLICY} and state['mode'] == 'tools':
+                missing = _missing_checks(state)
+                if state['turn'] == state['max_turns'] - 1 and missing:
+                    state['phase'] = 'needs_attention'
+                    state['error'] = ('Final synthesis requires: ' + ', '.join(missing) +
+                                      '. Inspect the tool history before authorizing a separate investigation.')
+                    save(db, state, 'synthesis_blocked', {'missing_checks': missing, 'turn_policy': state['turn_policy']})
+                    return status(db, investigation_id)
             try:
                 if phase == 'research':
                     if state['mode'] == 'tools':
                         compact_memory(db, state)
-                    tools = [*sources.TOOLS, HYPOTHESIS_TOOL] if state['mode'] == 'tools' else None
-                    body = ledger.build_task_request(state['model'], state['conversation'], tools)
+                    research_input, tools = _research_input(state)
+                    body = ledger.build_task_request(state['model'], research_input, tools)
                 else:
                     body = ledger.build_task_request(state['model'] if phase == 'repair' else state['critic_model'],
                                                     _critique_input(state, repair=phase == 'repair'))
@@ -397,12 +478,16 @@ def advance(db, investigation_id, store=None, poll_seconds=0):
                 return status(db, investigation_id)
         if not existing:
             ledger.preflight_task(body['model'])
+        if queued:
+            require_admission(db, state)
         run_id = ledger.reserve_task(db, body, state['packet'], key, purpose, state['parent_id'])
         if run_id not in state['run_ids']:
             state['run_ids'].append(run_id)
             save(db, state, 'model_reserved', {'run_id': run_id, 'phase': phase, 'model': body['model']})
             tracking.event('model.reserved', {'run_id': run_id, 'model': body['model'], 'stage': phase})
         with tracking.stage(phase, agent='Critic' if phase in {'critique', 'recheck', 'editorial_recheck'} else 'Investigator'):
+            if queued:
+                require_admission(db, state)
             ledger.execute(db, run_id, poll_seconds=poll_seconds)
         row = ledger.get_run(db, run_id)
         response = json.loads(row['response'] or '{}')
@@ -424,6 +509,12 @@ def advance(db, investigation_id, store=None, poll_seconds=0):
             if phase == 'research' and calls:
                 if state['mode'] != 'tools' or len(calls) > 8 or len(state['tool_results']) + len(calls) > 40:
                     raise ValueError('Tool call limit reached')
+                if state.get('turn_policy') in {SYNTHESIS_POLICY, TURN_POLICY} and not body.get('tools'):
+                    raise ValueError('Tools are unavailable during final synthesis')
+                if state.get('turn_policy') == TURN_POLICY:
+                    declared = {tool['name'] for tool in body.get('tools', [])}
+                    if any(call.get('name') not in declared for call in calls):
+                        raise ValueError('Returned tool was not permitted by this frozen request')
                 ids = [x.get('call_id') for x in calls]
                 if any(not isinstance(x, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,160}', x) for x in ids) or len(set(ids)) != len(ids):
                     raise ValueError('Invalid tool call identity')
@@ -489,6 +580,7 @@ def costs(db, run_ids):
 def status(db, investigation_id):
     state = get(db, investigation_id)
     return {'id': state['id'], 'phase': state['phase'], 'turns': state['turn'],
+            'turn_policy': state.get('turn_policy', 'legacy-tools-v0'),
             'tool_calls': len(state['tool_results']), 'sources': len(state['snapshots']),
             'passages': len(state['passages']), 'hypotheses': len(state['hypotheses']),
             'costs': costs(db, state['run_ids']), 'error': state['error']}
@@ -518,6 +610,9 @@ def amend(db, investigation_id, revised_report, editor):
     ledger.require_text(editor, 80, 'editor')
     with lock(db):
         state = get(db, investigation_id)
+        if _managed(db, state):
+            raise ValueError('Managed investigation cannot be amended without a separate bounded editorial handoff; '
+                             'the original report remains unchanged.')
         if state['phase'] != 'awaiting_review' or state.get('editorial_amendment'):
             raise ValueError('Only an unreviewed completed report can be amended once')
         revised = report(deepcopy(revised_report), state)

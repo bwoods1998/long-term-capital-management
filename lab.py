@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
 import json
+import re
 from pathlib import Path
 import sqlite3
 import stat
@@ -51,15 +52,34 @@ def build_request(case):
                                 'strict': True, 'schema': schema}}}
 
 
-def estimate_cost(usage, rates=RATES):
-    """USD estimate. Cached input is already part of input, not extra tokens."""
+def estimate_cost(usage, rates=RATES, metadata=None):
+    """USD estimate including automatic Supercache reads, without double counting.
+
+    These request profiles prohibit Supercache writes. A positive write count has
+    no approved accounting contract here, so its cost stays unknown rather than
+    silently receiving the ordinary input price. Absent counters preserve legacy
+    ordinary-cache accounting; malformed or partial counters are not assumed zero.
+    """
     if not isinstance(usage, dict) or not isinstance(usage.get('input_tokens_details') or {}, dict):
         raise ValueError('Missing or inconsistent token accounting')
     i, o = usage.get('input_tokens'), usage.get('output_tokens')
     c = (usage.get('input_tokens_details') or {}).get('cached_tokens', 0)
     if any(type(v) is not int or v < 0 for v in (i, o, c)) or c > i:
         raise ValueError('Missing or inconsistent token accounting')
-    return ((i-c)*Decimal(rates['input']) + c*Decimal(rates['cached']) +
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError('Invalid provider usage metadata')
+    metadata = metadata or {}
+    names = ('supercached_input_tokens', 'supercache_write_input_tokens')
+    supercached = 0
+    if any(name in metadata for name in names):
+        if any(not isinstance(metadata.get(name), str) or
+               not re.fullmatch(r'\d{1,16}', metadata[name]) for name in names):
+            raise ValueError('Incomplete or malformed Supercache accounting')
+        supercached, written = (int(metadata[name]) for name in names)
+        if supercached > c or written != 0:
+            raise ValueError('Inconsistent or unapproved Supercache accounting')
+    return ((i-c)*Decimal(rates['input']) + (c-supercached)*Decimal(rates['cached']) +
+            supercached*Decimal(rates['cached'])*Decimal('0.1') +
             o*Decimal(rates['output'])) / Decimal(1_000_000)
 
 
@@ -210,7 +230,7 @@ def report(db, run_id):
     grades = grade(answer, json.loads(row['case_json']))
     passed = sum(g['passed'] for g in grades.values())
     try:
-        cost = str(estimate_cost(response.get('usage') or {}, json.loads(row['rates'])))
+        cost = str(estimate_cost(response.get('usage') or {}, json.loads(row['rates']), response.get('metadata')))
     except ValueError:
         cost = None
     result = {'run_id': run_id, 'model': json.loads(row['request'])['model'],

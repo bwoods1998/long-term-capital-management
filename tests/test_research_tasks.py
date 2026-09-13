@@ -59,6 +59,50 @@ class ResearchTaskTests(unittest.TestCase):
             with self.subTest(changed=list(changed)), self.assertRaises(ValueError):
                 p.validate_task_envelope(changed)
 
+    def test_policy_probe_rates_envelope_and_purpose_are_bound(self):
+        with closing(p.database(self.path)) as db:
+            for window, profile in p.POLICY_PROBE_PROFILES.items():
+                body = p.build_task_request(p.POLICY_PROBE_MODEL, 'Frozen matched question')
+                body['metadata'] = {'completion_window': window, 'policy_probe': 'v1'}
+                body['prompt_cache_key'] = 'policy-' + 'a' * 64
+                self.assertEqual(p.validate_task_envelope(body), profile)
+                bound = (Decimal(p.POLICY_PROBE_MAX_REQUEST_BYTES) * Decimal(profile['rates']['input']) +
+                         Decimal(profile['max_output_tokens']) * Decimal(profile['rates']['output'])) / 1_000_000
+                self.assertLess(bound, Decimal(profile['reserve_cents']) / 100)
+                rid = p.reserve_task(db, body, self.packet, 'probe:' + window, 'policy_probe')
+                row = p.get_run(db, rid)
+                self.assertEqual(json.loads(row['rates']), profile['rates'])
+                self.assertEqual(row['reserved_cents'], 20)
+                for purpose in ('thesis', 'investigate', 'evaluation'):
+                    with self.assertRaises(ValueError):
+                        p.reserve_task(db, body, self.packet, 'wrong:' + purpose, purpose)
+                for changes in [{'metadata': {'completion_window': window, 'policy_probe': 'v2'}},
+                                {'metadata': {**body['metadata'], 'supercache_write': '24h'}},
+                                {'prompt_cache_key': 'unbounded'}, {'tools': []},
+                                {'background': False}, {'input': 'x' * 48000}]:
+                    with self.subTest(changes=list(changes)), self.assertRaises(ValueError):
+                        p.validate_task_envelope({**body, **changes})
+            with self.assertRaises(ValueError):
+                self.reserve(db, task_key='wrong:ordinary', purpose='policy_probe')
+
+    def test_replacement_probe_preserves_its_own_model_window_and_rates(self):
+        with closing(p.database(self.path)) as db:
+            for window, profile in p.POLICY_PROBE_REPLACEMENT_PROFILES.items():
+                body = p.build_task_request(p.POLICY_PROBE_REPLACEMENT_MODEL, 'Replacement protocol question')
+                body['metadata'] = {'completion_window': window, 'policy_probe': 'v2'}
+                body['prompt_cache_key'] = 'policy-' + 'b' * 64
+                self.assertEqual(p.validate_task_envelope(body), profile)
+                rid = p.reserve_task(db, body, self.packet, 'replacement:' + window, 'policy_probe')
+                self.assertEqual(json.loads(p.get_run(db, rid)['rates']), profile['rates'])
+                bound = (Decimal(p.POLICY_PROBE_MAX_REQUEST_BYTES) * Decimal(profile['rates']['input']) +
+                         Decimal(profile['max_output_tokens']) * Decimal(profile['rates']['output'])) / 1_000_000
+                self.assertLess(bound, Decimal('.20'))
+                for changed in [{**body, 'model': p.POLICY_PROBE_MODEL},
+                                {**body, 'metadata': {'completion_window': window, 'policy_probe': 'v1'}},
+                                {**body, 'metadata': {'completion_window': 'asap', 'policy_probe': 'v2'}}]:
+                    with self.assertRaises(ValueError):
+                        p.validate_task_envelope(changed)
+
     def test_task_reservation_is_idempotent_and_collisions_fail(self):
         with closing(p.database(self.path)) as db:
             first = self.reserve(db)

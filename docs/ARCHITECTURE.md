@@ -2,12 +2,14 @@
 
 ## Working V1
 
-The current system is a local research workflow with durable evidence, reviewed memory, and a public static ledger. A model-driven investigator can retrieve registered primary sources and calculate with checked facts. It has no trade capability or scheduler. An optional private account connector is separate from research and publication.
+The current system is a local research workflow with durable evidence, reviewed memory, and a public static ledger. A model-driven investigator can retrieve registered primary sources and calculate with checked facts. A bounded local source monitor checks for changes; a durable queue runs explicitly assigned research. An optional private account connector is separate from research and publication.
 
 ```mermaid
 flowchart TD
     Sources[Public source documents] --> Packet[Manually checked evidence packet]
     Packet --> Research[Local thesis or investigator controller]
+    Packet --> Queue[Explicit bounded assignment queue]
+    Queue --> Research
     Sources --> Tools[Registered source tools and calculator]
     Research <--> Tools
     Research <--> Sail[Sail inference]
@@ -17,6 +19,9 @@ flowchart TD
     Store --> Review[Explicit local review]
     Review --> Head[Current reviewed thesis]
     Head --> Research
+    Review --> Reports[Reviewed investigations]
+    Reports --> Research
+    Reports --> Export
     Research --> Voyage[Private Sail Voyage trace]
     Head --> Export[Allowlisted JSON export]
     Export --> Site[Public read-only page at /portfolio/]
@@ -33,13 +38,19 @@ The model returns a private draft. Local checks enforce its schema and citation 
 
 `watch`, `hold`, and `review` describe research views, not account positions or trade instructions. The next-review field is a proposed trigger, not a scheduled task.
 
+`source_watch.py` records new captures separately from the investigator's frozen cache. Durable due times, failure backoff, immutable observations, content comparison, and local curation prevent repeated page fetches from becoming duplicate research. It ignores one observed ephemeral request-trace line for comparison while retaining full raw captures. Accepting a source candidate does not revise checked facts or start a paid assignment. See [the source inbox](SOURCE-WATCH.md).
+
+`research_queue.py` accepts up to two explicit local assignments. Enqueue freezes the checked packet, registered baseline captures, model profiles, and schedule without calling Sail. Reviewed memory freezes when the investigation is first created. A single controller runs due jobs with stable investigation/request identities, pause checks, deadlines, and a maximum $3 reservation per job inside the shared ledger. It stops for review or attention and cannot review, publish, or import source-watch candidates. The source-candidate-to-checked-packet handoff remains manual; queued evidence cannot refresh itself. See [the queue protocol](RESEARCH-QUEUE.md).
+
+`trajectory_replay.py` uses separate fictional evidence and the same financial ledger to test sequential memory. Each next episode freezes the actual prior typed model state, without reference answers or grades. Deterministic admission rejects duplicate, future-dated, and unapproved records before inference. Full history and a current notebook see the same eligible evidence with different historical context. Neither synthetic answers nor evaluation results can enter real-company thesis history.
+
 ### Requests and cost
 
 The model, completion window, and reasoning allowance are explicit in each saved request. `portfolio.py preview` displays the thesis configuration without an API call. Every model step reserves its profile's conservative allowance before submission. Thesis, investigator, critic, and evaluation calls share one durable configurable limit; `portfolio.py budget` reports it. The ledger keeps unsuccessful and uncertain runs too. Stable workflow task keys prevent a repeated step from becoming a second reservation.
 
 The request body and idempotency key survive process restarts. Once a response ID is known, resume retrieves it. Uncertain resubmission is refused after 23 hours or if the credential has changed. Terminal incomplete or invalid output does not trigger an automatic paid redraft. A client timeout does not cancel accepted provider work.
 
-Cost estimates use the run's dated rates and reported usage. Unfinished work and malformed or missing usage remain unknown; failed or incomplete terminal work with valid usage still contributes to cost. Provider-billed expense is a separate, not-yet-reconciled measurement. Local allowances do not cap spending in other applications or survive deletion of their database history.
+Cost estimates use the run's dated rates and reported usage. Automatic Supercache reads are separated from ordinary cached tokens when the provider supplies both counters. Supercache writes are prohibited by the request profiles; an unexpected positive write count stays unpriced rather than receiving an ordinary input rate. Unfinished work and malformed or missing usage remain unknown; failed or incomplete terminal work with valid usage still contributes to cost. Provider-billed expense is a separate, not-yet-reconciled measurement. Local allowances do not cap spending in other applications or survive deletion of their database history.
 
 ### Public boundary
 
@@ -59,7 +70,7 @@ A visitor reads precomputed data and cannot launch inference, inspect private st
 
 A private Schwab adapter supports owner authorization and account reads; it is separate from the research runtime. Live account verification and richer reconciliation remain necessary before account observations inform decisions. Settlement, corporate actions, and public display permissions require their own work.
 
-A later durable assignment queue can use Sailboxes for execution. The current measured Sailbox proof runs isolated offline tests and restores synthetic accepted-request state through sleep/pause/resume. Live Voyages already trace research and evaluation steps. Sail supplies inference, runtime, and telemetry; our code owns memory, orchestration, evaluation, and policy. Persistent work requires durable records even if a VM wakes without its prior processes.
+The local assignment queue could later use Sailboxes for execution. The current measured Sailbox proof runs isolated offline tests and restores synthetic accepted-request state through sleep/pause/resume. Live Voyages already trace research and evaluation steps. Sail supplies inference, runtime, and telemetry; our code owns memory, orchestration, evaluation, and policy. Persistent work requires durable records even if a VM wakes without its prior processes.
 
 Any future order service must be separate from research. It will accept structured proposals only after strong owner authentication and deterministic checks of authority, instrument, quantity, current cash and positions, freshness, exposure, and open orders. External documents cannot grant permissions. Never assume Sail's idempotency guarantees apply to Schwab.
 
