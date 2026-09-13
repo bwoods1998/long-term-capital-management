@@ -107,6 +107,19 @@ transport authentication/idempotency headers, and event delivery failure. These 
 local contract tests; an actual recorded workflow and dashboard inspection are needed
 to claim successful live telemetry.
 
+At 01:04 UTC on September 13, a [read-only lifecycle reconciliation](../data/experiments/voyage-reconciliation-2026-09-13.json)
+confirmed all thirteen known Voyages on the server: ten completed and three failed,
+with matching identities, workflow hashes, and local status. All known traces had
+confirmed local delivery flags. The check sent only lifecycle GETs and left the
+private journals unchanged. Completion describes the workflow, not the correctness
+of its conclusions.
+
+One earlier creation remains unconfirmed without a returned identifier or saved
+startup diagnostic. The checked SDK and official reference provide attachment by
+known ID, but no supported listing or metadata-search operation was found to
+recover this identity. Its journal remains preserved; creation was not blindly
+retried. This trace uncertainty is separate from inference usage and billing.
+
 ## Observed Sailbox validation — September 12, 2026
 
 The clean-VM experiment completed. The public-safe result artifact is
