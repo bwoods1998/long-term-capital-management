@@ -1,20 +1,20 @@
 # Portfolio Agent
 
-An AI research agent following where AI spending becomes durable cash flow.
+**Follow the AI spending cycle.**
 
-The goal is a living research record across the AI industry: what the agent believes, the evidence behind it, what would change its mind, and how the companies depend on one another. I'm building it with AI agents on a revived 2019 MacBook, using Sail for inference and cloud execution.
+An AI research agent studies nine public companies: whose spending supports whose revenue, what turns into cash, and what could change the case. Built with AI agents on a revived 2019 MacBook, using Sail for inference, shared research context, and cloud tools.
 
-[Explore the project](https://blakewoods.us/portfolio/) · [Start here](docs/START-HERE.md) · [Current state](docs/CURRENT-STATE.md) · [Technical reference](docs/README.md)
+[Explore](https://blakewoods.us/portfolio/) · [Night shift](docs/NIGHT-SHIFT.md) · [Current state](docs/CURRENT-STATE.md) · [Technical reference](docs/README.md)
 
 ## What works
 
-The research universe spans chips and fabrication (NVIDIA, TSMC), networking (Broadcom), power and cooling (Constellation, Vertiv), cloud (Microsoft, Amazon, Alphabet), and applications (Meta). These are research subjects, not holdings. Microsoft is the first reviewed case; the others have verified company profiles and collected issuer disclosures.
+The research universe spans chips, networking, power and cooling, cloud, and applications. Microsoft is the first reviewed case; eight others have sourced profiles and collected disclosures. These are research subjects, not holdings.
 
-The agent reads sources, checks calculations, remembers reviewed findings, and submits drafts to a critic. A bounded cloud test preserved remote tool execution through a restart; its final report failed the response-format check and remained unpublished. Review still determines what becomes public.
+The night shift protocol builds independent company cases, challenges them against primary sources, revises them, and compares the results. Exact quotes, periods, units, arithmetic, failures, and costs remain measurable. Model agreement never substitutes for evidence; drafts stay private until reviewed.
 
-A separate improvement loop generates and tests critic prompts. Its first candidate fixed one validation mistake but introduced another, so it automatically kept the current method. Nine company questions also reused one Sail Supercache evidence corpus; results and costs are in the current-state record.
+A separate prompt-improvement loop rejected its first candidate: one fixed validation mistake came with a new regression. Earlier cloud and shared-context trials retain their outcomes in the [current-state record](docs/CURRENT-STATE.md).
 
-The website serves saved research and interactive evidence. Visitors cannot start paid work. There is no connected account, trading, or investment-return history; Schwab integration is paused.
+The website shows the company map, checked cash-flow scenarios, and dated research checkpoints. Visits cannot start paid work. Schwab is disconnected; there are no trades or investment returns.
 
 ## What we've learned
 
@@ -24,4 +24,4 @@ Correct numbers also need complete evidence and a supported explanation. Earlier
 
 ## Next
 
-Connect the company cases: whose spending supports whose revenue, where cash conversion weakens, and which apparent diversification depends on the same spending cycle. Gradually automate the routine research while preserving evidence, dated revisions, explicit spending limits, and review.
+Connect the cases into a living record of shared spending risks, then use unresolved questions and measured failures to choose the next research task. [Explore the first case or reproduce its arithmetic](docs/START-HERE.md).

@@ -9,6 +9,11 @@ Microsoft is the first reviewed case. The other companies have source-backed
 profiles; that does not mean their investment cases have been reviewed. The
 [current state](CURRENT-STATE.md) distinguishes completed work from the next test.
 
+The **Night shift** checkpoint records the nine-company research campaign:
+independent cases, skeptical review, revisions, and measured costs. Its
+[research notes](NIGHT-SHIFT.md) explain what ran and what still needs checking.
+Passing a quote or arithmetic check does not approve a financial conclusion.
+
 ## Follow one useful finding
 
 Open **Case** on the [project page](https://blakewoods.us/portfolio/). Change

@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "saved_at": "2026-09-13T06:37:09Z",
+  "state": "running",
+  "started_at": "2026-09-13T06:35:00Z",
+  "deadline": "2026-09-13T14:35:00Z",
+  "planned_steps": 86,
+  "completed_steps": 1,
+  "submitted_requests": 7,
+  "unknown_requests": 6,
+  "estimated_usd": "0.02797608",
+  "max_reservation_usd": "33.2",
+  "inflight_requests": 6,
+  "source_documents": 12,
+  "scope": "Mechanical checks and fallible model comparisons. Company cases and dependency maps remain unapproved drafts.",
+  "companies": [
+    {
+      "symbol": "NVDA",
+      "completed_steps": 1,
+      "baseline_mechanical_pass": false,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "TSM",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "AVGO",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "CEG",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "VRT",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "MSFT",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "AMZN",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "GOOGL",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    },
+    {
+      "symbol": "META",
+      "completed_steps": 0,
+      "baseline_mechanical_pass": null,
+      "revised_mechanical_pass": null,
+      "judge_preferences": [],
+      "approved": false
+    }
+  ]
+}

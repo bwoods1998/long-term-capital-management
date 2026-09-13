@@ -11,6 +11,10 @@ no trades or investment returns.
 [Explore the companies](https://blakewoods.us/portfolio/) ·
 [Follow the spending](AI-STACK.md) · [First reviewed case](CURRENT-CASE.md)
 
+**Night shift:** A bounded nine-company run is now connecting the cases through
+independent analysis, opposing review, shared evidence and cloud verification.
+[Dated progress](../public/overnight-research.json) · [Protocol and morning review](NIGHT-SHIFT.md)
+
 ## This build
 
 - **Clearer public view.** The website opens with the company map. Microsoft's
