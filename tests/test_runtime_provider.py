@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
+from io import BytesIO
+from urllib.error import URLError
 import sqlite3
 import json
 import tempfile
@@ -88,6 +90,38 @@ class ProviderTests(unittest.TestCase):
             )
         with self.assertRaises(ValueError):
             p.Transport(injected=True)
+
+    def test_foreground_inference_waits_for_full_generation_without_changing_request_identity(self):
+        transport = p.Transport(injected=True, key_fingerprint="a"*64)
+        cases=[("POST","/v1/responses",p.body_for("kimi_asap","source","question"),600),
+               ("POST","/v1/responses",p.body_for("kimi_flex","source","question"),45),
+               ("GET","/v1/responses/resp_one",None,45)]
+        for method,route,body,expected in cases:
+            with self.subTest(method=method,body=body), patch.object(p,"build_opener") as opener:
+                opener.return_value.open.return_value=BytesIO(b'{"id":"resp_one"}')
+                self.assertEqual(transport(method,route,body,"same-logical-request"),{"id":"resp_one"})
+                request=opener.return_value.open.call_args.args[0]
+                self.assertEqual(opener.return_value.open.call_args.kwargs["timeout"],expected)
+                self.assertEqual(request.get_header("Idempotency-key"),"same-logical-request")
+                if body is not None:self.assertEqual(json.loads(request.data),body)
+
+    def test_direct_and_wrapped_timeouts_are_typed_and_retain_original_hold_and_key(self):
+        for failure in (TimeoutError("private transport detail"), URLError(TimeoutError("private transport detail"))):
+            with self.subTest(failure=type(failure).__name__):
+                transport=p.Transport(injected=True,key_fingerprint="a"*64)
+                with patch.object(p,"build_opener") as opener:
+                    opener.return_value.open.side_effect=failure
+                    with self.assertRaisesRegex(RuntimeError,"^provider_transport_timeout$"):
+                        transport("POST","/v1/responses",p.body_for("kimi_asap","source","question"),"same-key")
+        self.script.replies=[RuntimeError("provider_transport_timeout"),response()]
+        identity=self.intent()
+        held=self.client.totals()["committed_usd"]
+        first=self.client.step(identity)
+        self.assertEqual(first["error"],"provider_transport_timeout")
+        self.assertIsNone(first["cost"])
+        self.assertEqual(self.client.totals()["committed_usd"],held)
+        self.assertEqual(self.client.step(identity)["status"],"completed")
+        self.assertEqual(self.script.calls[0],self.script.calls[1])
 
     def test_explicit_pre_admission_rejection_settles_zero_and_does_not_repeat(self):
         self.script.replies = [p.SubmissionRejected("unsupported_asap_request")]

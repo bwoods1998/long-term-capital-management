@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from urllib.request import Request, build_opener, HTTPRedirectHandler
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import hashlib
 import json
 import math
@@ -121,7 +121,10 @@ class Transport:
             method=method,
         )
         try:
-            with build_opener(NoRedirect).open(request, timeout=45) as response:
+            # Foreground Responses wait for generation to finish. Match Sail's
+            # bounded SDK default; background acknowledgements/GETs stay short.
+            timeout = 600 if method == "POST" and route == "/v1/responses" and not (body or {}).get("background", False) else 45
+            with build_opener(NoRedirect).open(request, timeout=timeout) as response:
                 raw = response.read(8_000_001)
                 if len(raw) > 8_000_000:
                     raise ValueError("Oversized provider response")
@@ -141,6 +144,11 @@ class Transport:
             if rejected:
                 raise SubmissionRejected(rejected) from None
             raise RuntimeError(f"provider_http_{code}") from None
+        except TimeoutError:
+            raise RuntimeError("provider_transport_timeout") from None
+        except URLError as error:
+            code = "provider_transport_timeout" if isinstance(error.reason, TimeoutError) else "provider_transport_unconfirmed"
+            raise RuntimeError(code) from None
         except Exception:
             raise RuntimeError("provider_transport_unconfirmed") from None
 
@@ -649,7 +657,7 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                 category = (
                     str(error)
                     if re.fullmatch(
-                        r"provider_http_\d{3}|provider_transport_unconfirmed",
+                        r"provider_http_\d{3}|provider_transport_(?:unconfirmed|timeout)",
                         str(error),
                     )
                     else type(error).__name__
