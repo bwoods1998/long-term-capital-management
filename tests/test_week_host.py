@@ -165,6 +165,13 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(api.call_count,1)
                 with self.assertRaises(ValueError):
                     week_host.reserve_cloud(root/'week',{**updated,'week_ends_at':'2026-09-19T05:00:00Z'},api)
+                (root/'week/host').mkdir()
+                (root/'week/host/deployment.json').write_text('{}')
+                (root/'week/run.json').write_text(json.dumps(config))
+                with self.assertRaisesRegex(ValueError, 'Existing host config'):
+                    week_host.reserve_cloud(root/'week',config,api)
+                self.assertEqual(json.loads((root/'week/run.json').read_text()),config)
+                self.assertEqual(api.call_count,1)
 
     def test_cli_defaults_to_available_credit_without_budget(self):
         arguments=['week_host.py','prepare','--directory','/tmp/unused-portfolio-cli-test','--starts-at','2026-09-14T04:00:00Z',
