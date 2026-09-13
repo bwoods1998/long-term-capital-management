@@ -27,6 +27,9 @@ def stamp(epoch):
     return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
+
+
 def read_config(path):
     c = json.loads(Path(path).read_text())
     required = {
@@ -82,9 +85,12 @@ def read_config(path):
             raise ValueError("Invalid runtime bound: " + key)
     if c.get("drain_seconds", 300) >= c["ends_epoch"] - c["started_epoch"]:
         raise ValueError("Drain exceeds runtime window")
-    raw = Path(c["evidence_path"]).read_bytes()
-    if len(raw) > 8000000 or hashlib.sha256(raw).hexdigest() != c["evidence_sha256"]:
-        raise ValueError("Frozen evidence changed")
+    with Path(c["evidence_path"]).open("rb") as source:
+        raw = source.read(MAX_EVIDENCE_BYTES + 1)
+    if len(raw) > MAX_EVIDENCE_BYTES:
+        raise ValueError("Frozen evidence exceeds 32 MiB limit")
+    if hashlib.sha256(raw).hexdigest() != c["evidence_sha256"]:
+        raise ValueError("Frozen evidence hash mismatch")
     if c.get("publish_url") not in (None, "https://blakewoods.us/api/portfolio/state"):
         raise ValueError("Unexpected publication destination")
     return c, json.loads(raw)

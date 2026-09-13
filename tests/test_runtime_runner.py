@@ -137,6 +137,51 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_full_constituent_evidence_over_eight_megabytes_preserves_every_source_observation(self):
+        from portfolio_runtime.evidence import TAGS
+        data = evidence()
+        companies = []
+        for i in range(503):
+            ticker = ''.join(chr(65+(i//divisor)%26) for divisor in (676,26,1))
+            company = deepcopy(data["companies"][0])
+            company.update(symbol=ticker, cik=str(i+1).zfill(10), captured_at=AT, cutoff=AT[:10])
+            company["facts"] = {metric: [{"tag": tags[0], "unit": "shares" if metric == "shares" else "USD",
+                "observations": [{"start": f"{year}-01-01", "end": f"{year}-12-31", "val": 1000000000+year+i,
+                    "filed": f"{year+1}-02-15", "form": "10-K", "accn": f"0000000001-{year%100:02}-000001",
+                    "fy": year, "fp": "FY", "period_kind": "annual"} for year in range(2020,2026)]}]
+                for metric,tags in TAGS.items()}
+            companies.append(company)
+        data["companies"] = companies
+        data["universe"]["companies"] = [{"symbol":c["symbol"],"cik":c["cik"]} for c in companies]
+        raw = (json.dumps(data,sort_keys=True,indent=2)+"\n").encode()
+        self.assertGreater(len(raw), 8_000_000)
+        self.assertLess(len(raw), r.MAX_EVIDENCE_BYTES)
+        Path(self.config["evidence_path"]).write_bytes(raw)
+        self.config["evidence_sha256"] = hashlib.sha256(raw).hexdigest()
+        path = self.root/"config.json"
+        path.write_text(canonical(self.config))
+        config, restored = r.read_config(path)
+        self.assertEqual(config["evidence_sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(restored, data)
+        research = Research(self.root/"full-research.sqlite", restored)
+        research.plan_wave(0,size=1)
+        self.assertEqual(len(research.companies),503)
+        self.assertTrue(all(len(task["body"].encode()) <= 500000 for task in research.waiting()))
+
+    def test_evidence_size_and_hash_failures_are_distinct_and_bounded(self):
+        path = self.root/"config.json"
+        path.write_text(canonical(self.config))
+        evidence_path = Path(self.config["evidence_path"])
+        with evidence_path.open("ab") as source:
+            source.write(b" ")
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            r.read_config(path)
+        with evidence_path.open("wb") as source:
+            source.seek(r.MAX_EVIDENCE_BYTES)
+            source.write(b" ")
+        with self.assertRaisesRegex(ValueError, "exceeds 32 MiB"):
+            r.read_config(path)
+
     def completed(self, task_id, result, *, kind="company", wave=0):
         with self.research.connect() as db:
             old = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
