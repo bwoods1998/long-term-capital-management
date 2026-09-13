@@ -661,6 +661,50 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(first["progress_at"], later["progress_at"])
         self.assertNotEqual(first["heartbeat_at"], later["heartbeat_at"])
 
+    def test_exhausted_submission_surfaces_health_and_keeps_profile_quarantined_across_epochs(self):
+        self.available_credit_config()
+        self.at = timestamp(MONDAY).timestamp()
+        self.admit(max_additional_inference_usd="100", max_inference_committed_usd="100")
+        service = self.service()
+        service.initialize()
+        identity, config = service.prepare_epoch()
+        service.current = identity
+        client = Client(Path(config["state_dir"])/"requests.sqlite", config, transport=lambda *a: None, clock=lambda: self.at)
+        client.reservation_guard = service.reservation_allowed
+        request = client.submit_intent("ambiguous", "kimi_flex", runtime_fixtures.body_for("kimi_flex", "source", "question", max_output=16))
+        with client.connect() as db:
+            db.execute("UPDATE requests SET attempts=10,error='provider_transport_unconfirmed' WHERE id=?", (request,))
+        held = service.totals()["committed_usd"]
+        work = runner.request_schedule(client.observations(), at=self.at)
+        self.assertEqual(service.observe_request_work(work), {"kimi_flex"})
+        self.assertEqual(service.health()["inference"]["exhausted_ambiguous_requests"], 1)
+        research = Research(Path(config["state_dir"])/"research.sqlite", json.loads(Path(config["evidence_path"]).read_text()))
+        with PortfolioLedger(self.root/"state/paper.sqlite") as ledger:
+            projection = runner.public_projection(config, ledger, research, client, status="running")
+            service.status = "running"
+            checkpoint = service.checkpoint(config, ledger, research, client, projection)
+            self.assertEqual((service.status, service.reason), ("needs_attention", "recovering"))
+            self.assertEqual(checkpoint["service"]["reason_code"], "recovering")
+            self.assertEqual(service.totals()["committed_usd"], held)
+            self.admit(allow=False)
+            service.checkpoint(config, ledger, research, client, projection)
+            self.assertEqual((service.status, service.reason), ("waiting", "funding_needed"))
+            self.admit(max_additional_inference_usd="100", max_inference_committed_usd="100")
+            for status in ("paused", "complete"):
+                service.status = status
+                service.checkpoint(config, ledger, research, client, projection)
+                self.assertEqual(service.status, status)
+        with service.connect() as db:
+            db.execute("UPDATE epochs SET status='parked_unsettled' WHERE id=?", (identity,))
+        service.current = "subsequent-epoch"
+        empty_work = runner.request_schedule([], at=self.at)
+        self.assertEqual(service.observe_request_work(empty_work), {"kimi_flex"})
+        with client.connect() as db:
+            db.execute("UPDATE requests SET response_id='resp_recovered',status='queued' WHERE id=?", (request,))
+        self.assertEqual(service.observe_request_work(empty_work), set())
+        self.assertEqual(service.health()["inference"]["exhausted_ambiguous_requests"], 0)
+        self.assertEqual(service.totals()["committed_usd"], held)
+
     def test_cash_baseline_preserves_first_market_open_and_is_idempotent(self):
         with PortfolioLedger(self.root/"paper.sqlite", created_at=SUNDAY) as ledger:
             session = next_session(SUNDAY)

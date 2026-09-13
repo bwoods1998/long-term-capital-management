@@ -157,6 +157,7 @@ class Service:
         self._last_evaluation = None
         self._last_recovery = 0
         self._paper_issue = False
+        self._exhausted_ambiguous_requests = 0
         self.progress_at = self.clock()
         self.stage = "initializing"
         self.lab = None
@@ -338,7 +339,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                   "spending_mode": self.config.get("spending_mode", "capped"),
                   "funding": self.funding_plan,
                   "storage": {"free_bytes": self.disk_free(), "minimum_free_bytes": 1024**3},
-                  "inference": self.totals()}
+                  "inference": {**self.totals(),
+                                "exhausted_ambiguous_requests": self._exhausted_ambiguous_requests}}
         if not self.available_credit:
             result["weekly_inference_budget_usd"] = self.config["weekly_inference_budget_usd"]
         if self.rehearsal:
@@ -639,6 +641,25 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
              "updated_at": stamp(self.clock()), **states})
         self.progress_at, self.stage = self.clock(), "scheduling"
 
+    def observe_request_work(self, work):
+        """Keep unresolved profile quarantine across hourly journal boundaries."""
+        exhausted = list(work["exhausted"])
+        with self.connect() as db:
+            epochs = db.execute("SELECT id,config FROM epochs WHERE status!='complete'").fetchall()
+        for epoch in epochs:
+            if epoch["id"] == self.current:
+                continue
+            path = Path(json.loads(epoch["config"])["state_dir"])/"requests.sqlite"
+            if not path.is_file():
+                continue
+            with sqlite3.connect("file:"+str(path)+"?mode=ro", uri=True, factory=ClosingConnection) as db:
+                db.row_factory = sqlite3.Row
+                rows = [dict(row) for row in db.execute("SELECT id,profile,status,response_id,attempts,created FROM requests WHERE response_id IS NULL AND attempts>0")]
+            exhausted.extend(runner.request_schedule(rows, at=self.clock())["exhausted"])
+        unique = {row["id"]: row for row in exhausted}
+        self._exhausted_ambiguous_requests = len(unique)
+        return {row["profile"] for row in unique.values()}
+
     def checkpoint(self, config, ledger, research, client, projection):
         self.progress_at, self.stage = self.clock(), "researching"
         self.paper_sync(ledger)
@@ -651,10 +672,16 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         self.reconcile_parked()
         save(self.root / "policy-evaluation.json", self._last_evaluation)
         admission = self.admission()
-        if self._paper_issue or not self.storage_available():
+        if self.status in ("paused", "complete"):
+            pass
+        elif self.stopping or admission.get("stop_requested"):
+            self.status, self.reason = "paused", "manual_pause"
+        elif self._paper_issue or not self.storage_available():
             self.status, self.reason = "needs_attention", "data_unavailable"
         elif not admission["allow_new_research"]:
             self.status, self.reason = "waiting", self._admission_reason(admission)
+        elif self._exhausted_ambiguous_requests:
+            self.status, self.reason = "needs_attention", "recovering"
         else:
             self.status, self.reason = "running", None
         self.next_wake = min(self.end, self.clock()+60)

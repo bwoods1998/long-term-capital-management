@@ -137,6 +137,59 @@ class RunnerTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_exhausted_ambiguous_requests_keep_holds_but_allow_another_profile(self):
+        self.config.update(spending_mode="available_credit", max_concurrency=8,
+                           ends_epoch=EPOCH+3600)
+        calls = []
+        def transport(method, path, body, identity):
+            calls.append((method, body["model"]))
+            return {"id": "resp_other", "status": "queued", "model": body["model"]}
+        client = Client(self.root/"requests.sqlite", self.config, transport=transport, clock=lambda: self.at)
+        client.reservation_guard = lambda amount: True
+        for i in range(8):
+            task = "exhausted-"+str(i)
+            self.research.add(task, 0, "company", "AAPL", "kimi_flex", "source", "question", max_output=16)
+            with self.research.connect() as db:
+                body = json.loads(db.execute("SELECT body FROM tasks WHERE id=?", (task,)).fetchone()[0])
+            identity = client.submit_intent(task, "kimi_flex", body)
+            self.research.attach(task, identity)
+        with client.connect() as db:
+            db.execute("UPDATE requests SET attempts=10,error='provider_transport_unconfirmed'")
+        before = client.rows()
+        self.research.add("same-profile", 0, "company", "MSFT", "kimi_flex", "source", "question", max_output=16)
+        self.research.add("other-profile", 0, "company", "MSFT", "pro_asap", "source", "question", max_output=16)
+        with self.research.connect() as db:
+            db.execute("INSERT INTO waves VALUES(0,?,?)", (self.at, "{}"))
+        with (patch.object(r, "initialize", return_value=(client, self.research, self.ledger())),
+              patch.object(r, "ThreadPoolExecutor", ImmediatePool),
+              patch.object(r.time, "time", side_effect=lambda: self.at),
+              patch.object(r, "utc_now", return_value=AT)):
+            r.run(self.config, self.data, once=True)
+        self.assertEqual(calls, [("POST", body_for("pro_asap", "", "", max_output=16)["model"])])
+        self.assertEqual(client.totals()["requests"], 9)
+        after = {row["id"]: row for row in client.rows()}
+        for old in before:
+            self.assertEqual(after[old["id"]], old)
+            self.assertIsNone(old["cost"])
+        self.assertEqual(client.totals()["unsettled_requests"], 9)
+
+    def test_final_live_attempt_and_accepted_flex_keep_slots_without_false_stall(self):
+        rows = [{"id": "final", "profile": "kimi_flex", "status": "prepared",
+                 "response_id": None, "attempts": 10, "created": EPOCH},
+                {"id": "accepted", "profile": "kimi_flex", "status": "queued",
+                 "response_id": "resp_flex", "attempts": 50, "created": EPOCH},
+                {"id": "never-sent", "profile": "pro_asap", "status": "prepared",
+                 "response_id": None, "attempts": 0, "created": EPOCH-86400}]
+        work = r.request_schedule(rows, at=EPOCH+60, live_ids={"final"})
+        self.assertEqual(work["occupied"], {"final", "accepted", "never-sent"})
+        self.assertEqual(work["exhausted"], [])
+        self.assertEqual(work["blocked_profiles"], set())
+        settled_attempt = r.request_schedule(rows, at=EPOCH+60)
+        self.assertEqual(settled_attempt["occupied"], {"accepted", "never-sent"})
+        self.assertEqual(settled_attempt["blocked_profiles"], {"kimi_flex"})
+        aged = r.request_schedule([{**rows[0], "attempts": 1}], at=EPOCH+86400)
+        self.assertEqual(len(aged["exhausted"]), 1)
+
     def test_full_constituent_evidence_over_eight_megabytes_preserves_every_source_observation(self):
         from portfolio_runtime.evidence import TAGS
         data = evidence()

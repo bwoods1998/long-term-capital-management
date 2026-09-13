@@ -30,6 +30,25 @@ def stamp(epoch):
 MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
 
 
+def request_schedule(rows, *, at, live_ids=()):
+    """Separate exhausted ambiguous submissions from actual executor work.
+
+    This changes scheduling only. Unknown requests retain their original state,
+    identity and cost reservation, and accepted IDs remain eligible for polling.
+    """
+    live_ids = set(live_ids)
+    pending = [row for row in rows if row["status"] not in TERMINAL]
+    exhausted = [row for row in pending
+                 if row["id"] not in live_ids and not row.get("response_id")
+                 and row["attempts"] > 0
+                 and (row["attempts"] >= 10 or at-row["created"] > 23*3600)]
+    exhausted_ids = {row["id"] for row in exhausted}
+    runnable = [row for row in pending if row["id"] not in exhausted_ids]
+    return {"runnable": runnable, "exhausted": exhausted,
+            "occupied": live_ids | {row["id"] for row in runnable},
+            "blocked_profiles": {row["profile"] for row in exhausted}}
+
+
 def read_config(path):
     c = json.loads(Path(path).read_text())
     required = {
@@ -621,7 +640,11 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
                         research.complete(row)
             rows = client.observations()
             # Recover all accepted response IDs before planning fresh work after a restart.
-            inflight = [r for r in rows if r["status"] not in TERMINAL]
+            work = request_schedule(rows, at=at, live_ids=futures)
+            inflight = work["runnable"]
+            blocked_profiles = work["blocked_profiles"]
+            if controller and hasattr(controller, "observe_request_work"):
+                blocked_profiles |= controller.observe_request_work(work)
             concurrency = config.get("max_concurrency", 32)
             if config.get("spending_mode") != "available_credit":
                 concurrency = min(concurrency, [1, 4, 8, 16, 24, 32][min(5, int(elapsed // 900))])
@@ -674,12 +697,14 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
                                 "elapsed_seconds": int(elapsed),
                             },
                         )
-                outstanding = len(inflight)
+                outstanding = len(work["occupied"])
                 for task in waiting:
                     if outstanding >= concurrency:
                         break
                     if controller and not controller.admission_allowed():
                         break
+                    if task["profile"] in blocked_profiles:
+                        continue
                     try:
                         if controller and task["kind"] == "allocation" and remaining <= 900:
                             # Leave an explicit review interval before final
@@ -755,6 +780,8 @@ def run(config, evidence, *, once=False, branch=False, controller=None):
         try:
             pool.shutdown(wait=True, cancel_futures=True)
             research.reconcile(client.iter_rows())
+            if controller and hasattr(controller, "observe_request_work"):
+                controller.observe_request_work(request_schedule(client.observations(), at=time.time()))
             if controller:
                 controller.paper_sync(ledger)
             propose_checked(config, research, ledger)
