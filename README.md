@@ -1,27 +1,27 @@
 # Portfolio Agent
 
-**Follow the AI spending cycle.**
+**Follow the AI dollar.**
 
-An AI research agent studies nine public companies: whose spending supports whose revenue, what turns into cash, and what could change the case. Built with AI agents on a revived 2019 MacBook, using Sail for inference, shared research context, and cloud tools.
+An agent investigating where the AI buildout turns into cash flow—from chips and power to cloud and applications. Built with [Sail](https://sailresearch.com), with a public record of evidence, changing views and research costs.
 
-[Explore](https://blakewoods.us/portfolio/) · [Night shift](docs/NIGHT-SHIFT.md) · [Current state](docs/CURRENT-STATE.md) · [Technical reference](docs/README.md)
+[Explore the project](https://blakewoods.us/portfolio/) · [Current results](docs/CURRENT-STATE.md) · [How it works](docs/SAIL-PRODUCTS.md)
+
+## Try it
+
+Choose one of nine companies on the website. Compare its latest cash-flow figures with the prior period, then change the assumptions.
+
+For example, Microsoft generated **about $46.8B more operating cash** in FY2026, but cash property spending rose **about $51.4B**. Cash remaining after those purchases fell **about $4.6B**. Growth and cash generation are different questions. [Sources and definitions →](docs/AI-STACK.md)
 
 ## What works
 
-The research universe spans chips, networking, power and cooling, cloud, and applications. Microsoft is the first reviewed case; eight others have sourced profiles and collected disclosures. These are research subjects, not holdings.
+- **Nine source-checked cash bridges.** Original currencies, periods and capital-spending definitions stay attached to the figures.
+- **A complete research experiment.** Three models read, challenge and revise company cases. The latest run used 80 requests, shared evidence, persistent cloud checks and a workflow trace.
+- **An honest result.** Both judges preferred NVIDIA’s revision; its mechanical checks still failed. Model agreement cannot replace verification.
 
-The night shift protocol builds independent company cases, challenges them against primary sources, revises them, and compares the results. Exact quotes, periods, units, arithmetic, failures, and costs remain measurable. Model agreement never substitutes for evidence; drafts stay private until reviewed.
-
-A separate prompt-improvement loop rejected its first candidate: one fixed validation mistake came with a new regression. Earlier cloud and shared-context trials retain their outcomes in the [current-state record](docs/CURRENT-STATE.md).
-
-The website shows the company map, checked cash-flow scenarios, and dated research checkpoints. Visits cannot start paid work. Schwab is disconnected; there are no trades or investment returns.
-
-## What we've learned
-
-Microsoft's annual operating cash flow rose by $46.773 billion, while cash property spending rose by $51.397 billion. The difference fell by $4.624 billion. Company-wide growth alone cannot establish AI-only returns.
-
-Correct numbers also need complete evidence and a supported explanation. Earlier experiments lost a source between stages; restoring it improved the numbers without resolving every interpretive error.
+The explorer’s financial figures were reviewed separately. Agent drafts remain research, not approved investment conclusions. [Results and limits →](docs/NIGHT-SHIFT.md)
 
 ## Next
 
-Connect the cases into a living record of shared spending risks, then use unresolved questions and measured failures to choose the next research task. [Explore the first case or reproduce its arithmetic](docs/START-HERE.md).
+Turn new disclosures into a dated record of what changed, why it matters and which shared spending risks remain. Evaluate those changes against unseen evidence, then test the agent’s decisions in a small live portfolio, with returns, drawdowns and research costs kept visible. **Schwab is not connected; no live trades yet.**
+
+[Reproduce the figures](docs/START-HERE.md) · [Technical reference](docs/README.md)

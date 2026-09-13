@@ -6,25 +6,9 @@ The agent should handle more routine research as its evidence and review improve
 
 ## Now
 
-The universe covers NVIDIA, TSMC, Broadcom, Constellation, Vertiv, Microsoft, Amazon,
-Alphabet, and Meta. Official disclosures support their profiles; Microsoft is the
-first reviewed investment case. These are research subjects, not holdings.
+Nine companies have source-checked current and prior cash-flow bridges. The latest experiment completed independent analysis, opposing review and revisions across the same universe, with a shared spending-risk map retained for review. Eight final company outputs passed the mechanical checks; that does not approve their interpretations.
 
-The agent can retrieve passages, calculate, save hypotheses, compare models, and
-critique a draft. Reviewed conclusions become memory for later work. A public page
-shows selected research and checked figures.
-
-The [latest dossier](DOSSIER-RESULTS.md) exposed a concrete weakness: losing evidence
-between stages can turn a disclosed fact into an unsupported answer. Restoring
-sources improved the numbers, while independent review still found problems in
-prose. The next workflow must preserve required evidence and represent missing
-values explicitly.
-
-A live cloud test verified six source/calculation operations and recovery after a
-Sailbox sleep and fresh-process restart. Inference and the spending ledger remained
-with the local controller. Its final report failed the strict response-format check;
-successful execution did not make it publishable. See the [current state](CURRENT-STATE.md).
-Brokerage integration is paused; there are no trades or portfolio returns.
+The website presents the financial explorer and a dated experiment result. Sail supplies inference, shared context, persistent cloud checks and tracing. The authoritative controller remains on the MacBook. Brokerage integration is paused; no trades or portfolio returns exist. [Current measurements](CURRENT-STATE.md).
 
 ## Next
 

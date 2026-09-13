@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "saved_at": "2026-09-13T06:36:12Z",
-  "state": "running",
+  "saved_at": "2026-09-13T07:39:26Z",
+  "state": "checkpoint",
   "current_focus": {
     "company": "Microsoft",
     "symbol": "MSFT",
@@ -9,9 +9,9 @@
   },
   "next_milestone": "Compare the shared spending risks across these companies.",
   "costs": {
-    "inference_known_usd": "2.294631562",
-    "inference_unknown_requests": 7,
-    "compute_known_usd": "0.01504778",
+    "inference_known_usd": "4.352895134",
+    "inference_unknown_requests": 1,
+    "compute_known_usd": "0.020205149",
     "compute_unknown_items": 0
   },
   "reviewed": {

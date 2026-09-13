@@ -1,52 +1,33 @@
 # Current state
 
-**Goal:** Follow where AI spending turns into durable cash flow, with evidence,
-dated changes of view, and a measured research cost.
+**13 September 2026 · Research phase**
 
-**Coverage:** Nine public companies across the AI stack. Microsoft is the first
-reviewed case; the other eight have sourced profiles and collected disclosures.
-This is a research universe, not a portfolio. Schwab is disconnected; there are
-no trades or investment returns.
+The objective is to follow where the AI buildout turns into durable cash flow, then test the agent’s changing view in a small portfolio.
 
-[Explore the companies](https://blakewoods.us/portfolio/) ·
-[Follow the spending](AI-STACK.md) · [First reviewed case](CURRENT-CASE.md)
+[Explore](https://blakewoods.us/portfolio/) · [Financial record](AI-STACK.md) · [Sail’s role](SAIL-PRODUCTS.md)
 
-**Night shift:** A bounded nine-company run is now connecting the cases through
-independent analysis, opposing review, shared evidence and cloud verification.
-[Dated progress](../public/overnight-research.json) · [Protocol and morning review](NIGHT-SHIFT.md)
+## Available now
 
-## This build
+The website has nine interactive, source-checked cash bridges: NVIDIA, TSMC, Broadcom, Constellation, Vertiv, Microsoft, Amazon, Alphabet and Meta. Each preserves current and prior periods, currency and capital deductions. These are company-wide figures, not AI-only returns or a cross-company ranking.
 
-- **Clearer public view.** The website opens with the company map. Microsoft's
-  checked cash-flow scenario and reviewed reports are one layer deeper. GitHub
-  holds the technical experiments.
-- **Real cloud tools.** Six source/calculation operations survived Sailbox sleep
-  and fresh-process resume. The final report failed its frozen JSON-format
-  contract and stayed private; future runs now handle an exact JSON wrapper.
-  [Result and cost](CLOUD-WORKER.md)
-- **Honest spending capacity.** Completed, validated usage now settles its
-  conservative allowance through immutable receipts. Unknown work keeps its
-  hold. The original $100 total allocation remains unchanged. [Accounting](BUDGET.md)
-- **Shared research context.** A nine-company Supercache experiment records
-  **129,024 reused tokens** across nine completed company questions. The trial
-  cost **$0.58887954**, including an incomplete initial source-index response;
-  no replacement write occurred. It did not recover the upfront write cost.
-  [Results](SHARED-RESEARCH-CONTEXT.md)
-- **Bounded method improvement.** An evidence-critic prompt experiment compares
-  the current method with one generated candidate. Both passed eight development
-  cases and seven of eight validation cases. The candidate fixed one mistake but
-  introduced another, so the loop **rejected it automatically**. The 33 calls cost
-  **$0.00380476**. [Decision and limits](AUTONOMY.md)
+The latest agent experiment finished **80 paid requests across three models**, using 12 documents and 29 frozen passages. Its nine company workflows and shared-risk map completed. Eight revisions passed mechanical checks; NVIDIA’s did not. One Meta comparison failed the required response format. Completion means the protocol finished, not that every answer succeeded.
 
-## Next
+| Measured capability | Latest run |
+|---|---|
+| Inference | $1.86 token-price estimate; no unknown request costs |
+| Supercache | 129,024 reused tokens across nine questions; reused the existing stored evidence |
+| Sailbox | Cloud and local results matched for all nine companies; state survived sleep/resume |
+| Cloud workspace | About $0.005 finalized for this run |
+| Voyages | Requests and revisions linked in one recorded trace |
 
-Build consistently scoped company cases, connect their spending dependencies,
-and use recorded failures to choose the next research-method experiment.
-Routine recovery and evaluation should run without manual intervention. Fresh
-validation evidence and a separate publication check remain necessary; a model
-cannot approve its own answer or change its success criteria.
+[Experiment and limitations](NIGHT-SHIFT.md) · [Machine-readable measurements](../public/overnight-sail-metrics.json)
 
-The current controller runs on the MacBook. Sailbox executes isolated tools;
-it does not yet host the entire agent. Website data is a saved checkpoint,
-not a continuous health monitor. See [Sail's role](SAIL-PRODUCTS.md) and the
-[roadmap](ROADMAP.md) for the remaining integration work.
+## What remains unproven
+
+Mechanical checks and model preferences do not approve financial explanations. The cash explorer was source-reviewed separately from the experimental drafts. A prior prompt-selection experiment rejected its candidate after one fixed validation error came with a regression; autonomous improvement has not been demonstrated.
+
+The coordinator still runs on the MacBook. Sail supplies inference and isolated cloud tools. The public page is a dated snapshot, not a continuous health monitor. No brokerage account is connected and no returns exist.
+
+## Next useful milestone
+
+A source-backed change log across these companies: what a new disclosure changes, which connected businesses might be affected, and what evidence would reverse the interpretation. Evaluate that process on unseen evidence before expanding autonomy. Brokerage execution follows account availability and tested portfolio controls.

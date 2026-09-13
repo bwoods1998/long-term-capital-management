@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-09-13T07:07:07Z",
+  "dataset_sha256": "8627a2a733f2dec20b375ee568e4798027f791d47f1ab6a893263735b096476a",
+  "companies": 9,
+  "scope": "Source-table and arithmetic review by an AI coding agent. This does not approve investment theses or measure AI-only returns.",
+  "current_and_prior_periods": true,
+  "source_definitions_preserved": true
+}

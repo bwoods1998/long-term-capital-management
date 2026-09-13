@@ -2,8 +2,7 @@
 
 The project follows public companies across the AI stack: what the evidence says,
 what remains uncertain, and what would change the view. Microsoft is the first
-reviewed case. The other eight companies have sourced profiles and bounded
-research questions; they are not holdings or fully reviewed investment cases.
+reviewed case. All nine now have source-checked cash bridges and completed experimental research workflows. They are not holdings or fully reviewed investment cases.
 
 ```mermaid
 flowchart LR
@@ -81,7 +80,14 @@ for what has actually run.
 The website serves allowlisted saved JSON. Visitors cannot launch model requests
 or access private prompts, full captures, credentials, or account identifiers.
 Technical experiment results live on GitHub; the page highlights companies and
-the first checked cash-flow scenario. Deployment is separate from research.
+the nine-company cash explorer and one measured research checkpoint. Deployment is separate from research.
+
+The current page has two independent inputs:
+
+- `public/cash-map.json` is a curated financial record. The site validates all current/prior arithmetic, allowed issuer URLs and the exact dataset hash in `data/research/cash-map-review.json` before building.
+- `scripts/export_presentation.py` reads one saved campaign through a read-only database snapshot. It exports allowlisted counts, check results and known cost estimates to `public/agent-state.json`. Model prose, request IDs and private trace links are excluded.
+
+The final campaign publisher can refresh the typed checkpoint. It cannot alter the cash map or turn a draft into an approved financial claim. A private publication hold permits an active editor to take over a concurrent deployment without changing the frozen research protocol.
 
 Schwab is disconnected. Future execution will require a separate structured
 order service with an owner-defined mandate, deterministic exposure and order

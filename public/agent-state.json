@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "saved_at": "2026-09-13T07:31:04Z",
+  "state": "complete",
+  "companies": [
+    {
+      "symbol": "NVDA",
+      "finished": true,
+      "initial_check": false,
+      "revised_check": false,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "TSM",
+      "finished": true,
+      "initial_check": true,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "AVGO",
+      "finished": true,
+      "initial_check": false,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "CEG",
+      "finished": true,
+      "initial_check": true,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "VRT",
+      "finished": true,
+      "initial_check": true,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "finished": true,
+      "initial_check": true,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "AMZN",
+      "finished": true,
+      "initial_check": false,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision",
+        "revision"
+      ]
+    },
+    {
+      "symbol": "GOOGL",
+      "finished": true,
+      "initial_check": false,
+      "revised_check": true,
+      "judge_preferences": [
+        "baseline",
+        "baseline"
+      ]
+    },
+    {
+      "symbol": "META",
+      "finished": true,
+      "initial_check": true,
+      "revised_check": true,
+      "judge_preferences": [
+        "revision"
+      ]
+    }
+  ],
+  "source_documents": 12,
+  "model_count": 3,
+  "requests": 80,
+  "known_inference_usd": "1.859159992",
+  "unknown_requests": 0,
+  "supercache_tokens": 129024,
+  "cloud_checks": 9,
+  "cloud_persistence_verified": true,
+  "cloud_finished": true,
+  "trace_recorded": true,
+  "scope": "One research run. Model preferences and mechanical checks do not approve financial conclusions."
+}

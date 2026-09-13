@@ -1,0 +1,329 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-09-13",
+  "scope": "company_wide",
+  "review_basis": "primary_source_tables_and_arithmetic",
+  "companies": [
+    {
+      "symbol": "NVDA",
+      "company": "NVIDIA",
+      "group": "chips",
+      "role": "Accelerated computing platforms.",
+      "period": "Q2 FY2027",
+      "period_end": "2026-07-26",
+      "prior_period": "Q2 FY2026",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "24077",
+      "prior_operating_cash": "15365",
+      "deductions": [
+        {
+          "label": "Property, equipment and intangibles",
+          "value": "2677",
+          "prior_value": "1894"
+        },
+        {
+          "label": "Capital principal payments",
+          "value": "59",
+          "prior_value": "21"
+        }
+      ],
+      "capital_spending": "2736",
+      "prior_capital_spending": "1915",
+      "cash_remaining": "21341",
+      "prior_cash_remaining": "13450",
+      "lesson": "Cash has to catch up with sales.",
+      "explanation": "Receivables and inventory can absorb cash even when sales are growing.",
+      "watch": "How quickly do customers turn their orders into cash payments?",
+      "definition": "Includes intangible purchases and capital principal payments; this is the company\u2019s disclosed free-cash-flow definition.",
+      "source": {
+        "title": "NVIDIA Announces Financial Results for Second Quarter Fiscal 2027 | NVIDIA Newsroom",
+        "url": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-second-quarter-fiscal-2027",
+        "sha256": "187839a6570c764e12015a5c02107d0ad26a68b42b35882ae001f750f6bc3540",
+        "fetched_at": "2026-09-13T05:13:06Z"
+      }
+    },
+    {
+      "symbol": "TSM",
+      "company": "TSMC",
+      "group": "chips",
+      "role": "Semiconductor manufacturing.",
+      "period": "Q2 2026",
+      "period_end": "2026-06-30",
+      "prior_period": "Q2 2025",
+      "currency": "TWD",
+      "unit": "millions",
+      "operating_cash": "783365",
+      "prior_operating_cash": "497064",
+      "deductions": [
+        {
+          "label": "Gross property, plant and equipment purchases",
+          "value": "496002",
+          "prior_value": "297226"
+        }
+      ],
+      "capital_spending": "496002",
+      "prior_capital_spending": "297226",
+      "cash_remaining": "287363",
+      "prior_cash_remaining": "199838",
+      "lesson": "Factories consume cash before they earn it.",
+      "explanation": "Capacity expansion turns today\u2019s cash into assets that must earn a return over time.",
+      "watch": "Will new capacity stay busy enough to support the next expansion?",
+      "definition": "New Taiwan dollars. TIFRS classifies interest differently from US GAAP. Gross PP&E purchases exclude disposal proceeds and other investing flows.",
+      "source": {
+        "title": "TSMC Q2 2026 condensed financial statements",
+        "url": "https://investor.tsmc.com/english/encrypt/files/encrypt_file/reports/2026-07/114aaca0fea2050e96b91fffbab9ed04ba09cd92/FS.pdf",
+        "sha256": "9003b927ec7030c68c28f83bf53f75b04cb4556daa9f1f88eb7ddcbd8ebfb73c",
+        "fetched_at": "2026-09-13T06:12:26Z"
+      }
+    },
+    {
+      "symbol": "AVGO",
+      "company": "Broadcom",
+      "group": "chips",
+      "role": "Custom chips, networking and infrastructure software.",
+      "period": "Q3 FY2026",
+      "period_end": "2026-08-02",
+      "prior_period": "Q3 FY2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "14197",
+      "prior_operating_cash": "7166",
+      "deductions": [
+        {
+          "label": "Property, plant and equipment purchases",
+          "value": "532",
+          "prior_value": "142"
+        }
+      ],
+      "capital_spending": "532",
+      "prior_capital_spending": "142",
+      "cash_remaining": "13665",
+      "prior_cash_remaining": "7024",
+      "lesson": "Low capex can still mean shared exposure.",
+      "explanation": "A company can spend little on its own equipment while depending on customers\u2019 infrastructure budgets.",
+      "watch": "How concentrated is demand for custom chips and networking?",
+      "definition": "Company-wide operating cash less PP&E purchases; includes software and non-AI businesses.",
+      "source": {
+        "title": "Broadcom Inc. Announces Third Quarter Fiscal Year 2026 Financial Results and Quarterly Dividend",
+        "url": "https://investors.broadcom.com/news-releases/news-release-details/broadcom-inc-announces-third-quarter-fiscal-year-2026-financial",
+        "sha256": "188e4b250009dc20cdb4e6e3233e229e7b78517fc6e0f39d77eb32b9bd90a851",
+        "fetched_at": "2026-09-13T05:19:48Z"
+      }
+    },
+    {
+      "symbol": "CEG",
+      "company": "Constellation Energy",
+      "group": "power",
+      "role": "Electricity generation and energy supply.",
+      "period": "H1 2026",
+      "period_end": "2026-06-30",
+      "prior_period": "H1 2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "1553",
+      "prior_operating_cash": "1584",
+      "deductions": [
+        {
+          "label": "Capital expenditures",
+          "value": "2521",
+          "prior_value": "1573"
+        }
+      ],
+      "capital_spending": "2521",
+      "prior_capital_spending": "1573",
+      "cash_remaining": "-968",
+      "prior_cash_remaining": "11",
+      "lesson": "Investment can outrun operating cash.",
+      "explanation": "A cash shortfall after capital spending leaves other funding sources to bridge the gap.",
+      "watch": "When will new capacity and contracts start generating operating cash?",
+      "definition": "Parent-company consolidated cash flows include Calpine in 2026. The bridge excludes acquisition payments, financing and other investing flows.",
+      "source": {
+        "title": "Constellation Energy Q2 2026 Form 10-Q \u2014 parent cash-flow statement",
+        "url": "https://www.sec.gov/Archives/edgar/data/1168165/000186827526000104/ceg-20260630.htm",
+        "sha256": "bb0425e84adc5a44da6d0e2e0f485994e5e57c0fd096391e36594d5541533840",
+        "fetched_at": "2026-09-13T06:18:01.334Z"
+      }
+    },
+    {
+      "symbol": "VRT",
+      "company": "Vertiv",
+      "group": "power",
+      "role": "Power and cooling equipment for data centers.",
+      "period": "Q2 2026",
+      "period_end": "2026-06-30",
+      "prior_period": "Q2 2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "1099.8",
+      "prior_operating_cash": "322.9",
+      "deductions": [
+        {
+          "label": "Capital expenditures",
+          "value": "173.3",
+          "prior_value": "45.0"
+        },
+        {
+          "label": "Capitalized software",
+          "value": "1.2",
+          "prior_value": "0.9"
+        }
+      ],
+      "capital_spending": "174.5",
+      "prior_capital_spending": "45.9",
+      "cash_remaining": "925.3",
+      "prior_cash_remaining": "277.0",
+      "lesson": "Working capital changes the cash story.",
+      "explanation": "Customer collections and supplier payments can move cash faster than reported earnings.",
+      "watch": "How much cash conversion persists when working capital normalizes?",
+      "definition": "Operating cash less capex and capitalized software; matches the issuer\u2019s adjusted free-cash-flow reconciliation for these periods.",
+      "source": {
+        "title": "Vertiv Holdings Co. - Vertiv Reports Strong Second Quarter 2026 with Diluted EPS Growth of 53% (Adjusted Diluted EPS Growth of +60%); Raises Full Year 2026 Guidance Across All Key Metrics",
+        "url": "https://investors.vertiv.com/news/news-details/2026/Vertiv-Reports-Strong-Second-Quarter-2026-with-Diluted-EPS-Growth-of-53-Adjusted-Diluted-EPS-Growth-of-60-Raises-Full-Year-2026-Guidance-Across-All-Key-Metrics/default.aspx",
+        "sha256": "f956e88202fb685798f66c46c1d51f38f5e4ef4b23421f3ffb784828721e7c32",
+        "fetched_at": "2026-09-13T05:15:03Z"
+      }
+    },
+    {
+      "symbol": "MSFT",
+      "company": "Microsoft",
+      "group": "cloud",
+      "role": "Cloud infrastructure, software and AI services.",
+      "period": "FY2026",
+      "period_end": "2026-06-30",
+      "prior_period": "FY2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "182935",
+      "prior_operating_cash": "136162",
+      "deductions": [
+        {
+          "label": "Cash additions to property and equipment",
+          "value": "115948",
+          "prior_value": "64551"
+        }
+      ],
+      "capital_spending": "115948",
+      "prior_capital_spending": "64551",
+      "cash_remaining": "66987",
+      "prior_cash_remaining": "71611",
+      "lesson": "More operating cash. Less left over.",
+      "explanation": "Operating cash grew, but cash property spending grew faster.",
+      "watch": "Will new capacity generate enough cash to outpace reinvestment?",
+      "definition": "Full fiscal year. Cash property purchases exclude noncash finance-lease additions and other commitments.",
+      "source": {
+        "title": "Microsoft FY2026 results \u00b7 Cash flow statements (unaudited)",
+        "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+        "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8",
+        "fetched_at": "2026-09-12T22:38:09Z"
+      }
+    },
+    {
+      "symbol": "AMZN",
+      "company": "Amazon",
+      "group": "cloud",
+      "role": "Retail, logistics and cloud infrastructure.",
+      "period": "12 months to Jun 2026",
+      "period_end": "2026-06-30",
+      "prior_period": "12 months to Jun 2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "161403",
+      "prior_operating_cash": "121137",
+      "deductions": [
+        {
+          "label": "Property and equipment, net of proceeds and incentives",
+          "value": "169007",
+          "prior_value": "102953"
+        }
+      ],
+      "capital_spending": "169007",
+      "prior_capital_spending": "102953",
+      "cash_remaining": "-7604",
+      "prior_cash_remaining": "18184",
+      "lesson": "Growth can have a funding gap.",
+      "explanation": "Operating cash rose while net capital spending pushed free cash flow below zero.",
+      "watch": "When will the new infrastructure turn into durable cash generation?",
+      "definition": "Trailing twelve months, not one quarter. Net property spending deducts sales proceeds and incentives; excludes debt principal, acquisitions and other financing.",
+      "source": {
+        "title": "Amazon Q2 2026 Form 10-Q",
+        "url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000026/amzn-20260630.htm",
+        "sha256": "3f78a6add5f15c81ccbe7b4eb2b3800c1dd1ed134894c04549fdfaee7052c755",
+        "fetched_at": "2026-09-13T07:04:17.814137+00:00"
+      }
+    },
+    {
+      "symbol": "GOOGL",
+      "company": "Alphabet",
+      "group": "cloud",
+      "role": "Search, advertising, cloud and AI services.",
+      "period": "Q2 2026",
+      "period_end": "2026-06-30",
+      "prior_period": "Q2 2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "39069",
+      "prior_operating_cash": "27747",
+      "deductions": [
+        {
+          "label": "Property and equipment purchases",
+          "value": "44924",
+          "prior_value": "22446"
+        }
+      ],
+      "capital_spending": "44924",
+      "prior_capital_spending": "22446",
+      "cash_remaining": "-5855",
+      "prior_cash_remaining": "5301",
+      "lesson": "Cash today pays for capacity tomorrow.",
+      "explanation": "Quarterly capital spending exceeded operating cash, despite growth in cash generation.",
+      "watch": "How quickly can customer demand catch up with the capital bill?",
+      "definition": "Quarterly company-wide operating cash less PP&E purchases; other investments and acquisitions are outside this bridge.",
+      "source": {
+        "title": "Alphabet Announces Second Quarter 2026 Results",
+        "url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000066/googexhibit991q22026.htm",
+        "sha256": "13e9fbbe2991f6b85e33d44c992efe183743ea73925fd0970ccfa72aff70878b",
+        "fetched_at": "2026-09-13T06:18:01.334Z"
+      }
+    },
+    {
+      "symbol": "META",
+      "company": "Meta Platforms",
+      "group": "cloud",
+      "role": "Social platforms, advertising and AI infrastructure.",
+      "period": "Q2 2026",
+      "period_end": "2026-06-30",
+      "prior_period": "Q2 2025",
+      "currency": "USD",
+      "unit": "millions",
+      "operating_cash": "31862",
+      "prior_operating_cash": "25561",
+      "deductions": [
+        {
+          "label": "Property and equipment purchases",
+          "value": "30116",
+          "prior_value": "16538"
+        },
+        {
+          "label": "Finance-lease principal payments",
+          "value": "962",
+          "prior_value": "474"
+        }
+      ],
+      "capital_spending": "31078",
+      "prior_capital_spending": "17012",
+      "cash_remaining": "784",
+      "prior_cash_remaining": "8549",
+      "lesson": "Almost all the operating cash went back in.",
+      "explanation": "Capital spending absorbed most of the quarter\u2019s operating cash generation.",
+      "watch": "Can AI-driven business gains keep up with the infrastructure spending?",
+      "definition": "Includes finance-lease principal, consistent with the issuer\u2019s free-cash-flow definition. Company-wide figures do not isolate AI returns.",
+      "source": {
+        "title": "Meta - Meta Reports Second Quarter 2026 Results",
+        "url": "https://investor.atmeta.com/investor-news/press-release-details/2026/Meta-Reports-Second-Quarter-2026-Results/default.aspx",
+        "sha256": "9a67e3007487aa9917b363ad67f09acea88cd7949ae9aab03991d82ccd046735",
+        "fetched_at": "2026-09-13T05:13:07Z"
+      }
+    }
+  ]
+}

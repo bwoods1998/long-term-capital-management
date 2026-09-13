@@ -12,6 +12,22 @@ from experiments and future integration.
 | Sailboxes | Isolated source-reading and calculation tools with disk receipts across sleep/resume | The full controller is not yet hosted there |
 | Voyages | Correlated inference/tool stages and durable workflow identities | A trace is not proof that a financial conclusion is correct |
 
+## Latest applied run
+
+The [nine-company campaign](NIGHT-SHIFT.md) completed 80 requests across DeepSeek V4 Pro, Kimi K2.6 and Kimi K3. Pro and Kimi built independent cases; a critic challenged them; revisions faced mechanical checks and anonymous paired judges. The run cost an estimated **$1.859159992** in inference.
+
+- **Supercache:** nine new questions reused 129,024 tokens from the existing corpus. These calls cost $0.10770169; repricing the same usage with ordinary cached input gives $0.11931385. That $0.01161216 difference is a counterfactual, not an observed alternate run or recovery of the earlier write cost.
+- **Sailbox:** the frozen verifier checked all nine cases, matched local results, slept and resumed with its receipts intact. Finalized compute was $0.005157369. The full controller remains local.
+- **Voyages:** one recorded workflow ties together the dependent requests and stages. Private trace links and drafts stay off the website.
+
+The benefit is inspectable disagreement and reusable execution, not proof that adding models improves accuracy. Eight final cases passed mechanical checks; one did not. Model judges preferred a failing NVIDIA revision. The [public measurements](../public/overnight-sail-metrics.json) preserve that distinction.
+
+A separate presentation review used Kimi K3 to check the nine cash bridges against source excerpts. It found no numerical mismatch in those excerpts and flagged four presentation risks: combined capital deductions, annual and trailing-year period lengths, and Constellation’s acquisition scope. The page now shows period lengths, labels deductions explicitly and surfaces the Calpine scope change. An earlier Pro attempt exhausted its output limit without a usable review; both calls remain in the private ledger. Model review supplemented source-table and arithmetic checks rather than replacing them.
+
+## What to test next
+
+Use fresh disclosures to test whether remembered evidence and explicit opposing checks catch changes a first-pass analyst misses. Measure source correctness, missed changes, cost and time on held-out tasks. Expand the task set before trying prompt promotion or model training; more requests alone are not progress.
+
 ## Inference and completion windows
 
 Each request freezes its model, reasoning setting, completion window, evidence,

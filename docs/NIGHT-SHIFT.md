@@ -6,6 +6,28 @@ An overnight research campaign follows NVIDIA, TSMC, Broadcom, Constellation, Ve
 
 [Public checkpoint](https://blakewoods.us/portfolio/) · [Latest measured status](../public/overnight-research.json) · [Controller](../overnight.py)
 
+## Result · 13 September 2026
+
+The bounded plan finished in about 40 minutes, rather than using its entire eight-hour allowance. It submitted **80 requests**, skipped six unneeded repair stages, and recorded **$1.859159992** in inference estimates plus **$0.005157369** finalized compute. No request costs remain unknown. This excludes the earlier Supercache write and other experiments.
+
+| Company | First draft checks | Revision checks | Valid judge preferences |
+|---|---|---|---|
+| NVIDIA | Fail | Fail | Revision, revision |
+| TSMC | Pass | Pass | Revision, revision |
+| Broadcom | Fail | Pass | Revision, revision |
+| Constellation | Pass | Pass | Revision, revision |
+| Vertiv | Pass | Pass | Revision, revision |
+| Microsoft | Pass | Pass | Revision, revision |
+| Amazon | Fail | Pass | Revision, revision |
+| Alphabet | Fail | Pass | Baseline, baseline |
+| Meta | Pass | Pass | Revision; one format-invalid comparison |
+
+**Agreement is not verification.** NVIDIA’s judges preferred the revision while it still failed numeric-evidence and period-comparability checks. A failed checker can reflect a representation problem; it does not itself prove that the economics are wrong. Alphabet’s judges preferred its baseline even though the revision passed the mechanical contract. Financial interpretation needs a separate review.
+
+Cloud verification matched local checks for all nine companies and survived sleep/resume. Nine questions reused **129,024 Supercache tokens**, with no new prefix write. The shared-risk map was generated and retained for review; it is not an approved portfolio thesis.
+
+The website’s cash-flow explorer was reviewed separately against source tables. Its figures are not an automatic publication of these drafts. [Typed run data](../public/agent-state.json) · [Detailed product measurements](../public/overnight-sail-metrics.json)
+
 ## The work
 
 Each company gets independent DeepSeek Pro and Kimi analyses, an opposing Kimi K3 critic, a revision, and two anonymously labeled comparisons. A final pass turns unresolved disagreements into concrete next research questions. The company cases feed two independent maps of spending dependencies, followed by critique and revision.
@@ -37,7 +59,7 @@ The campaign admits work for up to eight hours, with six requests in flight and 
 
 The coordinator and private ledger run on the plugged-in MacBook. Sail runs inference and the isolated cloud verifier. Voyages observes the workflow; it does not host the coordinator. A disconnected MacBook can delay local progress and the final publication.
 
-The public page shows a dated checkpoint. Its final automatic update contains only typed progress and cost measurements. Detailed company drafts, comparisons and the morning report stay private in `.data/overnight/<campaign-id>/morning.md` for review. There is no brokerage connection or trading in this campaign.
+The public page shows a dated checkpoint. Its publication contains only typed progress and cost measurements. During the presentation refinement, final publication was handed to the active editor so it could be tested and deployed with the new page. Detailed company drafts, comparisons and the morning report stay private in `.data/overnight/<campaign-id>/morning.md` for review. There is no brokerage connection or trading in this campaign.
 
 ## Resume or inspect
 

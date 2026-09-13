@@ -21,7 +21,7 @@ class PublishOvernightTests(unittest.TestCase):
         self.calls = []
         self.edits = {self.root: set(), self.site: set()}
         self.status = {'state': 'complete', 'saved_at': '2026-09-13T08:00:00Z', 'completed_steps': 86}
-        self.identifier = 'synthetic-publication'
+        self.identifier = '11111111-1111-4111-8111-111111111111'
         self.db = SimpleNamespace(close=Mock())
         for repo, paths in ((self.root, publish.PROJECT_PATHS), (self.site, publish.SITE_PATHS)):
             for name in paths:
@@ -58,6 +58,14 @@ class PublishOvernightTests(unittest.TestCase):
     def invoke(self):
         with redirect_stdout(StringIO()):
             publish.publish(self.identifier)
+
+    def test_active_editor_hold_prevents_any_publication_work(self):
+        hold = publish.head_path(self.identifier).with_name('publication-hold.json')
+        hold.parent.mkdir(parents=True)
+        hold.write_text('{"reason":"active presentation review"}')
+        self.invoke()
+        self.report.assert_not_called()
+        self.assertEqual(self.calls, [])
 
     def test_running_campaign_does_not_export_commit_push_or_deploy(self):
         self.status['state'] = 'running'

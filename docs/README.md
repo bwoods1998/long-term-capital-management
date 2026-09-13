@@ -1,26 +1,17 @@
-# Project reference
+# Technical reference
 
-For the project in a few minutes, [start here](START-HERE.md).
-[The roadmap](ROADMAP.md) distinguishes working capabilities from the next experiment.
-This index holds the implementation detail and historical evidence.
+[Project overview](../README.md) · [Current results](CURRENT-STATE.md) · [Reproduce the figures](START-HERE.md)
 
-## Research and findings
+## Core reading
 
-- [Current state](CURRENT-STATE.md), [AI spending map](AI-STACK.md), and
-  [first reviewed case](CURRENT-CASE.md): the concise project view.
-- [Current state](CURRENT-STATE.md): the AI-stack research universe, verified
-  capabilities, limitations, and the next substantive work.
-- [Microsoft case brief](CURRENT-CASE.md): the first reviewed case, with three
-  observations that could change its interpretation.
-- [Latest dossier results](DOSSIER-RESULTS.md): cash generation, investment commitments,
-  and what the larger model workflow got wrong.
-- [Financial review case](REVIEW-CASE.md): the full nine-row cash-flow audit;
-  [dossier design](RESEARCH-DOSSIER.md): the frozen questions and protocol.
-- [First investigations](INVESTIGATION-RESULTS.md): findings, rejected drafts,
-  and editorial corrections.
-- [Source registry and captures](../data/research/README.md) and
-  [checked thesis packet](../data/thesis/README.md): where evidence comes from.
-- [Optional exercises](../lessons/README.md): reproduce the reasoning and accounting.
+- [AI cash flows](AI-STACK.md): the nine-company financial record and its definitions.
+- [Sail’s role](SAIL-PRODUCTS.md): applied products, actual measurements and limits.
+- [Latest experiment](NIGHT-SHIFT.md): the research protocol and what survived its checks.
+- [Architecture](ARCHITECTURE.md): evidence, orchestration, memory and publication.
+- [Roadmap](ROADMAP.md): the next useful milestone and the path to a portfolio.
+
+<details>
+<summary>Implementation and earlier experiments</summary>
 
 ## Run and understand the system
 
@@ -82,3 +73,7 @@ The website reads saved JSON. Public visitors cannot start model requests.
 Raw responses, private run databases, full source captures, and credentials are
 not included in a public clone. Historical documents describe their recorded
 protocols; consult the relevant current runner before starting new paid work.
+
+</details>
+
+Public data for the current page: [cash bridges](../public/cash-map.json) · [source review](../data/research/cash-map-review.json) · [agent checkpoint](../public/agent-state.json).
