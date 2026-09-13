@@ -49,9 +49,10 @@ live paid assignment in this session.
 
 **Evidence freezes at enqueue; reviewed memory freezes when the investigation is
 first created.** Memory can therefore be newer than the packet. It remains a dated
-prior view to recheck, not evidence of a new disclosure. The source cutoff remains
-the enqueue date. This distinction also holds if a process stops between creating
-the investigation and attaching its frozen source state.
+prior view to recheck, not evidence of a new disclosure. A baseline assignment uses
+the enqueue date as its source cutoff; a curated assignment retains its bundle's
+checked evidence date. This distinction also holds if a process stops between
+creating the investigation and attaching its frozen source state.
 
 ## Run, pause, resume
 
