@@ -54,7 +54,7 @@ def read_config(path):
         raise ValueError("Unknown spending authority")
     caps = {"weekly_inference_budget_usd", "session_inference_budget_usd"}
     if mode == "available_credit":
-        if caps & config.keys():
+        if (caps | {"weekly_total_usd"}) & config.keys():
             raise ValueError("Available-credit service must not declare fixed inference caps")
     else:
         if not caps <= config.keys():

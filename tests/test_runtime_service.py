@@ -334,6 +334,7 @@ class ServiceTests(unittest.TestCase):
         save(path, self.config)
         self.assertEqual(read_config(path), self.config)
         for changed in ({**self.config, "weekly_inference_budget_usd": "100"},
+                        {**self.config, "weekly_total_usd": "1000"},
                         {**self.config, "spending_mode": "unlimited"},
                         {**self.config, "rehearsal": {**self.config["rehearsal"], "inference_budget_usd": "10"}}):
             save(path, changed)
@@ -928,7 +929,7 @@ class DecisionBoundaryTests(unittest.TestCase):
                     runner.run(config, self.data, once=True, controller=controller)
                 self.assertEqual(client.totals()["requests"], expected)
                 self.assertEqual(len(calls), expected)
-                self.assertEqual(len(guards), expected)
+                self.assertEqual(len(guards), expected*2 if mode == "available_credit" else expected)
 
     def test_due_precommitted_open_cannot_be_superseded_by_new_postopen_research(self):
         first = self.checked_allocation(wave=0)
