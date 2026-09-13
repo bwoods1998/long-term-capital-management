@@ -18,6 +18,7 @@ The question: **Can an agent maintain a coherent investment strategy over timeâ€
 
 - [Research loop](docs/RESEARCH-LOOP.md) and [Lesson 4](lessons/04-research-loop.md): tools, evidence memory, critique, and recovery.
 - [First investigation results](docs/INVESTIGATION-RESULTS.md): what retrieval added and which failures changed the code.
+- [Financial research dossier](docs/RESEARCH-DOSSIER.md): two analysts reconcile a full cash-flow bridge, investment commitments, and demand evidence across twelve connected stages.
 - [Measured model comparisons](docs/EVALUATION-RESULTS.md): all attempts, costs, and limits of the development test.
 - [Evidence timeline replay](docs/TRAJECTORY-REPLAY.md): fictional disclosures test memory, corrections, and abstention across sequential agent updates.
 - [Source-update inbox](docs/SOURCE-WATCH.md): notice changed documents without buying unnecessary research.

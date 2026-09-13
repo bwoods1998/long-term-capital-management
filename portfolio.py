@@ -48,6 +48,11 @@ TASK_PROFILES = {
         'reserve_cents': 20, 'rates': {'input': '0.35', 'cached': '0.10', 'output': '2'},
         'pricing_date': '2026-09-12', 'background': True},
 }
+# Separate text-only envelope; ordinary task profiles retain their output limits.
+DOSSIER_PROFILES = {
+    model: {**TASK_PROFILES[model], 'rates': dict(TASK_PROFILES[model]['rates']), 'max_output_tokens': 32768}
+    for model in ('deepseek-ai/DeepSeek-V4-Pro-0813', 'moonshotai/Kimi-K3')
+}
 POLICY_PROBE_MODEL = 'deepseek-ai/DeepSeek-V4-Pro-0813'
 POLICY_PROBE_MAX_REQUEST_BYTES = 48000
 POLICY_PROBE_PROFILES = {
@@ -71,6 +76,11 @@ POLICY_PROBE_REPLACEMENT_PROFILES = {
 }
 TERMINAL = {'completed', 'incomplete', 'failed', 'cancelled'}
 STATUSES = TERMINAL | {'queued', 'in_progress'}
+# Exact aliases observed in authenticated Responses readback; preserve versions.
+RESPONSE_MODEL_ALIASES = {
+    'deepseek-ai/DeepSeek-V4-Pro-0813': 'deepseek/deepseek-v4-pro-0813',
+    'deepseek-ai/DeepSeek-V4-Flash-0731': 'deepseek/deepseek-v4-flash-0731',
+}
 
 
 def encoded(value):
@@ -307,6 +317,9 @@ def validate_task_envelope(body):
         raise ValueError('Expected a research request object')
     metadata = body.get('metadata')
     probe = isinstance(metadata, dict) and 'policy_probe' in metadata
+    dossier = isinstance(metadata, dict) and 'dossier' in metadata
+    if probe and dossier:
+        raise ValueError('A request cannot combine separate experiment envelopes')
     if probe:
         version = metadata.get('policy_probe')
         probe_model = POLICY_PROBE_REPLACEMENT_MODEL if version == 'v2' else POLICY_PROBE_MODEL
@@ -319,12 +332,19 @@ def validate_task_envelope(body):
                 not re.fullmatch(r'policy-[0-9a-f]{64}', body['prompt_cache_key'])):
             raise ValueError('Request outside the frozen policy probe contract')
         profile = probe_profiles[window]
+    elif dossier:
+        model = body.get('model')
+        if not isinstance(model, str) or model not in DOSSIER_PROFILES:
+            raise ValueError('Dossier model is not in the approved profiles')
+        profile = DOSSIER_PROFILES[model]
     else:
         profile = _task_profile(body.get('model'))
     required = {'model', 'input', 'max_output_tokens', 'reasoning', 'background', 'metadata', 'text'}
-    allowed_keys = (required | {'prompt_cache_key'},) if probe else (required, required | {'tools'})
+    allowed_keys = ((required | {'prompt_cache_key'},) if probe else
+                    (required,) if dossier else (required, required | {'tools'}))
     expected_metadata = ({'completion_window': profile['completion_window'], 'policy_probe': metadata['policy_probe']}
-                         if probe else {'completion_window': profile['completion_window']})
+                         if probe else {'completion_window': profile['completion_window'], 'dossier': 'v1'}
+                         if dossier else {'completion_window': profile['completion_window']})
     value = body.get('input')
     if (set(body) not in allowed_keys or
             not (isinstance(value, str) and bool(value.strip()) or
@@ -352,6 +372,20 @@ def build_task_request(model, input, tools=None):
     if tools is not None:
         body['tools'] = tools
     # Own the request snapshot: later mutations of caller histories/tools cannot change it.
+    body = json.loads(encoded(body))
+    validate_task_envelope(body)
+    return body
+
+
+def build_dossier_request(model, input):
+    """A text-only larger-output request within the existing per-call allowance."""
+    if not isinstance(model, str) or model not in DOSSIER_PROFILES:
+        raise ValueError('Dossier model is not in the approved profiles')
+    profile = DOSSIER_PROFILES[model]
+    body = {'model': model, 'input': input, 'max_output_tokens': profile['max_output_tokens'],
+            'reasoning': {'effort': profile['reasoning_effort']}, 'background': profile['background'],
+            'metadata': {'completion_window': profile['completion_window'], 'dossier': 'v1'},
+            'text': {'format': {'type': 'text'}}}
     body = json.loads(encoded(body))
     validate_task_envelope(body)
     return body
@@ -474,6 +508,8 @@ def reserve_task(db, body, packet, task_key, purpose, parent_id=None):
                 raise ValueError('Task key collision: its request, evidence, parent or purpose changed')
             return existing['id']
         profile = validate_task_envelope(body)
+        if 'dossier' in body['metadata'] and purpose not in {'investigate', 'critique'}:
+            raise ValueError('Dossier requests are private investigation or critique work only')
         if (purpose == 'policy_probe') != ('policy_probe' in body['metadata']):
             raise ValueError('Policy probe request and ledger purpose must agree')
         parent = current(db)
@@ -566,7 +602,11 @@ def execute(db, run_id, poll_seconds=45):
         return status(db, run_id)
     try:
         if row['response_id']:
-            result = api('GET', '/v1/responses/' + row['response_id'])
+            fingerprint = row['key_fingerprint']
+            if not fingerprint or credential_fingerprint() != fingerprint:
+                raise ValueError('Known response lacks its original credential binding; reconcile privately')
+            result = api('GET', '/v1/responses/' + row['response_id'],
+                         expected_key_fingerprint=fingerprint)
         else:
             if time.time() - row['created'] > 23 * 3600:
                 raise ValueError('Uncertain submission older than 23h; reconcile manually. Refusing to resubmit.')
@@ -580,12 +620,17 @@ def execute(db, run_id, poll_seconds=45):
             result = api('POST', '/v1/responses', json.loads(row['request']), run_id,
                          expected_key_fingerprint=fingerprint)
         deadline = time.monotonic() + poll_seconds
+        requested_model = json.loads(row['request'])['model']
         while True:
             response_id = result.get('id') if isinstance(result, dict) else None
             if (not isinstance(response_id, str) or not re.fullmatch(r'resp_[A-Za-z0-9_-]+', response_id) or
                     result.get('status') not in STATUSES or
                     (row['response_id'] and response_id != row['response_id'])):
                 raise ValueError('Unexpected provider response identity or status; reservation retained')
+            reported_model = result.get('model')
+            model_matches = ('model' not in result or
+                             isinstance(reported_model, str) and reported_model in
+                             {requested_model, RESPONSE_MODEL_ALIASES.get(requested_model)})
             with db:
                 db.execute('BEGIN IMMEDIATE')
                 stored = get_run(db, run_id)
@@ -593,13 +638,22 @@ def execute(db, run_id, poll_seconds=45):
                     break
                 if stored['response_id'] and stored['response_id'] != response_id:
                     raise ValueError('Provider response changed identity')
-                db.execute('UPDATE runs SET response_id=?,response=?,observed_seconds=?,error=NULL WHERE id=?',
-                           (response_id, encoded(result), time.time() - row['created'], run_id))
+                if not model_matches:
+                    # A valid accepted handle must survive even a bad model label.
+                    # Park it without consuming output or pricing it as this model;
+                    # a later reconciliation can only GET, never submit again.
+                    db.execute('UPDATE runs SET response_id=? WHERE id=?', (response_id, run_id))
+                else:
+                    db.execute('UPDATE runs SET response_id=?,response=?,observed_seconds=?,error=NULL WHERE id=?',
+                               (response_id, encoded(result), time.time() - row['created'], run_id))
             row = get_run(db, run_id)
+            if not model_matches:
+                raise ValueError('Returned model differs from the frozen request; accepted handle retained')
             if result['status'] in TERMINAL or time.monotonic() >= deadline:
                 break
             time.sleep(3)
-            result = api('GET', '/v1/responses/' + response_id)
+            result = api('GET', '/v1/responses/' + response_id,
+                         expected_key_fingerprint=fingerprint)
         finalize(db, run_id)
     except (RuntimeError, ValueError, TypeError, KeyError):
         # Never persist provider error bodies or exception details from third-party calls.

@@ -35,6 +35,54 @@ class ResearchTaskTests(unittest.TestCase):
                         Decimal(profile['max_output_tokens']) * Decimal(profile['rates']['output'])) / 1_000_000
                 self.assertLess(cost, Decimal(profile['reserve_cents']) / 100)
 
+    def test_dossier_profiles_raise_only_labeled_output_limit_within_existing_allowance(self):
+        originals = copy.deepcopy(p.TASK_PROFILES)
+        for model, profile in p.DOSSIER_PROFILES.items():
+            with self.subTest(model=model):
+                request = p.build_dossier_request(model, 'Checked financial evidence')
+                self.assertEqual(p.validate_task_envelope(request), profile)
+                self.assertEqual(request['max_output_tokens'], 32768)
+                self.assertEqual(request['metadata'], {'completion_window': profile['completion_window'], 'dossier': 'v1'})
+                bound = (Decimal(p.TASK_MAX_REQUEST_BYTES) * Decimal(profile['rates']['input']) +
+                         Decimal(32768) * Decimal(profile['rates']['output'])) / 1_000_000
+                self.assertLess(bound, Decimal(profile['reserve_cents']) / 100)
+                for name, value in originals[model].items():
+                    if name != 'max_output_tokens':
+                        self.assertEqual(profile[name], value)
+                ordinary = p.build_task_request(model, 'Checked financial evidence')
+                self.assertEqual(ordinary['max_output_tokens'], originals[model]['max_output_tokens'])
+                for invalid in [{**ordinary, 'max_output_tokens': 32768},
+                                {**request, 'metadata': {'completion_window': profile['completion_window'], 'dossier': 'v2'}},
+                                {**request, 'metadata': {**request['metadata'], 'policy_probe': 'v1'}},
+                                {**request, 'tools': []}, {**request, 'prompt_cache_key': 'extra'},
+                                {**request, 'input': 'x'*p.TASK_MAX_REQUEST_BYTES},
+                                {**request, 'max_output_tokens': 32769}]:
+                    with self.assertRaises(ValueError):
+                        p.validate_task_envelope(invalid)
+        self.assertEqual(p.TASK_PROFILES, originals)
+        for model in ('deepseek-ai/DeepSeek-V4-Flash-0731', 'moonshotai/Kimi-K2.6'):
+            with self.assertRaises(ValueError):
+                p.build_dossier_request(model, 'Evidence')
+
+    def test_dossier_reservations_keep_stable_request_rates_and_private_purposes(self):
+        with closing(p.database(self.path)) as db:
+            p.set_budget_limit(db, 500)
+            for index, (model, profile) in enumerate(p.DOSSIER_PROFILES.items()):
+                body = p.build_dossier_request(model, [{'role': 'user', 'content': 'Checked evidence'}])
+                for purpose in ('investigate', 'critique'):
+                    key = f'dossier:{index}:{purpose}'
+                    rid = p.reserve_task(db, body, self.packet, key, purpose)
+                    self.assertEqual(p.reserve_task(db, body, self.packet, key, purpose), rid)
+                    row = p.get_run(db, rid)
+                    self.assertEqual(row['request'], p.encoded(body))
+                    self.assertEqual(row['reserved_cents'], profile['reserve_cents'])
+                    self.assertEqual(json.loads(row['rates']), profile['rates'])
+                for purpose in ('thesis', 'evaluation', 'replay', 'robustness', 'policy_probe'):
+                    with self.assertRaises(ValueError):
+                        p.reserve_task(db, body, self.packet, f'rejected:{index}:{purpose}', purpose)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM runs').fetchone()[0], 4)
+            self.assertEqual(db.execute('SELECT SUM(reserved_cents) FROM runs').fetchone()[0], 240)
+
     def test_request_owns_history_and_tools_and_rejects_unbounded_options(self):
         history = [{'role': 'user', 'content': 'Source evidence'}]
         tools = [{'type': 'function', 'name': 'read_source', 'parameters': {'type': 'object'}}]
@@ -152,6 +200,25 @@ class ResearchTaskTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0], 0)
             with self.assertRaises(ValueError):
                 p.public_snapshot(db)
+
+    def test_exact_model_names_and_only_documented_aliases_are_accepted(self):
+        models = [('deepseek-ai/DeepSeek-V4-Pro-0813', 'deepseek/deepseek-v4-pro-0813'),
+                  ('deepseek-ai/DeepSeek-V4-Flash-0731', 'deepseek/deepseek-v4-flash-0731'),
+                  ('moonshotai/Kimi-K3', 'moonshotai/Kimi-K3'),
+                  ('moonshotai/Kimi-K2.6', 'moonshotai/Kimi-K2.6')]
+        with closing(p.database(self.path)) as db:
+            p.set_budget_limit(db, 1000)
+            for index, (requested, reported) in enumerate(models):
+                with self.subTest(model=requested):
+                    rid = self.reserve(db, task_key=f'model:{index}', body=p.build_task_request(requested, 'Evidence'))
+                    response = {'id': f'resp_model_{index}', 'model': reported, 'status': 'completed',
+                                'output': [], 'usage': {'input_tokens': 10, 'output_tokens': 10}}
+                    with patch.object(p, 'credential_fingerprint', return_value='synthetic'), \
+                            patch.object(p, 'api', return_value=response):
+                        p.execute(db, rid, poll_seconds=0)
+                    self.assertEqual(json.loads(p.get_run(db, rid)['response'])['model'], reported)
+                    self.assertIsNotNone(p.run_cost(p.get_run(db, rid)))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0], 0)
 
     def test_even_a_valid_thesis_answer_from_replay_cannot_enter_thesis_history(self):
         answer = {'headline': 'Cash measures have limited scope',

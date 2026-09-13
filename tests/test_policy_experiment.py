@@ -128,7 +128,8 @@ class PolicyExperimentTests(unittest.TestCase):
         self.clear_delay()
         with patch.object(p, 'api', return_value=self.response(row['id'], self.answer(self.cases[1]))) as api:
             result = policy.advance(self.db, identifier, controller='one')
-        api.assert_called_once_with('GET', '/v1/responses/' + row['response_id'])
+        api.assert_called_once_with('GET', '/v1/responses/' + row['response_id'],
+                                    expected_key_fingerprint='synthetic-fingerprint')
         self.assertEqual(result['cost']['reserved_tasks'], 1)
         self.assertEqual(result['tasks'][1]['state'], 'pending')
         self.assertEqual(result['tasks'][0]['state'], 'completed')

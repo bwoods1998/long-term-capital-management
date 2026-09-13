@@ -1,0 +1,2203 @@
+{
+  "schema_version": 1,
+  "kind": "authored_financial_dossier_oracle",
+  "frozen_at": "2026-09-13",
+  "question": "What supports durable cash generation from Microsoft's AI infrastructure build, and which apparent signals fail after a full accounting reconciliation?",
+  "source_scope": "Two frozen public Microsoft issuer captures; no new disclosure, account data, portfolio return, trade or held-out benchmark.",
+  "publication_date": "2026-07-29",
+  "observation_date": "2026-09-12",
+  "output_contract": {
+    "fields": [
+      "headline",
+      "metrics",
+      "claims",
+      "caveats",
+      "next_tests"
+    ],
+    "metric_fields": [
+      "id",
+      "value",
+      "unit",
+      "period",
+      "evidence_ids"
+    ],
+    "value_format": "Finite plain decimal string; no currency symbols or comma separators.",
+    "citation_contract": "Every required evidence group must contain at least one cited complete source chunk. Citation existence is not semantic proof."
+  },
+  "model_visibility": {
+    "initial_analysts": [
+      "question",
+      "tasks[theme].instruction",
+      "tasks[theme].metrics",
+      "sources metadata",
+      "complete eligible source chunk text"
+    ],
+    "exclude": [
+      "expected",
+      "reported_rows",
+      "derived_checks",
+      "reconciliation_checks",
+      "qualitative_rubric",
+      "numeric_passage_oracles",
+      "previous model results and editorial audits"
+    ],
+    "reconciliation": "May receive original analyst outputs and deterministic error categories, but never reference expected values. Evaluation corrections must not overwrite original attempts."
+  },
+  "sources": {
+    "fy26-results": {
+      "id": "fy26-results",
+      "title": "Microsoft FY2026 results · Cash flow statements (unaudited)",
+      "url": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast",
+      "published_at": "2026-07-29",
+      "fetched_at": "2026-09-12T22:38:09Z",
+      "sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8"
+    },
+    "fy26-call": {
+      "id": "fy26-call",
+      "title": "Microsoft FY2026 earnings call · Management commentary",
+      "url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+      "published_at": "2026-07-29",
+      "fetched_at": "2026-09-12T22:37:57Z",
+      "sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084"
+    }
+  },
+  "source_spans": {
+    "fy26-call:19800:21600": {
+      "source_id": "fy26-call",
+      "start": 19800,
+      "end": 21600,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "2736d347d415f094991e13954c0d6aa28a9250cc5c7c499b2a160f88603d9ac6"
+    },
+    "fy26-call:21600:23400": {
+      "source_id": "fy26-call",
+      "start": 21600,
+      "end": 23400,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "9f724e508497a867e55650da472ea277010518817e8ecae20149246709b1b455"
+    },
+    "fy26-call:23400:25200": {
+      "source_id": "fy26-call",
+      "start": 23400,
+      "end": 25200,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "531b8a829912cc27186da3ad135b80277057dff272844f043709ce2c2fc69bf2"
+    },
+    "fy26-call:25200:27000": {
+      "source_id": "fy26-call",
+      "start": 25200,
+      "end": 27000,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "4362d10b3cd01d671fa9131452f201c652283c85e57e781e895a391a65e26e55"
+    },
+    "fy26-call:27000:28800": {
+      "source_id": "fy26-call",
+      "start": 27000,
+      "end": 28800,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "bcc2f79825913a9a8ff0a49d9af695b41880dc7d33b7b746ed0443c178ee2e19"
+    },
+    "fy26-call:28800:30600": {
+      "source_id": "fy26-call",
+      "start": 28800,
+      "end": 30600,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "b9b12b04924a60b3e2660d4f1d63741e5967e6df401176ceab2405cbb51f2a76"
+    },
+    "fy26-call:30600:32400": {
+      "source_id": "fy26-call",
+      "start": 30600,
+      "end": 32400,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "ecf79ec8ed6f54296859f2e0cb13b3485ee2dc11631905e108b4054c5711ac65"
+    },
+    "fy26-call:55800:57600": {
+      "source_id": "fy26-call",
+      "start": 55800,
+      "end": 57600,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "15e77e6ccaac8202e5809405f4d814c46b8942e5cc60c2ec1e3d770f62ea2847"
+    },
+    "fy26-call:57600:59400": {
+      "source_id": "fy26-call",
+      "start": 57600,
+      "end": 59400,
+      "snapshot_sha256": "9146a19e995889bca4eba9cdab3ed9bba3da2ae4e798df20a9116e67c8a71084",
+      "span_sha256": "298dffad5c49044641f13c33721de54fb6d94a38b3f1bd9244c2429bcf60f354"
+    },
+    "fy26-results:19800:21600": {
+      "source_id": "fy26-results",
+      "start": 19800,
+      "end": 21600,
+      "snapshot_sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8",
+      "span_sha256": "def4ec23c862c24a9ee960e7e5eb25660c35af10c050d980840323898a7f5073"
+    },
+    "fy26-results:21600:23400": {
+      "source_id": "fy26-results",
+      "start": 21600,
+      "end": 23400,
+      "snapshot_sha256": "6e6918e055dbd54df109ce2da8e3e628fb923c7c35315eafba34ec7a248c02a8",
+      "span_sha256": "695ed5709c367fa54a3b9add96c89a0c8630a29ff5622c262d6f25003b00ac81"
+    }
+  },
+  "tasks": {
+    "cashflow": {
+      "instruction": "Reconstruct Microsoft's entire FY2026-versus-FY2025 operating cash-flow bridge from the UNAUDITED TWELVE-MONTH columns, not the adjacent quarter or balance-sheet changes. Return every requested metric. Keep reported cash-flow adjustment signs: the operating assets/liabilities block has exactly nine rows, including long-term items. Reconcile net income plus the four preceding adjustment categories plus all nine rows to reported operating cash flow in each year. Attribute the change across those six grouped contributors. Contrast accounts payable and unearned revenue with the other seven rows and the net group. Distinguish an accounting decomposition from a causal or recurring-cash forecast; discuss investment gains, deferred taxes and noncash compensation without silently treating add-backs as economic profit. Cite the statement's units/column header and the complete relevant row blocks. Explain what actually drove the arithmetic change and what cannot establish durability.",
+      "metrics": [
+        {
+          "id": "net_income_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "net_income_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "depreciation_amortization_other_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "depreciation_amortization_other_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "stock_based_compensation_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "stock_based_compensation_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "investment_gains_losses_adjustment_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "investment_gains_losses_adjustment_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "deferred_income_taxes_adjustment_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "deferred_income_taxes_adjustment_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "accounts_receivable_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "accounts_receivable_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "inventories_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "inventories_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "other_current_assets_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "other_current_assets_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "other_long_term_assets_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "other_long_term_assets_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "accounts_payable_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "accounts_payable_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "unearned_revenue_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "unearned_revenue_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "income_taxes_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "income_taxes_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "other_current_liabilities_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "other_current_liabilities_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "other_long_term_liabilities_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "other_long_term_liabilities_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "operating_cash_flow_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "operating_cash_flow_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "operating_assets_liabilities_total_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "operating_assets_liabilities_total_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "operating_cash_flow_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "operating_assets_liabilities_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "accounts_payable_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "unearned_revenue_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "selected_positive_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "remaining_seven_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "net_income_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "depreciation_amortization_other_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "stock_based_compensation_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "investment_gains_losses_adjustment_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "deferred_income_taxes_adjustment_contribution_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        }
+      ]
+    },
+    "investment": {
+      "instruction": "Analyze cash spending, lease financing and future investment plans using their proper bases. Extract annual cash PP&E as a positive spending amount despite its cash-flow-statement outflow sign; compute annual operating cash flow less cash PP&E and its change. Separately report the rounded FY2026 Q4 capex, finance-lease and cash-PP&E figures from management, their component sum and its difference from reported capex. Do not force an exact reconciliation or invent its cause. Distinguish realized fiscal-year/quarter data, guidance for calendar-year 2026, and the estimated-life change effective FY2027. Identify which assets' lives change, what happens to future lease classification and reported capex, and what management says remains unchanged. Explain why cash PP&E is neither total commitments nor a complete AI investment denominator; do not claim no lease evidence exists. State the exact additional disclosures needed for a cash-versus-commitment bridge.",
+      "metrics": [
+        {
+          "id": "cash_ppe_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "cash_ppe_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "cash_after_ppe_fy2026",
+          "unit": "USD millions",
+          "period": "FY2026"
+        },
+        {
+          "id": "cash_after_ppe_fy2025",
+          "unit": "USD millions",
+          "period": "FY2025"
+        },
+        {
+          "id": "cash_ppe_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "cash_after_ppe_change",
+          "unit": "USD millions",
+          "period": "FY2026 versus FY2025"
+        },
+        {
+          "id": "reported_capex_fy2026_q4",
+          "unit": "USD billions",
+          "period": "FY2026 Q4"
+        },
+        {
+          "id": "finance_leases_fy2026_q4",
+          "unit": "USD billions",
+          "period": "FY2026 Q4"
+        },
+        {
+          "id": "cash_ppe_rounded_fy2026_q4",
+          "unit": "USD billions",
+          "period": "FY2026 Q4"
+        },
+        {
+          "id": "reported_component_sum_fy2026_q4",
+          "unit": "USD billions",
+          "period": "FY2026 Q4"
+        },
+        {
+          "id": "component_minus_reported_capex_fy2026_q4",
+          "unit": "USD billions",
+          "period": "FY2026 Q4"
+        },
+        {
+          "id": "datacenter_building_useful_life_before",
+          "unit": "years",
+          "period": "Before FY2027"
+        },
+        {
+          "id": "datacenter_building_useful_life_after",
+          "unit": "years",
+          "period": "Effective FY2027"
+        },
+        {
+          "id": "guided_capex_cy2026",
+          "unit": "USD billions",
+          "period": "CY2026 management outlook"
+        }
+      ]
+    },
+    "demand": {
+      "instruction": "Assess the strength and limits of demand evidence. Extract the requested Azure growth, commercial RPO, recognition timing and Microsoft Cloud margin metrics with proper units, periods and OpenAI inclusion scopes. Distinguish revenue growth, contracted backlog, future revenue recognition, cash collection, capacity utilization and investment return. RPO recognition is not a cash schedule, and aggregate Azure/Cloud figures are not AI-only economics. Weigh management's capacity constraints and rapid monetization claims against margin pressure, customer mix and backlog duration. Use the ROI discussion to identify testable infrastructure/model-efficiency levers while distinguishing management confidence from measured returns. Specify the missing AI-specific incremental cash flows and invested-capital denominator needed to estimate ROI; do not invent a value or equate missing evidence with a negative return.",
+      "metrics": [
+        {
+          "id": "commercial_rpo",
+          "unit": "USD billions",
+          "period": "FY2026 Q4 closing balance"
+        },
+        {
+          "id": "commercial_rpo_growth_including_openai",
+          "unit": "percent",
+          "period": "FY2026 Q4 closing balance"
+        },
+        {
+          "id": "commercial_rpo_growth_excluding_openai",
+          "unit": "percent",
+          "period": "FY2026 Q4 closing balance"
+        },
+        {
+          "id": "commercial_rpo_weighted_duration",
+          "unit": "years",
+          "period": "FY2026 Q4 closing balance"
+        },
+        {
+          "id": "rpo_next_12_months_share",
+          "unit": "percent",
+          "period": "FY2026 Q4 closing balance"
+        },
+        {
+          "id": "azure_revenue_growth_fy2026_q4",
+          "unit": "percent",
+          "period": "FY2026 Q4"
+        },
+        {
+          "id": "microsoft_cloud_gross_margin_fy2026_q4",
+          "unit": "percent",
+          "period": "FY2026 Q4"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "net_income_fy2026": {
+      "value": "133749",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "net_income_fy2025": {
+      "value": "101832",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "depreciation_amortization_other_fy2026": {
+      "value": "38534",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "depreciation_amortization_other_fy2025": {
+      "value": "29433",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "stock_based_compensation_fy2026": {
+      "value": "12405",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "stock_based_compensation_fy2025": {
+      "value": "11974",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "investment_gains_losses_adjustment_fy2026": {
+      "value": "-11047",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "investment_gains_losses_adjustment_fy2025": {
+      "value": "5329",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "deferred_income_taxes_adjustment_fy2026": {
+      "value": "14189",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "deferred_income_taxes_adjustment_fy2025": {
+      "value": "-7056",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "accounts_receivable_fy2026": {
+      "value": "-12737",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "accounts_receivable_fy2025": {
+      "value": "-10581",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "inventories_fy2026": {
+      "value": "-461",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "inventories_fy2025": {
+      "value": "309",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "other_current_assets_fy2026": {
+      "value": "-2627",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_current_assets_fy2025": {
+      "value": "-3044",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_long_term_assets_fy2026": {
+      "value": "-3964",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_long_term_assets_fy2025": {
+      "value": "-2950",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "accounts_payable_fy2026": {
+      "value": "5268",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "accounts_payable_fy2025": {
+      "value": "569",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "unearned_revenue_fy2026": {
+      "value": "9361",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "unearned_revenue_fy2025": {
+      "value": "5438",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "income_taxes_fy2026": {
+      "value": "-1875",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "income_taxes_fy2025": {
+      "value": "-38",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_current_liabilities_fy2026": {
+      "value": "6847",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_current_liabilities_fy2025": {
+      "value": "5922",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_long_term_liabilities_fy2026": {
+      "value": "-4707",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "other_long_term_liabilities_fy2025": {
+      "value": "-975",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "operating_cash_flow_fy2026": {
+      "value": "182935",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "operating_cash_flow_fy2025": {
+      "value": "136162",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "cash_ppe_fy2026": {
+      "value": "115948",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "cash_ppe_fy2025": {
+      "value": "64551",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "operating_assets_liabilities_total_fy2026": {
+      "value": "-4895",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "cash_after_ppe_fy2026": {
+      "value": "66987",
+      "unit": "USD millions",
+      "period": "FY2026",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "operating_assets_liabilities_total_fy2025": {
+      "value": "-5350",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "cash_after_ppe_fy2025": {
+      "value": "71611",
+      "unit": "USD millions",
+      "period": "FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "operating_cash_flow_change": {
+      "value": "46773",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "operating_assets_liabilities_change": {
+      "value": "455",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "accounts_payable_contribution_change": {
+      "value": "4699",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "unearned_revenue_contribution_change": {
+      "value": "3923",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "cash_ppe_change": {
+      "value": "51397",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "cash_after_ppe_change": {
+      "value": "-4624",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "selected_positive_contribution_change": {
+      "value": "8622",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "remaining_seven_contribution_change": {
+      "value": "-8167",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    "net_income_contribution_change": {
+      "value": "31917",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "depreciation_amortization_other_contribution_change": {
+      "value": "9101",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "stock_based_compensation_contribution_change": {
+      "value": "431",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "investment_gains_losses_adjustment_contribution_change": {
+      "value": "-16376",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "deferred_income_taxes_adjustment_contribution_change": {
+      "value": "21245",
+      "unit": "USD millions",
+      "period": "FY2026 versus FY2025",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    "reported_capex_fy2026_q4": {
+      "value": "41",
+      "unit": "USD billions",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ]
+    },
+    "finance_leases_fy2026_q4": {
+      "value": "5.6",
+      "unit": "USD billions",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ]
+    },
+    "cash_ppe_rounded_fy2026_q4": {
+      "value": "35.8",
+      "unit": "USD billions",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ]
+    },
+    "reported_component_sum_fy2026_q4": {
+      "value": "41.4",
+      "unit": "USD billions",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ]
+    },
+    "component_minus_reported_capex_fy2026_q4": {
+      "value": "0.4",
+      "unit": "USD billions",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ]
+    },
+    "datacenter_building_useful_life_before": {
+      "value": "15",
+      "unit": "years",
+      "period": "Before FY2027",
+      "required_evidence_groups": [
+        [
+          "fy26-call:28800:30600"
+        ]
+      ]
+    },
+    "datacenter_building_useful_life_after": {
+      "value": "25",
+      "unit": "years",
+      "period": "Effective FY2027",
+      "required_evidence_groups": [
+        [
+          "fy26-call:28800:30600"
+        ]
+      ]
+    },
+    "guided_capex_cy2026": {
+      "value": "175",
+      "unit": "USD billions",
+      "period": "CY2026 management outlook",
+      "required_evidence_groups": [
+        [
+          "fy26-call:28800:30600"
+        ]
+      ]
+    },
+    "commercial_rpo": {
+      "value": "678",
+      "unit": "USD billions",
+      "period": "FY2026 Q4 closing balance",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ],
+        [
+          "fy26-call:23400:25200"
+        ]
+      ]
+    },
+    "commercial_rpo_growth_including_openai": {
+      "value": "84",
+      "unit": "percent",
+      "period": "FY2026 Q4 closing balance",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ],
+        [
+          "fy26-call:23400:25200"
+        ]
+      ]
+    },
+    "commercial_rpo_growth_excluding_openai": {
+      "value": "25",
+      "unit": "percent",
+      "period": "FY2026 Q4 closing balance",
+      "required_evidence_groups": [
+        [
+          "fy26-call:23400:25200"
+        ]
+      ]
+    },
+    "commercial_rpo_weighted_duration": {
+      "value": "2.3",
+      "unit": "years",
+      "period": "FY2026 Q4 closing balance",
+      "required_evidence_groups": [
+        [
+          "fy26-call:23400:25200"
+        ]
+      ]
+    },
+    "rpo_next_12_months_share": {
+      "value": "30",
+      "unit": "percent",
+      "period": "FY2026 Q4 closing balance",
+      "required_evidence_groups": [
+        [
+          "fy26-call:23400:25200"
+        ]
+      ]
+    },
+    "azure_revenue_growth_fy2026_q4": {
+      "value": "43",
+      "unit": "percent",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:25200:27000"
+        ]
+      ]
+    },
+    "microsoft_cloud_gross_margin_fy2026_q4": {
+      "value": "65",
+      "unit": "percent",
+      "period": "FY2026 Q4",
+      "required_evidence_groups": [
+        [
+          "fy26-call:23400:25200"
+        ]
+      ]
+    }
+  },
+  "reported_rows": [
+    {
+      "id": "net_income",
+      "label": "Net income",
+      "source_id": "fy26-results",
+      "start": 21070,
+      "end": 21114,
+      "span_sha256": "ccdf24351fe5b6387cb34eade2be71d00366ed9561a02404701d00151198881f",
+      "reported_cells": [
+        "$35,766",
+        "$27,233",
+        "$133,749",
+        "$101,832"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "depreciation_amortization_other",
+      "label": "Depreciation, amortization, and other",
+      "source_id": "fy26-results",
+      "start": 21180,
+      "end": 21244,
+      "span_sha256": "da1beb9d56e64127bf432a11b5cc25e68787020eaff7ffd6b76c27c3c0714764",
+      "reported_cells": [
+        "11,022",
+        "9,317",
+        "38,534",
+        "29,433"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "stock_based_compensation",
+      "label": "Stock-based compensation expense",
+      "source_id": "fy26-results",
+      "start": 21245,
+      "end": 21303,
+      "span_sha256": "3663f432383d3b7b990ceba9c50ed3c83d00bcd93ff31baada9882c617f347eb",
+      "reported_cells": [
+        "3,122",
+        "3,073",
+        "12,405",
+        "11,974"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "investment_gains_losses_adjustment",
+      "label": "Net recognized losses (gains) on investments and derivatives",
+      "source_id": "fy26-results",
+      "start": 21304,
+      "end": 21393,
+      "span_sha256": "46d7fb89cdb0479c7f0c773dc466e9875c20f82c2f2291fa623a7e6571ed883b",
+      "reported_cells": [
+        "(3,743)",
+        "1,942",
+        "(11,047)",
+        "5,329"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "deferred_income_taxes_adjustment",
+      "label": "Deferred income taxes",
+      "source_id": "fy26-results",
+      "start": 21394,
+      "end": 21444,
+      "span_sha256": "76e63476c0c11ad4016859721cf6dd467fe2873a3a9d0dfec2a26cd80c7e5868",
+      "reported_cells": [
+        "4,650",
+        "(2,221)",
+        "14,189",
+        "(7,056)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "accounts_receivable",
+      "label": "Accounts receivable",
+      "source_id": "fy26-results",
+      "start": 21490,
+      "end": 21545,
+      "span_sha256": "13d08f1c54603e4fc592dbc4f0417cb0a84011435fae1123eee728b7f624d43b",
+      "reported_cells": [
+        "(21,084)",
+        "(16,179)",
+        "(12,737)",
+        "(10,581)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "inventories",
+      "label": "Inventories",
+      "source_id": "fy26-results",
+      "start": 21546,
+      "end": 21578,
+      "span_sha256": "315b3cb0299b00b70dd3a4bfaa0e68f706cbf4b5213a07c85de3d5922881ff50",
+      "reported_cells": [
+        "(178)",
+        "(81)",
+        "(461)",
+        "309"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ]
+      ]
+    },
+    {
+      "id": "other_current_assets",
+      "label": "Other current assets",
+      "source_id": "fy26-results",
+      "start": 21579,
+      "end": 21631,
+      "span_sha256": "cfb86ebeb531081cbe9db51eaabff02bd328f2f7104eb527029bce7d4924c2bd",
+      "reported_cells": [
+        "(2,842)",
+        "(3,686)",
+        "(2,627)",
+        "(3,044)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "other_long_term_assets",
+      "label": "Other long-term assets",
+      "source_id": "fy26-results",
+      "start": 21632,
+      "end": 21682,
+      "span_sha256": "ee92aec3126a5d762979b02c211a7eef6faf7affab915ca1e88390c63c42212c",
+      "reported_cells": [
+        "(1,350)",
+        "418",
+        "(3,964)",
+        "(2,950)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "accounts_payable",
+      "label": "Accounts payable",
+      "source_id": "fy26-results",
+      "start": 21683,
+      "end": 21721,
+      "span_sha256": "2c6f589675fdad881eff3923c67178410644f55f5ba9d52a2723aec9418cfe55",
+      "reported_cells": [
+        "2,365",
+        "(652)",
+        "5,268",
+        "569"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "unearned_revenue",
+      "label": "Unearned revenue",
+      "source_id": "fy26-results",
+      "start": 21722,
+      "end": 21764,
+      "span_sha256": "b24b50669c5fb94225ab2195e673c38c8b76379d96801a115ff63f79c4e66803",
+      "reported_cells": [
+        "22,428",
+        "18,361",
+        "9,361",
+        "5,438"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "income_taxes",
+      "label": "Income taxes",
+      "source_id": "fy26-results",
+      "start": 21765,
+      "end": 21802,
+      "span_sha256": "fb59888b751f9d45ae3191e736338f52d2927b053c857298e6730ce2186123d8",
+      "reported_cells": [
+        "(307)",
+        "1,043",
+        "(1,875)",
+        "(38)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "other_current_liabilities",
+      "label": "Other current liabilities",
+      "source_id": "fy26-results",
+      "start": 21803,
+      "end": 21852,
+      "span_sha256": "3cb809d1118c35c11a741df04bb2ea863ed275a867513c192a519659fcf08f5e",
+      "reported_cells": [
+        "7,013",
+        "5,346",
+        "6,847",
+        "5,922"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "other_long_term_liabilities",
+      "label": "Other long-term liabilities",
+      "source_id": "fy26-results",
+      "start": 21853,
+      "end": 21910,
+      "span_sha256": "afb7b83d43a295fd06dbed895443344f6f62c38463d08ea71c93aba3d1660734",
+      "reported_cells": [
+        "(1,421)",
+        "(1,267)",
+        "(4,707)",
+        "(975)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "operating_cash_flow",
+      "label": "Net cash from operations",
+      "source_id": "fy26-results",
+      "start": 21911,
+      "end": 21965,
+      "span_sha256": "c5b0ed087754880b0bf58756d4f920c6318cffebcf57f5862b43a5ac3ea7e788",
+      "reported_cells": [
+        "55,441",
+        "42,647",
+        "182,935",
+        "136,162"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "identity",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    },
+    {
+      "id": "cash_ppe",
+      "label": "Additions to property and equipment",
+      "source_id": "fy26-results",
+      "start": 22357,
+      "end": 22429,
+      "span_sha256": "40cc09b10c09b1a8b38768672ee4b0d8ffb33ebcf236d280887e9cea0864d941",
+      "reported_cells": [
+        "(35,802)",
+        "(17,079)",
+        "(115,948)",
+        "(64,551)"
+      ],
+      "column_order": [
+        "FY2026 Q4",
+        "FY2025 Q4",
+        "FY2026",
+        "FY2025"
+      ],
+      "unit": "USD millions",
+      "operation": "negate",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ]
+    }
+  ],
+  "derived_checks": [
+    {
+      "metric_id": "operating_assets_liabilities_total_fy2026",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "accounts_receivable_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "inventories_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_current_assets_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_long_term_assets_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "accounts_payable_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "unearned_revenue_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "income_taxes_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_current_liabilities_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_long_term_liabilities_fy2026",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "metric_id": "cash_after_ppe_fy2026",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "operating_cash_flow_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "cash_ppe_fy2026",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "operating_assets_liabilities_total_fy2025",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "accounts_receivable_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "inventories_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_current_assets_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_long_term_assets_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "accounts_payable_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "unearned_revenue_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "income_taxes_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_current_liabilities_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "other_long_term_liabilities_fy2025",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "metric_id": "cash_after_ppe_fy2025",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "operating_cash_flow_fy2025",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "cash_ppe_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "operating_cash_flow_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "operating_cash_flow_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "operating_cash_flow_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "operating_assets_liabilities_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "operating_assets_liabilities_total_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "operating_assets_liabilities_total_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "accounts_payable_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "accounts_payable_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "accounts_payable_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "unearned_revenue_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "unearned_revenue_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "unearned_revenue_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "cash_ppe_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "cash_ppe_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "cash_ppe_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "cash_after_ppe_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "cash_after_ppe_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "cash_after_ppe_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "selected_positive_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "accounts_payable_contribution_change",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "unearned_revenue_contribution_change",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "metric_id": "remaining_seven_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "operating_assets_liabilities_change",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "selected_positive_contribution_change",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "net_income_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "net_income_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "net_income_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "depreciation_amortization_other_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "depreciation_amortization_other_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "depreciation_amortization_other_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "stock_based_compensation_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "stock_based_compensation_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "stock_based_compensation_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "investment_gains_losses_adjustment_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "investment_gains_losses_adjustment_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "investment_gains_losses_adjustment_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "deferred_income_taxes_adjustment_contribution_change",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "deferred_income_taxes_adjustment_fy2026",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "deferred_income_taxes_adjustment_fy2025",
+          "coefficient": "-1"
+        }
+      ]
+    },
+    {
+      "metric_id": "reported_component_sum_fy2026_q4",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "finance_leases_fy2026_q4",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "cash_ppe_rounded_fy2026_q4",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "metric_id": "component_minus_reported_capex_fy2026_q4",
+      "operation": "linear_combination",
+      "terms": [
+        {
+          "metric_id": "reported_component_sum_fy2026_q4",
+          "coefficient": "1"
+        },
+        {
+          "metric_id": "reported_capex_fy2026_q4",
+          "coefficient": "-1"
+        }
+      ]
+    }
+  ],
+  "reconciliation_checks": [
+    {
+      "id": "full_ocf_fy2026",
+      "left_metric": "operating_cash_flow_fy2026",
+      "right_metrics": [
+        "net_income_fy2026",
+        "depreciation_amortization_other_fy2026",
+        "stock_based_compensation_fy2026",
+        "investment_gains_losses_adjustment_fy2026",
+        "deferred_income_taxes_adjustment_fy2026",
+        "operating_assets_liabilities_total_fy2026"
+      ]
+    },
+    {
+      "id": "full_ocf_fy2025",
+      "left_metric": "operating_cash_flow_fy2025",
+      "right_metrics": [
+        "net_income_fy2025",
+        "depreciation_amortization_other_fy2025",
+        "stock_based_compensation_fy2025",
+        "investment_gains_losses_adjustment_fy2025",
+        "deferred_income_taxes_adjustment_fy2025",
+        "operating_assets_liabilities_total_fy2025"
+      ]
+    },
+    {
+      "id": "full_ocf_growth_bridge",
+      "left_metric": "operating_cash_flow_change",
+      "right_metrics": [
+        "net_income_contribution_change",
+        "depreciation_amortization_other_contribution_change",
+        "stock_based_compensation_contribution_change",
+        "investment_gains_losses_adjustment_contribution_change",
+        "deferred_income_taxes_adjustment_contribution_change",
+        "operating_assets_liabilities_change"
+      ]
+    }
+  ],
+  "qualitative_rubric": [
+    {
+      "id": "complete_annual_bridge",
+      "theme": "cashflow",
+      "criterion": "Use all nine operating asset/liability adjustments and all preceding reconciliation lines from the annual columns; label the block broader than current working capital.",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "offsets_and_attribution",
+      "theme": "cashflow",
+      "criterion": "Explain that payable/unearned-revenue improvements are largely offset by the other seven rows; reconcile the full OCF change across net income and each adjustment group. Do not imply those two lines explain most total OCF growth.",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "cash_flow_quality",
+      "theme": "cashflow",
+      "criterion": "Separate arithmetic contributions from persistence/causality: investment gain reversals, deferred taxes, depreciation/amortization/other and stock compensation are distinct adjustments; source does not establish each cause or future reversal schedule.",
+      "required_evidence_groups": [
+        [
+          "fy26-results:19800:21600"
+        ],
+        [
+          "fy26-results:21600:23400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "outflow_and_measure_scope",
+      "theme": "investment",
+      "criterion": "Cash PP&E is a cash outflow shown positive for spending; OCF minus cash PP&E is a defined company-wide proxy, not AI-only free cash flow, total capex, or a measure of all economic lease commitments.",
+      "required_evidence_groups": [
+        [
+          "fy26-results:21600:23400"
+        ],
+        [
+          "fy26-call:21600:23400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "rounded_quarter_gap",
+      "theme": "investment",
+      "criterion": "Disclose the mismatch between the sum of rounded quarterly components and rounded reported capex. Do not manufacture exact equality, silently substitute annual amounts, or assign the mismatch to a cause unproven by these captures.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "classification_vs_activity",
+      "theme": "investment",
+      "criterion": "Attribute the change to management: datacenter/office-building lives change effective FY2027, not GPU/CPU lives; future finance-to-operating lease classification changes reported capex. Management says CY2026 expectations otherwise unchanged; this is an outlook, not verified construction activity.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:28800:30600"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "leases_and_cash_flow",
+      "theme": "investment",
+      "criterion": "Quarterly management commentary says increased operating lease payments partly offset OCF growth. Do not state OCF excludes all lease payments or that the entire evidence set has no finance-lease information.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "demand_attribution_and_scope",
+      "theme": "demand",
+      "criterion": "Attribute Azure capacity constraints/quick monetization and commercial RPO metrics to management. Preserve inclusion/exclusion of OpenAI, distinguish year-over-year growth from sequential composition and retain approximate recognition timing.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:21600:23400"
+        ],
+        [
+          "fy26-call:23400:25200"
+        ],
+        [
+          "fy26-call:25200:27000"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "backlog_is_not_roi",
+      "theme": "demand",
+      "criterion": "RPO is future contracted revenue, not present cash or guaranteed AI profit; weighted duration is not payback. Aggregate Azure growth and Cloud gross margin cannot isolate AI incremental returns.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:23400:25200"
+        ],
+        [
+          "fy26-call:25200:27000"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "margin_counterevidence",
+      "theme": "demand",
+      "criterion": "Demand growth coexists with year-over-year Cloud gross-margin pressure; attribute mix/infrastructure/usage and efficiency explanations to management rather than an independent causal decomposition.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:23400:25200"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "roi_unknown_not_false",
+      "theme": "demand",
+      "criterion": "Conclude AI-only incremental ROIC is not determinable from this evidence. Name both missing attributable incremental cash/profit and deployed AI invested-capital/lifetime/cost allocation inputs; management confidence and efficiency levers do not supply a numerical ROIC.",
+      "required_evidence_groups": [
+        [
+          "fy26-call:55800:57600"
+        ],
+        [
+          "fy26-call:57600:59400"
+        ]
+      ],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    },
+    {
+      "id": "testable_next_disclosures",
+      "theme": "all",
+      "criterion": "Propose dated, falsifiable follow-up checks that could weaken the interpretation: complete lease/commitment schedules and cash reconciliation, full annual cash-flow bridge with reversals, backlog conversion/collection and customer concentration, AI-specific incremental economics. No trade recommendation or return forecast.",
+      "required_evidence_groups": [],
+      "evaluation": "Independent substantive review required; deterministic citations or model-critic approval alone cannot mark this passed."
+    }
+  ],
+  "comparison_limits": [
+    "This authored dossier follows known failures; reference values were checked before these new responses, but it is not an unseen financial benchmark.",
+    "Model and completion-window configurations may differ; any comparison is between those complete configurations.",
+    "A missing or incorrect metric remains a failure in its original stage; revisions are additional measured work, never replacements.",
+    "Source publication date differs from capture time. The frozen capture proves text observed in September, not what the page contained at an earlier historical timestamp.",
+    "For rounded management figures, the oracle tests faithful transcription and scoped arithmetic, not unreported precision.",
+    "Reference unit/period strings are explicitly supplied to every analyst so a hidden formatting preference cannot masquerade as a reasoning failure."
+  ]
+}

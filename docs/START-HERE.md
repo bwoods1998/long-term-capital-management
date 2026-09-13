@@ -33,6 +33,12 @@ Before opening the results, write down your answers:
 The point is to separate an observation from the explanation we want to give it.
 The raw failures remain in each experiment's record.
 
+The [financial dossier](RESEARCH-DOSSIER.md) carries that discipline into a larger
+research task: two independent analysts, three reconciliations, synthesis, critique,
+and revision. Its sixty-four numerical targets distinguish financial values from
+units, periods, and source coverage. A passing arithmetic check still does not
+establish a sound explanation or approve publication.
+
 For a financial review exercise, [audit the net effect](REVIEW-CASE.md). The agent
 and its critic highlighted two positive cash-flow contributions while overlooking
 offsets in the full table. Check the arithmetic, then rewrite the summary.

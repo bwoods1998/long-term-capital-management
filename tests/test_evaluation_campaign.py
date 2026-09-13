@@ -188,13 +188,15 @@ class EvaluationCampaignTests(unittest.TestCase):
         run_id = p.reserve_task(self.db, json.loads(item['request_json']), self.packet,
                                 item['task_key'], 'evaluation')
         with self.db:
-            self.db.execute('UPDATE runs SET response_id=?,response=? WHERE id=?',
-                            ('resp_existing', p.encoded({'id': 'resp_existing', 'status': 'queued'}), run_id))
+            self.db.execute('UPDATE runs SET response_id=?,response=?,key_fingerprint=? WHERE id=?',
+                            ('resp_existing', p.encoded({'id': 'resp_existing', 'status': 'queued'}),
+                             'test-key-fingerprint', run_id))
         response = self.response(run_id)
         response['id'] = 'resp_existing'
         with patch.object(p, 'api', return_value=response) as api:
             result = campaigns.advance(self.db, identifier)
-        api.assert_called_once_with('GET', '/v1/responses/resp_existing')
+        api.assert_called_once_with('GET', '/v1/responses/resp_existing',
+                                    expected_key_fingerprint='test-key-fingerprint')
         self.assertTrue(result['finished'])
         self.assertEqual(self.db.execute('SELECT operation FROM evaluation_attempts').fetchone()[0], 'retrieve')
 

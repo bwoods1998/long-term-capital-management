@@ -38,6 +38,12 @@ Next: curate an actual useful disclosure update, broaden source registration, an
 
 ## 4. Compare decisions and compute budgets
 
+A [financial dossier](RESEARCH-DOSSIER.md) now supplies a bounded twelve-stage
+protocol for connected research across cash generation, infrastructure commitments,
+and demand evidence. Its authored numerical oracle checks the full accounting
+bridge, while independent review still owns scope, causality, and uncertainty.
+The first run's stage outcomes must be read separately from its design.
+
 A three-model development regression and a separate uniform-critic comparison now measure verdicts, citation checks, abstention, and incremental cost. [Results](EVALUATION-RESULTS.md) retain errors and unknown costs. These authored cases are not held out, and model comparisons also differ in completion window. Next use harder, independently reviewed cases and matched scheduling policies to test whether more computation improves supported conclusions enough to justify its expense.
 
 Add a clearly labeled simulator for proposed portfolio decisions, with declared fill assumptions, fees, external cashflows, and a benchmark. Exercise partial fills, rejections, ambiguous responses, and duplicate commands before connecting any order path.

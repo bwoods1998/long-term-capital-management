@@ -201,7 +201,7 @@ class RobustnessTests(unittest.TestCase):
         self.assertEqual(result['cost']['reserved_calls'], 1)
         self.assertEqual(result['states']['completed'], 1)
 
-    def test_changed_key_parks_existing_request_and_wrong_model_fails_without_replacement(self):
+    def test_changed_key_and_wrong_model_park_existing_request_without_replacement(self):
         identifier = self.create()
         def queued(method, *args, **kwargs):
             response = self.oracle_api(method, *args, **kwargs)
@@ -222,8 +222,15 @@ class RobustnessTests(unittest.TestCase):
             return {**response, 'model': 'unexpected-model'}
         with patch.object(p, 'api', side_effect=wrong_model):
             result = r.advance(self.db, identifier)
-        self.assertEqual(result['states']['identity_error'], 1)
+        # The shared transport now rejects model drift before this protocol can
+        # consume or grade it, while retaining the accepted handle for GET only.
+        self.assertEqual(result['states']['waiting'], 1)
         self.assertEqual(result['cost']['reserved_calls'], 1)
+        self.assertEqual(result['cost']['unknown_usage_runs'], 1)
+        row = self.db.execute('SELECT response_id,response FROM runs').fetchone()
+        self.assertIsNotNone(row['response_id'])
+        self.assertEqual(json.loads(row['response'])['status'], 'queued')
+        self.assertEqual([call[0] for call in self.calls], ['POST', 'GET'])
 
     def test_deadline_implementation_and_shared_budget_stop_new_requests(self):
         identifier = self.create()

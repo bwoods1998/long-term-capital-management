@@ -2,6 +2,7 @@ import concurrent.futures
 from contextlib import closing
 import copy
 from decimal import Decimal
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -11,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import portfolio as p
+import lab
 
 
 class PortfolioTests(unittest.TestCase):
@@ -144,14 +146,124 @@ class PortfolioTests(unittest.TestCase):
         with self.database(self.path) as db:
             rid = self.reserve(db)
             with db:
-                db.execute('UPDATE runs SET response_id=? WHERE id=?', ('resp_known', rid))
+                db.execute('UPDATE runs SET response_id=?,key_fingerprint=? WHERE id=?',
+                           ('resp_known', 'synthetic-key-fingerprint', rid))
             with patch.object(p, 'api', return_value=self.response(status='incomplete', response_id='resp_known')) as api:
                 p.execute(db, rid, poll_seconds=0)
                 p.execute(db, rid, poll_seconds=0)
-                api.assert_called_once_with('GET', '/v1/responses/resp_known')
+                api.assert_called_once_with('GET', '/v1/responses/resp_known',
+                                            expected_key_fingerprint='synthetic-key-fingerprint')
             self.assertEqual(db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0], 0)
             with self.assertRaises(ValueError):
                 p.public_snapshot(db)
+
+    def test_known_response_recovery_requires_original_credential_without_rebinding(self):
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            with patch.object(p, 'api', return_value=self.response(status='queued')):
+                p.execute(db, rid, poll_seconds=0)
+            before = dict(p.get_run(db, rid))
+            with patch.object(p, 'credential_fingerprint', return_value='rotated'), patch.object(p, 'api') as api:
+                p.execute(db, rid, poll_seconds=0)
+                api.assert_not_called()
+            after = p.get_run(db, rid)
+            for field in ('request', 'response_id', 'response', 'key_fingerprint', 'reserved_cents'):
+                self.assertEqual(after[field], before[field])
+            with patch.object(p, 'api', return_value=self.response()) as api:
+                p.execute(db, rid, poll_seconds=0)
+                api.assert_called_once_with('GET', '/v1/responses/resp_test',
+                                            expected_key_fingerprint='synthetic-key-fingerprint')
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM runs').fetchone()[0], 1)
+
+    def test_unbound_legacy_accepted_handle_stays_parked(self):
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            with db:
+                db.execute('UPDATE runs SET response_id=? WHERE id=?', ('resp_legacy', rid))
+            with patch.object(p, 'api') as api, patch.object(p, 'credential_fingerprint') as key:
+                p.execute(db, rid, poll_seconds=0)
+                api.assert_not_called()
+                key.assert_not_called()
+            self.assertEqual(p.get_run(db, rid)['response_id'], 'resp_legacy')
+            self.assertIsNone(p.get_run(db, rid)['key_fingerprint'])
+            self.assertIsNone(p.run_cost(p.get_run(db, rid)))
+
+    def test_every_poll_is_bound_to_the_original_key(self):
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            with patch.object(p, 'api', side_effect=[self.response(status='queued'), self.response()]) as api, \
+                    patch.object(p.time, 'sleep'), patch.object(p.time, 'monotonic', return_value=0):
+                p.execute(db, rid, poll_seconds=1)
+            self.assertEqual([call.args[0] for call in api.call_args_list], ['POST', 'GET'])
+            self.assertTrue(all(call.kwargs['expected_key_fingerprint'] == 'synthetic-key-fingerprint'
+                                for call in api.call_args_list))
+            self.assertEqual(p.get_run(db, rid)['reserved_cents'], p.RESERVE_CENTS)
+
+    def test_get_transport_blocks_rotation_between_local_check_and_key_loading(self):
+        bound = hashlib.sha256(b'synthetic-original').hexdigest()
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            with db:
+                db.execute('UPDATE runs SET response_id=?,key_fingerprint=? WHERE id=?',
+                           ('resp_known', bound, rid))
+            with patch.object(p, 'credential_fingerprint', return_value=bound), \
+                    patch.object(lab, 'load_api_key', return_value='synthetic-rotated'), \
+                    patch.object(lab, 'build_opener') as opener:
+                p.execute(db, rid, poll_seconds=0)
+                opener.assert_not_called()
+            row = p.get_run(db, rid)
+            self.assertEqual(row['response_id'], 'resp_known')
+            self.assertEqual(row['key_fingerprint'], bound)
+            self.assertIsNone(row['response'])
+
+    def test_wrong_model_post_preserves_handle_and_only_recovers_by_get(self):
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            frozen = dict(p.get_run(db, rid))
+            wrong = {**self.response(), 'model': 'deepseek/deepseek-v4-pro-9999'}
+            with patch.object(p, 'api', return_value=wrong) as api:
+                p.execute(db, rid, poll_seconds=0)
+                self.assertEqual(api.call_args.args[0], 'POST')
+            parked = p.get_run(db, rid)
+            self.assertEqual(parked['response_id'], 'resp_test')
+            self.assertIsNone(parked['response'])
+            self.assertIsNone(p.run_cost(parked))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0], 0)
+            # Correctly identified readback consumes the original response only.
+            good = {**self.response(), 'model': 'deepseek/deepseek-v4-pro-0813'}
+            with patch.object(p, 'api', return_value=good) as api:
+                p.execute(db, rid, poll_seconds=0)
+                api.assert_called_once_with('GET', '/v1/responses/resp_test',
+                                            expected_key_fingerprint='synthetic-key-fingerprint')
+            after = p.get_run(db, rid)
+            for field in ('request', 'rates', 'packet_json', 'reserved_cents'):
+                self.assertEqual(after[field], frozen[field])
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0], 1)
+
+    def test_wrong_model_get_preserves_prior_pending_state_and_rejects_invalid_labels(self):
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            with patch.object(p, 'api', return_value={**self.response(status='queued'), 'model': p.MODEL}):
+                p.execute(db, rid, poll_seconds=0)
+            before = p.get_run(db, rid)['response']
+            for label in ['deepseek/deepseek-v4-flash-0731', 'DeepSeek-V4-Pro-0813', None, ['invalid']]:
+                with self.subTest(label=label), patch.object(p, 'api', return_value={**self.response(), 'model': label}) as api:
+                    p.execute(db, rid, poll_seconds=0)
+                    self.assertEqual(api.call_args.args[0], 'GET')
+                    self.assertEqual(p.get_run(db, rid)['response'], before)
+                    self.assertIsNone(p.run_cost(p.get_run(db, rid)))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0], 0)
+
+    def test_stored_terminal_history_needs_no_network_or_new_credential_binding(self):
+        with self.database(self.path) as db:
+            rid = self.reserve(db)
+            self.finish(db, rid)
+            before = dict(p.get_run(db, rid))
+            with patch.object(p, 'api') as api, patch.object(p, 'credential_fingerprint') as key:
+                p.execute(db, rid, poll_seconds=0)
+                api.assert_not_called()
+                key.assert_not_called()
+            self.assertEqual(dict(p.get_run(db, rid)), before)
 
     def test_invalid_completed_response_is_not_published_or_resubmitted(self):
         answer = copy.deepcopy(self.answer)
