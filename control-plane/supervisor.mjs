@@ -54,11 +54,17 @@ export function creditDecision(summary, c, health = {}, at = Date.now(), cloudRe
   const plannedPerDay = availableCredit(c)?0:finite(proposedRate) ? Math.min(proposedRate, Math.max(0, dollars(c.weekly_inference_usd) - reserved) / hours * 24)
     : Math.min(24, Math.max(0, dollars(c.weekly_inference_usd) - reserved) / hours * 24);
   const measuredPerDay = finite(summary.avg_cost_per_day) ? summary.avg_cost_per_day / 100 : 0;
-  const burn = Math.max(plannedPerDay, measuredPerDay);
+  // Only elapsed scheduled research time belongs in the deployment rate:
+  // future weekdays and the rehearsal-to-week gap are not operating hours.
+  const elapsed=(begin,end)=>Math.max(0,Math.min(at,Date.parse(end))-Date.parse(begin));
+  const activeHours=(elapsed(c.starts_at,c.ends_at)+(c.rehearsal?elapsed(c.rehearsal.starts_at,c.rehearsal.ends_at):0))/3600000;
+  const deploymentPerDay=availableCredit(c)?known*24/Math.max(1,activeHours):0;
+  const observedPerDay=Math.max(measuredPerDay,deploymentPerDay);
+  const burn = Math.max(plannedPerDay, observedPerDay);
   const runway = burn > 0 ? Math.max(0, balance - outstanding - dollars(c.credit_floor_usd) - cloudRemaining) / burn : null;
   const exhausted = !availableCredit(c)&&dollars(c.weekly_inference_usd) - committed < .1;
   return {allow:requestRoom >= .1, reason:requestRoom >= .1 ? 'ready' : exhausted ? 'authorization_exhausted' : 'credit_low', balance_usd:balance,
-    outstanding_usd:outstanding, usable_usd:usable, runway_days:runway,
+    outstanding_usd:outstanding, usable_usd:usable, runway_days:runway, observed_inference_usd_per_day:observedPerDay,
     max_inference_committed_usd:grant(absolute), max_additional_inference_usd:grant(usable),
     warn:requestRoom < .1 || (runway !== null && runway < 2)};
 }

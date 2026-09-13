@@ -144,6 +144,31 @@ test('available-credit runway uses observed burn rather than balance or proposed
  assert.equal(idle.runway_days,null);assert.equal(idle.warn,false);
 });
 
+test('observed twenty-dollar first hour warns before available credit is exhausted',()=>{
+ const c=availableConfig();delete c.rehearsal;
+ const h={inference:{known_cost_usd:'20',committed_usd:'20'}};
+ const d=creditDecision({...billing,balance:10000,avg_cost_per_day:196},c,h,start+3600000,7);
+ assert.equal(d.observed_inference_usd_per_day,480);
+ assert.equal(d.runway_days,91/480);assert.equal(d.warn,true);assert.equal(d.allow,true);
+ assert.equal(d.reason,'ready');
+ const firstSecond=creditDecision({...billing,balance:10000,avg_cost_per_day:0},c,h,start+1000,7);
+ assert.equal(firstSecond.observed_inference_usd_per_day,480);
+});
+
+test('rehearsal gap and future week never dilute measured deployment spending',()=>{
+ const c=availableConfig(), h={inference:{known_cost_usd:'20',committed_usd:'20'}}, summary={...billing,avg_cost_per_day:0};
+ const firstHour=creditDecision(summary,c,h,start-7*3600000,7);
+ assert.equal(firstHour.observed_inference_usd_per_day,480);
+ const ended=creditDecision(summary,c,h,start-3*3600000,7);
+ const gap=creditDecision(summary,c,h,start-3600000,7);
+ assert.equal(ended.observed_inference_usd_per_day,96);
+ assert.equal(gap.observed_inference_usd_per_day,96);assert.equal(gap.runway_days,ended.runway_days);
+ const weekHour=creditDecision(summary,c,h,start+3600000,7);
+ assert.equal(weekHour.observed_inference_usd_per_day,80); // Five rehearsal hours + one actual weekday hour.
+ const noCost=creditDecision(summary,c,{inference:{known_cost_usd:'0',committed_usd:'0'}},start-7*3600000,7);
+ assert.equal(noCost.observed_inference_usd_per_day,0);assert.equal(noCost.runway_days,null);assert.equal(noCost.warn,false);
+});
+
 test('dynamic host reservation uses real resource ceilings through the shutdown grace',()=>{
  const c=availableConfig(), box={sailbox_id:c.box_id,vcpu_count:1,memory_mib:2048,state_disk_size_gib:32};
  const reserve=hostReserve({rates},box,c,start);
