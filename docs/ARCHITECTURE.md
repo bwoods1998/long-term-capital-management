@@ -1,43 +1,50 @@
 # Architecture
 
-One persistent coordinator maintains the portfolio and research state. Research branches can investigate alternatives; only the coordinator can admit a paper allocation. The public site reads a small saved projection.
+One persistent paper account, a continuous research history, and bounded research sessions. A small independent Cloudflare supervisor controls availability and funding; Sail performs the research. Website visitors only read saved results.
 
-| Component | Responsibility |
-|---|---|
-| [`evidence.py`](../portfolio_runtime/evidence.py) | Capture dated constituents and SEC financial facts, preserving sources, periods and hashes. |
-| [`runner.py`](../portfolio_runtime/runner.py) | Pace research waves to a wall-clock deadline, recover requests and publish checkpoints. |
-| [`research.py`](../portfolio_runtime/research.py) | Choose unresolved questions, retain prior work and compare research methods. |
-| [`provider.py`](../portfolio_runtime/provider.py) | Freeze Sail requests, reserve cost and recover accepted responses by identity. |
-| [`ledger.py`](../portfolio_runtime/ledger.py) | Record paper decisions, fills, cash, holdings and sourced valuations. |
-| [`sail_host.py`](../portfolio_runtime/sail_host.py) | Provision restricted Sailboxes, preserve state through restart and isolate research forks. |
-| Public checkpoint | Publish portfolio state and template-based progress without raw model responses or credentials. |
+```mermaid
+flowchart LR
+    Sources[Disclosures and market data] --> Research[Sail research]
+    Research --> Review[Source checks and critique]
+    Review --> Portfolio[Paper portfolio]
+    Portfolio --> Outcomes[Observed outcomes vs benchmark]
+    Outcomes --> Research
+    Research <--> Experiments[Policy comparisons]
+    Portfolio --> Journal[Public portfolio and research history]
+    Research --> Journal
+    Cloud[Cloud supervisor] --> Research
+```
 
-## Evidence and decisions
+## Research and improvement
 
-The initial universe contains 503 listed securities, captured on September 13, 2026. Membership comes from a [community-maintained list](https://en.wikipedia.org/wiki/List_of_S%26P_500_companies); financial observations come from the [SEC Companyfacts API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces). All 503 captures succeeded.
+[`service.py`](../portfolio_runtime/service.py) preserves the paper account while creating immutable research epochs. Each epoch records its source cutoff, model profiles, policy version, deadline and spending allocation. Daily source captures retain original observations; previously published findings are never rewritten to match a later conclusion.
 
-These are selected whole-company US-GAAP facts, not complete filings or a licensed constituent feed. Delayed Yahoo Finance observations from September 11 accompany the research bank; they are valuation inputs, not executable quotes. Custom tags, segments and industry-specific measures may be missing. Annual, quarterly, year-to-date and balance-sheet observations retain their original periods. A filing captured later cannot silently enter an earlier evidence cutoff.
+The universe is S&P 500 stocks plus cash. Membership currently comes from a community-maintained list; financial facts come from SEC Companyfacts and selected primary filings. Source periods, units, tags, accessions and hashes are retained. Missing sector-specific or valuation evidence remains missing. Delayed Yahoo observations support research and the daily-bar paper adapter; they are not brokerage quotes.
 
-The first sustained run starts with this frozen bank. Later waves address coverage gaps and questions raised by previous work, with bounded retrieval of pre-cutoff annual filings for deeper evidence. Every new capture retains its original source and hash. Memory carries earlier analyses and failures; numerical claims are checked against the original observations. Passing that check does not establish a sound valuation or justify a trade.
+Memory carries prior theses and unanswered questions across epochs. A dated outcome journal returns the actual portfolio record to later allocation reviews. This closes the investment feedback loop; it does not establish that a particular process change caused better returns.
 
-Proposals specify a complete target portfolio, leaving any unallocated weight in cash. The current mandate is long-only, no leverage, at most 20% per stock, with $100,000 of **virtual** starting capital. Deterministic ledger checks apply independently of model confidence.
+The supporting [`PolicyLab`](../portfolio_runtime/improvement.py) compares fixed research-memory policies on matched dated tasks, with separate audit companies. Promotion and rollback affect subsequent epochs only. Numerical source checks do not establish investment quality. Autonomous investment-policy selection requires a prospective comparison that is still to be built. [Evaluation protocol](EVALUATION.md).
 
-## Paper execution and performance
+## Paper accounting
 
-A proposal is not a fill. Paper execution requires a still-valid constituent snapshot, a sourced market session and prices available after the decision. Quote execution buys at the ask and sells at the bid. The separate daily-bar path uses a later session's opening price with fixed modeled slippage; it is not an intraday fill simulation.
+A single writer reconciles the account before considering a replacement allocation. Proposals remain distinct from fills. The mandate is long-only, no leverage, whole shares, at most 20% per stock, with $100,000 of virtual initial capital.
 
-The ledger records fees, external funding and exact decimal amounts. Time-weighted returns exclude external deposits from investment gains. Benchmark comparisons require matching S&P 500 total-return observations. The paper adapter validates Yahoo Finance’s specific `^SP500TR` index feed, keeps its source hash and synchronizes opening and closing observations with portfolio valuations; it does not claim licensed exchange data. Missing benchmark data stays missing; an ETF or a price-only index is not substituted. Research expenses are tracked outside portfolio returns.
+Daily-bar paper fills use an eligible later market opening with modeled slippage. Returns require sourced portfolio and S&P 500 Total Return observations at matching times. External deposits are excluded from time-weighted returns. Inference and infrastructure expenses are reported separately from trading returns.
 
-Unresolved corporate actions can suspend execution and invalidate current marks. Sunday research may produce a pending allocation, but cannot produce a Sunday regular-session fill. Historical or synthetic prices are never presented as a live track record.
+Daily constituent refresh and market accounting continue independently of research funding. Unsupported corporate actions explicitly suspend affected accounting; this version does not infer dividend entitlement or payment dates. No live Schwab execution service exists.
 
-## Persistence and publication
+## Cloud operation
 
-Separate SQLite journals hold requests, research and paper events. Request bodies, model profiles and reservation identities are immutable. Recovery retrieves an accepted response; uncertain usage retains its reservation. A completed provider response can still fail source checks.
+The frozen Sailbox bundle contains application code and public evidence. Credentials are injected by the provider only on allowed HTTPS routes; brokerage credentials are excluded. The service and its bootstrap hold process locks to prevent duplicate writers.
 
-The Sailbox adapter installs a frozen bundle and starts a managed process with a deadline. A separate watchdog on the owner's computer checks progress and restarts that process on the same cloud disk if needed. The cloud image has no verified native boot service: recovery and timely resource cleanup depend on the watchdog remaining available. A live readiness test verified credential injection, restricted routes, sleep/wake, process restart and restoration of a compressed SQLite backup.
+The [Cloudflare supervisor](../control-plane/supervisor.mjs) runs independently of the Mac and the Sail agent. It controls admission, checks credit and progress, restarts the same machine's process, and sends exception or completion emails. A technical weekly ceiling bounds exposure; actual research pace depends on available credit and useful new evidence. Unknown request costs retain their allowance. More funding does not automatically increase research intensity.
 
-Research forks start from a sterile checkpoint, receive separate assignments and reserved allowances, and have no publication authority. The first fork experiment compares full-universe context with a smaller context selected for five identical company questions. The coordinator's restricted egress policy permits its provider, public-source and publication routes. Credentials are injected into permitted requests outside the guest environment.
+The service uses one durable Voyage event sequence across all epochs; an hourly research completion does not terminate the week's trace. Public activity and private health distinguish deliberate waiting from a stalled process.
 
-The website accepts only a validated checkpoint. Public reads cannot start inference or submit paper orders. It shows the last publication time, pending allocations separately from holdings, and returns only after sourced observations exist. The Schwab connection is paused; there is no live execution service.
+Private R2 snapshots preserve paper, request, research, policy and trace records. Each SQLite file is backed up consistently and hash-checked; the set is not a simultaneous transaction across databases. Automatic recovery uses the existing Sail disk. Restoring an older backup onto another machine requires provider-request reconciliation before spending or execution resumes.
 
-[Experiment design](EVALUATION.md) · [Operations](OPERATIONS.md)
+## Publication
+
+The main page reads a small checkpoint. A separate paginated research history contains explicit conclusions, source claims, uncertainties and portfolio consequences. Internal reasoning blocks, prompts, credentials and account identifiers are excluded. Server validation and immutable record IDs make retries safe; later revisions receive new entries.
+
+[Operations](OPERATIONS.md) · [Roadmap](ROADMAP.md)

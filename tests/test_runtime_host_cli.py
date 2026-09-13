@@ -1,6 +1,7 @@
 """Offline checks for host identities, private bundles and external recovery."""
 
 from datetime import timedelta
+from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
@@ -117,6 +118,40 @@ class HostCliTests(unittest.TestCase):
         (target / "portfolio_runtime/runner.py").write_text("changed")
         with self.assertRaises(ValueError):
             cli.load_bundle(target)
+
+    def test_cloud_reservation_tracks_frozen_disk_and_full_shutdown_grace(self):
+        (self.root / "portfolio_runtime").mkdir()
+        (self.root / "portfolio_runtime/runner.py").write_text("pass\n")
+        deadline = now() + timedelta(days=5)
+        rates = {
+            "vcpu_second_usd_nanos": 4167,
+            "memory_gib_second_usd_nanos": 2222,
+            "state_disk_gib_second_usd_nanos": 194,
+            "s_creation_usd_nanos": 5000000,
+        }
+        for config, disk, grace in (({}, 8, 120), ({"kind": "weekday_service"}, 32, 300)):
+            bundle = freeze_bundle(
+                self.root, ["portfolio_runtime/runner.py"], config, deadline=deadline.isoformat()
+            )
+            # Fractional remaining time rounds up rather than under-reserving.
+            at = deadline.timestamp() - 432000.25
+            expected = Decimal((4167 + 2 * 2222 + disk * 194) * (432001 + grace) + 5000000) / 10**9
+            self.assertEqual(cli.cloud_cost_bound(rates, bundle, current_epoch=at), expected)
+            for invalid in (None, True, -1, "194"):
+                with self.subTest(disk=disk, rate=invalid), self.assertRaisesRegex(ValueError, "rates"):
+                    cli.cloud_cost_bound({**rates, "state_disk_gib_second_usd_nanos": invalid}, bundle, current_epoch=at)
+
+        # $5 would cover the old 8 GiB estimate but not this frozen 32 GiB week.
+        config = {**self.config, "kind": "weekday_service", "cloud_budget_usd": "5",
+                  "week_ends_at": deadline.isoformat()}
+        self.deployment.api = lambda *args: {"rates": rates}
+        with patch.object(self.deployment.host, "create") as allocate:
+            with self.assertRaisesRegex(ValueError, "cloud allowance"):
+                self.deployment.provision(
+                    config, "app_example", key="test-only", publication_token="test-publication",
+                    backup_token="test-backup", bundle=bundle, telemetry=False,
+                )
+            allocate.assert_not_called()
 
     def test_watchdog_recovers_missing_progress_then_backs_up_and_sleeps(self):
         calls = []

@@ -1,24 +1,10 @@
 # Roadmap
 
-**Objective:** a persistent Sail-powered portfolio manager that can outperform the S&P 500 Total Return Index, with a public decision and performance record.
+**Objective:** an autonomous Sail-powered portfolio manager, measured against the S&P 500 Total Return Index.
 
-## Implemented
+1. **An unattended paper week.** Maintain one portfolio and research history, ingest new evidence, test research policies and report outcomes. Recover routine interruptions without the development machine.
+2. **A credible forward record.** Evaluate forecasts and allocations as outcomes arrive, strengthen valuation and sector-specific evidence, and add complete corporate-action accounting. Compare against a fixed simpler policy on the same information.
+3. **Schwab execution.** Connect the brokerage account and add order reconciliation under the existing mandate, after execution and recovery checks pass.
+4. **Specialized research models.** When evaluated examples justify it, compare a trained adapter with the base model using Sail's LoRA/Tinker sampling integration and held-out evaluations.
 
-- Dated 503-security universe and SEC financial-fact captures.
-- Persistent research and request journals, source checks and paired experiment planning.
-- Paper ledger with constituent/exposure checks, pending orders, sourced execution and return accounting.
-- Restricted Sailbox hosting adapter and a concise public checkpoint.
-
-## Next: five hours of continuous research
-
-Run the hosted coordinator against the frozen source bank. Build the initial paper allocation, carry unresolved questions into later waves, test memory and scheduling alternatives, and measure actual cache and infrastructure behavior. Verify that the process keeps making useful progress until its deadline. No investment performance exists yet.
-
-## Then: a forward portfolio record
-
-Ingest new disclosures and tradable market observations, reconcile fills and corporate actions, and maintain the portfolio across days. Compare decisions with a simpler research baseline using the same arriving information. Publish meaningful changes and outcomes.
-
-## Live execution
-
-Connect Schwab after the account opens. Add order submission, reconciliation and recovery under the same investment mandate. Keep research forks separate from the sole execution service.
-
-Training a research policy comes later, after enough evaluated examples exist to demonstrate improvement on unseen tasks.
+The current public page reports what is deployed. Better source-check scores, more requests and greater spending are not evidence of investment outperformance.

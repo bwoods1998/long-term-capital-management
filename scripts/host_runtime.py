@@ -13,6 +13,7 @@ from decimal import Decimal
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -26,6 +27,7 @@ from portfolio_runtime.sail_host import (
     SailHost,
     freeze_bundle,
     validate_bundle,
+    bundle_disk_limit_gib,
     restricted_policy,
     http_document,
     encoded,
@@ -53,6 +55,26 @@ NAMES = tuple(
         "credentials",
     )
 ) + ("data/sp500-evidence.json",)
+
+
+def cloud_cost_bound(rates, bundle, *, current_epoch=None):
+    """Reserve the frozen host ceilings through its maximum shutdown grace."""
+    disk_gib = bundle_disk_limit_gib(bundle)
+    keys = (
+        "vcpu_second_usd_nanos",
+        "memory_gib_second_usd_nanos",
+        "state_disk_gib_second_usd_nanos",
+        "s_creation_usd_nanos",
+    )
+    if any(type(rates.get(k)) is not int or rates[k] < 0 for k in keys):
+        raise ValueError("Current cloud rates are unavailable")
+    at = time.time() if current_epoch is None else current_epoch
+    seconds = math.ceil(max(0, stamp(bundle["manifest"]["deadline"]).timestamp() - at))
+    seconds += 300 if disk_gib == 32 else 120
+    return Decimal(
+        (rates[keys[0]] + 2 * rates[keys[1]] + disk_gib * rates[keys[2]]) * seconds
+        + rates[keys[3]]
+    ) / 1_000_000_000
 
 
 def private_read(path):
@@ -249,6 +271,7 @@ class HostDeployment:
         names=NAMES,
         bundle=None,
         telemetry=True,
+        backup_token=None,
     ):
         """Install only. Starting the service is a separate explicit command."""
         publication = publication_token is not None
@@ -266,9 +289,19 @@ class HostDeployment:
                 self.secret_set(state["publication_secret"], publication_token)
                 state["publication_secret_saved"] = True
                 self.write(state)
+            weekday = config.get("kind") == "weekday_service"
+            if weekday:
+                if not backup_token or not publication:
+                    raise ValueError("Weekday service requires private backup and publication credentials")
+                state.setdefault("backup_secret", "pa_" + state["identity"] + "_backup")
+                if not state.get("backup_secret_saved"):
+                    self.secret_set(state["backup_secret"], backup_token)
+                    state["backup_secret_saved"] = True
+                    self.write(state)
             voyage_id = self.ensure_voyage(state)
             if bundle is None:
-                guest = guest_config(config, voyage_id=voyage_id)
+                guest = ({**config, "injected_auth": True, "voyage_id": voyage_id}
+                         if weekday else guest_config(config, voyage_id=voyage_id))
                 if not publication:
                     guest.pop("publish_url", None)
                 bundle = freeze_bundle(
@@ -276,37 +309,14 @@ class HostDeployment:
                     names,
                     guest,
                     role="coordinator",
-                    deadline=datetime.fromtimestamp(
+                    deadline=config["week_ends_at"] if weekday else datetime.fromtimestamp(
                         config["ends_epoch"], timezone.utc
                     ).isoformat(),
                 )
             save_bundle(self.directory / "bundle", bundle)
             frozen = load_bundle(self.directory / "bundle")
-            seconds = (
-                max(
-                    0,
-                    int(
-                        stamp(frozen["manifest"]["deadline"]).timestamp() - time.time()
-                    ),
-                )
-                + 120
-            )
             rates = self.api("GET", "/v1/sailboxes/spend").get("rates", {})
-            keys = (
-                "vcpu_second_usd_nanos",
-                "memory_gib_second_usd_nanos",
-                "state_disk_gib_second_usd_nanos",
-                "s_creation_usd_nanos",
-            )
-            if any(type(rates.get(k)) is not int or rates[k] < 0 for k in keys):
-                raise ValueError("Current cloud rates are unavailable")
-            ceiling = (
-                Decimal(
-                    (rates[keys[0]] + 2 * rates[keys[1]] + 8 * rates[keys[2]]) * seconds
-                    + rates[keys[3]]
-                )
-                / 1_000_000_000
-            )
+            ceiling = cloud_cost_bound(rates, frozen)
             if ceiling > Decimal(config["cloud_budget_usd"]):
                 raise ValueError("Host cost bound exceeds the frozen cloud allowance")
             state["cloud_cost_bound_usd"] = str(ceiling)
@@ -317,6 +327,10 @@ class HostDeployment:
                 publish_secret=state["publication_secret"],
                 telemetry=telemetry,
                 sec_sources=config.get("fetch_filings", False),
+                journal=weekday,
+                daily_sources=weekday,
+                backup_host=config["backup_url"].split("/")[2] if weekday else None,
+                backup_secret=state.get("backup_secret") if weekday else None,
             )
             if not state.get("policy_contract"):
                 try:

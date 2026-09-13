@@ -99,7 +99,7 @@ def public_activity(research, totals, now, *, running=True):
         "portfolio_critic",
         "memory_review",
     }
-    profiles = {"pro_flex", "kimi_flex", "kimi_asap", "kimi_balanced", "glm_flex", "k3"}
+    profiles = {"pro_flex", "pro_asap", "kimi_flex", "kimi_asap", "kimi_balanced", "glm_flex", "k3"}
     tasks = []
     if running:
         with research.connect() as db:
@@ -266,7 +266,7 @@ def initialize(config, evidence):
     client = Client(path / "requests.sqlite", config)
     research = Research(path / "research.sqlite", evidence)
     ledger = PortfolioLedger(
-        path / "paper.sqlite", created_at=config["account_created_at"]
+        Path(config.get("paper_path", path / "paper.sqlite")), created_at=config["account_created_at"]
     )
     u = evidence["universe"]
     ledger.register_universe(
@@ -285,6 +285,16 @@ def initialize(config, evidence):
 def propose_checked(config, research, ledger):
     """A checked critic approves the exact proposal; durable intent spans both DBs."""
     from .market import next_session
+    from .contracts import timestamp
+
+    # Once a precommitted opening arrives, later research must not cancel that
+    # order after observing its execution-time information. Resolve its actual
+    # paper fill (or an explicit operational cancellation) first.
+    pending_ids = {p["id"] for p in ledger.public_state()["pending_decisions"]}
+    if any(event["payload"].get("expected_open_at")
+           and timestamp(event["payload"]["expected_open_at"]) <= timestamp(utc_now())
+           for event in ledger.events() if event["kind"] == "decision" and event["id"] in pending_ids):
+        return
 
     with research.connect() as db:
         rows = db.execute(
@@ -377,7 +387,11 @@ ORDER BY wave DESC LIMIT 3"""
                     ).fetchone()[0]
                 )
         try:
-            ledger.propose(row["id"], **intent)
+            # Task IDs restart at wave zero in a fresh immutable epoch. The
+            # shared portfolio uses the run identity as its global namespace.
+            decision_id = (config["run_id"] + ":" + row["id"]
+                           if config.get("paper_path") else row["id"])
+            ledger.propose(decision_id, **intent)
         except ValueError:
             research.event(
                 "allocation_rejected",
@@ -510,13 +524,22 @@ def report(config, client, research):
     return result
 
 
-def run(config, evidence, *, once=False, branch=False):
+def run(config, evidence, *, once=False, branch=False, controller=None):
     if config.get("research_only") and not branch:
         raise ValueError("Research fork cannot start portfolio authority")
     state = Path(config["state_dir"])
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock = (state / "runner.lock").open("a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    paper_lock = None
+    if config.get("paper_path") and not branch:
+        paper_lock = (Path(config["paper_path"]).parent / "paper-writer.lock").open("a")
+        try:
+            fcntl.flock(paper_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BaseException:
+            paper_lock.close()
+            lock.close()
+            raise
     if branch:
         try:
             if config.get("research_only") is not True or config.get("publish_url"):
@@ -527,18 +550,32 @@ def run(config, evidence, *, once=False, branch=False):
     try:
         client, research, ledger = initialize(config, evidence)
     except BaseException:
+        if paper_lock:
+            paper_lock.close()
         lock.close()
         raise
+    if controller:
+        try:
+            controller.initialize_epoch(config, research, client)
+        except BaseException:
+            ledger.close()
+            if paper_lock:
+                paper_lock.close()
+            lock.close()
+            raise
     stopping = [False]
-    trace = None
-    if config.get("voyage_id"):
+    trace = controller.trace if controller else None
+    if config.get("voyage_id") and not controller:
         from .telemetry import Voyage
 
         trace = Voyage(state / "voyage.sqlite", config)
+    if trace:
         client.transport.headers.update(trace.headers())
 
     def stop(*_):
         stopping[0] = True
+        if controller:
+            controller.request_stop()
 
     previous_handlers = {
         sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)
@@ -552,12 +589,13 @@ def run(config, evidence, *, once=False, branch=False):
         filings = Filings(state / "filings")
     futures = {}
     last_publish = 0
+    last_plan_attempt = 0
     pool = ThreadPoolExecutor(max_workers=config.get("max_concurrency", 32))
     try:
         # Recover crash gaps once from exact durable bodies. Completed futures
         # reconcile individually below; polling never reloads historical prompts.
         research.reconcile(client.iter_rows())
-        while not stopping[0]:
+        while not stopping[0] and not (controller and controller.should_stop()):
             at = time.time()
             elapsed = at - config["started_epoch"]
             remaining = config["ends_epoch"] - at
@@ -591,7 +629,7 @@ def run(config, evidence, *, once=False, branch=False):
                     30, 3 * max(1, row["attempts"])
                 ):
                     futures[row["id"]] = pool.submit(client.step, row["id"])
-            if remaining > config.get("drain_seconds", 300):
+            if remaining > config.get("drain_seconds", 300) and (not controller or controller.admission_allowed()):
                 waiting = research.waiting()
                 with research.connect() as db:
                     wave = db.execute(
@@ -607,28 +645,38 @@ def run(config, evidence, *, once=False, branch=False):
                     and not inflight
                     and at - last >= config.get("min_wave_seconds", 120)
                 )
-                if should_plan:
-                    cache_ready = any(cache_write_confirmed(r) for r in rows)
-                    research.plan_wave(
+                if should_plan and at-last_plan_attempt >= config.get("min_wave_seconds", 120):
+                    last_plan_attempt = at
+                    cache_ready = any(cache_write_confirmed(r) for r in rows) or bool(
+                        controller and controller.cache_ready(research)
+                    )
+                    planned_count = research.plan_wave(
                         wave,
                         size=config.get("wave_size", 24),
                         cache_ready=cache_ready,
                         filings=filings,
                     )
                     waiting = research.waiting()
-                    research.event(
-                        "wave_planned",
-                        {
-                            "wave": wave,
-                            "concurrency": concurrency,
-                            "elapsed_seconds": int(elapsed),
-                        },
-                    )
+                    if planned_count != 0:
+                        research.event(
+                            "wave_planned",
+                            {
+                                "wave": wave,
+                                "concurrency": concurrency,
+                                "elapsed_seconds": int(elapsed),
+                            },
+                        )
                 outstanding = len(inflight)
                 for task in waiting:
                     if outstanding >= concurrency:
                         break
+                    if controller and not controller.admission_allowed():
+                        break
                     try:
+                        if controller and task["kind"] == "allocation" and remaining <= 900:
+                            # Leave an explicit review interval before final
+                            # admission closes; a proposal alone is not a trade.
+                            continue
                         identity = client.submit_intent(
                             task["id"],
                             task["profile"],
@@ -636,6 +684,11 @@ def run(config, evidence, *, once=False, branch=False):
                             cache=task["cache"],
                         )
                     except AdmissionClosed:
+                        if controller and task["kind"] in ("allocation", "portfolio_critic"):
+                            # Cheap company tasks must not consume each newly
+                            # released dollar while a critical review waits for
+                            # enough of the paced allowance to accumulate.
+                            break
                         continue
                     research.attach(task["id"], identity)
                     if identity not in futures:
@@ -644,6 +697,8 @@ def run(config, evidence, *, once=False, branch=False):
             if at - last_publish >= 60 or remaining <= 0 or once:
                 # Settled critiques still affect the final paper allocation while
                 # admission is closed; this submits no additional inference.
+                if controller:
+                    controller.paper_sync(ledger)
                 propose_checked(config, research, ledger)
                 status = (
                     "running"
@@ -655,6 +710,10 @@ def run(config, evidence, *, once=False, branch=False):
                 projection = public_projection(
                     config, ledger, research, client, status=status
                 )
+                if controller:
+                    projection = controller.checkpoint(config, ledger, research, client, projection)
+                from .journal import publish_journal
+                publish_journal(config, research, client)
                 try:
                     published = publish(config, projection)
                 except Exception:
@@ -669,7 +728,7 @@ def run(config, evidence, *, once=False, branch=False):
                 )
                 if trace:
                     trace.event(
-                        "checkpoint-" + str(checkpoint_id),
+                        ((config["run_id"] + ":") if controller else "") + "checkpoint-" + str(checkpoint_id),
                         "research.checkpoint",
                         {
                             "companies_researched": research.summary()[
@@ -688,6 +747,8 @@ def run(config, evidence, *, once=False, branch=False):
         try:
             pool.shutdown(wait=True, cancel_futures=True)
             research.reconcile(client.iter_rows())
+            if controller:
+                controller.paper_sync(ledger)
             propose_checked(config, research, ledger)
             final_status = (
                 "paused"
@@ -700,25 +761,27 @@ def run(config, evidence, *, once=False, branch=False):
                 else "running"
             )
             try:
-                publish(
-                    config,
-                    public_projection(
-                        config, ledger, research, client, status=final_status
-                    ),
-                )
+                projection = public_projection(config, ledger, research, client, status=final_status)
+                if controller:
+                    projection = controller.checkpoint(config, ledger, research, client, projection)
+                from .journal import publish_journal
+                publish_journal(config, research, client)
+                publish(config, projection)
             except Exception:
                 pass
             report(config, client, research)
             if trace:
                 if final_status == "complete":
                     trace.event(
-                        "terminal",
-                        "voyage.completed",
+                        config["run_id"] + ":terminal" if controller else "terminal",
+                        "research.epoch_completed" if controller else "voyage.completed",
                         {"requests": client.totals()["requests"]},
                     )
                 trace.flush()
         finally:
             ledger.close()
+            if paper_lock:
+                paper_lock.close()
             lock.close()
             for sig, previous in previous_handlers.items():
                 signal.signal(sig, previous)
@@ -783,6 +846,14 @@ def paper(config, evidence, *, market=None):
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (state / "runner.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        paper_lock = None
+        if config.get("paper_path"):
+            paper_lock = (Path(config["paper_path"]).parent / "paper-writer.lock").open("a")
+            try:
+                fcntl.flock(paper_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BaseException:
+                paper_lock.close()
+                raise
         client, research, ledger = initialize(config, evidence)
         try:
             market = market or YahooMarketData(state / "market")
@@ -809,6 +880,8 @@ def paper(config, evidence, *, market=None):
             }
         finally:
             ledger.close()
+            if paper_lock:
+                paper_lock.close()
 
 
 def main():

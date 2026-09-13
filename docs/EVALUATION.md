@@ -1,48 +1,57 @@
 # Evaluation
 
-Two questions drive the project:
+Can a persistent agent improve its investment decisions and outperform the S&P 500 Total Return Index? The feedback loop is **dated decision → paper execution → observed outcome → revised hypothesis → next decision**. More inference is useful only when it improves that process.
 
-1. Can the portfolio outperform the S&P 500 Total Return Index?
-2. Which additional research and infrastructure capabilities improve its decisions, and at what cost?
+## Forward investment feedback
 
-The first needs a forward investment record. The second can be tested now. A five-hour research run can expose accounting errors, weak assumptions and infrastructure limits; it cannot establish investment skill.
+Paper returns begin with sourced observations and dated decisions. Deposits are excluded; recorded trading costs are included. Comparisons require matching total-return observations. Missing benchmark data remains missing. Research expenses are tracked separately.
 
-## First sustained experiment
+[`outcomes.py`](../portfolio_runtime/outcomes.py) preserves original decisions and appends outcomes from actual ledger closing marks. Each executed allocation has its own cohort, ending before the next rebalance; feedback reports the latest recorded close in that interval, not a reconstructed exit price. Execution costs remain included. Unexecuted orders and future sessions produce no return. A benchmark arriving later adds a receipt without changing what an earlier review could know.
 
-The coordinator is being prepared for a five-hour deadline, with a $90 inference ceiling and a separate $3.50 cloud ceiling. These are spending limits, not targets. It will create new research waves from prior findings and incomplete coverage, rather than exhaust a fixed batch and stop early. The deadline, request history and unresolved costs remain recorded. A complete queue is not evidence of five hours of operation.
+Subsequent allocation reviews receive the original thesis, targets, observed account return and matching index-relative outcome. They can investigate mistaken assumptions and propose falsifiable changes for the next decision. These are uncontrolled observations: successive closes overlap, market conditions change, and good returns can follow poor reasoning. They are not independent trials or causal attribution. **There is no outcome-trained investment policy or demonstrated investment improvement yet.**
 
-| Comparison | Controlled work | Measurements |
-|---|---|---|
-| Memory versus fresh analysis | Same company facts and question; one arm receives prior work. | Source-check pass rate, unresolved questions, decision changes, tokens, latency and cost. |
-| Completion windows | Kimi K2.6 receives the same source packet under ASAP, Balanced and Flex. | End-to-end completion time, failures, reported usage and cost. |
-| Supercache versus ordinary reuse | Shared universe context reused across investigations. | Actual write and read charges, cached tokens, observed ordinary-cache behavior and total cost. |
-| Independent criticism | DeepSeek proposes allocations; Kimi K3 challenges assumptions and concentration. | Disagreements, source failures, revisions and whether proposals change. |
-| Persistence and forks | Same five company questions on isolated forks; full-universe versus selected context. | Source-check results, tokens, latency and branch cost; separate recovery receipts. |
+New outcomes can trigger another bounded investment review, regardless of whether returns were positive or negative. They do not justify raising research intensity above the initial exploration allowance. A future investment-policy promotion needs a predeclared challenger, genuinely prospective comparable decisions, sufficient independent market periods and a fixed cost-aware evaluator. Source-extraction scores and a handful of profitable trades cannot substitute for that evidence.
 
-Company research rotates across DeepSeek V4 Pro, Kimi K2.6 and GLM 5.3. A model's confidence or agreement with another model is never counted as financial truth. Model versions, request bodies, completion windows and rates are saved with the run.
+Source checks are not investment skill. They cannot establish sound business reasoning, valuation completeness or forecast accuracy. Historical replay tests software behavior; it is not an out-of-sample investment record because a model may know later events. Short-term P&L never rewards a research-policy change.
 
-Memory pairs share the same system context, company facts and question, and differ by prior work. Cache controls use distinct leading routing markers to prevent treatment crossover; ordinary caching can warm naturally; workload changes across waves. These are recorded comparisons, not a claim that every variable is isolated. Report sample sizes and failures alongside averages, and repeat meaningful comparisons before changing the research policy.
+## Supporting research-policy tests
 
-The fork comparison covers NVIDIA, JPMorgan, Exxon Mobil, UnitedHealth and Caterpillar. It tests whether carrying the whole universe helps these specific reviews enough to justify the extra context. Five pairs are an initial observation, not a general verdict on retrieval or long context. Its $4 allowance is reserved inside the main $90 ceiling.
+[`improvement.py`](../portfolio_runtime/improvement.py) compares two fixed policies: **memory_3**, which includes up to three earlier company reviews, and **fresh**, which omits them. Both arms receive the same dated company facts, question, Kimi K2.6 ASAP model, system instructions and output limit. Arm order varies deterministically by company and date. This changes context handling, not model weights.
 
-## Sail's role
+The evaluator selects three distinct accounting metrics and periods before receiving any answer. Each result must satisfy the existing output schema, reproduce those source observations exactly, and contain no unsupported entries in its numerical claim list or allocation instruction. Confidence, persuasive prose and an agent's own score are ignored. A missing or malformed response is not a pass.
 
-[Inference](https://docs.sailresearch.com/completion-windows) provides different models and scheduling windows. [Supercache](https://docs.sailresearch.com/supercache) supports repeated use of stable context. [Sailboxes](https://docs.sailresearch.com/sailboxes) provide persistent compute; [checkpoint forks](https://docs.sailresearch.com/sailboxes-forking) isolate alternative research. [Voyages](https://docs.sailresearch.com/voyages) can connect these actions in one trace.
+Each epoch can schedule at most four pairs, inside its existing research allowance. No prior company work means no meaningful memory comparison, so that pair is skipped. Planning saves both task identities and their exact inputs before submission; recovery cannot replace a failed arm with a different question.
 
-The runtime integrates these capabilities where they serve the experiment. A host adapter or configured trace is not a completed demonstration: actual run receipts must establish provisioning, recovery, reuse and trace delivery. Tinker training and LoRA serving are not implemented. They become useful when there is enough evaluated task data to test a learned improvement against an unchanged baseline.
+Planning stops when its 20-pair cohort awaits settlement. After two complete non-improving looks, this fixed comparison stops; additional audits are not scheduled alone. Repeating the same unsuccessful experiment indefinitely is not self-improvement.
 
-## What counts as evidence
+| Promotion requirement | Fixed rule |
+|---|---|
+| Prospective sample | 20 distinct companies across at least two evidence dates; at most ten selection pairs per date. |
+| Complete comparison | Both arms have terminal responses and settled costs. Earlier unfinished pairs cannot be skipped for later winners. |
+| Consistent reliability | Challenger passes at least 90%; at least five net paired wins; positive net wins on every sampled date. |
+| Repeated testing | Exact one-sided paired sign test, with threshold `0.01 / (look × (look + 1))`. Each look consumes a disjoint batch. |
+| Cost | Challenger's measured inference cost is no more than twice the incumbent's. |
 
-Every numerical research claim must match a supplied ticker, metric, XBRL tag, unit and accounting period. Source checks catch mismatched values and unsupported citations. They do not prove business reasoning, forecast accuracy, valuation completeness or an ability to beat the market. Dated research prices must retain their observation time; missing prices must not become invented valuation multiples. Delayed Yahoo Finance observations support research only and cannot fill a current order.
+Each evaluated batch reports both policies' source passes, actual cost, net additional passes, passes per dollar and policy cost difference. **Net additional source passes per comparison dollar** is `(challenger passes − incumbent passes) / cost of both arms`. It can be negative; zero cost gives no ratio. Unknown costs remain incomplete. These are source-handling diagnostics, not investment ROI; held-out audits never determine policy choices or spending.
 
-Paper performance begins with sourced observations and dated decisions. Deposits are excluded from returns; recorded trading costs are included. The S&P comparison uses matching total-return observations, with the difference expressed in percentage points. Agent operating costs remain a separate expense. Results should eventually include drawdown, turnover and forward forecast calibration, once those measurements exist.
+The sign test assumes independent pairs. Distinct companies reduce repeated-company dependence, but shared models, accounting patterns and market conditions can still correlate errors. These thresholds are conservative engineering criteria, not a proof of general improvement.
 
-No historical backfill is presented as this agent's investment record. Historical replay can test software behavior, but a model may already know later events. A short period of positive returns cannot establish a durable advantage.
+A deterministic fifth of company symbols is reserved for **audit only**. Those paired outcomes are recorded separately and never select or roll back a policy. Trial outputs are excluded from ordinary research memory and follow-up questions. Candidates and selection rules are fixed before future evidence dates arrive.
 
-## Cost and failure reporting
+Promotion creates an immutable policy version, applied only to the next research epoch. New dated pairs continue comparing the promoted policy with its predecessor. A qualifying forward regression rolls back to the original policy. This first implementation allows one promotion and one rollback; it cannot edit its evaluator, add policies, change budgets, alter the portfolio mandate or modify the benchmark. Ties, missing evidence and inconclusive results preserve the current policy.
 
-Known inference cost is calculated from validated provider usage and the frozen rate schedule. Unknown or missing usage retains its full allowance. Cache writes count toward the experiment's cost; cached tokens are a subset of input tokens. Cloud usage and storage must be reconciled separately before claiming a total bill or savings.
+## Sail comparisons
 
-A useful final report includes the actual operating window, completed and failed work, source-check results, paired comparisons, allocation changes, unresolved questions and settled costs. “More requests” and “more money spent” are workload measures, not quality scores.
+| Capability | Question and measurement |
+|---|---|
+| [Completion windows](https://docs.sailresearch.com/completion-windows) | Does a longer deadline reduce cost for the same task? Record completion time, failures and actual usage. |
+| [Supercache](https://docs.sailresearch.com/supercache) | Does repeated stable context repay its write charge? Include writes, reads, ordinary-cache behavior and missing usage. |
+| Independent models | Which source errors or allocation assumptions survive a separate critic? Agreement is not financial truth. |
+| [Sailboxes](https://docs.sailresearch.com/sailboxes) and [forks](https://docs.sailresearch.com/sailboxes-forking) | Can isolated research survive interruption without duplicated work or changed inputs? Compare scoped context on matched questions. |
+| [Voyages](https://docs.sailresearch.com/voyages) | Can the recorded trace connect requests, research and recovery? Configuring a trace does not establish successful delivery. |
 
-[Current milestone](ROADMAP.md) · [Architecture](ARCHITECTURE.md) · [Dated earlier results](history/README.md)
+The initial fork design compares five company questions under full-universe and selected context. Its receipts must distinguish completed comparisons from proposed work; this is a bounded test, not a general conclusion about long context. Current policy changes use the stricter prospective process above. Tinker training and LoRA serving are not implemented.
+
+Every report should separate completed work, source failures, unsettled requests, measured cost and open questions. Unknown usage retains its reservation. Cloud compute and storage require separate reconciliation. Request volume and spending are workload measures, not quality scores.
+
+[Architecture](ARCHITECTURE.md) · [Operations](OPERATIONS.md) · [Earlier experiments](history/README.md)

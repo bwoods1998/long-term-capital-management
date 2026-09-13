@@ -1,0 +1,14 @@
+{
+  "name": "portfolio-supervisor",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "triggers": {"crons": ["* * * * *"]},
+  "send_email": [{"name":"EMAIL","destination_address":"blakewoods98@gmail.com","allowed_sender_addresses":["agent@blakewoods.us"]}],
+  "durable_objects": {"bindings": [{"name":"SUPERVISOR","class_name":"PortfolioSupervisor"}]},
+  "migrations": [{"tag":"v1","new_sqlite_classes":["PortfolioSupervisor"]}],
+  "r2_buckets": [{"binding":"BACKUPS","bucket_name":"portfolio-private-backups"}],
+  "observability": {"enabled":false}
+}

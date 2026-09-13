@@ -81,7 +81,7 @@ class API:
                 "status": "running",
                 "vcpu_count": 1,
                 "memory_mib": 2048,
-                "state_disk_size_gib": 8,
+                "state_disk_size_gib": body["state_disk_limit_gib"],
                 "egress_policy": {"document": body["egress_policy"], "policy_id": None}
                 if "egress_policy" in body
                 else None,
@@ -244,6 +244,30 @@ class HostTests(unittest.TestCase):
             self.host.install(bundle)
         self.assertEqual(self.api.boxes[sid].files, {})
 
+    def test_weekday_disk_is_frozen_and_exact_readback_is_required(self):
+        bundle = self.bundle(config={"kind": "weekday_service", "paper_only": True})
+        self.host.create(self.app, "week-service", bundle)
+        self.host.create(self.app, "week-service", bundle)
+        saved = self.host._read()
+        self.assertEqual(saved["create_body"]["state_disk_limit_gib"], 32)
+        creates = [c for c in self.api.calls if c[:2] == ("POST", "/v1/sailboxes")]
+        self.assertEqual(len(creates), 1)
+        with self.assertRaisesRegex(ValueError, "frozen inputs"):
+            self.host.create(self.app, "week-service", self.bundle())
+        for changed_disk in (8, 64):
+            self.api.rows[saved["sailbox_id"]]["state_disk_size_gib"] = changed_disk
+            with self.subTest(disk=changed_disk), self.assertRaisesRegex(ValueError, "resource isolation"):
+                self.host.attach()
+        self.assertEqual(self.api.boxes[saved["sailbox_id"]].files, {})
+
+    def test_oneoff_disk_stays_small_and_weekday_cannot_be_a_branch(self):
+        bundle = self.bundle()
+        self.host.create(self.app, "oneoff", bundle)
+        self.assertEqual(self.host._read()["create_body"]["state_disk_limit_gib"], 8)
+        branch = self.bundle(role="research_branch", config={"kind": "weekday_service"})
+        with self.assertRaisesRegex(ValueError, "coordinator disk"):
+            h.bundle_disk_limit_gib(branch)
+
     def test_policy_is_route_scoped_and_rejects_broad_or_branch_publish(self):
         doc = h.restricted_policy("sail_inference", publish_secret="site_publish")
         rules = doc["rules"]["api.sailresearch.com"]
@@ -256,6 +280,59 @@ class HostTests(unittest.TestCase):
         rules[0]["match"]["path"] = {"prefix": "/v1/"}
         with self.assertRaises(ValueError):
             h._validate_policy(doc, "coordinator", resource("sb"))
+
+    def test_weekday_guest_has_only_source_reads_publication_and_write_only_backups(self):
+        own = resource("sb")
+        backup = "portfolio-supervisor.example.workers.dev"
+        doc = h.restricted_policy(
+            "inference", publish_secret="public_journal", journal=True,
+            sec_sources=True, daily_sources=True, backup_host=backup,
+            backup_secret="backup_upload", own_box_id=own,
+        )
+        h._validate_policy(doc, "coordinator", own)
+
+        def route(host, method, path):
+            if host not in doc["allowlist"]:
+                return False, None
+            for rule in doc["rules"][host]:
+                if "respond" in rule:
+                    return False, None
+                match = rule["match"]
+                methods = match["method"] if isinstance(match["method"], list) else [match["method"]]
+                wanted = match["path"]
+                if method in methods and (path.startswith(wanted["prefix"]) if isinstance(wanted, dict) else path == wanted):
+                    return True, rule.get("request", {}).get("set", {}).get("headers", {}).get("authorization")
+            return False, None
+
+        for host, path in [
+            ("data.sec.gov", "/api/xbrl/companyfacts/CIK0001234567.json"),
+            ("data.sec.gov", "/submissions/CIK0001234567.json"),
+            ("www.sec.gov", "/Archives/edgar/data/1234567/filing.htm"),
+            ("query1.finance.yahoo.com", "/v8/finance/chart/NVDA"),
+            ("en.wikipedia.org", "/wiki/List_of_S%26P_500_companies"),
+            ("en.wikipedia.org", "/wiki/List_of_S&P_500_companies"),
+        ]:
+            self.assertEqual(route(host, "GET", path), (True, None))
+            self.assertFalse(route(host, "POST", path)[0])
+        self.assertEqual(route("blakewoods.us", "POST", "/api/portfolio/research"), (True, "Bearer ${secrets.public_journal}"))
+        self.assertEqual(route(backup, "PUT", "/v1/backups/private-object"), (True, "Bearer ${secrets.backup_upload}"))
+        for host, method, path in [
+            (backup, "GET", "/v1/backups/private-object"),
+            (backup, "POST", "/v1/pause"),
+            ("blakewoods.us", "GET", "/api/portfolio/notifications"),
+            ("blakewoods.us", "POST", "/api/portfolio/research/unreviewed"),
+            ("api.sailresearch.com", "GET", "/v2/usage/summary"),
+            ("sailbox-api.sailresearch.com", "POST", "/v1/sailboxes"),
+            ("api.schwabapi.com", "POST", "/trader/v1/accounts/private/orders"),
+        ]:
+            self.assertFalse(route(host, method, path)[0], (host, method, path))
+        self.assertTrue(route("sailbox-api.sailresearch.com", "POST", f"/v1/sailboxes/{own}/sleep")[0])
+        with self.assertRaises(ValueError):
+            h._validate_policy(doc, "research_branch", own)
+        broadened = copy.deepcopy(doc)
+        broadened["rules"][backup][0]["match"]["method"] = ["PUT", "GET"]
+        with self.assertRaises(ValueError):
+            h._validate_policy(broadened, "coordinator", own)
 
     def test_checkpoint_only_sterile_seed_without_service_or_state(self):
         bundle = self.bundle("research_seed")

@@ -141,7 +141,9 @@ def capture_universe(directory, fetcher=None):
     captured = now()
     record = {
         "schema_version": 1,
-        "id": "sp500-" + digest(raw)[:20],
+        # The source may be byte-identical tomorrow, but its capture/expiry is a
+        # new immutable membership observation in the persistent paper account.
+        "id": "sp500-" + digest(raw + captured.encode())[:20],
         "captured_at": captured,
         "effective_at": captured,
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).strftime(
@@ -301,6 +303,53 @@ def capture(directory, limit=None):
     }
     save(directory / "capture.json", summary)
     return summary
+
+
+def assemble(directory, *, captured_at=None):
+    """Assemble one complete dated packet without relabeling older captures.
+
+    Prices are added separately by the service for selected names; an absent
+    quote remains absent. This function makes no network requests.
+    """
+    directory = Path(directory)
+    universe = json.loads((directory / "universe.json").read_text())
+    companies = []
+    overview = []
+    for member in universe["companies"]:
+        company = json.loads(
+            (directory / "companies" / (member["symbol"] + ".json")).read_text()
+        )
+        if company["symbol"] != member["symbol"] or company["cik"] != member["cik"]:
+            raise ValueError("Evidence does not match captured membership")
+        if company["cutoff"] != universe["captured_at"][:10]:
+            raise ValueError("Cannot silently carry yesterday's source cutoff forward")
+        companies.append(company)
+        facts = {}
+        for metric, variants in company["facts"].items():
+            if metric not in (
+                "revenue", "operating_cash", "capital_spending", "net_income",
+                "assets", "cash", "debt_noncurrent", "shares",
+            ):
+                continue
+            observations = [
+                (variant, observation)
+                for variant in variants
+                for observation in variant["observations"]
+            ]
+            if not observations:
+                continue
+            # Annual cash-flow/income comparisons must not silently use YTD.
+            annual = [x for x in observations if x[1].get("period_kind") == "annual"]
+            variant, observation = max(
+                annual or observations, key=lambda x: (x[1]["end"], x[1].get("filed", ""))
+            )
+            facts[metric] = [observation["val"], observation.get("start"),
+                             observation["end"], variant["unit"]]
+        overview.append({"symbol": company["symbol"],
+                         "sector": company.get("sector", ""), "facts": facts})
+    return {"schema_version": 1, "captured_at": captured_at or now(),
+            "universe": universe, "companies": companies, "overview": overview,
+            "price_source": "Dated Yahoo research snapshots where available; missing prices are not inferred."}
 
 
 if __name__ == "__main__":

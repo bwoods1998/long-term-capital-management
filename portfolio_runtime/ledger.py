@@ -828,6 +828,36 @@ class PortfolioLedger:
                 self._record_benchmark(benchmark, recorded_at=observed_at)
             return self._public(self._state())
 
+    def establish_cash_baseline(self, *, market_session, benchmark, observed_at):
+        """Value known opening cash against an actually observed index opening.
+
+        This is neither a trade nor a reconstructed position. Once investment
+        history exists it cannot move the start boundary or rewrite returns.
+        """
+        timestamp(observed_at)
+        if (not isinstance(market_session, MarketSession)
+            or not isinstance(benchmark, BenchmarkPoint)
+            or benchmark.as_of != market_session.opens_at
+            or timestamp(benchmark.captured_at) > timestamp(observed_at)
+            or not timestamp(self.created_at) <= timestamp(market_session.opens_at) <= timestamp(observed_at)):
+            raise ValueError("Opening cash baseline requires an observed aligned index opening")
+        with self._transaction():
+            state = self._state()
+            if state["history"]:
+                return self._public(state)
+            due_pending = any(d["status"] == "pending" and (
+                not d.get("expected_open_at") or timestamp(d["expected_open_at"]) <= timestamp(observed_at)
+            ) for d in state["decisions"].values())
+            if state["holdings"] or state["actions"] or due_pending:
+                raise ValueError("Only an uninvested cash account has a known opening baseline")
+            nav = self._nav(state["cash"], state["cash"], {})
+            nav["valuation_at"] = market_session.opens_at
+            self._append("opening-cash:"+market_session.opens_at, "mark", observed_at,
+                         {"quotes": [], "bars": [], "valuation_model": "opening_cash_baseline",
+                          "calendar_source": market_session.source, "nav": nav})
+            self._record_benchmark(benchmark, recorded_at=observed_at)
+            return self._public(self._state())
+
     def mark_daily_close(self, bars, *, observed_at, market_session, benchmark=None):
         """Record an observed, completed session close without inventing quotes."""
         timestamp(observed_at)

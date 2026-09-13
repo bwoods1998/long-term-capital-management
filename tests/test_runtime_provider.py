@@ -77,6 +77,8 @@ class ProviderTests(unittest.TestCase):
     def test_asap_only_models_and_injected_credential_boundaries(self):
         self.assertFalse(p.body_for("k3", "x", "y")["background"])
         self.assertFalse(p.body_for("flash", "x", "y")["background"])
+        self.assertFalse(p.body_for("kimi_asap", "x", "y")["background"])
+        self.assertFalse(p.body_for("pro_asap", "x", "y")["background"])
         self.assertTrue(p.body_for("kimi_flex", "x", "y")["background"])
         with self.assertRaises(ValueError):
             p.Transport(
@@ -86,6 +88,46 @@ class ProviderTests(unittest.TestCase):
             )
         with self.assertRaises(ValueError):
             p.Transport(injected=True)
+
+    def test_explicit_pre_admission_rejection_settles_zero_and_does_not_repeat(self):
+        self.script.replies = [p.SubmissionRejected("unsupported_asap_request")]
+        identity = self.intent()
+        row = self.client.step(identity)
+        self.assertEqual((row["status"], row["cost"], row["response_id"]), ("failed", "0", None))
+        self.assertEqual(self.client.totals()["unsettled_requests"], 0)
+        self.client.step(identity)
+        self.assertEqual(len(self.script.calls), 1)
+
+    def test_generic_bad_request_cannot_release_an_uncertain_reservation(self):
+        self.script.replies = [RuntimeError("provider_http_400")]
+        identity = self.intent()
+        row = self.client.step(identity)
+        self.assertIsNone(row["cost"])
+        self.assertEqual(self.client.totals()["unsettled_requests"], 1)
+
+    def test_asap_requests_admit_synchronous_bodies(self):
+        for name in ("kimi_asap", "pro_asap", "k3", "flash"):
+            self.assertTrue(self.client.submit_intent(name, name, p.body_for(name, "facts", "question")))
+
+    def test_external_spend_guard_blocks_new_reservations_but_preserves_recovery(self):
+        identity = self.intent()
+        observed = []
+        self.client.reservation_guard = lambda amount: observed.append(amount) or False
+        self.assertEqual(self.intent(), identity)
+        self.assertEqual(observed, [])
+        with self.assertRaises(p.AdmissionClosed):
+            self.intent("new-task")
+        self.assertEqual(len(observed), 1)
+        self.assertGreater(observed[0], Decimal(0))
+        self.assertEqual(self.client.totals()["requests"], 1)
+
+    def test_never_dispatched_crash_gap_retires_at_drain_cutoff(self):
+        identity = self.intent()
+        self.at = self.config["ends_epoch"] + 86400
+        row = self.client.step(identity)
+        self.assertEqual((row["status"],row["cost"]), ("cancelled","0"))
+        self.assertEqual(row["error"],"never_dispatched_before_deadline")
+        self.assertEqual(self.script.calls, [])
 
     def test_intent_and_money_contract_are_immutable(self):
         identity = self.intent()

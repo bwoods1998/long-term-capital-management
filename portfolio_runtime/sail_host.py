@@ -178,6 +178,19 @@ def validate_bundle(bundle):
     return manifest
 
 
+def bundle_disk_limit_gib(bundle):
+    """The deployment's immutable resource envelope, also used for cost bounds."""
+    manifest = validate_bundle(bundle)
+    config = json.loads(bundle["files"]["config/run.json"])
+    if not isinstance(config, dict):
+        raise ValueError("Frozen guest configuration must be an object")
+    if config.get("kind") == "weekday_service":
+        if manifest["role"] != "coordinator":
+            raise ValueError("A weekday service must own its coordinator disk")
+        return 32
+    return 8
+
+
 def restricted_policy(
     inference_secret,
     *,
@@ -185,6 +198,10 @@ def restricted_policy(
     telemetry=False,
     own_box_id=None,
     sec_sources=False,
+    journal=False,
+    daily_sources=False,
+    backup_host=None,
+    backup_secret=None,
 ):
     """Return a document to SAVE before use; all unmatched HTTPS paths answer 403.
 
@@ -225,6 +242,7 @@ def restricted_policy(
         result["allowlist"].append("blakewoods.us")
         result["rules"]["blakewoods.us"] = [
             rule(publish_secret, "POST", "/api/portfolio/state"),
+            *([rule(publish_secret, "POST", "/api/portfolio/research")] if journal else []),
             deny,
         ]
         result["missing_alpn"]["blakewoods.us"] = "http/1.1"
@@ -239,6 +257,28 @@ def restricted_policy(
                 deny,
             ]
             result["missing_alpn"][host] = "http/1.1"
+    if daily_sources:
+        for host, prefixes in (
+            ("data.sec.gov", ["/submissions/", "/api/xbrl/companyfacts/"]),
+            ("www.sec.gov", ["/Archives/edgar/data/"]),
+            # Sail's HTTP proxy matches decoded URL paths. Both spellings
+            # identify the same fixed constituent page, with no broad prefix.
+            ("en.wikipedia.org", ["/wiki/List_of_S%26P_500_companies", "/wiki/List_of_S&P_500_companies"]),
+            ("query1.finance.yahoo.com", ["/v8/finance/chart/"]),
+        ):
+            if host not in result["allowlist"]:
+                result["allowlist"].append(host)
+            result["rules"][host] = [
+                {"match": {"method": "GET", "path": {"prefix": p}}}
+                for p in dict.fromkeys(prefixes)
+            ] + [deny]
+            result["missing_alpn"][host] = "http/1.1"
+    if backup_host or backup_secret:
+        if not isinstance(backup_host, str) or not re.fullmatch(r"portfolio-supervisor\.[a-z0-9-]+\.workers\.dev", backup_host):
+            raise ValueError("Expected the dedicated private supervisor host")
+        result["allowlist"].append(backup_host)
+        result["rules"][backup_host] = [rule(backup_secret, "PUT", {"prefix": "/v1/backups/"}), deny]
+        result["missing_alpn"][backup_host] = "http/1.1"
     if own_box_id:
         _id(own_box_id, "sb")
         host = "sailbox-api.sailresearch.com"
@@ -296,16 +336,26 @@ def _validate_policy(document, role, box_id):
         sec_sources = any(
             host in document["rules"] for host in ("data.sec.gov", "www.sec.gov")
         )
+        journal = bool(publication) and any(r.get("match", {}).get("path") == "/api/portfolio/research" for r in document["rules"]["blakewoods.us"])
+        daily_sources = "en.wikipedia.org" in document["rules"]
+        backup_hosts = [h for h in document["rules"] if h.startswith("portfolio-supervisor.")]
+        if len(backup_hosts) > 1:
+            raise ValueError("Only one backup destination is allowed")
+        backup_host = backup_hosts[0] if backup_hosts else None
         expected = restricted_policy(
             inference,
             publish_secret=publication,
             telemetry=telemetry,
             own_box_id=own,
             sec_sources=sec_sources,
+            journal=journal,
+            daily_sources=daily_sources,
+            backup_host=backup_host,
+            backup_secret=secret(backup_host) if backup_host else None,
         )
         if document != expected or (
             role == "research_branch"
-            and (publication or own or telemetry or sec_sources)
+            and (publication or own or telemetry or sec_sources or daily_sources or backup_host)
         ):
             raise ValueError("Policy exceeds the role-specific route allowlist")
     except (KeyError, TypeError, AttributeError, IndexError):
@@ -334,7 +384,10 @@ except BlockingIOError:sys.exit(0)
 os.set_inheritable(f.fileno(),True)
 (root/'state/host-process.json').write_text(json.dumps({'pid':os.getpid(),'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}))
 os.chdir(root)
-command=[sys.executable,'-m','portfolio_runtime.runner','run' if a['role']=='coordinator' else 'branch','--config','/workspace/config/run.json']
+c=json.loads((root/'config/run.json').read_text())
+service=c.get('kind')=='weekday_service'
+if service and (a['role']!='coordinator' or 'portfolio_runtime/service.py' not in m['files']):sys.exit(78)
+command=[sys.executable,'-m','portfolio_runtime.service' if service else 'portfolio_runtime.runner','run' if a['role']=='coordinator' else 'branch','--config','/workspace/config/run.json']
 child=subprocess.Popen(command,pass_fds=(f.fileno(),))
 def stop(*_):
  if child.poll() is None:child.send_signal(signal.SIGTERM)
@@ -424,7 +477,7 @@ class SailHost:
             "image": {"base": "BASE_IMAGE_DEBIAN"},
             "size": "s",
             "memory_limit_gib": 2,
-            "state_disk_limit_gib": 8,
+            "state_disk_limit_gib": bundle_disk_limit_gib(bundle),
             "visibility": "private",
             "ingress_ports": [],
             "volume_mounts": [],
@@ -507,7 +560,9 @@ class SailHost:
             or row.get("visibility") != "private"
             or row.get("vcpu_count") != 1
             or row.get("memory_mib") != 2048
-            or row.get("state_disk_size_gib") != 8
+            or state["create_body"].get("state_disk_limit_gib") not in (8, 32)
+            or row.get("state_disk_size_gib")
+            != state["create_body"]["state_disk_limit_gib"]
             or row.get("volume_mounts") != []
             or row.get("ingress_ports") not in (None, [])
             or not policy_ok
@@ -644,7 +699,8 @@ class SailHost:
                 if code == 78:
                     raise ValueError("Frozen guest bootstrap failed validation")
             timeout = max(
-                1, int((stamp(state["deadline"]) - now()).total_seconds()) + 120
+                1, int((stamp(state["deadline"]) - now()).total_seconds())
+                + (300 if state["create_body"]["state_disk_limit_gib"] == 32 else 120)
             )
             attempt = {
                 "id": str(uuid.uuid4()),

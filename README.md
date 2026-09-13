@@ -2,16 +2,16 @@
 
 **Building an autonomous portfolio manager on Sail to outperform the S&P 500.**
 
-The agent researches companies, maintains investment theses and allocates a paper portfolio across S&P 500 stocks and cash. The benchmark is the **S&P 500 Total Return Index**. Live execution through Charles Schwab comes later.
+One paper portfolio across S&P 500 stocks and cash. The goal is a continuous loop: **invest, observe outcomes, revise the decision process, test again**. Sail agents follow financial disclosures and revisit their investment cases against the portfolio's record. Every decision and revision is timestamped. The benchmark is the **S&P 500 Total Return Index**.
 
-The experiment: does a persistent agent make better decisions when it can spend more time researching, remember earlier work and test competing explanations? Sail supplies the inference and cloud infrastructure; the project records the decisions, failures and cost.
-
-[Public portfolio](https://blakewoods.us/portfolio/) · [Architecture](docs/ARCHITECTURE.md) · [Evaluation](docs/EVALUATION.md)
+[Portfolio](https://blakewoods.us/portfolio/) · [Research history](https://blakewoods.us/portfolio/research/) · [How it works](docs/ARCHITECTURE.md)
 
 ## Current state
 
-- Paper ledger implemented; no live trades or investment performance yet.
-- Dated SEC financial facts captured for all 503 securities in the current research universe.
-- Hosted research is underway. The [live portfolio](https://blakewoods.us/portfolio/) shows the latest work and checkpoint; [run notes](docs/runs/2026-09-13.md) record the first sustained experiment.
+- Paper portfolio and source-linked research history; live Schwab execution comes later.
+- Weekday service implemented: persistent history, daily evidence, scheduled paper accounting, cloud supervision and private backups. The portfolio page shows deployment status.
+- Recorded outcomes return to subsequent allocation reviews. Controlled memory experiments support research reliability; autonomous investment-policy selection and proven outperformance remain ahead.
 
-[Run and inspect](docs/OPERATIONS.md) · [Roadmap](docs/ROADMAP.md)
+Sail supplies inference, persistent cloud execution and Voyages tracing. The project measures research quality, latency and cost, including memory, scheduling and cache comparisons. Training a specialized model is a later experiment.
+
+[Evaluation](docs/EVALUATION.md) · [Operations](docs/OPERATIONS.md) · [Roadmap](docs/ROADMAP.md)

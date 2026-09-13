@@ -37,6 +37,15 @@ class AdmissionClosed(RuntimeError):
     pass
 
 
+class SubmissionRejected(RuntimeError):
+    """Explicit pre-admission provider rejection, with no accepted response."""
+    def __init__(self, code):
+        if code not in {"unsupported_asap_request"}:
+            raise ValueError("Unrecognized rejection")
+        self.code = code
+        super().__init__(code)
+
+
 class ClosingConnection(sqlite3.Connection):
     """Commit/rollback and close context-owned connections; long runs must not leak FDs."""
 
@@ -120,7 +129,17 @@ class Transport:
         except HTTPError as error:
             # Never log provider bodies, credentials or arbitrary exception text.
             code = error.code
+            rejected = None
+            if code == 400 and method == "POST" and route == "/v1/responses":
+                try:
+                    detail = json.loads(error.read(32000)).get("error", {})
+                    if detail.get("type") == "invalid_request_error" and detail.get("code") == "unsupported_asap_request":
+                        rejected = detail["code"]
+                except (ValueError, TypeError, AttributeError):
+                    pass
             error.close()
+            if rejected:
+                raise SubmissionRejected(rejected) from None
             raise RuntimeError(f"provider_http_{code}") from None
         except Exception:
             raise RuntimeError("provider_transport_unconfirmed") from None
@@ -193,7 +212,7 @@ def body_for(
         ],
         "reasoning": {"effort": "medium"},
         "max_output_tokens": max_output,
-        "background": profile not in ("k3", "flash"),
+        "background": window != "asap",
         "metadata": metadata,
     }
     if cache_key:
@@ -422,7 +441,7 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                 raise ValueError("Request differs from frozen profile")
             if body.get("reasoning") != {"effort": "medium"}:
                 raise ValueError("Unfrozen reasoning effort")
-            if body["background"] is not (profile not in ("k3", "flash")):
+            if body["background"] is not (self.profiles[profile][1] != "asap"):
                 raise ValueError("Unsupported completion mode")
             if (
                 type(body["max_output_tokens"]) is not int
@@ -473,6 +492,9 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
             self._admission_open(db)
             if Decimal(self.totals(db)["committed_usd"]) + reserve > self.allowance(at):
                 raise AdmissionClosed("Paced allowance unavailable")
+            guard = getattr(self, "reservation_guard", None)
+            if guard is not None and guard(reserve) is not True:
+                raise AdmissionClosed("External spending authority unavailable")
             identity = "pa-" + str(uuid.uuid4())
             db.execute(
                 "INSERT INTO requests(id,task_id,profile,body,reserved,status,created,updated,cache) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -510,15 +532,18 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                 row = dict(found)
             if row["status"] in TERMINAL:
                 return row
-            if not row["response_id"] and (
-                self.clock() - row["created"] > 23 * 3600 or row["attempts"] >= 10
-            ):
-                return row
             if (
                 not row["response_id"]
                 and row["attempts"] == 0
                 and self.clock()
                 >= self.config["ends_epoch"] - self.config.get("drain_seconds", 300)
+            ):
+                with self.connect() as db:
+                    db.execute("UPDATE requests SET status='cancelled',cost='0',updated=?,error='never_dispatched_before_deadline' WHERE id=? AND response_id IS NULL AND attempts=0",
+                               (self.clock(), identity))
+                    return dict(db.execute("SELECT * FROM requests WHERE id=?", (identity,)).fetchone())
+            if not row["response_id"] and (
+                self.clock() - row["created"] > 23 * 3600 or row["attempts"] >= 10
             ):
                 return row
             with self.connect() as db:
@@ -594,6 +619,12 @@ CREATE TRIGGER IF NOT EXISTS allocation_receipt_immutable BEFORE UPDATE ON alloc
                         ),
                     )
             except Exception as error:
+                if isinstance(error, SubmissionRejected) and not row["response_id"]:
+                    with self.connect() as db:
+                        db.execute("UPDATE requests SET status='failed',cost='0',updated=?,error=? WHERE id=? AND response_id IS NULL",
+                                   (self.clock(), error.code, identity))
+                    with self.connect() as db:
+                        return dict(db.execute("SELECT * FROM requests WHERE id=?", (identity,)).fetchone())
                 category = (
                     str(error)
                     if re.fullmatch(

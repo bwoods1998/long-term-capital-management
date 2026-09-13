@@ -20,6 +20,12 @@ class Research:
         self.path = Path(path)
         self.evidence = evidence
         self.companies = {c["symbol"]: c for c in evidence["companies"]}
+        self.memory_limit = 3
+        self.bounded_novelty = False
+        self.enable_cache_write = True
+        self.enable_experiments = True
+        self.allocation_profile = "pro_flex"
+        self.outcome_review_requested = False
         if not self.companies or len(self.companies) != len(evidence["companies"]):
             raise ValueError("Duplicate or empty company evidence")
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -30,6 +36,9 @@ CREATE TABLE IF NOT EXISTS decisions(id TEXT PRIMARY KEY,at TEXT NOT NULL,task_i
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,at REAL NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS research_contract(id INTEGER PRIMARY KEY CHECK(id=1),sha256 TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS decision_intents(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS prior_work(id TEXT PRIMARY KEY,symbol TEXT,kind TEXT NOT NULL,result TEXT NOT NULL,grade TEXT NOT NULL,cutoff TEXT,source_fingerprint TEXT NOT NULL,created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS prior_questions(id TEXT PRIMARY KEY,symbol TEXT NOT NULL,question TEXT NOT NULL,source_fingerprint TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS prior_work_frozen BEFORE UPDATE ON prior_work BEGIN SELECT RAISE(ABORT,'immutable prior research'); END;
 CREATE TRIGGER IF NOT EXISTS task_body_frozen BEFORE UPDATE OF id,wave,kind,symbol,profile,cache,body,created ON tasks BEGIN SELECT RAISE(ABORT,'immutable research task'); END;
 CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON tasks WHEN OLD.request_id IS NOT NULL AND NEW.request_id IS NOT OLD.request_id BEGIN SELECT RAISE(ABORT,'immutable task request'); END;""")
             db.execute("BEGIN IMMEDIATE")
@@ -113,10 +122,12 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
         )
 
     def latest(self, symbol=None, limit=12):
+        if limit <= 0:
+            return []
         with self.connect() as db:
             if symbol:
                 rows = db.execute(
-                    "SELECT id,kind,result,grade FROM tasks WHERE symbol=? AND status='complete' ORDER BY created DESC LIMIT ?",
+                    "SELECT id,kind,result,grade FROM tasks WHERE symbol=? AND status='complete' AND kind IN ('company','memory_review') ORDER BY created DESC LIMIT ?",
                     (symbol, limit),
                 ).fetchall()
             else:
@@ -124,7 +135,19 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                     "SELECT id,kind,result,grade FROM tasks WHERE status='complete' AND kind IN ('allocation','portfolio_critic','memory_review') ORDER BY created DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
-        return [
+            prior = []
+            if len(rows) < limit:
+                if symbol:
+                    prior = db.execute(
+                        "SELECT id,kind,result,grade,cutoff FROM prior_work WHERE symbol=? AND kind IN ('company','memory_review') ORDER BY created DESC LIMIT ?",
+                        (symbol, limit-len(rows)),
+                    ).fetchall()
+                else:
+                    prior = db.execute(
+                        "SELECT id,kind,result,grade,cutoff FROM prior_work WHERE kind IN ('allocation','portfolio_critic','memory_review') ORDER BY created DESC LIMIT ?",
+                        (limit-len(rows),),
+                    ).fetchall()
+        result = [
             {
                 "id": r["id"],
                 "kind": r["kind"],
@@ -133,18 +156,76 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
             }
             for r in rows
         ]
+        return result + [{"id": r["id"], "kind": r["kind"],
+                          "result": json.loads(r["result"]), "grade": json.loads(r["grade"]),
+                          "historical_cutoff": r["cutoff"],
+                          "notice": "Prior hypothesis, not source evidence; recheck against current packet."}
+                         for r in prior]
+
+    @staticmethod
+    def source_fingerprint(company):
+        # HTTP capture timestamps and unrelated SEC metadata are not new facts.
+        price = company.get("research_price") or {}
+        return hashlib.sha256(canonical({"facts": company.get("facts", {}),
+            "price": {k: price.get(k) for k in ("price", "as_of", "currency")}}).encode()).hexdigest()
+
+    def carry_history(self, paths):
+        """Import bounded immutable memory; never copy requests or trial outputs.
+
+        Retain original final text, but recheck its numerical claims against the
+        new epoch's sources. No earlier decision is promoted by this import.
+        """
+        allowed = {"company", "allocation", "portfolio_critic", "memory_review"}
+        with self.connect() as target:
+            for path in paths:
+                path = Path(path)
+                if not path.is_file() or path.resolve() == self.path.resolve():
+                    continue
+                with sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, factory=ClosingConnection) as source:
+                    source.row_factory = sqlite3.Row
+                    rows = source.execute(
+                        "SELECT id,symbol,kind,result,grade,body,created FROM tasks WHERE status='complete' AND kind IN ('company','allocation','portfolio_critic','memory_review') ORDER BY created DESC LIMIT 1600"
+                    ).fetchall()
+                for row in rows:
+                    if row["kind"] not in allowed or (row["symbol"] and row["symbol"] not in self.companies):
+                        continue
+                    result = json.loads(row["result"])
+                    if not isinstance(result, dict):
+                        continue
+                    try:
+                        body = json.loads(row["body"])
+                        packet = json.loads(body["input"][-1]["content"])
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                    company = packet.get("evidence") or {}
+                    cutoff = company.get("captured_at") or company.get("cutoff")
+                    fingerprint = self.source_fingerprint(company)
+                    identity = "prior-" + hashlib.sha256((str(path) + ":" + row["id"]).encode()).hexdigest()[:40]
+                    grade = grade_result(result, self.companies,
+                                         allocation=row["kind"] == "allocation")
+                    target.execute("INSERT OR IGNORE INTO prior_work VALUES(?,?,?,?,?,?,?,?)",
+                        (identity, row["symbol"], row["kind"], row["result"], canonical(grade),
+                         cutoff, fingerprint, row["created"]))
+                    question = packet.get("question")
+                    if row["kind"] == "company" and row["symbol"] and isinstance(question, str):
+                        target.execute("INSERT OR IGNORE INTO prior_questions VALUES(?,?,?,?)",
+                            (identity, row["symbol"], question, fingerprint))
 
     def choose(self, limit):
         with self.connect() as db:
             counts = {
                 r["symbol"]: r["n"]
                 for r in db.execute(
-                    "SELECT symbol,count(*) n FROM tasks WHERE symbol IS NOT NULL GROUP BY symbol"
+                    "SELECT symbol,count(*) n FROM tasks WHERE symbol IS NOT NULL AND kind!='policy_trial' GROUP BY symbol"
                 )
             }
+            if self.bounded_novelty:
+                for row in db.execute("SELECT symbol,source_fingerprint,count(*) n FROM prior_questions GROUP BY symbol,source_fingerprint"):
+                    if row["symbol"] in self.companies and row["source_fingerprint"] == self.source_fingerprint(self.companies[row["symbol"]]):
+                        counts[row["symbol"]] = counts.get(row["symbol"], 0) + row["n"]
             unresolved = []
             for r in db.execute(
-                "SELECT result,grade FROM tasks WHERE status='complete' ORDER BY created DESC LIMIT 120"
+                "SELECT result,grade,created FROM tasks WHERE status='complete' AND kind IN ('company','allocation','portfolio_critic','memory_review') UNION ALL SELECT result,grade,created FROM prior_work ORDER BY created DESC LIMIT 120"
             ):
                 result = json.loads(r["result"])
                 grade = json.loads(r["grade"])
@@ -191,7 +272,59 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                         "Investigate capital allocation, accounting comparability and valuation uncertainty; identify a disconfirming test.",
                     )
                 )
-        return selected
+        if not self.bounded_novelty:
+            return selected
+        seen = {}
+        with self.connect() as db:
+            for row in db.execute("SELECT symbol,question,source_fingerprint FROM prior_questions"):
+                seen.setdefault((row["symbol"], row["source_fingerprint"]), set()).add(row["question"])
+            for row in db.execute("SELECT symbol,body FROM tasks WHERE kind='company'"):
+                packet = json.loads(json.loads(row["body"])["input"][-1]["content"])
+                key = (row["symbol"], self.source_fingerprint(packet["evidence"]))
+                seen.setdefault(key, set()).add(packet["question"])
+        # Three distinct substantive reviews of unchanged evidence are enough
+        # before waiting for fresh facts/prices. New wording is not infinite work.
+        eligible = []
+        for sym, question in selected + [(s, q) for s, q, _ in unresolved]:
+            key = (sym, self.source_fingerprint(self.companies[sym]))
+            questions = seen.get(key, set())
+            if len(questions) < 3 and question not in questions and sym not in {s for s, _ in eligible}:
+                eligible.append((sym, question))
+        for sym in symbols:
+            if len(eligible) >= limit:
+                break
+            key = (sym, self.source_fingerprint(self.companies[sym]))
+            questions = seen.get(key, set())
+            question = "Assess the business economics, cash generation, balance-sheet resilience and missing valuation evidence. Identify what would change an investment decision."
+            if len(questions) < 3 and question not in questions and sym not in {s for s, _ in eligible}:
+                eligible.append((sym, question))
+        return eligible[:limit]
+
+    def checked_for_allocation(self):
+        """Current and historical company views, rechecked against this epoch.
+
+        Imported views remain hypotheses; only their exact numeric claims are
+        validated here. Trial outputs are never portfolio decision evidence.
+        """
+        with self.connect() as db:
+            rows = db.execute("""SELECT id,symbol,result,created,NULL cutoff FROM tasks
+WHERE kind='company' AND status='complete'
+UNION ALL SELECT id,symbol,result,created,cutoff FROM prior_work WHERE kind='company'
+ORDER BY created DESC LIMIT 1600""").fetchall()
+        checked, seen = [], set()
+        for row in rows:
+            if row["symbol"] not in self.companies or row["symbol"] in seen:
+                continue
+            result = json.loads(row["result"])
+            if not grade_result(result, self.companies)["source_check_passed"]:
+                continue
+            seen.add(row["symbol"])
+            checked.append({"symbol": row["symbol"], "result": result,
+                            "research_id": row["id"], "historical_cutoff": row["cutoff"],
+                            "interpretation": "Numerical claims rechecked against current sources; investment conclusion remains a hypothesis."})
+            if len(checked) == 36:
+                break
+        return checked
 
     def plan_wave(self, number, *, size=24, cache_ready=False, filings=None):
         with self.connect() as db:
@@ -200,6 +333,12 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
         # Later waves are material follow-ups selected from prior results, not replayed
         # prompts. Creation is idempotent and the deadline (not queue length) ends work.
         picks = self.choose(size)
+        checked = self.checked_for_allocation()
+        with self.connect() as db:
+            prior_allocation = db.execute("SELECT 1 FROM tasks WHERE kind='allocation' LIMIT 1").fetchone()
+        outcome_only = not picks and self.outcome_review_requested and not prior_allocation and bool(checked)
+        if not picks and not outcome_only:
+            return 0
         planned = []
 
         def add(*args, **kwargs):
@@ -219,7 +358,7 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                             **self.companies[symbol],
                             "filing_context": context,
                         }
-            history = self.latest(symbol, 3)
+            history = self.latest(symbol, self.memory_limit)
             profile = (
                 "pro_flex"
                 if number % 3 == 0
@@ -252,7 +391,7 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                 cache,
                 max_output=12288,
             )
-            if cache == "read" and i < 3:
+            if self.enable_experiments and cache == "read" and i < 3:
                 add(
                     f"w{number:02}-cache-control-{symbol}",
                     number,
@@ -266,7 +405,7 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                 )
             # Paired long-context vs fresh review: identical company facts/question;
             # memory arm receives prior work, fresh arm deliberately does not.
-            if history and memory_pairs < 3:
+            if self.enable_experiments and history and memory_pairs < 3:
                 memory_pairs += 1
                 fresh = canonical(
                     {
@@ -293,15 +432,11 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                     max_output=12288,
                 )
         # Completion-window experiments use the SAME task/source packet for all arms.
-        pair = picks[0][0]
-        question = canonical(
-            {
-                "task": "research",
-                "question": "Reconcile annual versus YTD cash flow and identify the most consequential financing risk.",
-                "evidence": self.companies[pair],
-            }
-        )
-        for profile in ("kimi_asap", "kimi_balanced", "kimi_flex"):
+        pair = picks[0][0] if picks else None
+        question = canonical({"task": "research",
+            "question": "Reconcile annual versus YTD cash flow and identify the most consequential financing risk.",
+            "evidence": self.companies[pair]}) if pair else None
+        for profile in (("kimi_asap", "kimi_balanced", "kimi_flex") if self.enable_experiments and picks else ()):
             add(
                 f"w{number:02}-window-{profile}",
                 number,
@@ -314,22 +449,16 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
             )
         # Allocation proposals use accumulated, checked research. K3 serves as an
         # independent capital-allocation critic, not a source of numerical truth.
-        with self.connect() as db:
-            checked = [
-                {"symbol": r["symbol"], "result": json.loads(r["result"])}
-                for r in db.execute(
-                    "SELECT symbol,result,grade FROM tasks WHERE status='complete' AND kind='company' ORDER BY created DESC LIMIT 120"
-                )
-                if json.loads(r["result"])
-                and json.loads(r["grade"])["source_check_passed"]
-            ]
         if checked:
             shared = canonical(
                 {
                     "task": "allocation",
-                    "question": "Propose the complete paper portfolio. Account for valuation uncertainty, sector concentration and competing uses of capital. You may keep cash if evidence is inadequate.",
+                    "question": "Propose the complete paper portfolio. Account for valuation uncertainty, sector concentration and competing uses of capital. You may keep cash if evidence is inadequate. Review the dated prior investment decisions and subsequent observations supplied here: state which investment assumption survived or failed, what evidence changes your current decision, and one falsifiable decision-rule hypothesis to revisit. Separate business evidence from realized price noise. Realized portfolio returns are confounded, not proof that a rule caused outperformance. Preserve earlier predictions; do not rewrite them with hindsight. Put this concise review in thesis and the next investment tests in questions.",
                     "checked_research": checked[:36],
                     "prior_portfolio_research": self.latest(limit=3),
+                    "paper_portfolio": getattr(self, "portfolio_context", None),
+                    "observed_investment_outcomes": getattr(self, "investment_outcomes", []),
+                    "trigger": "new_actual_investment_outcome" if outcome_only else "accumulated_company_research",
                 }
             )
             add(
@@ -337,12 +466,12 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                 number,
                 "allocation",
                 None,
-                "pro_flex",
+                self.allocation_profile,
                 self.prefix("allocation"),
                 shared,
                 max_output=16384,
             )
-        if number == 2:
+        if picks and number == 2 and not cache_ready and self.enable_cache_write and self.enable_experiments:
             add(
                 "cache-write-v1",
                 number,
@@ -385,6 +514,7 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                     canonical({"selected": [s for s, _ in picks], "size": size}),
                 ),
             )
+        return len(planned)
 
     def waiting(self):
         with self.connect() as db:
@@ -488,7 +618,7 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                         "original_input": json.loads(task["body"])["input"][-1][
                             "content"
                         ],
-                        "instruction": "Review this exact allocation. Return base research JSON with empty targets, >=3 distinct checkable source claims, plus review_verdict (approve, revise, or abstain) and the exact proposal_sha256. Approve only if its evidence supports proposing these paper targets; revise for material reasoning/accounting defects; abstain for insufficient evidence. Model confidence is not evidence.",
+                        "instruction": "Review this exact allocation and its proposed investment-rule hypothesis against the supplied dated prior decisions and forward observations. Challenge hindsight, unsupported causal claims and repeated mistakes; a profitable trade alone is not proof. Return base research JSON with empty targets, >=3 distinct checkable source claims, plus review_verdict (approve, revise, or abstain) and the exact proposal_sha256. Approve only if its evidence supports proposing these paper targets; revise for material reasoning/accounting defects; abstain for insufficient evidence. Model confidence is not evidence.",
                     }
                 )
                 self.add(

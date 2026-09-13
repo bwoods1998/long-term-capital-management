@@ -573,6 +573,29 @@ class YahooMarketData:
             "portfolio": state,
         }
 
+    def establish_baseline(self, ledger, *, now=None):
+        """Keep a cash-only Monday in the forward benchmark interval."""
+        now = now or self.clock()
+        state = ledger.public_state()
+        if state["history"]:
+            return {"status": "established", "portfolio": state}
+        pending_ids = {decision["id"] for decision in state["pending_decisions"]}
+        if any(not event["payload"].get("expected_open_at")
+               or timestamp(event["payload"]["expected_open_at"]) <= timestamp(now)
+               for event in ledger.events() if event["kind"] == "decision" and event["id"] in pending_ids):
+            return {"status": "waiting_for_pending_fill", "portfolio": state}
+        session = next_session(state["created_at"])
+        if timestamp(now) < timestamp(session.opens_at):
+            return {"status": "waiting_for_first_session", "portfolio": state}
+        if not self.benchmark_enabled:
+            return {"status": "unavailable", "portfolio": state}
+        points = self.fetch_benchmark()
+        point = next((p for p in points if p.as_of == session.opens_at), None)
+        if point is None:
+            return {"status": "unavailable", "portfolio": state}
+        return {"status": "established", "portfolio": ledger.establish_cash_baseline(
+            market_session=session, benchmark=point, observed_at=self.clock())}
+
     @staticmethod
     def _guard_actions(ledger, snapshots, *, observed_at):
         state = ledger.public_state()
