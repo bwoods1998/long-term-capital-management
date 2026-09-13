@@ -5,6 +5,7 @@ Independent Cloudflare Worker and Durable Object. Runs once a minute, checks the
 The API is private. `ADMIN_TOKEN`, `BACKUP_TOKEN` and `SAIL_API_KEY` are Wrangler secrets; do not put their values in configuration or Git. The backup token can only upload immutable checksummed artifacts to private R2 storage. It cannot read backups or control the service.
 
 - `GET /v1/status`: configuration, health and notification receipts.
+- `GET /v1/transport-check`: private, read-only checks of provider connectivity.
 - `POST /v1/configure`: enroll one immutable, tested service contract.
 - `POST /v1/pause` / `/v1/resume`: control the enrolled service.
 - `PUT /v1/backups/<service>/<snapshot>/<sha256>.gz`: private backup upload.

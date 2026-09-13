@@ -43,6 +43,16 @@ export default {
    return json({error:'method_not_allowed'},405);
   }
   if(!authorized(request,env.ADMIN_TOKEN))return json({error:'unauthorized'},401);
+  if(url.pathname==='/v1/transport-check'&&request.method==='GET'){
+   const checks=[];
+   for(const endpoint of ['https://api.sailresearch.com/v2/usage/summary?range=7d','https://sailbox-api.sailresearch.com/v1/sailboxes/spend']){
+    try{
+     const response=await fetch(endpoint,{redirect:'manual',headers:{Authorization:'Bearer '+env.SAIL_API_KEY},signal:AbortSignal.timeout(15000)});
+     checks.push({endpoint,status:response.status});await response.body?.cancel();
+    }catch(error){checks.push({endpoint,error_type:error.name,message:String(error.message).split(String(env.SAIL_API_KEY)).join('[redacted]').slice(0,240)});}
+   }
+   return json({credential_configured:typeof env.SAIL_API_KEY==='string'&&env.SAIL_API_KEY.length>12,checks});
+  }
   return env.SUPERVISOR.get(env.SUPERVISOR.idFromName('weekday-v1')).fetch(request);
  }
 };

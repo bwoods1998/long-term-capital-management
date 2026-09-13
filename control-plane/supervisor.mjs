@@ -5,6 +5,10 @@ const iso = ms => new Date(ms).toISOString();
 const finite = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 export const dollars = value => { if (typeof value !== 'number' && (typeof value !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value))) throw new Error('invalid_money'); const n = Number(value); if (!finite(n)) throw new Error('invalid_money'); return n; };
 const grant = value => (Math.floor(Math.max(0,value) * 1e8) / 1e8).toFixed(8);
+const failureCode = error => error?.message === 'Illegal invocation' ? 'fetch_illegal_invocation'
+  : /AbortSignal\.timeout/.test(error?.message || '') ? 'timeout_api_unavailable'
+  : /^[a-z0-9_]{1,64}$/.test(error?.message || '') ? error.message
+  : error?.name === 'SyntaxError' ? 'invalid_provider_json' : error?.name === 'TypeError' ? 'transport_type_error' : 'supervisor_failure';
 export function validateConfig(c) {
   if (!c || c.schema_version !== 1 || !/^[a-z0-9-]{8,64}$/.test(c.service_id || '')
     || !/^sb_[0-9a-f-]{36}$/.test(c.box_id || '') || !/^[a-f0-9]{64}$/.test(c.manifest_sha256 || '')) throw new Error('invalid_config');
@@ -66,7 +70,9 @@ export class Supervisor {
   constructor(storage, env, {fetcher = fetch, now = Date.now} = {}) { this.s = storage; this.env = env; this.fetcher = fetcher; this.now = now; this.tail = Promise.resolve(); }
   serial(fn) { const p = this.tail.then(fn); this.tail = p.catch(() => {}); return p; }
   async request(path, options = {}, base = API) {
-    const r = await this.fetcher(base + path, {...options, redirect:'error', signal:AbortSignal.timeout(45000),
+    // Workers' native fetch must not receive a Supervisor instance as `this`.
+    const fetcher = this.fetcher;
+    const r = await fetcher(base + path, {...options, redirect:'manual', signal:AbortSignal.timeout(45000),
       headers:{'Authorization':'Bearer ' + this.env.SAIL_API_KEY,'Content-Type':'application/json',...options.headers}});
     if (!r.ok) { r.body?.cancel(); throw new Error('provider_http_' + r.status); }
     return r;
@@ -104,6 +110,7 @@ export class Supervisor {
     if (finite(details.balance_usd)) lines.push('Sail balance: $' + details.balance_usd.toFixed(2) + '.');
     if (finite(details.runway_days)) lines.push('Estimated research runway: ' + details.runway_days.toFixed(1) + ' days.');
     if (kind === 'credit_low') lines.push('Add Sail credit to keep research running. The service detects funding automatically; no restart is needed: https://app.sailresearch.com/');
+    if (kind === 'recovered') lines.push('Cloud supervision is healthy again. The service will continue within its scheduled window.');
     if (kind === 'complete' && details.health?.inference) {
       const totals = details.health.inference;
       if (Number.isSafeInteger(totals.completed) && Number.isSafeInteger(totals.requests)) lines.push('Research: ' + totals.completed + ' completed / ' + totals.requests + ' requests.');
@@ -141,16 +148,20 @@ export class Supervisor {
     control.last_tick = at; await this.s.put('control',control);
     await this.s.setAlarm(at + 60000); // Durable recovery before any external work.
     const previous = await this.s.get('latest');
+    const hadFailure = (control.failures || 0) > 0;
     const latest = {as_of:iso(at),service_id:c.service_id,health:previous?.health,backup:previous?.backup};
     const start = Date.parse(c.starts_at), end = Date.parse(c.ends_at), ended = at >= end;
     const save = async () => { await this.s.put('control',control); await this.s.put('latest',latest); return latest; };
+    const recovered = async () => { if (!hadFailure) return; control.failures=0;
+      await this.alert(c.service_id+':recovered:'+(control.recovery_episode||0),'recovered');
+      control.recovery_episode=(control.recovery_episode||0)+1; };
     const sleep = async wake => this.json('/v1/sailboxes/'+c.box_id+'/sleep',{method:'POST',body:JSON.stringify(wake ? {wake_at:iso(wake)} : {})});
     const fail = async reason => { control.failures=(control.failures||0)+1;latest.status='needs_attention';latest.reason_code=reason;
       if (control.failures>=3) await this.alert(c.service_id+':failure:'+iso(at).slice(0,10),'failure',{reason}); };
     // Billing outages revoke admission; they never prevent stop, backup or cleanup.
     let summary = null;
     try { summary = await this.json('/v2/usage/summary?range=7d',{},INFERENCE); }
-    catch { latest.billing_status='unavailable'; }
+    catch (error) { latest.billing_status='unavailable';latest.billing_reason_code=failureCode(error); }
     if (!control.spend_checked_at || at-control.spend_checked_at >= 3600000) {
       try {
         const usage = await this.json('/v1/sailboxes/spend?sailbox_id='+c.box_id);
@@ -159,7 +170,7 @@ export class Supervisor {
         if (usage.pricing_configured !== true || !finite(nanos)) throw new Error('compute_spend_unavailable');
         control.compute_used_usd = Math.max(control.compute_used_usd || 0,nanos/1e9);
         control.spend_checked_at=at;
-      } catch { latest.compute_status='unavailable'; }
+      } catch (error) { latest.compute_status='unavailable';latest.compute_reason_code=failureCode(error); }
     }
     const computeKnown = control.spend_checked_at !== undefined;
     const computeExhausted = computeKnown && control.compute_used_usd >= dollars(c.cloud_budget_usd);
@@ -170,7 +181,7 @@ export class Supervisor {
     if (!computeKnown) credit = {...credit,allow:false,reason:'billing_unavailable'};
     latest.credit=credit;
     // One notice per funding episode. A low balance must not send a second runway email.
-    const fundingIssue = !credit.allow || credit.warn;
+    const fundingIssue = !credit.allow || (credit.warn && at>=start);
     if (fundingIssue && !control.credit_alerted && !ended && !control.paused) {
       await this.alert(c.service_id+':credit:'+(control.credit_episode||0),credit.reason==='billing_unavailable'?'billing_unavailable':credit.reason==='authorization_exhausted'?'failure':'credit_low', {...credit,reason:credit.reason});
       control.credit_alerted=true;
@@ -178,7 +189,7 @@ export class Supervisor {
     if (control.parked && control.paused && !ended) {latest.status='paused';return save();}
     if (control.budget_parked && !ended) {latest.status='needs_attention';latest.reason_code='cloud_budget_exhausted';return save();}
     if (control.sleep_until && at < Date.parse(control.sleep_until) && !control.paused && !ended && !computeExhausted) {
-      latest.status='waiting';return save();
+      latest.status='waiting';if(credit.allow&&!latest.billing_status&&!latest.compute_status)await recovered();return save();
     }
     delete control.sleep_until;
     const stopping = ended || control.paused || computeExhausted;
@@ -261,8 +272,9 @@ export class Supervisor {
         const wake=at<start?start:Math.min(end,Date.parse(health.next_wake_at));
         await sleep(wake);control.sleep_until=iso(wake);
       }
+      if(!stopping&&credit.allow&&!latest.billing_status&&!latest.compute_status&&['waiting','running'].includes(latest.status))await recovered();
     } catch (error) {
-      const reason=/^[a-z0-9_]{1,64}$/.test(error?.message||'')?error.message:'supervisor_failure';
+      const reason=failureCode(error);
       await fail(reason);
       // A broken file/exec/backup API cannot prevent the independently available
       // sleep endpoint from enforcing the final stop boundary.

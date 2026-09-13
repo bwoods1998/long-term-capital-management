@@ -28,6 +28,17 @@ test('bounded transport and explicit terminal exec receipts',async()=>{
  assert.equal(parseExec('{"type":"started","exec_request_id":"one"}\n').code,null);
  await assert.rejects(()=>boundedText(new Response('oversized'),2),/oversized/);
 });
+
+test('native fetch is invoked without a controller receiver',async()=>{
+ const c=new Supervisor(new Storage(),{}, {fetcher:async function(){assert.equal(this,undefined);return Response.json({ok:true});}});
+ assert.deepEqual(await c.json('/v1/test'),{ok:true});
+});
+
+test('portable manual redirects never forward the Sail credential',async()=>{
+ let calls=0;
+ const c=new Supervisor(new Storage(),{SAIL_API_KEY:'test-key'},{fetcher:async(url,options)=>{calls++;assert.equal(options.redirect,'manual');return new Response(null,{status:302,headers:{Location:'https://untrusted.invalid/'}});}});
+ await assert.rejects(()=>c.json('/v1/test'),/provider_http_302/);assert.equal(calls,1);
+});
 test('immutable enrollment, serialized duplicate ticks, and pending alarm before external I/O',async()=>{
  const s=new Storage();let calls=0;
  const c=new Supervisor(s,{}, {now:()=>start,fetcher:async()=>{calls++;assert.equal(s.alarm,start+60000);throw new Error('network');}});
@@ -152,6 +163,13 @@ test('pre-start service sleeps once and billing checks leave it asleep',async()=
  const before=f.calls.length;f.advance(60000);await f.c.tick();
  assert(f.calls.slice(before).every(r=>r.url.includes('/usage/summary')));
  assert(!f.commands().some(c=>typeof c.command==='string'&&c.command.includes('host-boot')));
+});
+
+test('successful supervision sends one recovery notice and clears prior failures',async()=>{
+ const f=harness({at:start-3600000});await f.c.configure(config());await f.s.put('control',{paused:false,failures:3});
+ await f.c.tick();assert.equal((await f.s.get('control')).failures,0);
+ assert.equal(f.sent.filter(m=>/service recovered/.test(m.subject)).length,1);
+ f.advance(60000);await f.c.tick();assert.equal(f.sent.filter(m=>/service recovered/.test(m.subject)).length,1);
 });
 
 test('fixed week deadline sleeps even if progress stays live, backup stalls and probe fails',async()=>{
