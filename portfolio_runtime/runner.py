@@ -177,18 +177,26 @@ def public_projection(config, ledger, research, client, *, status="running"):
     if saved:
         decision = json.loads(saved["result"])
         targets = decision.get("targets", [])
+        unchanged = saved["status"] == "unchanged"
         symbols = ", ".join(
             t["symbol"]
             for t in sorted(targets, key=lambda x: Decimal(x["weight"]), reverse=True)[
                 :4
             ]
         )
+        if unchanged:
+            summary_text = (
+                "Reaffirmed the existing target allocation."
+                if targets else "Reaffirmed the cash allocation."
+            )
+        elif targets:
+            summary_text = f"Selected {len(targets)} stocks. Largest target positions: {symbols}."
+        else:
+            summary_text = "Keep the paper portfolio in cash while researching stronger evidence."
         latest = {
             "at": saved["at"],
-            "action": "rebalance" if targets else "hold",
-            "summary": f"Selected {len(targets)} stocks. Largest target positions: {symbols}."
-            if targets
-            else "Keep the paper portfolio in cash while researching stronger evidence.",
+            "action": "rebalance" if targets and not unchanged else "hold",
+            "summary": summary_text,
             "sources": [],
         }
         cited = list(

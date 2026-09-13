@@ -645,6 +645,47 @@ class RunnerTests(unittest.TestCase):
                 ledger.public_state()["pending_decisions"][0]["decided_at"], AT
             )
 
+    def test_reaffirmed_allocation_has_new_review_time_without_a_new_order(self):
+        targets = [
+            {"symbol": "AAPL", "weight": "0.10"},
+            {"symbol": "MSFT", "weight": "0.15"},
+        ]
+        self.checked_allocation(targets=targets, wave=0)
+        client = SimpleNamespace(
+            totals=lambda: {
+                "unsettled_requests": 0,
+                "known_cost_usd": "0",
+                "completed": 0,
+                "requests": 0,
+                "committed_usd": "0",
+            }
+        )
+        reviewed_at = "2026-09-13T15:05:00Z"
+        with self.ledger() as ledger:
+            with patch.object(r, "utc_now", return_value=AT):
+                r.propose_checked(self.config, self.research, ledger)
+                first = r.public_projection(self.config, ledger, self.research, client)
+            original_state, original_events = ledger.public_state(), ledger.events()
+            self.assertEqual(first["latest_decision"]["action"], "rebalance")
+            # Equivalent decimal spellings are the same target allocation.
+            targets[0]["weight"] = "0.100"
+            self.checked_allocation(targets=targets, wave=1)
+            with patch.object(r, "utc_now", return_value=reviewed_at):
+                r.propose_checked(self.config, self.research, ledger)
+                view = r.public_projection(self.config, ledger, self.research, client)
+            self.assertEqual(ledger.events(), original_events)
+            self.assertEqual(view["portfolio"], original_state)
+            self.assertEqual(
+                view["portfolio"]["pending_decisions"][0]["decided_at"], AT
+            )
+            self.assertEqual(view["latest_decision"]["at"], reviewed_at)
+            self.assertEqual(view["latest_decision"]["action"], "hold")
+            self.assertEqual(
+                view["latest_decision"]["summary"],
+                "Reaffirmed the existing target allocation.",
+            )
+            self.assertTrue(view["latest_decision"]["sources"])
+
     def test_older_approved_wave_cannot_overwrite_newer_paper_allocation(self):
         self.checked_allocation(wave=0)
         newest = self.checked_allocation(
