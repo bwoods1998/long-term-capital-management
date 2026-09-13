@@ -15,9 +15,22 @@ sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location("week_host", SCRIPTS / "week_host.py")
 week_host = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(week_host)
+from portfolio_runtime.ledger import PortfolioLedger
 
 
 class PreparationTests(unittest.TestCase):
+    def inputs(self,root):
+        anchor=root/'.data/runtime/account-anchor.json'
+        anchor.parent.mkdir(parents=True)
+        anchor.write_text(json.dumps({'created_at':'2026-09-13T15:34:12Z'}))
+        seed=root/'seed';seed.mkdir()
+        with PortfolioLedger(seed/'paper.sqlite',created_at='2026-09-13T15:34:12Z'):
+            pass
+        for name in ('research.sqlite','requests.sqlite'):
+            with closing(sqlite3.connect(seed/name)) as db,db:
+                db.execute('CREATE TABLE saved(id INTEGER PRIMARY KEY)')
+        return seed
+
     def test_seed_transfer_does_not_replace_the_serializable_deployment_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -40,14 +53,7 @@ class PreparationTests(unittest.TestCase):
     def test_large_ceiling_keeps_exploration_pace_and_checked_seed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            anchor = root / ".data/runtime/account-anchor.json"
-            anchor.parent.mkdir(parents=True)
-            anchor.write_text(json.dumps({"created_at": "2026-09-13T15:34:12Z"}))
-            seed = root / "seed"
-            seed.mkdir()
-            for name in ("paper.sqlite", "research.sqlite", "requests.sqlite"):
-                with closing(sqlite3.connect(seed / name)) as db, db:
-                    db.execute("CREATE TABLE saved(id INTEGER PRIMARY KEY)")
+            seed=self.inputs(root)
             with patch.object(week_host, "ROOT", root), patch.object(week_host, "load_api_key", return_value="test-only-private-key"):
                 config = week_host.prepare(root / "week", total="1000", starts="2026-09-14T04:00:00Z", ends="2026-09-19T04:00:00Z", seed=seed)
             self.assertEqual(config["session_inference_budget_usd"], "4.625")
@@ -57,6 +63,54 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(len(frozen["files"]), 3)
             self.assertNotIn("test-only-private-key", (root / "week/run.json").read_text())
             self.assertEqual((root / "week/run.json").stat().st_mode & 0o077, 0)
+
+    def test_rehearsal_keeps_same_week_start_budget_account_and_enrollment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);seed=self.inputs(root)
+            before=(seed/'paper.sqlite').read_bytes()
+            rehearsal={'starts_at':'2026-09-13T19:00:00Z','ends_at':'2026-09-14T00:00:00Z',
+                       'inference_budget_usd':'10','session_inference_budget_usd':'2'}
+            with patch.object(week_host,'ROOT',root),patch.object(week_host,'load_api_key',return_value='test-key'):
+                config=week_host.prepare(root/'week',total='1000',starts='2026-09-14T04:00:00Z',
+                                        ends='2026-09-19T04:00:00Z',seed=seed,rehearsal=rehearsal)
+            self.assertEqual(config['rehearsal'],rehearsal)
+            self.assertEqual(config['week_starts_at'],'2026-09-14T04:00:00Z')
+            self.assertEqual(config['weekly_inference_budget_usd'],'992.5')
+            self.assertEqual(config['account_created_at'],'2026-09-13T15:34:12Z')
+            self.assertEqual((seed/'paper.sqlite').read_bytes(),before)
+            (root/'week/host').mkdir()
+            (root/'week/host/host.json').write_text(json.dumps({'sailbox_id':'sb-test','manifest_sha256':'a'*64}))
+            enrolled=week_host.enrollment(root/'week')
+            self.assertEqual(enrolled['rehearsal'],rehearsal)
+            self.assertEqual(enrolled['starts_at'],config['week_starts_at'])
+
+    def test_rehearsal_rejects_overlap_overspending_oversized_window_before_key(self):
+        base={'starts_at':'2026-09-13T19:00:00Z','ends_at':'2026-09-14T00:00:00Z',
+              'inference_budget_usd':'10','session_inference_budget_usd':'2'}
+        changes=({'ends_at':'2026-09-14T05:00:00Z'}, {'inference_budget_usd':'11'},
+                 {'session_inference_budget_usd':'2.1'}, {'session_inference_budget_usd':'0'},
+                 {'inference_budget_usd':'NaN'}, {'starts_at':'2026-09-12T19:00:00Z'})
+        with tempfile.TemporaryDirectory() as directory,patch.object(week_host,'load_api_key') as key:
+            for change in changes:
+                with self.assertRaises(ValueError):
+                    week_host.prepare(Path(directory)/'fresh',total='1000',starts='2026-09-14T04:00:00Z',
+                                      ends='2026-09-19T04:00:00Z',seed=directory,rehearsal={**base,**change})
+            key.assert_not_called()
+
+    def test_rehearsal_cannot_precede_permanent_account_or_change_seed_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);seed=self.inputs(root)
+            rehearsal={'starts_at':'2026-09-13T14:00:00Z','ends_at':'2026-09-13T19:00:00Z',
+                       'inference_budget_usd':'10','session_inference_budget_usd':'2'}
+            with patch.object(week_host,'ROOT',root),patch.object(week_host,'load_api_key') as key:
+                with self.assertRaises(ValueError):
+                    week_host.prepare(root/'week',total='1000',starts='2026-09-14T04:00:00Z',
+                                      ends='2026-09-19T04:00:00Z',seed=seed,rehearsal=rehearsal)
+                (root/'.data/runtime/account-anchor.json').write_text(json.dumps({'created_at':'2026-09-13T15:30:00Z'}))
+                with self.assertRaises(ValueError):
+                    week_host.prepare(root/'week',total='1000',starts='2026-09-14T04:00:00Z',
+                                      ends='2026-09-19T04:00:00Z',seed=seed)
+                key.assert_not_called()
 
     def test_invalid_window_is_rejected_before_private_credentials(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(week_host, "load_api_key") as key:

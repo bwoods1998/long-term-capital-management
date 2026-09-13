@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {Supervisor,creditDecision,validateConfig,parseExec,boundedText} from '../supervisor.mjs';
 const start=Date.parse('2026-09-14T04:00:00Z');
 const config=()=>({schema_version:1,service_id:'week-20260914',box_id:'sb_00000000-0000-0000-0000-000000000001',manifest_sha256:'a'.repeat(64),starts_at:new Date(start).toISOString(),ends_at:'2026-09-19T04:00:00Z',weekly_total_usd:'100',weekly_inference_usd:'92.5',cloud_budget_usd:'7.5',credit_floor_usd:'2'});
@@ -10,6 +11,7 @@ class Storage{
  async list({prefix}){return new Map([...this.data].filter(([k])=>k.startsWith(prefix)));}
  async setAlarm(t){this.alarm=t;}
  async deleteAlarm(){this.alarm=null;}
+ async transaction(fn){const before=structuredClone(this.data), alarm=this.alarm;try{return await fn(this);}catch(e){this.data=before;this.alarm=alarm;throw e;}}
 }
 const billing={balance:12000,balance_unavailable:false,has_metronome_customer:true,avg_cost_per_day:1000};
 test('billing units, pending reservations, unknown balance, and actionable runway',()=>{
@@ -98,6 +100,117 @@ function harness({at=start,running=true,balance=billing,compute=0,health={}}={})
  }});
  return {c,s,state,calls,sent,advance(ms){state.at+=ms;},commands(){return calls.filter(r=>r.url.endsWith('/exec')).map(r=>JSON.parse(r.options.body));},files(){return calls.filter(r=>r.url.includes('/files?')).map(r=>JSON.parse(r.options.body));}};
 }
+
+const rehearsalConfig=()=>({...config(),rehearsal:{starts_at:new Date(start-8*3600000).toISOString(),ends_at:new Date(start-3*3600000).toISOString(),inference_budget_usd:'10',session_inference_budget_usd:'2'}});
+test('rehearsal config preserves the week and accepts only a bounded explicit prelude',()=>{
+ const c=rehearsalConfig();assert.equal(validateConfig(c).starts_at,config().starts_at);
+ for(const change of [{ends_at:c.starts_at,starts_at:new Date(start-9*3600000).toISOString()},
+   {ends_at:new Date(start+1000).toISOString()},{session_inference_budget_usd:'11'},{inference_budget_usd:'0'},{command:'anything'}]) {
+  assert.throws(()=>validateConfig({...c,rehearsal:{...c.rehearsal,...change}}));
+ }
+});
+
+test('Sunday rehearsal admits within its own cap before the unchanged weekday start',async()=>{
+ const c=rehearsalConfig(), f=harness({at:start-7*3600000});await f.c.configure(c);await f.c.tick();
+ assert.equal(f.files()[0].allow_new_research,true);
+ assert.equal(f.files()[0].max_inference_committed_usd,'10.00000000');
+ assert.equal((await f.s.get('config')).starts_at,config().starts_at);
+ assert(!f.commands().some(c=>typeof c.command==='string'&&c.command.includes('host-boot')));
+});
+
+test('rehearsal completion emails once, denies gap admission, and sleeps until the original week',async()=>{
+ const c=rehearsalConfig(), at=start-2*3600000;
+ const f=harness({at,health:{status:'waiting',next_wake_at:c.starts_at,rehearsal:{...c.rehearsal,status:'complete',completed_at:new Date(at-60000).toISOString(),unsettled_requests:0,inference:{completed:11,requests:12,known_cost_usd:'1.23'}}}});
+ await f.c.configure(c);await f.c.tick();
+ assert.equal(f.files()[0].allow_new_research,false);
+ assert.equal((await f.s.get('control')).sleep_until,c.starts_at);
+ assert.equal((await f.s.get('control')).finished,undefined);
+ assert.equal(f.sent.filter(m=>/rehearsal complete/.test(m.subject)).length,1);
+ assert(f.sent.some(m=>m.text.includes('9:00 PM Pacific')));
+ assert(f.sent.some(m=>m.text.includes('11 completed / 12 requests')&&m.text.includes('$1.23')));
+ assert(!f.sent.some(m=>/week complete/.test(m.subject)));
+ const before=f.calls.length;f.advance(60000);await f.c.tick();
+ assert(f.calls.slice(before).every(r=>r.url.includes('/usage/summary')));
+ assert.equal(f.sent.filter(m=>/rehearsal complete/.test(m.subject)).length,1);
+ f.advance(start-f.state.at);f.state.health.heartbeat_at=new Date(start).toISOString();f.state.health.progress_at=new Date(start).toISOString();f.state.health.status='running';
+ await f.c.tick();assert.equal(f.files().at(-1).allow_new_research,true);
+ assert.equal(f.sent.filter(m=>/rehearsal complete/.test(m.subject)).length,1);
+});
+
+test('funded bounded rehearsal avoids irrelevant weekly runway warnings while low credit still alerts',async()=>{
+ const c=rehearsalConfig();
+ const f=harness({at:start-7*3600000,balance:{...billing,balance:3000,avg_cost_per_day:11100}});
+ await f.c.configure(c);await f.c.tick();assert.equal(f.files()[0].allow_new_research,true);
+ assert.equal(f.sent.length,0);
+ const g=harness({at:start-7*3600000,balance:{...billing,balance:500,avg_cost_per_day:11100}});
+ await g.c.configure(c);await g.c.tick();assert.equal(g.files()[0].allow_new_research,false);
+ assert(g.sent.some(m=>/funding needed/.test(m.subject)));
+});
+
+test('unsettled rehearsal never sends completion and still recovers receipts during the gap',async()=>{
+ const c=rehearsalConfig(), at=start-2*3600000;
+ const f=harness({at,running:false,health:{rehearsal:{...c.rehearsal,status:'settling',completed_at:null,unsettled_requests:1}}});
+ await f.c.configure(c);await f.c.tick();
+ assert.equal(f.files()[0].allow_new_research,false);
+ assert(f.commands().some(c=>typeof c.command==='string'&&c.command.includes('host-boot')));
+ assert(!f.sent.some(m=>/rehearsal complete|week complete/.test(m.subject)));
+ f.advance(60000);f.state.running=true;f.state.health.status='waiting';f.state.health.next_wake_at=c.starts_at;
+ f.state.health.heartbeat_at=new Date(f.state.at).toISOString();f.state.health.progress_at=new Date(f.state.at).toISOString();
+ await f.c.tick();assert(!f.calls.some(r=>r.url.endsWith('/sleep')));
+});
+
+async function replacementHarness() {
+ const f=harness({at:start-3600000,running:false});await f.c.configure(config());
+ const old=config(), next={...rehearsalConfig(),service_id:'week-20260914-v3',box_id:'sb_00000000-0000-0000-0000-000000000003',manifest_sha256:'c'.repeat(64)};
+ const at=new Date(f.state.at-1000).toISOString(), snapshot='snapshot-20260913-abcd';
+ const files=['paper.sqlite','research.sqlite','requests.sqlite'].map((name,i)=>({path:'state/seed/'+name,compressed_sha256:String(i+1).repeat(64),compressed_bytes:50,object_key:old.service_id+'/'+snapshot+'/'+String(i+1).repeat(64)+'.gz'}));
+ const manifest={schema_version:1,service_id:old.service_id,snapshot_id:snapshot,completed_at:at,files};
+ const raw=JSON.stringify(manifest),hash=createHash('sha256').update(raw).digest('hex'),key=old.service_id+'/'+snapshot+'/'+hash+'.json';
+ f.c.env.BACKUPS={get:async k=>k===key?{body:new Response(raw).body,size:Buffer.byteLength(raw),customMetadata:{sha256:hash}}:null,head:async k=>{const row=files.find(r=>r.object_key===k);return row?{size:row.compressed_bytes,customMetadata:{sha256:row.compressed_sha256}}:null;}};
+ await f.s.put('control',{paused:true,parked:true,stop_started_at:new Date(f.state.at-60000).toISOString(),failures:3,boot_intent:{id:'old'},credit_episode:7});
+ await f.s.put('latest',{status:'paused',health:null,backup:{running:false,status:'complete',completed_at:at,manifest_key:key}});
+ f.c.json=async()=>({sailbox_id:old.box_id,status:'sleeping'});
+ f.c.file=async()=>({service_id:next.service_id,allow_new_research:false});
+ f.c.exec=async()=>({manifest_sha256:next.manifest_sha256,running:false,health:null});
+ return {...f,body:{previous_service_id:old.service_id,config:next,readiness:{ready:true,manifest_sha256:next.manifest_sha256,seed_verified:true,previous_backup_manifest_key:key}}};
+}
+
+test('replacement archives one stopped enrollment atomically and resets all old operational state',async()=>{
+ const f=await replacementHarness();await f.c.replace(f.body);
+ assert.equal((await f.s.get('config')).service_id,f.body.config.service_id);
+ assert.deepEqual(await f.s.get('control'),{paused:false,failures:0});
+ assert.equal((await f.s.get('archive:'+config().service_id)).control.boot_intent.id,'old');
+ assert.equal((await f.s.get('latest')).health,undefined);
+ assert.equal(f.s.alarm,f.state.at+1000);
+ assert.equal((await f.c.replace(f.body)).replayed,true);
+ assert.equal(await f.s.get('replacement_count'),1);
+});
+
+test('replacement refuses active, unreconciled, missing-backup, changed-seed and already-running candidates',async()=>{
+ for(const mutate of [
+   async f=>f.s.put('control',{...(await f.s.get('control')),paused:false}),
+   async f=>f.s.put('control',{...(await f.s.get('control')),parked:false}),
+   async f=>f.s.put('latest',{...(await f.s.get('latest')),health:{inference:{unsettled_requests:1}}}),
+   async f=>{f.c.json=async()=>({sailbox_id:config().box_id,status:'running'});},
+   async f=>{f.c.env.BACKUPS.head=async()=>null;},
+   async f=>{f.body.readiness.previous_backup_manifest_key='wrong';},
+   async f=>{f.c.exec=async()=>({manifest_sha256:f.body.config.manifest_sha256,running:true});},
+   async f=>{f.c.file=async()=>({service_id:f.body.config.service_id,allow_new_research:true});},
+   async f=>f.s.put('replacement_count',12),
+ ]) {
+   const f=await replacementHarness();await mutate(f);await assert.rejects(()=>f.c.replace(f.body));
+   assert.equal((await f.s.get('config')).service_id,config().service_id);
+   assert.equal(await f.s.get('archive:'+config().service_id),undefined);
+ }
+});
+
+test('replacement transaction failure cannot half-switch the active controller',async()=>{
+ const f=await replacementHarness(), original=f.s.put.bind(f.s);
+ f.s.put=async(k,v)=>{if(k==='control')throw Error('storage_failed');return original(k,v);};
+ await assert.rejects(()=>f.c.replace(f.body),/storage_failed/);
+ assert.equal((await f.s.get('config')).service_id,config().service_id);
+ assert.equal(await f.s.get('archive:'+config().service_id),undefined);
+});
 
 test('absolute credit grants reserve cloud and active epochs without starving already funded requests',()=>{
  const health={inference:{known_cost_usd:'5',committed_usd:'7',reserved_usd:'10'}};

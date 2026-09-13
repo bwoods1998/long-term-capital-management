@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import patch
 
 from portfolio_runtime import runner
+from portfolio_runtime import service as service_runtime
 from portfolio_runtime.contracts import BenchmarkPoint, UniverseSnapshot, YAHOO_SP500TR, timestamp
 from portfolio_runtime.evidence import save
 from portfolio_runtime.ledger import PortfolioLedger
@@ -313,6 +314,174 @@ class ServiceTests(unittest.TestCase):
             save(path, {**self.config, field: value})
             with self.assertRaises(ValueError):
                 read_config(path)
+
+    def rehearsal_config(self):
+        self.config["rehearsal"] = {"starts_at": "2026-09-13T19:07:00Z", "ends_at": "2026-09-14T00:07:00Z",
+                                    "inference_budget_usd": "10", "session_inference_budget_usd": "2"}
+        return self.config["rehearsal"]
+
+    def test_rehearsal_contract_requires_bounded_pre_week_envelope(self):
+        rehearsal = self.rehearsal_config()
+        path = self.root/"config.json"
+        save(path, self.config)
+        self.assertEqual(read_config(path)["rehearsal"], rehearsal)
+        invalid = [
+            {**rehearsal, "ends_at": "2026-09-14T04:00:01Z"},
+            {**rehearsal, "ends_at": "2026-09-13T19:30:00Z"},
+            {**rehearsal, "starts_at": "2026-09-13T14:00:00Z"},
+            {**rehearsal, "inference_budget_usd": "101"},
+            {**rehearsal, "session_inference_budget_usd": "11"},
+            {**rehearsal, "inference_budget_usd": "NaN"},
+            {**rehearsal, "repeat": True}, None,
+        ]
+        for value in invalid:
+            with self.subTest(rehearsal=value):
+                save(path, {**self.config, "rehearsal": value})
+                with self.assertRaises(ValueError):
+                    read_config(path)
+
+    def test_five_rehearsal_hours_then_gap_and_same_week_account(self):
+        rehearsal = self.rehearsal_config()
+        starts = timestamp(rehearsal["starts_at"]).timestamp()
+        ends = timestamp(rehearsal["ends_at"]).timestamp()
+        self.at = starts-1
+        calls = []
+        def settled(config, data, controller):
+            calls.append(deepcopy(config))
+            client = Client(Path(config["state_dir"])/"requests.sqlite", config,
+                            transport=lambda *a: self.fail("No network in accounting fixture"), clock=lambda: self.at)
+            research = Research(Path(config["state_dir"])/"research.sqlite", data)
+            research.add("one", 0, "company", "AAPL", "kimi_flex", "source", "question", max_output=128)
+            row = research.waiting()[0]
+            identity = client.submit_intent(row["id"], row["profile"], json.loads(row["body"]))
+            with client.connect() as db:
+                db.execute("UPDATE requests SET status='completed',cost='2',response_id='resp_one' WHERE id=?", (identity,))
+            save(self.root/"state/public.json", {"schema_version": 1, "research": {"status": "running"},
+                 "sail": {"status": "running", "started_at": stamp(config["started_epoch"]),
+                          "ends_at": stamp(config["ends_epoch"]), "known_cost_usd": "2", "unsettled_requests": 0}})
+            self.at = config["ends_epoch"]
+        service = self.service(executor=settled)
+        self.admit()
+        with service.locked():
+            self.assertEqual(service.tick(), "waiting")
+        self.assertEqual(service.health()["next_wake_at"], rehearsal["starts_at"])
+        self.assertFalse(service.admission_allowed())
+        self.assertEqual(service.allowance(), 0)
+        for hour in range(5):
+            self.at = starts+hour*3600
+            self.admit()
+            with service.locked():
+                service.tick()
+            self.assertEqual(calls[-1]["started_epoch"], starts+hour*3600)
+            self.assertEqual(calls[-1]["ends_epoch"], starts+(hour+1)*3600)
+            self.assertEqual(Decimal(calls[-1]["inference_budget_usd"]), 2)
+            self.assertLessEqual(Decimal(service.totals("rehearsal")["reserved_usd"]), 10)
+        self.assertEqual(self.at, ends)
+        self.assertEqual(service.health()["rehearsal"]["status"], "complete")
+        self.assertEqual(service.health()["rehearsal"]["completed_at"], rehearsal["ends_at"])
+        self.assertEqual(service.health()["rehearsal"]["inference"]["known_cost_usd"], "10")
+        self.assertEqual(service.status, "waiting")
+        self.assertFalse(service.terminal)
+        self.assertEqual(service.public_service()["next_wake_at"], MONDAY)
+        public = json.loads((self.root/"state/public.json").read_text())
+        self.assertEqual(public["sail"]["status"], "complete")
+        self.assertEqual(public["sail"]["ends_at"], rehearsal["ends_at"])
+        self.assertEqual(public["service"]["rehearsal"]["status"], "complete")
+        with service.locked():
+            self.admit()
+            service.tick()
+        self.assertEqual(len(calls), 5)
+        resumed = self.service()
+        self.at = timestamp(MONDAY).timestamp()
+        self.admit()
+        with resumed.locked():
+            resumed.tick()
+        self.assertEqual(self.runs[0]["research_window"], "weekday")
+        self.assertEqual(Decimal(self.runs[0]["inference_budget_usd"]), Decimal("4.5"))
+        self.assertEqual(resumed.health()["rehearsal"]["completed_at"], rehearsal["ends_at"])
+        self.assertEqual({c["paper_path"] for c in calls+self.runs}, {str(self.root/"state/paper.sqlite")})
+        self.assertEqual(len(resumed.history_paths()), 5)
+        with PortfolioLedger(self.root/"state/paper.sqlite") as ledger:
+            self.assertEqual(ledger.public_state()["created_at"], SUNDAY)
+
+    def test_rehearsal_pending_identity_recovers_in_gap_without_false_completion(self):
+        rehearsal = self.rehearsal_config()
+        self.at = timestamp(rehearsal["starts_at"]).timestamp()
+        calls, configs = [], []
+        finished = [False]
+        def transport(method, route, body=None, request_id=None):
+            calls.append((method, request_id, route))
+            result = {"id": "resp_rehearsal", "status": "queued", "model": "moonshotai/Kimi-K2.6"}
+            if method == "GET" and finished[0]:
+                result.update(status="completed", usage={"input_tokens": 100, "output_tokens": 20, "input_tokens_details": {"cached_tokens": 0}},
+                    output=[{"type": "message", "content": [{"type": "output_text", "text": canonical(answer())}]}])
+            return result
+        def execute(config, data, controller):
+            configs.append(config)
+            client = Client(Path(config["state_dir"])/"requests.sqlite", config, transport=transport, clock=lambda: self.at)
+            research = Research(Path(config["state_dir"])/"research.sqlite", data)
+            research.add("retained", 0, "company", "AAPL", "kimi_flex", "source", "question", max_output=128)
+            row = research.waiting()[0]
+            identity = client.submit_intent(row["id"], row["profile"], json.loads(row["body"]))
+            research.attach(row["id"], identity)
+            client.step(identity)
+            self.at = timestamp(rehearsal["ends_at"]).timestamp()
+        service = self.service(executor=execute)
+        self.admit()
+        with service.locked():
+            service.tick()
+        self.assertIsNone(service.health()["rehearsal"]["completed_at"])
+        self.assertEqual(service.health()["rehearsal"]["status"], "settling")
+        self.assertEqual(service.status, "needs_attention")
+        self.assertEqual(service.next_wake, self.at+60)
+        held = service.totals("rehearsal")["committed_usd"]
+        resumed = self.service()
+        with patch.object(service_runtime, "Client", side_effect=lambda path, config: Client(path, config, transport=transport, clock=lambda: self.at)):
+            with resumed.locked():
+                resumed.tick()
+            self.assertEqual(resumed.totals("rehearsal")["committed_usd"], held)
+            self.assertIsNone(resumed.health()["rehearsal"]["completed_at"])
+            self.at += 61
+            finished[0] = True
+            with resumed.locked():
+                resumed.tick()
+        self.assertEqual([call[0] for call in calls], ["POST", "GET", "GET"])
+        self.assertEqual(resumed.health()["rehearsal"]["status"], "complete")
+        self.assertEqual(resumed.totals()["requests"], 1)
+        self.assertEqual(resumed.next_wake, timestamp(MONDAY).timestamp())
+        self.assertEqual(self.runs, [])
+
+    def test_rehearsal_reservation_is_durable_and_final_partial_slot_is_clamped(self):
+        rehearsal = self.rehearsal_config()
+        rehearsal["ends_at"] = "2026-09-14T00:37:00Z"
+        self.at = timestamp("2026-09-14T00:07:00Z").timestamp()
+        self.admit()
+        service = self.service()
+        service.initialize()
+        identity, config = service.prepare_epoch()
+        self.assertEqual(config["ends_epoch"], timestamp(rehearsal["ends_at"]).timestamp())
+        held = service.totals("rehearsal")["reserved_usd"]
+        resumed = self.service()
+        self.assertEqual(resumed.totals("rehearsal")["reserved_usd"], held)
+        self.assertIsNone(resumed.prepare_epoch())
+        self.at = timestamp(rehearsal["ends_at"]).timestamp()
+        self.admit()
+        self.assertFalse(resumed.reservation_allowed(Decimal("0.01")))
+
+    def test_rehearsal_keeps_hourly_handoffs_when_adaptive_work_downshifts(self):
+        rehearsal = self.rehearsal_config()
+        self.config.update(adaptive_spending=True, session_inference_budget_usd="4.625")
+        self.at = timestamp(rehearsal["starts_at"]).timestamp()
+        service = self.service()
+        for hour in range(4):
+            self.admit()
+            with service.locked():
+                service.tick()
+        self.assertEqual(len(self.runs), 4)
+        self.assertEqual(self.runs[2]["funding_plan"]["mode"], "maintenance")
+        self.assertEqual(Decimal(self.runs[2]["inference_budget_usd"]), Decimal("1.5"))
+        self.assertEqual(self.runs[2]["funding_plan"]["minimum_interval_seconds"], 3600)
+        self.assertEqual(self.runs[3]["started_epoch"]-self.runs[2]["started_epoch"], 3600)
 
     def test_terminal_unknown_usage_keeps_its_hold_without_blocking_next_epoch(self):
         self.at = timestamp(MONDAY).timestamp()+600

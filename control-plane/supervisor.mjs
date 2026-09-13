@@ -1,4 +1,5 @@
 // Fixed cloud operations only. Agent outputs cannot supply commands or authority.
+import {createHash} from 'node:crypto';
 export const API = 'https://sailbox-api.sailresearch.com';
 export const INFERENCE = 'https://api.sailresearch.com';
 const iso = ms => new Date(ms).toISOString();
@@ -19,7 +20,14 @@ export function validateConfig(c) {
     || dollars(c.weekly_inference_usd) + dollars(c.cloud_budget_usd) > dollars(c.weekly_total_usd)
     || dollars(c.credit_floor_usd) < 1) throw new Error('invalid_budget');
   if (Object.keys(c).some(k => !['schema_version','service_id','box_id','manifest_sha256','starts_at','ends_at',
-    'weekly_total_usd','weekly_inference_usd','cloud_budget_usd','credit_floor_usd'].includes(k))) throw new Error('unknown_config');
+    'weekly_total_usd','weekly_inference_usd','cloud_budget_usd','credit_floor_usd','rehearsal'].includes(k))) throw new Error('unknown_config');
+  if (c.rehearsal !== undefined) {
+    const r=c.rehearsal, a=Date.parse(r?.starts_at), b=Date.parse(r?.ends_at);
+    if (!r || Object.keys(r).sort().join(',')!=='ends_at,inference_budget_usd,session_inference_budget_usd,starts_at'
+      || !Number.isFinite(a)||!Number.isFinite(b)||b-a<3600000||b-a>8*3600000||b>start||end-a>7*86400000
+      || dollars(r.inference_budget_usd)<=0||dollars(r.inference_budget_usd)>Math.min(10,dollars(c.weekly_inference_usd))
+      || dollars(r.session_inference_budget_usd)<=0||dollars(r.session_inference_budget_usd)>Math.min(2,dollars(r.inference_budget_usd))) throw new Error('invalid_rehearsal');
+  }
   return c;
 }
 export function creditDecision(summary, c, health = {}, at = Date.now(), cloudRemaining = 0) {
@@ -104,15 +112,19 @@ export class Supervisor {
     const key = 'mail:' + id; if (await this.s.get(key)) return;
     const titles = {credit_low:'Sail funding needed',billing_unavailable:'Sail balance unavailable',
       failure:'Portfolio service needs attention',recovered:'Portfolio service recovered',backup:'Portfolio backup needs attention',
-      complete:'Portfolio week complete',paused:'Portfolio service paused'};
+      complete:'Portfolio week complete',paused:'Portfolio service paused',rehearsal:'Portfolio rehearsal complete'};
     const lines = [titles[kind] + '.', ''];
     if (details.reason && /^[a-z0-9_]{1,64}$/.test(details.reason)) lines.push('Reason: ' + details.reason + '.');
     if (finite(details.balance_usd)) lines.push('Sail balance: $' + details.balance_usd.toFixed(2) + '.');
     if (finite(details.runway_days)) lines.push('Estimated research runway: ' + details.runway_days.toFixed(1) + ' days.');
     if (kind === 'credit_low') lines.push('Add Sail credit to keep research running. The service detects funding automatically; no restart is needed: https://app.sailresearch.com/');
     if (kind === 'recovered') lines.push('Cloud supervision is healthy again. The service will continue within its scheduled window.');
-    if (kind === 'complete' && details.health?.inference) {
-      const totals = details.health.inference;
+    if (kind === 'rehearsal') {
+      lines.push('The rehearsal has ended and its inference requests are settled. The same paper portfolio continues into the scheduled week.');
+      if (Number.isFinite(Date.parse(details.next_start_at))) lines.push('Scheduled week begins: '+new Date(details.next_start_at).toLocaleString('en-US',{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'short'})+' Pacific.');
+    }
+    const totals=kind==='rehearsal'?details.health?.rehearsal?.inference:details.health?.inference;
+    if (['complete','rehearsal'].includes(kind) && totals) {
       if (Number.isSafeInteger(totals.completed) && Number.isSafeInteger(totals.requests)) lines.push('Research: ' + totals.completed + ' completed / ' + totals.requests + ' requests.');
       try { lines.push('Recorded inference cost: $' + dollars(totals.known_cost_usd).toFixed(2) + '.'); } catch {}
       lines.push('Review the paper portfolio and dated decisions below. Research activity alone does not establish investment improvement.');
@@ -134,6 +146,66 @@ export class Supervisor {
       await this.s.setAlarm(this.now()+1000); return {configured:true,service_id:c.service_id};
     });
   }
+  async replace(body) {
+    if (!body || Object.keys(body).sort().join(',')!=='config,previous_service_id,readiness') throw new Error('invalid_replacement');
+    const c=validateConfig(body.config), receipt=body.readiness;
+    if (!receipt || Object.keys(receipt).sort().join(',')!=='manifest_sha256,previous_backup_manifest_key,ready,seed_verified'
+      || receipt.ready!==true||receipt.seed_verified!==true||receipt.manifest_sha256!==c.manifest_sha256) throw new Error('replacement_not_ready');
+    return this.serial(async()=>{
+      const prior=await this.s.get('config'), control=await this.s.get('control'), latest=await this.s.get('latest');
+      if (prior?.service_id===c.service_id) {
+        const done=await this.s.get('replacement:'+c.service_id);
+        if (done && done.previous_service_id===body.previous_service_id && JSON.stringify(prior)===JSON.stringify(c)
+          && JSON.stringify(done.readiness)===JSON.stringify(receipt)) return {replaced:true,replayed:true,service_id:c.service_id};
+        throw new Error('replacement_identity_reused');
+      }
+      if (!prior || prior.service_id!==body.previous_service_id || prior.box_id===c.box_id
+        || await this.s.get('archive:'+c.service_id) || await this.s.get('replacement:'+c.service_id)) throw new Error('replacement_identity_changed');
+      const count=await this.s.get('replacement_count')||0;
+      if (count>=12) throw new Error('replacement_limit');
+      const backup=latest?.backup, stopped=Date.parse(control?.stop_started_at), completed=Date.parse(backup?.completed_at);
+      if (control?.paused!==true||control?.parked!==true||latest?.status!=='paused'||!Number.isFinite(stopped)
+        ||backup?.status!=='complete'||backup.running!==false||!Number.isFinite(completed)||completed<stopped
+        ||receipt.previous_backup_manifest_key!==backup.manifest_key
+        || Number(latest?.health?.inference?.pending_requests ?? 0)!==0
+        || Number(latest?.health?.inference?.unsettled_requests ?? 0)!==0) throw new Error('previous_service_not_parked');
+      const oldBox=await this.json('/v1/sailboxes/'+prior.box_id);
+      if (oldBox.sailbox_id!==prior.box_id||!['sleeping','paused'].includes(oldBox.status)) throw new Error('previous_box_not_asleep');
+      const key=backup.manifest_key;
+      if (typeof key!=='string'||!key.startsWith(prior.service_id+'/')||!new RegExp('^[a-z0-9-]{8,64}/[a-z0-9-]{8,80}/[a-f0-9]{64}\\.json$').test(key)) throw new Error('backup_identity_changed');
+      const object=await this.env.BACKUPS.get(key);
+      if (!object||object.size>2*1024*1024) throw new Error('backup_unavailable');
+      const raw=await boundedText(object,2*1024*1024), hash=createHash('sha256').update(raw).digest('hex');
+      if (!key.endsWith('/'+hash+'.json')||object.customMetadata?.sha256!==hash) throw new Error('backup_integrity_failed');
+      const manifest=JSON.parse(raw);
+      if (manifest.schema_version!==1||manifest.service_id!==prior.service_id||manifest.completed_at!==backup.completed_at
+        ||manifest.snapshot_id!==key.split('/')[1]||!Array.isArray(manifest.files)||!manifest.files.length||manifest.files.length>4000) throw new Error('backup_integrity_failed');
+      for (const name of ['paper.sqlite','research.sqlite','requests.sqlite']) if (!manifest.files.some(row=>['state/'+name,'state/seed/'+name].includes(row.path))) throw new Error('backup_missing_ledger');
+      for(let i=0;i<manifest.files.length;i+=20) await Promise.all(manifest.files.slice(i,i+20).map(async row=>{
+        if (!/^[a-f0-9]{64}$/.test(row.compressed_sha256||'')||row.object_key!==prior.service_id+'/'+manifest.snapshot_id+'/'+row.compressed_sha256+'.gz'
+          ||!Number.isSafeInteger(row.compressed_bytes)||row.compressed_bytes<1) throw new Error('backup_integrity_failed');
+        const head=await this.env.BACKUPS.head(row.object_key);
+        if (!head||head.size!==row.compressed_bytes||head.customMetadata?.sha256!==row.compressed_sha256) throw new Error('backup_artifact_missing');
+      }));
+      const admission=await this.file(c,'/workspace/config/admission.json');
+      const probe=await this.exec(c,['python3','/workspace/portfolio_runtime/supervisor_guest.py','probe']);
+      if (admission.service_id!==c.service_id||admission.allow_new_research!==false||probe.running!==false
+        ||probe.manifest_sha256!==c.manifest_sha256||Number(probe.health?.inference?.pending_requests??0)!==0
+        ||Number(probe.health?.inference?.unsettled_requests??0)!==0) throw new Error('replacement_not_stopped');
+      const at=iso(this.now());
+      await this.s.transaction(async store=>{
+        await store.put('archive:'+prior.service_id,{archived_at:at,config:prior,control,latest});
+        await store.put('replacement:'+c.service_id,{at,previous_service_id:prior.service_id,readiness:receipt});
+        await store.put('replacement_count',count+1);
+        await store.put('config',c);await store.put('control',{paused:false,failures:0});
+        await store.put('latest',{as_of:at,service_id:c.service_id,status:'waiting'});
+        // SQLite storage operations participate in this transaction; the
+        // legacy transaction facade need not expose the alarm methods.
+        await this.s.setAlarm(this.now()+1000);
+      });
+      return {replaced:true,service_id:c.service_id};
+    });
+  }
   async status() { return {config:await this.s.get('config'),control:await this.s.get('control'),latest:await this.s.get('latest'),
     mails:Object.fromEntries(await this.s.list({prefix:'mail:',limit:50}))}; }
   async pause(value) { return this.serial(async () => { const v = await this.s.get('control') || {}; v.paused = value;
@@ -150,7 +222,9 @@ export class Supervisor {
     const previous = await this.s.get('latest');
     const hadFailure = (control.failures || 0) > 0;
     const latest = {as_of:iso(at),service_id:c.service_id,health:previous?.health,backup:previous?.backup};
-    const start = Date.parse(c.starts_at), end = Date.parse(c.ends_at), ended = at >= end;
+    const weekStart=Date.parse(c.starts_at), start=Date.parse(c.rehearsal?.starts_at||c.starts_at), end=Date.parse(c.ends_at), ended=at>=end;
+    const rehearsalActive=!!c.rehearsal&&at>=start&&at<Date.parse(c.rehearsal.ends_at);
+    const rehearsalGap=!!c.rehearsal&&at>=Date.parse(c.rehearsal.ends_at)&&at<weekStart;
     const save = async () => { await this.s.put('control',control); await this.s.put('latest',latest); return latest; };
     const recovered = async () => { if (!hadFailure) return; control.failures=0;
       await this.alert(c.service_id+':recovered:'+(control.recovery_episode||0),'recovered');
@@ -178,10 +252,21 @@ export class Supervisor {
     let credit;
     try { credit = creditDecision(summary,c,previous?.health || {},at,Math.max(0,dollars(c.cloud_budget_usd)-(control.compute_used_usd||0))); }
     catch { credit = creditDecision(null,c); }
+    if (rehearsalActive) {
+      try {
+        const h=previous?.health||{}, r=h.rehearsal?.inference||{};
+        const remaining=Math.max(0,dollars(c.rehearsal.inference_budget_usd)-dollars(r.committed_usd??0));
+        const absolute=Math.min(dollars(credit.max_inference_committed_usd),dollars(h.inference?.committed_usd??0)+remaining);
+        credit={...credit,max_inference_committed_usd:grant(absolute),max_additional_inference_usd:grant(Math.min(dollars(credit.max_additional_inference_usd),Math.max(0,dollars(c.rehearsal.inference_budget_usd)-dollars(r.reserved_usd??r.committed_usd??0))))};
+        const cloudRemaining=Math.max(0,dollars(c.cloud_budget_usd)-(control.compute_used_usd||0));
+        if (credit.allow&&credit.balance_usd-credit.outstanding_usd-cloudRemaining-dollars(c.credit_floor_usd)>=remaining) credit={...credit,warn:false};
+        if (remaining<.1) credit={...credit,allow:false,reason:'rehearsal_budget_exhausted',warn:false};
+      } catch {credit={...credit,allow:false,reason:'billing_unavailable'};}
+    }
     if (!computeKnown) credit = {...credit,allow:false,reason:'billing_unavailable'};
     latest.credit=credit;
     // One notice per funding episode. A low balance must not send a second runway email.
-    const fundingIssue = !credit.allow || (credit.warn && at>=start);
+    const fundingIssue = credit.reason!=='rehearsal_budget_exhausted'&&(!credit.allow || (credit.warn && at>=start));
     if (fundingIssue && !control.credit_alerted && !ended && !control.paused) {
       await this.alert(c.service_id+':credit:'+(control.credit_episode||0),credit.reason==='billing_unavailable'?'billing_unavailable':credit.reason==='authorization_exhausted'?'failure':'credit_low', {...credit,reason:credit.reason});
       control.credit_alerted=true;
@@ -196,9 +281,9 @@ export class Supervisor {
     if (stopping && !control.stop_started_at) {control.stop_started_at=iso(at);await this.s.put('control',control);}
     const forceAt = ended ? end+300000 : stopping ? Date.parse(control.stop_started_at)+300000 : Infinity;
     try {
-      const reason = ended?'week_complete':control.paused?'manual_pause':computeExhausted?'cloud_budget_exhausted':at<start?'scheduled_wait':credit.reason==='ready'?null:credit.reason==='credit_low'?'funding_needed':'recovering';
+      const reason = ended?'week_complete':control.paused?'manual_pause':computeExhausted?'cloud_budget_exhausted':at<start||rehearsalGap||credit.reason==='rehearsal_budget_exhausted'?'scheduled_wait':credit.reason==='ready'?null:credit.reason==='credit_low'?'funding_needed':'recovering';
       const admission = {schema_version:1,service_id:c.service_id,updated_at:iso(at),
-        allow_new_research:credit.allow && !stopping && at>=start,reason_code:reason,
+        allow_new_research:credit.allow && !stopping && at>=start && !rehearsalGap,reason_code:reason,
         max_inference_committed_usd:credit.max_inference_committed_usd,
         max_additional_inference_usd:credit.max_additional_inference_usd,
         stop_requested:stopping && !ended};
@@ -207,6 +292,11 @@ export class Supervisor {
       if (probe.manifest_sha256!==c.manifest_sha256 || typeof probe.running!=='boolean' || typeof probe.boot_id!=='string' || !/^[a-zA-Z0-9-]{1,100}$/.test(probe.boot_id)) throw new Error('manifest_mismatch');
       latest.health=probe.health;latest.backup=probe.backup;
       const health=probe.health || {}, backup=probe.backup || {};
+      const rehearsal=health.rehearsal, rehearsalCompleted=Date.parse(rehearsal?.completed_at);
+      const rehearsalDone=!!c.rehearsal&&rehearsal?.status==='complete'&&rehearsal.starts_at===c.rehearsal.starts_at&&rehearsal.ends_at===c.rehearsal.ends_at
+        &&Number.isFinite(rehearsalCompleted)&&rehearsalCompleted>=Date.parse(c.rehearsal.ends_at)&&rehearsalCompleted<=at
+        &&Number(rehearsal.unsettled_requests??rehearsal.inference?.unsettled_requests??NaN)===0;
+      if (rehearsalDone) await this.alert(c.service_id+':rehearsal-complete','rehearsal',{next_start_at:c.starts_at,health});
       const backupTime=Date.parse(backup.completed_at), backupAge=Number.isFinite(backupTime)?Math.max(0,at-backupTime):Infinity;
       const requestPending=Number(health.inference?.pending_requests ?? health.inference?.unsettled_requests ?? 0);
       const stopAge=stopping?at-Date.parse(control.stop_started_at):0;
@@ -215,7 +305,7 @@ export class Supervisor {
         control.stop_sent=true;await this.s.put('control',control);
       }
       if (stopping) latest.status='stopping';
-      else if (at<start) latest.status='waiting';
+      else if (at<start||(rehearsalGap&&rehearsalDone)) latest.status='waiting';
       else if (!probe.running && computeKnown && !computeExhausted) {
         // Inference funding gates new requests, not accepted-ID recovery or
         // paper accounting. Their bounded host allocation is separate.
@@ -268,8 +358,8 @@ export class Supervisor {
         else if (computeExhausted) control.budget_parked=true;
         else control.parked=true;
         await this.alert(c.service_id+':forced-stop','failure',{reason:'shutdown_requires_reconciliation'});
-      } else if (!stopping && !backup.running && !backupDue && (at<start || (health.status==='waiting' && Date.parse(health.next_wake_at)-at>300000))) {
-        const wake=at<start?start:Math.min(end,Date.parse(health.next_wake_at));
+      } else if (!stopping && !backup.running && !backupDue && (at<start || (rehearsalGap&&rehearsalDone) || (health.status==='waiting' && !rehearsalGap && requestPending===0 && Date.parse(health.next_wake_at)-at>300000))) {
+        const wake=at<start?start:rehearsalGap&&rehearsalDone?weekStart:Math.min(end,Date.parse(health.next_wake_at));
         await sleep(wake);control.sleep_until=iso(wake);
       }
       if(!stopping&&credit.allow&&!latest.billing_status&&!latest.compute_status&&['waiting','running'].includes(latest.status))await recovered();

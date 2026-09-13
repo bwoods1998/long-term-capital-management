@@ -7,6 +7,7 @@ The API is private. `ADMIN_TOKEN`, `BACKUP_TOKEN` and `SAIL_API_KEY` are Wrangle
 - `GET /v1/status`: configuration, health and notification receipts.
 - `GET /v1/transport-check`: private, read-only checks of provider connectivity.
 - `POST /v1/configure`: enroll one immutable, tested service contract.
+- `POST /v1/replace`: archive a paused, parked, backed-up enrollment and atomically enroll a verified stopped replacement. Requires the prior service identity, new configuration and matching readiness/backup receipt; retries preserve that operation.
 - `POST /v1/pause` / `/v1/resume`: control the enrolled service.
 - `PUT /v1/backups/<service>/<snapshot>/<sha256>.gz`: private backup upload.
 

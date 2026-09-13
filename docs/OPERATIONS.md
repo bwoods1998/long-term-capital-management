@@ -30,6 +30,8 @@ Inspect `capture.json` before launch. A partial source bank is not complete cove
 
 There is no project-wide $100 default. Each deployment records its authorized allowance and pacing rules. Additional inference should be supported by useful coverage, resolved questions or measured experimental results. A larger account balance does not by itself demonstrate benefit or justify more work. Frozen accounting and risk limits remain separate from the research policy being tested.
 
+An optional rehearsal adds a separately capped research window before the scheduled week, using the same paper ledger. Sunday research cannot create Sunday market fills. After the window ends, accepted requests settle before one completion email; the service then waits for the original weekday start. The rehearsal does not shorten the week or create another portfolio.
+
 The supervisor's private secrets are `SAIL_API_KEY`, `ADMIN_TOKEN` and `BACKUP_TOKEN`. The guest receives route-scoped credential injection for inference, publication and backup uploads. It cannot read private backups, change supervisor settings, access brokerage credentials, or make live orders. The site has its own private publication token and accepts only the public schema.
 
 Weekday Sailboxes use 1 vCPU, 2 GiB memory and a 32 GiB disk ceiling; one-off experiments retain 8 GiB. Provisioning checks current rates against the full resource ceilings through the shutdown grace period. Below 1 GiB of free disk, the service stops admitting new research while continuing receipt recovery. Capacity and billing checks are separate from evidence of useful inference.

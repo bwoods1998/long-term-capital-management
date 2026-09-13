@@ -56,6 +56,18 @@ def read_config(path):
             raise ValueError("Invalid inference allocation")
     if Decimal(config["session_inference_budget_usd"]) > Decimal(config["weekly_inference_budget_usd"]):
         raise ValueError("An epoch cannot exceed the weekly allocation")
+    if "rehearsal" in config:
+        rehearsal = config["rehearsal"]
+        if not isinstance(rehearsal, dict) or set(rehearsal) != {"starts_at", "ends_at", "inference_budget_usd", "session_inference_budget_usd"}:
+            raise ValueError("Invalid rehearsal contract")
+        begins, ends = timestamp(rehearsal["starts_at"]), timestamp(rehearsal["ends_at"])
+        if not timedelta(hours=1) <= ends-begins <= timedelta(hours=8) or ends > start:
+            raise ValueError("Rehearsal must be 1–8 hours and end before the week starts")
+        if timestamp(config["account_created_at"]) > begins:
+            raise ValueError("Paper account must exist before rehearsal")
+        budget, cap = (Decimal(str(rehearsal[key])) for key in ("inference_budget_usd", "session_inference_budget_usd"))
+        if not budget.is_finite() or not cap.is_finite() or not 0 < cap <= budget <= Decimal(config["weekly_inference_budget_usd"]) or cap > 100:
+            raise ValueError("Rehearsal must fit inside the inference envelope")
     if type(config["session_seconds"]) is not int or not 600 <= config["session_seconds"] <= 28800:
         raise ValueError("Each research epoch is bounded to 10 minutes–8 hours")
     for key in ("state_dir", "initial_evidence_path", "admission_path", "seed_dir"):
@@ -123,6 +135,7 @@ class Service:
         self.trace_factory, self.trace = trace_factory, None
         self.start = timestamp(config["week_starts_at"]).timestamp()
         self.end = timestamp(config["week_ends_at"]).timestamp()
+        self.rehearsal = config.get("rehearsal")
         self.stopping = False
         self.terminal = False
         self.status, self.reason, self.next_wake, self.current = "starting", None, self.start, None
@@ -143,6 +156,8 @@ CREATE TABLE IF NOT EXISTS epochs(id TEXT PRIMARY KEY,config TEXT NOT NULL,reser
 CREATE TABLE IF NOT EXISTS value_receipts(epoch_id TEXT PRIMARY KEY,body TEXT NOT NULL,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS checked_fundamentals(identity TEXT PRIMARY KEY,first_epoch TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS consumed_outcomes(identity TEXT PRIMARY KEY,epoch_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS phase_markers(id TEXT PRIMARY KEY,body TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS immutable_phase_marker BEFORE UPDATE ON phase_markers BEGIN SELECT RAISE(ABORT,'immutable phase marker'); END;
 CREATE TRIGGER IF NOT EXISTS immutable_contract BEFORE UPDATE ON contract BEGIN SELECT RAISE(ABORT,'immutable service contract'); END;
 CREATE TRIGGER IF NOT EXISTS immutable_value_receipt BEFORE UPDATE ON value_receipts BEGIN SELECT RAISE(ABORT,'immutable value receipt'); END;
 CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved,created ON epochs BEGIN SELECT RAISE(ABORT,'immutable research epoch'); END;""")
@@ -185,9 +200,35 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
     def admission_allowed(self):
         doc = self.admission()
         return (not self.stopping and not doc.get("stop_requested")
-                and self.start <= self.clock() < self.end
-                and timestamp(stamp(self.clock())).astimezone(NEW_YORK).weekday() < 5
+                and self.active_window() is not None
                 and doc["allow_new_research"] and self.storage_available())
+
+    def active_window(self, now=None):
+        now = self.clock() if now is None else now
+        if self.rehearsal:
+            start, end = (timestamp(self.rehearsal[key]).timestamp() for key in ("starts_at", "ends_at"))
+            if start <= now < end:
+                return "rehearsal", start, end
+        if self.start <= now < self.end and timestamp(stamp(now)).astimezone(NEW_YORK).weekday() < 5:
+            return "weekday", self.start, self.end
+        return None
+
+    def next_research_at(self, now=None):
+        now = self.clock() if now is None else now
+        if self.rehearsal:
+            start = timestamp(self.rehearsal["starts_at"]).timestamp()
+            if now < start:
+                return start
+        return max(self.start, next_weekday(now))
+
+    def rehearsal_gap(self):
+        """Keep receipt recovery awake; the gap itself authorizes no research."""
+        totals = self.totals("rehearsal")
+        if totals["pending_requests"] or totals["unsettled_requests"]:
+            self.status, self.reason = "needs_attention", "recovering"
+            self.next_wake = min(self.clock()+60, self.start)
+        else:
+            self.status, self.reason, self.next_wake = "waiting", "scheduled_wait", self.start
 
     def storage_available(self):
         return self.disk_free() >= 1024**3
@@ -219,7 +260,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         except (ValueError, ArithmeticError):
             return False
 
-    def totals(self):
+    def totals(self, phase=None):
         result = {"known_cost_usd": Decimal(0), "committed_usd": Decimal(0),
                   "reserved_usd": Decimal(0), "requests": 0, "completed": 0,
                   "unsettled_requests": 0, "pending_requests": 0, "parked_requests": 0}
@@ -227,6 +268,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             rows = db.execute("SELECT * FROM epochs").fetchall()
         for row in rows:
             config = json.loads(row["config"])
+            if phase is not None and config.get("research_window", "weekday") != phase:
+                continue
             totals = request_totals(Path(config["state_dir"]) / "requests.sqlite")
             result["known_cost_usd"] += Decimal(totals["known_cost_usd"])
             result["committed_usd"] += Decimal(totals["committed_usd"])
@@ -240,6 +283,37 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         return {key: format(value, "f") if isinstance(value, Decimal) else value
                 for key, value in result.items()}
 
+    def rehearsal_state(self, *, public=False):
+        if not self.rehearsal:
+            return None
+        with self.connect() as db:
+            marker = db.execute("SELECT body FROM phase_markers WHERE id='rehearsal_complete'").fetchone()
+        completed_at = json.loads(marker[0])["completed_at"] if marker else None
+        now = self.clock()
+        status = ("complete" if completed_at else "scheduled" if now < timestamp(self.rehearsal["starts_at"]).timestamp()
+                  else "running" if now < timestamp(self.rehearsal["ends_at"]).timestamp() else "settling")
+        state = {"starts_at": self.rehearsal["starts_at"], "ends_at": self.rehearsal["ends_at"],
+                 "status": status, "completed_at": completed_at}
+        if not public:
+            totals = self.totals("rehearsal")
+            state.update(inference_budget_usd=self.rehearsal["inference_budget_usd"], inference=totals,
+                         unsettled_requests=totals["unsettled_requests"])
+        return state
+
+    def update_rehearsal(self):
+        """One immutable, fully settled receipt; never terminates the week."""
+        if not self.rehearsal or self.clock() < timestamp(self.rehearsal["ends_at"]).timestamp():
+            return
+        totals = self.totals("rehearsal")
+        if totals["pending_requests"] or totals["unsettled_requests"]:
+            return
+        with self.connect() as db:
+            active = db.execute("SELECT config FROM epochs WHERE status IN ('prepared','running')").fetchall()
+            if any(json.loads(row[0]).get("research_window") == "rehearsal" for row in active):
+                return
+            db.execute("INSERT OR IGNORE INTO phase_markers VALUES('rehearsal_complete',?)",
+                       (canonical({"completed_at": stamp(self.clock()), "inference": totals}),))
+
     def health(self):
         result = {"schema_version": 1, "service_id": self.config["service_id"],
                   "status": self.status, "heartbeat_at": stamp(self.clock()),
@@ -252,6 +326,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                   "funding": self.funding_plan,
                   "storage": {"free_bytes": self.disk_free(), "minimum_free_bytes": 1024**3},
                   "inference": self.totals()}
+        if self.rehearsal:
+            result["rehearsal"] = self.rehearsal_state()
         # A dedicated writer prevents partial/overlapping atomic replacements
         # while the main thread assembles evidence or waits on a provider.
         with self._health_lock:
@@ -273,10 +349,13 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
 
     def public_service(self):
         state = "waiting" if self.status == "starting" else self.status
-        return {"id": self.config["service_id"], "status": state,
+        result = {"id": self.config["service_id"], "status": state,
                 "heartbeat_at": stamp(self.clock()),
                 "next_wake_at": stamp(self.next_wake) if self.next_wake is not None else None,
                 "week_ends_at": self.config["week_ends_at"], "reason_code": self.reason}
+        if self.rehearsal:
+            result["rehearsal"] = self.rehearsal_state(public=True)
+        return result
 
     def initialize(self):
         target = self.root / "paper.sqlite"
@@ -699,7 +778,21 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         return evidence
 
     def allowance(self):
-        total = Decimal(self.config["weekly_inference_budget_usd"])
+        window = self.active_window()
+        if window is None:
+            return Decimal(0)
+        all_reserved = Decimal(self.totals()["reserved_usd"])
+        envelope = Decimal(self.config["weekly_inference_budget_usd"])
+        rehearsal_reserved = Decimal(self.totals("rehearsal")["reserved_usd"]) if self.rehearsal else Decimal(0)
+        if window[0] == "rehearsal":
+            total = Decimal(self.rehearsal["inference_budget_usd"])
+            cap = Decimal(self.rehearsal["session_inference_budget_usd"])
+            # One epoch up front, then a linear rate. Unused allowance rolls
+            # forward inside this prelude but can never exceed its own cap.
+            elapsed = Decimal(str(max(0, self.clock()-window[1])))
+            paced = min(total, cap*(1+elapsed/Decimal(self.config["session_seconds"])))
+            return max(Decimal(0), min(paced-rehearsal_reserved, envelope-all_reserved))
+        total = max(Decimal(0), envelope-rehearsal_reserved)
         elapsed = Decimal(str(weekday_seconds(self.start, min(self.clock(), self.end))))
         duration = Decimal(str(weekday_seconds(self.start, self.end)))
         if duration <= 0:
@@ -714,20 +807,32 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         local = timestamp(stamp(self.clock())).astimezone(NEW_YORK)
         tomorrow = datetime.combine(local.date()+timedelta(days=1), daytime(), NEW_YORK).timestamp()
         daily = total * Decimal(str(weekday_seconds(self.start, min(tomorrow, self.end))))/duration
-        return max(Decimal(0), min(total, paced, daily)-Decimal(self.totals()["reserved_usd"]))
+        return max(Decimal(0), min(total, paced, daily)-(all_reserved-rehearsal_reserved))
 
     def prepare_epoch(self):
         now = int(self.clock())
+        window = self.active_window(now)
+        if window is None:
+            return None
+        phase, window_start, window_end = window
         local = timestamp(stamp(now)).astimezone(NEW_YORK)
         midnight = datetime.combine(local.date(), daytime(), NEW_YORK).timestamp()
-        slot = int((now-midnight)//self.config["session_seconds"])
-        identity = local.date().isoformat()+"-"+str(slot).zfill(2)
+        anchor = window_start if phase == "rehearsal" else midnight
+        slot = int((now-anchor)//self.config["session_seconds"])
+        identity = (("rehearsal-" if phase == "rehearsal" else "")
+                    +local.date().isoformat()+"-"+str(slot).zfill(2))
         with self.connect() as db:
             old = db.execute("SELECT config FROM epochs WHERE id=?", (identity,)).fetchone()
         if old:
             return None  # Never relaunch fresh work in an already used time slot.
         evidence = self.daily_evidence()
         self.funding_plan = self.choose_funding(evidence)
+        if phase == "rehearsal":
+            cap = min(Decimal(self.funding_plan["epoch_cap_usd"]), Decimal(self.rehearsal["session_inference_budget_usd"]))
+            interval = self.config["session_seconds"]
+            self.funding_plan = {**self.funding_plan, "epoch_cap_usd": format(cap, "f"), "research_window": "rehearsal",
+                "minimum_interval_seconds": interval,
+                "planned_inference_usd_per_day": float(cap*Decimal(86400)/Decimal(interval))}
         if self.funding_plan["mode"] == "maintenance":
             with self.connect() as db:
                 last = db.execute("SELECT max(created) FROM epochs").fetchone()[0]
@@ -747,9 +852,9 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             return None
         evidence = self._enrich_prices(evidence)
         now = int(self.clock())
-        end = min(int(midnight+(slot+1)*self.config["session_seconds"]), int(self.end),
+        end = min(int(anchor+(slot+1)*self.config["session_seconds"]), int(window_end),
                   int(datetime.combine(local.date()+timedelta(days=1), daytime(), NEW_YORK).timestamp()))
-        if end-now < 360 or not self.admission_allowed():
+        if end-now < 360 or self.active_window(now) != window or not self.admission_allowed():
             return None
         directory = self.root / "epochs" / identity
         evidence_path = directory / "evidence.json"
@@ -768,7 +873,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                   "wave_size": self.config.get("wave_size", 12),
                   "wave_seconds": self.config.get("wave_seconds", 600),
                   "min_wave_seconds": 300, "research_policy": self.lab.policy(),
-                  "funding_plan": self.funding_plan}
+                  "funding_plan": self.funding_plan, "research_window": phase}
         for key in ("publish_url", "publish_token_path", "voyage_id", "voyage_headers"):
             if self.config.get(key):
                 config[key] = self.config[key]
@@ -804,7 +909,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         totals = self.totals()
         projection["sail"].update(known_cost_usd=totals["known_cost_usd"],
             unsettled_requests=totals["unsettled_requests"],
-            status="running" if totals["pending_requests"] else "complete" if self.status == "complete" else "not_started")
+            status="running" if totals["pending_requests"] else "complete" if projection["sail"].get("started_at") else "not_started")
         activity = projection["sail"].get("activity")
         if activity:
             activity["tasks"] = []
@@ -818,6 +923,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
         self.initialize()
         self.progress_at, self.stage = self.clock(), "scheduling"
         self.reconcile_parked()
+        self.update_rehearsal()
         now = self.clock()
         with self.connect() as db:
             pending = db.execute("SELECT id,config FROM epochs WHERE status IN ('prepared','running') ORDER BY created LIMIT 1").fetchone()
@@ -850,9 +956,12 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                 self.status, self.reason, self.next_wake = "complete", "week_complete", None
             elif self.stopping or doc.get("stop_requested"):
                 self.status, self.reason, self.next_wake = "paused", "manual_pause", None
-            elif now < self.start or next_weekday(now) != int(now):
+            elif self.active_window(now) is None:
                 self.status, self.reason = "waiting", "scheduled_wait"
-                self.next_wake = max(self.start, next_weekday(now))
+                self.next_wake = self.next_research_at(now)
+                if self.rehearsal and now >= timestamp(self.rehearsal["ends_at"]).timestamp():
+                    self.funding_plan = self._funding_plan("exploration", "scheduled_weekday_research")
+                    self.rehearsal_gap()
             elif not self.admission_allowed():
                 self.status, self.reason, self.next_wake = "waiting", self._admission_reason(doc), now+60
             else:
@@ -884,6 +993,10 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                 self.current = None
             if expired and totals["pending_requests"]:
                 self.status, self.reason = "needs_attention", "recovering"
+            self.update_rehearsal()
+            if expired and config.get("research_window") == "rehearsal" and self.active_window() is None and self.clock() < self.start:
+                self.rehearsal_gap()
+                self._idle_projection()
         else:
             self._idle_projection()
         if self.status == "complete" and self.trace:
