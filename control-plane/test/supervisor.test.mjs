@@ -11,7 +11,11 @@ class Storage{
  async list({prefix}){return new Map([...this.data].filter(([k])=>k.startsWith(prefix)));}
  async setAlarm(t){this.alarm=t;}
  async deleteAlarm(){this.alarm=null;}
- async transaction(fn){const before=structuredClone(this.data), alarm=this.alarm;try{return await fn(this);}catch(e){this.data=before;this.alarm=alarm;throw e;}}
+ async transaction(fn){
+  const before=structuredClone(this.data), alarm=this.alarm;
+  const facade=Object.freeze({get:k=>this.get(k),put:(k,v)=>this.put(k,v),delete:async k=>this.data.delete(k),list:options=>this.list(options)});
+  try{return await fn(facade);}catch(e){this.data=before;this.alarm=alarm;throw e;}
+ }
 }
 const billing={balance:12000,balance_unavailable:false,has_metronome_customer:true,avg_cost_per_day:1000};
 test('billing units, pending reservations, unknown balance, and actionable runway',()=>{
@@ -210,6 +214,29 @@ test('replacement transaction failure cannot half-switch the active controller',
  await assert.rejects(()=>f.c.replace(f.body),/storage_failed/);
  assert.equal((await f.s.get('config')).service_id,config().service_id);
  assert.equal(await f.s.get('archive:'+config().service_id),undefined);
+});
+
+test('replacement schedules through SQLite storage when its transaction facade has no alarm API',async()=>{
+ const f=await replacementHarness(), transaction=f.s.transaction.bind(f.s);let checked=false;
+ f.s.transaction=fn=>transaction(async store=>{
+   assert.deepEqual(Object.keys(store).sort(),['delete','get','list','put']);
+   assert.equal(store.setAlarm,undefined);checked=true;return fn(store);
+ });
+ await f.c.replace(f.body);
+ assert.equal(checked,true);assert.equal(f.s.alarm,f.state.at+1000);
+ assert.equal((await f.s.get('config')).service_id,f.body.config.service_id);
+});
+
+test('SQLite transaction rolls back replacement and top-level alarm together after scheduling failure',async()=>{
+ const f=await replacementHarness(), previousAlarm=f.state.at+300000;
+ await f.s.setAlarm(previousAlarm);
+ const setAlarm=f.s.setAlarm.bind(f.s);
+ f.s.setAlarm=async value=>{await setAlarm(value);throw Error('alarm_storage_failed');};
+ await assert.rejects(()=>f.c.replace(f.body),/alarm_storage_failed/);
+ assert.equal(f.s.alarm,previousAlarm);
+ assert.equal((await f.s.get('config')).service_id,config().service_id);
+ assert.equal(await f.s.get('archive:'+config().service_id),undefined);
+ assert.equal(await f.s.get('replacement_count'),undefined);
 });
 
 test('absolute credit grants reserve cloud and active epochs without starving already funded requests',()=>{
