@@ -43,8 +43,11 @@ Inspect or control the enrolled service through its private API:
 | `GET /v1/status` | Saved health, spending authority and notification receipts. |
 | `POST /v1/pause` | Close new admission and stop the service with a bounded grace period. |
 | `POST /v1/resume` | Resume the same enrolled service and journals within its existing window and authority. |
+| `POST /v1/release` | Verify a reviewed runtime update on the same paused, backed-up Sailbox; retain its configuration and journals. |
 
 Use the local `week_host.py status`, `pause`, and `resume` commands with the deployment directory. A terminal disconnect does not stop the cloud service. Do not start a second local coordinator against a copy of its portfolio.
+
+For a runtime update, pause and verify a fresh backup before installing reviewed code and its new manifest. The private release operation checks both manifests, unchanged service configuration and a stopped process before recording the new version; it leaves the service paused for verification. Resume then recovers the existing request identities and paper ledger. Release does not change the schedule, resources, source evidence or spending policy.
 
 ## Funding, progress and notifications
 

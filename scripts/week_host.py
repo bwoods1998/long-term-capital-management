@@ -180,7 +180,7 @@ def enrollment(directory):
     return result
 
 def control(method,path,body=None):
-    if path not in ('/v1/configure','/v1/replace','/v1/status','/v1/pause','/v1/resume','/v1/tick'):raise ValueError('Unexpected control path')
+    if path not in ('/v1/configure','/v1/replace','/v1/release','/v1/status','/v1/pause','/v1/resume','/v1/tick'):raise ValueError('Unexpected control path')
     req=Request(SUPERVISOR+path,data=encoded(body) if body is not None else None,method=method,
         headers={'Authorization':'Bearer '+private_read(ROOT/'.data/runtime/control/admin-token'),'Content-Type':'application/json','User-Agent':'Blake Woods Portfolio Agent'})
     with build_opener(NoRedirect).open(req,timeout=60) as r:return json.loads(r.read(256000))

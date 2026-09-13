@@ -230,6 +230,112 @@ export class Supervisor {
       return {replaced:true,service_id:c.service_id};
     });
   }
+  async release(body) {
+    const hashPattern=/^[a-f0-9]{64}$/;
+    if (!body || Object.keys(body).sort().join(',')!=='manifest_sha256,previous_backup_manifest_key,previous_manifest_sha256'
+      || !hashPattern.test(body.previous_manifest_sha256||'') || !hashPattern.test(body.manifest_sha256||'')
+      || body.previous_manifest_sha256===body.manifest_sha256 || typeof body.previous_backup_manifest_key!=='string') throw new Error('invalid_release');
+    const canonical=value=>JSON.stringify(value, function(_key,item) {
+      return item && typeof item==='object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])) : item;
+    });
+    const digest=raw=>createHash('sha256').update(raw).digest('hex');
+    return this.serial(async()=>{
+      const prior=await this.s.get('config'), control=await this.s.get('control'), latest=await this.s.get('latest');
+      if (!prior) throw new Error('release_not_configured');
+      const receiptKey='release:'+prior.service_id+':'+body.manifest_sha256;
+      const archiveKey='release-archive:'+prior.service_id+':'+body.previous_manifest_sha256;
+      const done=await this.s.get(receiptKey);
+      if (done && prior.manifest_sha256===body.manifest_sha256 && canonical(done.request)===canonical(body))
+        return {released:true,replayed:true,service_id:prior.service_id,manifest_sha256:body.manifest_sha256};
+      if (done || prior.manifest_sha256!==body.previous_manifest_sha256
+        || await this.s.get('release-archive:'+prior.service_id+':'+body.manifest_sha256)) throw new Error('release_identity_changed');
+      const backup=latest?.backup, stopped=Date.parse(control?.stop_started_at), completed=Date.parse(backup?.completed_at);
+      if (control?.paused!==true || control?.parked!==true || latest?.status!=='paused' || !Number.isFinite(stopped)
+        || backup?.status!=='complete' || backup.running!==false || !Number.isFinite(completed) || completed<stopped
+        || body.previous_backup_manifest_key!==backup.manifest_key) throw new Error('release_not_parked');
+      const key=backup.manifest_key;
+      if (!/^[a-z0-9-]{8,64}\/[a-z0-9-]{8,80}\/[a-f0-9]{64}\.json$/.test(key)
+        || !key.startsWith(prior.service_id+'/')) throw new Error('backup_identity_changed');
+      const object=await this.env.BACKUPS.get(key);
+      if (!object || object.size>2*1024*1024) throw new Error('backup_unavailable');
+      const raw=await boundedText(object,2*1024*1024), backupHash=digest(raw);
+      if (!key.endsWith('/'+backupHash+'.json') || object.customMetadata?.sha256!==backupHash) throw new Error('backup_integrity_failed');
+      const backupManifest=JSON.parse(raw), rows=backupManifest.files;
+      if (backupManifest.schema_version!==1 || backupManifest.service_id!==prior.service_id
+        || backupManifest.completed_at!==backup.completed_at || backupManifest.snapshot_id!==key.split('/')[1]
+        || !Array.isArray(rows) || !rows.length || rows.length>4000) throw new Error('backup_integrity_failed');
+      const paths=new Set();
+      for (const row of rows) {
+        if (typeof row.path!=='string' || row.path.startsWith('/') || row.path.split('/').some(p=>!p||p==='.'||p==='..')
+          || paths.has(row.path) || !hashPattern.test(row.sha256||'') || !Number.isSafeInteger(row.bytes) || row.bytes<1
+          || !hashPattern.test(row.compressed_sha256||'') || !Number.isSafeInteger(row.compressed_bytes) || row.compressed_bytes<1
+          || row.object_key!==prior.service_id+'/'+backupManifest.snapshot_id+'/'+row.compressed_sha256+'.gz') throw new Error('backup_integrity_failed');
+        paths.add(row.path);
+      }
+      for (const name of ['paper.sqlite','research.sqlite','requests.sqlite'])
+        if (!rows.some(row=>['state/'+name,'state/seed/'+name].includes(row.path))) throw new Error('backup_missing_ledger');
+      for(let i=0;i<rows.length;i+=20) await Promise.all(rows.slice(i,i+20).map(async row=>{
+        const head=await this.env.BACKUPS.head(row.object_key);
+        if (!head || head.size!==row.compressed_bytes || head.customMetadata?.sha256!==row.compressed_sha256) throw new Error('backup_artifact_missing');
+      }));
+      const archivedJson=async path=>{
+        const row=rows.find(item=>item.path===path);
+        if (!row || row.bytes>256*1024 || row.compressed_bytes>256*1024) throw new Error('release_contract_missing');
+        const blob=await this.env.BACKUPS.get(row.object_key);
+        if (!blob || blob.size!==row.compressed_bytes || blob.customMetadata?.sha256!==row.compressed_sha256) throw new Error('backup_integrity_failed');
+        const reader=blob.body.getReader(), chunks=[];let size=0;
+        try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;
+          if(size>row.compressed_bytes)throw new Error('backup_integrity_failed');chunks.push(value);}}
+        finally {await reader.cancel().catch(()=>{});}
+        const packed=Buffer.concat(chunks);
+        if(size!==row.compressed_bytes || digest(packed)!==row.compressed_sha256) throw new Error('backup_integrity_failed');
+        const unpacked=await boundedText(new Response(new Response(packed).body.pipeThrough(new DecompressionStream('gzip'))),256*1024);
+        if(Buffer.byteLength(unpacked)!==row.bytes || digest(unpacked)!==row.sha256) throw new Error('backup_integrity_failed');
+        return {value:JSON.parse(unpacked),row};
+      };
+      const oldHost=await archivedJson('host-manifest.json'), oldRun=await archivedJson('config/run.json');
+      if (digest(canonical(oldHost.value))!==prior.manifest_sha256) throw new Error('release_previous_manifest_changed');
+      const nextHost=await this.file(prior,'/workspace/host-manifest.json');
+      if (digest(canonical(nextHost))!==body.manifest_sha256) throw new Error('release_manifest_changed');
+      for(const manifest of [oldHost.value,nextHost]) {
+        if (!manifest || Object.keys(manifest).sort().join(',')!=='deadline,files,role,schema_version'
+          || manifest.schema_version!==1 || manifest.role!=='coordinator' || !manifest.files || Array.isArray(manifest.files)
+          || typeof manifest.files!=='object' || Object.keys(manifest.files).length>200) throw new Error('release_contract_changed');
+        for (const [path,row] of Object.entries(manifest.files)) {
+          if (!path || path.startsWith('/') || path.split('/').some(p=>!p||p==='.'||p==='..')
+            || !row || Object.keys(row).sort().join(',')!=='bytes,sha256' || !hashPattern.test(row.sha256||'')
+            || !Number.isSafeInteger(row.bytes) || row.bytes<0) throw new Error('release_contract_changed');
+        }
+      }
+      if (oldHost.value.deadline!==nextHost.deadline || canonical(Object.keys(oldHost.value.files).sort())!==canonical(Object.keys(nextHost.files).sort()))
+        throw new Error('release_contract_changed');
+      const changed=Object.keys(nextHost.files).filter(path=>canonical(nextHost.files[path])!==canonical(oldHost.value.files[path]));
+      if (!changed.length || changed.some(path=>!/^portfolio_runtime\/[a-zA-Z0-9_]+\.py$/.test(path)
+        || path==='portfolio_runtime/supervisor_guest.py')) throw new Error('release_contract_changed');
+      const runDescriptor=oldHost.value.files['config/run.json'];
+      if (!runDescriptor || runDescriptor.sha256!==oldRun.row.sha256 || runDescriptor.bytes!==oldRun.row.bytes
+        || oldRun.value.kind!=='weekday_service' || oldRun.value.service_id!==prior.service_id) throw new Error('release_contract_changed');
+      const liveRun=await this.file(prior,'/workspace/config/run.json');
+      if (canonical(liveRun)!==canonical(oldRun.value)) throw new Error('release_contract_changed');
+      const box=await this.json('/v1/sailboxes/'+prior.box_id);
+      if (box.sailbox_id!==prior.box_id || box.vcpu_count!==1 || box.memory_mib!==2048 || box.state_disk_size_gib!==32)
+        throw new Error('release_resources_changed');
+      const admission=await this.file(prior,'/workspace/config/admission.json');
+      const probe=await this.exec(prior,['python3','/workspace/portfolio_runtime/supervisor_guest.py','probe']);
+      if (admission.service_id!==prior.service_id || admission.allow_new_research!==false || admission.stop_requested!==true
+        || probe.running!==false || probe.manifest_sha256!==body.manifest_sha256) throw new Error('release_not_stopped');
+      const at=iso(this.now());
+      await this.s.transaction(async store=>{
+        await store.put(archiveKey,{at,config:prior,manifest:oldHost.value,control,latest,backup_manifest_key:key});
+        await store.put(receiptKey,{at,request:body,changed_files:changed,previous_config:prior});
+        await store.put('config',{...prior,manifest_sha256:body.manifest_sha256});
+        // The paused control state and all inference holds survive this release.
+        await this.s.setAlarm(this.now()+1000);
+      });
+      return {released:true,service_id:prior.service_id,manifest_sha256:body.manifest_sha256};
+    });
+  }
   async status() { return {config:await this.s.get('config'),control:await this.s.get('control'),latest:await this.s.get('latest'),
     mails:Object.fromEntries(await this.s.list({prefix:'mail:',limit:50}))}; }
   async pause(value) { return this.serial(async () => { const v = await this.s.get('control') || {}; v.paused = value;

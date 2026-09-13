@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {gzipSync} from 'node:zlib';
 import {Supervisor,creditDecision,validateConfig,parseExec,boundedText,hostReserve} from '../supervisor.mjs';
 const start=Date.parse('2026-09-14T04:00:00Z');
 const config=()=>({schema_version:1,service_id:'week-20260914',box_id:'sb_00000000-0000-0000-0000-000000000001',manifest_sha256:'a'.repeat(64),starts_at:new Date(start).toISOString(),ends_at:'2026-09-19T04:00:00Z',weekly_total_usd:'100',weekly_inference_usd:'92.5',cloud_budget_usd:'7.5',credit_floor_usd:'2'});
@@ -363,6 +364,129 @@ test('SQLite transaction rolls back replacement and top-level alarm together aft
  assert.equal((await f.s.get('config')).service_id,config().service_id);
  assert.equal(await f.s.get('archive:'+config().service_id),undefined);
  assert.equal(await f.s.get('replacement_count'),undefined);
+});
+
+async function releaseHarness() {
+ const f=harness({at:start-3600000,running:false});
+ const canonical=value=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)
+   ?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+ const hash=raw=>createHash('sha256').update(raw).digest('hex');
+ const descriptor=raw=>({bytes:Buffer.byteLength(raw),sha256:hash(raw)});
+ const old=config(), run={schema_version:1,kind:'weekday_service',service_id:old.service_id,spending_mode:'available_credit',
+   week_starts_at:old.starts_at,week_ends_at:old.ends_at,state_dir:'/workspace/state'};
+ const runRaw=canonical(run);
+ const host={schema_version:1,role:'coordinator',deadline:old.ends_at,files:{'config/run.json':descriptor(runRaw),
+   'portfolio_runtime/provider.py':descriptor('timeout = 45\n'),
+   'portfolio_runtime/supervisor_guest.py':descriptor('# fixed probe\n'),'data/evidence.json':descriptor('{}')}};
+ old.manifest_sha256=hash(canonical(host));
+ const live=structuredClone(host);live.files['portfolio_runtime/provider.py']=descriptor('timeout = 600\n');
+ const at=new Date(f.state.at-1000).toISOString(), snapshot='snapshot-release-20260913';
+ const packed=new Map(), rows=[];
+ for(const [path,value] of Object.entries({'host-manifest.json':canonical(host),'config/run.json':runRaw,
+   'state/paper.sqlite':'paper fixture with pending decision','state/seed/research.sqlite':'immutable research fixture',
+   'state/epochs/one/requests.sqlite':'pending inference holds','state/seed/requests.sqlite':'old receipts'})) {
+   const raw=Buffer.from(value), zip=gzipSync(raw), h=hash(zip), key=old.service_id+'/'+snapshot+'/'+h+'.gz';
+   rows.push({path,...descriptor(raw),compressed_sha256:h,compressed_bytes:zip.length,object_key:key});packed.set(key,zip);
+ }
+ const backup={schema_version:1,service_id:old.service_id,snapshot_id:snapshot,completed_at:at,files:rows};
+ const backupRaw=canonical(backup), backupHash=hash(backupRaw), key=old.service_id+'/'+snapshot+'/'+backupHash+'.json';
+ f.c.env.BACKUPS={get:async k=>{
+   const raw=k===key?Buffer.from(backupRaw):packed.get(k);return raw?{body:new Response(raw).body,size:raw.length,
+     customMetadata:{sha256:k===key?backupHash:rows.find(row=>row.object_key===k).compressed_sha256}}:null;
+ },head:async k=>{const raw=packed.get(k),row=rows.find(row=>row.object_key===k);
+   return raw?{size:raw.length,customMetadata:{sha256:row.compressed_sha256}}:null;}};
+ await f.c.configure(old);
+ await f.s.put('control',{paused:true,parked:true,stop_started_at:new Date(f.state.at-60000).toISOString(),failures:2,
+   stop_sent:true,credit_episode:3,boot_intent:{id:'existing'},last_tick:f.state.at-60000});
+ const health={service_id:old.service_id,inference:{pending_requests:8,unsettled_requests:8,committed_usd:'22',reserved_usd:'100',known_cost_usd:'2'}};
+ await f.s.put('latest',{status:'paused',health,backup:{running:false,status:'complete',completed_at:at,manifest_key:key}});
+ const admission={service_id:old.service_id,allow_new_research:false,stop_requested:true};
+ const resources={sailbox_id:old.box_id,vcpu_count:1,memory_mib:2048,state_disk_size_gib:32};
+ const probe={manifest_sha256:hash(canonical(live)),running:false,health};
+ f.c.json=async path=>{assert.equal(path,'/v1/sailboxes/'+old.box_id);return resources;};
+ f.c.file=async(c,path)=>{assert.equal(c.box_id,old.box_id);
+   if(path==='/workspace/config/admission.json')return admission;
+   if(path==='/workspace/host-manifest.json')return live;
+   assert.equal(path,'/workspace/config/run.json');return run;};
+ f.c.exec=async(c,command)=>{assert.equal(c.box_id,old.box_id);
+   assert.deepEqual(command,['python3','/workspace/portfolio_runtime/supervisor_guest.py','probe']);return probe;};
+ const body={previous_manifest_sha256:old.manifest_sha256,manifest_sha256:probe.manifest_sha256,previous_backup_manifest_key:key};
+ return {...f,body,old,host,run,live,probe,admission,resources,packed,rows,
+   refresh(){body.manifest_sha256=hash(canonical(live));probe.manifest_sha256=body.manifest_sha256;}};
+}
+
+test('same-box release preserves paused control and every pending hold, archives prior contract and replays exactly',async()=>{
+ const f=await releaseHarness(), control=await f.s.get('control'), latest=await f.s.get('latest');
+ const result=await f.c.release(f.body);assert.equal(result.released,true);
+ assert.deepEqual(await f.s.get('config'),{...f.old,manifest_sha256:f.body.manifest_sha256});
+ assert.deepEqual(await f.s.get('control'),control);assert.deepEqual(await f.s.get('latest'),latest);
+ const archive=await f.s.get('release-archive:'+f.old.service_id+':'+f.old.manifest_sha256);
+ assert.deepEqual(archive.config,f.old);assert.deepEqual(archive.manifest,f.host);
+ assert.equal(archive.latest.health.inference.unsettled_requests,8);
+ const receipt=await f.s.get('release:'+f.old.service_id+':'+f.body.manifest_sha256);
+ assert.deepEqual(receipt.changed_files,['portfolio_runtime/provider.py']);assert.equal(f.s.alarm,f.state.at+1000);
+ f.c.exec=async()=>{throw Error('must_not_repeat_external_verification');};
+ assert.equal((await f.c.release({...f.body})).replayed,true);
+ await assert.rejects(()=>f.c.release({...f.body,previous_backup_manifest_key:'different'}),/identity/);
+ await assert.rejects(()=>f.c.release({previous_manifest_sha256:f.body.manifest_sha256,manifest_sha256:f.old.manifest_sha256,
+   previous_backup_manifest_key:f.body.previous_backup_manifest_key}),/identity/);
+});
+
+test('release rejects active writers, changed service contracts and missing or stale post-stop backups',async()=>{
+ for(const mutate of [
+   async f=>f.s.put('control',{...(await f.s.get('control')),paused:false}),
+   async f=>f.s.put('control',{...(await f.s.get('control')),parked:false}),
+   async f=>f.s.put('latest',{...(await f.s.get('latest')),status:'running'}),
+   async f=>f.s.put('control',{...(await f.s.get('control')),stop_started_at:new Date(f.state.at).toISOString()}),
+   async f=>{f.body.previous_manifest_sha256='f'.repeat(64);},
+   async f=>{f.body.previous_backup_manifest_key='different';},
+   async f=>{f.body.service_id='other-service';},
+   async f=>{f.c.env.BACKUPS.head=async()=>null;},
+   async f=>{f.probe.running=true;},
+   async f=>{f.probe.manifest_sha256='f'.repeat(64);},
+   async f=>{f.admission.allow_new_research=true;},
+   async f=>{f.admission.stop_requested=false;},
+   async f=>{f.admission.service_id='different-service';},
+   async f=>{f.resources.state_disk_size_gib=64;},
+   async f=>{f.run.service_id='changed-service';},
+   async f=>{f.run.week_ends_at='2027-01-01T00:00:00Z';},
+   async f=>{f.live.deadline='2027-01-01T00:00:00Z';f.refresh();},
+   async f=>{f.live.role='researcher';f.refresh();},
+   async f=>{delete f.live.files['data/evidence.json'];f.refresh();},
+   async f=>{f.live.files['config/run.json'].sha256='f'.repeat(64);f.refresh();},
+   async f=>{f.live.files['data/evidence.json'].sha256='f'.repeat(64);f.refresh();},
+   async f=>{f.live.files['portfolio_runtime/supervisor_guest.py'].sha256='f'.repeat(64);f.refresh();},
+ ]) {
+   const f=await releaseHarness();await mutate(f);await assert.rejects(()=>f.c.release(f.body));
+   assert.deepEqual(await f.s.get('config'),f.old);
+   assert.equal(await f.s.get('release-archive:'+f.old.service_id+':'+f.old.manifest_sha256),undefined);
+ }
+});
+
+test('release checks compressed and uncompressed backup bytes instead of trusting metadata',async()=>{
+ for(const mode of ['compressed','plain']) {
+   const f=await releaseHarness(), row=f.rows.find(row=>row.path==='host-manifest.json');
+   if(mode==='compressed')f.packed.get(row.object_key)[15]^=1;
+   else {
+     const get=f.c.env.BACKUPS.get.bind(f.c.env.BACKUPS), key=f.body.previous_backup_manifest_key;
+     const manifest=JSON.parse(await boundedText(await get(key)));
+     manifest.files.find(item=>item.path===row.path).sha256='f'.repeat(64);
+     const raw=JSON.stringify(manifest),hash=createHash('sha256').update(raw).digest('hex'),nextKey=key.replace(/[a-f0-9]{64}\.json$/,hash+'.json');
+     f.c.env.BACKUPS.get=async key=>key===nextKey?{body:new Response(raw).body,size:Buffer.byteLength(raw),customMetadata:{sha256:hash}}:get(key);
+     f.body.previous_backup_manifest_key=nextKey;const latest=await f.s.get('latest');latest.backup.manifest_key=nextKey;await f.s.put('latest',latest);
+   }
+   await assert.rejects(()=>f.c.release(f.body),/backup_integrity/);assert.deepEqual(await f.s.get('config'),f.old);
+ }
+});
+
+test('release storage or alarm failure atomically restores manifest, archive, receipt and paused state',async()=>{
+ for(const failure of ['config','alarm']) {
+   const f=await releaseHarness(), before=structuredClone(f.s.data), previousAlarm=f.s.alarm;
+   if(failure==='config') {const put=f.s.put.bind(f.s);f.s.put=async(k,v)=>{if(k==='config')throw Error('storage_failed');return put(k,v);};}
+   else {const alarm=f.s.setAlarm.bind(f.s);f.s.setAlarm=async at=>{await alarm(at);throw Error('alarm_failed');};}
+   await assert.rejects(()=>f.c.release(f.body),/failed/);
+   assert.deepEqual(f.s.data,before);assert.equal(f.s.alarm,previousAlarm);
+ }
 });
 
 test('absolute credit grants reserve cloud and active epochs without starving already funded requests',()=>{

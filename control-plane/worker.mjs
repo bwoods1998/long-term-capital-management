@@ -13,6 +13,7 @@ export class PortfolioSupervisor extends DurableObject {
   if(path==='/v1/tick'&&request.method==='POST')return json(await this.controller.tick());
   if(path==='/v1/configure'&&request.method==='POST')return json(await this.controller.configure(JSON.parse(await boundedText(request,16000))));
   if(path==='/v1/replace'&&request.method==='POST')return json(await this.controller.replace(JSON.parse(await boundedText(request,20000))));
+  if(path==='/v1/release'&&request.method==='POST')return json(await this.controller.release(JSON.parse(await boundedText(request,2000))));
   if(['/v1/pause','/v1/resume'].includes(path)&&request.method==='POST')return json(await this.controller.pause(path.endsWith('/pause')));
   return json({error:'not_found'},404);
  }catch{return json({error:'operation_failed'},409);}}

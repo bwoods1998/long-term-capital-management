@@ -10,6 +10,7 @@ In `available_credit` mode, fresh Sail credit funds research after outstanding r
 - `GET /v1/transport-check`: private, read-only checks of provider connectivity.
 - `POST /v1/configure`: enroll one immutable, tested service contract.
 - `POST /v1/replace`: archive a paused, parked, backed-up enrollment and atomically enroll a verified stopped replacement. Requires the prior service identity, new configuration and matching readiness/backup receipt; retries preserve that operation.
+- `POST /v1/release`: authorize reviewed runtime code on the same stopped, backed-up Sailbox. Archives the prior manifest and preserves configuration, journals, outstanding requests and spending policy. Resumption is explicit.
 - `POST /v1/pause` / `/v1/resume`: control the enrolled service.
 - `PUT /v1/backups/<service>/<snapshot>/<sha256>.gz`: private backup upload.
 
