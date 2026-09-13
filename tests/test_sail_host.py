@@ -97,6 +97,7 @@ class API:
                 **copy.deepcopy(self.rows[source]),
                 "sailbox_id": sid,
                 "name": body["name"],
+                "http_policy": None,
             }
             self.boxes[sid] = Box()
             self.boxes[sid].files = copy.deepcopy(self.boxes[source].files)
@@ -111,6 +112,10 @@ class API:
             return {}
         if route.endswith("/http-policy"):
             if method == "GET":
+                if self.rows[sid]["http_policy"] is None:
+                    error = RuntimeError("No policy attached")
+                    error.status_code = 404
+                    raise error
                 return self.rows[sid]["http_policy"]
             pid = body["policy_id"]
             self.rows[sid]["http_policy"] = {"document": self.policies[pid], "id": pid}
@@ -300,6 +305,55 @@ class HostTests(unittest.TestCase):
         self.assertNotIn("/workspace/state", child_box.files)
         self.assertEqual(self.host._read()["policy"], {"no_network": True})
         self.assertEqual(child._read()["role"], "research_branch")
+
+    def test_http_fork_rebinds_credentials_after_checkpoint_without_inheriting_them(
+        self,
+    ):
+        doc = h.restricted_policy("sail_inference")
+        seed = h.SailHost(
+            self.root / "local/http-seed.json",
+            api=self.api,
+            box_factory=lambda sid: self.api.boxes[sid],
+            policy_contract="http",
+            allowed_hosts=tuple(doc["allowlist"]),
+        )
+        seed_bundle = self.bundle("research_seed")
+        seed.create(self.app, "http-seed", seed_bundle)
+        pid = resource("hp")
+        self.api.policies[pid] = h.http_document(doc)
+        seed.bind_policy(pid, doc)
+        seed.install(seed_bundle)
+        child = h.SailHost(
+            self.root / "local/http-branch.json",
+            api=self.api,
+            box_factory=lambda sid: self.api.boxes[sid],
+            policy_contract="http",
+        )
+        config = {
+            "research_only": True,
+            "assigned_task_ids": ["fixed-task"],
+            "inference_budget_usd": "2",
+        }
+        bundle = self.bundle("research_branch", config)
+        child.fork_research(seed, bundle, "http-child")
+        child.fork_research(seed, bundle, "http-child")
+        self.assertIsNone(child._read()["policy_id"])
+        self.assertIsNone(child._read()["policy"])
+        self.assertEqual(
+            child._read()["create_body"]["network_policy"],
+            seed._read()["create_body"]["network_policy"],
+        )
+        with self.assertRaises(ValueError):
+            child.start()
+        child.bind_policy(pid, doc)
+        child.install(bundle)
+        child.start()
+        self.assertEqual(child._read()["policy_id"], pid)
+        self.assertEqual(seed._read()["policy_id"], pid)
+        self.assertEqual(
+            len([c for c in self.api.calls if c[1] == "/v1/sailboxes/from_checkpoint"]),
+            1,
+        )
 
     def test_legacy_http_policy_preserves_exact_hosts_and_request_rules(self):
         doc = h.restricted_policy(

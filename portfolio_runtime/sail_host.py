@@ -778,6 +778,12 @@ class SailHost:
             )
             state.pop("checkpoint", None)
             state.pop("checkpoint_key", None)
+            # HTTP credential bindings are not inherited by checkpoint forks.
+            # The immutable host allowlist survives; bind the reviewed policy
+            # explicitly before installing/starting the branch's assignment.
+            if state.get("policy_contract") == "http":
+                state["policy"] = None
+                state["policy_id"] = None
             self._save(state)
             response = self.api(
                 "POST",

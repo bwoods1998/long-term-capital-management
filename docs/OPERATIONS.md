@@ -56,7 +56,7 @@ For Sailbox hosting, `scripts/host_runtime.py provision --app-id <your-app-id>` 
 
 The website's checkpoint contains its publication time. It refreshes once a minute while visible. A saved “running” checkpoint is an observation, not proof that a process is still healthy.
 
-The first hosted deployment uses local user services `portfolio-sail-five-hour` and `portfolio-sail-forks`. They survive a terminal disconnect; the computer must remain on for recovery and timely cloud cleanup. Inspect them with `systemctl --user status <service>`. Private observations and backups live beside the frozen configuration under `host/` and `forks/`.
+The first hosted deployment uses local user services `portfolio-sail-five-hour` and `portfolio-sail-forks-v2`. They survive a terminal disconnect; the computer must remain on for recovery and timely cloud cleanup. Inspect them with `systemctl --user status <service>`. Private observations and backups live beside the frozen configuration under `host/` and `forks-v2/`; `forks/` retains the initial pre-inference failure.
 
 The website's separate Cloudflare alarm watches terminal states and missing heartbeats. Email delivery requires a verified notification destination; its private delivery journal distinguishes acceptance, pending configuration and an unconfirmed send. A configured binding alone is not proof that email arrived.
 
