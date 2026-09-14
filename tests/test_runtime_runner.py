@@ -22,6 +22,7 @@ from portfolio_runtime.research import (
     ALLOCATION_BODY_LIMIT,
     ALLOCATION_PROPOSAL_LIMIT,
     REQUEST_BODY_LIMIT,
+    DECISION_OUTPUT_LIMIT,
     critic_packet,
 )
 from portfolio_runtime.provider import Client, canonical, body_for
@@ -586,6 +587,7 @@ class RunnerTests(unittest.TestCase):
                 "SELECT body FROM tasks WHERE id='w01-allocation'"
             ).fetchone()[0]
         packet = json.loads(json.loads(before)["input"][-1]["content"])
+        self.assertEqual(json.loads(before)["max_output_tokens"], DECISION_OUTPUT_LIMIT)
         self.assertEqual(packet["allocation_evidence_version"], 2)
         sources = {row["symbol"]: row for row in packet["candidate_evidence"]}
         self.assertEqual(sources["AAPL"]["research_price"], quote)
@@ -617,6 +619,22 @@ class RunnerTests(unittest.TestCase):
             )
         original_input = json.loads(critic["input"][-1]["content"])["original_input"]
         self.assertEqual(original_input, packet)
+        self.assertEqual(critic["max_output_tokens"], DECISION_OUTPUT_LIMIT)
+
+    def test_existing_allocation_keeps_its_original_critic_output_allowance(self):
+        self.research.add(
+            "w00-allocation", 0, "allocation", None, "pro_asap",
+            self.research.decision_prefix(),
+            canonical(self.research.allocation_packet([])), max_output=16384,
+        )
+        result = answer([{"symbol": "AAPL", "weight": "0.10"}])
+        completed = self.completed("w00-allocation", result, kind="allocation", wave=0)
+        with self.research.connect() as db:
+            before = db.execute("SELECT body FROM tasks WHERE id='w00-critic'").fetchone()[0]
+        self.assertEqual(json.loads(before)["max_output_tokens"], 16384)
+        self.research.complete(completed)
+        with self.research.connect() as db:
+            self.assertEqual(db.execute("SELECT body FROM tasks WHERE id='w00-critic'").fetchone()[0], before)
 
     def test_target_claim_requirement_applies_only_to_new_allocation_protocol(self):
         self.research.add(
@@ -725,7 +743,7 @@ class RunnerTests(unittest.TestCase):
             self.research.allocation_profile,
             prefix,
             canonical(packet),
-            max_output=16384,
+            max_output=DECISION_OUTPUT_LIMIT,
         )
         self.assertLessEqual(len(canonical(body).encode()), ALLOCATION_BODY_LIMIT)
         # A maximally escaped permitted proposal still fits its dependent
@@ -736,7 +754,7 @@ class RunnerTests(unittest.TestCase):
             "k3",
             prefix,
             canonical(critic_packet("a" * 64, proposal, packet)),
-            max_output=16384,
+            max_output=DECISION_OUTPUT_LIMIT,
         )
         self.assertLessEqual(len(canonical(critic).encode()), REQUEST_BODY_LIMIT)
         self.assertEqual(

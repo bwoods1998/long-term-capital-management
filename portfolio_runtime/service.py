@@ -18,11 +18,12 @@ import re
 import signal
 import shutil
 import sqlite3
+import tempfile
 import threading
 import time
 
 from .contracts import NEW_YORK, UniverseSnapshot, identifier, timestamp
-from .evidence import assemble, capture, save
+from .evidence import assemble, capture, save, facts_for_identity
 from .ledger import PortfolioLedger
 from .market import YahooMarketData
 from .provider import Client, ClosingConnection, PROFILES, TERMINAL, canonical
@@ -176,6 +177,9 @@ CREATE TABLE IF NOT EXISTS epochs(id TEXT PRIMARY KEY,config TEXT NOT NULL,reser
 CREATE TABLE IF NOT EXISTS value_receipts(epoch_id TEXT PRIMARY KEY,body TEXT NOT NULL,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS checked_fundamentals(identity TEXT PRIMARY KEY,first_epoch TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS consumed_outcomes(identity TEXT PRIMARY KEY,epoch_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS outcome_review_receipts(identity TEXT PRIMARY KEY,epoch_id TEXT NOT NULL,body TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS immutable_outcome_review BEFORE UPDATE ON outcome_review_receipts BEGIN SELECT RAISE(ABORT,'immutable outcome review'); END;
+CREATE TRIGGER IF NOT EXISTS retained_outcome_review BEFORE DELETE ON outcome_review_receipts BEGIN SELECT RAISE(ABORT,'immutable outcome review'); END;
 CREATE TABLE IF NOT EXISTS phase_markers(id TEXT PRIMARY KEY,body TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS immutable_phase_marker BEFORE UPDATE ON phase_markers BEGIN SELECT RAISE(ABORT,'immutable phase marker'); END;
 CREATE TRIGGER IF NOT EXISTS immutable_contract BEFORE UPDATE ON contract BEGIN SELECT RAISE(ABORT,'immutable service contract'); END;
@@ -474,7 +478,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
     def fundamental_fingerprints(evidence):
         # Price ticks, HTTP hashes, model confidence and reworded questions are
         # not new business evidence and cannot authorize more spending.
-        return {company["symbol"]: hashlib.sha256(canonical(company.get("facts", {})).encode()).hexdigest()
+        return {company["symbol"]: hashlib.sha256(canonical(facts_for_identity(company)).encode()).hexdigest()
                 for company in evidence["companies"]}
 
     def seed_value_coverage(self):
@@ -498,7 +502,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                         company = json.loads(json.loads(body)["input"][-1]["content"])["evidence"]
                         if company["symbol"] != symbol:
                             continue
-                        digest = hashlib.sha256(canonical(company.get("facts", {})).encode()).hexdigest()
+                        digest = hashlib.sha256(canonical(facts_for_identity(company)).encode()).hexdigest()
                         identities.add(symbol+":"+digest)
                     except (ValueError, KeyError, TypeError):
                         continue
@@ -508,8 +512,102 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                 db.execute("INSERT OR IGNORE INTO checked_fundamentals VALUES(?,'seed')", (identity,))
             db.execute("INSERT OR IGNORE INTO checked_fundamentals VALUES('seed_import_complete','seed')")
 
+    @staticmethod
+    def outcome_identity(outcome):
+        return hashlib.sha256(canonical([outcome["decision_id"], outcome["market_as_of"]]).encode()).hexdigest()
+
+    def record_outcome_reviews(self, epoch_id, config):
+        """A reservation is not a review: retain the exact completed critique.
+
+        Approval is not required. A supported revision or abstention is useful
+        feedback; an unreviewed proposal or a pre-close packet is not.
+        """
+        path = Path(config["state_dir"])/"research.sqlite"
+        if self.outcomes is None or not path.is_file():
+            return
+        totals = request_totals(Path(config["state_dir"])/"requests.sqlite")
+        if totals["pending_requests"] or totals["unsettled_requests"]:
+            return
+        with sqlite3.connect("file:"+str(path)+"?mode=ro", uri=True, factory=ClosingConnection) as source:
+            source.row_factory = sqlite3.Row
+            rows = source.execute("""SELECT a.id allocation_id,a.body allocation_body,a.result allocation_result,a.grade allocation_grade,
+c.id critic_id,c.body critic_body,c.result critic_result,c.grade critic_grade
+FROM tasks a JOIN tasks c ON c.wave=a.wave AND c.kind='portfolio_critic'
+WHERE a.kind='allocation' AND a.status='complete' AND c.status='complete' ORDER BY a.created,a.id""").fetchall()
+        receipts = []
+        for row in rows:
+            try:
+                if not (json.loads(row["allocation_grade"])["source_check_passed"]
+                        and json.loads(row["critic_grade"])["source_check_passed"]):
+                    continue
+                packet = json.loads(json.loads(row["allocation_body"])["input"][-1]["content"])
+                critic_packet = json.loads(json.loads(row["critic_body"])["input"][-1]["content"])
+                original = critic_packet["original_input"]
+                if isinstance(original, str):
+                    original = json.loads(original)  # Existing v1 bodies remain unchanged.
+                proposal = hashlib.sha256(row["allocation_result"].encode()).hexdigest()
+                critic = json.loads(row["critic_result"])
+                if (original != packet or critic_packet["proposal_sha256"] != proposal
+                        or critic_packet["proposal"] != json.loads(row["allocation_result"])
+                        or critic["proposal_sha256"] != proposal
+                        or critic["review_verdict"] not in ("approve", "revise", "abstain")):
+                    continue
+                for outcome in packet.get("observed_investment_outcomes", []):
+                    # Verify the exact context against what the append-only
+                    # outcome journal actually knew at its observation time.
+                    if timestamp(outcome["observed_at"]).timestamp() > self.clock():
+                        continue
+                    known = self.outcomes.context(cutoff=outcome["observed_at"], limit=20)
+                    if outcome not in known:
+                        continue
+                    identity = self.outcome_identity(outcome)
+                    receipt = {"schema_version": 1, "observed_at": stamp(self.clock()),
+                               "allocation_task": row["allocation_id"], "critic_task": row["critic_id"],
+                               "proposal_sha256": proposal, "review_verdict": critic["review_verdict"],
+                               "allocation_body_sha256": hashlib.sha256(row["allocation_body"].encode()).hexdigest(),
+                               "critic_body_sha256": hashlib.sha256(row["critic_body"].encode()).hexdigest(),
+                               "outcome_context_sha256": hashlib.sha256(canonical(outcome).encode()).hexdigest()}
+                    receipts.append((identity, epoch_id, canonical(receipt)))
+            except (ValueError, TypeError, KeyError, IndexError):
+                continue  # Malformed or incomplete reviews do not acknowledge feedback.
+        with self.connect() as db:
+            db.executemany("INSERT OR IGNORE INTO outcome_review_receipts VALUES(?,?,?)", receipts)
+
+    def reviewable_outcomes(self):
+        """Retry settled failed reviews without duplicating accepted work.
+
+        Old consumed_outcomes rows retain their original reservation meaning.
+        Epoch configs record later attempts; retry backoff is one, two, four,
+        then six hours for hourly epochs. This controls retries, not spending.
+        """
+        if self.outcomes is None:
+            return []
+        with self.connect() as db:
+            reviewed = {row[0] for row in db.execute("SELECT identity FROM outcome_review_receipts")}
+            reserved = {row[0] for row in db.execute("SELECT identity FROM consumed_outcomes")}
+            epochs = [(row["status"], json.loads(row["config"])) for row in db.execute("SELECT status,config FROM epochs ORDER BY created")]
+        fresh = []
+        for outcome in self.outcomes.context(cutoff=stamp(self.clock()), limit=20):
+            identity = self.outcome_identity(outcome)
+            if identity in reviewed:
+                continue
+            attempts = [(status, config) for status, config in epochs
+                        if identity in config.get("funding_plan", {}).get("new_outcome_ids", [])]
+            if not attempts:
+                if identity not in reserved:
+                    fresh.append(identity)
+                continue
+            status, config = attempts[-1]
+            if status != "complete":
+                continue  # Existing accepted requests must finish before a replacement.
+            cooldown = min(21600, self.config["session_seconds"] * 2**min(len(attempts)-1, 3))
+            if self.clock() >= config["ends_epoch"]+cooldown:
+                fresh.append(identity)
+        return fresh
+
     def record_value(self, epoch_id, config):
         """Seal observational research productivity, never claim trading ROI."""
+        self.record_outcome_reviews(epoch_id, config)
         if not self.config.get("adaptive_spending"):
             return
         with self.connect() as db:
@@ -576,16 +674,9 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
                 mode, reason = "maintenance", "repeated_work_without_new_checked_evidence"
             else:
                 reason = "continuing_unproven_investment_research"
-        fresh_outcomes = []
-        if self.outcomes is not None:
-            with self.connect() as db:
-                for outcome in self.outcomes.context(cutoff=stamp(self.clock()), limit=20):
-                    # Later benchmark recovery for the same decision/close is
-                    # improved attribution, not a fresh trading outcome that
-                    # can repeatedly unlock another research allocation.
-                    identity = hashlib.sha256(canonical([outcome["decision_id"], outcome["market_as_of"]]).encode()).hexdigest()
-                    if not db.execute("SELECT 1 FROM consumed_outcomes WHERE identity=?", (identity,)).fetchone():
-                        fresh_outcomes.append(identity)
+        # Benchmark recovery for the same decision/close improves attribution;
+        # it is not another outcome. Reservations and completed reviews differ.
+        fresh_outcomes = self.reviewable_outcomes()
         if fresh_outcomes:
             mode, reason = "exploration", "new_observed_investment_outcome"
         plan = self._funding_plan(mode, reason, latest_receipt=receipts[0]["epoch_id"] if receipts else None)
@@ -822,6 +913,8 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             runner.report(validated, client, research)
             totals = request_totals(Path(config["state_dir"])/"requests.sqlite")
             status = "parked_unsettled" if totals["pending_requests"] else "drained_unsettled" if totals["unsettled_requests"] else "complete"
+            if status == "complete":
+                self.record_outcome_reviews(epoch_id, config)
             with self.connect() as db:
                 db.execute("UPDATE epochs SET known=?,committed=?,status=? WHERE id=?",
                            (totals["known_cost_usd"], totals["committed_usd"], status, epoch_id))
@@ -865,35 +958,126 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             raise ValueError("Daily sources are stale or from the future")
         return result
 
-    def _enrich_prices(self, evidence):
-        """Freeze actual research prices before admission, never future fills.
+    def _valid_research_price(self, symbol, quote):
+        """Retained quotes keep the provider identity and original observation time."""
+        from .market import chart_url
+        try:
+            return (isinstance(quote, dict) and quote.get("schema_version") == 1
+                    and quote.get("symbol") == symbol and quote.get("currency") == "USD"
+                    and quote.get("provider") == "Yahoo Finance" and quote.get("adjusted") is False
+                    and quote.get("price_kind") in ("daily_close", "session_to_date")
+                    and quote.get("source") == chart_url(symbol)
+                    and re.fullmatch(r"[a-f0-9]{64}", quote.get("source_sha256", "")) is not None
+                    and isinstance(quote.get("price"), str)
+                    and Decimal(quote["price"]).is_finite() and Decimal(quote["price"]) > 0
+                    and timestamp(quote["as_of"]) <= timestamp(quote["captured_at"])
+                    and 0 <= self.clock()-timestamp(quote["as_of"]).timestamp() <= 7*86400
+                    and 0 <= self.clock()-timestamp(quote["captured_at"]).timestamp() <= 7*86400)
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            return False
 
-        A small rotating set and existing holdings are refreshed each epoch.
-        Other companies retain missing prices; agents must explicitly abstain
-        when valuation evidence is inadequate.
+    def _retained_research_prices(self, companies):
+        """Recover a bounded quote bank; daily filing evidence stays immutable."""
+        path = self.root / "research-prices.json"
+        prices = {}
+
+        def include(symbol, cik, quote):
+            if (symbol not in companies or cik != companies[symbol].get("cik")
+                    or not self._valid_research_price(symbol, quote)):
+                return
+            old = prices.get(symbol)
+            # A later download cannot make an older market observation newer.
+            rank = lambda q: (q["as_of"], q["captured_at"])
+            if old is None or rank(quote) > rank(old["quote"]):
+                prices[symbol] = {"cik": cik, "quote": quote}
+
+        try:
+            saved = json.loads(path.read_text())
+            if saved.get("schema_version") != 1 or not isinstance(saved.get("prices"), dict):
+                raise ValueError("Unrecognized retained price cache")
+            for symbol, entry in saved["prices"].items():
+                if isinstance(entry, dict):
+                    include(symbol, entry.get("cik"), entry.get("quote"))
+        except (OSError, ValueError, TypeError, AttributeError):
+            # Migration/recovery only: immutable epoch packets retain the exact
+            # old quote receipts. Do not scan an unbounded week on every tick.
+            for packet in sorted((self.root / "epochs").glob("*/evidence.json"))[-24:]:
+                try:
+                    previous = json.loads(packet.read_text())
+                    for company in previous["companies"]:
+                        include(company["symbol"], company.get("cik"), company.get("research_price"))
+                except (OSError, ValueError, TypeError, KeyError):
+                    continue
+        for symbol, company in companies.items():
+            include(symbol, company.get("cik"), company.get("research_price"))
+        return prices
+
+    def _research_price_priority(self, evidence):
+        """Use the real research selector without creating an epoch or requests."""
+        from .research import Research
+        # A private temporary preview is outside the service artifact tree.
+        # Only hypotheses are imported; frozen source/request journals are read.
+        with tempfile.TemporaryDirectory(prefix="portfolio-price-preview-") as directory:
+            preview = Research(Path(directory) / "research.sqlite", evidence)
+            preview.bounded_novelty = True
+            preview.carry_history(self.history_paths())
+            selected = [symbol for symbol, _ in preview.choose(self.config.get("wave_size", 12))]
+            candidates = [row["symbol"] for row in preview.checked_for_allocation()]
+        return selected, candidates
+
+    def _enrich_prices(self, evidence):
+        """Freeze sourced prices for actual research and all portfolio positions.
+
+        Keep older observations with their real dates, refresh selected research
+        before a small rotating coverage sample, and never use this bank as fills.
         """
         market = self.market_factory(self.root / "market")
         if not hasattr(market, "snapshot_price"):
             return evidence
+        companies = {c["symbol"]: c for c in evidence["companies"]}
+        prices = self._retained_research_prices(companies)
+        for symbol, company in companies.items():
+            if not self._valid_research_price(symbol, company.get("research_price")):
+                company.pop("research_price", None)
+        for symbol, entry in prices.items():
+            companies[symbol]["research_price"] = entry["quote"]
         with PortfolioLedger(self.root / "paper.sqlite") as ledger:
             state = ledger.public_state()
         symbols = {h["symbol"] for h in state["holdings"]}
         for decision in state["pending_decisions"]:
             symbols.update(t["symbol"] for t in decision["targets"])
+        selected, candidates = self._research_price_priority(evidence)
         ordered = sorted((c["symbol"] for c in evidence["companies"]), key=lambda s: hashlib.sha256(s.encode()).hexdigest())
         offset = int((self.clock()-self.start)//self.config["session_seconds"])*32 % len(ordered)
-        symbols = set(sorted(symbols)[:32]) | set((ordered+ordered)[offset:offset+32])
-        companies = {c["symbol"]: c for c in evidence["companies"]}
+        priority = list(dict.fromkeys(selected+candidates+(ordered+ordered)[offset:offset+32]))
+        # Every held/pending name is mandatory. At most 64 additional names
+        # bound source traffic; this is independent of inference spending.
+        symbols |= set([symbol for symbol in priority if symbol not in symbols][:64])
         # Old quotes keep their actual capture/as-of. They are never restamped.
         self.progress_at, self.stage = self.clock(), "refreshing_prices"
+        refreshed = []
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = {pool.submit(market.snapshot_price, symbol): symbol for symbol in sorted(symbols) if symbol in companies}
             for future in as_completed(futures):
                 try:
-                    companies[futures[future]]["research_price"] = future.result()
+                    symbol, quote = futures[future], future.result()
+                    if self._valid_research_price(symbol, quote):
+                        old = prices.get(symbol, {}).get("quote")
+                        if old is None or (quote["as_of"], quote["captured_at"]) >= (old["as_of"], old["captured_at"]):
+                            companies[symbol]["research_price"] = quote
+                            prices[symbol] = {"cik": companies[symbol].get("cik"), "quote": quote}
+                            refreshed.append(symbol)
                 except (ValueError, OSError, TimeoutError):
                     pass
                 self.progress_at = self.clock()
+        save(self.root / "research-prices.json", {"schema_version": 1, "prices": prices})
+        save(self.root / "research-price-health.json", {
+            "schema_version": 1, "observed_at": stamp(self.clock()),
+            "next_wave_symbols": selected, "allocation_candidates": candidates,
+            "requested_symbols": sorted(symbols & companies.keys()), "refreshed_symbols": sorted(refreshed),
+            "retained_price_count": len(prices),
+            "next_wave_with_prices": [symbol for symbol in selected if symbol in prices],
+            "interpretation": "Dated research quotes; retained observations are never current quotes or execution prices."})
         # The common overview remains frozen for the entire source day. Fresh
         # focal-company quotes live in the task suffix, so a measured cache
         # write can be reused across epochs without pretending evidence is new.
@@ -1129,6 +1313,10 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             expired = self.clock() >= config["ends_epoch"]
             finished = expired and totals["pending_requests"] == 0
             status = ("complete" if totals["unsettled_requests"] == 0 else "drained_unsettled") if finished else "parked_unsettled" if expired else "running"
+            if status == "complete":
+                # Seal feedback before closing the epoch. A crash afterwards
+                # can repeat this insert, but cannot lose the review receipt.
+                self.record_outcome_reviews(identity, config)
             with self.connect() as db:
                 db.execute("UPDATE epochs SET known=?,committed=?,status=? WHERE id=?",
                            (totals["known_cost_usd"], totals["committed_usd"], status, identity))

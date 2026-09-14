@@ -22,7 +22,9 @@ Capture dated public sources without inference:
 python3 -m portfolio_runtime.evidence --directory .data/runtime/evidence
 ```
 
-Inspect `capture.json` before launch. A partial source bank is not complete coverage. The weekday service refreshes constituent membership and SEC facts by evidence date, retains prior research, and fetches actual research prices separately from paper-execution observations.
+Inspect `capture.json` before launch. A partial source bank is not complete coverage. The weekday service refreshes constituent membership and SEC facts by evidence date and retains prior research. Capital-spending evidence distinguishes PP&E payments from broader productive-asset payments; overlapping tags are never additive. Explanatory labels do not count as new financial evidence.
+
+Research-price refreshes prioritize every held/pending stock, the next company reviews and checked allocation candidates. A persistent quote bank retains exact source dates for up to seven days; retained prices are not current quotes or paper-execution observations. New allocations and their dependent critics allow up to 32,768 output tokens, including reasoning, while existing request bodies remain frozen.
 
 ## Enroll a cloud week
 
@@ -91,6 +93,8 @@ Restore and reconciliation are deliberately manual in this version. Replaying a 
 ## What improves automatically
 
 The next investment review can revisit the original thesis against actual paper outcomes. A dated outcome journal preserves proposed allocations and measures executed holdings through recorded closing marks, net of trading costs and excluding deposits. Allocation and critic reviews receive only feedback observed by their cutoff. Missing benchmark observations stay missing; later data appends a new receipt without rewriting what an earlier review knew.
+
+Scheduling an outcome review does not mark it complete. A durable receipt requires a settled, source-passed allocation and matching critic containing the exact observed feedback. Failed or empty sessions retry after one, two, four, then six hours; unsettled requests retain their identities. A completed review can approve, revise or abstain—it does not establish that the agent learned a profitable rule.
 
 A separate policy experiment compares the same research task with up to three prior company reviews versus fresh context. Prospective dated pairs, an untouched audit set, source checks and recorded cost govern promotion. Results cannot rewrite their evaluator, benchmark, portfolio mandate or spending authority. This version permits one qualifying promotion and one rollback; it does not train model weights or autonomously edit production code.
 

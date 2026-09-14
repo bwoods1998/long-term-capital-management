@@ -22,7 +22,10 @@ TAGS = {
         "RevenueFromContractWithCustomerIncludingAssessedTax",
     ],
     "operating_cash": ["NetCashProvidedByUsedInOperatingActivities"],
-    "capital_spending": ["PaymentsToAcquirePropertyPlantAndEquipment"],
+    "capital_spending": [
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "PaymentsToAcquireProductiveAssets",
+    ],
     "net_income": ["NetIncomeLoss", "ProfitLoss"],
     "assets": ["Assets"],
     "equity": [
@@ -36,6 +39,13 @@ TAGS = {
     "dividends_paid": ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends"],
     "buybacks": ["PaymentsForRepurchaseOfCommonStock"],
     "shares": ["CommonStockSharesOutstanding"],
+}
+
+# These are different cash-flow definitions, not additive components or
+# interchangeable aliases. Retain their exact tags for every source claim.
+CAPITAL_SPENDING_DEFINITIONS = {
+    "PaymentsToAcquirePropertyPlantAndEquipment": "Cash paid for property, plant and equipment.",
+    "PaymentsToAcquireProductiveAssets": "Cash paid for property, plant and equipment, software and other intangible assets; broader than PP&E alone.",
 }
 
 
@@ -158,6 +168,21 @@ def capture_universe(directory, fetcher=None):
     return record
 
 
+def facts_for_identity(company):
+    """Explanatory tag labels are not new financial observations.
+
+    Old packets lacked these labels. Excluding only that added field preserves
+    their existing identity while new tags, periods and values still count.
+    """
+    facts = dict(company.get("facts", {}))
+    if "capital_spending" in facts:
+        facts["capital_spending"] = [
+            {key: value for key, value in variant.items() if key != "definition"}
+            for variant in facts["capital_spending"]
+        ]
+    return facts
+
+
 def compact_facts(raw, company, captured_at, cutoff):
     """Keep annual/YTD/instant observations distinct, with accession and filing date."""
     data = json.loads(raw)
@@ -228,6 +253,8 @@ def compact_facts(raw, company, captured_at, cutoff):
                 if selected:
                     variants.append(
                         {"tag": tag, "unit": unit, "observations": selected}
+                        | ({"definition": CAPITAL_SPENDING_DEFINITIONS[tag]}
+                           if metric == "capital_spending" else {})
                     )
         if variants:
             out[metric] = variants
@@ -243,6 +270,7 @@ def compact_facts(raw, company, captured_at, cutoff):
         "limitations": [
             "Standard US-GAAP whole-company facts only; custom tags and business segments may be absent.",
             "Do not compare periods or capital-spending definitions without reconciling them.",
+            "Capital-spending tags can overlap; do not add PP&E payments to productive-asset payments.",
         ],
     }
 
