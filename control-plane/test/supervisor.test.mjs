@@ -254,7 +254,14 @@ test('rehearsal completion emails once, denies gap admission, and sleeps until t
  const f=harness({at,health:{status:'waiting',next_wake_at:c.starts_at,rehearsal:{...c.rehearsal,status:'complete',completed_at:new Date(at-60000).toISOString(),unsettled_requests:0,inference:{completed:11,requests:12,known_cost_usd:'1.23'}}}});
  await f.c.configure(c);await f.c.tick();
  assert.equal(f.files()[0].allow_new_research,false);
+ assert.equal((await f.s.get('control')).sleep_until,undefined);
+ assert.equal(f.commands().filter(c=>typeof c.command==='string'&&c.command.includes('supervisor_guest backup')).length,1);
+ assert(!f.calls.some(r=>r.url.endsWith('/sleep')));
+ f.advance(60000);f.state.backup.completed_at=new Date(f.state.at).toISOString();
+ f.state.backup.manifest_key=c.service_id+'/snapshot-complete/'+ 'b'.repeat(64)+'.json';
+ await f.c.tick();
  assert.equal((await f.s.get('control')).sleep_until,c.starts_at);
+ assert.equal((await f.s.get('control')).rehearsal_backup.manifest_key,f.state.backup.manifest_key);
  assert.equal((await f.s.get('control')).finished,undefined);
  assert.equal(f.sent.filter(m=>/rehearsal complete/.test(m.subject)).length,1);
  assert(f.sent.some(m=>m.text.includes('9:00 PM Pacific')));
@@ -266,6 +273,50 @@ test('rehearsal completion emails once, denies gap admission, and sleeps until t
  f.advance(start-f.state.at);f.state.health.heartbeat_at=new Date(start).toISOString();f.state.health.progress_at=new Date(start).toISOString();f.state.health.status='running';
  await f.c.tick();assert.equal(f.files().at(-1).allow_new_research,true);
  assert.equal(f.sent.filter(m=>/rehearsal complete/.test(m.subject)).length,1);
+});
+
+test('a previously sleeping completed rehearsal wakes only for its missing final backup',async()=>{
+ const c=availableConfig(),at=start-2*3600000;
+ const health={status:'waiting',next_wake_at:c.starts_at,rehearsal:{...c.rehearsal,status:'complete',completed_at:new Date(at-60000).toISOString(),unsettled_requests:0}};
+ const f=harness({at,running:false,health});await f.c.configure(c);
+ f.state.backup.completed_at=new Date(at-120000).toISOString();
+ await f.s.put('control',{paused:false,sleep_until:c.starts_at,backup_intent:{id:'old-backup',at:new Date(at-180000).toISOString(),confirmed:true}});
+ await f.s.put('latest',{status:'waiting',health:f.state.health,backup:f.state.backup});
+ await f.c.tick();
+ assert.equal(f.files()[0].allow_new_research,false);
+ assert.equal(f.files()[0].stop_requested,false);
+ assert(!f.commands().some(c=>typeof c.command==='string'&&c.command.includes('host-boot')));
+ assert.equal(f.commands().filter(c=>typeof c.command==='string'&&c.command.includes('supervisor_guest backup')).length,1);
+ assert.equal((await f.s.get('control')).sleep_until,undefined);
+ assert(!f.calls.some(r=>r.url.endsWith('/sleep')));
+ f.advance(60000);f.state.backup={running:true,status:'running'};await f.c.tick();
+ assert(!f.calls.some(r=>r.url.endsWith('/sleep')));
+ f.advance(60000);f.state.backup={running:false,status:'complete',completed_at:new Date(f.state.at).toISOString(),manifest_key:c.service_id+'/snapshot-final/'+ 'c'.repeat(64)+'.json'};
+ await f.c.tick();
+ assert.equal((await f.s.get('control')).sleep_until,c.starts_at);
+ assert.equal((await f.s.get('control')).rehearsal_backup.requested_at,new Date(at).toISOString());
+ const before=f.calls.length;f.advance(60000);await f.c.tick();
+ assert(f.calls.slice(before).every(r=>r.url.includes('/usage/summary')));
+ assert.equal(f.sent.filter(m=>/rehearsal complete/.test(m.subject)).length,1);
+});
+
+test('a snapshot begun before completion cannot certify final rehearsal records',async()=>{
+ const c=availableConfig(),at=start-2*3600000,marker=new Date(at-60000).toISOString();
+ const f=harness({at,running:false,health:{status:'waiting',rehearsal:{...c.rehearsal,status:'complete',completed_at:marker,unsettled_requests:0}}});
+ await f.c.configure(c);
+ f.state.backup.manifest_key=c.service_id+'/snapshot-before/'+ 'd'.repeat(64)+'.json';
+ await f.s.put('control',{paused:false,backup_intent:{id:'before-marker',at:new Date(at-120000).toISOString(),confirmed:true}});
+ await f.c.tick();
+ assert.equal((await f.s.get('control')).rehearsal_backup,undefined);
+ assert.equal((await f.s.get('control')).sleep_until,undefined);
+ assert.equal(f.commands().filter(c=>typeof c.command==='string'&&c.command.includes('supervisor_guest backup')).length,1);
+ // Neither a failed snapshot nor a manifest from another service is sufficient.
+ f.advance(60000);f.state.backup={running:false,status:'failed',completed_at:new Date(f.state.at).toISOString()};await f.c.tick();
+ assert.equal((await f.s.get('control')).sleep_until,undefined);
+ f.advance(60000);f.state.backup={running:false,status:'complete',completed_at:new Date(f.state.at).toISOString(),manifest_key:'another-service/snapshot-final/'+ 'e'.repeat(64)+'.json'};await f.c.tick();
+ assert.equal((await f.s.get('control')).rehearsal_backup,undefined);
+ assert.equal((await f.s.get('control')).sleep_until,undefined);
+ assert(!f.calls.some(r=>r.url.endsWith('/sleep')));
 });
 
 test('funded bounded rehearsal avoids irrelevant weekly runway warnings while low credit still alerts',async()=>{

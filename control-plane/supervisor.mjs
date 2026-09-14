@@ -7,6 +7,18 @@ const iso = ms => new Date(ms).toISOString();
 const backupObjectKey = (service,row) => new RegExp('^'+service+'/[a-z0-9-]{8,80}/'+row.compressed_sha256+'\\.gz$').test(row.object_key||'');
 const finite = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const availableCredit = c => c.spending_mode==='available_credit';
+const completedRehearsal = (c,health,at) => {
+  const r=health?.rehearsal, completed=Date.parse(r?.completed_at);
+  return !!c.rehearsal&&r?.status==='complete'&&r.starts_at===c.rehearsal.starts_at&&r.ends_at===c.rehearsal.ends_at
+    &&Number.isFinite(completed)&&completed>=Date.parse(c.rehearsal.ends_at)&&completed<=at
+    &&Number(r.unsettled_requests??r.inference?.unsettled_requests??NaN)===0;
+};
+const rehearsalBackedUp = (c,health,control,at) => {
+  const r=control.rehearsal_backup, marker=Date.parse(health?.rehearsal?.completed_at);
+  return completedRehearsal(c,health,at)&&r?.completed_marker===health.rehearsal.completed_at
+    &&Date.parse(r.requested_at)>=marker&&Date.parse(r.completed_at)>=Date.parse(r.requested_at)&&Date.parse(r.completed_at)<=at
+    &&new RegExp('^'+c.service_id+'/[a-z0-9-]{8,80}/[a-f0-9]{64}\\.json$').test(r.manifest_key||'');
+};
 export const dollars = value => { if (typeof value !== 'number' && (typeof value !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value))) throw new Error('invalid_money'); const n = Number(value); if (!finite(n)) throw new Error('invalid_money'); return n; };
 const grant = value => (Math.floor(Math.max(0,value) * 1e8) / 1e8).toFixed(8);
 const failureCode = error => error?.message === 'Illegal invocation' ? 'fetch_illegal_invocation'
@@ -420,7 +432,10 @@ export class Supervisor {
     }
     if (control.parked && control.paused && !ended) {latest.status='paused';return save();}
     if (control.budget_parked && !ended) {latest.status='needs_attention';latest.reason_code='cloud_budget_exhausted';return save();}
-    if (control.sleep_until && at < Date.parse(control.sleep_until) && !control.paused && !ended && !computeExhausted) {
+    // Older controllers could sleep during the gap before the final snapshot.
+    // Wake only the probe/backup path until a post-completion receipt exists.
+    const missingRehearsalBackup=rehearsalGap&&completedRehearsal(c,previous?.health,at)&&!rehearsalBackedUp(c,previous?.health,control,at);
+    if (control.sleep_until && at < Date.parse(control.sleep_until) && !missingRehearsalBackup && !control.paused && !ended && !computeExhausted) {
       latest.status='waiting';if(credit.allow&&!latest.billing_status&&!latest.compute_status)await recovered();return save();
     }
     delete control.sleep_until;
@@ -440,12 +455,16 @@ export class Supervisor {
       if (probe.manifest_sha256!==c.manifest_sha256 || typeof probe.running!=='boolean' || typeof probe.boot_id!=='string' || !/^[a-zA-Z0-9-]{1,100}$/.test(probe.boot_id)) throw new Error('manifest_mismatch');
       latest.health=probe.health;latest.backup=probe.backup;
       const health=probe.health || {}, backup=probe.backup || {};
-      const rehearsal=health.rehearsal, rehearsalCompleted=Date.parse(rehearsal?.completed_at);
-      const rehearsalDone=!!c.rehearsal&&rehearsal?.status==='complete'&&rehearsal.starts_at===c.rehearsal.starts_at&&rehearsal.ends_at===c.rehearsal.ends_at
-        &&Number.isFinite(rehearsalCompleted)&&rehearsalCompleted>=Date.parse(c.rehearsal.ends_at)&&rehearsalCompleted<=at
-        &&Number(rehearsal.unsettled_requests??rehearsal.inference?.unsettled_requests??NaN)===0;
+      const rehearsalDone=completedRehearsal(c,health,at);
       if (rehearsalDone) await this.alert(c.service_id+':rehearsal-complete','rehearsal',{next_start_at:c.starts_at,health});
       const backupTime=Date.parse(backup.completed_at), backupAge=Number.isFinite(backupTime)?Math.max(0,at-backupTime):Infinity;
+      // Completion time alone is insufficient: a snapshot may have begun before
+      // the final ledger write. Require a confirmed intent requested afterward.
+      if (rehearsalDone&&backup.status==='complete'&&!backup.running&&control.backup_intent?.confirmed) {
+        const receipt={completed_marker:health.rehearsal.completed_at,requested_at:control.backup_intent.at,
+          completed_at:backup.completed_at,manifest_key:backup.manifest_key};
+        if (rehearsalBackedUp(c,health,{rehearsal_backup:receipt},at)) control.rehearsal_backup=receipt;
+      }
       const requestPending=Number(health.inference?.pending_requests ?? health.inference?.unsettled_requests ?? 0);
       const stopAge=stopping?at-Date.parse(control.stop_started_at):0;
       if (stopping && probe.running && !control.stop_sent && (!ended || at>=forceAt)) {
@@ -481,7 +500,8 @@ export class Supervisor {
       // Backups get a durable intent. An uncertain acknowledgement retries exactly
       // that operation; running jobs are never replaced with a newly minted ID.
       const stopNeedsBackup=stopping&&!probe.running&&(!Number.isFinite(backupTime)||backupTime<Date.parse(control.stop_started_at));
-      const backupDue=!backup.running&&(backupAge>1800000||stopNeedsBackup);
+      const rehearsalNeedsBackup=rehearsalGap&&rehearsalDone&&!rehearsalBackedUp(c,health,control,at);
+      const backupDue=!backup.running&&(backupAge>1800000||stopNeedsBackup||rehearsalNeedsBackup);
       if (backupDue && at<forceAt) {
         if (control.backup_intent && (Number.isFinite(backupTime)&&backupTime>=Date.parse(control.backup_intent.at))) control.backup_intent=null;
         if (control.backup_intent?.confirmed && at-Date.parse(control.backup_intent.at)>900000) control.backup_intent=null;
