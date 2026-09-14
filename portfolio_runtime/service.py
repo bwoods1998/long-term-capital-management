@@ -708,6 +708,33 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             projection["latest_decision"] = self._latest_public_decision
         return projection
 
+    def public_coverage(self, projection, research=None):
+        """Count retained source-checked company work, not just the last hour.
+
+        This reports research history for current constituents. It does not
+        claim every retained review uses today's financial disclosures.
+        """
+        activity = projection.get("sail", {}).get("activity")
+        if not activity:
+            return projection
+        with self.connect() as db:
+            checked = {row[0].split(":", 1)[0] for row in db.execute(
+                "SELECT identity FROM checked_fundamentals WHERE instr(identity,':')>0")}
+            last = db.execute("SELECT config FROM epochs ORDER BY created DESC LIMIT 1").fetchone()
+        if research is not None:
+            companies = set(research.companies)
+            with research.connect() as db:
+                for row in db.execute("SELECT symbol,grade FROM tasks WHERE kind='company' AND status='complete'"):
+                    if row["grade"] and json.loads(row["grade"]).get("source_check_passed"):
+                        checked.add(row["symbol"])
+        else:
+            path = json.loads(last[0])["evidence_path"] if last else self.config["initial_evidence_path"]
+            companies = {company["symbol"] for company in json.loads(Path(path).read_text())["companies"]}
+        count = len(checked & companies)
+        activity.update(companies_researched=count, universe_size=len(companies), coverage_scope="retained")
+        projection["research"]["question"] = f"{count} of {len(companies)} stocks researched."
+        return projection
+
     def checkpoint(self, config, ledger, research, client, projection):
         self.progress_at, self.stage = self.clock(), "researching"
         self.paper_sync(ledger)
@@ -746,6 +773,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             activity.update(completed_requests=totals["completed"], total_requests=totals["requests"],
                             reserved_cost_usd=format(Decimal(totals["committed_usd"])-Decimal(totals["known_cost_usd"]), "f"))
         self.preserve_latest_decision(projection)
+        self.public_coverage(projection, research)
         save(self.root / "public.json", projection)
         self.health()
         return projection
@@ -1031,6 +1059,7 @@ CREATE TRIGGER IF NOT EXISTS immutable_epoch BEFORE UPDATE OF id,config,reserved
             activity.update(completed_requests=totals["completed"], total_requests=totals["requests"],
                             reserved_cost_usd=format(Decimal(totals["committed_usd"])-Decimal(totals["known_cost_usd"]), "f"))
         self.preserve_latest_decision(projection)
+        self.public_coverage(projection)
         runner.publish(self.config, projection)
 
     def tick(self):

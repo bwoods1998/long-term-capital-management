@@ -24,6 +24,7 @@ from .contracts import (
     UTC,
     YAHOO_SP500TR,
     decimal_text,
+    number,
     symbol,
     timestamp,
     utc_now,
@@ -600,7 +601,23 @@ class YahooMarketData:
             market_session=session, benchmark=point, observed_at=self.clock())}
 
     @staticmethod
-    def _guard_actions(ledger, snapshots, *, observed_at):
+    def _action_symbols(ledger, now):
+        """Recheck recently disposed lots for dividends reported after the sale.
+
+        Yahoo's source window is one month. Include recent actual fills, not
+        research targets, so a cash-only account can still discover its rights.
+        Older unreported events remain outside this feed's explicit coverage.
+        """
+        recent = timestamp(now) - timedelta(days=32)
+        symbols = {holding["symbol"] for holding in ledger.public_state()["holdings"]}
+        for event in ledger.events():
+            if event["kind"] == "rebalance":
+                symbols.update(fill["symbol"] for fill in event["payload"]["fills"]
+                               if timestamp(fill["quote_at"]) >= recent)
+        return symbols
+
+    @staticmethod
+    def _guard_actions(ledger, snapshots, *, observed_at, valuation_at=None):
         state = ledger.public_state()
         held = {holding["symbol"] for holding in state["holdings"]}
         boundary = state["as_of"] or state["created_at"]
@@ -609,16 +626,31 @@ class YahooMarketData:
             for event in ledger.events()
             if event["kind"] == "action_flag"
         }
-        blocked = False
+        blocked, dividends = False, []
+        valuation_at = valuation_at or observed_at
         for snapshot in snapshots:
-            if snapshot.symbol not in held:
-                continue
-            if timestamp(snapshot.coverage_start) > timestamp(boundary):
+            if snapshot.symbol in held and timestamp(snapshot.coverage_start) > timestamp(boundary):
                 raise ValueError(
                     "Corporate-action coverage does not reach the last account valuation"
                 )
             for action in snapshot.actions:
-                if timestamp(action["effective_at"]) > timestamp(boundary):
+                effective = timestamp(action["effective_at"])
+                # Only provider-observed cash distributions at a reviewed ex-date
+                # opening qualify. Large distributions can have different due-
+                # bill rules; ambiguous times and all splits still fail closed.
+                if action["kind"] == "dividends" and effective > timestamp(state["created_at"]):
+                    session = session_for_day(effective.astimezone(NEW_YORK).date())
+                    previous = [bar for bar in snapshot.bars if timestamp(bar.opens_at) < effective]
+                    ordinary = (session is not None and session.opens_at == action["effective_at"]
+                                and previous and number(action["amount"]) < number(previous[-1].close) / 4)
+                    if ordinary:
+                        if effective <= timestamp(valuation_at):
+                            dividends.append({"symbol": snapshot.symbol, "effective_at": action["effective_at"],
+                                "amount": action["amount"], "reference_close": previous[-1].close,
+                                "source": snapshot.source, "source_sha256": snapshot.source_sha256,
+                                "captured_at": snapshot.captured_at})
+                        continue
+                if snapshot.symbol in held and timestamp(action["effective_at"]) > timestamp(boundary):
                     if action["id"] not in existing:
                         ledger.flag_corporate_action(
                             snapshot.symbol,
@@ -632,6 +664,7 @@ class YahooMarketData:
             raise ValueError(
                 "A reported corporate action requires its explicit accounting adapter before trading or marking"
             )
+        return dividends
 
     def fill_pending(self, ledger, *, now=None):
         now = now or self.clock()
@@ -670,14 +703,18 @@ class YahooMarketData:
             set(decision["targets"])
             | {holding["symbol"] for holding in state["holdings"]}
         )
-        snapshots = [self.fetch(ticker) for ticker in required]
+        # Capture currently executable prices last so historical-rights checks
+        # cannot age those bars beyond the mandate's freshness limit.
+        scan = sorted(self._action_symbols(ledger, now) - set(required)) + required
+        snapshots = [self.fetch(ticker) for ticker in scan]
         observed_at = self.clock()
-        self._guard_actions(ledger, snapshots, observed_at=observed_at)
+        dividends = self._guard_actions(ledger, snapshots, observed_at=observed_at, valuation_at=session.opens_at)
         result = ledger.fill_at_next_open(
             decision_id,
-            bars=[snapshot.bar(session) for snapshot in snapshots],
+            bars=[snapshot.bar(session) for snapshot in snapshots if snapshot.symbol in required],
             now=observed_at,
             market_session=session,
+            dividends=dividends,
         )
         return {
             "status": "filled",
@@ -698,21 +735,24 @@ class YahooMarketData:
                 "status": "up_to_date",
                 "portfolio": self.sync_benchmark(ledger)["portfolio"],
             }
-        snapshots = [self.fetch(holding["symbol"]) for holding in state["holdings"]]
+        required = {holding["symbol"] for holding in state["holdings"]}
+        scan = sorted(self._action_symbols(ledger, now) - required) + sorted(required)
+        snapshots = [self.fetch(ticker) for ticker in scan]
         observed_at = self.clock()
         if any(
             snapshot.last_trade_at is None
             or timestamp(snapshot.last_trade_at) < timestamp(session.closes_at)
-            for snapshot in snapshots
+            for snapshot in snapshots if snapshot.symbol in required
         ):
             raise ValueError(
                 "The provider has not confirmed the completed session close"
             )
-        self._guard_actions(ledger, snapshots, observed_at=observed_at)
+        dividends = self._guard_actions(ledger, snapshots, observed_at=observed_at, valuation_at=session.closes_at)
         state = ledger.mark_daily_close(
-            [snapshot.bar(session) for snapshot in snapshots],
+            [snapshot.bar(session) for snapshot in snapshots if snapshot.symbol in required],
             observed_at=observed_at,
             market_session=session,
+            dividends=dividends,
         )
         return {
             "status": "marked",

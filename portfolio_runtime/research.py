@@ -15,6 +15,123 @@ Metric must be an EXACT supplied internal key: revenue, operating_cash, capital_
 """
 
 
+ALLOCATION_EVIDENCE_VERSION = 2
+ALLOCATION_BODY_LIMIT = 400000
+ALLOCATION_PROPOSAL_LIMIT = 48000
+REQUEST_BODY_LIMIT = 500000
+
+
+def critic_packet(proposal_sha256, proposal, original_input):
+    return {
+        "task": "portfolio_critic",
+        "proposal_sha256": proposal_sha256,
+        "proposal": proposal,
+        "original_input": original_input,
+        "instruction": "Review this exact allocation and its proposed investment-rule hypothesis against the supplied dated prior decisions and forward observations. Challenge hindsight, unsupported causal claims and repeated mistakes; a profitable trade alone is not proof. Return base research JSON with empty targets, >=3 distinct checkable source claims, plus review_verdict (approve, revise, or abstain) and the exact proposal_sha256. Approve only if its evidence supports proposing these paper targets; revise for material reasoning/accounting defects; abstain for insufficient evidence. Model confidence is not evidence.",
+    }
+
+
+def allocation_evidence_version(body):
+    try:
+        packet = json.loads(json.loads(body)["input"][-1]["content"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return (
+        packet.get("allocation_evidence_version") if isinstance(packet, dict) else None
+    )
+
+
+def allocation_company_evidence(company):
+    """Keep exact recent filed observations and dated quotes, never derived ratios.
+
+    Annual and interim observations remain separate. A missing same-period
+    capex/share count cannot silently borrow an older observation for a ratio.
+    """
+    result = {
+        key: company[key]
+        for key in (
+            "symbol",
+            "name",
+            "sector",
+            "industry",
+            "cik",
+            "source",
+            "sha256",
+            "captured_at",
+            "cutoff",
+            "limitations",
+        )
+        if key in company
+    }
+    price = company.get("research_price")
+    result["research_price"] = (
+        {
+            key: price[key]
+            for key in (
+                "schema_version",
+                "symbol",
+                "price",
+                "currency",
+                "as_of",
+                "captured_at",
+                "price_kind",
+                "adjusted",
+                "provider",
+                "source",
+                "source_sha256",
+            )
+            if key in price
+        }
+        if isinstance(price, dict)
+        else None
+    )
+    facts = {}
+    for metric, variants in company.get("facts", {}).items():
+        selected = {}
+        for variant in variants:
+            for observation in variant["observations"]:
+                kind = observation.get("period_kind", "unclassified")
+                # A quarter is not a replacement for YTD cash flow, even
+                # when the two observations share the same end date.
+                bucket = (variant["unit"], kind)
+                order = (
+                    observation["end"],
+                    observation.get("filed", ""),
+                    observation.get("start", "") or "",
+                )
+                if bucket not in selected or order > selected[bucket][0]:
+                    selected[bucket] = (order, variant, observation)
+        compact = []
+        for _, variant, observation in selected.values():
+            compact.append(
+                {
+                    "tag": variant["tag"],
+                    "unit": variant["unit"],
+                    "observations": [
+                        {
+                            key: observation[key]
+                            for key in (
+                                "start",
+                                "end",
+                                "val",
+                                "filed",
+                                "form",
+                                "accn",
+                                "fy",
+                                "fp",
+                                "period_kind",
+                            )
+                            if key in observation
+                        }
+                    ],
+                }
+            )
+        if compact:
+            facts[metric] = compact
+    result["facts"] = facts
+    return result
+
+
 class Research:
     def __init__(self, path, evidence):
         self.path = Path(path)
@@ -121,6 +238,31 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
             + canonical(self.evidence["overview"])
         )
 
+    def decision_prefix(self):
+        # Protocol v2 supplies richer primary candidate facts in the suffix.
+        # Repeating a 503-company abbreviated fact table would crowd those out.
+        universe = self.evidence["universe"]
+        return (
+            "Allocation evidence protocol v2.\n"
+            + SYSTEM
+            + f"\nKeep the complete allocation JSON within {ALLOCATION_PROPOSAL_LIMIT} UTF-8 bytes.\n"
+            + "\nFROZEN ELIGIBLE MEMBERSHIP:\n"
+            + canonical(
+                {
+                    key: universe[key]
+                    for key in (
+                        "id",
+                        "source",
+                        "captured_at",
+                        "effective_at",
+                        "expires_at",
+                    )
+                    if key in universe
+                }
+                | {"symbols": sorted(self.companies)}
+            )
+        )
+
     def latest(self, symbol=None, limit=12):
         if limit <= 0:
             return []
@@ -225,7 +367,14 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                         ).hexdigest()[:40]
                     )
                     grade = grade_result(
-                        result, self.companies, allocation=row["kind"] == "allocation"
+                        result,
+                        self.companies,
+                        allocation=row["kind"] == "allocation",
+                        require_target_claims=(
+                            row["kind"] == "allocation"
+                            and packet.get("allocation_evidence_version")
+                            == ALLOCATION_EVIDENCE_VERSION
+                        ),
                     )
                     target.execute(
                         "INSERT OR IGNORE INTO prior_work VALUES(?,?,?,?,?,?,?,?)",
@@ -253,6 +402,13 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
 
     def choose(self, limit):
         with self.connect() as db:
+            reviewed = set()
+            # Quote changes can justify valuation follow-ups, but they do not
+            # erase a company's already completed source-checked research.
+            for row in db.execute("""SELECT symbol,grade FROM tasks WHERE kind='company' AND status='complete'
+UNION ALL SELECT symbol,grade FROM prior_work WHERE kind='company'"""):
+                if row["grade"] and json.loads(row["grade"]).get("source_check_passed"):
+                    reviewed.add(row["symbol"])
             counts = {
                 r["symbol"]: r["n"]
                 for r in db.execute(
@@ -292,7 +448,11 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
         # Half the slots close coverage gaps; half address actual findings/failures.
         symbols = sorted(
             self.companies,
-            key=lambda s: (counts.get(s, 0), hashlib.sha256(s.encode()).hexdigest()),
+            key=lambda s: (
+                s in reviewed,
+                counts.get(s, 0),
+                hashlib.sha256(s.encode()).hexdigest(),
+            ),
         )
         selected = [
             (
@@ -387,6 +547,87 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
             if len(checked) == 36:
                 break
         return checked
+
+    def allocation_packet(self, checked, *, outcome_only=False):
+        portfolio = getattr(self, "portfolio_context", None)
+        primary_symbols = []
+        if portfolio:
+            primary_symbols.extend(
+                holding["symbol"] for holding in portfolio.get("holdings", [])
+            )
+            for decision in portfolio.get("pending_decisions", []):
+                primary_symbols.extend(
+                    target["symbol"] for target in decision["targets"]
+                )
+        primary_symbols.extend(row["symbol"] for row in checked)
+        symbols = list(
+            dict.fromkeys(
+                symbol for symbol in primary_symbols if symbol in self.companies
+            )
+        )
+        packet = {
+            "task": "allocation",
+            "allocation_evidence_version": ALLOCATION_EVIDENCE_VERSION,
+            "question": "Propose the complete paper portfolio. Account for valuation uncertainty, sector concentration and competing uses of capital. You may keep cash if evidence is inadequate. Review the dated prior investment decisions and subsequent observations supplied here: state which investment assumption survived or failed, what evidence changes your current decision, and one falsifiable decision-rule hypothesis to revisit. Separate business evidence from realized price noise. Realized portfolio returns are confounded, not proof that a rule caused outperformance. Preserve earlier predictions; do not rewrite them with hindsight. Put this concise review in thesis and the next investment tests in questions.",
+            "source_instruction": "candidate_evidence contains primary filed facts and dated research prices, distinct from prior model conclusions. Use supplied prices when assessing valuation; missing or stale prices are not current quotes and are never inferred. Include at least one exact filed claim for EVERY target symbol. A quote is not an SEC fact claim. Evaluate a proposed rule if the needed facts are already supplied instead of repeating it as an unanswered question. Compare cash flow and capex only for matching start, end and currency; annual, YTD and instant values are not interchangeable. Do not fabricate multiples or use an old share count as a current market capitalization. A source check establishes claim support, not investment merit.",
+            "candidate_evidence": [
+                allocation_company_evidence(self.companies[symbol])
+                for symbol in symbols
+            ],
+            "checked_research": list(checked[:36]),
+            "prior_portfolio_research": self.latest(limit=3),
+            "paper_portfolio": portfolio,
+            "observed_investment_outcomes": getattr(self, "investment_outcomes", []),
+            "trigger": "new_actual_investment_outcome"
+            if outcome_only
+            else "accumulated_company_research",
+            "context_omissions": {
+                "checked_reviews": 0,
+                "prior_reviews": 0,
+                "company_facts": [],
+            },
+        }
+        prefix = self.decision_prefix()
+
+        def fits():
+            body = body_for(
+                self.allocation_profile,
+                prefix,
+                canonical(packet),
+                max_output=16384,
+                cache_key="pa-" + hashlib.sha256(prefix.encode()).hexdigest()[:40],
+            )
+            critic = body_for(
+                "k3",
+                prefix,
+                canonical(critic_packet("0" * 64, None, packet)),
+                max_output=16384,
+                cache_key="pa-" + hashlib.sha256(prefix.encode()).hexdigest()[:40],
+            )
+            # The proposal is itself inside the provider's JSON input string.
+            # Every byte of its canonical JSON can require at most one extra
+            # escape. This reserves the complete permitted v2 output, not a
+            # favorable previous response or an estimated token count.
+            return (
+                len(canonical(body).encode()) <= ALLOCATION_BODY_LIMIT
+                and len(canonical(critic).encode()) + 2 * ALLOCATION_PROPOSAL_LIMIT
+                <= REQUEST_BODY_LIMIT
+            )
+
+        # Preserve direct evidence and actual outcome feedback ahead of repeated
+        # narrative. Omissions are explicit and apply only to this new task.
+        while packet["checked_research"] and not fits():
+            packet["checked_research"].pop()
+            packet["context_omissions"]["checked_reviews"] += 1
+        while len(packet["prior_portfolio_research"]) > 1 and not fits():
+            packet["prior_portfolio_research"].pop()
+            packet["context_omissions"]["prior_reviews"] += 1
+        for company in reversed(packet["candidate_evidence"]):
+            if fits():
+                break
+            company["facts"] = {}
+            packet["context_omissions"]["company_facts"].append(company["symbol"])
+        return packet
 
     def plan_wave(self, number, *, size=24, cache_ready=False, filings=None):
         with self.connect() as db:
@@ -532,19 +773,7 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
         # independent capital-allocation critic, not a source of numerical truth.
         if checked:
             shared = canonical(
-                {
-                    "task": "allocation",
-                    "question": "Propose the complete paper portfolio. Account for valuation uncertainty, sector concentration and competing uses of capital. You may keep cash if evidence is inadequate. Review the dated prior investment decisions and subsequent observations supplied here: state which investment assumption survived or failed, what evidence changes your current decision, and one falsifiable decision-rule hypothesis to revisit. Separate business evidence from realized price noise. Realized portfolio returns are confounded, not proof that a rule caused outperformance. Preserve earlier predictions; do not rewrite them with hindsight. Put this concise review in thesis and the next investment tests in questions.",
-                    "checked_research": checked[:36],
-                    "prior_portfolio_research": self.latest(limit=3),
-                    "paper_portfolio": getattr(self, "portfolio_context", None),
-                    "observed_investment_outcomes": getattr(
-                        self, "investment_outcomes", []
-                    ),
-                    "trigger": "new_actual_investment_outcome"
-                    if outcome_only
-                    else "accumulated_company_research",
-                }
+                self.allocation_packet(checked, outcome_only=outcome_only)
             )
             add(
                 f"w{number:02}-allocation",
@@ -552,7 +781,7 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                 "allocation",
                 None,
                 self.allocation_profile,
-                self.prefix("allocation"),
+                self.decision_prefix(),
                 shared,
                 max_output=16384,
             )
@@ -583,7 +812,10 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                 row = db.execute(
                     "SELECT body FROM tasks WHERE id=?", (args[0],)
                 ).fetchone()
-                if len(row["body"].encode()) > 500000:
+                body_limit = (
+                    ALLOCATION_BODY_LIMIT if args[2] == "allocation" else 500000
+                )
+                if len(row["body"].encode()) > body_limit:
                     db.execute(
                         "UPDATE tasks SET status='failed',result='null',grade=? WHERE id=?",
                         (
@@ -674,12 +906,18 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                         if source
                         else None
                     )
+                require_target_claims = (
+                    task["kind"] == "allocation"
+                    and allocation_evidence_version(task["body"])
+                    == ALLOCATION_EVIDENCE_VERSION
+                )
                 grade = grade_result(
                     result,
                     self.companies,
                     allocation=task["kind"] == "allocation",
                     critic=task["kind"] == "portfolio_critic",
                     proposal_sha256=proposal,
+                    require_target_claims=require_target_claims,
                 )
                 status = (
                     "complete"
@@ -701,16 +939,14 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                 and json.loads(task["grade"])["source_check_passed"]
             ):
                 proposal = hashlib.sha256(task["result"].encode()).hexdigest()
+                original_input = json.loads(task["body"])["input"][-1]["content"]
+                if (
+                    allocation_evidence_version(task["body"])
+                    == ALLOCATION_EVIDENCE_VERSION
+                ):
+                    original_input = json.loads(original_input)
                 prompt = canonical(
-                    {
-                        "task": "portfolio_critic",
-                        "proposal_sha256": proposal,
-                        "proposal": json.loads(task["result"]),
-                        "original_input": json.loads(task["body"])["input"][-1][
-                            "content"
-                        ],
-                        "instruction": "Review this exact allocation and its proposed investment-rule hypothesis against the supplied dated prior decisions and forward observations. Challenge hindsight, unsupported causal claims and repeated mistakes; a profitable trade alone is not proof. Return base research JSON with empty targets, >=3 distinct checkable source claims, plus review_verdict (approve, revise, or abstain) and the exact proposal_sha256. Approve only if its evidence supports proposing these paper targets; revise for material reasoning/accounting defects; abstain for insufficient evidence. Model confidence is not evidence.",
-                    }
+                    critic_packet(proposal, json.loads(task["result"]), original_input)
                 )
                 self.add(
                     f"w{task['wave']:02}-critic",
@@ -718,7 +954,10 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                     "portfolio_critic",
                     None,
                     "k3",
-                    self.prefix("critic"),
+                    self.decision_prefix()
+                    if allocation_evidence_version(task["body"])
+                    == ALLOCATION_EVIDENCE_VERSION
+                    else self.prefix("critic"),
                     prompt,
                     max_output=16384,
                     db=db,
@@ -765,7 +1004,13 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
 
 
 def grade_result(
-    result, companies, *, allocation=False, critic=False, proposal_sha256=None
+    result,
+    companies,
+    *,
+    allocation=False,
+    critic=False,
+    proposal_sha256=None,
+    require_target_claims=False,
 ):
     errors = []
     checked = 0
@@ -775,6 +1020,11 @@ def grade_result(
             "claims_checked": 0,
             "errors": ["invalid_json"],
         }
+    if (
+        require_target_claims
+        and len(canonical(result).encode()) > ALLOCATION_PROPOSAL_LIMIT
+    ):
+        errors.append("proposal_envelope_exceeded")
     keys = {
         "thesis",
         "claims",
@@ -798,6 +1048,7 @@ def grade_result(
         errors.append("invalid_review_identity")
     claims = result.get("claims")
     seen = set()
+    supported_symbols = set()
     if not isinstance(claims, list) or not 3 <= len(claims) <= 50:
         errors.append("claim_count")
     else:
@@ -849,6 +1100,7 @@ def grade_result(
                             found = True
                 if found:
                     checked += 1
+                    supported_symbols.add(claim["symbol"])
                 else:
                     errors.append("source_mismatch")
             except (KeyError, TypeError, ValueError, InvalidOperation):
@@ -902,6 +1154,8 @@ def grade_result(
                 errors.append("invalid_weight")
         if total > 1:
             errors.append("overallocated")
+        if require_target_claims and seen - supported_symbols:
+            errors.append("target_without_filed_claim")
     return {
         "source_check_passed": not errors,
         "claims_checked": checked,

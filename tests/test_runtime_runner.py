@@ -12,7 +12,15 @@ import unittest
 from unittest.mock import patch
 import uuid
 from portfolio_runtime import runner as r
-from portfolio_runtime.research import Research, grade_result
+from portfolio_runtime.research import (
+    Research,
+    grade_result,
+    allocation_company_evidence,
+    ALLOCATION_BODY_LIMIT,
+    ALLOCATION_PROPOSAL_LIMIT,
+    REQUEST_BODY_LIMIT,
+    critic_packet,
+)
 from portfolio_runtime.provider import Client, canonical, body_for
 
 CREATED = "2026-09-13T14:00:00Z"
@@ -520,6 +528,292 @@ class RunnerTests(unittest.TestCase):
                 db.execute("SELECT status FROM decisions").fetchone()[0],
                 "revision_requested",
             )
+
+    def test_primary_allocation_evidence_reaches_the_exact_dependent_critic(self):
+        company = self.research.companies["AAPL"]
+        company.update(captured_at=AT, cutoff=AT[:10])
+        quote = {
+            "symbol": "AAPL",
+            "price": "100.25",
+            "currency": "USD",
+            "as_of": "2026-09-11T20:00:00Z",
+            "captured_at": AT,
+            "price_kind": "daily_close",
+            "adjusted": False,
+            "source": "https://query1.finance.yahoo.com/example",
+            "source_sha256": "b" * 64,
+        }
+        company["research_price"] = quote
+        annual = company["facts"]["operating_cash"][0]["observations"][0]
+        annual.update(
+            period_kind="annual",
+            filed="2026-02-01",
+            form="10-K",
+            accn="0000000001-26-000001",
+        )
+        interim = {
+            **annual,
+            "start": "2026-01-01",
+            "end": "2026-06-30",
+            "val": 60,
+            "period_kind": "year_to_date_or_other",
+            "filed": "2026-08-01",
+            "form": "10-Q",
+            "accn": "0000000001-26-000002",
+        }
+        company["facts"]["operating_cash"][0]["observations"].append(interim)
+        quarter = {
+            **interim,
+            "start": "2026-04-01",
+            "val": 35,
+            "period_kind": "quarter",
+        }
+        company["facts"]["operating_cash"][0]["observations"].append(quarter)
+        self.research.portfolio_context = {
+            "holdings": [],
+            "pending_decisions": [
+                {"id": "pending", "targets": [{"symbol": "MSFT", "weight": "0.10"}]}
+            ],
+        }
+        self.completed("company-AAPL", answer())
+        original_evidence = canonical(self.research.evidence)
+        self.research.plan_wave(1, size=1)
+        with self.research.connect() as db:
+            before = db.execute(
+                "SELECT body FROM tasks WHERE id='w01-allocation'"
+            ).fetchone()[0]
+        packet = json.loads(json.loads(before)["input"][-1]["content"])
+        self.assertEqual(packet["allocation_evidence_version"], 2)
+        sources = {row["symbol"]: row for row in packet["candidate_evidence"]}
+        self.assertEqual(sources["AAPL"]["research_price"], quote)
+        self.assertIsNone(sources["MSFT"]["research_price"])
+        self.assertEqual(sources["AAPL"]["sha256"], company["sha256"])
+        self.assertEqual(
+            [
+                row["observations"][0]
+                for row in sources["AAPL"]["facts"]["operating_cash"]
+            ],
+            [annual, interim, quarter],
+        )
+        self.assertEqual(canonical(self.research.evidence), original_evidence)
+        self.completed(
+            "w01-allocation",
+            answer([{"symbol": "AAPL", "weight": "0.10"}]),
+            kind="allocation",
+            wave=1,
+        )
+        with self.research.connect() as db:
+            critic = json.loads(
+                db.execute("SELECT body FROM tasks WHERE id='w01-critic'").fetchone()[0]
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT body FROM tasks WHERE id='w01-allocation'"
+                ).fetchone()[0],
+                before,
+            )
+        original_input = json.loads(critic["input"][-1]["content"])["original_input"]
+        self.assertEqual(original_input, packet)
+
+    def test_target_claim_requirement_applies_only_to_new_allocation_protocol(self):
+        self.research.add(
+            "w00-allocation",
+            0,
+            "allocation",
+            None,
+            "pro_flex",
+            "evidence",
+            canonical({"task": "allocation"}),
+        )
+        legacy = self.checked_allocation(targets=[{"symbol": "MSFT", "weight": "0.10"}])
+        with self.research.connect() as db:
+            before = tuple(
+                db.execute(
+                    "SELECT body,grade FROM tasks WHERE id=?", (legacy,)
+                ).fetchone()
+            )
+        self.assertTrue(json.loads(before[1])["source_check_passed"])
+        self.completed("company-AAPL", answer())
+        self.research.plan_wave(1, size=1)
+        unsupported = answer([{"symbol": "MSFT", "weight": "0.10"}])
+        self.completed("w01-allocation", unsupported, kind="allocation", wave=1)
+        with self.research.connect() as db:
+            grade = json.loads(
+                db.execute(
+                    "SELECT grade FROM tasks WHERE id='w01-allocation'"
+                ).fetchone()[0]
+            )
+            self.assertEqual(grade["errors"], ["target_without_filed_claim"])
+            self.assertIsNone(
+                db.execute("SELECT id FROM tasks WHERE id='w01-critic'").fetchone()
+            )
+            self.assertEqual(
+                tuple(
+                    db.execute(
+                        "SELECT body,grade FROM tasks WHERE id=?", (legacy,)
+                    ).fetchone()
+                ),
+                before,
+            )
+        self.research.plan_wave(2, size=1)
+        supported = deepcopy(unsupported)
+        supported["claims"].append({**supported["claims"][0], "symbol": "MSFT"})
+        self.completed("w02-allocation", supported, kind="allocation", wave=2)
+        with self.research.connect() as db:
+            self.assertTrue(
+                json.loads(
+                    db.execute(
+                        "SELECT grade FROM tasks WHERE id='w02-allocation'"
+                    ).fetchone()[0]
+                )["source_check_passed"]
+            )
+            self.assertIsNotNone(
+                db.execute("SELECT id FROM tasks WHERE id='w02-critic'").fetchone()
+            )
+        supported["claims"][-1]["value"] = 999
+        grade = grade_result(
+            supported,
+            self.research.companies,
+            allocation=True,
+            require_target_claims=True,
+        )
+        self.assertIn("source_mismatch", grade["errors"])
+        self.assertIn("target_without_filed_claim", grade["errors"])
+        following = Research(
+            self.root / "following-research.sqlite", self.research.evidence
+        )
+        following.carry_history([self.research.path])
+        with following.connect() as db:
+            grades = [
+                json.loads(row[0])
+                for row in db.execute(
+                    "SELECT grade FROM prior_work WHERE kind='allocation'"
+                )
+            ]
+        self.assertEqual(sum(grade["source_check_passed"] for grade in grades), 2)
+        self.assertEqual(
+            sum("target_without_filed_claim" in grade["errors"] for grade in grades), 1
+        )
+
+    def test_allocation_context_bound_preserves_sources_and_actual_outcome_feedback(
+        self,
+    ):
+        checked = [
+            {
+                "symbol": "AAPL",
+                "result": {**answer(), "thesis": "Earlier narrative. " * 800},
+                "research_id": str(i),
+            }
+            for i in range(36)
+        ]
+        outcomes = [
+            {
+                "decision_id": "earlier",
+                "market_as_of": AT,
+                "benchmark_status": "unavailable",
+            }
+        ]
+        self.research.investment_outcomes = outcomes
+        prefix = "Frozen source context. " * 10000
+        with patch.object(self.research, "decision_prefix", return_value=prefix):
+            packet = self.research.allocation_packet(checked)
+        self.assertGreater(packet["context_omissions"]["checked_reviews"], 0)
+        self.assertEqual(packet["observed_investment_outcomes"], outcomes)
+        self.assertEqual(
+            packet["candidate_evidence"][0],
+            allocation_company_evidence(self.research.companies["AAPL"]),
+        )
+        body = body_for(
+            self.research.allocation_profile,
+            prefix,
+            canonical(packet),
+            max_output=16384,
+        )
+        self.assertLessEqual(len(canonical(body).encode()), ALLOCATION_BODY_LIMIT)
+        # A maximally escaped permitted proposal still fits its dependent
+        # critic; the original evidence remains an object, never serialized twice.
+        proposal = "\\" * ((ALLOCATION_PROPOSAL_LIMIT - 2) // 2)
+        self.assertEqual(len(canonical(proposal).encode()), ALLOCATION_PROPOSAL_LIMIT)
+        critic = body_for(
+            "k3",
+            prefix,
+            canonical(critic_packet("a" * 64, proposal, packet)),
+            max_output=16384,
+        )
+        self.assertLessEqual(len(canonical(critic).encode()), REQUEST_BODY_LIMIT)
+        self.assertEqual(
+            json.loads(critic["input"][-1]["content"])["original_input"], packet
+        )
+        self.assertEqual(len(checked), 36)
+
+    def test_new_allocation_proposal_bound_does_not_regrade_legacy_outputs(self):
+        result = answer([{"symbol": "AAPL", "weight": "0.10"}])
+        # The old numeric checker permits alternative representations of the
+        # exact same value; their size cannot consume the critic's envelope.
+        result["claims"][0]["value"] = "0" * ALLOCATION_PROPOSAL_LIMIT + "100"
+        self.assertTrue(
+            grade_result(result, self.research.companies, allocation=True)[
+                "source_check_passed"
+            ]
+        )
+        grade = grade_result(
+            result, self.research.companies, allocation=True, require_target_claims=True
+        )
+        self.assertEqual(grade["errors"], ["proposal_envelope_exceeded"])
+
+    def test_changed_quote_keeps_coverage_priority_on_unreviewed_companies(self):
+        company = self.research.companies["AAPL"]
+        old_company = {
+            **company,
+            "research_price": {"price": "100", "as_of": AT, "currency": "USD"},
+        }
+        question = "Assess the business economics, cash generation, balance-sheet resilience and missing valuation evidence. Identify what would change an investment decision."
+        self.research.add(
+            "prior-AAPL",
+            0,
+            "company",
+            "AAPL",
+            "pro_flex",
+            "context",
+            canonical({"evidence": old_company, "question": question}),
+        )
+        self.completed("prior-AAPL", answer())
+        updated = deepcopy(self.data)
+        updated["companies"][0]["research_price"] = {
+            "price": "105",
+            "as_of": "2026-09-13T15:05:00Z",
+            "currency": "USD",
+        }
+        following = Research(self.root / "following.sqlite", updated)
+        following.carry_history([self.research.path])
+        following.bounded_novelty = True
+        self.assertNotEqual(
+            following.source_fingerprint(old_company),
+            following.source_fingerprint(following.companies["AAPL"]),
+        )
+        choices = following.choose(2)
+        self.assertEqual(choices[0][0], "MSFT")
+        self.assertEqual({symbol for symbol, _ in choices}, {"MSFT", "AAPL"})
+
+    def test_oversized_new_allocation_stays_unadmitted_without_stopping_research(self):
+        self.completed("company-AAPL", answer())
+        with patch.object(self.research, "decision_prefix", return_value="x" * 500000):
+            self.research.plan_wave(1, size=1)
+        with self.research.connect() as db:
+            task = db.execute(
+                "SELECT status,grade,request_id FROM tasks WHERE id='w01-allocation'"
+            ).fetchone()
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(
+            json.loads(task["grade"])["errors"], ["request_envelope_exceeded"]
+        )
+        self.assertIsNone(task["request_id"])
+        self.assertTrue(
+            any(task["kind"] == "company" for task in self.research.waiting())
+        )
+        self.assertFalse(
+            any(task["kind"] == "allocation" for task in self.research.waiting())
+        )
 
     def test_memory_pairs_use_first_three_eligible_followups_after_coverage_slots(self):
         symbols = ["AAPL", "MSFT", "AMZN", "NVDA", "GOOG", "META", "AVGO"]

@@ -208,6 +208,8 @@ class PortfolioLedger:
             "holdings": {},
             "fees": Decimal(0),
             "deposits": Decimal(0),
+            "dividend_receivable": Decimal(0),
+            "dividends": {},
             "decisions": {},
             "actions": {},
             "history": [],
@@ -228,6 +230,7 @@ class PortfolioLedger:
                 state["last_at"] = event["at"]
                 if kind in ("rebalance", "mark", "deposit"):
                     state["last_accounting_at"] = event["at"]
+                self._apply_dividends(state, data.get("dividends", []))
                 if kind == "decision":
                     state["decisions"][event["id"]] = {
                         **data,
@@ -521,14 +524,120 @@ class PortfolioLedger:
             )
 
     @staticmethod
-    def _equity(cash, holdings, quotes):
-        return cash + sum(
+    def _equity(cash, holdings, quotes, receivable=Decimal(0)):
+        return cash + receivable + sum(
             (
                 quantity * number(quotes[ticker].last)
                 for ticker, quantity in holdings.items()
             ),
             Decimal(0),
         )
+
+    @staticmethod
+    def _apply_dividends(state, changes):
+        for change in changes:
+            key = change["key"]
+            if change["kind"] == "entitlement":
+                if key in state["dividends"]:
+                    raise ValueError("Duplicate dividend entitlement")
+                state["dividends"][key] = dict(change)
+                state["dividend_receivable"] += number(change["value"])
+            elif change["kind"] == "payment":
+                saved = state["dividends"].get(key)
+                if saved is None or saved.get("paid") or change["value"] != saved["value"]:
+                    raise ValueError("Invalid dividend payment")
+                value = number(change["value"])
+                state["dividend_receivable"] -= value
+                state["cash"] += value
+                saved["paid"] = True
+                saved["paid_at"] = change["payable_at"]
+            else:
+                raise ValueError("Unknown dividend accounting change")
+        if state["dividend_receivable"] < 0:
+            raise ValueError("Dividend receivables cannot be negative")
+
+    def _dividend_changes(self, state, dividends, *, valuation_at, observed_at):
+        """Recognize sourced ex-date rights in the same transaction as a valuation.
+
+        Entitlement uses actual simulated fills strictly before the ex-date, not
+        today's holdings. Unpaid rights remain assets after the stock is sold.
+        No payment date is inferred. Optional payment evidence must be explicit
+        and already effective; the market adapter currently supplies none.
+        """
+        if (not isinstance(dividends, (list, tuple)) or len(dividends) > 1000
+            or any(not isinstance(item, dict) for item in dividends)):
+            raise ValueError("Dividend observations must be bounded")
+        events = self._events() if dividends else []
+        changes, seen = [], {}
+        allowed = {"symbol", "effective_at", "amount", "source", "source_sha256",
+                   "captured_at", "reference_close", "payment"}
+        if any(not allowed - {"payment"} <= set(data) for data in dividends):
+            raise ValueError("Cash dividend evidence is incomplete")
+        for data in sorted(dividends, key=lambda d: (d.get("effective_at", ""), d.get("symbol", ""))):
+            if not isinstance(data, dict) or set(data) - allowed:
+                raise ValueError("Invalid cash dividend evidence")
+            ticker = symbol(data["symbol"])
+            effective = timestamp(data["effective_at"])
+            captured = timestamp(data["captured_at"])
+            amount, reference = number(data["amount"], positive=True), number(data["reference_close"], positive=True)
+            source_url(data["source"])
+            digest = data["source_sha256"]
+            if (not isinstance(digest, str) or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+                or not effective <= captured <= timestamp(observed_at)
+                or effective > timestamp(valuation_at) or amount >= reference / 4):
+                raise ValueError("Cash dividend requires observed ordinary-distribution evidence")
+            # A reviewed session boundary rules out ambiguous intraday dates.
+            from .market import session_for_day, NEW_YORK
+            session = session_for_day(effective.astimezone(NEW_YORK).date())
+            if session is None or session.opens_at != data["effective_at"]:
+                raise ValueError("Cash dividend ex-date must be an observed session opening")
+            key = "dividend:" + ticker + ":" + data["effective_at"]
+            canonical_amount = decimal_text(amount)
+            if key in seen and seen[key] != canonical_amount:
+                raise ValueError("Conflicting dividend observations")
+            seen[key] = canonical_amount
+            saved = state["dividends"].get(key)
+            if saved and saved["amount"] != canonical_amount:
+                raise ValueError("An observed dividend amount cannot be silently revised")
+            if saved is None:
+                shares = Decimal(0)
+                for event in events:
+                    if event["kind"] != "rebalance":
+                        continue
+                    for fill in event["payload"]["fills"]:
+                        if fill["symbol"] == ticker and timestamp(fill["quote_at"]) < effective:
+                            shares += number(fill["quantity"]) * (1 if fill["side"] == "buy" else -1)
+                if shares < 0:
+                    raise ValueError("Dividend entitlement cannot be short")
+                change = {"kind": "entitlement", "key": key, "symbol": ticker,
+                          "effective_at": data["effective_at"], "amount": canonical_amount,
+                          "shares": decimal_text(shares), "value": decimal_text((shares * amount).quantize(
+                              Decimal("0.00000001"), rounding=ROUND_HALF_EVEN)),
+                          "source": data["source"], "source_sha256": digest,
+                          "captured_at": data["captured_at"], "reference_close": data["reference_close"]}
+                changes.append(change)
+                self._apply_dividends(state, [change])
+                saved = state["dividends"][key]
+            payment = data.get("payment")
+            if payment is not None:
+                if (not isinstance(payment, dict) or set(payment) != {
+                    "payable_at", "source", "source_sha256", "captured_at"}):
+                    raise ValueError("Dividend payment requires explicit sourced payment evidence")
+                source_url(payment["source"])
+                paid_at, payment_capture = timestamp(payment["payable_at"]), timestamp(payment["captured_at"])
+                payment_digest = payment["source_sha256"]
+                if (not isinstance(payment_digest, str) or len(payment_digest) != 64
+                    or any(c not in "0123456789abcdef" for c in payment_digest)
+                    or paid_at < effective or payment_capture > timestamp(observed_at)):
+                    raise ValueError("Invalid dividend payment date or evidence")
+                if saved.get("paid") and saved["paid_at"] != payment["payable_at"]:
+                    raise ValueError("An observed dividend payment date cannot be silently revised")
+                if paid_at <= timestamp(valuation_at) and not saved.get("paid"):
+                    change = {"kind": "payment", "key": key, "value": saved["value"], **payment}
+                    changes.append(change)
+                    self._apply_dividends(state, [change])
+        return changes
 
     @staticmethod
     def _nav(equity, opening_equity, quotes, before_flow=None):
@@ -556,6 +665,7 @@ class PortfolioLedger:
         now,
         market_session,
         fee_per_order="0",
+        dividends=(),
         _daily_bars=None,
     ):
         """Atomically simulate a rebalance; a market-data failure leaves intent pending.
@@ -569,9 +679,12 @@ class PortfolioLedger:
             raise ValueError("An explicit sourced market calendar session is required")
         fee = number(fee_per_order)
         event_id = "fill:" + _hash({"decision_id": decision_id})[:40]
+        dividend_request = _hash(dividends) if dividends else None
         with self._transaction():
             saved = self._saved(event_id, "rebalance")
             if saved:
+                if saved.get("dividend_request") != dividend_request:
+                    raise ValueError("An executed allocation cannot be replayed with different dividend evidence")
                 return saved
             if _daily_bars is None and not timestamp(
                 market_session.opens_at
@@ -605,7 +718,8 @@ class PortfolioLedger:
                 after=decision["decided_at"],
                 market_session=market_session,
             )
-            opening = self._equity(state["cash"], state["holdings"], quote_map)
+            dividend_changes = self._dividend_changes(state, dividends, valuation_at=valuation_at, observed_at=now)
+            opening = self._equity(state["cash"], state["holdings"], quote_map, state["dividend_receivable"])
             quantum = Decimal(1).scaleb(-self.mandate.share_decimals)
             # Reserve all possible per-order fees before assigning any capital.
             available_nav = opening - fee * len(required)
@@ -670,7 +784,7 @@ class PortfolioLedger:
             holdings = {
                 ticker: quantity for ticker, quantity in holdings.items() if quantity
             }
-            ending = self._equity(cash, holdings, quote_map)
+            ending = self._equity(cash, holdings, quote_map, state["dividend_receivable"])
             if cash < 0 or ending <= 0:
                 raise ValueError(
                     "A simulated rebalance cannot create leverage or nonpositive equity"
@@ -712,12 +826,16 @@ class PortfolioLedger:
                 ),
             }
             payload["nav"]["valuation_at"] = valuation_at
+            if dividend_changes:
+                payload["dividends"] = dividend_changes
+            if dividend_request:
+                payload["dividend_request"] = dividend_request
             self._append(event_id, "rebalance", now, payload)
             self._state()
             return payload
 
     def fill_at_next_open(
-        self, decision_id, *, bars, now, market_session, fee_per_order="0"
+        self, decision_id, *, bars, now, market_session, fee_per_order="0", dividends=()
     ):
         """Use the precommitted next session's observed open, plus fixed slippage.
 
@@ -780,6 +898,7 @@ class PortfolioLedger:
             now=now,
             market_session=market_session,
             fee_per_order=fee_per_order,
+            dividends=dividends,
             _daily_bars=bars,
         )
 
@@ -790,6 +909,7 @@ class PortfolioLedger:
         observed_at,
         mark_id=None,
         benchmark=None,
+        dividends=(),
         _daily_bars=None,
         _session=None,
     ):
@@ -797,6 +917,16 @@ class PortfolioLedger:
         mark_id = mark_id or "mark:" + observed_at
         identifier(mark_id)
         with self._transaction():
+            dividend_request = _hash({"quotes": [record(q) for q in quotes],
+                "bars": [record(bar) for bar in _daily_bars] if _daily_bars is not None else None,
+                "session": record(_session) if _session is not None else None,
+                "benchmark": record(benchmark) if benchmark is not None else None,
+                "observed_at": observed_at, "dividends": dividends}) if dividends else None
+            saved = self._saved(mark_id, "mark")
+            if saved and saved.get("dividend_request") is not None:
+                if saved["dividend_request"] != dividend_request:
+                    raise ValueError("An idempotency key cannot identify different dividend valuation content")
+                return self._public(self._state())
             state = self._state()
             self._action_guard(state, set(state["holdings"]), observed_at)
             valuation_at = _session.closes_at if _session is not None else observed_at
@@ -809,7 +939,8 @@ class PortfolioLedger:
                     "Valuations cannot precede the last recorded market observation"
                 )
             quote_map = self._quotes(quotes, set(state["holdings"]), valuation_at)
-            equity = self._equity(state["cash"], state["holdings"], quote_map)
+            dividend_changes = self._dividend_changes(state, dividends, valuation_at=valuation_at, observed_at=observed_at)
+            equity = self._equity(state["cash"], state["holdings"], quote_map, state["dividend_receivable"])
             payload = {
                 "quotes": []
                 if _daily_bars is not None
@@ -823,6 +954,10 @@ class PortfolioLedger:
                 "nav": self._nav(equity, equity, quote_map),
             }
             payload["nav"]["valuation_at"] = valuation_at
+            if dividend_changes:
+                payload["dividends"] = dividend_changes
+            if dividend_request:
+                payload["dividend_request"] = dividend_request
             self._append(mark_id, "mark", observed_at, payload)
             if benchmark is not None:
                 self._record_benchmark(benchmark, recorded_at=observed_at)
@@ -858,7 +993,7 @@ class PortfolioLedger:
             self._record_benchmark(benchmark, recorded_at=observed_at)
             return self._public(self._state())
 
-    def mark_daily_close(self, bars, *, observed_at, market_session, benchmark=None):
+    def mark_daily_close(self, bars, *, observed_at, market_session, benchmark=None, dividends=()):
         """Record an observed, completed session close without inventing quotes."""
         timestamp(observed_at)
         if not isinstance(market_session, MarketSession) or timestamp(
@@ -908,6 +1043,7 @@ class PortfolioLedger:
             observed_at=observed_at,
             mark_id="close:" + market_session.closes_at,
             benchmark=benchmark,
+            dividends=dividends,
             _daily_bars=bars,
             _session=market_session,
         )
@@ -930,7 +1066,7 @@ class PortfolioLedger:
             state = self._state()
             self._action_guard(state, set(state["holdings"]), at)
             quote_map = self._quotes(quotes, set(state["holdings"]), at, exact=True)
-            before = self._equity(state["cash"], state["holdings"], quote_map)
+            before = self._equity(state["cash"], state["holdings"], quote_map, state["dividend_receivable"])
             payload = {
                 "amount": decimal_text(cash),
                 "quotes": [record(q) for q in quotes],
@@ -1021,7 +1157,7 @@ class PortfolioLedger:
                 }
             )
         equity = (
-            (None if blocked else state["last_equity"]) if holdings else state["cash"]
+            (None if blocked else state["last_equity"]) if holdings else state["cash"] + state["dividend_receivable"]
         )
         history = [dict(point) for point in state["history"]]
         baseline = state["benchmarks"].get(state["started_at"])
@@ -1062,6 +1198,7 @@ class PortfolioLedger:
             "as_of": history[-1]["at"] if history else state["last_at"],
             "initial_cash": decimal_text(number(self.mandate.initial_cash)),
             "cash": decimal_text(state["cash"]),
+            "dividend_receivable": decimal_text(state["dividend_receivable"]),
             "equity": decimal_text(equity) if equity is not None else None,
             "net_deposits": decimal_text(state["deposits"]),
             "trading_fees": decimal_text(state["fees"]),

@@ -443,6 +443,34 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(service.preserve_latest_decision({"latest_decision": newer})["latest_decision"], newer)
         self.assertEqual(service.preserve_latest_decision({"latest_decision": first})["latest_decision"], newer)
 
+    def test_public_coverage_retains_checked_history_without_counting_duplicates_or_failed_work(self):
+        service = self.service()
+        with service.connect() as db:
+            for identity in ("AAPL:old-facts", "AAPL:new-facts", "DELISTED:old-facts", "seed_import_complete"):
+                db.execute("INSERT INTO checked_fundamentals VALUES(?,'seed')", (identity,))
+        research = Research(self.root/"coverage.sqlite", evidence())
+        result = answer()
+        for claim in result["claims"]:
+            claim["symbol"] = "MSFT"
+        research.add("current-msft", 0, "company", "MSFT", "kimi_asap", "facts", "review")
+        with research.connect() as db:
+            db.execute("UPDATE tasks SET status='complete',result=?,grade=? WHERE id='current-msft'",
+                       (canonical(result), canonical(grade_result(result, research.companies))))
+        projection = {"sail": {"activity": {"companies_researched": 0, "universe_size": 2}}, "research": {"question": ""}}
+        service.public_coverage(projection, research)
+        self.assertEqual(projection["sail"]["activity"]["companies_researched"], 2)
+        self.assertEqual(projection["sail"]["activity"]["coverage_scope"], "retained")
+        self.assertEqual(projection["research"]["question"], "2 of 2 stocks researched.")
+        with research.connect() as db:
+            db.execute("UPDATE tasks SET grade=? WHERE id='current-msft'", (canonical({"source_check_passed": False}),))
+        service.public_coverage(projection, research)
+        self.assertEqual(projection["sail"]["activity"]["companies_researched"], 1)
+        # Sealed company work survives an empty new session and process restart.
+        with service.connect() as db:
+            db.execute("INSERT INTO checked_fundamentals VALUES('MSFT:sealed','finished-hour')")
+        self.service().public_coverage(projection)
+        self.assertEqual(projection["sail"]["activity"]["companies_researched"], 2)
+
     def test_available_credit_refreshes_grant_after_slow_sources_and_keeps_value_gate(self):
         self.rehearsal_config()
         self.available_credit_config()
