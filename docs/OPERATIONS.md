@@ -51,7 +51,7 @@ For a runtime update, pause and verify a fresh backup before installing reviewed
 
 ## Funding, progress and notifications
 
-The [September 13 rehearsal audit](runs/2026-09-13-rehearsal-audit.md) records the latest deployed corrections, live verification and remaining limits before the scheduled paper week.
+The [completed September 13 rehearsal](runs/2026-09-13-rehearsal-complete.md) records settled results, launch corrections and remaining limits before the scheduled paper week. The [earlier audit](runs/2026-09-13-rehearsal-audit.md) preserves what was known during the test.
 
 Cloudflare checks actual Sail billing, reserves for unsettled requests and cloud usage, and grants short-lived spending authority. Missing or stale authority prevents new requests. The guest also enforces the grant at request reservation, preserving existing commitments rather than pretending failed or unfinished work was free.
 
@@ -65,11 +65,13 @@ A low-funding pause recovers automatically after a top-up. Inference retains clo
 
 The [portfolio page](https://blakewoods.us/portfolio/) reads saved checkpoints and refreshes once a minute while visible. It distinguishes running research, deliberate waiting and a service needing attention. Visitors cannot start inference or submit trades.
 
-Coverage is labeled per session; request counts and costs accumulate across the service. The latest reviewed allocation persists across hourly boundaries. A checkpoint with no admitted work reports waiting, including an explicit credit wait when funding prevents the queued work.
+Coverage counts retained, source-checked research for current constituents; it does not imply every review uses today's disclosures. Request counts and costs accumulate across the service. The latest reviewed allocation persists across hourly boundaries. A checkpoint with no admitted work reports waiting, including an explicit credit wait when funding prevents the queued work.
 
 [Research history](https://blakewoods.us/portfolio/research/) contains immutable final investment explanations, exact filing references, open questions and proposed decisions. Unsuccessful adjacent requests share a collapsed row; each individual record and timestamp remains accessible. Only settled terminal observations enter the journal. Admission and observed completion times are not hidden model-stage timestamps. Raw prompts, internal reasoning and account details stay private.
 
 Paper accounting remains authoritative. A proposal is not a fill; fills require subsequent market-session observations. Portfolio returns use the S&P 500 Total Return benchmark and exclude deposits. Research and hosting costs are tracked separately. Missing market data or unresolved corporate actions must not be replaced with fabricated prices or returns.
+
+Observed ordinary cash dividends accrue on the ex-date using shares held before that date. They enter portfolio value as receivables, not spendable cash or deposits. Payment requires separate dated evidence; the current market adapter does not supply payment dates. Splits, special distributions and ambiguous actions still suspend affected accounting until an explicit adapter can reconcile them.
 
 ## Private recovery
 
