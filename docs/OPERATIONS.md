@@ -53,7 +53,7 @@ For a runtime update, pause and verify a fresh backup before installing reviewed
 
 ## Funding, progress and notifications
 
-The [completed September 13 rehearsal](runs/2026-09-13-rehearsal-complete.md) records settled results, launch corrections and remaining limits before the scheduled paper week. The [earlier audit](runs/2026-09-13-rehearsal-audit.md) preserves what was known during the test.
+The [pre-week impact audit](runs/2026-09-13-preweek-impact-audit.md) records the final evidence, feedback-loop and live Sail checks. The [completed September 13 rehearsal](runs/2026-09-13-rehearsal-complete.md) preserves settled results and earlier launch corrections.
 
 Cloudflare checks actual Sail billing, reserves for unsettled requests and cloud usage, and grants short-lived spending authority. Missing or stale authority prevents new requests. The guest also enforces the grant at request reservation, preserving existing commitments rather than pretending failed or unfinished work was free.
 
