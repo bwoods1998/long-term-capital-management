@@ -366,16 +366,18 @@ CREATE TRIGGER IF NOT EXISTS task_request_frozen BEFORE UPDATE OF request_id ON 
                             (str(path) + ":" + row["id"]).encode()
                         ).hexdigest()[:40]
                     )
-                    grade = grade_result(
-                        result,
-                        self.companies,
-                        allocation=row["kind"] == "allocation",
-                        require_target_claims=(
-                            row["kind"] == "allocation"
-                            and packet.get("allocation_evidence_version")
-                            == ALLOCATION_EVIDENCE_VERSION
-                        ),
-                    )
+                    if (
+                        row["kind"] == "allocation"
+                        and packet.get("allocation_evidence_version")
+                        == ALLOCATION_EVIDENCE_VERSION
+                    ):
+                        grade = grade_allocation_v2(result, self.companies)
+                    else:
+                        grade = grade_result(
+                            result,
+                            self.companies,
+                            allocation=row["kind"] == "allocation",
+                        )
                     target.execute(
                         "INSERT OR IGNORE INTO prior_work VALUES(?,?,?,?,?,?,?,?)",
                         (
@@ -911,14 +913,16 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
                     and allocation_evidence_version(task["body"])
                     == ALLOCATION_EVIDENCE_VERSION
                 )
-                grade = grade_result(
-                    result,
-                    self.companies,
-                    allocation=task["kind"] == "allocation",
-                    critic=task["kind"] == "portfolio_critic",
-                    proposal_sha256=proposal,
-                    require_target_claims=require_target_claims,
-                )
+                if require_target_claims:
+                    grade = grade_allocation_v2(result, self.companies)
+                else:
+                    grade = grade_result(
+                        result,
+                        self.companies,
+                        allocation=task["kind"] == "allocation",
+                        critic=task["kind"] == "portfolio_critic",
+                        proposal_sha256=proposal,
+                    )
                 status = (
                     "complete"
                     if request["status"] == "completed" and isinstance(result, dict)
@@ -1003,14 +1007,40 @@ ORDER BY created DESC LIMIT 1600""").fetchall()
             }
 
 
+def grade_allocation_v2(result, companies):
+    """Additional v2 allocation gates, separate from the frozen policy evaluator."""
+    grade = grade_result(result, companies, allocation=True)
+    if not isinstance(result, dict):
+        return grade
+    errors = set(grade["errors"])
+    if len(canonical(result).encode()) > ALLOCATION_PROPOSAL_LIMIT:
+        errors.add("proposal_envelope_exceeded")
+    supported = set()
+    claims = result.get("claims")
+    for claim in claims if isinstance(claims, list) else []:
+        try:
+            for variant in companies[claim["symbol"]]["facts"].get(claim["metric"], []):
+                if variant["tag"] != claim["tag"] or variant["unit"] != claim["unit"]:
+                    continue
+                if any(
+                    observation.get("start") == claim["start"]
+                    and observation["end"] == claim["end"]
+                    and Decimal(str(observation["val"])) == Decimal(str(claim["value"]))
+                    for observation in variant["observations"]
+                ):
+                    supported.add(claim["symbol"])
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            continue
+    targets = result.get("targets")
+    for target in targets if isinstance(targets, list) else []:
+        if isinstance(target, dict) and isinstance(target.get("symbol"), str):
+            if target["symbol"] not in supported:
+                errors.add("target_without_filed_claim")
+    return {**grade, "source_check_passed": not errors, "errors": sorted(errors)}
+
+
 def grade_result(
-    result,
-    companies,
-    *,
-    allocation=False,
-    critic=False,
-    proposal_sha256=None,
-    require_target_claims=False,
+    result, companies, *, allocation=False, critic=False, proposal_sha256=None
 ):
     errors = []
     checked = 0
@@ -1020,11 +1050,6 @@ def grade_result(
             "claims_checked": 0,
             "errors": ["invalid_json"],
         }
-    if (
-        require_target_claims
-        and len(canonical(result).encode()) > ALLOCATION_PROPOSAL_LIMIT
-    ):
-        errors.append("proposal_envelope_exceeded")
     keys = {
         "thesis",
         "claims",
@@ -1048,7 +1073,6 @@ def grade_result(
         errors.append("invalid_review_identity")
     claims = result.get("claims")
     seen = set()
-    supported_symbols = set()
     if not isinstance(claims, list) or not 3 <= len(claims) <= 50:
         errors.append("claim_count")
     else:
@@ -1100,7 +1124,6 @@ def grade_result(
                             found = True
                 if found:
                     checked += 1
-                    supported_symbols.add(claim["symbol"])
                 else:
                     errors.append("source_mismatch")
             except (KeyError, TypeError, ValueError, InvalidOperation):
@@ -1154,8 +1177,6 @@ def grade_result(
                 errors.append("invalid_weight")
         if total > 1:
             errors.append("overallocated")
-        if require_target_claims and seen - supported_symbols:
-            errors.append("target_without_filed_claim")
     return {
         "source_check_passed": not errors,
         "claims_checked": checked,

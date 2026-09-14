@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import hashlib
+import inspect
 import json
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -15,6 +17,7 @@ from portfolio_runtime import runner as r
 from portfolio_runtime.research import (
     Research,
     grade_result,
+    grade_allocation_v2,
     allocation_company_evidence,
     ALLOCATION_BODY_LIMIT,
     ALLOCATION_PROPOSAL_LIMIT,
@@ -671,12 +674,7 @@ class RunnerTests(unittest.TestCase):
                 db.execute("SELECT id FROM tasks WHERE id='w02-critic'").fetchone()
             )
         supported["claims"][-1]["value"] = 999
-        grade = grade_result(
-            supported,
-            self.research.companies,
-            allocation=True,
-            require_target_claims=True,
-        )
+        grade = grade_allocation_v2(supported, self.research.companies)
         self.assertIn("source_mismatch", grade["errors"])
         self.assertIn("target_without_filed_claim", grade["errors"])
         following = Research(
@@ -756,10 +754,89 @@ class RunnerTests(unittest.TestCase):
                 "source_check_passed"
             ]
         )
-        grade = grade_result(
-            result, self.research.companies, allocation=True, require_target_claims=True
-        )
+        grade = grade_allocation_v2(result, self.research.companies)
         self.assertEqual(grade["errors"], ["proposal_envelope_exceeded"])
+
+    def test_service_reopens_the_pre_v2_frozen_policy_evaluator(self):
+        from portfolio_runtime.service import Service
+        from portfolio_runtime.improvement import PolicyLab
+
+        # These hashes are from the completed rehearsal's immutable contract
+        # and grade_result at 1a8b88c. Allocation-only gates must not migrate it.
+        self.assertEqual(
+            hashlib.sha256(inspect.getsource(grade_result).encode()).hexdigest(),
+            "813258b822db8d15f69e0b39923150d552d41dc20b836c6d619b05371b829c13",
+        )
+        frozen = {
+            "evaluator_sha256": "4a67ad5712fed9d4f53f13bf5830b8438fdec57f54f11069f9de528e06d140d5",
+            "system_sha256": "ae0e4b73e0042e406bb65a75662ab004629df3b50dabc5607f8fffe8717ff57a",
+            "policies": {"fresh": {"memory_limit": 0}, "memory_3": {"memory_limit": 3}},
+            "rules": {
+                "family_alpha": "0.01",
+                "holdout_modulus": 5,
+                "max_cost_ratio": "2",
+                "max_non_improving_looks": 2,
+                "max_output": 8192,
+                "max_promotions": 1,
+                "max_rollbacks": 1,
+                "min_dates": 2,
+                "min_net_wins": 5,
+                "min_pass_rate": "0.90",
+                "pairs_per_look": 20,
+                "profile": "kimi_asap",
+                "selection_pairs_per_day": 10,
+                "version": 1,
+            },
+        }
+        state = self.root / "restored-service"
+        state.mkdir()
+        path = state / "improvement.sqlite"
+        with sqlite3.connect(path) as db:
+            db.execute(
+                "CREATE TABLE policy_contract(id INTEGER PRIMARY KEY,body TEXT NOT NULL)"
+            )
+            db.execute("INSERT INTO policy_contract VALUES(1,?)", (canonical(frozen),))
+            db.execute(
+                "CREATE TABLE policies(version INTEGER PRIMARY KEY,name TEXT NOT NULL,action TEXT NOT NULL,at TEXT NOT NULL,decision TEXT)"
+            )
+            db.execute(
+                "INSERT INTO policies VALUES(0,'memory_3','initial',?,NULL)", (AT,)
+            )
+        config = {
+            "state_dir": str(state),
+            "spending_mode": "available_credit",
+            "week_starts_at": "2026-09-14T04:00:00Z",
+            "week_ends_at": "2026-09-19T04:00:00Z",
+            "account_created_at": CREATED,
+            "session_seconds": 3600,
+            "voyage_id": "voy_fixture",
+        }
+        # Exercise the production service initialization and real PolicyLab;
+        # external tracing is isolated and no epoch/inference is launched.
+        service = Service(
+            config, clock=lambda: EPOCH, trace_factory=lambda *_: object()
+        )
+        service.initialize()
+        self.assertIsInstance(service.lab, PolicyLab)
+        self.assertEqual(
+            service.lab.policy(), {"version": 0, "name": "memory_3", "memory_limit": 3}
+        )
+        service.initialize()
+        with sqlite3.connect(path) as db:
+            self.assertEqual(
+                db.execute("SELECT body FROM policy_contract").fetchone()[0],
+                canonical(frozen),
+            )
+            self.assertEqual(
+                db.execute("SELECT version,name,action,at FROM policies").fetchall(),
+                [(0, "memory_3", "initial", AT)],
+            )
+        with patch(
+            "portfolio_runtime.improvement.inspect.getsource",
+            return_value="changed evaluator",
+        ):
+            with self.assertRaisesRegex(ValueError, "Frozen policy evaluator changed"):
+                PolicyLab(path)
 
     def test_changed_quote_keeps_coverage_priority_on_unreviewed_companies(self):
         company = self.research.companies["AAPL"]
