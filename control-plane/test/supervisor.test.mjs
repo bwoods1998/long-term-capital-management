@@ -154,6 +154,56 @@ test('repeated guest errors alert despite fresh heartbeat and advancing progress
  }
 });
 
+test('service errors notify once per episode across restarts, then notify again after observed recovery',async()=>{
+ const f=harness({health:{status:'needs_attention',reason_code:'runtime_error'}});
+ await f.c.configure(config());await f.c.tick();
+ assert.equal(f.sent.filter(m=>/service needs attention/.test(m.subject)).length,1);
+ // Recreate the controller with the same durable storage, as on deployment.
+ f.c=new Supervisor(f.s,f.c.env,{now:()=>f.state.at,fetcher:f.c.fetcher});
+ for(let i=0;i<3;i++){
+  f.advance(60000);f.state.health.heartbeat_at=new Date(f.state.at).toISOString();f.state.health.progress_at=new Date(f.state.at).toISOString();await f.c.tick();
+ }
+ assert.equal(f.sent.length,1);
+ assert.equal((await f.s.get('control')).service_failure_active,true);
+ // A stale supposedly healthy process is not proof of recovery.
+ f.advance(60000);f.state.health.status='running';f.state.health.reason_code=null;
+ f.state.health.heartbeat_at=new Date(f.state.at-400000).toISOString();await f.c.tick();
+ assert.equal((await f.s.get('control')).service_failure_active,true);
+ f.advance(60000);f.state.health.heartbeat_at=new Date(f.state.at).toISOString();f.state.health.progress_at=new Date(f.state.at).toISOString();await f.c.tick();
+ assert.equal((await f.s.get('control')).service_failure_active,false);
+ assert.equal((await f.s.get('control')).service_failure_episode,1);
+ assert.equal(f.sent.filter(m=>/service recovered/.test(m.subject)).length,1);
+ f.advance(60000);f.state.health.status='needs_attention';f.state.health.reason_code='runtime_error';
+ f.state.health.heartbeat_at=new Date(f.state.at).toISOString();f.state.health.progress_at=new Date(f.state.at).toISOString();await f.c.tick();
+ assert.equal(f.sent.filter(m=>/service needs attention/.test(m.subject)).length,2);
+ assert.equal((await f.s.get('mail:'+config().service_id+':service:runtime_error:1')).state,'accepted');
+ f.advance(60000);await f.c.tick();assert.equal(f.sent.filter(m=>/service needs attention/.test(m.subject)).length,2);
+});
+
+test('legacy service failure receipts remain protected and ambiguous delivery is not retried',async()=>{
+ const f=harness({health:{status:'needs_attention',reason_code:'data_unavailable'}});await f.c.configure(config());
+ await f.s.put('mail:'+config().service_id+':service:data_unavailable',{kind:'failure',state:'unconfirmed',at:new Date(start-60000).toISOString()});
+ await f.c.tick();assert.equal(f.sent.length,0);
+ // A failed probe does not count as service recovery.
+ f.advance(60000);f.state.brokenProbe=true;await f.c.tick();assert.equal((await f.s.get('control')).service_failure_active,true);
+ f.state.brokenProbe=false;f.advance(60000);f.state.health.status='waiting';f.state.health.reason_code='scheduled_wait';
+ f.state.health.heartbeat_at=new Date(f.state.at).toISOString();f.state.health.progress_at=new Date(f.state.at).toISOString();await f.c.tick();
+ assert.equal((await f.s.get('control')).service_failure_active,false);
+ f.c.env.EMAIL.send=async()=>{f.sent.push({subject:'ambiguous service failure'});throw Error('delivery unknown');};
+ f.advance(60000);f.state.health.status='needs_attention';f.state.health.reason_code='data_unavailable';await f.c.tick();
+ const mail=await f.s.get('mail:'+config().service_id+':service:data_unavailable:1');assert.equal(mail.state,'unconfirmed');
+ const count=f.sent.length;f.advance(60000);await f.c.tick();assert.equal(f.sent.length,count);
+});
+
+test('a healthy upgrade probe retires old service alert identities before a new occurrence',async()=>{
+ const f=harness();await f.c.configure(config());
+ await f.s.put('mail:'+config().service_id+':service:runtime_error',{kind:'failure',state:'accepted',at:new Date(start-60000).toISOString()});
+ await f.c.tick();assert.equal(f.sent.length,0);
+ assert.equal((await f.s.get('control')).service_failure_episode,1);
+ f.advance(60000);f.state.health.status='needs_attention';f.state.health.reason_code='runtime_error';await f.c.tick();
+ assert.equal(f.sent.length,1);assert.equal((await f.s.get('mail:'+config().service_id+':service:runtime_error:1')).state,'accepted');
+});
+
 test('available-credit configuration has no fixed week or rehearsal dollar authority',()=>{
  const c=availableConfig();assert.equal(validateConfig(c).spending_mode,'available_credit');
  for(const change of [{weekly_inference_usd:'100'},{weekly_total_usd:'100'},

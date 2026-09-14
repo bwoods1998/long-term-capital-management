@@ -496,7 +496,22 @@ export class Supervisor {
           }
         } else {latest.status=health.status||'running';control.failures=0;delete control.recovery_started_at;}
       } else latest.status=credit.allow?'waiting':'needs_attention';
-      if (health.reason_code && health.status==='needs_attention') await this.alert(c.service_id+':service:'+health.reason_code,'failure',{reason:health.reason_code});
+      if (health.reason_code && health.status==='needs_attention') {
+        // Preserve legacy episode-zero keys across a controller upgrade, and
+        // keep one notice per reason until a fresh healthy probe closes it.
+        const episode=control.service_failure_episode||0;
+        control.service_failure_active=true;await this.s.put('control',control);
+        await this.alert(c.service_id+':service:'+health.reason_code+(episode?':'+episode:''),'failure',{reason:health.reason_code});
+      } else if (!stopping&&['running','waiting'].includes(latest.status)&&['running','waiting'].includes(health.status)) {
+        if (control.service_failure_active) {
+          const episode=control.service_failure_episode||0;
+          if (!hadFailure) await this.alert(c.service_id+':service-recovered:'+episode,'recovered');
+          control.service_failure_episode=episode+1;control.service_failure_active=false;
+        } else if (control.service_failure_episode===undefined) {
+          // A healthy first probe also closes any pre-upgrade legacy episode.
+          control.service_failure_episode=1;
+        }
+      }
       // Backups get a durable intent. An uncertain acknowledgement retries exactly
       // that operation; running jobs are never replaced with a newly minted ID.
       const stopNeedsBackup=stopping&&!probe.running&&(!Number.isFinite(backupTime)||backupTime<Date.parse(control.stop_started_at));
