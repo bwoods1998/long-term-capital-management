@@ -203,3 +203,9 @@ Four more agents checked the merged floor for bugs. What they found and what was
 
 The Sail key on the box comes from `.env`, not credential injection; the design note was wrong
 and the README now says so.
+
+## Addendum: spawns off the tick (23:35 UTC)
+
+The live watcher measured the cost of an inline playbook rewrite: the checkpoint froze for 6 minutes 15 seconds (23:17:28 to 23:23:43) while scholes-3 was born, and every hourly seeding pass would have repeated it. Commit 879f00a moves the rewrite off the tick: a child is born at once with its parent's playbook (plus the house view), the model's rewrite runs on a worker thread that touches nothing but the provider, and the tick applies finished rewrites through `PlaybookStore` as a versioned `desk.playbook_updated` (reason "bred from <parent>"). `evolution.deferred_rewrites` (default on) switches it off. The gateway watchdog's stale-checkpoint threshold had been raised to 1800 s at 23:20 as a stopgap and stays there.
+
+The 24h-burn deploy (a44a60c) took effect at 23:24: the run block's infra total fell from the 30-day figure (105.14, most of it the earlier paper week) to the floor's own 3.58, runway 53 days at Sail's 24h burn of 5.06 a day.
