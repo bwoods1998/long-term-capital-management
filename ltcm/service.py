@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 from .broker import Instrument, OrderIntent, money, text
 from .analytics import ResultsLedger
 from .committee import Committee, capital_mode, live_desks, promoted_desks, retired_desks
+from .runway import Runway, assess as assess_runway
 from .events import EventLog, canonical, now_iso
 from .evolve import Evolution
 from .gateway import Gateway
@@ -83,6 +84,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "sources": {},
     "profit_share": "0.25",
     "floor_cap_max_usd_per_day": "60",
+    # Spend policy. "runway": no daily cap -- the Sail credit above a reserve is the limit, the
+    # floor throttles when the runway is short and stops at the reserve (`ltcm.runway`).
+    # "capped": the older fixed daily cap plus a share of realized profit.
+    "spend_mode": "runway",
+    "spend_policy": {},
+    # How often the evolution loop tops families up with shadow variants, in seconds.
+    "seed_interval_seconds": 3600,
     "publish": True,
     "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
     "shadow_slippage_bps": 5,
@@ -146,6 +154,11 @@ def load_env(path: str | Path) -> dict[str, str]:
 #: An `event_resolution` session fires at most this often per desk, however many markets
 #: settle in one afternoon. The manifest caps orders; this caps the model spend behind them.
 RESOLUTION_COOLDOWN_SECONDS = 1800
+#: The runway policy's fields, carried from `ops.budget` into the checkpoint and the status.
+RUNWAY_KEYS = (
+    "mode", "balance_usd", "spendable_usd", "runway_days", "burn_usd_per_day", "reserve_usd",
+    "desk_fuse_usd",
+)
 
 
 def _venue_rank(venue: str) -> tuple[int, str]:
@@ -1226,7 +1239,14 @@ class Service:
 
     # ------------------------------------------------------------------ inference budget
     def apply_budget(self, at: str) -> dict[str, Any]:
-        """Recompute the floor's daily model cap from realized profit and publish it."""
+        """Set what the desks may spend today and publish it.
+
+        Under the runway policy (the default) there is no daily cap: the Sail credit above the
+        reserve is the limit, read live, and the policy only decides how the floor approaches
+        zero. Under the capped policy the cap is a base plus a share of realized profit.
+        """
+        if str(self.config.get("spend_mode", "runway")) == "runway":
+            return self._apply_runway(at)
         budget = self.committee.compute_budget(at)
         cap = money(budget["cap_usd"])
         if self.provider is not None and hasattr(self.provider, "floor_cap"):
@@ -1253,6 +1273,123 @@ class Service:
         )
         self._budget = {**budget, "spent_today_usd": spent}
         return self._budget
+
+    def _apply_runway(self, at: str) -> dict[str, Any]:
+        provider = self.provider
+        balance = None
+        burn = ZERO
+        spent = ZERO
+        if provider is not None:
+            reader = getattr(provider, "check_balance", None)
+            if callable(reader):
+                try:
+                    balance = reader()
+                except Exception:
+                    balance = None
+            trailing = getattr(provider, "spent_since", None)
+            if callable(trailing):
+                try:
+                    burn = money(trailing(24.0))
+                except Exception:
+                    burn = ZERO
+            try:
+                spent = money(provider.spent_today())
+            except Exception:
+                spent = ZERO
+        runway = assess_runway(balance, burn, self.config.get("spend_policy") or {})
+        if provider is not None:
+            if hasattr(provider, "floor_cap"):
+                provider.floor_cap = runway.cap_usd
+            if hasattr(provider, "desk_fuse"):
+                provider.desk_fuse = runway.desk_fuse_usd
+        payload = {"scope": "floor", "spent_usd": text(spent), **runway.to_payload()}
+        # One public event per change of picture: the mode, the cap and the runway to the
+        # dollar and the day, not one event per cent the balance moves.
+        coarse = {
+            "mode": runway.mode,
+            "cap": str(int(runway.cap_usd)),
+            "balance": None if runway.balance_usd is None else str(int(runway.balance_usd)),
+            "runway": None if runway.runway_days is None else str(int(runway.runway_days)),
+        }
+        digest = hashlib.sha256(canonical(coarse).encode("utf-8")).hexdigest()[:12]
+        self.log.append(
+            "ops", "ops.budget", payload, id=f"budget:floor:{at[:10]}:{digest}", at=at
+        )
+        self._note_spend_mode(runway, at)
+        self._runway = runway
+        self._budget = {
+            "scope": "floor",
+            "cap_usd": runway.cap_usd,
+            "spent_today_usd": spent,
+            "base_usd": ZERO,
+            "profit_share": ZERO,
+            "trailing_realized_usd": ZERO,
+            "profit_window_days": 0,
+            **runway.to_payload(),
+        }
+        return self._budget
+
+    def _note_spend_mode(self, runway: Runway, at: str) -> None:
+        """Say in public when the floor's posture toward its credit changes."""
+        previous = self.state().get("spend_mode_seen")
+        if previous == runway.mode:
+            return
+        self._save_state(spend_mode_seen=runway.mode)
+        balance = "unread" if runway.balance_usd is None else f"${runway.balance_usd}"
+        days = "" if runway.runway_days is None else f"{runway.runway_days} days"
+        if runway.mode == "stopped":
+            self.alert(
+                "critical",
+                f"floor paused: Sail credit {balance} is at the ${runway.reserve_usd} reserve. "
+                "No new session starts; marks, settlements and publication continue. "
+                "Credit added at Sail resumes the floor within a minute.",
+            )
+        elif runway.mode == "throttled":
+            self.alert(
+                "warning",
+                f"floor throttled: {days} of Sail credit left at ${runway.burn_usd_per_day} a day. "
+                f"Live desks only, ${runway.cap_usd} a day, until credit is added.",
+            )
+        elif runway.mode == "unknown":
+            self.alert(
+                "warning",
+                "Sail balance could not be read; the floor keeps working under the fallback cap "
+                f"of ${runway.cap_usd} a day.",
+            )
+        elif previous is not None:
+            self.alert(
+                "info",
+                f"floor open: Sail credit {balance}, {days} of runway at "
+                f"${runway.burn_usd_per_day} a day. No daily cap.",
+            )
+
+    def spend_mode(self) -> str:
+        """`open`, `throttled`, `stopped` or `unknown` under the runway policy; `capped` otherwise."""
+        runway = getattr(self, "_runway", None)
+        return runway.mode if runway is not None else "capped"
+
+    def seed_population(self, at: str) -> list[dict[str, Any]]:
+        """Top families up with shadow variants, a couple at a time, at most once per interval.
+
+        Each spawn asks the model for a playbook, so a pass is bounded to `seed_batch` children
+        to keep the tick short; the next pass, an interval later, tops the family up further.
+        It runs on the tick's own thread: the roster, the ledgers and the event log are all
+        touched here, and none of them is meant to be shared with a second thread.
+        """
+        interval = int(self.config.get("seed_interval_seconds", 3600))
+        last = self.state().get("last_seed_at")
+        if last is not None and (parse_iso(at) - parse_iso(last)).total_seconds() < interval:
+            return []
+        self._save_state(last_seed_at=at)
+        batch = max(1, int(self.config.get("seed_batch", 2)))
+        try:
+            actions = list(self.evolution.seed(at, limit=batch))
+        except Exception as exc:
+            self.alert("warning", f"seeding failed: {type(exc).__name__}: {exc}")
+            return []
+        if actions:
+            self.reload_manifests()
+        return actions
 
     # ------------------------------------------------------------------ marks
     def mark_all(self, at: str) -> int:
@@ -1326,6 +1463,10 @@ class Service:
         }
 
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
+        runway = getattr(self, "_runway", None)
+        stopped = runway is not None and runway.mode == "stopped"
+        live_only = runway is not None and runway.live_only
+        result["spend_mode"] = self.spend_mode()
         # Settlements are swept before the schedule so a market that resolved since the last
         # tick wakes its desk on this tick rather than the next one.
         result["settlements"] = self.sweep_settlements(at)
@@ -1336,8 +1477,12 @@ class Service:
         if any(desk_id not in previous for desk_id in self.manifests):
             self.committee.allocate(at)
             result["committee"] = True
-        if not result["kill_switch"]:
+        if not result["kill_switch"] and not stopped:
             due = self.due_sessions(at)
+            if live_only:
+                # Short runway: the shadow race pauses and the credit goes to the real sleeves.
+                live = self.live_ids()
+                due = [(m, trigger) for m, trigger in due if m.id in live]
             self.start_sessions(due)
             result["sessions"] = [f"{m.id}/{trigger}" for m, trigger in due]
 
@@ -1373,7 +1518,13 @@ class Service:
         if state.get("last_rate_card_day") != day:
             result["rate_card"] = self.check_rate_card()
             self._save_state(last_rate_card_day=day)
-        if self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
+        if not stopped and not live_only:
+            seeded = self.seed_population(at)
+            if seeded:
+                result["evolution"] = list(result.get("evolution") or []) + seeded
+        if stopped:
+            pass  # the memo and the evolution loop both ask the model; they wait for credit
+        elif self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
             # Meriwether writes every day; capital is only resized on the committee's weekday.
             resize_day = local.weekday() == int(self.config["committee_weekday"])
             memo_daily = bool(self.config.get("committee_memo_daily", True))
@@ -1383,7 +1534,7 @@ class Service:
             if resize_day or memo_daily:
                 result["memo"] = bool(self.committee.memo(at))
                 self._save_state(last_committee_day=day)
-        if self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day):
+        if not stopped and self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day):
             actions = list(self.evolution.select(at)) + list(self.evolution.promote(at))
             self.reload_manifests()
             self._save_state(last_evolution_day=day)
@@ -1671,9 +1822,10 @@ class Service:
             budget={
                 "spent_today_usd": spent if spent is not None else ZERO,
                 "cap_usd": money(budget["cap_usd"]),
-                "base_usd": money(budget["base_usd"]),
-                "profit_share": money(budget["profit_share"]),
-                "trailing_realized_usd": money(budget["trailing_realized_usd"]),
+                "base_usd": money(budget.get("base_usd", ZERO)),
+                "profit_share": money(budget.get("profit_share", ZERO)),
+                "trailing_realized_usd": money(budget.get("trailing_realized_usd", ZERO)),
+                **{k: budget.get(k) for k in RUNWAY_KEYS if k in budget},
             },
             infra=self.infra(at, spend_usd=spent if spent is not None else ZERO),
         )
@@ -1778,7 +1930,9 @@ class Service:
                 "cap_usd": str(self._budget.get("cap_usd", self.config["floor_cap_usd_per_day"])),
                 "base_usd": str(self.config["floor_cap_usd_per_day"]),
                 "trailing_realized_usd": str(self._budget.get("trailing_realized_usd", "0")),
+                **{k: self._budget.get(k) for k in RUNWAY_KEYS if k in self._budget},
             },
+            "spend_mode": self.spend_mode(),
             "desks": desks,
             "last_mark_at": state.get("last_mark_at"),
             "last_committee_day": state.get("last_committee_day"),

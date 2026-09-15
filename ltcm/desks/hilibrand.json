@@ -33,16 +33,18 @@
   },
   "model": {
     "profile": "pro_flex",
-    "reasoning_effort": "medium",
-    "max_output_tokens": 8192,
-    "max_turns": 20
+    "reasoning_effort": "high",
+    "max_output_tokens": 16384,
+    "max_turns": 32
   },
   "cadence": {
     "sessions": [
       "00:30",
-      "06:30",
+      "04:30",
+      "08:30",
       "12:30",
-      "18:30"
+      "16:30",
+      "20:30"
     ],
     "timezone": "UTC",
     "triggers": [],
@@ -64,7 +66,7 @@
     "playbook_write"
   ],
   "budget": {
-    "usd_per_day": "2.50"
+    "usd_per_day": "25"
   },
   "capital": {
     "mode": "live",

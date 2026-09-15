@@ -20,7 +20,12 @@
   "critic_profile": "glm_asap",
   "evolution": {
     "min_days": 3,
-    "min_decisions": 5
+    "min_decisions": 5,
+    "target_variants": 4,
+    "max_variants": 6,
+    "playbook_profile": "pro_asap",
+    "playbook_reasoning_effort": "high",
+    "playbook_budget_usd_per_day": "5.00"
   },
   "sources": {},
   "publish": true,
@@ -47,5 +52,16 @@
       "secret_env": "COINBASE_API_SECRET",
       "private_key_path": ".data/ltcm/keys/coinbase.pem"
     }
-  }
+  },
+  "spend_mode": "runway",
+  "spend_policy": {
+    "reserve_usd": "10",
+    "throttle_days": "3",
+    "stretch_days": "5",
+    "desk_fuse_pct": "0.25",
+    "desk_fuse_min_usd": "10",
+    "fallback_cap_usd": "40",
+    "infra_usd_per_day": "0.30"
+  },
+  "seed_interval_seconds": 3600
 }

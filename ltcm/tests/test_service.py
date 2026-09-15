@@ -197,6 +197,11 @@ class ServiceCase(unittest.TestCase):
             # in `ltcm/config.json`.
             "floor_cap_usd_per_day": "15",
             "floor_cap_max_usd_per_day": "60",
+            # The capped policy, so the cap assertions test the arithmetic; the runway policy
+            # has its own case below with a provider that reports a balance.
+            "spend_mode": "capped",
+            # No seeding unless a case asks for it: the packaged config breeds families.
+            "evolution": {"target_variants": 1},
             "sources": {"news": False, "edgar": False, "event": False, "chain": False},
         }
         base.update(config)
@@ -427,6 +432,122 @@ class BudgetTests(ServiceCase):
         self.assertEqual(budget["trailing_realized_usd"], Decimal("200.00"))
         self.assertEqual(budget["cap_usd"], Decimal("65.00").min(Decimal("60")))
         self.assertEqual(self.provider.floor_cap, Decimal("60"))
+
+
+class RunwayProvider(FakeProvider):
+    """A provider that reports a Sail balance and a trailing burn, the way the real one does."""
+
+    def __init__(self, balance="279.82", burn="0.40"):
+        super().__init__()
+        self.balance = None if balance is None else Decimal(balance)
+        self.burn = Decimal(burn)
+        self.desk_fuse = None
+
+    def check_balance(self):
+        return self.balance
+
+    def spent_since(self, hours=24.0):
+        return self.burn
+
+
+class RunwayPolicyTests(ServiceCase):
+    """No daily cap: the credit above the reserve is the limit, and the floor's posture toward
+    it is published, throttled and stopped in public."""
+
+    def setUp(self):
+        super().setUp()
+        self.provider = RunwayProvider()
+        self.service.close()
+        self.service = self.build(spend_mode="runway")
+
+    def test_open_credit_means_no_cap_and_a_published_runway(self):
+        result = self.tick()
+        self.assertEqual(result["spend_mode"], "open")
+        self.assertEqual(self.provider.floor_cap, Decimal("269.82"))  # everything above the reserve
+        self.assertEqual(self.provider.desk_fuse, Decimal("67.45"))
+        event = self.service.log.last("ops", "ops.budget")
+        self.assertEqual(event.payload["mode"], "open")
+        self.assertEqual(event.payload["balance_usd"], "279.82")
+        self.assertEqual(event.payload["runway_days"], "385.4")
+        self.assertEqual(event.payload["spent_usd"], "0.03")
+        checkpoint = self.publisher.checkpoints[-1]
+        self.assertEqual(checkpoint["budget"]["mode"], "open")
+        self.assertEqual(str(checkpoint["budget"]["balance_usd"]), "279.82")
+        self.assertEqual(str(checkpoint["budget"]["cap_usd"]), "269.82")
+        # A steady picture is one public event, not one per tick.
+        self.tick(moment(2026, 9, 14, 13, 51))
+        self.assertEqual(len(self.service.log.read(kind="ops.budget")), 1)
+
+    def test_at_the_reserve_the_floor_stops_says_so_once_and_resumes_when_credit_arrives(self):
+        self.provider.balance = Decimal("9.50")
+        result = self.tick()
+        self.assertEqual(result["spend_mode"], "stopped")
+        self.assertEqual(result["sessions"], [])
+        self.assertEqual(self.sessions_started(), [])
+        self.assertEqual(self.provider.floor_cap, Decimal("0"))
+        alerts = [e.payload for e in self.service.log.read(kind="ops.alert")]
+        paused = [a for a in alerts if a["text"].startswith("floor paused")]
+        self.assertEqual(len(paused), 1)
+        self.assertEqual(paused[0]["level"], "critical")
+        self.tick(moment(2026, 9, 14, 13, 51))
+        self.assertEqual(len([e for e in self.service.log.read(kind="ops.alert") if e.payload["text"].startswith("floor paused")]), 1)
+        # Marks and publication went on regardless.
+        self.assertTrue(self.publisher.checkpoints)
+        self.assertEqual(self.publisher.checkpoints[-1]["budget"]["mode"], "stopped")
+
+        self.provider.balance = Decimal("120")  # the owner topped up
+        result = self.tick(moment(2026, 9, 14, 13, 52))
+        self.assertEqual(result["spend_mode"], "open")
+        self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+        opened = [e for e in self.service.log.read(kind="ops.alert") if e.payload["text"].startswith("floor open")]
+        self.assertEqual(len(opened), 1)
+
+    def test_a_short_runway_keeps_the_live_desks_and_pauses_the_shadow_race(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.write_manifest("earnings-02", capital={"mode": "shadow", "usd": "1000"})
+        self.service.close()
+        self.service = self.build(spend_mode="runway", live_venues=["alpaca"])
+        self.provider.balance = Decimal("20")
+        self.provider.burn = Decimal("5")
+        result = self.tick()
+        self.assertEqual(result["spend_mode"], "throttled")
+        self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+        self.assertEqual(self.sessions_started("earnings-02"), [])
+        self.assertEqual(self.provider.floor_cap, Decimal("2.00"))
+        throttled = [e for e in self.service.log.read(kind="ops.alert") if e.payload["text"].startswith("floor throttled")]
+        self.assertEqual(len(throttled), 1)
+
+    def test_an_unreadable_balance_never_stops_the_floor(self):
+        self.provider.balance = None
+        result = self.tick()
+        self.assertEqual(result["spend_mode"], "unknown")
+        self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+        self.assertEqual(self.provider.floor_cap, Decimal("40"))
+
+
+class SeedingTests(ServiceCase):
+    """The floor breeds shadow variants of its live desks so the promotion race is always on."""
+
+    def setUp(self):
+        super().setUp()
+        self.service.close()
+        self.service = self.build(evolution={"target_variants": 3}, seed_batch=1)
+
+    def test_families_are_topped_up_a_child_per_pass_and_wired_in_at_once(self):
+        result = self.tick()
+        self.assertEqual([a["action"] for a in result["evolution"]], ["spawned"])
+        self.assertIn("earnings-01-2", self.service.manifests)
+        self.assertEqual(self.service.manifests["earnings-01-2"].capital_mode, "shadow")
+        self.assertIn("earnings-01-2", self.service.shadow_books)
+        # Within the interval nothing more is bred; after it the family is completed.
+        self.assertEqual(self.tick(moment(2026, 9, 14, 14, 20))["evolution"], [])
+        result = self.tick(moment(2026, 9, 14, 15, 0))
+        self.assertEqual([a["desk_id"] for a in result["evolution"]], ["earnings-01-3"])
+        self.assertEqual(self.tick(moment(2026, 9, 14, 16, 5))["evolution"], [])
+        self.assertEqual(len(self.service.log.read(kind="evolution.spawned")), 2)
+        # The children are funded before their first session, like any new desk.
+        allocations = self.service.log.read(kind="committee.allocation")
+        self.assertIn("earnings-01-3", allocations[-1].payload["allocations"])
 
 
 class ScheduleTests(ServiceCase):

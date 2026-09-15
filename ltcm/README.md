@@ -92,12 +92,34 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 "After fill" means the event is written immediately but marked `public: false`; the publisher
 releases it when the matching order reaches a terminal state. Nobody can trade ahead of a desk.
 
-## Budget policy
+## Spend policy: a runway, not a cap
 
-The floor has one daily Sail cap (`ops.budget` scope `floor`) and each desk has its own
-(`manifest.budget.usd_per_day`). The provider refuses a request when either would be exceeded or
-when the live Sail balance is below the floor's reserve. Unknown request costs keep their
-reservation until settled, exactly as in the first generation.
+The floor has no daily inference cap. The Sail credit above a small reserve is the limit, read
+live every tick, and `ltcm/runway.py` decides only how the floor approaches zero:
+
+| Mode | When | What the floor does |
+|---|---|---|
+| `open` | runway longer than `throttle_days` (3) | No cap. Every desk runs its cadence, families are bred up to `target_variants`, the committee and the evolution loop run. |
+| `throttled` | runway under `throttle_days` | The remaining credit is stretched over `stretch_days` (5); only live desks keep their sessions; breeding pauses. |
+| `stopped` | balance at or under `reserve_usd` (10) | No new model call. Marks, order polling, settlements and publication continue. Credit added at Sail lifts the floor back to `open` on the next tick. |
+| `unknown` | the balance could not be read | The floor keeps working under `fallback_cap_usd`; an outage at the usage API is not a reason to stop trading. |
+
+Runway is `(balance - reserve) / burn`, where burn is the trailing day's settled model cost from
+the provider's own ledger plus `infra_usd_per_day` for the box. The picture is published as
+`ops.budget` (one event per change of mode, cap, dollar of balance or day of runway) and in the
+checkpoint's `budget` block, so the site shows the credit, the runway and the mode. Every change
+of mode is an `ops.alert`, and the gateway's watchdog mails the owner at a week of runway, at two
+days, and when the floor has stopped.
+
+One fuse survives: a desk may not commit more than `desk_fuse_pct` (25%) of the spendable
+credit in a day (never under `desk_fuse_min_usd`). It is not a budget -- a desk working normally
+never reaches it -- it is the difference between a desk stuck in a tool loop costing an afternoon
+and costing the balance. `manifest.budget.usd_per_day` is ignored under this policy.
+
+`spend_mode: "capped"` in `ltcm/config.json` restores the older policy: a fixed daily cap plus a
+share of realized profit, and each desk's own daily budget. The provider still refuses a request
+when the live Sail balance is below the reserve under either policy, and unknown request costs
+keep their reservation until settled.
 
 ## The live-order critic
 

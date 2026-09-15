@@ -604,6 +604,11 @@ class Provider:
         self.clock = clock
         self.floor_cap = Decimal(str(floor_cap_usd_per_day))
         self.reserve_floor = Decimal(str(reserve_floor_usd))
+        #: When set, the per-desk daily limit every request is admitted against, in place of the
+        #: caller's `desk_cap_usd_per_day`. The runway policy sets it: a share of the spendable
+        #: credit, a fuse against a desk stuck in a loop rather than a budget. None keeps the
+        #: caller's cap, which is how the capped policy and the tests run.
+        self.desk_fuse: Decimal | None = None
         self.log = log
         self.sleep = sleep
         self.poll_interval = float(poll_interval)
@@ -704,6 +709,23 @@ class Provider:
                     (self.today(), desk_id),
                 ).fetchall()
         return sum((Decimal(r["spent_usd"]) for r in rows), ZERO)
+
+    def spent_since(self, hours: float = 24.0) -> Decimal:
+        """Settled model cost over the trailing window, from the request ledger itself.
+
+        This is the burn the runway policy divides the credit by. It reads settled costs, not
+        reservations, and it reads requests by when they were created, so a session that ran
+        yesterday afternoon still counts toward "the last day" at noon today.
+        """
+        since = time.strftime(
+            "%Y-%m-%dT%H:%M:%S", time.gmtime(float(self.clock()) - float(hours) * 3600.0)
+        )
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT cost_usd FROM requests WHERE created_at >= ? AND cost_usd IS NOT NULL",
+                (since,),
+            ).fetchall()
+        return sum((Decimal(r["cost_usd"]) for r in rows), ZERO)
 
     def _add_spend(self, day: str, desk_id: str, delta: Decimal) -> None:
         row = self._db.execute(
@@ -949,7 +971,8 @@ class Provider:
                 "SELECT spent_usd FROM budget_days WHERE day = ?", (day,)
             ).fetchall()
             floor_spent = sum((Decimal(r["spent_usd"]) for r in floor_rows), ZERO)
-            if desk_spent + reserved > desk_cap:
+            limit = self.desk_fuse if self.desk_fuse is not None else desk_cap
+            if desk_spent + reserved > limit:
                 raise BudgetExceeded("provider_desk_cap_exceeded")
             if floor_spent + reserved > self.floor_cap:
                 raise BudgetExceeded("provider_floor_cap_exceeded")

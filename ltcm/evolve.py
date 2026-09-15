@@ -81,6 +81,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "min_decisions": 20,
     "min_variants": 2,
     "max_variants": 6,
+    #: How many variants each family is kept at. `seed()` breeds shadow children from the live
+    #: desk until a family has this many, so the forward race that promotion reads is always
+    #: running. 1 means no seeding: a family is only ever the desks the owner wrote.
+    "target_variants": 1,
     "margin": "2.0",  # percentage points below the family median
     "playbook_profile": "pro_flex",
     "playbook_budget_usd_per_day": "1.00",
@@ -222,6 +226,51 @@ class Evolution:
             "days_live": state.days_live,
             "equity": text(state.equity),
         }
+
+    # ------------------------------------------------------------------ seeding
+    def seed(self, now: Any = None, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Bring every family up to `target_variants` by breeding shadow children.
+
+        Selection can only replace a variant that lost a race, so a family that is one desk
+        wide never races at all. Seeding is what starts the race: each family with fewer active
+        variants than the target gets children of its live desk (its best-scoring variant when
+        no desk is live), one generation at a time, each born shadow with a rewritten playbook.
+        Nothing is retired here and nothing inherits money. Idempotent once a family is full.
+        `limit` bounds the children bred in one call, across families, so a caller can keep a
+        pass short and come back for the rest.
+        """
+        at = iso_time(now) if now is not None else self.now()
+        target = int(self.config["target_variants"])
+        ceiling = int(self.config["max_variants"])
+        if target <= 1:
+            return []
+        modes = promoted_desks(self.log)
+        actions: list[dict[str, Any]] = []
+        # Round-robin across families, one child per family per round, so a bounded pass
+        # gives every family its first sibling before any family gets its third.
+        while limit is None or len(actions) < limit:
+            bred = False
+            for family, variants in sorted(self.families().items()):
+                if limit is not None and len(actions) >= limit:
+                    break
+                if min(target, ceiling) - len(variants) <= 0:
+                    continue
+                live = [m for m in variants if capital_mode(m, modes) == "live"]
+                # The live desk is the parent. With none live, the best-scoring variant is, and
+                # on a tie the founder rather than a child, so a young family breeds siblings,
+                # not a chain of grandchildren.
+                rank = lambda m: (self.score(m.id, at), -int(m.generation), m.id)  # noqa: E731
+                parent = live[0] if live else max(variants, key=rank)
+                best = max(variants, key=rank)
+                spawned = self.spawn(parent, best, at)
+                if spawned is None:
+                    continue
+                spawned["reason"] = "seed"
+                actions.append(spawned)
+                bred = True
+            if not bred:
+                break
+        return actions
 
     # ------------------------------------------------------------------ selection
     def select(self, now: Any = None) -> list[dict[str, Any]]:

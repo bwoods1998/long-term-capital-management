@@ -591,6 +591,20 @@ def counted(value: Any) -> int | None:
     return number if number >= 0 else 0
 
 
+def runway_fields(budget: Mapping[str, Any]) -> dict[str, Any]:
+    """The spend-policy fields of a budget block, in the site's shapes: money as strings,
+    `balance_usd` and `runway_days` null when the balance could not be read."""
+    if not budget.get("mode"):
+        return {}
+    out: dict[str, Any] = {"mode": str(budget["mode"])}
+    for key in ("balance_usd", "runway_days"):
+        value = budget.get(key)
+        out[key] = None if value is None else floor_at_zero(value)
+    for key in ("spendable_usd", "burn_usd_per_day", "reserve_usd", "desk_fuse_usd"):
+        out[key] = floor_at_zero(budget.get(key))
+    return out
+
+
 def checkpoint_body(
     *,
     published_at: str,
@@ -666,6 +680,8 @@ def checkpoint_body(
         "budget": {
             "spent_today_usd": floor_at_zero(budget.get("spent_today_usd")),
             "cap_usd": floor_at_zero(budget.get("cap_usd")),
+            # The runway policy's picture, when the floor runs under it. Absent under a fixed cap.
+            **runway_fields(budget),
         },
         # Where the floor runs and what the box has cost today. Absent facts stay null rather
         # than guessing: the site prints what it is given and nothing more.

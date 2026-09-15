@@ -77,3 +77,25 @@ Coinbase (Alpaca when the live account opens). This is the state after that move
 When Alpaca opens: `scripts/setup_venues.py setup` for the live keys, move the manifests back
 from `ltcm/desks/pending-alpaca/`, add `alpaca` to `live_venues` in `ltcm/config.json`, run
 `bash scripts/place_secrets.sh`, then `floor_box.py deploy`.
+
+## Addendum, 19:10 UTC: no cap on infrastructure spend
+
+The owner's instruction: no cap on infra spend, as long as he is told when to top up and the
+floor stops gracefully when he does not; be as bold as the credit allows in pursuit of
+recursive self-improvement. What changed:
+
+- **Spend policy is a runway** (`ltcm/runway.py`). No daily cap: the Sail credit above a $10
+  reserve is the limit. Under three days of runway the floor throttles to the live desks; at
+  the reserve it stops new sessions and waits; credit added at Sail reopens it within a minute.
+  The mode, the balance and the runway are published in every checkpoint and on the tape.
+- **Notifications are by runway.** The gateway mails at seven days of runway with the date the
+  credit runs out, again at two days, and once more when the floor reports itself stopped.
+  A paused box is resumed whenever the balance is above the reserve.
+- **The race is seeded.** Each family is bred up to four variants: the live desk plus three
+  shadow children (mutated persona, effort, session times, and one in three on another
+  model), two per hour until full. The children score against real prices without money and
+  the promotion gates decide who takes the sleeve. Selection retires the laggards.
+- **The live desks think harder and more often.** High reasoning effort, 16k output tokens,
+  40 and 32 turns, five Kalshi sessions a day and six crypto sessions a day.
+- **One fuse.** A desk may not commit more than a quarter of the spendable credit in a day: a
+  guard against a tool loop, not a budget.

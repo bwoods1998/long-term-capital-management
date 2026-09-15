@@ -142,6 +142,54 @@ class ScoreTests(EvolveCase):
         )
 
 
+class SeedTests(EvolveCase):
+    """Seeding is what starts a family's race: children of the live desk, born shadow."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_manifest("earnings-01", capital={"mode": "live", "usd": "1000"})
+        self.allocate({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
+
+    def test_a_family_is_bred_up_to_the_target_from_its_live_desk(self):
+        evolution = self.evolution(target_variants=3)
+        actions = evolution.seed("2026-09-15T19:00:00.000Z")
+        self.assertEqual([a["action"] for a in actions], ["spawned", "spawned"])
+        self.assertEqual({a["reason"] for a in actions}, {"seed"})
+        self.assertEqual({a["parent_id"] for a in actions}, {"earnings-01"})
+        family = evolution.families()["earnings"]
+        self.assertEqual(len(family), 3)
+        children = [m for m in family if m.id != "earnings-01"]
+        self.assertTrue(all(m.capital_mode == "shadow" for m in children))
+        self.assertTrue(all(m.parent_id == "earnings-01" for m in children))
+        self.assertEqual(sorted(m.id for m in children), ["earnings-01-2", "earnings-01-3"])
+        self.assertEqual(len(self.log.read(kind="evolution.spawned")), 2)
+
+    def test_a_full_family_is_left_alone(self):
+        evolution = self.evolution(target_variants=3)
+        evolution.seed("2026-09-15T19:00:00.000Z")
+        self.assertEqual(evolution.seed("2026-09-15T20:00:00.000Z"), [])
+        self.assertEqual(len(evolution.families()["earnings"]), 3)
+
+    def test_the_default_target_of_one_never_breeds(self):
+        self.assertEqual(self.evolution().seed("2026-09-15T19:00:00.000Z"), [])
+
+    def test_a_bounded_pass_gives_every_family_a_sibling_before_any_gets_a_third(self):
+        self.write_manifest("crypto-01", family="crypto", capital={"mode": "live", "usd": "500"})
+        self.allocate({"earnings-01": "1000", "crypto-01": "500"}, "2026-09-01T13:00:00.000Z")
+        evolution = self.evolution(target_variants=4)
+        first = evolution.seed("2026-09-15T19:00:00.000Z", limit=2)
+        self.assertEqual(sorted(a["family"] for a in first), ["crypto", "earnings"])
+        second = evolution.seed("2026-09-15T20:00:00.000Z", limit=2)
+        self.assertEqual(sorted(a["family"] for a in second), ["crypto", "earnings"])
+        self.assertEqual({len(v) for v in evolution.families().values()}, {3})
+
+    def test_the_ceiling_still_holds(self):
+        evolution = self.evolution(target_variants=9, max_variants=2)
+        actions = evolution.seed("2026-09-15T19:00:00.000Z")
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(len(evolution.families()["earnings"]), 2)
+
+
 class SelectionTests(EvolveCase):
     def setUp(self):
         super().setUp()
