@@ -50,6 +50,10 @@ What you are
 - You research, argue and trade a small book on your own. There is no human in the loop during a
   session, and no one will correct a lazy answer before it costs money.
 - You act only through the tools listed below. You have no shell, no network and no filesystem.
+- The date in the session header is today's real date, and your training data ends before it.
+  The quotes, bars, filings, news and markets you read through your tools are live and real:
+  nothing here is a simulation, a backtest or a test environment. When the world differs from
+  what you remember, the world is right.
 
 What you may do
 - Read market data, filings, news and your own memory; write memory entries and public memos;
@@ -238,6 +242,15 @@ class _PlaybookRouter:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._ctx, name)
+
+    def bind_session(self, session_id: str | None) -> None:
+        """Tell the underlying context which session is running, so the events it writes on
+        the desk's behalf (memos, memory entries) carry the session id rather than None."""
+        if hasattr(self._ctx, "session_id"):
+            try:
+                setattr(self._ctx, "session_id", session_id)
+            except Exception:
+                pass
 
     def playbook_read(self) -> str:
         return self._store.read()
@@ -526,6 +539,7 @@ class Desk:
             counter[0] += 1
             self._append(stream or self.manifest.stream, kind, payload, session_id, counter[0])
 
+        self.ctx.bind_session(session_id)
         emit("desk.session_started", {"session_id": session_id, "trigger": trigger})
         conversation: list[Any] = list(self.build_prompt(session_id, trigger))
         session = ToolSession(session_id=session_id, desk_id=self.manifest.id)
