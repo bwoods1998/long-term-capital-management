@@ -25,7 +25,7 @@ import os
 import signal
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -1510,6 +1510,42 @@ class Service:
             return None
         return only
 
+    def next_session_at(self, manifest: DeskManifest, at: str) -> str | None:
+        """When this desk next sits down on its cadence, as a UTC instant, or None if it never
+        does (a desk with no sessions). Slots already run today are skipped, weekends are
+        skipped for a weekdays-only desk, and a slot inside the catch-up window that has not run
+        yet counts as now. The site's idle line ("next 16:30 ET") reads this."""
+        slots = list(manifest.cadence.sessions)
+        if not slots:
+            return None
+        tz = ZoneInfo(manifest.cadence.timezone)
+        local = parse_iso(at).astimezone(tz)
+        catchup = int(self.config["session_catchup_seconds"])
+        for day_offset in range(0, 9):
+            day = local.date() + timedelta(days=day_offset)
+            if manifest.cadence.weekdays_only and day.weekday() >= 5:
+                continue
+            day_key = day.isoformat()
+            for slot in sorted(slots, key=_clock_minutes):
+                minutes = _clock_minutes(slot)
+                when = datetime.combine(day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=minutes)
+                if day_offset == 0:
+                    elapsed = (local - when).total_seconds()
+                    if elapsed > catchup:
+                        continue  # long past: the schedule would not run it
+                    if self.ran_today(manifest, f"cadence:{slot}", day_key):
+                        continue
+                    if elapsed > 0:
+                        return iso_time(parse_iso(at))  # due now, on the next tick
+                return iso_time(when.astimezone(timezone.utc))
+        return None
+
+    def _next_session_or_none(self, manifest: DeskManifest, at: str) -> str | None:
+        try:
+            return self.next_session_at(manifest, at)
+        except Exception:
+            return None
+
     def run_session(self, manifest: DeskManifest, trigger: str) -> Any:
         """Run one desk session to completion. The desk emits its own session events."""
         context = self.context(manifest, None)
@@ -2248,6 +2284,8 @@ class Service:
                     "positions": self.desk_positions(desk_id, at),
                     # leap: watch. The session running right now, if one is.
                     "live_session": self.live_session(desk_id),
+                    # When the desk next sits down; the site's idle line reads it.
+                    "next_session_at": self._next_session_or_none(manifest, at),
                     # leap: lab -- why a bred desk differs from its parent, and how well it forecasts.
                     "mutation": self._mutation_of(desk_id, spawn_records),
                     "calibration": self._calibration_of(desk_id, at),

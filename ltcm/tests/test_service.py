@@ -20,6 +20,10 @@ AAPL = Instrument("equity", "AAPL", "alpaca")
 DESK = "earnings-01"
 
 
+def moment_iso(year, month, day, hour, minute=0):
+    return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:00.000Z"
+
+
 def moment(year, month, day, hour, minute=0):
     """A UTC instant as a POSIX timestamp, for the injected clock."""
     return dt.datetime(year, month, day, hour, minute, tzinfo=UTC).timestamp()
@@ -322,6 +326,17 @@ class CadenceTests(ServiceCase):
         self.started_without_end(moment(2026, 9, 14, 13, 50))
         self.tick(moment(2026, 9, 14, 14, 20))
         self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+
+    def test_the_next_session_is_the_next_unrun_slot_in_the_desks_own_time(self):
+        manifest = self.service.manifests[DESK]
+        # Monday 09:50 New York: the 09:45 slot is five minutes old and has not run: due now.
+        self.assertEqual(self.service.next_session_at(manifest, moment_iso(2026, 9, 14, 13, 50)), moment_iso(2026, 9, 14, 13, 50))
+        self.tick()  # runs 09:45
+        self.assertEqual(self.service.next_session_at(manifest, self.service.now()), "2026-09-14T19:30:00.000Z")  # 15:30 New York
+        # Friday evening for a weekdays-only desk: Monday morning.
+        self.assertEqual(self.service.next_session_at(manifest, moment_iso(2026, 9, 18, 23, 0)), "2026-09-21T13:45:00.000Z")
+        # A slot long past that never ran is not resurrected.
+        self.assertEqual(self.service.next_session_at(manifest, moment_iso(2026, 9, 14, 18, 0)), "2026-09-14T19:30:00.000Z")
 
     def test_the_postmortem_runs_after_the_close(self):
         self.tick(moment(2026, 9, 15, 1, 40))  # 21:40 New York on the 14th
@@ -1540,6 +1555,8 @@ class LeapSandboxAndRunClockTests(ServiceCase):
         self.assertEqual(run["sessions_today"], 1)
         self.assertEqual(str(run["sail_model_spend_today_usd"]), "0.03")
         self.assertIsInstance(run["models_used"], list)
+        desk = self.publisher.checkpoints[-1]["desks"][0]
+        self.assertEqual(desk["next_session_at"], "2026-09-14T19:30:00.000Z")  # 15:30 New York, after the 09:45 ran
 
 
 class LeapLabServiceTests(ServiceCase):

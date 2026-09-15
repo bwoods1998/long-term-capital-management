@@ -730,6 +730,7 @@ def checkpoint_body(
                 "status": desk.get("status"),
                 "gate": desk.get("gate"),
                 "updated_at": not_after(desk.get("updated_at"), published_at),
+                **({"next_session_at": desk.get("next_session_at")} if "next_session_at" in desk else {}),
                 # leap: exits and watch. Optional on the wire: an older floor omits them.
                 **({"positions": [position_row(row) for row in list(desk.get("positions") or [])[:50]]}
                    if desk.get("positions") is not None else {}),
