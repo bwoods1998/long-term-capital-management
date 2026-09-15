@@ -105,6 +105,10 @@ RATE_CARD_ROW = re.compile(
     r" pricing: input \$(?P<input>[\d.]+), cached \$(?P<cached>[\d.]+), "
     r"output \$(?P<output>[\d.]+)"
 )
+#: Each model's rows sit in a `<tbody data-model="<slug>">` group. The slug is the identifier
+#: the API takes, so it is the key to match on; the display name in the row's label is prose
+#: ("DeepSeek V4 Pro" one week, "DeepSeek V4 Pro 0813" the next) and only a fallback.
+RATE_CARD_GROUP = re.compile(r'<tbody[^>]*\bdata-model="(?P<slug>[^"]+)"')
 
 TERMINAL = frozenset({"completed", "incomplete", "failed", "cancelled"})
 PENDING = frozenset({"queued", "in_progress"})
@@ -141,6 +145,28 @@ CREATE TABLE IF NOT EXISTS budget_days (
     PRIMARY KEY (day, desk_id)
 );
 """
+
+
+def _parse_rate_card(page: str) -> tuple[dict[tuple[str, str], tuple[str, str, str]], dict[tuple[str, str], tuple[str, str, str]]]:
+    """Every pricing row on the card, keyed two ways: by folded display name and window, and by
+    the model slug of the `data-model` group the row sits in and window. A row outside any
+    group (an older page layout) is still found by its display name."""
+    by_name: dict[tuple[str, str], tuple[str, str, str]] = {}
+    by_slug: dict[tuple[str, str], tuple[str, str, str]] = {}
+    groups = list(RATE_CARD_GROUP.finditer(page))
+    for match in RATE_CARD_ROW.finditer(page):
+        prices = (match.group("input"), match.group("cached"), match.group("output"))
+        window = _fold(match.group("window"))
+        by_name[(_fold(match.group("model")), window)] = prices
+        slug = None
+        for group in groups:
+            if group.start() < match.start():
+                slug = group.group("slug")
+            else:
+                break
+        if slug:
+            by_slug[(slug, window)] = prices
+    return by_name, by_slug
 
 
 def _fold(value: Any) -> str:
@@ -744,10 +770,7 @@ class Provider:
         if not page:
             summary["error"] = "empty"
             return summary
-        published: dict[tuple[str, str], tuple[str, str, str]] = {}
-        for match in RATE_CARD_ROW.finditer(page):
-            key = (_fold(match.group("model")), _fold(match.group("window")))
-            published[key] = (match.group("input"), match.group("cached"), match.group("output"))
+        published, by_slug = _parse_rate_card(page)
         summary["rows"] = len(published)
         if not published:
             self._alert_rate_card(
@@ -760,11 +783,9 @@ class Provider:
             model, window, *ours = PROFILES[profile]
             display = DISPLAY_NAMES.get(model)
             label = WINDOW_LABELS.get(window)
-            theirs = (
-                published.get((_fold(display), _fold(label)))
-                if display and label
-                else None
-            )
+            theirs = by_slug.get((model, _fold(label))) if label else None
+            if theirs is None and display and label:
+                theirs = published.get((_fold(display), _fold(label)))
             if theirs is None:
                 summary["unchecked"].append(profile)
                 self._alert_rate_card(

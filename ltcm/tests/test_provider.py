@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from ltcm.events import EventLog
 from ltcm.provider import (
     PROFILES,
+    DISPLAY_NAMES,
     RATE_CARD_URL,
     BudgetExceeded,
     FunctionCall,
@@ -693,6 +694,41 @@ class RateCardDriftTests(ProviderCase):
         result = self.checker(self.page()).rate_card_check()
         self.assertEqual(result["drift"], [])
         self.assertEqual(result["rows"], len(self.LIVE))
+
+    def grouped_page(self, names):
+        """The card as it is published now: each model's rows inside a `<tbody data-model>`
+        group, with a display name that is prose and may carry a date suffix."""
+        lines = ["# Pricing", ""]
+        for slug, display in names.items():
+            lines.append(f'      <tbody className="pricing-model-group" data-model="{slug}">')
+            for (model, window), (inp, cached, out) in self.LIVE.items():
+                if model != DISPLAY_NAMES[slug]:
+                    continue
+                lines.append(
+                    f'        <tr className="pricing-row" aria-label="{display} {window} pricing: '
+                    f'input ${inp}, cached ${cached}, output ${out} per 1M tokens.">'
+                )
+            lines.append("      </tbody>")
+        return "\n".join(lines)
+
+    def test_rows_are_matched_by_the_model_slug_when_the_display_name_drifts(self):
+        # Sail renamed the DeepSeek rows "DeepSeek V4 Pro 0813" and "DeepSeek V4 Flash 0731";
+        # the slug in the group did not change, and the slug is what the API takes.
+        names = {slug: display for slug, display in DISPLAY_NAMES.items()}
+        names["deepseek-ai/DeepSeek-V4-Pro-0813"] = "DeepSeek V4 Pro 0813"
+        names["deepseek-ai/DeepSeek-V4-Flash-0731"] = "DeepSeek V4 Flash 0731"
+        result = self.checker({"text": self.grouped_page(names)}).rate_card_check()
+        self.assertEqual(result["unchecked"], [])
+        self.assertEqual(result["drift"], [])
+        self.assertEqual(result["checked"], len(PROFILES))
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_row_in_the_wrong_group_is_not_mistaken_for_ours(self):
+        page = self.grouped_page(dict(DISPLAY_NAMES)).replace(
+            'data-model="openai/gpt-oss-120b"', 'data-model="openai/gpt-oss-120b-v2"'
+        ).replace("gpt-oss-120b Default", "gpt-oss-120b v2 Default")
+        result = self.checker({"text": page}).rate_card_check()
+        self.assertEqual(result["unchecked"], ["oss_asap"])
 
     def test_punctuation_in_a_model_name_is_not_a_price_change(self):
         page = self.page().replace("GLM-5.3 Flash", "GLM 5.3 flash")
