@@ -17,7 +17,7 @@ Box state (ids, the allowlist in effect, uploaded-file digests, checkpoints) liv
 
 ```sh
 python3 scripts/floor_box.py create      # 1. the box, the network policy, the code, the venv
-python3 scripts/floor_box.py secrets     # 2. .env and .data/ltcm/keys -> the box, mode 600
+python3 scripts/floor_box.py secrets     # 2. the three values the box needs -> /workspace/.env, mode 600
 python3 scripts/floor_box.py start       # 3. start the supervised loop
 python3 scripts/floor_box.py status      # 4. box, spend, loop, log tail, the floor's health
 python3 scripts/floor_box.py checkpoint --name before-<change>   # 5. before anything risky
@@ -51,15 +51,17 @@ An idle floor uses a small fraction of one vCPU, so the box costs single-digit d
 python3 scripts/floor_box.py secrets
 ```
 
-Reads the local `.env` and every file in `.data/ltcm/keys/`, refuses any of them that is group- or
-world-readable, and uploads them as bytes to `/workspace/.env` and `/workspace/.data/ltcm/keys/`
-with mode 600. It never parses, prints or logs a value -- the output is names and byte counts.
+In gateway mode (`gateway_url` set in `ltcm/config.json`, which is how the floor runs) the box
+needs exactly three values and gets exactly three: `SAIL_API_KEY` (the desks think on Sail),
+`GATEWAY_TOKEN` (the box asks the gateway to sign venue requests) and `CAPITAL_PUBLISH_TOKEN`
+(the box publishes to the site). They are read from the local `.env`, composed into a three-line
+file and uploaded as bytes to `/workspace/.env`, mode 600. **The venue keys never go to the
+box**: `KALSHI_KEY_ID`, `kalshi.pem`, `COINBASE_KEY_NAME` and `COINBASE_API_SECRET` live only in
+the gateway's Cloudflare secrets, so a fork or a checkpoint of the box can never reach a venue
+without the gateway's caps. Without a `gateway_url` the older direct mode applies and the whole
+`.env` and `.data/ltcm/keys/` are sent, which is the mode this script was first written for.
 
-No other command reads a secret. The code upload refuses `.env`, anything under `.data/`, and any
-private-key file, whatever the working tree happens to contain.
-
-**After this the box can move real money.** A checkpoint taken from here on carries these files,
-and so does any Sailbox forked from that checkpoint.
+No value is decoded, logged or kept; the command prints names and byte counts only.
 
 ### 3. `start` / `stop`
 
@@ -171,9 +173,10 @@ its way to a new dependency. Add a host by editing `FLOOR_HOSTS` in `ltcm/sailbo
 can be changed on a live box with `PUT /v1/sailboxes/{id}/egress-policy`, and `status` reports the
 moment the box stops matching the list recorded in `.data/ltcm/box.json`.
 
-The floor's own credentials are **files on the box**, not Sail secrets: every venue request is
-signed by the adapter that builds it, so there is no HTTP policy and Sail is never handed a key to
-inject.
+The box holds three values as a file, `/workspace/.env`, mode 600: the Sail key, the gateway
+token and the publish token. Every venue request is signed by the gateway from its own Cloudflare
+secrets; the box never holds a venue key, so there is no HTTP policy and Sail is never handed a
+key to inject.
 
 ## The lab image and the desks' sandboxes
 

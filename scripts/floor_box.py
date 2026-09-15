@@ -73,6 +73,27 @@ SKIP_NAMES = {".env", ".DS_Store"}
 
 #: The only files `secrets` sends, and the only place this script reads a credential.
 SECRET_ENV = ".env"
+#: What the box needs in gateway mode, and all it gets. Venue keys are the gateway's.
+BOX_ENV_NAMES = ("SAIL_API_KEY", "GATEWAY_TOKEN", "CAPITAL_PUBLISH_TOKEN")
+
+
+def floor_config() -> dict[str, Any]:
+    """The packaged `ltcm/config.json`, or {} when it is not there (tests, a bare checkout)."""
+    try:
+        return json.loads((REPO_ROOT / "ltcm" / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def compose_box_env(raw: bytes) -> bytes:
+    """The lines of a local `.env` the box may hold, in a fixed order, nothing else."""
+    values: dict[str, bytes] = {}
+    for line in raw.splitlines():
+        if b"=" not in line or line.lstrip().startswith(b"#"):
+            continue
+        name, value = line.split(b"=", 1)
+        values[name.strip().decode("ascii", "replace")] = value.strip()
+    return b"".join(f"{name}=".encode() + values[name] + b"\n" for name in BOX_ENV_NAMES if values.get(name))
 SECRET_KEYS = Path(".data") / "ltcm" / "keys"
 
 RUN_SH = """#!/bin/sh
@@ -502,6 +523,29 @@ def cmd_secrets(args: argparse.Namespace) -> int:
 
     sources: list[tuple[Path, str]] = []
     env_path = REPO_ROOT / SECRET_ENV
+    gateway_mode = bool(floor_config().get("gateway_url"))
+    if gateway_mode:
+        # The box needs three values and gets three: the venue keys stay in the gateway, so a
+        # fork or a checkpoint of the box can never reach a venue on its own.
+        if not env_path.is_file():
+            raise SystemExit(f"nothing to send: no {SECRET_ENV}")
+        if stat.S_IMODE(env_path.stat().st_mode) & 0o077:
+            raise SystemExit(f"{SECRET_ENV} is group- or world-readable. `chmod 600` it first.")
+        wanted = compose_box_env(env_path.read_bytes())
+        missing = [name for name in BOX_ENV_NAMES if f"{name}=".encode() not in wanted]
+        if missing:
+            raise SystemExit(f"{SECRET_ENV} lacks {', '.join(missing)}; the box needs all of them")
+        api.exec(box, ["sh", "-c", f"chmod 700 {REMOTE_ROOT}/.data {REMOTE_ROOT}/.data/ltcm 2>/dev/null; rm -rf {REMOTE_ROOT}/.data/ltcm/keys"], timeout=60, on_output=None)
+        api.upload(box, f"{REMOTE_ROOT}/.env", wanted, mode=0o600)
+        say(f"  {SECRET_ENV} -> {REMOTE_ROOT}/.env  ({len(wanted):,} bytes, {len(BOX_ENV_NAMES)} values, mode 600)")
+        say("  venue keys stay in the gateway; none were sent and any on the box were removed")
+        del wanted
+        state["secrets_pushed_at"] = _now()
+        state["secret_names"] = [SECRET_ENV]
+        write_state(state)
+        say("")
+        say("credentials are on the box. `python3 scripts/floor_box.py start` when ready.")
+        return 0
     if env_path.is_file():
         sources.append((env_path, f"{REMOTE_ROOT}/.env"))
     keys_dir = REPO_ROOT / SECRET_KEYS

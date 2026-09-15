@@ -159,6 +159,30 @@ class SecretsCommandTests(unittest.TestCase):
         self.assertEqual(state["secret_names"], [".env", "kalshi.pem"])
         self.assertNotIn("xyz", floor_box.STATE_PATH.read_text(encoding="utf-8"))
 
+    def test_in_gateway_mode_only_the_three_values_go_and_the_keys_stay_home(self):
+        (floor_box.REPO_ROOT / "ltcm").mkdir(exist_ok=True)
+        (floor_box.REPO_ROOT / "ltcm" / "config.json").write_text(
+            '{"gateway_url": "https://gw.example.workers.dev"}', encoding="utf-8"
+        )
+        self.env.write_bytes(
+            b"KALSHI_KEY_ID=venue-key\nSAIL_API_KEY=sail-1\n# note\nGATEWAY_TOKEN=gw-1\n"
+            b"COINBASE_API_SECRET=venue-secret\nCAPITAL_PUBLISH_TOKEN=pub-1\n"
+        )
+        code, printed = self.run_it()
+        self.assertEqual(code, 0)
+        self.assertEqual([t for t, _c, _m in self.uploads], ["/workspace/.env"])
+        sent = self.uploads[0][1]
+        self.assertEqual(sent, b"SAIL_API_KEY=sail-1\nGATEWAY_TOKEN=gw-1\nCAPITAL_PUBLISH_TOKEN=pub-1\n")
+        self.assertNotIn(b"venue", sent)
+        self.assertNotIn("venue-secret", printed)
+        self.assertIn("venue keys stay in the gateway", printed)
+        self.assertEqual(floor_box.read_state()["secret_names"], [".env"])
+        # A value the box needs but the owner's .env lacks is a refusal, not a half-upload.
+        self.env.write_bytes(b"SAIL_API_KEY=sail-1\n")
+        with self.assertRaises(SystemExit) as caught:
+            self.run_it()
+        self.assertIn("GATEWAY_TOKEN", str(caught.exception))
+
     def test_nothing_to_send_says_so_rather_than_creating_an_empty_env(self):
         self.env.unlink()
         self.key.unlink()
