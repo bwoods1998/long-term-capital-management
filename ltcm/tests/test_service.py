@@ -1612,6 +1612,25 @@ class LabSlotTests(ServiceCase):
         self.assertEqual(asked(), ["crypto", "earnings"], "done for the night")
 
 
+class ForecastResolverTests(ServiceCase):
+    """Kalshi reports a settled market as `finalized`; the resolver must read it that way."""
+
+    def resolver_with(self, row):
+        self.service.source = lambda name: SimpleNamespace(market=lambda ticker: row) if name == "event" else None
+        return self.service._forecast_resolver()
+
+    def test_a_finalized_market_resolves_and_a_determined_one_waits(self):
+        finalized = {"status": "finalized", "result": "no", "close_time": "2026-09-15T22:00:00Z", "expiration_time": "2026-09-15T22:05:00Z", "settlement_time": None}
+        self.clock.set(moment(2026, 9, 15, 22, 10))
+        answer = self.resolver_with(finalized)("kalshi", "KXBTCD-26SEP1518-T86799.99")
+        self.assertEqual(answer["result"], "no")
+        self.assertEqual(answer["settled_at"], "2026-09-15T22:00:00Z")
+        self.assertEqual(self.resolver_with({**finalized, "status": "settled"})("kalshi", "X")["result"], "no")
+        self.assertIsNone(self.resolver_with({**finalized, "status": "determined"})("kalshi", "X"))
+        self.assertIsNone(self.resolver_with({**finalized, "status": "active", "result": ""})("kalshi", "X"))
+        self.assertIsNone(self.resolver_with(finalized)("coinbase", "X"))
+
+
 class MemoryScopeTests(ServiceCase):
     def test_a_desk_reads_only_its_own_memory(self):
         self.write_manifest("earnings-02")

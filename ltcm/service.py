@@ -1851,9 +1851,9 @@ class Service:
     def _forecast_resolver(self) -> Any:
         """Ask the event venue whether a market has settled. Kalshi only, for now.
 
-        UNVERIFIED: which of Kalshi's timestamps carries the settlement moment. The market row
-        exposes `expiration_time` and `close_time`; the earlier of the two that is in the past
-        is used, and the tick's own time when neither is.
+        Kalshi's market row carries no settlement timestamp (`settlement_time` is null on a
+        finalized market, verified 2026-09-15); of `expiration_time` and `close_time` the earlier
+        that is in the past is used, and the tick's own time when neither is.
         """
         source = self.source("event")
         reader = getattr(source, "market", None)
@@ -1864,7 +1864,10 @@ class Service:
             if venue != "kalshi":
                 return None
             row = reader(market)
-            if not isinstance(row, dict) or row.get("status") != "settled":
+            # Verified against the venue on 2026-09-15: a settled market reads `status:
+            # "finalized"` with `result: "yes"|"no"`; `determined` is a result that can still be
+            # disputed, so it does not count, and the older `settled` spelling is kept.
+            if not isinstance(row, dict) or str(row.get("status") or "") not in ("finalized", "settled"):
                 return None
             result = str(row.get("result") or "").strip().lower()
             if result not in ("yes", "no"):
