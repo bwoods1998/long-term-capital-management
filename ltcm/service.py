@@ -1123,12 +1123,52 @@ class Service:
                 minutes_slot = _clock_minutes(slot) if trigger != "postmortem" else postmortem_at
                 if minutes_now < minutes_slot:
                     continue
+                if self.interrupted_session(manifest, trigger, day, at) is not None:
+                    due.append((manifest, trigger))
+                    continue
                 if (minutes_now - minutes_slot) * 60 > catchup:
                     continue
                 if self.ran_today(manifest, trigger, day):
                     continue
                 due.append((manifest, trigger))
         return due
+
+    def interrupted_session(
+        self, manifest: DeskManifest, trigger: str, day: str, at: str
+    ) -> Any | None:
+        """The one session this slot started today that never ended, if it is worth retrying.
+
+        Sessions run to completion inside the tick, so a `desk.session_started` with no
+        `desk.session_ended` was cut short from outside: a restart into new code, a Sailbox
+        resume, the watchdog, an operator stop. The floor is meant never to stop working, so
+        such a slot is sat down again -- once, and only within the catch-up window measured
+        from the interrupted start, so a box that was asleep all afternoon does not wake up
+        and replay the morning. A second start for the slot, ended or not, closes the matter:
+        a session that dies twice is a bug to read about, not a loop to spin.
+        """
+        if any(
+            thread.is_alive() and thread.name == f"session-{manifest.id}-{trigger}"
+            for thread in self._sessions
+        ):
+            return None  # still running here; not interrupted, just slow
+        tz = ZoneInfo(manifest.cadence.timezone)
+        started = [
+            event
+            for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=5000)
+            if event.payload.get("trigger") == trigger
+            and parse_iso(event.at).astimezone(tz).date().isoformat() == day
+        ]
+        if len(started) != 1:
+            return None
+        only = started[0]
+        session_id = only.payload.get("session_id")
+        for event in self.log.read(stream=manifest.stream, kind="desk.session_ended", limit=5000):
+            if event.payload.get("session_id") == session_id:
+                return None
+        catchup = int(self.config["session_catchup_seconds"])
+        if (parse_iso(at) - parse_iso(only.at)).total_seconds() > catchup:
+            return None
+        return only
 
     def run_session(self, manifest: DeskManifest, trigger: str) -> Any:
         """Run one desk session to completion. The desk emits its own session events."""

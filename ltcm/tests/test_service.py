@@ -258,6 +258,59 @@ class CadenceTests(ServiceCase):
         self.tick(moment(2026, 9, 14, 18, 0))
         self.assertEqual(self.sessions_started(), [])
 
+    def started_without_end(self, at, trigger="cadence:09:45", desk=DESK, suffix=""):
+        """What a restart leaves behind: a session that opened and never wrote its end."""
+        from datetime import datetime, timezone
+
+        if not isinstance(at, str):
+            at = datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        session_id = f"{desk}:{at[:16]}:{trigger}{suffix}"
+        self.service.log.append(
+            f"desk:{desk}",
+            "desk.session_started",
+            {"session_id": session_id, "trigger": trigger},
+            id=f"ss:{session_id}",
+            at=at,
+        )
+        return session_id
+
+    def test_a_session_cut_short_by_a_restart_is_sat_down_again_once(self):
+        self.started_without_end(moment(2026, 9, 14, 13, 50))
+        self.tick(moment(2026, 9, 14, 14, 20))  # the box is back; the start is 30 minutes old
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "cadence:09:45"])
+        self.tick(moment(2026, 9, 14, 14, 25))  # the retry ended normally: that slot is done
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "cadence:09:45"])
+
+    def test_the_retry_is_measured_from_the_interrupted_start_not_the_slot(self):
+        # The slot was sat down 55 minutes late (still inside its window) and then killed.
+        # At 11:00 New York the slot itself is 75 minutes stale, but the start is 20 minutes old.
+        self.started_without_end(moment(2026, 9, 14, 14, 40))
+        self.tick(moment(2026, 9, 14, 15, 0))
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "cadence:09:45"])
+
+    def test_an_interruption_older_than_the_catch_up_window_is_left_alone(self):
+        self.started_without_end(moment(2026, 9, 14, 13, 50))
+        self.tick(moment(2026, 9, 14, 15, 0))  # 70 minutes after the start: the afternoon is not replayed
+        self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+
+    def test_a_session_that_died_twice_is_a_bug_not_a_loop(self):
+        self.started_without_end(moment(2026, 9, 14, 13, 50))
+        self.started_without_end(moment(2026, 9, 14, 13, 55), suffix=":2")
+        self.tick(moment(2026, 9, 14, 14, 0))
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "cadence:09:45"])
+
+    def test_a_session_still_running_here_is_not_mistaken_for_an_interrupted_one(self):
+        import threading
+
+        release = threading.Event()
+        worker = threading.Thread(target=release.wait, name=f"session-{DESK}-cadence:09:45", daemon=True)
+        worker.start()
+        self.addCleanup(release.set)
+        self.service._sessions.append(worker)
+        self.started_without_end(moment(2026, 9, 14, 13, 50))
+        self.tick(moment(2026, 9, 14, 14, 20))
+        self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+
     def test_the_postmortem_runs_after_the_close(self):
         self.tick(moment(2026, 9, 15, 1, 40))  # 21:40 New York on the 14th
         self.assertEqual(self.sessions_started(), ["postmortem"])
