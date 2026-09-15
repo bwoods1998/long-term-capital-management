@@ -415,7 +415,7 @@ class PaperBroker:
             rows = self._db.execute("SELECT * FROM fills ORDER BY at ASC, id ASC").fetchall()
         else:
             rows = self._db.execute(
-                "SELECT * FROM fills WHERE at > ? ORDER BY at ASC, id ASC", (since,)
+                "SELECT * FROM fills WHERE at >= ? ORDER BY at ASC, id ASC", (since,)
             ).fetchall()
         return [
             Fill(

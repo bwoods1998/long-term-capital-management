@@ -176,6 +176,34 @@ def cmd_kill(args: argparse.Namespace) -> int:
         service.close()
 
 
+def cmd_promote(args: argparse.Namespace) -> int:
+    """Owner decision: move one desk between paper and live capital. Public, like every event."""
+    service = _service(args)
+    try:
+        manifest = service.manifests.get(args.desk_id)
+        if manifest is None:
+            print(_dumps({"error": f"unknown desk {args.desk_id}"}))
+            return 2
+        if args.to == "live" and not [v for v in manifest.venues if v != "paper"]:
+            print(_dumps({"error": "desk has no live venue in its manifest"}))
+            return 2
+        at = service.now()
+        payload = {
+            "desk_id": manifest.id,
+            "from": "paper" if args.to == "live" else "live",
+            "to": args.to,
+            "score": {},
+            "reason": f"owner decision: {args.reason}",
+        }
+        event = service.log.append(
+            "evolution", "evolution.promoted", payload, id=f"promoted:{manifest.id}:{at[:16]}", at=at
+        )
+        print(_dumps({"desk_id": manifest.id, "to": args.to, "event": event.id}))
+        return 0
+    finally:
+        service.close()
+
+
 def cmd_unkill(args: argparse.Namespace) -> int:
     service = _service(args)
     try:
@@ -251,6 +279,10 @@ def build_parser() -> argparse.ArgumentParser:
     kill = sub.add_parser("kill", help="engage the kill switch")
     kill.add_argument("--reason", default="manual")
     sub.add_parser("unkill", help="release the kill switch")
+    promote = sub.add_parser("promote", help="owner decision: move a desk to live or back to paper")
+    promote.add_argument("desk_id")
+    promote.add_argument("--to", choices=("live", "paper"), default="live")
+    promote.add_argument("--reason", default="manual")
 
     publish = sub.add_parser("publish", help="push the tape and the checkpoint")
     publish.add_argument("--dry-run", action="store_true", dest="dry_run")
@@ -265,6 +297,7 @@ COMMANDS = {
     "desks": cmd_desks,
     "session": cmd_session,
     "kill": cmd_kill,
+    "promote": cmd_promote,
     "unkill": cmd_unkill,
     "publish": cmd_publish,
 }

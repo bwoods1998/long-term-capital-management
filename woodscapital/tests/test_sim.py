@@ -480,7 +480,7 @@ class MarkTests(SimTestCase):
 
 
 class FillHistoryTests(SimTestCase):
-    def test_fills_since_filters_strictly_after_the_stamp(self):
+    def test_fills_since_is_inclusive_of_the_stamp(self):
         self.book()
         self.broker.submit(intent(quantity="1"))
         first = self.broker.fills()[0]
@@ -490,10 +490,12 @@ class FillHistoryTests(SimTestCase):
         self.broker.submit(intent(quantity="3", nonce="3"))
 
         self.assertEqual(len(self.broker.fills()), 3)
+        # The cursor is inclusive: two fills in one second must both be returned, and the
+        # gateway dedupes by fill id.
         later = self.broker.fills(since=first.at)
-        self.assertEqual(len(later), 2)
-        self.assertTrue(all(fill.at > first.at for fill in later))
-        self.assertEqual(self.broker.fills(since=later[-1].at), [])
+        self.assertEqual(len(later), 3)
+        self.assertTrue(all(fill.at >= first.at for fill in later))
+        self.assertEqual(len(self.broker.fills(since=later[-1].at)), 1)
 
     def test_a_fill_round_trips_through_its_dict(self):
         self.book()

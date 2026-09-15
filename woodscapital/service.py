@@ -319,10 +319,28 @@ class DeskContext:
         if source is None:
             raise RuntimeError("no event market source is configured")
         index = self.service.event_index(source)
+        # A query that names a series or market ticker (KXFEDDECISION-26SEP) is looked up
+        # directly, so a market the sweep missed is still reachable by name.
+        direct: list[dict[str, Any]] = []
+        for token in re.findall(r"\b[A-Z][A-Z0-9]{2,}(?:-[A-Z0-9.]+)*\b", query or ""):
+            try:
+                page = source.markets(series_ticker=token.split("-")[0], status="open", limit=200)
+                direct.extend(dict(r) for r in page.get("markets", []) if isinstance(r, Mapping))
+            except Exception:
+                continue
+        if direct:
+            wanted = query.lower()
+            direct = [r for r in direct if not r.get("ticker") or str(r.get("ticker")).lower().startswith(wanted.split()[0].lower().split("-")[0])]
+            for r in direct:
+                r["series_ticker"] = str(r.get("ticker") or "").split("-")[0]
+            seen = {r.get("ticker") for r in direct}
+            index = direct + [r for r in index if r.get("ticker") not in seen]
         words = [w for w in re.split(r"[^a-z0-9]+", (query or "").lower()) if len(w) > 1]
         scored: list[tuple[int, Decimal, dict[str, Any]]] = []
         for row in index:
-            haystack = row["_haystack"]
+            haystack = row.get("_haystack") or " ".join(
+                str(x or "") for x in (row.get("title"), row.get("yes_sub_title"), row.get("ticker"), row.get("event_ticker"))
+            ).lower()
             hits = sum(1 for w in words if w in haystack)
             if words and hits == 0:
                 continue
@@ -683,14 +701,18 @@ class Service:
             return cached[1]
         rows: list[dict[str, Any]] = []
         cursor = None
-        for _ in range(12):
-            page = source.markets(
-                status="open",
-                limit=1000,
-                cursor=cursor,
-                min_close_ts=int(now),
-                max_close_ts=int(now) + 60 * 86400,
-            )
+        for _ in range(150):
+            try:
+                page = source.markets(
+                    status="open",
+                    limit=400,  # some pages carry long titles; 400 rows stays under the 4 MB cap
+                    cursor=cursor,
+                    min_close_ts=int(now),
+                    max_close_ts=int(now) + 60 * 86400,
+                )
+            except Exception as exc:  # a bad page ends the sweep; a partial index still serves
+                self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}")
+                break
             for row in page.get("markets", []):
                 if not isinstance(row, Mapping):
                     continue

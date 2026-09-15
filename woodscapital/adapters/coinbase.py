@@ -452,7 +452,7 @@ class CoinbaseBroker:
             fees=dec(row.get("total_fees"), "0") or money(0),
             submitted_at=_stamp(row.get("created_time")),
             updated_at=_stamp(row.get("last_update_time") or row.get("created_time")),
-            reason=str(row.get("reject_reason") or row.get("cancel_message") or "") or None,
+            reason=_reason_of(row),
         )
         order._raw = {"status": row.get("status")}
         return order
@@ -477,3 +477,12 @@ __all__ = [
     "PREFIX",
     "JWT_LIFETIME",
 ]
+
+
+def _reason_of(row: "dict[str, Any]") -> "str | None":
+    """A human reason only for orders that were actually refused or cancelled."""
+    status = str(row.get("status") or "").upper()
+    if status in ("CANCELLED", "CANCEL_QUEUED", "FAILED", "EXPIRED", "REJECTED"):
+        text = str(row.get("reject_reason") or row.get("cancel_message") or "").strip()
+        return text if text and text != "REJECT_REASON_UNSPECIFIED" else (status.lower() or None)
+    return None
