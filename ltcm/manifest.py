@@ -48,6 +48,7 @@ TOOLS = (
     "record_forecast",
     "memo_read",
     "run_code",  # leap: sandbox
+    "weather_forecast",  # leap: weather
 )
 CADENCE_TRIGGERS = ("earnings_release", "filing", "market_open", "market_close", "event_resolution")
 TIMEZONE = re.compile(r"^[A-Za-z_]+/[A-Za-z_]+$|^UTC$")

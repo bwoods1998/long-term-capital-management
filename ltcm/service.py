@@ -388,6 +388,13 @@ class DeskContext:
             raise RuntimeError("no option chain source is configured")
         return list(source.chain(symbol, expiry))
 
+    def weather_forecast(self, city: str) -> dict[str, Any]:  # leap: weather
+        """The NWS forecast, hourly path and latest reading for a Kalshi weather city."""
+        source = self.service.source("weather")
+        if source is None:
+            raise RuntimeError("no weather source is configured")
+        return source.forecast(city)
+
     def event_markets(self, query: str) -> list[dict[str, Any]]:
         """Open event contracts matching a free-text query, priced in dollars.
 
@@ -845,6 +852,10 @@ class Service:
                 built = router("event") if router is not None else None
             elif name == "chain":
                 built = self.market_data if hasattr(self.market_data, "chain") else None
+            elif name == "weather":  # leap: weather
+                from .data.weather import Weather
+
+                built = Weather(self.transport, cache_dir=self.capital_dir / "cache", clock=self.clock)
         except Exception:
             built = None
         self._sources[name] = built

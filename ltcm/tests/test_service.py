@@ -213,7 +213,7 @@ class ServiceCase(unittest.TestCase):
             # The ratio allocation rule, so the capital assertions test arithmetic, not a draw;
             # the bandit has its own case in test_committee.
             "committee": {"bandit_enabled": False},
-            "sources": {"news": False, "edgar": False, "event": False, "chain": False},
+            "sources": {"news": False, "edgar": False, "event": False, "chain": False, "weather": False},
         }
         base.update(config)
         return Service(
@@ -910,6 +910,26 @@ class ContextTests(ServiceCase):
         ctx = self.context()
         with self.assertRaises(RuntimeError):
             ctx.news("AAPL earnings", 5)
+
+
+class WeatherToolTests(ServiceCase):
+    """leap: weather -- the desk context reads the NWS source, or says there is none."""
+
+    def context(self):
+        return self.service.context(self.service.manifests[DESK], session_id="s-w")
+
+    def test_the_forecast_comes_from_the_weather_source(self):
+        class Source:
+            def forecast(self, city):
+                return {"city": city, "days": [], "hourly": [], "observation": None}
+
+        self.service._sources["weather"] = Source()
+        ctx = self.context()
+        self.assertEqual(ctx.weather_forecast("Chicago")["city"], "Chicago")
+
+    def test_without_a_weather_source_the_tool_says_so(self):
+        with self.assertRaises(RuntimeError):
+            self.context().weather_forecast("Chicago")
 
 
 class EnvTests(unittest.TestCase):

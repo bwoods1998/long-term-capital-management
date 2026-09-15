@@ -40,6 +40,7 @@ SANDBOX_HOSTS = (
     "www.sec.gov",
     "efts.sec.gov",
     "data.sec.gov",
+    "api.weather.gov",            # leap: weather -- NWS forecasts and readings, public
 )
 #: Only the lab image build needs package sources; forks keep the list, which is harmless.
 BUILD_HOSTS = SANDBOX_HOSTS + (
