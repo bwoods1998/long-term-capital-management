@@ -521,6 +521,17 @@ class SailboxClient:
                 raise
             return self.transport("GET", f"/sailboxes/{box_id(sailbox)}/http-policy") or {}
 
+    def set_egress(self, sailbox: str, allowlist: Sequence[str]) -> dict[str, Any]:
+        """Replace the box's egress allowlist with an inline document.
+
+        `PUT /sailboxes/{id}/egress-policy` takes either a saved `policy_id` or an inline
+        `document` (https://docs.sailresearch.com/api-reference/egress-policies/set-a-sailboxs-egress-policy.md);
+        the floor sends a document with an allowlist and nothing else. Returns the live readback.
+        """
+        document = {"allowlist": normalize_hosts(list(allowlist))}
+        self.transport("PUT", f"/sailboxes/{box_id(sailbox)}/egress-policy", {"document": document})
+        return self.egress(sailbox)
+
     def verify_egress(self, sailbox: str, expected: Mapping[str, Any]) -> dict[str, Any]:
         """Read the policy back from the live API and compare it with what was asked for."""
         row = self.get(sailbox)

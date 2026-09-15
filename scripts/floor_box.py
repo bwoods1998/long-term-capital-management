@@ -56,6 +56,7 @@ from ltcm.sailbox import (  # noqa: E402  (path first, so a checkout runs withou
     SailboxError,
     floor_policy,
     hourly_cost,
+    policy_allowlist,
 )
 
 STATE_PATH = REPO_ROOT / ".data" / "ltcm" / "box.json"
@@ -855,8 +856,28 @@ def cmd_terminate(args: argparse.Namespace) -> int:
 
 
 def cmd_hosts(args: argparse.Namespace) -> int:
-    """What the floor may reach, and what it is for. No network call."""
+    """What the floor may reach. With --add, widen the live allowlist and record it."""
     state = read_state()
+    if getattr(args, "add", None):
+        client = SailboxClient()
+        box = require_box(state)
+        live = client.egress(box)
+        hosts = policy_allowlist(live) or list(
+            expected_policy(state)["allowlist"]
+        )
+        wanted = sorted(set(hosts) | {h.strip().lower() for h in args.add if h.strip()})
+        readback = client.set_egress(box, wanted)
+        got = policy_allowlist(readback)
+        missing = [h for h in wanted if h not in got]
+        if missing:
+            raise SystemExit(f"the live policy does not carry: {', '.join(missing)}")
+        state["egress_allowlist"] = got
+        for host in args.add:
+            if "workers.dev" in host:
+                state["gateway_host"] = host.strip().lower()
+        write_state(state)
+        say(f"allowlist now {len(got)} hosts; added {', '.join(args.add)}")
+        return 0
     policy = expected_policy(state)
     for host in policy["allowlist"]:
         say(f"  {host}")
@@ -970,7 +991,8 @@ def build_parser() -> argparse.ArgumentParser:
     terminate.add_argument("--box")
     terminate.add_argument("--yes", action="store_true")
 
-    sub.add_parser("hosts", help="print the egress allowlist this box runs under")
+    hosts = sub.add_parser("hosts", help="print the egress allowlist this box runs under")
+    hosts.add_argument("--add", nargs="+", metavar="HOST", help="add hosts to the live allowlist")
     return parser
 
 

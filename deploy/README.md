@@ -144,8 +144,14 @@ Sail resolves the names itself, so `/etc/hosts` on the box cannot redirect anyth
 connection to an unlisted host is accepted and then closed rather than refused.
 
 ```sh
-python3 scripts/floor_box.py hosts
+python3 scripts/floor_box.py hosts                      # what the box may reach
+python3 scripts/floor_box.py hosts --add gw.example.workers.dev   # widen the live list
 ```
+
+Sail's allowlist is applied at DNS resolution and a wildcard such as `*.workers.dev` is
+accepted but never resolves, so the gateway is listed by its exact name. `hosts --add` sends
+the widened list as an inline policy document, reads it back, and records what the API kept
+in `.data/ltcm/box.json`, which is what `status` checks against and what a fork inherits.
 
 | Host | Why |
 |---|---|

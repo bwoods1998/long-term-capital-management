@@ -314,6 +314,23 @@ class CreateTests(unittest.TestCase):
             transport.last("POST", "/apps/find")["body"], {"name": "ltcm", "mint_if_missing": True}
         )
 
+    def test_set_egress_sends_an_inline_document_and_reads_the_policy_back(self):
+        # The wildcard `*.workers.dev` is accepted by the API but is not what the box's resolver
+        # honours, so the exact gateway host has to be on the list. The body is the documented
+        # shape: a `document` wrapper, never a bare `allowlist`, which the API refuses as unknown.
+        wanted = list(FLOOR_HOSTS) + ["ltcm-gateway.example.workers.dev"]
+        api, transport = self.client(
+            {
+                ("PUT", f"/sailboxes/{BOX}/egress-policy"): {},
+                ("GET", f"/sailboxes/{BOX}/egress-policy"): {"document": {"allowlist": wanted}},
+            }
+        )
+        readback = api.set_egress(BOX, ["LTCM-Gateway.example.workers.dev", *FLOOR_HOSTS])
+        sent = transport.last("PUT", f"/sailboxes/{BOX}/egress-policy")["body"]
+        self.assertEqual(set(sent), {"document"})
+        self.assertEqual(sent["document"], {"allowlist": normalize_hosts(wanted)})
+        self.assertEqual(policy_allowlist(readback), normalize_hosts(wanted))
+
     def test_verify_egress_reads_the_policy_endpoint_when_the_row_is_silent(self):
         policy = floor_policy()
         api, transport = self.client(

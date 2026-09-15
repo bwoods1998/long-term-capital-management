@@ -14,6 +14,7 @@ import io
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import ltcm
@@ -300,6 +301,59 @@ class StateTests(unittest.TestCase):
         policy = floor_box.expected_policy({})
         for host in FLOOR_HOSTS:
             self.assertIn(host, policy["allowlist"])
+
+
+class HostsAddTests(unittest.TestCase):
+    """`hosts --add` widens the live allowlist and records what the API confirmed."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.original = floor_box.STATE_PATH
+        floor_box.STATE_PATH = Path(self.temp.name) / ".data" / "ltcm" / "box.json"
+        self.addCleanup(lambda: setattr(floor_box, "STATE_PATH", self.original))
+        floor_box.write_state({"box_id": "sb_1", "egress_allowlist": list(FLOOR_HOSTS)})
+
+    def test_the_exact_gateway_host_joins_the_list_and_is_written_down(self):
+        live = {"allowlist": list(FLOOR_HOSTS) + ["*.workers.dev"]}
+        seen: dict[str, list[str]] = {}
+
+        class Client:
+            def egress(self, box):
+                return {"document": dict(live)}
+
+            def set_egress(self, box, allowlist):
+                seen["sent"] = list(allowlist)
+                live["allowlist"] = list(allowlist)
+                return {"document": dict(live)}
+
+        with mock.patch.object(floor_box, "SailboxClient", Client):
+            args = floor_box.build_parser().parse_args(
+                ["hosts", "--add", "ltcm-gateway.example.workers.dev"]
+            )
+            self.assertEqual(floor_box.cmd_hosts(args), 0)
+        self.assertIn("ltcm-gateway.example.workers.dev", seen["sent"])
+        self.assertIn("*.workers.dev", seen["sent"])  # nothing that was there is dropped
+        state = floor_box.read_state()
+        self.assertIn("ltcm-gateway.example.workers.dev", state["egress_allowlist"])
+        self.assertEqual(state["gateway_host"], "ltcm-gateway.example.workers.dev")
+        # And `status` now checks against the widened list, not the packaged default.
+        self.assertIn("ltcm-gateway.example.workers.dev", floor_box.expected_policy(state)["allowlist"])
+
+    def test_a_host_the_api_did_not_keep_is_an_error_not_a_silent_success(self):
+        class Client:
+            def egress(self, box):
+                return {"document": {"allowlist": list(FLOOR_HOSTS)}}
+
+            def set_egress(self, box, allowlist):
+                return {"document": {"allowlist": list(FLOOR_HOSTS)}}
+
+        with mock.patch.object(floor_box, "SailboxClient", Client):
+            args = floor_box.build_parser().parse_args(["hosts", "--add", "gw.example.workers.dev"])
+            with self.assertRaises(SystemExit) as caught:
+                floor_box.cmd_hosts(args)
+        self.assertIn("gw.example.workers.dev", str(caught.exception))
+        self.assertNotIn("gw.example.workers.dev", floor_box.read_state().get("egress_allowlist", []))
 
 
 class ParserTests(unittest.TestCase):
