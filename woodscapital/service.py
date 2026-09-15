@@ -690,46 +690,71 @@ class Service:
         return None
 
     def event_index(self, source: Any) -> list[dict[str, Any]]:
-        """Open Kalshi markets closing within 60 days, priced in dollars; cached ten minutes.
+        """Open Kalshi markets closing within 60 days, priced in dollars.
 
-        `/markets` filters by close time and pages 1000 rows at a time, so the whole tradable
-        near-term universe (a few thousand markets) is one cheap sweep.
+        The sweep takes a minute or more, so it runs on a background thread and refreshes every
+        ten minutes; callers get the latest completed index (empty before the first sweep
+        finishes). `/markets` filters by close time and pages 400 rows at a time.
         """
-        now = time.time()
         cached = getattr(self, "_event_index", None)
-        if cached is not None and now - cached[0] < 600:
-            return cached[1]
+        lock = getattr(self, "_event_index_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._event_index_lock = lock
+        now = time.time()
+        stale = cached is None or now - cached[0] >= 600
+        if stale and not getattr(self, "_event_index_building", False):
+            with lock:
+                if not getattr(self, "_event_index_building", False):
+                    self._event_index_building = True
+                    worker = threading.Thread(
+                        target=self._build_event_index, args=(source,), name="event-index", daemon=True
+                    )
+                    worker.start()
+                    if cached is None:
+                        worker.join(timeout=25)  # first call: wait a little so a desk sees something
+        cached = getattr(self, "_event_index", None)
+        return cached[1] if cached else []
+
+    def _build_event_index(self, source: Any) -> None:
         rows: list[dict[str, Any]] = []
-        cursor = None
-        for _ in range(150):
-            try:
-                page = source.markets(
-                    status="open",
-                    limit=400,  # some pages carry long titles; 400 rows stays under the 4 MB cap
-                    cursor=cursor,
-                    min_close_ts=int(now),
-                    max_close_ts=int(now) + 60 * 86400,
-                )
-            except Exception as exc:  # a bad page ends the sweep; a partial index still serves
-                self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}")
-                break
-            for row in page.get("markets", []):
-                if not isinstance(row, Mapping):
-                    continue
-                row = dict(row)
-                ticker = str(row.get("ticker") or "")
-                row["series_ticker"] = ticker.split("-")[0] if ticker else None
-                row["_haystack"] = " ".join(
-                    str(x or "") for x in (row.get("title"), row.get("yes_sub_title"),
-                                          row.get("no_sub_title"), row.get("event_ticker"),
-                                          row["series_ticker"], ticker)
-                ).lower()
-                rows.append(row)
-            cursor = page.get("cursor")
-            if not cursor:
-                break
-        self._event_index = (now, rows)
-        return rows
+        try:
+            now = time.time()
+            for window_days in (21, 60):
+                cursor = None
+                lower = int(now) if window_days == 21 else int(now) + 21 * 86400
+                for _ in range(150):
+                    try:
+                        page = source.markets(
+                            status="open",
+                            limit=400,
+                            cursor=cursor,
+                            min_close_ts=lower,
+                            max_close_ts=int(now) + window_days * 86400,
+                        )
+                    except Exception as exc:
+                        self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}")
+                        break
+                    for row in page.get("markets", []):
+                        if not isinstance(row, Mapping):
+                            continue
+                        row = dict(row)
+                        ticker = str(row.get("ticker") or "")
+                        row["series_ticker"] = ticker.split("-")[0] if ticker else None
+                        row["_haystack"] = " ".join(
+                            str(x or "") for x in (row.get("title"), row.get("yes_sub_title"),
+                                                  row.get("no_sub_title"), row.get("event_ticker"),
+                                                  row["series_ticker"], ticker)
+                        ).lower()
+                        rows.append(row)
+                    cursor = page.get("cursor")
+                    if not cursor:
+                        break
+                    if window_days == 21:
+                        self._event_index = (now, list(rows))  # publish the near-term part early
+            self._event_index = (now, rows)
+        finally:
+            self._event_index_building = False
 
     def _private_key(self, relative: str | None) -> bytes | None:
         if not relative:

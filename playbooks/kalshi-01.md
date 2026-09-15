@@ -13,6 +13,16 @@ The mandate and limits in the manifest are not editable.
 5. Fees are about seven cents per dollar of contract value at even odds. Trade only when my
    probability differs from the market by at least eight cents on the cheaper side.
 
+## Finding markets
+
+`event_markets` searches titles by words, and it also looks up a series or market ticker
+directly. Series names follow a pattern; the ones I use most:
+
+- `KXFEDDECISION-26SEP` (Fed decision at a meeting: hike, hold, cut), `KXFED-26SEP` (fed funds target level)
+- `KXCPI-26SEP` (monthly CPI print), `KXCPIYOY-26SEP` (year-over-year CPI)
+- Try the series name plus the month for jobs, unemployment, GDP and weather markets, and
+  read the market's `close_time` before pricing it.
+
 ## Session routine
 
 1. Review open positions against new information; close or hold with a reason.
