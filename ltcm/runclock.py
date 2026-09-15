@@ -3,7 +3,7 @@
 The one question a visitor asks first is "how long has this been running, and is it paying for
 itself?" This folds the answer from things the floor already records: the first session on the
 tape is the start; sessions and decisions are counted from their own events; the loop's
-availability is the share of five-minute floor marks that actually landed in the last seven
+availability is the share of five-minute mark cycles that actually landed in the last seven
 days; model spend comes from the provider's own request ledger; the box's cost is either Sail's
 own number for the period (when the usage API answers) or a plain estimate from the configured
 daily rate, labelled as such by being the only nullable-by-design field.
@@ -134,7 +134,9 @@ class RunClock:
 
     def read(self, at: str) -> dict[str, Any]:
         starts = [e.at for e in self._events("desk.session_started", 100_000)]
-        marks = [e.at for e in self._events("floor.mark", 5_000)]
+        # One mark cycle writes a ledger.mark per desk at the same instant; distinct instants
+        # are the cycles that landed. (floor.mark is written only when the balance moves.)
+        marks = sorted({e.at for e in self._events("ledger.mark", 50_000)})
         decisions = len(self._events("risk.decision", 100_000))
         spend_today = ZERO
         spend_total = ZERO

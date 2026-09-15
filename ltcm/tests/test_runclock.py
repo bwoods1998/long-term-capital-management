@@ -113,7 +113,8 @@ class RunClockTests(unittest.TestCase):
     def test_it_reads_every_component_and_survives_each_one_failing(self):
         log = FakeLog({
             "desk.session_started": ["2026-09-15T18:11:22.000Z", "2026-09-16T00:30:00.000Z"],
-            "floor.mark": ["2026-09-15T18:20:00.000Z"],
+            # Two desks marked in the same cycle: one cycle landed, not two.
+            "ledger.mark": ["2026-09-15T18:20:00.000Z", "2026-09-15T18:20:00.000Z"],
             "risk.decision": ["2026-09-15T18:30:00.000Z"] * 3,
         })
         clock = RunClock(
@@ -131,6 +132,8 @@ class RunClockTests(unittest.TestCase):
         self.assertEqual(run["sail_infra_spend_total_usd"], "0.50")
         self.assertEqual(run["pnl_total_usd"], "4.00")
         self.assertEqual(run["uptime_seconds"], 1234)
+        # 18:11 to 12:00 next day is 214 cycles of five minutes; one landed.
+        self.assertEqual(run["availability_7d_pct"], "0.4")
 
         def boom(*args, **kwargs):
             raise RuntimeError("down")
