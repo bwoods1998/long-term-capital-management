@@ -786,6 +786,13 @@ class Service:
             results=lambda: ResultsLedger(self.log, self.manifests),
             calibration=self.calibration,
         )
+        # Whatever credential the box holds is redacted from every published string, so a
+        # model that echoes one back cannot put it on the site.
+        try:
+            from .publish import register_secret_literals
+            register_secret_literals(self.env().get(name) for name in ("SAIL_API_KEY", "GATEWAY_TOKEN", "CAPITAL_PUBLISH_TOKEN"))
+        except Exception:
+            pass
         self.publisher = publisher if publisher is not None else self._build_publisher()
         self.feeds = self._build_feeds()  # leap: feeds
         self.sandboxes = self._build_sandboxes()  # leap: sandbox

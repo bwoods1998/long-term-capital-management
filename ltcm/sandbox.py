@@ -273,6 +273,12 @@ class SandboxManager:
                 raise SailboxError("no lab image: run scripts/lab_image.py build")
             row = self.client.from_checkpoint(checkpoint, name=f"lab-{desk_id}"[:60])
             box = str(row.get("sailbox_id"))
+            # A fork inherits the image's build-time allowlist (package mirrors); a desk's box
+            # gets the data-only list, so its code can read markets and nothing else.
+            try:
+                self.client.set_egress(box, list(SANDBOX_HOSTS))
+            except Exception:
+                pass  # the image's list is still data-only plus package mirrors; not worth failing
             try:
                 self.client.set_auto_sleep(box, automatic=True, min_seconds_before_sleep=300)
             except Exception:

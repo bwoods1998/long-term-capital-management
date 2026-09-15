@@ -141,10 +141,26 @@ def _host_allowed(url: str) -> bool:
     return host in ALLOWED_HOSTS
 
 
+#: The floor's own credential values, registered at start so that a string carrying one of
+#: them, however it got there, never reaches the site. Values only; names are not secret.
+_SECRET_LITERALS: list[str] = []
+
+
+def register_secret_literals(values: Iterable[Any]) -> int:
+    """Remember credential values to redact. Short or empty values are ignored: a four-letter
+    token would redact ordinary words. Returns how many are registered."""
+    found = {str(v) for v in values if isinstance(v, str) and len(v) >= 16}
+    _SECRET_LITERALS[:] = sorted(found, key=len, reverse=True)
+    return len(_SECRET_LITERALS)
+
+
 def sanitize_string(value: str) -> str:
     """Make one model-written string safe to hand the site, without changing what it says."""
     cleaned = CONTROL.sub("", value)
     cleaned = SECRET.sub(REDACTED, cleaned)
+    for literal in _SECRET_LITERALS:
+        if literal in cleaned:
+            cleaned = cleaned.replace(literal, REDACTED)
     cleaned = URL.sub(lambda m: m.group(0) if _host_allowed(m.group(0)) else DROPPED_LINK, cleaned)
     cleaned = cleaned.replace("<", "\u2039")
     cleaned = UNSAFE_SCHEME.sub(lambda m: m.group(1) + ": ", cleaned)

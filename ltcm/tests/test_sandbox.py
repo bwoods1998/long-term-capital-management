@@ -58,6 +58,10 @@ class FakeClient:
         self.calls.append(("autosleep", box, automatic, min_seconds_before_sleep))
         return {}
 
+    def set_egress(self, box, allowlist):
+        self.calls.append(("egress", box, tuple(allowlist)))
+        return {"document": {"allowlist": list(allowlist)}}
+
     def get(self, box):
         self.calls.append(("get", box))
         return {"sailbox_id": box, "status": self.status}
@@ -118,6 +122,8 @@ class RunTests(SandboxCase):
         self.assertEqual(first.sandbox, "sb_lab-mullins")
         self.assertEqual(self.client.forks, 1)
         self.assertIn(("autosleep", "sb_lab-mullins", True, 300), self.client.calls)
+        self.assertIn(("egress", "sb_lab-mullins", tuple(SANDBOX_HOSTS)), self.client.calls)
+        self.assertNotIn("pypi.org", SANDBOX_HOSTS)
         second = manager.run("mullins", "print('again')", purpose="probe")
         self.assertEqual(self.client.forks, 1, "one sandbox per desk")
         self.assertEqual(second.sandbox, first.sandbox)

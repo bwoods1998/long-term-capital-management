@@ -211,6 +211,17 @@ class SanitizerTests(PublisherCase):
         defused = sanitize_for_site("then javascript:alert(1) and data:text/plain;base64,QQ== ran")
         self.assertEqual(defused, "then javascript: alert(1) and data: text/plain;base64,QQ== ran")
 
+    def test_the_floors_own_credential_values_are_redacted_wherever_they_appear(self):
+        from ltcm.publish import register_secret_literals
+
+        self.assertEqual(register_secret_literals(["gw-token-0123456789abcdef", "short", None]), 1)
+        try:
+            cleaned = sanitize_for_site({"text": "sent gw-token-0123456789abcdef to the gateway", "note": "short word"})
+            self.assertEqual(cleaned["text"], "sent [redacted] to the gateway")
+            self.assertEqual(cleaned["note"], "short word")
+        finally:
+            register_secret_literals([])
+
     def test_tabs_and_newlines_survive(self):
         self.assertEqual(sanitize_for_site("a\tb\nc\r"), "a\tb\nc\r")
 
