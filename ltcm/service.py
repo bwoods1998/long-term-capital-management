@@ -91,6 +91,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "spend_policy": {},
     # How often the evolution loop tops families up with shadow variants, in seconds.
     "seed_interval_seconds": 3600,
+    # leap: feeds -- venue WebSockets (fills, resolutions, prices) on their own threads.
+    "feeds": {"enabled": True},
     "publish": True,
     "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
     "shadow_slippage_bps": 5,
@@ -624,6 +626,7 @@ class Service:
             },
         )
         self.publisher = publisher if publisher is not None else self._build_publisher()
+        self.feeds = self._build_feeds()  # leap: feeds
 
     # ------------------------------------------------------------------ construction
     def env(self) -> dict[str, str]:
@@ -920,6 +923,129 @@ class Service:
         except OSError:
             return None
 
+    # leap: feeds ------------------------------------------------------------------------------
+    def _build_feeds(self) -> Any:
+        """The venue WebSocket hub, or None when feeds are off or the floor is not in gateway mode.
+
+        Feeds need the gateway for their credential material and a live venue to listen to.
+        Nothing is started here: `run()` starts the threads, so a constructed service (tests,
+        `status`, one-off commands) never opens a socket.
+        """
+        settings = self.config.get("feeds") or {}
+        if not bool(settings.get("enabled", True)):
+            return None
+        gateway_url = self.config.get("gateway_url")
+        token = self.secret(self.config.get("gateway_token_env") or "GATEWAY_TOKEN")
+        live = [v for v in (self.config.get("live_venues") or []) if v in ("kalshi", "coinbase")]
+        if not gateway_url or not token or not live:
+            return None
+        try:
+            from . import feeds as feeds_module
+            from .feeds import coinbase as coinbase_feeds
+            from .feeds import kalshi as kalshi_feeds
+        except Exception as exc:  # pragma: no cover - the package ships with the runtime
+            self.alert("warning", f"feeds unavailable: {type(exc).__name__}")
+            return None
+        try:
+            credentials = feeds_module.GatewayCredentials(str(gateway_url), token, transport=self.transport)
+            hub = feeds_module.FeedHub(
+                clock=self.clock,
+                alert=self.alert,
+                held=self._held_symbols,
+                allowed=self._allowed_symbols,
+                max_age=float(settings.get("max_age_seconds", feeds_module.DEFAULT_MAX_AGE_SECONDS)),
+            )
+            if "kalshi" in live:
+                hub.add(kalshi_feeds.KalshiFeed(hub, credentials, clock=self.clock))
+            if "coinbase" in live:
+                hub.add(coinbase_feeds.CoinbaseMarketFeed(hub, clock=self.clock))
+                hub.add(coinbase_feeds.CoinbaseUserFeed(hub, credentials, clock=self.clock))
+            return hub
+        except Exception as exc:
+            self.alert("warning", f"feeds not enabled: {type(exc).__name__}")
+            return None
+
+    def _held_symbols(self) -> dict[str, set[str]]:
+        """venue -> the market tickers and product ids the desks currently hold, from the ledgers."""
+        held: dict[str, set[str]] = {}
+        at = self.now()
+        for ledger in list(self.ledgers.values()):
+            try:
+                positions = ledger.state(at).positions.values()
+            except Exception:
+                continue
+            for position in positions:
+                if position.quantity == 0:
+                    continue
+                instrument = position.instrument
+                symbol = str(instrument.market_id or instrument.symbol or "").upper()
+                if symbol:
+                    held.setdefault(instrument.venue, set()).add(symbol)
+        return held
+
+    def _allowed_symbols(self) -> dict[str, set[str]]:
+        """venue -> the symbols a desk's manifest allows it to trade (crypto products, mostly)."""
+        allowed: dict[str, set[str]] = {}
+        for manifest in list(self.manifests.values()):
+            for symbol in manifest.instruments.allow or ():
+                allowed.setdefault(manifest.market_venue, set()).add(str(symbol).upper())
+        return allowed
+
+    def _drain_feeds(self, at: str) -> dict[str, Any] | None:
+        """Act on what the sockets saw: confirm fills by REST now, note resolutions, keep health."""
+        hub = self.feeds
+        if hub is None:
+            return None
+        try:
+            drained = hub.drain()
+        except Exception as exc:
+            self.alert("warning", f"feeds drain failed: {type(exc).__name__}")
+            return None
+        confirmed: list[str] = []
+        for venue in drained.get("fill_venues") or []:
+            try:
+                confirmed.extend(row.get("fill_id", "") for row in self.gateway.ingest_fills(venue))
+            except Exception as exc:
+                self.alert("warning", f"fill confirmation on {venue} failed: {type(exc).__name__}")
+        try:
+            hub.check_health()
+        except Exception:
+            pass
+        return {
+            "fill_venues": list(drained.get("fill_venues") or []),
+            "fills_confirmed": [f for f in confirmed if f],
+            "resolutions": len(drained.get("resolutions") or []),
+        }
+
+    def _maybe_upgrade_kalshi_tier(self, at: str) -> None:
+        """Ask Kalshi for the Advanced API tier once the floor has its first API fill.
+
+        Free, self-serve, and it triples the write budget (docs quoted in the backlog, T9):
+        `POST /trade-api/v2/account/api_usage_level/upgrade`, granted when at least one of the
+        last hundred orders was created via the API. A refusal is retried a day later; a grant
+        is recorded once and never asked for again.
+        """
+        state = self.state()
+        if state.get("kalshi_tier_upgraded"):
+            return
+        retry_after = state.get("kalshi_tier_retry_after")
+        if retry_after and str(at) < str(retry_after):
+            return
+        broker = self.brokers.get("kalshi")
+        upgrader = getattr(broker, "upgrade_api_tier", None)
+        if upgrader is None:
+            return
+        if not self.log.read(stream="broker:kalshi", kind="broker.fill", limit=1):
+            return
+        try:
+            outcome = upgrader()
+        except Exception as exc:
+            self._save_state(kalshi_tier_retry_after=iso_time(parse_iso(at) + timedelta(days=1)))
+            self.alert("info", f"kalshi api tier upgrade not granted yet: {str(exc)[:200]}")
+            return
+        self._save_state(kalshi_tier_upgraded=at)
+        self.alert("info", f"kalshi api tier upgraded to advanced: {json.dumps(outcome, default=str)[:200]}")
+
     def _build_provider(self) -> Any:
         try:
             from . import provider as provider_module
@@ -1045,6 +1171,13 @@ class Service:
                     router.add(manifest.id, broker)
 
     def quote(self, instrument: Instrument):
+        if self.feeds is not None:  # leap: feeds -- a fresh socket price beats any poll
+            try:
+                live = self.feeds.quote(instrument)
+            except Exception:
+                live = None
+            if live is not None:
+                return live
         broker = self.brokers.get(instrument.venue)
         for source in (broker, self.market_data):
             if source is None:
@@ -1471,6 +1604,9 @@ class Service:
         }
 
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
+        # leap: feeds -- what the sockets saw since the last tick, confirmed by REST before it counts
+        result["feeds"] = self._drain_feeds(at)
+        self._maybe_upgrade_kalshi_tier(at)
         runway = getattr(self, "_runway", None)
         stopped = runway is not None and runway.mode == "stopped"
         live_only = runway is not None and runway.live_only
@@ -1998,6 +2134,11 @@ class Service:
         except ValueError:  # not the main thread
             previous = {}
         result: dict[str, Any] = {}
+        if self.feeds is not None:  # leap: feeds
+            try:
+                self.feeds.start()
+            except Exception as exc:
+                self.alert("warning", f"feeds did not start: {type(exc).__name__}")
         try:
             while not self.stopping:
                 try:
@@ -2020,6 +2161,11 @@ class Service:
         return result
 
     def close(self) -> None:
+        if self.feeds is not None:  # leap: feeds
+            try:
+                self.feeds.stop()
+            except Exception:
+                pass
         for thread in self._sessions:
             thread.join(timeout=1.0)
         for broker in list(self.shadow_books.values()) + list(self.brokers.values()):

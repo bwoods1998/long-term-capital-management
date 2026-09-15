@@ -49,6 +49,8 @@ Design rules, inherited from the first generation and kept on purpose:
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
 | `service.py` | The always-on loop: schedule desk sessions, tick simulators, mark ledgers, run risk breakers, run the committee and evolution on their cadences, publish. |
 | `adapters/` | Live venue adapters (`alpaca.py`, `kalshi.py`, `coinbase.py`, later `schwab.py`, `tastytrade.py`). |
+| `data/ws.py` | A standard-library RFC 6455 WebSocket client: TLS, handshake with extra headers, masked frames out, control frames answered, fragmentation reassembled, read deadlines. |
+| `feeds/` | The floor's ears: `FeedHub` keeps venue sockets open on their own threads (Kalshi `fill`, `market_lifecycle_v2`, `ticker`; Coinbase `ticker` and `user`), caches fresh prices for `Service.quote`, and hands the tick fill candidates and resolutions. The REST sweeps stay the record; the sockets make them run sooner. Credential material comes from the gateway (`GET /v1/kalshi/ws-auth`, `GET /v1/coinbase/ws-jwt`). |
 | `data/` | Market and document sources (`yahoo.py`, `alpaca.py`, `kalshi.py`, `coinbase.py`, `edgar.py`, `news.py`). |
 | `desks/` | Desk manifests (JSON). `playbooks/` at the repository root holds the versioned playbooks desks edit. |
 
