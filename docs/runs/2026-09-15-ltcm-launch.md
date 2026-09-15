@@ -44,7 +44,7 @@ executed: the automated session's permission classifier refused the real-money s
 the owner's decision to make anyway. Everything else is ready. To go live:
 
 ```sh
-cd ~/Work/portfolio-agent
+cd ~/Work/long-term-capital-management
 # 1. enable the venues (edit "live_venues": ["kalshi", "coinbase"] in ltcm/config.json)
 # 2. promote the desks; each promotion is a public event on the committee page
 .venv/bin/python -m ltcm promote kalshi-01 --to live --reason "first live sleeve"

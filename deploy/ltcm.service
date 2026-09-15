@@ -8,8 +8,8 @@ StartLimitBurst=5
 [Service]
 Type=simple
 UMask=0077
-WorkingDirectory=%h/Work/portfolio-agent
-ExecStart=%h/Work/portfolio-agent/.venv/bin/python -m ltcm run
+WorkingDirectory=%h/Work/long-term-capital-management
+ExecStart=%h/Work/long-term-capital-management/.venv/bin/python -m ltcm run
 Restart=on-failure
 RestartSec=60
 TimeoutStopSec=120
