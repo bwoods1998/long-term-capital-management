@@ -10,14 +10,17 @@
 # by `scripts/floor_box.py create` (its id is in .data/ltcm/box.json).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ROOT="$PWD"
+ENV_FILE="$ROOT/.env"
+PEM="$ROOT/.data/ltcm/keys/kalshi.pem"
 
-if ! grep -q '^GATEWAY_TOKEN=' .env; then
-  printf 'GATEWAY_TOKEN=%s\n' "$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" >> .env
-  chmod 600 .env
+if ! grep -q '^GATEWAY_TOKEN=' "$ENV_FILE"; then
+  printf 'GATEWAY_TOKEN=%s\n' "$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
   echo "generated GATEWAY_TOKEN in .env"
 fi
 
-value() { grep "^$1=" .env | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
+value() { grep "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
 
 echo "== gateway secrets"
 ( cd gateway
@@ -26,8 +29,8 @@ echo "== gateway secrets"
     if [ -z "$v" ]; then echo "  $name: missing in .env, skipped"; continue; fi
     printf '%s' "$v" | npx wrangler secret put "$name" >/dev/null 2>&1 && echo "  $name: set" || echo "  $name: FAILED"
   done
-  if [ -f ../.data/ltcm/keys/kalshi.pem ]; then
-    npx wrangler secret put KALSHI_PRIVATE_KEY < ../.data/ltcm/keys/kalshi.pem >/dev/null 2>&1 && echo "  KALSHI_PRIVATE_KEY: set" || echo "  KALSHI_PRIVATE_KEY: FAILED"
+  if [ -f "$PEM" ]; then
+    npx wrangler secret put KALSHI_PRIVATE_KEY < "$PEM" >/dev/null 2>&1 && echo "  KALSHI_PRIVATE_KEY: set" || echo "  KALSHI_PRIVATE_KEY: FAILED"
   else
     echo "  KALSHI_PRIVATE_KEY: kalshi.pem not found, skipped"
   fi
