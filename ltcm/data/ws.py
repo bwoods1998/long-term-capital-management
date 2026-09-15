@@ -26,7 +26,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator, Mapping
 
-GUID = b"258EAFA5-E914-47DA-95CA-5AB0DC85B11F"
+GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"  # RFC 6455 §1.3, verified against its own example
 
 OP_CONTINUATION = 0x0
 OP_TEXT = 0x1

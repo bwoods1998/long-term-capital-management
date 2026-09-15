@@ -36,6 +36,15 @@ def parse_client_frame(data: bytes) -> tuple[int, bytes, bytes]:
     return opcode, payload, data[offset + 4 + length :]
 
 
+class AcceptKeyTests(unittest.TestCase):
+    def test_the_rfc_6455_example_key_produces_the_rfc_6455_example_accept(self):
+        # RFC 6455 §1.3: a wrong GUID passes a self-consistent fake server and fails every
+        # real one with "sec-websocket-accept mismatch", which is how this vector earned a test.
+        from ltcm.data.ws import accept_key
+
+        self.assertEqual(accept_key(b"dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+
+
 class FakeServer:
     """The server end of a socketpair: answers the handshake, then plays a script."""
 
@@ -126,8 +135,9 @@ class FrameTests(unittest.TestCase):
 
     def test_the_accept_key_is_base64_of_sha1_over_key_and_guid(self):
         key = b"dGhlIHNhbXBsZSBub25jZQ=="
-        expected = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-5AB0DC85B11F").digest()).decode()
+        expected = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest()).decode()
         self.assertEqual(ws.accept_key(key), expected)
+        self.assertEqual(expected, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")  # the RFC's own worked example
         self.assertEqual(len(base64.b64decode(ws.accept_key(key))), 20)
 
     def test_urls_split_into_host_port_path_and_tls(self):
