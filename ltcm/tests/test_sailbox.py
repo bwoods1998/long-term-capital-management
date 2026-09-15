@@ -99,6 +99,12 @@ class AllowlistTests(unittest.TestCase):
         with self.assertRaises(SailboxError):
             normalize_hosts([f"h{n}.example.com" for n in range(129)])
 
+    def test_the_floor_can_reach_the_sailbox_control_plane_for_its_sandboxes(self):
+        # run_code forks and drives a desk's sandbox through sailbox-api; a floor that cannot
+        # resolve it fails every run in forty milliseconds, as the first live session showed.
+        self.assertIn("sailbox-api.sailresearch.com", FLOOR_HOSTS)
+        self.assertIn("sailbox-api.sailresearch.com", floor_policy()["allowlist"])
+
     def test_floor_policy_carries_every_required_host_and_the_gateway(self):
         policy = floor_policy()
         for host in FLOOR_HOSTS:

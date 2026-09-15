@@ -35,7 +35,10 @@ class FakeProvider:
         self.calls.append({"profile": profile, "items": items, **kwargs})
         if self.text is None:
             raise RuntimeError("budget_exceeded")
-        return SimpleNamespace(output_text=self.text, cost_usd=Decimal("0.05"))
+        return SimpleNamespace(
+            output_text=self.text, cost_usd=Decimal("0.05"),
+            incomplete=getattr(self, "incomplete", False), incomplete_reason=getattr(self, "incomplete_reason", None),
+        )
 
 
 class EvolveCase(unittest.TestCase):
@@ -298,6 +301,19 @@ class PlaybookTests(EvolveCase):
         self.assertIn("earnings-01", packet)
         self.assertEqual(self.provider.calls[0]["desk_id"], "earnings-03")
         self.assertIsNone(self.provider.calls[0]["tools"])
+
+    def test_a_rewrite_cut_off_at_the_output_limit_is_not_a_playbook(self):
+        self.write_manifest("earnings-01")
+        self.provider.text = "# Half a playbook\n\n## Rules\n\n1. Always"
+        self.provider.incomplete = True
+        self.provider.incomplete_reason = "max_output_tokens"
+        evolution = self.evolution()
+        evolution.spawn(load_manifest(self.desks / "earnings-01.json"), None, "2026-09-15T19:00:00.000Z")
+        child = (self.playbooks / "earnings-01-2.md").read_text(encoding="utf-8")
+        self.assertNotIn("Half a playbook", child)
+        self.assertIn("earnings-01 playbook", child)  # the parent's, whole
+        alerts = [e.payload["text"] for e in self.log.read(kind="ops.alert")]
+        self.assertTrue(any("incomplete (max_output_tokens)" in text for text in alerts), alerts)
 
     def test_a_provider_failure_copies_the_parent_playbook(self):
         self.write_manifest("earnings-01")

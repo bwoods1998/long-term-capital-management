@@ -105,7 +105,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "playbook_profile": "pro_flex",
     "playbook_budget_usd_per_day": "1.00",
     "playbook_reasoning_effort": "medium",
-    "playbook_max_output_tokens": 6144,
+    "playbook_max_output_tokens": 12288,
     "playbook_max_chars": 12_000,
     #: Venues the floor can actually send an order to. A promotion onto anything else is deferred.
     "live_venues": (),
@@ -661,7 +661,20 @@ class Evolution:
             )
             return fallback
         body = (response.output_text or "").strip()
-        if not body:
+        if not body or getattr(response, "incomplete", False):
+            # A rewrite cut off at the output limit is half a playbook: the child would inherit
+            # a document that stops mid-rule. The parent's is whole; use it and say so.
+            self.log.append(
+                "ops",
+                "ops.alert",
+                {
+                    "level": "warning",
+                    "text": f"playbook for {desk_id} copied from {parent.id}: the rewrite was "
+                    + ("empty" if not body else f"incomplete ({getattr(response, 'incomplete_reason', None) or 'output limit'})"),
+                },
+                id=f"alert:playbook:{desk_id}",
+                at=at,
+            )
             return fallback
         return body[: int(self.config["playbook_max_chars"])] + "\n"
 

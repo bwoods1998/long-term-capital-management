@@ -1645,12 +1645,16 @@ class LeapLabServiceTests(ServiceCase):
             '{"experiments": [{"hypothesis": "Fewer sessions, better ones.", '
             '"change": {"cadence.sessions": ["10:30"]}}]}'
         )
-        self.tick(moment(2026, 9, 15, 0, 5))  # 20:05 New York on the 14th: the lab's slot
+        self.tick(moment(2026, 9, 15, 0, 5))  # 20:05 New York on the 14th: the lab's slot; the ask
+        self.assertEqual(self.service.state()["lab_pending_day"], "2026-09-14")
+        self.assertEqual(self.service.log.read(kind="lab.experiment"), [], "one model call per tick: the ask first")
+        self.tick(moment(2026, 9, 15, 0, 6))  # the next tick breeds the proposal
         experiments = self.service.log.read(kind="lab.experiment")
         self.assertEqual([e.payload["status"] for e in experiments], ["proposed", "running"])
         self.assertIn(f"{DESK}-2", self.service.manifests)
         self.assertEqual(self.service.manifests[f"{DESK}-2"].cadence.sessions, ("10:30",))
         self.assertEqual(self.service.state()["last_lab_day"], "2026-09-14")
+        self.assertIsNone(self.service.state().get("lab_pending_day"))
         # The same evening again: nothing more is asked for.
         self.tick(moment(2026, 9, 15, 0, 40))
         self.assertEqual(len(self.service.log.read(kind="lab.experiment")), 2)

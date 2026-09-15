@@ -115,6 +115,9 @@ PENDING = frozenset({"queued", "in_progress"})
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 RESPONSE_ID = re.compile(r"^resp_[A-Za-z0-9_-]{1,200}$")
 RETRY_STATUSES = (429, 503, 529)
+#: How long one foreground (asap) generation may take. A high-effort turn over a long context
+#: took over ten minutes tonight and was cut off at 600; the floor's polling patience is 900.
+FOREGROUND_TIMEOUT = 900
 MAX_BODY_BYTES = 8_000_000
 PLACES = Decimal("0.00000001")
 ZERO = Decimal(0)
@@ -383,7 +386,7 @@ class Transport:
         request = Request(url, data=data, headers=headers, method=method)
         # asap foreground generation is awaited inline; background POSTs and every GET are short.
         foreground = method == "POST" and not (body or {}).get("background", False)
-        timeout = 600 if foreground else 45
+        timeout = FOREGROUND_TIMEOUT if foreground else 45
         opener = self._opener or build_opener(_NoRedirect)
         try:
             with opener.open(request, timeout=timeout) as response:

@@ -275,6 +275,10 @@ class Lab:
         self.config = {**DEFAULT_CONFIG, **dict(config or {})}
         self.results = results
         self.calibration = calibration
+        #: Work the night has asked for but not yet done, so a tick can do one unit at a time:
+        #: (family, parent, best sibling, proposal). Families already asked today, by day.
+        self._queue: list[tuple[str, DeskManifest, DeskManifest, dict[str, Any]]] = []
+        self._asked: dict[str, set[str]] = {}
 
     def now(self) -> str:
         return now_iso(self.clock)
@@ -326,12 +330,32 @@ class Lab:
         return out
 
     # ------------------------------------------------------------------ proposing
-    def run(self, now: Any = None) -> list[dict[str, Any]]:
-        """One night's work: judge what is due, then propose what is new."""
-        at = iso_time(now) if now is not None else self.now()
-        return self.evaluate(at) + self.propose(at)
+    def run(self, now: Any = None, *, max_work: int | None = None) -> list[dict[str, Any]]:
+        """One night's work: judge what is due, then propose what is new.
 
-    def propose(self, now: Any = None) -> list[dict[str, Any]]:
+        `max_work` bounds the model calls made in this call (an ask of one family, or one
+        spawn with its playbook rewrite, is one unit) so the floor's tick can spread a night's
+        lab over consecutive ticks instead of blocking for the whole of it; `pending()` says
+        whether more remains.
+        """
+        at = iso_time(now) if now is not None else self.now()
+        return self.evaluate(at) + self.propose(at, max_work=max_work)
+
+    def pending(self, at: str) -> bool:
+        """True while tonight's lab still has an ask or a spawn to do. `at` is the instant the
+        caller is working at; the night is keyed by its UTC date, the same key `propose` uses."""
+        if self._queue:
+            return True
+        asked = self._asked.get(iso_time(parse_iso(at))[:10] if "T" in at else at, set())
+        modes = promoted_desks(self.log)
+        for family, variants in self.evolution.families().items():
+            if family in asked:
+                continue
+            if any(capital_mode(m, modes) == "live" for m in variants):
+                return True
+        return False
+
+    def propose(self, now: Any = None, *, max_work: int | None = None) -> list[dict[str, Any]]:
         at = iso_time(now) if now is not None else self.now()
         day = at[:10]
         actions: list[dict[str, Any]] = []
@@ -339,49 +363,88 @@ class Lab:
         per_family = int(self.config["max_experiments_per_family"])
         per_day = int(self.config["max_experiments_per_day"])
         max_running = int(self.config["max_running_per_family"])
+        asked = self._asked.setdefault(day, set())
+        work = 0
+
+        def budget_left() -> bool:
+            return max_work is None or work < max_work
+
+        # Spawns already asked for come first: a proposal is paid for once and never dropped.
+        while self._queue and budget_left():
+            family, parent, best, proposal = self._queue.pop(0)
+            work += 1
+            actions.extend(self._process(family, parent, best, proposal, at, day, per_day, max_running))
+
         for family, variants in sorted(self.evolution.families().items()):
+            if not budget_left():
+                break
+            if family in asked:
+                continue
             live = [m for m in variants if capital_mode(m, modes) == "live"]
             if not live:
+                asked.add(family)
                 continue
-            parent = live[0]
             if self.proposed_on(day) >= per_day:
                 break
             if len(self.running(family)) >= max_running:
+                asked.add(family)
                 continue
+            parent = live[0]
             best = max(variants, key=lambda m: (self.evolution.score(m.id, at), -int(m.generation), m.id))
-            for proposal in self._ask(family, parent, at)[:per_family]:
-                if self.proposed_on(day) >= per_day:
-                    break
-                if len(self.running(family)) >= max_running:
-                    break
-                hypothesis = proposal["hypothesis"]
-                raw_change = proposal.get("change")
-                exp_id = experiment_id(family, hypothesis, raw_change if isinstance(raw_change, dict) else {}, day)
-                if exp_id in self.experiments():
-                    continue
-                try:
-                    change = validate_change(raw_change, parent, self.config)
-                except LabError as exc:
-                    actions.append(
-                        self._publish(exp_id, family, parent, hypothesis, raw_change, "withdrawn", at, reason=str(exc))
-                    )
-                    continue
-                self._publish(exp_id, family, parent, hypothesis, change, "proposed", at)
-                spawned = self.evolution.spawn(parent, best, at, change=change, experiment_id=exp_id)
-                if spawned is None:
-                    actions.append(
-                        self._publish(
-                            exp_id, family, parent, hypothesis, change, "withdrawn", at,
-                            reason="the family is at its variant ceiling",
-                        )
-                    )
-                    continue
-                actions.append(
-                    self._publish(
-                        exp_id, family, parent, hypothesis, change, "running", at,
-                        variant_desk_id=spawned["desk_id"],
-                    )
+            asked.add(family)
+            work += 1
+            proposals = self._ask(family, parent, at)[:per_family]
+            if max_work is None:
+                for proposal in proposals:
+                    actions.extend(self._process(family, parent, best, proposal, at, day, per_day, max_running))
+            else:
+                self._queue.extend((family, parent, best, proposal) for proposal in proposals)
+        return actions
+
+    def _process(
+        self,
+        family: str,
+        parent: DeskManifest,
+        best: DeskManifest,
+        proposal: Mapping[str, Any],
+        at: str,
+        day: str,
+        per_day: int,
+        max_running: int,
+    ) -> list[dict[str, Any]]:
+        """Validate, publish and breed one proposal. The caps are checked again here because
+        a queued proposal may have waited a tick while another family filled them."""
+        actions: list[dict[str, Any]] = []
+        if self.proposed_on(day) >= per_day or len(self.running(family)) >= max_running:
+            return actions
+        hypothesis = proposal["hypothesis"]
+        raw_change = proposal.get("change")
+        exp_id = experiment_id(family, hypothesis, raw_change if isinstance(raw_change, dict) else {}, day)
+        if exp_id in self.experiments():
+            return actions
+        try:
+            change = validate_change(raw_change, parent, self.config)
+        except LabError as exc:
+            actions.append(
+                self._publish(exp_id, family, parent, hypothesis, raw_change, "withdrawn", at, reason=str(exc))
+            )
+            return actions
+        self._publish(exp_id, family, parent, hypothesis, change, "proposed", at)
+        spawned = self.evolution.spawn(parent, best, at, change=change, experiment_id=exp_id)
+        if spawned is None:
+            actions.append(
+                self._publish(
+                    exp_id, family, parent, hypothesis, change, "withdrawn", at,
+                    reason="the family is at its variant ceiling",
                 )
+            )
+            return actions
+        actions.append(
+            self._publish(
+                exp_id, family, parent, hypothesis, change, "running", at,
+                variant_desk_id=spawned["desk_id"],
+            )
+        )
         return actions
 
     def _publish(

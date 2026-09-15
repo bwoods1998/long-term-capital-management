@@ -178,6 +178,16 @@ def load_env(path: str | Path) -> dict[str, str]:
 #: An `event_resolution` session fires at most this often per desk, however many markets
 #: settle in one afternoon. The manifest caps orders; this caps the model spend behind them.
 RESOLUTION_COOLDOWN_SECONDS = 1800
+
+
+def _rss_mb() -> int | None:
+    """The process's resident memory in MiB from /proc, or None where /proc is not there."""
+    try:
+        with open("/proc/self/statm", encoding="utf-8") as handle:
+            pages = int(handle.read().split()[1])
+        return int(pages * os.sysconf("SC_PAGE_SIZE") / (1024 * 1024))
+    except Exception:
+        return None
 #: The runway policy's fields, carried from `ops.budget` into the checkpoint and the status.
 RUNWAY_KEYS = (
     "mode", "balance_usd", "spendable_usd", "runway_days", "burn_usd_per_day", "reserve_usd",
@@ -1124,6 +1134,16 @@ class Service:
             self.alert("warning", f"sandboxes unavailable: {type(exc).__name__}")
             return None
 
+    def _feeds_status(self) -> dict[str, Any] | None:
+        """The venue sockets as the hub reports them, or None on a floor without feeds."""
+        hub = getattr(self, "feeds", None)
+        if hub is None:
+            return None
+        try:
+            return hub.status()
+        except Exception:
+            return {"error": "status unavailable"}
+
     def _venue_equity(self) -> dict[str, Decimal]:
         """Each live venue's equity as the venue reports it, for the committee's sleeve caps."""
         out: dict[str, Decimal] = {}
@@ -2057,14 +2077,22 @@ class Service:
         # calibration is published once; the lab sits down at its own evening slot.
         if not stopped:
             self._calibration_tick(at, state)
-        if not stopped and self._due(local, self.config["lab_time"], state.get("last_lab_day"), day):
+        # The lab's night is spread over ticks, one model call per tick, so the floor keeps
+        # marking, exiting and publishing while it thinks: a night that blocked the tick for
+        # twenty minutes would have the watchdog restart the box in the middle of it.
+        lab_pending = state.get("lab_pending_day") == day
+        if not stopped and (lab_pending or self._due(local, self.config["lab_time"], state.get("last_lab_day"), day)):
+            experiments: list[dict[str, Any]] = []
             try:
-                experiments = list(self.lab.run(at))
+                if not lab_pending:
+                    self._save_state(lab_pending_day=day)
+                    experiments.extend(self.lab.evaluate(at))
+                experiments.extend(self.lab.propose(at, max_work=1))
             except Exception as exc:
                 self.alert("warning", f"lab run failed: {type(exc).__name__}: {exc}")
-                experiments = []
             self.reload_manifests()
-            self._save_state(last_lab_day=day)
+            if not self.lab.pending(at):
+                self._save_state(last_lab_day=day, lab_pending_day=None)
             result["experiments"] = experiments
         if stopped:
             pass  # the memo and the evolution loop both ask the model; they wait for credit
@@ -2578,6 +2606,8 @@ class Service:
             "reconciliation_mismatch": self.gateway.reconciliation_mismatch,
             "blocked_desks": sorted(self.gateway.blocked_desks),
             "events": self.log.latest_seq(),
+            "feeds": self._feeds_status(),
+            "rss_mb": _rss_mb(),
             "floor": {
                 "equity": text(floor["equity"]),
                 "cash": text(floor["cash"]),

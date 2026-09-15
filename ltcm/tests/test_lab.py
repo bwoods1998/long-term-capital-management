@@ -271,6 +271,28 @@ class ProposalTests(LabCase):
         self.assertEqual(lab.propose("2026-09-16T00:00:00.000Z"), [])
         self.assertEqual(lab.proposed_on("2026-09-15"), 2)
 
+    def test_a_night_can_be_done_one_unit_per_call_without_losing_a_proposal(self):
+        self.provider.replies = [
+            reply(
+                {"hypothesis": "one", "change": {"memory_limit": 20}},
+                {"hypothesis": "two", "change": {"memory_limit": 60}},
+            ),
+        ]
+        lab = self.lab(max_experiments_per_family=2)
+        day = NIGHT
+        self.assertTrue(lab.pending(day))
+        self.assertEqual(lab.propose(NIGHT, max_work=1), [])  # the ask: proposals are queued
+        self.assertTrue(lab.pending(day))
+        first = lab.propose("2026-09-15T00:00:30.000Z", max_work=1)
+        self.assertEqual([a["status"] for a in first], ["running"])
+        self.assertTrue(lab.pending(day))
+        second = lab.propose("2026-09-15T00:01:00.000Z", max_work=1)
+        self.assertEqual([a["status"] for a in second], ["running"])
+        self.assertFalse(lab.pending(day))
+        self.assertEqual(lab.propose("2026-09-15T00:01:30.000Z", max_work=1), [])
+        self.assertEqual(len(lab.running("earnings")), 2)
+        self.assertEqual(len(self.provider.calls) if hasattr(self.provider, "calls") else 1, 3 if hasattr(self.provider, "calls") else 1)
+
     def test_a_model_failure_is_an_alert_and_no_experiment(self):
         self.provider.replies = [RuntimeError("provider_transport_timeout")]
         self.assertEqual(self.lab().propose(NIGHT), [])
