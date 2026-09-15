@@ -107,6 +107,30 @@ test('a checkpoint older than fifteen minutes restarts the box, once', async () 
   assert.equal(again.action, 'restarted');
 });
 
+test('the first stale pass restarts without mailing; a restart that did not help is mailed', async () => {
+  const gate = gateWith();
+  const { fetcher, at } = cloud({ ago: 1200 });
+  const { mailer, sent } = recorder();
+  const first = await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW });
+  assert.equal(first.action, 'restarted');
+  assert.deepEqual(sent, [], 'a deploy or a fresh start must not page the owner');
+
+  // Five minutes on, the floor has still not published: now the owner hears about it.
+  at(NOW + 300000);
+  const later = await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW + 300000 });
+  assert.equal(later.action, 'cooldown');
+  assert.deepEqual(sent.map(message => message.subject), ['LTCM: the desks are not running']);
+});
+
+test('a restart that the box refused is mailed at once', async () => {
+  const gate = gateWith();
+  const { fetcher } = cloud({ ago: 1200, execOk: false });
+  const { mailer, sent } = recorder();
+  const result = await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW });
+  assert.equal(result.action, 'restart_failed');
+  assert.deepEqual(sent.map(message => message.subject), ['LTCM: the desks are not running']);
+});
+
 test('a paused box with credit behind it is resumed and restarted, with no human step', async () => {
   const gate = gateWith();
   const { fetcher, calls } = cloud({ ago: 60, status: 'paused', balanceCents: 12000 });

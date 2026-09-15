@@ -195,8 +195,15 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   if (balance !== null && balance < criticalBalance) await send('sail_balance_critical', { threshold_usd: criticalBalance });
   else if (balance !== null && balance < lowBalance) await send('sail_balance_low', { threshold_usd: lowBalance });
 
-  const restartTried = Number.isFinite(Date.parse(record.last_restart_at || '')) || Number.isFinite(previousRestart);
-  if (stopped || (stale && restartTried)) await send('box_not_running');
+  // "Not running" is a verdict, not a symptom. A stale checkpoint on the first pass gets a
+  // restart and the benefit of the doubt: the loop needs a minute to publish again, and a mail
+  // sent before that minute is up is a false alarm on every deploy. The mail goes out when a
+  // recovery attempt failed outright, when the box is stopped and this pass could not resume
+  // it, or when a restart went out on an earlier pass and the floor is still quiet.
+  const recoveredNow = action === 'resumed' || action === 'restarted';
+  const recoveryFailed = ['restart_failed', 'resume_failed', 'box_unrecoverable', 'stale_no_sailbox', 'stopped_low_balance'].includes(action);
+  const stillQuiet = stale && cooling;
+  if (recoveryFailed || (stopped && !recoveredNow) || stillQuiet) await send('box_not_running');
   if (facts.kill_switch) await send('kill_switch_engaged');
   if (gate.capsExhausted(now)) await send('caps_exhausted');
   if (new Date(now).getUTCHours() === DIGEST_UTC_HOUR) await send('daily_digest');
