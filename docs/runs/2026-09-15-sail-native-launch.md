@@ -131,3 +131,26 @@ and merged: 980 runtime tests, 69 gateway tests, 46 site tests.
 Two production incidents on the way, both fixed within minutes: the runway budget event reused
 an id with different content and stalled every tick for half an hour; the WebSocket client's
 GUID had a transposed character and every real server refused the handshake.
+
+## Addendum, 22:20 UTC: why nothing traded, and what changed
+
+The owner asked why a 24/7 recursive fund made no trade on its first day. The honest answer:
+the floor was set up to pass. Both live desks had narrow mandates and strict thresholds (eight
+cents of edge on Kalshi; a one percent move on Coinbase at taker fees), only two families
+covered a sliver of what the venues offer, most of the day was spent restarting into new
+code, and the flex completion window queued turns for minutes. A floor that makes no
+decisions produces no outcomes, and the loop selects on outcomes. Changes, all live:
+
+- **Mullins**: every public event series; three cents of edge after fees (and 1.5 times the
+  fee) instead of eight; a recorded forecast for every market priced; eight sessions a day;
+  sleeve $200 of the Kalshi cash.
+- **Scholes** (new, live, $142): Kalshi's hourly, daily and weekly BTC, ETH and index range
+  markets, each bucket priced from realized volatility in his sandbox; twelve sessions a day;
+  settlements within hours.
+- **Haghani** (new, live, $150, being built as this is written): Kalshi daily temperature
+  markets priced from National Weather Service forecasts; resolves every day.
+- **Hilibrand**: ten pairs, maker orders, a hurdle of twice the round-trip fee, intraday
+  setups, up to four positions, twelve sessions a day; the house view appended to the family's
+  live playbooks rather than overwriting the desks' own rewrites.
+- **Every desk** in the asap window; children inherit the founder's tools; duds are retired;
+  Kimi K3 in the gene pool; gateway caps sized so the desks' own limits bind first.
