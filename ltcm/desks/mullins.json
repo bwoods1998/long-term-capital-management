@@ -62,7 +62,8 @@
     "playbook_read",
     "playbook_write",
     "record_forecast",
-    "memo_read"
+    "memo_read",
+    "run_code"
   ],
   "budget": {
     "usd_per_day": "25"

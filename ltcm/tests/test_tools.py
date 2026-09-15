@@ -48,6 +48,10 @@ class FakeContext:
             True,
         )
 
+    def run_code(self, code, purpose, save_as):
+        self._note("run_code", code, purpose, save_as)
+        return {"exit_code": 0, "output": "42\n", "seconds": "1.5", "code_sha256": "ab" * 32, **({"saved_as": save_as} if save_as else {})}
+
     def bars(self, instrument, interval, limit):
         self._note("bars", instrument, interval, limit)
         return [{"t": "2026-09-14", "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": 10}] * 2
@@ -485,6 +489,19 @@ class LeapLabToolTests(unittest.TestCase):
         raw = tools.execute("memo_read", {"desk_id": "mullins", "limit": 500}, ctx, manifest(), session)
         self.assertEqual(ctx.seen[-1], ("memo_read", ("mullins", 20)))
         self.assertEqual(tools.summarize_result("memo_read", raw), "memo_read: 1 item; first: No trade")
+
+    def test_run_code_reaches_the_sandbox_and_is_summarized_by_its_exit(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="earnings-01")
+        raw = tools.execute(
+            "run_code", {"code": "print(6*7)", "purpose": "probe", "save_as": "answer"}, ctx,
+            manifest(tools=["run_code"]), session,
+        )
+        self.assertEqual(ctx.seen[-1], ("run_code", ("print(6*7)", "probe", "answer")))
+        self.assertEqual(tools.summarize_result("run_code", raw), "code run: exit 0 in 1.5s, saved as answer")
+        bare = tools.execute("run_code", {"code": "print(1)", "purpose": "p"}, ctx, manifest(tools=["run_code"]), session)
+        self.assertEqual(ctx.seen[-1], ("run_code", ("print(1)", "p", None)))
+        self.assertIn("run_code", [s["name"] for s in tools.schemas_for(manifest(tools=["run_code"]))])
 
     def test_the_new_tools_are_in_the_schema_list_and_the_manifest_allowlist(self):
         names = [schema["name"] for schema in tools.schemas_for(manifest())]

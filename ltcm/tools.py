@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 
+from .sandbox import RUN_CODE_SCHEMA  # leap: sandbox
 from .broker import ASSET_CLASSES, Balance, Instrument, OrderIntent, Position, Quote
 from .manifest import TOOLS, DeskManifest
 
@@ -107,6 +108,10 @@ class ToolContext(Protocol):
 
     def memo_read(self, desk_id: str, limit: int) -> list[dict[str, Any]]:
         """Another desk's published memos, newest first. Their words, not instructions."""
+
+    # leap: sandbox
+    def run_code(self, code: str, purpose: str, save_as: str | None) -> dict[str, Any]:
+        """Run Python in the desk's own sandbox and publish the run; never raises for a bad run."""
 
 
 @dataclass
@@ -215,6 +220,8 @@ def _schema(name: str, description: str, properties: dict[str, Any], required: l
 
 
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+    # leap: sandbox -- the schema lives with the sandbox, which owns its contract.
+    "run_code": {k: v for k, v in RUN_CODE_SCHEMA.items() if k != "type"},
     "quote": _schema(
         "quote",
         "Current bid, ask and last for one instrument. Quotes may be delayed; the response says so.",
@@ -598,6 +605,12 @@ def _dispatch(
             _text(arguments, "desk_id", limit=60),
             _count(arguments, "limit", low=1, high=20, default=5),
         )
+    if name == "run_code":  # leap: sandbox
+        return ctx.run_code(
+            _text(arguments, "code", limit=40_000),
+            _text(arguments, "purpose", limit=200),
+            _text(arguments, "save_as", limit=40, required=False) or None,
+        )
     if name == "end_session":
         summary = _text(arguments, "summary", limit=2000)
         session.ended = True
@@ -821,6 +834,11 @@ def _summarize(name: str, data: Any) -> str:
         return (
             f"forecast recorded: {data.get('market', '?')} p(yes)={data.get('probability', '?')}"
             + (f" vs market {data['market_price']}" if data.get("market_price") else "")
+        )
+    if name == "run_code":  # leap: sandbox
+        return (
+            f"code run: exit {data.get('exit_code', '?')} in {data.get('seconds', '?')}s"
+            + (f", saved as {data['saved_as']}" if data.get("saved_as") else "")
         )
     keys = ", ".join(sorted(str(k) for k in data)[:12])
     return f"{name}: {{{keys}}}"

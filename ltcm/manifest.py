@@ -47,6 +47,7 @@ TOOLS = (
     # leap: lab -- a stated probability, scored at resolution; another desk's memos, read-only.
     "record_forecast",
     "memo_read",
+    "run_code",  # leap: sandbox
 )
 CADENCE_TRIGGERS = ("earnings_release", "filing", "market_open", "market_close", "event_resolution")
 TIMEZONE = re.compile(r"^[A-Za-z_]+/[A-Za-z_]+$|^UTC$")

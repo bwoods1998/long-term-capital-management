@@ -46,6 +46,8 @@ Design rules, inherited from the first generation and kept on purpose:
 | `committee.py` | Meriwether: rules-based capital allocation across desks (weekly), the daily public memo, promotion and demotion by the fixed gates. |
 | `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. |
 | `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
+| `sandbox.py` | One forked Sailbox per desk for the code it writes (`run_code`): the lab image, a toolbox that persists, a daily fuse, data-only egress. |
+| `runclock.py` | The public run clock: how long the desks have worked, sessions and decisions, Sail spend, profit per Sail dollar. |
 | `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
 | `publish.py` | Batches public events and leaderboard rows to the site API. |
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
@@ -75,6 +77,7 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `desk.outcome` | desk | yes | `instrument`, `market_id`, `result`, `entry_price`, `exit_price`, `quantity`, `pnl`, `held_for_hours`, `rationale_excerpt` |
 | `desk.session_ended` | desk | yes | `session_id`, `requests`, `cost_usd`, `reason` |
 | `desk.watch` | desk | yes | `trigger`, `detail`, `decision` (`wake`/`ignore`), `reason`, `cost_usd`, `session_id?` |
+| `desk.code_run` | desk | yes | `session_id`, `code_sha256`, `language`, `stdout`, `exit_code`, `seconds`, `sandbox`, `purpose`, `saved_as?` |
 | `desk.exit_plan` | desk | yes | `intent_id`, `instrument`, `target_price?`, `stop_price?`, `time_stop_at?`, `venue_native`, `order_ids[]` |
 | `risk.decision` | risk | yes | `intent_id`, `desk_id`, `approved`, `reasons[]` |
 | `risk.review` | risk | yes | `intent_id`, `desk_id`, `verdict` (`approve` or `block`), `reason`, `model` |

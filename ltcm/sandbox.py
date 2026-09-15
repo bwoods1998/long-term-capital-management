@@ -372,13 +372,10 @@ RUN_CODE_SCHEMA: dict[str, Any] = {
     "type": "function",
     "name": "run_code",
     "description": (
-        "Run Python in your own sandbox: a machine with numpy, pandas and `labkit` "
-        "(bars, quote, kalshi_market, kalshi_markets, kalshi_history, news) that reads the same "
-        "public data your other tools read. Use it to test a signal on real history, fit a "
-        "probability to a series, or size from measured volatility before you trade. Print what "
-        "you want to read back; output is bounded to 4000 characters and the run to two minutes. "
-        "Pass save_as to keep the code in your toolbox and import it later as "
-        "`from toolbox.<name> import ...`. Every run is published with its hash."
+        "Run Python in your own sandbox: numpy, pandas and labkit (bars, quote, kalshi_market, "
+        "kalshi_markets, kalshi_history, news) over the same public data as your other tools. "
+        "Test a signal on real history or fit a probability before you trade. Print what you want "
+        "back (4000 characters, two minutes). save_as keeps the code as toolbox.<name>."
     ),
     "parameters": {
         "type": "object",

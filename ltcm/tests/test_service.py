@@ -204,6 +204,8 @@ class ServiceCase(unittest.TestCase):
             "spend_mode": "capped",
             # No seeding unless a case asks for it: the packaged config breeds families.
             "evolution": {"target_variants": 1},
+            # No sandboxes unless a case installs a fake: the packaged config names a lab image.
+            "sandbox": {"enabled": False},
             # The ratio allocation rule, so the capital assertions test arithmetic, not a draw;
             # the bandit has its own case in test_committee.
             "committee": {"bandit_enabled": False},
@@ -1478,6 +1480,66 @@ class AccountBalanceTests(ServiceCase):
         self.assertEqual([row["venue"] for row in report["floor"]["venues"]], ["kalshi", "coinbase"])
         written = json.loads(self.service.health_path.read_text())
         self.assertEqual(written["floor"]["venues"][1]["equity"], self.COINBASE)
+
+
+class FakeSandboxes:
+    """Stands in for `ltcm.sandbox.SandboxManager`: one recorded run, never a network."""
+
+    def __init__(self):
+        self.runs = []
+        self.slept = False
+
+    def run(self, desk_id, code, *, purpose="", save_as=None, timeout=120):
+        from ltcm.sandbox import CodeRun
+
+        self.runs.append((desk_id, code, purpose, save_as))
+        return CodeRun(desk_id, "ab" * 32, "42\n", 0, Decimal("1.5"), "sb_lab-x", purpose, saved_as=save_as)
+
+    def sleep_all(self):
+        self.slept = True
+        return 1
+
+
+class LeapSandboxAndRunClockTests(ServiceCase):
+    """leap: sandbox and run clock -- a desk runs code in its own box; the public sees the run."""
+
+    def test_run_code_publishes_the_run_and_returns_it_to_the_desk(self):
+        self.service.sandboxes = FakeSandboxes()
+        ctx = self.service.context(self.service.manifests[DESK], session_id="s-9")
+        out = ctx.run_code("print(6*7)", "a probe", "answer")
+        self.assertEqual(out["exit_code"], 0)
+        self.assertEqual(out["output"], "42\n")
+        self.assertEqual(out["saved_as"], "answer")
+        event = self.service.log.read(kind="desk.code_run")[0]
+        self.assertEqual(event.stream, f"desk:{DESK}")
+        self.assertEqual(event.payload["session_id"], "s-9")
+        self.assertEqual(event.payload["exit_code"], 0)
+        self.assertEqual(event.payload["language"], "python")
+        self.assertEqual(event.payload["sandbox"], "sb_lab-x"[-12:])
+        self.assertEqual(self.service.sandboxes.runs, [(DESK, "print(6*7)", "a probe", "answer")])
+        self.service.close()
+        self.assertTrue(self.service.sandboxes.slept)
+
+    def test_without_a_lab_image_the_tool_answers_rather_than_failing(self):
+        self.assertIsNone(self.service.sandboxes)  # no image configured in tests
+        ctx = self.service.context(self.service.manifests[DESK], session_id="s-9")
+        out = ctx.run_code("print(1)", "probe", None)
+        self.assertEqual(out["exit_code"], 3)
+        self.assertEqual(self.service.log.read(kind="desk.code_run"), [])
+
+    def test_the_checkpoint_carries_the_run_clock(self):
+        self.fund()
+        self.tick()
+        run = self.publisher.checkpoints[-1]["run"]
+        for key in ("started_at", "uptime_seconds", "availability_7d_pct", "sessions_total", "sessions_today",
+                    "decisions_total", "sail_model_spend_today_usd", "sail_model_spend_total_usd",
+                    "sail_infra_spend_total_usd", "sail_spend_total_usd", "pnl_total_usd", "pnl_per_sail_dollar",
+                    "models_used"):
+            self.assertIn(key, run)
+        self.assertEqual(run["sessions_total"], 1)
+        self.assertEqual(run["sessions_today"], 1)
+        self.assertEqual(str(run["sail_model_spend_today_usd"]), "0.03")
+        self.assertIsInstance(run["models_used"], list)
 
 
 class LeapLabServiceTests(ServiceCase):

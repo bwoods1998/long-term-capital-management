@@ -675,6 +675,7 @@ def checkpoint_body(
     infra: Mapping[str, Any] | None = None,
     watch: Mapping[str, Any] | None = None,
     lab: Mapping[str, Any] | None = None,
+    run: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact shape the site expects. Money stays `Decimal` for `jsonable` to render.
 
@@ -768,6 +769,8 @@ def checkpoint_body(
         **({"watch": watch_row(watch)} if watch is not None else {}),
         # leap: lab -- present whenever the floor runs a lab, however empty its record.
         **({"lab": lab_block(lab)} if lab is not None else {}),
+        # leap: run clock -- how long the desks have worked, what it cost, what it earned.
+        **({"run": run_row(run)} if run is not None else {}),
     }
 
 
@@ -811,6 +814,30 @@ def live_session_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "session_id": row.get("session_id"),
         "trigger": row.get("trigger"),
         "started_at": row.get("started_at"),
+    }
+
+
+def run_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """The contract's `run` block. Signed numbers stay signed; unknowns stay null."""
+    def signed(value: Any) -> Any:
+        if value is None:
+            return None
+        return value if isinstance(value, Decimal) else Decimal(str(value))
+
+    return {
+        "started_at": row.get("started_at"),
+        "uptime_seconds": counted(row.get("uptime_seconds")),
+        "availability_7d_pct": None if row.get("availability_7d_pct") is None else floor_at_zero(row.get("availability_7d_pct")),
+        "sessions_total": counted(row.get("sessions_total")),
+        "sessions_today": counted(row.get("sessions_today")),
+        "decisions_total": counted(row.get("decisions_total")),
+        "sail_model_spend_today_usd": floor_at_zero(row.get("sail_model_spend_today_usd")),
+        "sail_model_spend_total_usd": floor_at_zero(row.get("sail_model_spend_total_usd")),
+        "sail_infra_spend_total_usd": None if row.get("sail_infra_spend_total_usd") is None else floor_at_zero(row.get("sail_infra_spend_total_usd")),
+        "sail_spend_total_usd": floor_at_zero(row.get("sail_spend_total_usd")),
+        "pnl_total_usd": signed(row.get("pnl_total_usd")),
+        "pnl_per_sail_dollar": signed(row.get("pnl_per_sail_dollar")),
+        "models_used": [str(m)[:40] for m in list(row.get("models_used") or [])[:8]],
     }
 
 

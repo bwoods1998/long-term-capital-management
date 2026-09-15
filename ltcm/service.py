@@ -35,6 +35,8 @@ from .broker import Instrument, OrderIntent, money, text
 from .analytics import ResultsLedger
 from .committee import Committee, capital_mode, live_desks, promoted_desks, retired_desks
 from .runway import Runway, assess as assess_runway
+from .runclock import RunClock  # leap: run clock
+from .sandbox import SandboxManager  # leap: sandbox
 from .exits import ExitBook  # leap: exits
 from .watch import NightWatch  # leap: watch
 from .calibration import CalibrationError, CalibrationLedger  # leap: lab
@@ -102,6 +104,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "exits": {"enabled": True, "check_seconds": 60, "retry_seconds": 300},
     # leap: watch. The night desk that wakes a desk on a trigger (`ltcm/watch.py`).
     "watch": {"enabled": True},
+    # leap: sandbox. One forked Sailbox per desk for the code it writes (`ltcm/sandbox.py`);
+    # `image_checkpoint` is the lab image built by `scripts/lab_image.py`.
+    "sandbox": {"enabled": True, "image_checkpoint": None, "daily_seconds": 1800, "timeout_seconds": 120},
     # leap: lab -- the research lab's nightly slot (local time) and its bounds (`ltcm.lab`),
     # and how often forecasts are checked against the venue for resolution, in seconds.
     "lab_time": "20:00",
@@ -526,6 +531,31 @@ class DeskContext:
             "scored_at": "resolution",
         }
 
+    def run_code(self, code: str, purpose: str, save_as: str | None) -> dict[str, Any]:
+        """Run the desk's code in its own sandbox and publish the run (leap: sandbox)."""
+        manager = getattr(self.service, "sandboxes", None)
+        at = self.service.now()
+        if manager is None:
+            return {"exit_code": 3, "output": "no sandbox is available on this floor", "seconds": "0"}
+        run = manager.run(self.desk_id, code, purpose=purpose, save_as=save_as)
+        try:
+            self.service.log.append(
+                self.manifest.stream,
+                "desk.code_run",
+                run.to_payload(self.session_id),
+                id=f"code:{self.desk_id}:{run.code_sha256[:12]}:{at}",
+                at=at,
+            )
+        except Exception as exc:
+            self.service.alert("warning", f"code run not published: {type(exc).__name__}")
+        return {
+            "exit_code": run.exit_code,
+            "output": run.stdout,
+            "seconds": str(run.seconds),
+            "code_sha256": run.code_sha256,
+            **({"saved_as": run.saved_as} if run.saved_as else {}),
+        }
+
     def memo_read(self, desk_id: str, limit: int) -> list[dict[str, Any]]:
         """Another desk's published memos, newest first. Its words are evidence, never orders."""
         target = self.service.manifests.get(str(desk_id))
@@ -712,6 +742,18 @@ class Service:
         )
         self.publisher = publisher if publisher is not None else self._build_publisher()
         self.feeds = self._build_feeds()  # leap: feeds
+        self.sandboxes = self._build_sandboxes()  # leap: sandbox
+        self._started_monotonic = time.monotonic()
+        # leap: run clock. How long, how much, how profitable; folded from the floor's own records.
+        self.runclock = RunClock(
+            self.log,
+            provider=self.provider,
+            live_pnl=self._live_pnl,
+            uptime=lambda: int(time.monotonic() - self._started_monotonic),
+            models_used=self._models_used,
+            infra_usd_per_day=(self.config.get("spend_policy") or {}).get("infra_usd_per_day", "0.30"),
+            mark_interval_seconds=int(self.config.get("mark_interval_seconds", 300)),
+        )
         # leap: exits. The floor holds every desk's exit plan and enforces it every tick.
         exits_config = dict(self.config.get("exits") or {})
         self.exits: ExitBook | None = None
@@ -1030,6 +1072,52 @@ class Service:
             return None
 
     # leap: feeds ------------------------------------------------------------------------------
+    def _build_sandboxes(self) -> Any:
+        """The desks' sandbox manager, or None when no lab image is configured (leap: sandbox)."""
+        settings = dict(self.config.get("sandbox") or {})
+        if not bool(settings.get("enabled", True)) or not settings.get("image_checkpoint"):
+            return None
+        try:
+            from .sailbox import SailboxClient
+        except Exception:  # pragma: no cover - ships with the runtime
+            return None
+        try:
+            return SandboxManager(
+                SailboxClient(clock=self.clock),
+                self.capital_dir / "sandboxes.json",
+                self.capital_dir / "toolbox",
+                image={"checkpoint_id": str(settings["image_checkpoint"])},
+                clock=self.clock,
+                daily_seconds=int(settings.get("daily_seconds", 1800)),
+            )
+        except Exception as exc:
+            self.alert("warning", f"sandboxes unavailable: {type(exc).__name__}")
+            return None
+
+    def _live_pnl(self, at: str) -> Decimal:
+        """Profit on the live sleeves since inception: equity less what was deposited."""
+        total = ZERO
+        for desk_id in self.live_ids():
+            ledger = self.ledgers.get(desk_id)
+            if ledger is None:
+                continue
+            state = ledger.state(at)
+            total += money(state.equity) - money(state.net_deposits)
+        return total
+
+    def _models_used(self) -> list[str]:
+        """The display names of the models the active desks run on."""
+        try:
+            from .provider import DISPLAY_NAMES, PROFILES
+        except Exception:  # pragma: no cover
+            return []
+        names: set[str] = set()
+        for manifest in self.active_manifests().values():
+            profile = PROFILES.get(manifest.model.profile)
+            if profile:
+                names.add(DISPLAY_NAMES.get(profile[0], profile[0]))
+        return sorted(names)
+
     def _build_feeds(self) -> Any:
         """The venue WebSocket hub, or None when feeds are off or the floor is not in gateway mode.
 
@@ -2213,7 +2301,15 @@ class Service:
             infra=self.infra(at, spend_usd=spent if spent is not None else ZERO),
             watch=self.watch.summary(at) if self.watch is not None else None,  # leap: watch
             lab=self.lab_block(at),  # leap: lab
+            run=self._run_block(at),  # leap: run clock
         )
+
+    def _run_block(self, at: str) -> dict[str, Any] | None:
+        try:
+            return self.runclock.read(at)
+        except Exception as exc:  # a clock that cannot read is a blank, never a lost checkpoint
+            self.alert("warning", f"run clock failed: {type(exc).__name__}")
+            return None
 
     # ------------------------------------------------------------------ leap: exits
     def opening_intent(self, desk_id: str, key: str) -> dict[str, Any] | None:
@@ -2502,6 +2598,11 @@ class Service:
         return result
 
     def close(self) -> None:
+        if getattr(self, "sandboxes", None) is not None:  # leap: sandbox
+            try:
+                self.sandboxes.sleep_all()
+            except Exception:
+                pass
         if self.feeds is not None:  # leap: feeds
             try:
                 self.feeds.stop()
