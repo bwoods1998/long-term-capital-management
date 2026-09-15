@@ -219,6 +219,11 @@ class Evolution:
         self.clock = clock
         self.config = {**DEFAULT_CONFIG, **dict(config or {})}
         self._ledgers: dict[str, DeskLedger] = {}
+        #: When set, a spawn writes the parent's playbook as a stand-in and hands the model
+        #: rewrite to this scheduler instead of waiting on it: the floor's tick must not hold
+        #: for a five-minute generation. The service runs the job on a worker and applies the
+        #: result on its own thread. None keeps the inline behaviour (tests, one-off scripts).
+        self.rewriter: Callable[[dict[str, Any]], Any] | None = None
 
     # ------------------------------------------------------------------ helpers
     def now(self) -> str:
@@ -553,7 +558,12 @@ class Evolution:
             return None
 
         playbook_path = self.playbooks_dir / f"{desk_id}.md"
-        playbook = self.write_playbook(parent, best_sibling, desk_id, at)
+        deferred = self.rewriter is not None
+        inputs = self.rewrite_inputs(parent, best_sibling, desk_id)
+        if deferred:
+            playbook = inputs["fallback"]  # the parent's playbook stands in until the rewrite lands
+        else:
+            playbook = self.compose_playbook(inputs, desk_id, at)
         if notes:  # leap: lab -- the house view, appended verbatim below the rewritten playbook
             playbook = playbook.rstrip("\n") + "\n\n## House view\n\n" + "\n\n".join(
                 f"- {note}" for note in notes
@@ -579,6 +589,8 @@ class Evolution:
         if experiment_id:  # leap: lab
             payload["experiment_id"] = experiment_id
         self.log.append("evolution", "evolution.spawned", payload, id=f"spawned:{desk_id}", at=at)
+        if deferred:
+            self.rewriter({**inputs, "desk_id": desk_id, "notes": list(notes), "at": at})
         return {"action": "spawned", **payload}
 
     # ------------------------------------------------------------------ playbooks
@@ -604,31 +616,55 @@ class Evolution:
         desk_id: str,
         at: str,
     ) -> str:
-        """Ask the provider to rewrite the parent's playbook. Falls back to copying it."""
+        """Ask the provider to rewrite the parent's playbook, inline. Falls back to copying it."""
+        return self.compose_playbook(self.rewrite_inputs(parent, best_sibling, desk_id), desk_id, at)
+
+    def rewrite_inputs(
+        self, parent: DeskManifest, best_sibling: DeskManifest | None, desk_id: str
+    ) -> dict[str, Any]:
+        """Everything a rewrite reads, gathered here so the model call itself needs no log or
+        disk: the parent's and the best sibling's playbooks and the parent's post-mortems."""
         parent_text = self.read_playbook(parent)
         fallback = parent_text or (
             f"# {desk_id} playbook\n\nInherited from {parent.id}. The desk may edit this file "
             "through the `playbook_write` tool.\n"
         )
-        if self.provider is None:
-            return fallback
         sibling_text = (
             self.read_playbook(best_sibling)
             if best_sibling is not None and best_sibling.id != parent.id
             else ""
         )
-        lessons = self.postmortems(parent.id)
+        return {
+            "family": parent.family,
+            "parent_id": parent.id,
+            "sibling_id": best_sibling.id if best_sibling is not None else None,
+            "parent_text": parent_text,
+            "sibling_text": sibling_text,
+            "lessons": self.postmortems(parent.id),
+            "fallback": fallback,
+        }
+
+    def compose_playbook(self, inputs: Mapping[str, Any], desk_id: str, at: str) -> str:
+        """The model's rewrite from gathered inputs, or the fallback with a published reason.
+        Safe to call from a worker thread: it touches the provider and, on failure, the log's
+        locked append, nothing else."""
+        fallback = str(inputs.get("fallback") or "")
+        if self.provider is None:
+            return fallback
+        parent_id = inputs.get("parent_id")
+        sibling_text = str(inputs.get("sibling_text") or "")
+        lessons = list(inputs.get("lessons") or [])
         instructions = (
             "You rewrite trading playbooks for a public automated trading floor. Produce the "
             f"complete markdown playbook for a new desk variant, {desk_id}, in the "
-            f"{parent.family} family. Keep the parent's structure. Fold in the lessons from the "
+            f"{inputs.get('family')} family. Keep the parent's structure. Fold in the lessons from the "
             "post-mortems and anything the better-performing sibling does differently. Do not "
             "restate the mandate or the risk limits: those live in the manifest and are not "
             "editable. Output only the markdown."
         )
         packet = [
-            f"## Parent playbook ({parent.id})\n\n{parent_text}",
-            f"## Best sibling playbook ({best_sibling.id})\n\n{sibling_text}"
+            f"## Parent playbook ({parent_id})\n\n{inputs.get('parent_text') or ''}",
+            f"## Best sibling playbook ({inputs.get('sibling_id')})\n\n{sibling_text}"
             if sibling_text
             else "## Best sibling playbook\n\n(none)",
             "## Parent post-mortems\n\n" + ("\n\n---\n\n".join(lessons) if lessons else "(none)"),
@@ -654,7 +690,7 @@ class Evolution:
                 "ops.alert",
                 {
                     "level": "warning",
-                    "text": f"playbook for {desk_id} copied from {parent.id}: {exc}",
+                    "text": f"playbook for {desk_id} copied from {parent_id}: {exc}",
                 },
                 id=f"alert:playbook:{desk_id}",
                 at=at,
@@ -669,7 +705,7 @@ class Evolution:
                 "ops.alert",
                 {
                     "level": "warning",
-                    "text": f"playbook for {desk_id} copied from {parent.id}: the rewrite was "
+                    "text": f"playbook for {desk_id} copied from {parent_id}: the rewrite was "
                     + ("empty" if not body else f"incomplete ({getattr(response, 'incomplete_reason', None) or 'output limit'})"),
                 },
                 id=f"alert:playbook:{desk_id}",

@@ -793,6 +793,8 @@ class Service:
             register_secret_literals(self.env().get(name) for name in ("SAIL_API_KEY", "GATEWAY_TOKEN", "CAPITAL_PUBLISH_TOKEN"))
         except Exception:
             pass
+        if bool((self.config.get("evolution") or {}).get("deferred_rewrites", True)):
+            self.evolution.rewriter = self._schedule_rewrite
         self.publisher = publisher if publisher is not None else self._build_publisher()
         self.feeds = self._build_feeds()  # leap: feeds
         self.sandboxes = self._build_sandboxes()  # leap: sandbox
@@ -1887,6 +1889,74 @@ class Service:
         runway = getattr(self, "_runway", None)
         return runway.mode if runway is not None else "capped"
 
+    # ------------------------------------------------------------------ playbook rewrites off the tick
+    def _schedule_rewrite(self, job: Mapping[str, Any]) -> None:
+        """Queue a bred desk's playbook rewrite for the worker thread (`Evolution.rewriter`)."""
+        import queue
+
+        if getattr(self, "_rewrite_jobs", None) is None:
+            self._rewrite_jobs: Any = queue.Queue()
+            self._rewrite_done: Any = queue.Queue()
+        self._rewrite_jobs.put(dict(job))
+        worker = getattr(self, "_rewrite_thread", None)
+        if worker is None or not worker.is_alive():
+            self._rewrite_thread = threading.Thread(
+                target=self._rewrite_worker, name="playbook-rewrites", daemon=True
+            )
+            self._rewrite_thread.start()
+
+    def _rewrite_worker(self) -> None:
+        """Runs the model calls only: no manifest, ledger or state is touched here."""
+        while True:
+            try:
+                job = self._rewrite_jobs.get(timeout=30)
+            except Exception:
+                return  # idle: the next job starts a fresh worker
+            try:
+                text = self.evolution.compose_playbook(job, str(job["desk_id"]), str(job["at"]))
+            except Exception as exc:
+                text = None
+                self.alert("warning", f"playbook rewrite for {job.get('desk_id')} failed: {type(exc).__name__}")
+            self._rewrite_done.put((str(job["desk_id"]), text, list(job.get("notes") or [])))
+
+    def apply_rewrites(self, at: str) -> list[str]:
+        """Apply finished rewrites on the tick's own thread: versioned, published, no lock games."""
+        done = getattr(self, "_rewrite_done", None)
+        if done is None:
+            return []
+        applied: list[str] = []
+        while True:
+            try:
+                desk_id, text, notes = done.get_nowait()
+            except Exception:
+                break
+            manifest = self.manifests.get(desk_id)
+            if manifest is None or not text:
+                continue
+            if notes:
+                text = text.rstrip("\n") + "\n\n## House view\n\n" + "\n\n".join(f"- {n}" for n in notes) + "\n"
+            try:
+                from .desk import PlaybookStore
+
+                result = PlaybookStore(self.root, manifest).write(
+                    text, f"bred from {manifest.parent_id}: rewritten from the parent's playbook and post-mortems"
+                )
+                self.log.append(
+                    manifest.stream,
+                    "desk.playbook_updated",
+                    {
+                        "version": result.get("version"),
+                        "diff": str(result.get("diff", ""))[:20_000],
+                        "reason": str(result.get("reason", ""))[:500],
+                    },
+                    id=f"playbook:{desk_id}:v{result.get('version')}:{at}",
+                    at=at,
+                )
+                applied.append(desk_id)
+            except Exception as exc:
+                self.alert("warning", f"playbook rewrite for {desk_id} not applied: {type(exc).__name__}")
+        return applied
+
     def seed_population(self, at: str) -> list[dict[str, Any]]:
         """Top families up with shadow variants, a couple at a time, at most once per interval.
 
@@ -2164,6 +2234,7 @@ class Service:
             seeded = self.seed_population(at)
             if seeded:
                 result["evolution"] = list(result.get("evolution") or []) + seeded
+        result["rewrites"] = self.apply_rewrites(at)
         # leap: lab -- forecasts are checked against the venue on a slow clock and the day's
         # calibration is published once; the lab sits down at its own evening slot.
         if not stopped:

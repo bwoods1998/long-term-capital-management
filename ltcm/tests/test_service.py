@@ -1701,6 +1701,50 @@ class MemoryScopeTests(ServiceCase):
         self.assertEqual([row["text"] for row in other.memory_read("", 10)], ["Fed hike at 93%"])
 
 
+class DeferredRewriteTests(ServiceCase):
+    """A spawn copies the parent's playbook at once; the model's rewrite lands on a later tick."""
+
+    def setUp(self):
+        super().setUp()
+        self.service.close()
+        self.service = self.build(evolution={"target_variants": 2}, seed_batch=1)
+
+    def test_the_child_is_born_with_the_parents_playbook_and_rewritten_off_the_tick(self):
+        import time
+
+        self.assertIsNotNone(self.service.evolution.rewriter, "the service defers rewrites by default")
+        jobs = []
+        self.service.evolution.rewriter = jobs.append  # hold the job so the two halves are observable
+        result = self.tick()
+        self.assertEqual([a["desk_id"] for a in result["evolution"]], ["earnings-01-2"])
+        self.assertEqual(result["rewrites"], [])
+        child = self.service.manifests["earnings-01-2"]
+        parent_text = (self.root / "playbooks" / "earnings-01.md").read_text(encoding="utf-8")
+        self.assertEqual((self.root / "playbooks" / "earnings-01-2.md").read_text(encoding="utf-8"), parent_text)
+        self.assertEqual([j["desk_id"] for j in jobs], ["earnings-01-2"])
+        self.assertEqual(jobs[0]["parent_id"], "earnings-01")
+
+        # The worker asks the model off the tick (the fake answers "memo body") ...
+        self.service._schedule_rewrite(jobs[0])
+        deadline = time.monotonic() + 5
+        while self.service._rewrite_done.qsize() == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.service._rewrite_done.qsize(), 1)
+        self.assertTrue(any("playbook" in str(c) for c in self.provider.calls))
+        # ... and the next tick applies it on the tick's own thread, versioned and published.
+        result = self.tick(moment(2026, 9, 14, 13, 51))
+        self.assertEqual(result["rewrites"], ["earnings-01-2"])
+        self.assertEqual((self.root / "playbooks" / "earnings-01-2.md").read_text(encoding="utf-8").strip(), "memo body")
+        history = self.root / "playbooks" / "history" / "earnings-01-2"
+        self.assertEqual(sorted(p.name for p in history.iterdir()), ["v1.md", "v2.md"])
+        event = self.service.log.read(stream=child.stream, kind="desk.playbook_updated")[-1]
+        self.assertIn("bred from earnings-01", event.payload["reason"])
+        self.assertEqual(event.payload["version"], 2)
+        self.assertIn("+memo body", event.payload["diff"])
+        # A tick with nothing finished is a no-op, and a failed model call never blocks the tick.
+        self.assertEqual(self.service.apply_rewrites(moment(2026, 9, 14, 13, 52)), [])
+
+
 class LeapLabServiceTests(ServiceCase):
     """leap: lab -- the floor records forecasts, reads memos, runs the lab and publishes it."""
 
