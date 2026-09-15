@@ -32,7 +32,7 @@
     "max_limit_deviation_pct": "0.03"
   },
   "model": {
-    "profile": "pro_flex",
+    "profile": "pro_asap",
     "reasoning_effort": "high",
     "max_output_tokens": 16384,
     "max_turns": 32

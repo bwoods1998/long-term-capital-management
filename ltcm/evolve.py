@@ -74,7 +74,9 @@ SESSION_SHIFTS = (-45, -20, 20, 45)
 #: would fail its first request, not its validation.
 MODEL_PROFILES = tuple(
     profile
-    for profile in ("pro_flex", "k3", "kimi_flex", "glm_flex", "oss_asap", "flash_flex")
+    # asap windows only: a desk that waits minutes in a queue between thoughts is neither a
+    # trader nor something anyone can watch think. The flex windows stay for nightly batch work.
+    for profile in ("pro_asap", "k3", "kimi_asap", "glm_asap", "oss_asap", "flash_asap")
     if profile in PROFILES
 )
 #: One child in three changes model. Any more and a family has no control group left; any fewer
