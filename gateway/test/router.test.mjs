@@ -343,3 +343,27 @@ test('a trade notice is composed from the floor\'s facts, mailed once, and count
   assert.equal(over.headers.get('Retry-After'), '3600');
   assert.equal(sent.length, 4);
 });
+
+test('the gateway signs only the venue paths the floor uses; everything else is refused before signing', async () => {
+  const gate = gateFor();
+  const refused = [
+    ['POST', '/v1/kalshi/portfolio/orders/batched', KALSHI_ORDER],
+    ['POST', '/v1/coinbase/api/v3/brokerage/portfolios/move_funds', { amount: '1' }],
+    ['GET', '/v1/coinbase/api/v3/brokerage/key_permissions', undefined],
+    ['DELETE', '/v1/kalshi/portfolio/positions', undefined],
+    ['POST', '/v1/kalshi/portfolio/balance', {}],
+  ];
+  for (const [method, path, body] of refused) {
+    const response = await route(ask(method, path, body === undefined ? {} : { body }), env(), { gate, now: () => NOW });
+    assert.equal(response.status, 403, `${method} ${path}`);
+  }
+  for (const [method, path] of [
+    ['GET', '/v1/kalshi/portfolio/balance'], ['GET', '/v1/kalshi/markets?status=open&limit=5'],
+    ['GET', '/v1/kalshi/markets/KXTEST-26/orderbook'], ['GET', '/v1/coinbase/api/v3/brokerage/accounts'],
+    ['GET', '/v1/coinbase/api/v3/brokerage/market/products/BTC-USD/candles?granularity=ONE_HOUR'],
+    ['DELETE', '/v1/kalshi/portfolio/orders/ord_1'], ['POST', '/v1/kalshi/account/api_usage_level/upgrade'],
+  ]) {
+    const { response } = await call(ask(method, path), { gate });
+    assert.notEqual(response.status, 403, `${method} ${path}`);
+  }
+});

@@ -14,6 +14,37 @@ export const ORDER_PATHS = {
 
 export const normalizePath = path => String(path || '').replace(/^\/+/, '').replace(/\/+$/, '');
 
+// The only venue paths this gateway will sign. Everything the floor does is here; anything
+// else, a batched order, a funds move, a key management call, is refused before signing, so
+// a bug or a compromise on the box can at most do what the floor already does, inside the caps.
+const SEGMENT = '[A-Za-z0-9._~%-]+';
+export const VENUE_PATHS = {
+  kalshi: [
+    ['GET', /^portfolio\/(balance|positions|fills|settlements)$/],
+    ['GET', /^portfolio\/orders(\/[A-Za-z0-9._~%-]+)?$/],
+    ['GET', new RegExp(`^(markets|series|events)(\\/${SEGMENT}(\\/(orderbook|candlesticks|history|markets))?(\\/${SEGMENT})?)?$`)],
+    ['GET', /^exchange\/(status|schedule)$/],
+    ['POST', /^portfolio\/events\/orders$/],
+    ['POST', /^portfolio\/orders$/],
+    ['POST', /^account\/api_usage_level\/upgrade$/],
+    ['DELETE', /^portfolio\/(events\/)?orders\/[A-Za-z0-9._~%-]+$/],
+  ],
+  coinbase: [
+    ['GET', /^api\/v3\/brokerage\/accounts(\/[A-Za-z0-9._~%-]+)?$/],
+    ['GET', /^api\/v3\/brokerage\/best_bid_ask$/],
+    ['GET', new RegExp(`^api\\/v3\\/brokerage\\/market\\/(products(\\/${SEGMENT}(\\/(candles|ticker))?)?|product_book)$`)],
+    ['GET', /^api\/v3\/brokerage\/orders\/historical\/(fills|batch|[A-Za-z0-9._~%-]+)$/],
+    ['POST', /^api\/v3\/brokerage\/orders$/],
+    ['POST', /^api\/v3\/brokerage\/orders\/batch_cancel$/],
+  ],
+};
+
+/** True when this gateway is willing to sign `method path` for `venue`. */
+export function allowedVenuePath(venue, method, path) {
+  const clean = normalizePath(path).split('?')[0];
+  return (VENUE_PATHS[venue] || []).some(([m, pattern]) => m === method && pattern.test(clean));
+}
+
 /** True when `METHOD venue/path` is a call that can bring a new order into existence. */
 export function createsOrder(venue, method, path) {
   if (String(method).toUpperCase() !== 'POST') return false;

@@ -18,7 +18,7 @@
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
-import { createsOrder, notional, REFERENCE_HEADER } from './caps.mjs';
+import { createsOrder, notional, REFERENCE_HEADER, allowedVenuePath } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as coinbase from './coinbase.mjs';
 
@@ -93,6 +93,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   const target = parseRoute(path);
   if (!target) return fail('Not found.', 404);
   if (!METHODS.includes(request.method)) return fail('Method not allowed.', 405, { Allow: ALLOW });
+  if (!allowedVenuePath(target.venue, request.method, target.path)) {
+    return fail('Not a path this gateway signs.', 403);
+  }
 
   const body = await readBody(request);
   if (body.error) return fail(body.error, 413);
