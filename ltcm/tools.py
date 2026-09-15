@@ -315,6 +315,21 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "limit_price": {"type": "string", "description": "Decimal string; limit orders only."},
             "time_in_force": {"type": "string", "enum": ["day", "gtc", "ioc"]},
             "rationale": {"type": "string", "description": "1-2000 characters, published."},
+            # leap: exits. The plan is enforced by the floor once the entry fills: a target
+            # or a stop becomes an exit order when the mark reaches it, and the time stop
+            # becomes a market exit at that moment, whether or not the desk is in session.
+            "target_price": {
+                "type": "string",
+                "description": "Decimal string. Take profit here: above the entry for a buy, below for a sell.",
+            },
+            "stop_price": {
+                "type": "string",
+                "description": "Decimal string. Cut the loss here: below the entry for a buy, above for a sell.",
+            },
+            "holding_period_hours": {
+                "type": "integer",
+                "description": "1-720. The floor exits at market when this many hours have passed.",
+            },
         },
         ["instrument", "side", "quantity", "order_type", "rationale"],
     ),
@@ -555,6 +570,13 @@ def _propose(
         limit_price = None
     elif limit_price is None:
         raise ToolError("a limit order needs a limit_price")
+    # leap: exits. Optional plan fields; the risk engine refuses an inverted stop or target.
+    holding = arguments.get("holding_period_hours")
+    time_stop_at = None
+    if holding is not None:
+        if isinstance(holding, bool) or not isinstance(holding, int) or not 1 <= holding <= 720:
+            raise ToolError("holding_period_hours must be an integer from 1 to 720")
+        time_stop_at = _hours_after(session.now, holding)
     try:
         intent = OrderIntent.new(
             desk_id=manifest.id,
@@ -568,10 +590,13 @@ def _propose(
             created_at=session.now,
             session_id=session.session_id,
             nonce=session.next_nonce(),
+            target_price=arguments.get("target_price"),
+            stop_price=arguments.get("stop_price"),
+            time_stop_at=time_stop_at,
         )
     except ToolError:
         raise
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, ArithmeticError) as exc:
         raise ToolError(f"invalid order: {exc}") from None
     result = ctx.propose_order(intent)
     if not isinstance(result, dict):
@@ -590,7 +615,28 @@ def _propose(
     if not approved:
         # Verbatim, so the model learns the exact rule it broke rather than a paraphrase.
         out["reasons"] = [str(r) for r in reasons] if isinstance(reasons, list) else [str(reasons)]
+    if intent.has_exit_plan:  # leap: exits
+        out["exit_plan"] = {
+            "target_price": None if intent.target_price is None else format(intent.target_price, "f"),
+            "stop_price": None if intent.stop_price is None else format(intent.stop_price, "f"),
+            "time_stop_at": intent.time_stop_at,
+        }
     return out
+
+
+def _hours_after(stamp: str, hours: int) -> str:
+    """`stamp` plus `hours`, as the same ISO-8601 UTC shape the desk stamps its turns with."""
+    from datetime import datetime, timedelta, timezone
+
+    text_stamp = str(stamp or "").strip()
+    try:
+        moment = datetime.fromisoformat(text_stamp.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ToolError(f"session clock is unreadable: {exc}") from None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    later = (moment + timedelta(hours=int(hours))).astimezone(timezone.utc)
+    return later.strftime("%Y-%m-%dT%H:%M:%S.") + f"{later.microsecond // 1000:03d}Z"
 
 
 # --------------------------------------------------------------------------- publication
@@ -680,6 +726,14 @@ def _summarize(name: str, data: Any) -> str:
         verdict = "approved" if data.get("approved") else "rejected"
         reasons = data.get("reasons") or []
         tail = f": {'; '.join(str(r) for r in reasons)}" if reasons else ""
+        plan = data.get("exit_plan")  # leap: exits
+        if isinstance(plan, dict) and data.get("approved"):
+            parts = [
+                f"target {plan['target_price']}" if plan.get("target_price") else "",
+                f"stop {plan['stop_price']}" if plan.get("stop_price") else "",
+                f"time stop {plan['time_stop_at']}" if plan.get("time_stop_at") else "",
+            ]
+            tail += "; exit plan: " + ", ".join(p for p in parts if p)
         return f"propose_order {data.get('intent_id', '')} {verdict}{tail}"
     if name == "playbook_write":
         return f"playbook updated to version {data.get('version', '?')}"

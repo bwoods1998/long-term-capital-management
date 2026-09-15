@@ -60,6 +60,8 @@ KINDS: dict[str, str] = {
     "desk.postmortem": "public",
     "desk.outcome": "public",
     "desk.session_ended": "public",
+    "desk.watch": "public",  # leap: watch
+    "desk.exit_plan": "public",  # leap: exits
     "risk.decision": "public",
     "risk.review": "public",
     "risk.breaker": "public",
