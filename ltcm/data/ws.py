@@ -276,12 +276,17 @@ class WebSocket:
             if remaining is not None and remaining <= 0:
                 raise TimeoutError("websocket read timed out")
             fin, opcode, payload = self._read_frame(remaining)
-            if opcode == OP_PING:
-                self.pings_answered += 1
-                self.pong(payload)
-                continue
-            if opcode == OP_PONG:
-                self.pongs_received += 1
+            if opcode in (OP_PING, OP_PONG):
+                # A control frame is the peer saying it is alive: the idle clock restarts.
+                # Without this, a market with no trades for thirty seconds looked like a dead
+                # socket and the feed reconnected every idle timeout, however many pings came.
+                if opcode == OP_PING:
+                    self.pings_answered += 1
+                    self.pong(payload)
+                else:
+                    self.pongs_received += 1
+                if timeout is not None:
+                    deadline = time.monotonic() + max(0.0, timeout)
                 continue
             if opcode == OP_CLOSE:
                 code, reason = 1005, ""

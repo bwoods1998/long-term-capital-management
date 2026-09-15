@@ -113,7 +113,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # leap: lab -- the research lab's nightly slot (local time) and its bounds (`ltcm.lab`),
     # and how often forecasts are checked against the venue for resolution, in seconds.
     "lab_time": "20:00",
-    "lab_budget_seconds": 120,
     "lab": {},
     "calibration_interval_seconds": 600,
     "publish": True,
@@ -2136,7 +2135,10 @@ class Service:
                     experiments.extend(self.lab.evaluate(at))
                 experiments.extend(self.lab.propose(at, max_work=1))
             except Exception as exc:
+                # One alert, and the night is over: a lab that fails every tick until midnight
+                # would write the same alert to the public tape every thirty seconds.
                 self.alert("warning", f"lab run failed: {type(exc).__name__}: {exc}")
+                self._save_state(last_lab_day=day, lab_pending_day=None)
             self.reload_manifests()
             if not self.lab.pending(at):
                 self._save_state(last_lab_day=day, lab_pending_day=None)

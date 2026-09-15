@@ -7,6 +7,7 @@ import hashlib
 import socket
 import struct
 import threading
+import time
 import unittest
 
 from ltcm.data import ws
@@ -226,6 +227,24 @@ class ConnectionTests(unittest.TestCase):
         server, sock = self.open()
         with self.assertRaises(TimeoutError):
             sock.recv(timeout=0.2)
+        sock.close()
+
+    def test_a_ping_restarts_the_idle_clock_so_a_quiet_market_is_not_a_dead_socket(self):
+        # Kalshi pings every ten seconds; a market with no trades for a minute sent nothing else.
+        # Four pings 50 ms apart and a message at 250 ms, read with a 150 ms idle timeout: the
+        # message must arrive, because each ping proved the peer alive.
+        server, sock = self.open()
+
+        def chatter() -> None:
+            for _ in range(4):
+                time.sleep(0.05)
+                server.server_end.sendall(server_frame(ws.OP_PING, b"k"))
+            time.sleep(0.05)
+            server.server_end.sendall(server_frame(ws.OP_TEXT, b"late"))
+
+        threading.Thread(target=chatter, daemon=True).start()
+        self.assertEqual(sock.recv(timeout=0.15).text, "late")
+        self.assertEqual(sock.pings_answered, 4)
         sock.close()
 
     def test_messages_generator_stops_on_idle_timeout_and_on_close(self):

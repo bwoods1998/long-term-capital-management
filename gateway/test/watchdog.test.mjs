@@ -79,6 +79,12 @@ test('Sail reports money in fractional cents, so 3106.14 is $31.06', async () =>
   const { mailer, sent } = recorder();
   await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW });
   assert.equal(gate.status(NOW).sail.balance_usd, 31.0614);
+  // The runway the pass computed is on /v1/health, not only in the mail.
+  const sail = gate.status(NOW).sail;
+  assert.equal(sail.reserve_usd, 10);
+  assert.equal(sail.spendable_usd, 21.0614);
+  assert.ok(sail.runway_days > 5 && sail.runway_days < 5.2, String(sail.runway_days));
+  assert.match(sail.run_out_at, /^2026-09-20T/);
   // $21.06 above the reserve at $4.13 a day is five days of runway: the first, gentle warning.
   assert.equal(sent[0].subject, 'LTCM: 5.1 days of Sail credit left \u2014 top up when you can');
   assert.match(sent[0].text, /credit lasts 5\.1 days, to about 2026-09-20 /);

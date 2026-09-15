@@ -48,6 +48,12 @@ Design rules, inherited from the first generation and kept on purpose:
 | `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
 | `sandbox.py` | One forked Sailbox per desk for the code it writes (`run_code`): the lab image, a toolbox that persists, a daily fuse, data-only egress. |
 | `runclock.py` | The public run clock: how long the desks have worked, sessions and decisions, Sail spend, profit per Sail dollar. |
+| `exits.py` | The exit plans the floor keeps: stops, targets and time stops enforced every tick as exposure-reducing orders; Coinbase brackets ride on the order. |
+| `watch.py` | The night desk: triggers over held markets, fills, new markets and headlines, one flash-model verdict on whether to wake a desk. |
+| `notify.py` | Trade notices: one email per live fill and per settlement, folded from the log and sent through the gateway. |
+| `runway.py` | The spend policy: open, throttled or stopped against the Sail credit; no daily cap. |
+| `sailbox.py` | The Sailbox API client the operator scripts and the sandboxes use: create, fork, exec, egress, checkpoints. |
+| `hostinfo.py` | What machine the floor runs on and for how long, for the checkpoint's infra block. |
 | `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
 | `publish.py` | Batches public events and leaderboard rows to the site API. |
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
@@ -92,6 +98,7 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `lab.calibration` | lab | yes | `scope`, `desk_id`, `family`, `generation`, `n`, `brier`, `reliability[]`, `as_of`, `since` |
 | `lab.experiment` | lab | yes | `experiment_id`, `hypothesis`, `family`, `parent_id`, `change`, `variant_desk_id`, `status`, `proposed_at`, `evaluate_after`, `reason?` |
 | `lab.verdict` | lab | yes | `experiment_id`, `status` (`adopted` or `rejected`), `evidence`, `reason`, `as_of` |
+| `floor.mark` | ops | yes | `account_equity`, `account_cash`, `venues[]`, `as_of` (the real account balances, marked every five minutes) |
 | `lab.resolution` | lab | no | `market`, `venue`, `result`, `settled_at`, `source` (the fact a market resolved, recorded once) |
 | `committee.gate` | committee | yes | `desk_id`, `gate`, `passed`, `evidence{}` |
 | `evolution.spawned` | evolution | yes | `desk_id`, `family`, `parent_id`, `generation`, `mutation` |
@@ -99,7 +106,6 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `evolution.promoted` | evolution | yes | `desk_id`, `from`, `to`, `score{}` |
 | `lab.hypothesis` | lab | yes | `hypothesis_id`, `text`, `test_plan` |
 | `lab.result` | lab | yes | `hypothesis_id`, `metrics{}`, `verdict` |
-| `lab.asked` | lab | no | `family`, `as_of` (the lab asked this family for experiments today; bounds one ask a night) |
 | `ops.alert` | ops | yes | `level`, `text` |
 | `ops.budget` | ops | yes | `scope`, `spent_usd`, `cap_usd` |
 | `provider.request` | ops | no | `request_id`, `desk_id`, `profile`, `cost_usd`, `usage{}` |
