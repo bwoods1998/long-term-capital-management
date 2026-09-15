@@ -185,7 +185,7 @@ live every tick, and `ltcm/runway.py` decides only how the floor approaches zero
 
 Runway is `(balance - reserve) / burn`, where burn is the trailing day's settled model cost from
 the provider's own ledger plus `infra_usd_per_day` for the box. The picture is published as
-`ops.budget` (one event per change of mode, cap, dollar of balance or day of runway) and in the
+`ops.budget` (one event per change of mode, cap, dollar of balance or spend, or day of runway) and in the
 checkpoint's `budget` block, so the site shows the credit, the runway and the mode. Every change
 of mode is an `ops.alert`, and the gateway's watchdog mails the owner at a week of runway, at two
 days, and when the floor has stopped.

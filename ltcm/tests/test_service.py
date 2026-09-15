@@ -528,7 +528,7 @@ class RunwayPolicyTests(ServiceCase):
         self.assertEqual(event.payload["mode"], "open")
         self.assertEqual(event.payload["balance_usd"], "279")  # the tape speaks in dollars
         self.assertEqual(event.payload["runway_days"], "385")
-        self.assertEqual(event.payload["spent_usd"], "0.03")
+        self.assertEqual(event.payload["spent_usd"], "0")  # dollars: the checkpoint carries the cents
         checkpoint = self.publisher.checkpoints[-1]
         self.assertEqual(checkpoint["budget"]["mode"], "open")
         self.assertEqual(str(checkpoint["budget"]["balance_usd"]), "279.82")  # exact, here
@@ -540,7 +540,7 @@ class RunwayPolicyTests(ServiceCase):
         self.tick(moment(2026, 9, 14, 13, 52))
         self.assertEqual(len(self.service.log.read(kind="ops.budget")), 1)
         self.assertEqual([e for e in self.service.log.read(kind="ops.alert") if "tick failed" in e.payload["text"]], [])
-        # A dollar of balance, or a cent of spend, is a new picture.
+        # A dollar of balance, or a dollar of spend, is a new picture; a cent of spend is not.
         self.provider.balance = Decimal("270.10")
         self.tick(moment(2026, 9, 14, 13, 53))
         self.assertEqual(len(self.service.log.read(kind="ops.budget")), 2)

@@ -1816,13 +1816,15 @@ class Service:
             if hasattr(provider, "desk_fuse"):
                 provider.desk_fuse = runway.desk_fuse_usd
         # One public event per change of picture, and the picture *is* the payload: the mode,
-        # today's spend to the cent, and the balance, the cap and the runway to the dollar and
-        # the day. An id derived from less than the payload would be reused with different
-        # content the moment the balance moved a cent, and the log rightly refuses that.
+        # and today's spend, the balance, the cap and the runway to the dollar and the day. An id
+        # derived from less than the payload would be reused with different content the moment
+        # the balance moved a cent, and the log rightly refuses that; a payload carrying cents
+        # would be a new public event on every tick of every session. The checkpoint's budget
+        # block carries the exact figures.
         exact = runway.to_payload()
         payload = {
             "scope": "floor",
-            "spent_usd": text(spent),
+            "spent_usd": str(int(spent)),
             "mode": runway.mode,
             "cap_usd": str(int(runway.cap_usd)),
             "balance_usd": None if runway.balance_usd is None else str(int(runway.balance_usd)),
