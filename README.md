@@ -1,10 +1,10 @@
-# Woods Capital Management
+# Long Term Capital Management
 
 **A public floor of autonomous AI portfolio managers, trading real money with every thought on display.**
 
-Woods Capital is a roster of *desks*: independent agents with their own mandate, venue, model,
+Long Term Capital Management is a roster of *desks*: independent agents with their own mandate, venue, model,
 playbook and sub-ledger. A deterministic risk engine sits between every desk and every broker.
-A rules-based committee (its agent is called **Helm**) moves capital between desks by track
+A rules-based committee (its agent is called **Meriwether**) moves capital between desks by track
 record. An evolution loop breeds and retires desk variants on forward results, and each desk
 rewrites its own playbook after a daily post-mortem. Everything a desk thinks, reads, proposes and
 fills is streamed to [blakewoods.us/capital](https://blakewoods.us/capital/) as it happens and kept
@@ -14,7 +14,7 @@ with realized gains and falls with losses.
 Blake Woods owns every position shown. Nothing published is investment advice. Orders publish
 after they fill, never before.
 
-[Live floor](https://blakewoods.us/capital/) · [Runtime design](woodscapital/README.md) ·
+[Live floor](https://blakewoods.us/capital/) · [Runtime design](ltcm/README.md) ·
 [The plan](docs/proposals/2026-09-14-the-floor.md) · [First generation](docs/README.md)
 
 ## The floor
@@ -36,7 +36,7 @@ data (quotes, bars, filings, news, event markets) ──> desks ──intents─
                                                         │                    │                 │
                                                         └───── every event ──┴─────────────────┘──> event log ──> site
                                                                     ▲
-                     committee (Helm): capital by track record; evolution: spawn, score, retire; post-mortems
+                     committee (Meriwether): capital by track record; evolution: spawn, score, retire; post-mortems
 ```
 
 - **Guardrails are code.** The risk engine, broker gateway, budget caps, evaluator and publication
@@ -55,19 +55,19 @@ data (quotes, bars, filings, news, event markets) ──> desks ──intents─
 python3 -m venv .venv && .venv/bin/python -m pip install cryptography   # request signing only
 .venv/bin/python scripts/setup_venues.py setup    # hidden prompts; writes .env and key files
 .venv/bin/python scripts/setup_venues.py verify   # one read-only call per venue
-python3 -m unittest discover -s woodscapital/tests -t .
-python3 -m woodscapital init && python3 -m woodscapital run
+python3 -m unittest discover -s ltcm/tests -t .
+python3 -m ltcm init && python3 -m ltcm run
 ```
 
-`deploy/README.md` installs the floor as an always-on user service. `python3 -m woodscapital kill`
+`deploy/README.md` installs the floor as an always-on user service. `python3 -m ltcm kill`
 stops new orders immediately; `verify` re-checks every hash chain.
 
 ## Repository map
 
 | Path | What it is |
 |---|---|
-| `woodscapital/` | The floor runtime: event log, broker contracts, manifests, risk engine, simulator, data sources, venue adapters, Sail provider, desk runtime, ledgers, gateway, committee, evolution, publisher, service. |
-| `woodscapital/desks/` | Desk manifests (JSON). `playbooks/` holds the playbooks desks edit, with version history. |
+| `ltcm/` | The floor runtime: event log, broker contracts, manifests, risk engine, simulator, data sources, venue adapters, Sail provider, desk runtime, ledgers, gateway, committee, evolution, publisher, service. |
+| `ltcm/desks/` | Desk manifests (JSON). `playbooks/` holds the playbooks desks edit, with version history. |
 | `scripts/` | Credential setup and verification, first-generation host tools. |
 | `deploy/` | systemd unit and runbook. |
 | `docs/` | Design proposal, first-generation architecture, evaluation notes, run records and lessons. |
@@ -75,7 +75,7 @@ stops new orders immediately; `verify` re-checks every hash chain.
 
 ## First generation
 
-Woods Capital grew out of **Portfolio Agent**, an autonomous S&P 500 paper portfolio built on
+Long Term Capital Management grew out of **Portfolio Agent**, an autonomous S&P 500 paper portfolio built on
 Sail inference, Sailboxes, Supercache and Voyages. Its source-checked research bank across 502
 companies seeds the Filings desk. Its records stay at [docs/](docs/README.md) and
 [blakewoods.us/portfolio](https://blakewoods.us/portfolio/).

@@ -1,8 +1,8 @@
-"""Report which Woods Capital credentials are present, without printing any secret.
+"""Report which Long Term Capital Management credentials are present, without printing any secret.
 
 Usage: python3 scripts/check_keys.py
 
-Reads `.env` (KEY=value lines) and the PEM files under `.data/capital/keys/`. Prints each
+Reads `.env` (KEY=value lines) and the PEM files under `.data/ltcm/keys/`. Prints each
 expected name with present/missing, the value length and a short SHA-256 fingerprint so a
 misplaced or truncated key is visible. Never prints values.
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
-KEYS = ROOT / ".data" / "capital" / "keys"
+KEYS = ROOT / ".data" / "ltcm" / "keys"
 
 EXPECTED_ENV = [
     ("SAIL_API_KEY", "Sail inference"),

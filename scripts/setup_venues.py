@@ -1,4 +1,4 @@
-"""Collect Woods Capital venue credentials privately and verify them read-only.
+"""Collect Long Term Capital Management venue credentials privately and verify them read-only.
 
     .venv/bin/python scripts/setup_venues.py setup    # hidden prompts; writes .env and key files
     .venv/bin/python scripts/setup_venues.py verify   # one read-only authenticated call per venue
@@ -30,7 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
-KEYS = ROOT / ".data" / "capital" / "keys"
+KEYS = ROOT / ".data" / "ltcm" / "keys"
 TIMEOUT = 30
 
 ALPACA_PAPER = "https://paper-api.alpaca.markets"
@@ -123,7 +123,7 @@ def multiline_hidden(prompt: str) -> str:
 def setup() -> int:
     if not sys.stdin.isatty():
         raise SystemExit("run setup in an interactive terminal")
-    print("Woods Capital venue setup. Nothing you type is echoed or sent anywhere.")
+    print("Long Term Capital Management venue setup. Nothing you type is echoed or sent anywhere.")
     print("Each section can be skipped if it was saved before. Values are saved as you go.\n")
     existing = read_env()
 

@@ -1,15 +1,15 @@
-# Woods Capital launch record · September 15, 2026
+# Long Term Capital Management launch record · September 15, 2026
 
-Overnight build from the Portfolio Agent repository into **Woods Capital Management**: one
+Overnight build from the Portfolio Agent repository into **Long Term Capital Management**: one
 project, one repository, one site section. This is the state at hand-off, written before the
 owner woke up.
 
 ## What is running
 
-- **Floor service**: `woodscapital.service` (systemd user unit on the MacBook) runs
-  `python -m woodscapital run` every 30 seconds: due desk sessions, paper broker ticks, ledger
+- **Floor service**: `ltcm.service` (systemd user unit on the MacBook) runs
+  `python -m ltcm run` every 30 seconds: due desk sessions, paper broker ticks, ledger
   marks every five minutes, circuit breakers, committee and evolution on their slots, publication
-  to the site every loop. `deploy/README.md` has the commands. `python3 -m woodscapital status`
+  to the site every loop. `deploy/README.md` has the commands. `python3 -m ltcm status`
   prints the same view the site shows.
 - **Mode: paper for every desk.** Six desks are funded from the floor's $5,000 of virtual
   capital: Filings, Earnings on DeepSeek, Earnings on Kimi, Earnings on GLM, Kalshi and Crypto.
@@ -45,12 +45,12 @@ the owner's decision to make anyway. Everything else is ready. To go live:
 
 ```sh
 cd ~/Work/portfolio-agent
-# 1. enable the venues (edit "live_venues": ["kalshi", "coinbase"] in woodscapital/config.json)
+# 1. enable the venues (edit "live_venues": ["kalshi", "coinbase"] in ltcm/config.json)
 # 2. promote the desks; each promotion is a public event on the committee page
-.venv/bin/python -m woodscapital promote kalshi-01 --to live --reason "first live sleeve"
-.venv/bin/python -m woodscapital promote crypto-01 --to live --reason "first live sleeve"
+.venv/bin/python -m ltcm promote kalshi-01 --to live --reason "first live sleeve"
+.venv/bin/python -m ltcm promote crypto-01 --to live --reason "first live sleeve"
 # 3. restart the floor
-systemctl --user restart woodscapital.service
+systemctl --user restart ltcm.service
 ```
 
 The two manifests already carry $200 live sleeves (`capital.usd`), so the first live orders are
@@ -71,9 +71,9 @@ step: watch the first Kalshi order on the committee page, since that path is unp
 
 ## Where things are
 
-- Runtime: `woodscapital/` (README documents modules, event kinds, budget and publication policy).
-- Desk manifests: `woodscapital/desks/`; playbooks: `playbooks/` with version history.
-- Data and state: `.data/capital/` (events, provider, memory, paper books, health). Backups of
-  this directory are not yet automated; the event log verifies with `python3 -m woodscapital verify`.
-- Credentials: `.env` and `.data/capital/keys/` (owner-only). `scripts/setup_venues.py verify`
+- Runtime: `ltcm/` (README documents modules, event kinds, budget and publication policy).
+- Desk manifests: `ltcm/desks/`; playbooks: `playbooks/` with version history.
+- Data and state: `.data/ltcm/` (events, provider, memory, paper books, health). Backups of
+  this directory are not yet automated; the event log verifies with `python3 -m ltcm verify`.
+- Credentials: `.env` and `.data/ltcm/keys/` (owner-only). `scripts/setup_venues.py verify`
   re-checks every venue read-only.
