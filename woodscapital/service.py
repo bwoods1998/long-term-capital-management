@@ -128,6 +128,91 @@ def _clock_minutes(value: str) -> int:
 
 # --------------------------------------------------------------------------- the tool context
 
+
+FACT_TAGS = (
+    "Revenues",
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "GrossProfit",
+    "OperatingIncomeLoss",
+    "NetIncomeLoss",
+    "EarningsPerShareDiluted",
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "NetCashProvidedByUsedInOperatingActivities",
+    "PaymentsToAcquirePropertyPlantAndEquipment",
+    "PaymentsToAcquireProductiveAssets",
+    "PaymentsForRepurchaseOfCommonStock",
+    "PaymentsOfDividends",
+    "PaymentsOfDividendsCommonStock",
+    "CashAndCashEquivalentsAtCarryingValue",
+    "LongTermDebt",
+    "LongTermDebtNoncurrent",
+    "DebtCurrent",
+    "Assets",
+    "Liabilities",
+    "StockholdersEquity",
+    "InventoryNet",
+    "AccountsReceivableNetCurrent",
+    "ResearchAndDevelopmentExpense",
+    "InterestExpense",
+    "IncomeTaxExpenseBenefit",
+)
+
+
+def compact_facts(symbol: str, raw: Mapping[str, Any], *, per_tag: int = 8) -> dict[str, Any]:
+    """Reduce SEC companyfacts to the recent, filed observations of a fixed tag list."""
+    facts = raw.get("facts") if isinstance(raw, Mapping) else None
+    gaap = facts.get("us-gaap") if isinstance(facts, Mapping) else None
+    out: dict[str, Any] = {
+        "symbol": symbol,
+        "entity": raw.get("entityName") if isinstance(raw, Mapping) else None,
+        "cik": raw.get("cik") if isinstance(raw, Mapping) else None,
+        "source": "SEC companyfacts (XBRL); values as filed, USD unless noted",
+        "tags": {},
+    }
+    if not isinstance(gaap, Mapping):
+        return out
+    for tag in FACT_TAGS:
+        entry = gaap.get(tag)
+        if not isinstance(entry, Mapping):
+            continue
+        units = entry.get("units") or {}
+        rows: list[dict[str, Any]] = []
+        for unit, observations in units.items():
+            if unit not in ("USD", "shares", "USD/shares"):
+                continue
+            for obs in observations or []:
+                if not isinstance(obs, Mapping) or obs.get("form") not in ("10-K", "10-Q", "20-F", "40-F"):
+                    continue
+                rows.append(
+                    {
+                        "value": obs.get("val"),
+                        "unit": unit,
+                        "start": obs.get("start"),
+                        "end": obs.get("end"),
+                        "fy": obs.get("fy"),
+                        "fp": obs.get("fp"),
+                        "form": obs.get("form"),
+                        "filed": obs.get("filed"),
+                        "accession": obs.get("accn"),
+                    }
+                )
+        if not rows:
+            continue
+        rows.sort(key=lambda r: (str(r.get("end") or ""), str(r.get("filed") or "")), reverse=True)
+        seen: set[tuple[Any, Any]] = set()
+        kept: list[dict[str, Any]] = []
+        for row in rows:
+            key = (row.get("start"), row.get("end"))
+            if key in seen:
+                continue  # the same period is refiled in later reports; keep the newest filing
+            seen.add(key)
+            kept.append(row)
+            if len(kept) >= per_tag:
+                break
+        out["tags"][tag] = kept
+    return out
+
+
 class DeskContext:
     """One desk's view of the world: the `tools.ToolContext` surface, wired to real components.
 
@@ -191,10 +276,17 @@ class DeskContext:
         return {**{k: v for k, v in row.items() if k != "url"}, **document, "symbol": symbol}
 
     def facts(self, symbol: str) -> dict[str, Any]:
+        """A compact financial fact sheet: recent values for the tags a desk actually uses.
+
+        Raw companyfacts runs to megabytes; this keeps the last eight 10-K/10-Q observations
+        per tag (USD or shares), each with its period, form and filing date, so a desk can build
+        a cash-flow bridge without paying to read the whole XBRL history.
+        """
         edgar = self.service.source("edgar")
         if edgar is None:
             raise RuntimeError("no filings source is configured")
-        return edgar.companyfacts(edgar.cik_for(symbol))
+        raw = edgar.companyfacts(edgar.cik_for(symbol))
+        return compact_facts(symbol, raw)
 
     def calendar(self, days: int) -> list[dict[str, Any]]:
         """The next `days` calendar days, with the session on each one or None when closed."""
