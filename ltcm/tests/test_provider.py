@@ -571,7 +571,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(transport("POST", "/v1/responses", {"background": False}, "idem-1")["id"], "resp_x")
         self.assertEqual(opener.request.get_header("Authorization"), "Bearer sail-key")
         self.assertEqual(opener.request.get_header("Idempotency-key"), "idem-1")
-        self.assertEqual(opener.timeout, 600)  # foreground generation is awaited inline
+        self.assertEqual(opener.timeout, 1500)  # foreground generation is awaited inline, patiently
         transport("GET", "/v2/usage/summary")
         self.assertEqual(opener.timeout, 45)
         self.assertIsNone(opener.request.get_header("Idempotency-key"))

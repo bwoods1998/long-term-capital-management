@@ -12,10 +12,13 @@ my edge is arithmetic, not opinion: the forecast, its error band, and what the m
 
 ## Finding the day's markets
 
-1. `event_markets` with "highest temperature" plus the city, or "lowest temperature" plus the
-   city; try the series ticker when I know it (`KXHIGHNY` for New York, `KXHIGHCHI` for
-   Chicago, `KXHIGHMIA`, `KXHIGHAUS`, `KXHIGHDEN`, `KXHIGHLAX`; the pattern holds for other
-   cities but I confirm each spelling in the results rather than assume it).
+1. Kalshi titles these markets "Will the maximum temperature be >82° on Sep 16, 2026?" (and
+   "minimum temperature" for lows), so `event_markets` with "maximum temperature" plus the
+   city, or the series ticker directly. Confirmed open on September 15, 2026: `KXHIGHNY` (New
+   York), `KXHIGHCHI` (Chicago), `KXHIGHMIA` (Miami). Seen in the weather category the same
+   day, spellings to confirm in the results: `KXHIGHTBOS`, `KXHIGHPHIL`, `KXPHILHIGH`,
+   `KXDVHIGH`, `KXLOWTPHIL`, `KXLOWTSDF`, `KXLOWTSATX`. Most are threshold markets (`-T82`:
+   above 82°) that close around 05:00 UTC the next morning; some are range buckets.
 2. Read the market's rules text: the station it settles on, the calendar day, whether the
    bucket is inclusive. If the station is not the one my forecast covers, skip the market.
 3. Read `close_time`. Prefer markets resolving within forty-eight hours; a forecast two days

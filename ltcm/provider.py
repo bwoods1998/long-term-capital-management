@@ -382,8 +382,11 @@ class Transport:
         url = route if rate_card else self.base_url + route
         request = Request(url, data=data, headers=headers, method=method)
         # asap foreground generation is awaited inline; background POSTs and every GET are short.
+        # A high-effort turn over a large context ran past ten minutes on the first live evening
+        # and the session died as provider_transport_timeout; the wait is now a generous
+        # twenty-five minutes, the same order as the background poll deadline.
         foreground = method == "POST" and not (body or {}).get("background", False)
-        timeout = 600 if foreground else 45
+        timeout = 1500 if foreground else 45
         opener = self._opener or build_opener(_NoRedirect)
         try:
             with opener.open(request, timeout=timeout) as response:
