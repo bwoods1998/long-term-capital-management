@@ -21,7 +21,19 @@ both shapes and on a market with a finer tick grid than one cent.
 
 Only yes bids and no bids rest on the book; an ask for yes is a bid for no at the complement
 (https://docs.kalshi.com/api-reference/market/get-market-orderbook), so
-`yes_ask = 1.00 - best no bid`.
+`yes_ask = 1.00 - best no bid`. Orderbook reads carry `use_yes_price=true`, the flag Kalshi
+asks new integrations to set (https://docs.kalshi.com/getting_started/order_direction,
+"Orderbook pricing convention"): *"The flag defaults to false to preserve the existing
+long-standing behavior; new integrations are encouraged to set it."* The REST snapshot this
+module reads still arrives in no-leg pricing, so the complement above stands; when Kalshi flips
+the default, the no side arrives already on the yes scale and the complement in `orderbook()`
+must go with it. Nothing in the runtime reads `orderbook()` today -- quotes come from the
+market row -- so that migration is one function wide.
+
+Legs. An `Instrument` whose `right` is `"no"` names the NO leg of a market, and `quote()`
+returns it in NO dollars: `no_bid = 1 - yes_ask`, `no_ask = 1 - yes_bid`, `no_last = 1 - last`.
+The risk engine and the simulator therefore price a NO order in the same currency the desk
+quotes it in, and only `adapters/kalshi.py` converts back to the YES scale the wire wants.
 """
 
 from __future__ import annotations
@@ -82,6 +94,46 @@ def price_field(market: dict[str, Any], name: str) -> "Decimal | None":
     if fixed is not None:
         return decimal_or_none(fixed)
     return dollars_from_cents(market.get(name))
+
+
+def band_field(band: dict[str, Any], name: str) -> "Decimal | None":
+    """One edge of a price band in dollars, from `{name}_dollars` if present, else `{name}`.
+
+    Unlike `price_field` this never divides by a hundred: `price_ranges` is documented in
+    dollars on both spellings, and guessing cents here would move an order a hundredfold.
+    """
+    for key in (name + "_dollars", name):
+        value = band.get(key)
+        if value is not None:
+            parsed = decimal_or_none(value)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def parse_price_ranges(rows: Any) -> list[dict[str, Decimal]]:
+    """`price_ranges` as `[{"start", "end", "step"}, ...]` in dollars, unusable bands dropped.
+
+    *"Valid price ranges for orders on this market"*
+    (https://docs.kalshi.com/api-reference/market/get-market). There is no scalar tick size:
+    a market can price in centi-cents inside one band and pennies inside another.
+    """
+    if not isinstance(rows, list):
+        return []
+    bands: list[dict[str, Decimal]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        start = band_field(row, "start")
+        end = band_field(row, "end")
+        step = band_field(row, "step")
+        if start is None or end is None or step is None:
+            continue
+        if step <= 0 or end < start or start < 0 or end > ONE:
+            continue
+        bands.append({"start": start, "end": end, "step": step})
+    bands.sort(key=lambda band: band["start"])
+    return bands
 
 
 def count_field(market: dict[str, Any], name: str) -> "Decimal | None":
@@ -182,7 +234,7 @@ class KalshiMarketData:
         """
         payload = self._get(
             f"/markets/{_ticker(ticker)}/orderbook",
-            {"depth": max(1, min(int(depth), 100))},
+            {"depth": max(1, min(int(depth), 100)), "use_yes_price": "true"},
             what=f"kalshi orderbook {ticker}",
         )
         fixed = payload.get("orderbook_fp")
@@ -204,6 +256,10 @@ class KalshiMarketData:
             "yes_bid": yes_bid,
             "yes_ask": yes_ask,
         }
+
+    def price_ranges(self, ticker: str) -> list[dict[str, Decimal]]:
+        """The market's valid order price bands in dollars, or `[]` when it publishes none."""
+        return self.market(ticker).get("price_ranges") or []
 
     def events(
         self,
@@ -257,11 +313,19 @@ class KalshiMarketData:
             "close_time": row.get("close_time"),
             "expiration_time": row.get("expected_expiration_time") or row.get("expiration_time"),
             "can_close_early": bool(row.get("can_close_early")),
+            "price_ranges": parse_price_ranges(row.get("price_ranges")),
         }
 
     # ------------------------------------------------------------- MarketData
     def quote(self, instrument: Instrument) -> Quote:
-        """The yes bid and ask in dollars for one event contract."""
+        """Bid, ask and last in dollars **on the leg the instrument names**.
+
+        A `right="no"` instrument is quoted in NO dollars, which is the price the desk reasons
+        about and the price the risk engine must size against: `no_bid = 1 - yes_ask`,
+        `no_ask = 1 - yes_bid`, `no_last = 1 - last`. Buying the NO leg at $0.30 and selling
+        the YES leg at $0.70 are the same trade, so the two quotes are complements, never
+        independent readings.
+        """
         if instrument.asset_class != "event":
             raise DataError(f"kalshi quotes only event contracts, not {instrument.asset_class!r}")
         ticker = instrument.market_id or instrument.symbol
@@ -269,6 +333,10 @@ class KalshiMarketData:
         bid, ask, last = row["yes_bid"], row["yes_ask"], row["last_price"]
         if bid is None and ask is None and last is None:
             raise DataError(f"kalshi {ticker}: market carries no prices")
+        if str(instrument.right or "").lower() == "no":
+            # The complement swaps the sides as well as the scale: the best price to sell NO
+            # is the complement of the best price to buy YES.
+            bid, ask, last = _complement(ask), _complement(bid), _complement(last)
         return Quote(
             instrument=instrument,
             bid=bid if bid and bid > 0 else None,
@@ -303,6 +371,11 @@ class KalshiMarketData:
         if volume is None or price is None:
             return None
         return volume * price
+
+
+def _complement(value: "Decimal | None") -> "Decimal | None":
+    """`1 - p` for a price that is there, `None` for one that is not."""
+    return None if value is None else ONE - value
 
 
 def _ticker(value: Any) -> str:
@@ -343,4 +416,6 @@ __all__ = [
     "cents_from_dollars",
     "price_field",
     "count_field",
+    "band_field",
+    "parse_price_ranges",
 ]

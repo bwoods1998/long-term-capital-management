@@ -33,6 +33,27 @@ verified against, and `"v2"` is a one-argument migration once an account confirm
 Money: the balance endpoint reports integer **cents**; contract prices on the legacy order
 surface are integer cents from 1 to 99. Everything crossing this module's boundary is dollars as
 a `Decimal`, converted by `ltcm.data.kalshi.cents_from_dollars` and its inverse.
+
+**Legs.** The v2 endpoint quotes everything from the YES side. From the `BookSide` schema
+(https://docs.kalshi.com/api-reference/orders/create-order-v2): *"Side of the book for an order
+or trade. For event markets, this refers to the YES leg only: `bid` means buy YES, `ask` means
+sell YES. (Selling YES is economically equivalent to buying NO at `1 - price`, but this endpoint
+quotes everything from the YES side.)"* and, from
+https://docs.kalshi.com/getting_started/order_direction, *"`bid` = yes, `ask` = no, always"*
+with *"buy-no and sell-yes both produce long no"*. **There is no `no_price` field on v2.**
+
+So a desk that wants the NO leg names it on the instrument (`right="no"`) and quotes its own
+price in NO dollars; `order_body` sends `side` from the table below and `price = 1 - that`, once:
+
+    desk side   leg    book_side   wire price
+    buy         yes    bid         p
+    sell        yes    ask         p
+    buy         no     ask         1 - p
+    sell        no     bid         1 - p
+
+A market order has no price of its own, so it is crossed as an immediate-or-cancel limit at the
+touch **read from the YES leg**, which is already the wire's scale and is therefore never
+complemented again. Buying NO is selling YES, so the book side decides which touch is crossed.
 """
 
 from __future__ import annotations
@@ -78,7 +99,16 @@ HUNDRED = Decimal(100)
 ORDERS_PATH = "/portfolio/orders"
 ORDERS_PATH_V2 = "/portfolio/events/orders"
 
-CAPABILITIES = {"event", "limit", "gtc", "ioc"}
+CAPABILITIES = {"event", "limit", "gtc", "ioc", "no_leg"}
+
+#: How long a market's `price_ranges` is trusted before it is read again.
+PRICE_RANGE_TTL_SECONDS = 600.0
+
+#: The grid every Kalshi market priced in whole cents accepts, used only when a market
+#: publishes no `price_ranges` of its own.
+DEFAULT_PRICE_RANGES: tuple[dict[str, Decimal], ...] = (
+    {"start": Decimal("0.01"), "end": Decimal("0.99"), "step": Decimal("0.01")},
+)
 
 #: Kalshi's three order states mapped onto this runtime's vocabulary.
 STATUS_MAP: dict[str, str] = {
@@ -114,6 +144,31 @@ def ticker_of(instrument: Instrument) -> str:
     if not ticker:
         raise RejectedOrder("kalshi: the instrument carries no market ticker")
     return ticker
+
+
+def yes_leg(instrument: Instrument) -> Instrument:
+    """The same contract named on its YES leg, for reading the wire's own price scale."""
+    if str(getattr(instrument, "right", "") or "yes").lower() == "yes":
+        return instrument
+    import dataclasses
+
+    return dataclasses.replace(instrument, right="yes")
+
+
+def on_grid(price: Decimal, bands: "list[dict[str, Decimal]] | tuple[dict[str, Decimal], ...]") -> bool:
+    """True when `price` sits on one of the market's `{start, end, step}` bands, inclusive.
+
+    A band is a closed interval and a step, so 0.01..0.99 step 0.01 accepts $0.37 and refuses
+    $0.375, while a centi-cent band accepts both. The arithmetic is exact `Decimal` remainder;
+    a float here would reject a legitimate price roughly one time in a thousand.
+    """
+    for band in bands:
+        start, end, step = band["start"], band["end"], band["step"]
+        if step <= 0 or not (start <= price <= end):
+            continue
+        if (price - start) % step == 0:
+            return True
+    return False
 
 
 def whole_contracts(quantity: Decimal) -> int:
@@ -155,6 +210,9 @@ class KalshiBroker:
         self.market_data = market_data or KalshiMarketData(
             getattr(self.client, "transport", None), host=self.host, clock=clock
         )
+        #: ticker -> (read_at_epoch_seconds, bands). A market's grid does not move intraday,
+        #: so one read covers every order on it for ten minutes.
+        self._price_ranges: dict[str, tuple[float, tuple[dict[str, Decimal], ...]]] = {}
 
     # --------------------------------------------------------------- signing
     def timestamp_ms(self) -> str:
@@ -285,22 +343,23 @@ class KalshiBroker:
         book_side = "bid" if side == "yes" else "ask"
         if intent.side == "sell":
             book_side = "ask" if side == "yes" else "bid"
-        if side != "yes":
-            # Price scaling for the NO leg on the v2 surface is not documented unambiguously;
-            # until a live test settles it, this floor expresses every view on the YES leg.
-            raise RejectedOrder("kalshi v2: only YES-leg contracts are traded on this floor")
         time_in_force = TIF_V2.get(intent.time_in_force, "good_till_canceled")
         if intent.order_type == "limit":
+            # The desk always quotes its own leg, so a NO limit is in NO dollars and crosses to
+            # the YES scale exactly once. Buying NO at $0.30 is `side: "ask"`, `price: 0.7000`.
             price = money(intent.limit_price)
+            if side == "no":
+                price = ONE - price
         else:
-            # v2 has no market order: cross the touch with an immediate-or-cancel limit.
-            quote = self.quote(intent.instrument)
-            price = quote.reference(intent.side)
+            # v2 has no market order: cross the touch with an immediate-or-cancel limit. The
+            # reference is read from the YES leg, which is already the wire's scale, so it is
+            # never complemented -- `book_side` alone says which touch this order crosses.
+            quote = self.quote(yes_leg(intent.instrument))
+            price = quote.reference("buy" if book_side == "bid" else "sell")
             if price is None or price <= 0:
                 raise RejectedOrder("kalshi v2: no quote to price a market order against")
             time_in_force = "immediate_or_cancel"
-        if not (Decimal("0.01") <= price <= Decimal("0.99")):
-            raise RejectedOrder("kalshi v2: price must be between 0.01 and 0.99 dollars")
+        self.require_on_grid(ticker, price)
         body = {
             "ticker": ticker,
             "side": book_side,
@@ -313,6 +372,40 @@ class KalshiBroker:
         if intent.side == "sell":
             body["reduce_only"] = True
         return body
+
+    def price_ranges(self, ticker: str) -> tuple[dict[str, Decimal], ...]:
+        """The market's valid order price bands, cached for ten minutes per ticker.
+
+        *"Valid price ranges for orders on this market"*, an array of `{start, end, step}` in
+        dollars on `GET /markets/{ticker}`. There is **no scalar tick size** on a Kalshi market
+        and some price in centi-cents, so a hardcoded penny grid rejects legitimate orders.
+        A market that publishes none, or a read that fails, falls back to the penny grid rather
+        than letting an unpriced order through.
+        """
+        now = float(self.clock())
+        cached = self._price_ranges.get(ticker)
+        if cached is not None and now - cached[0] < PRICE_RANGE_TTL_SECONDS:
+            return cached[1]
+        bands: tuple[dict[str, Decimal], ...] = DEFAULT_PRICE_RANGES
+        reader = getattr(self.market_data, "price_ranges", None)
+        if reader is not None:
+            try:
+                found = reader(ticker)
+            except Exception:
+                # A market-data failure must not decide an order's price. Fall back, and let
+                # the venue have the last word on the grid.
+                found = None
+            if found:
+                bands = tuple(found)
+        self._price_ranges[ticker] = (now, bands)
+        return bands
+
+    def require_on_grid(self, ticker: str, price: Decimal) -> None:
+        """Refuse a price the market cannot accept, before it costs a rejected order."""
+        if not on_grid(price, self.price_ranges(ticker)):
+            raise RejectedOrder(
+                f"kalshi v2: {format(price, 'f')} is not on {ticker}'s price grid"
+            )
 
     def submit(self, intent: OrderIntent) -> Order:
         """Create an order. `client_order_id` is the intent id, so a retry is never a new order."""
@@ -437,6 +530,65 @@ class KalshiBroker:
             at=iso(row.get("created_time") or row.get("ts") or 0),
         )
 
+    # ----------------------------------------------------------- settlements
+    def settlements(self, since: "str | None" = None) -> list[dict[str, Any]]:
+        """`GET /portfolio/settlements`, oldest first: which side won, and what it paid.
+
+        https://docs.kalshi.com/api-reference/portfolio/get-portfolio-settlements. A settled
+        binary contract is worth $1.00 or $0.00 and the venue pays it without a trade, so no
+        fill is ever reported for it -- this endpoint is the only record that a position closed.
+
+        Each row is normalized to dollars and this runtime's vocabulary:
+        `{"ticker", "result", "yes_count", "no_count", "revenue", "settled_time"}`, where
+        `result` is `yes`, `no` or `""` for a market that resolved to neither (a scalar, or a
+        void).
+        """
+        params: dict[str, Any] = {"limit": 1000}
+        if since:
+            params["min_ts"] = int(_epoch_seconds(since))
+        payload = self._call(
+            "GET", "/portfolio/settlements", params=params, what="kalshi settlements", ok=(200,)
+        )
+        rows = payload.get("settlements") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            parsed = self.parse_settlement(row)
+            if parsed is not None:
+                out.append(parsed)
+        out.sort(key=lambda row: (row["settled_time"], row["ticker"]))
+        return out
+
+    def parse_settlement(self, row: Any) -> "dict[str, Any] | None":
+        """One settlement row, or None when it names no market or carries no settled time."""
+        if not isinstance(row, dict):
+            return None
+        ticker = str(row.get("ticker") or row.get("market_ticker") or "").strip().upper()
+        settled = row.get("settled_time") or row.get("settled_ts") or row.get("determined_time")
+        if not ticker or not settled:
+            return None
+        result = str(row.get("market_result") or row.get("result") or "").strip().lower()
+        if result not in ("yes", "no"):
+            result = ""
+        revenue = (
+            dec(row.get("revenue_dollars"))
+            or dollars_from_cents(row.get("revenue"))
+            or money(0)
+        )
+        try:
+            stamp = iso(settled)
+        except Exception:
+            return None
+        return {
+            "ticker": ticker,
+            "result": result,
+            "yes_count": dec(row.get("yes_count_fp")) or dec(row.get("yes_count")) or money(0),
+            "no_count": dec(row.get("no_count_fp")) or dec(row.get("no_count")) or money(0),
+            "revenue": revenue,
+            "settled_time": stamp,
+        }
+
     # --------------------------------------------------------------- parsing
     def parse_order(self, row: dict[str, Any], *, intent: "OrderIntent | None" = None) -> Order:
         ticker = str(row.get("ticker") or (ticker_of(intent.instrument) if intent else "")).upper()
@@ -526,6 +678,10 @@ __all__ = [
     "contract_side",
     "ticker_of",
     "whole_contracts",
+    "yes_leg",
+    "on_grid",
+    "DEFAULT_PRICE_RANGES",
+    "PRICE_RANGE_TTL_SECONDS",
     "ORDERS_PATH",
     "ORDERS_PATH_V2",
     "STATUS_MAP",

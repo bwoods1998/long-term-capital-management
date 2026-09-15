@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from ltcm.events import EventLog
 from ltcm.provider import (
     PROFILES,
+    RATE_CARD_URL,
     BudgetExceeded,
     FunctionCall,
     Provider,
@@ -96,7 +97,7 @@ class ProviderCase(unittest.TestCase):
 
     def provider(self, transport, **kwargs):
         kwargs.setdefault("floor_cap_usd_per_day", "25")
-        return Provider(
+        built = Provider(
             self.root / "provider.sqlite",
             transport=transport,
             clock=lambda: self.time[0],
@@ -104,6 +105,8 @@ class ProviderCase(unittest.TestCase):
             sleep=self.slept.append,
             **kwargs,
         )
+        self.addCleanup(built.close)
+        return built
 
     def respond(self, provider, profile="pro_flex", key="s1:0", cap="2.50", items=None, **kwargs):
         return provider.respond(
@@ -133,6 +136,7 @@ class RateCardTests(unittest.TestCase):
             "glm_flex": ("zai-org/GLM-5.3", "flex", "0.40", "0.08", "1.80"),
             "glm_flash_asap": ("zai-org/GLM-5.3-Flash", "asap", "0.11", "0.02", "0.35"),
             "glm_flash_flex": ("zai-org/GLM-5.3-Flash", "flex", "0.05", "0.01", "0.18"),
+            "oss_asap": ("openai/gpt-oss-120b", "asap", "0.06", "0.03", "0.40"),
         }
         self.assertEqual(PROFILES, expected)
         for name, (_, window, *prices) in PROFILES.items():
@@ -505,13 +509,19 @@ class ParsingTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
-    def test_only_three_routes_are_reachable(self):
+    def test_only_the_allowlisted_routes_are_reachable(self):
         transport = Transport(key_source=lambda: "k")
         self.assertTrue(transport.allowed("POST", "/v1/responses"))
         self.assertTrue(transport.allowed("GET", "/v1/responses/resp_abc123"))
         self.assertTrue(transport.allowed("GET", "/v2/usage/summary"))
         self.assertTrue(transport.allowed("GET", "/v2/usage/summary?range=7d"))
+        self.assertTrue(transport.allowed("GET", RATE_CARD_URL))
         for method, route in (
+            ("POST", RATE_CARD_URL),
+            ("GET", "https://docs.sailresearch.com/"),
+            ("GET", "https://docs.sailresearch.com/support.md"),
+            ("GET", "https://docs.sailresearch.com/pricing.md?x=1"),
+            ("GET", "http://docs.sailresearch.com/pricing.md"),
             ("GET", "/v1/responses"),
             ("POST", "/v1/responses/resp_abc"),
             ("DELETE", "/v1/responses/resp_abc"),
@@ -580,6 +590,130 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(TransportError) as caught:
             transport("GET", "/v2/usage/summary")
         self.assertEqual(caught.exception.code, "provider_key_missing")
+
+
+class RateCardDriftTests(ProviderCase):
+    """`rate_card_check` diffs `PROFILES` against the published card, and only alerts."""
+
+    #: One row per profile the floor holds, in the page's `aria-label` shape.
+    LIVE = {
+        ("DeepSeek V4 Pro", "Default (ASAP)"): ("0.92", "0.04", "2.77"),
+        ("DeepSeek V4 Pro", "Flex"): ("0.46", "0.02", "1.39"),
+        ("DeepSeek V4 Flash", "Default (ASAP)"): ("0.09", "0.02", "0.18"),
+        ("DeepSeek V4 Flash", "Flex"): ("0.05", "0.01", "0.09"),
+        ("Kimi K2.6", "Default (ASAP)"): ("1.00", "0.20", "4.00"),
+        ("Kimi K2.6", "Balanced"): ("0.45", "0.20", "3.00"),
+        ("Kimi K2.6", "Flex"): ("0.35", "0.10", "2.00"),
+        ("Kimi K3", "Default (ASAP)"): ("2.50", "0.25", "12.50"),
+        ("GLM-5.3", "Default (ASAP)"): ("0.98", "0.18", "3.08"),
+        ("GLM-5.3", "Balanced"): ("0.50", "0.12", "2.50"),
+        ("GLM-5.3", "Flex"): ("0.40", "0.08", "1.80"),
+        ("GLM-5.3 Flash", "Default (ASAP)"): ("0.11", "0.02", "0.35"),
+        ("GLM-5.3 Flash", "Flex"): ("0.05", "0.01", "0.18"),
+        ("gpt-oss-120b", "Default (ASAP)"): ("0.06", "0.03", "0.40"),
+    }
+
+    def page(self, overrides=None, drop=()):
+        rows = dict(self.LIVE)
+        rows.update(overrides or {})
+        for key in drop:
+            rows.pop(key, None)
+        lines = ["# Pricing", ""]
+        for (model, window), (inp, cached, out) in rows.items():
+            lines.append(
+                f'<tr aria-label="{model} {window} pricing: input ${inp}, '
+                f'cached ${cached}, output ${out} per 1M tokens."><td>{model}</td></tr>'
+            )
+        return "\n".join(lines)
+
+    def checker(self, payload):
+        return self.provider(lambda method, route, body=None, idempotency_key=None: payload)
+
+    def alerts(self):
+        return [e.payload for e in self.log.read(kind="ops.alert", limit=100)]
+
+    def test_a_card_that_matches_raises_nothing(self):
+        result = self.checker({"text": self.page()}).rate_card_check()
+        self.assertEqual(result["drift"], [])
+        self.assertEqual(result["unchecked"], [])
+        self.assertEqual(result["checked"], len(PROFILES))
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_price_that_moved_is_named_in_an_alert(self):
+        page = self.page({("GLM-5.3", "Default (ASAP)"): ("1.40", "0.26", "4.40")})
+        result = self.checker({"text": page}).rate_card_check()
+        self.assertEqual([d["profile"] for d in result["drift"]], ["glm_asap"])
+        self.assertEqual(result["drift"][0]["published"], ["1.40", "0.26", "4.40"])
+        self.assertEqual(result["drift"][0]["ours"], ["0.98", "0.18", "3.08"])
+        texts = [a["text"] for a in self.alerts()]
+        self.assertEqual(len(texts), 1)
+        self.assertIn("glm_asap", texts[0])
+        self.assertIn("0.98/0.18/3.08", texts[0])
+        self.assertIn("1.40/0.26/4.40", texts[0])
+        self.assertEqual(self.alerts()[0]["level"], "error")
+
+    def test_a_profile_with_no_published_row_is_flagged_rather_than_passed(self):
+        page = self.page(drop=[("gpt-oss-120b", "Default (ASAP)")])
+        result = self.checker({"text": page}).rate_card_check()
+        self.assertEqual(result["unchecked"], ["oss_asap"])
+        self.assertEqual(self.alerts()[0]["level"], "warn")
+        self.assertIn("no published row for oss_asap", self.alerts()[0]["text"])
+
+    def test_a_page_whose_format_changed_fails_loudly(self):
+        result = self.checker({"text": "# Pricing\n\nSee the table."}).rate_card_check()
+        self.assertEqual(result["error"], "unparsed")
+        self.assertIn("format has changed", self.alerts()[0]["text"])
+
+    def test_the_check_never_edits_the_profiles(self):
+        before = dict(PROFILES)
+        page = self.page({("Kimi K3", "Default (ASAP)"): ("9.99", "9.99", "9.99")})
+        self.checker({"text": page}).rate_card_check()
+        self.assertEqual(PROFILES, before)
+
+    def test_a_transport_failure_is_quiet(self):
+        def broken(method, route, body=None, idempotency_key=None):
+            raise TransportError("provider_transport_timeout")
+
+        result = self.provider(broken).rate_card_check()
+        self.assertEqual(result["error"], "TransportError")
+        self.assertEqual(result["drift"], [])
+        self.assertEqual(self.alerts(), [])
+
+    def test_the_page_is_fetched_from_the_docs_url_only(self):
+        seen = []
+
+        def transport(method, route, body=None, idempotency_key=None):
+            seen.append((method, route))
+            return {"text": self.page()}
+
+        self.provider(transport).rate_card_check()
+        self.assertEqual(seen, [("GET", RATE_CARD_URL)])
+
+    def test_a_plain_string_body_is_accepted_too(self):
+        result = self.checker(self.page()).rate_card_check()
+        self.assertEqual(result["drift"], [])
+        self.assertEqual(result["rows"], len(self.LIVE))
+
+    def test_punctuation_in_a_model_name_is_not_a_price_change(self):
+        page = self.page().replace("GLM-5.3 Flash", "GLM 5.3 flash")
+        result = self.checker({"text": page}).rate_card_check()
+        self.assertEqual(result["drift"], [])
+        self.assertEqual(result["unchecked"], [])
+
+
+class RateCardTransportTests(unittest.TestCase):
+    def test_the_rate_card_is_fetched_as_text_without_the_key(self):
+        class TextResponse(_Response):
+            def __init__(self, text):
+                self.raw = text.encode("utf-8")
+
+        opener = _Opener(TextResponse('aria-label="GLM-5.3 Flex pricing: ..."'))
+        transport = Transport(key_source=lambda: "sail-key", opener=opener)
+        payload = transport("GET", RATE_CARD_URL)
+        self.assertIn("aria-label", payload["text"])
+        self.assertEqual(opener.request.full_url, RATE_CARD_URL)
+        self.assertIsNone(opener.request.get_header("Authorization"))
+        self.assertEqual(opener.timeout, 45)
 
 
 def _no_key():

@@ -127,6 +127,11 @@ def load_env(path: str | Path) -> dict[str, str]:
     return out
 
 
+#: An `event_resolution` session fires at most this often per desk, however many markets
+#: settle in one afternoon. The manifest caps orders; this caps the model spend behind them.
+RESOLUTION_COOLDOWN_SECONDS = 1800
+
+
 def _clock_minutes(value: str) -> int:
     return int(value[:2]) * 60 + int(value[3:5])
 
@@ -376,18 +381,22 @@ class DeskContext:
         )
 
     def outcomes(self, limit: int) -> list[dict[str, Any]]:
-        """The desk's own closed record: fills newest last, each with the order it came from."""
-        fills = [
-            event.payload
-            for event in self.service.log.read(kind="broker.fill", limit=10_000)
-            if event.payload.get("desk_id") == self.desk_id
-        ]
-        orders = {row["order_id"]: row for row in self.service.gateway.orders(self.desk_id)}
+        """The desk's scored record, newest first: one row per resolved position.
+
+        A `desk.outcome` is written when a market the desk held settles (see
+        `Gateway.poll_settlements`), and carries the entry, the exit, the size, the realized
+        P&L, how long it was held and the sentence the desk gave for the trade. This is what
+        the prompt's "Recent outcomes" block and the post-mortem score, so a desk that has
+        closed nothing yet sees an empty list rather than a list of its own open trades.
+        """
         rows = [
-            {**fill, "order": orders.get(fill.get("order_id"), {}).get("status")}
-            for fill in fills
+            dict(event.payload)
+            for event in self.service.log.read(
+                stream=self.manifest.stream, kind="desk.outcome", limit=10_000
+            )
         ]
-        return rows[-max(1, int(limit)) :]
+        rows.reverse()
+        return rows[: max(1, int(limit))]
 
     # -- memory and writing ------------------------------------------------
     def memory_read(self, query: str, limit: int) -> list[dict[str, Any]]:
@@ -926,11 +935,50 @@ class Service:
                 return True
         return False
 
-    def due_sessions(self, at: str) -> list[tuple[DeskManifest, str]]:
-        """(manifest, trigger) for every cadence slot that has come round today and not run.
+    def last_session_at(self, manifest: DeskManifest, trigger: str | None = None) -> str | None:
+        """When this desk last opened a session, for any trigger or for one named trigger."""
+        latest: str | None = None
+        for event in self.log.read(
+            stream=manifest.stream, kind="desk.session_started", limit=10_000
+        ):
+            if trigger is not None and event.payload.get("trigger") != trigger:
+                continue
+            if latest is None or event.at > latest:
+                latest = event.at
+        return latest
 
-        Triggers are `cadence:HH:MM` for a scheduled slot and `postmortem` for the daily review,
-        both inside the desk runtime's trigger grammar.
+    def resolution_due(self, manifest: DeskManifest, at: str) -> bool:
+        """True when an outcome this desk has not sat down with has appeared.
+
+        A settled market is the only forward result the floor gets, so a desk that declares the
+        `event_resolution` trigger is woken by a new `desk.outcome` on its own stream rather
+        than by the clock -- markets resolve on weekends too, so `weekdays_only` does not gate
+        this arm. A busy settlement afternoon could otherwise burn the desk's daily model
+        budget in an hour, so the trigger fires at most once every thirty minutes per desk.
+        """
+        if "event_resolution" not in manifest.cadence.triggers:
+            return False
+        since = self.last_session_at(manifest)
+        outcomes = [
+            event
+            for event in self.log.read(stream=manifest.stream, kind="desk.outcome", limit=10_000)
+            if since is None or event.at > since
+        ]
+        if not outcomes:
+            return False
+        last_resolution = self.last_session_at(manifest, "event_resolution")
+        if last_resolution is not None:
+            elapsed = (parse_iso(at) - parse_iso(last_resolution)).total_seconds()
+            if elapsed < RESOLUTION_COOLDOWN_SECONDS:
+                return False
+        return True
+
+    def due_sessions(self, at: str) -> list[tuple[DeskManifest, str]]:
+        """(manifest, trigger) for every session that has come due and not run.
+
+        Triggers are `cadence:HH:MM` for a scheduled slot, `postmortem` for the daily review,
+        and `event_resolution` when a market the desk held has settled since it last sat down
+        -- all three inside the desk runtime's trigger grammar.
         """
         due: list[tuple[DeskManifest, str]] = []
         catchup = int(self.config["session_catchup_seconds"])
@@ -938,6 +986,8 @@ class Service:
         for desk_id, manifest in sorted(self.active_manifests().items()):
             tz = ZoneInfo(manifest.cadence.timezone)
             local = parse_iso(at).astimezone(tz)
+            if self.resolution_due(manifest, at):
+                due.append((manifest, "event_resolution"))
             if manifest.cadence.weekdays_only and local.weekday() >= 5:
                 continue
             day = local.date().isoformat()
@@ -1095,10 +1145,22 @@ class Service:
             "evolution": [],
             "published": None,
             "budget": None,
+            "settlements": [],
+            "rate_card": None,
             "kill_switch": self.gateway.kill_switch_engaged(),
         }
 
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
+        # Settlements are swept before the schedule so a market that resolved since the last
+        # tick wakes its desk on this tick rather than the next one.
+        result["settlements"] = self.sweep_settlements(at)
+        # A desk that has never been funded, or a roster change, gets an allocation right away, before any
+        # session starts, so a desk never sees an unfunded book;
+        # the weekly resize by track record still only happens on the committee's day.
+        previous, _ = self.committee.last_allocation()
+        if any(desk_id not in previous for desk_id in self.manifests):
+            self.committee.allocate(at)
+            result["committee"] = True
         if not result["kill_switch"]:
             due = self.due_sessions(at)
             self.start_sessions(due)
@@ -1133,12 +1195,9 @@ class Service:
                     self.alert("warning", f"event index warm-up failed: {type(exc).__name__}")
 
         day = local.date().isoformat()
-        # A desk that has never been funded, or a roster change, gets an allocation right away;
-        # the weekly resize by track record still only happens on the committee's day.
-        previous, _ = self.committee.last_allocation()
-        if any(desk_id not in previous for desk_id in self.manifests):
-            self.committee.allocate(at)
-            result["committee"] = True
+        if state.get("last_rate_card_day") != day:
+            result["rate_card"] = self.check_rate_card()
+            self._save_state(last_rate_card_day=day)
         if self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
             # Meriwether writes every day; capital is only resized on the committee's weekday.
             resize_day = local.weekday() == int(self.config["committee_weekday"])
@@ -1158,6 +1217,40 @@ class Service:
         result["published"] = self.publish()
         self.health(at, result)
         return result
+
+    def sweep_settlements(self, at: str) -> list[str]:
+        """Close resolved event markets on every venue that reports settlements.
+
+        Returns the fill ids written. A venue with no settlement endpoint, or a sweep that
+        fails, is a no-op: nothing here may stop the rest of the tick.
+        """
+        written: list[str] = []
+        for venue in sorted(self.gateway.brokers):
+            broker = self.gateway.brokers[venue]
+            if getattr(broker, "settlements", None) is None:
+                continue
+            try:
+                written.extend(
+                    row["fill_id"] for row in self.gateway.poll_settlements(venue, at)
+                )
+            except Exception as exc:
+                self.alert("warning", f"settlement sweep on {venue} failed: {exc}")
+        return written
+
+    def check_rate_card(self) -> dict[str, Any] | None:
+        """Ask the provider to diff its frozen price list against Sail's published one.
+
+        Once a day, and quiet: a provider without the check, or a check that cannot reach the
+        docs, reports nothing. Drift is an `ops.alert`, never an edit to `PROFILES`.
+        """
+        checker = getattr(self.provider, "rate_card_check", None)
+        if checker is None:
+            return None
+        try:
+            return checker()
+        except Exception as exc:
+            self.alert("warning", f"rate card check failed: {type(exc).__name__}: {exc}")
+            return None
 
     @staticmethod
     def _due(local: datetime, clock_time: str, last_day: Any, day: str) -> bool:
@@ -1489,6 +1582,21 @@ class _PaperRouter:
         out: list[Any] = []
         for broker in self.brokers.values():
             out.extend(broker.fills(since))
+        return out
+
+    def settle_event(self, market_id: str, payout_per_contract: Any, *, now: Any = None) -> list[Any]:
+        """Settle one resolved market in every paper book. A book with no position pays nothing.
+
+        `payout_per_contract` is the **yes** value; each simulator pays its NO holdings the
+        complement. Fanning out is safe because a book that never traded the market returns
+        no fills, and it keeps the router from having to know which desk held what.
+        """
+        out: list[Any] = []
+        for broker in self.brokers.values():
+            settle = getattr(broker, "settle_event", None)
+            if settle is None:
+                continue
+            out.extend(settle(market_id, payout_per_contract, now=now))
         return out
 
     def tick(self) -> None:

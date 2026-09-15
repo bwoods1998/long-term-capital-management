@@ -61,6 +61,7 @@ Streams: `desk:<id>`, `ledger:<id>`, `risk`, `broker:<venue>`, `committee`, `evo
 | `desk.intent` | desk | after fill | `intent_id`, `instrument`, `side`, `quantity`, `order_type`, `limit_price?`, `rationale` |
 | `desk.playbook_updated` | desk | yes | `version`, `diff`, `reason` |
 | `desk.postmortem` | desk | yes | `period`, `text`, `lessons[]` |
+| `desk.outcome` | desk | yes | `instrument`, `market_id`, `result`, `entry_price`, `exit_price`, `quantity`, `pnl`, `held_for_hours`, `rationale_excerpt` |
 | `desk.session_ended` | desk | yes | `session_id`, `requests`, `cost_usd`, `reason` |
 | `risk.decision` | risk | yes | `intent_id`, `desk_id`, `approved`, `reasons[]` |
 | `risk.review` | risk | yes | `intent_id`, `desk_id`, `verdict` (`approve` or `block`), `reason`, `model` |

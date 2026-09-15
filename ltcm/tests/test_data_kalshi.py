@@ -220,3 +220,95 @@ class QuoteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NO_CONTRACT = Instrument("event", "CPI", "kalshi", market_id=TICKER, right="no")
+YES_CONTRACT = Instrument("event", "CPI", "kalshi", market_id=TICKER, right="yes")
+
+
+class NoLegQuoteTests(unittest.TestCase):
+    """A `right="no"` instrument is quoted in NO dollars: the complement, sides swapped."""
+
+    def test_the_no_quote_is_the_complement_of_the_yes_quote(self):
+        source, _ = data({f"{BASE}/markets/{TICKER}": CENTS_MARKET})
+        yes = source.quote(CONTRACT)
+        source, _ = data({f"{BASE}/markets/{TICKER}": CENTS_MARKET})
+        no = source.quote(NO_CONTRACT)
+        # yes_bid 0.38 / yes_ask 0.41 -> no_bid 0.59 / no_ask 0.62.
+        self.assertEqual(no.bid, Decimal("1") - yes.ask)
+        self.assertEqual(no.ask, Decimal("1") - yes.bid)
+        self.assertEqual(no.last, Decimal("1") - yes.last)
+        self.assertEqual(no.bid, Decimal("0.59"))
+        self.assertEqual(no.ask, Decimal("0.62"))
+        self.assertEqual(no.last, Decimal("0.60"))
+
+    def test_the_two_legs_always_sum_to_a_dollar(self):
+        source, _ = data({f"{BASE}/markets/{TICKER}": CENTS_MARKET})
+        no = source.quote(NO_CONTRACT)
+        source, _ = data({f"{BASE}/markets/{TICKER}": CENTS_MARKET})
+        yes = source.quote(CONTRACT)
+        self.assertEqual(no.reference("buy") + yes.reference("sell"), Decimal("1"))
+        self.assertEqual(no.reference("sell") + yes.reference("buy"), Decimal("1"))
+
+    def test_an_explicit_yes_leg_is_quoted_like_a_bare_instrument(self):
+        source, _ = data({f"{BASE}/markets/{TICKER}": CENTS_MARKET})
+        quote = source.quote(YES_CONTRACT)
+        self.assertEqual((quote.bid, quote.ask), (Decimal("0.38"), Decimal("0.41")))
+
+    def test_a_missing_yes_side_leaves_the_matching_no_side_missing(self):
+        row = {"market": dict(CENTS_MARKET["market"])}
+        row["market"].pop("yes_ask")
+        source, _ = data({f"{BASE}/markets/{TICKER}": row})
+        quote = source.quote(NO_CONTRACT)
+        self.assertIsNone(quote.bid)  # no_bid = 1 - yes_ask, and there is no yes ask
+        self.assertEqual(quote.ask, Decimal("0.62"))
+
+
+class PriceRangeTests(unittest.TestCase):
+    def test_bands_are_read_in_dollars_and_sorted(self):
+        row = {"market": dict(CENTS_MARKET["market"])}
+        row["market"]["price_ranges"] = [
+            {"start": "0.50", "end": "0.99", "step": "0.01"},
+            {"start": "0.0001", "end": "0.4999", "step": "0.0001"},
+        ]
+        source, _ = data({f"{BASE}/markets/{TICKER}": row})
+        bands = source.price_ranges(TICKER)
+        self.assertEqual(
+            bands,
+            [
+                {"start": Decimal("0.0001"), "end": Decimal("0.4999"), "step": Decimal("0.0001")},
+                {"start": Decimal("0.50"), "end": Decimal("0.99"), "step": Decimal("0.01")},
+            ],
+        )
+
+    def test_unusable_bands_are_dropped_rather_than_guessed(self):
+        row = {"market": dict(CENTS_MARKET["market"])}
+        row["market"]["price_ranges"] = [
+            {"start": "0.01", "end": "0.99"},          # no step
+            {"start": "0.01", "end": "0.99", "step": "0"},   # zero step
+            {"start": "0.90", "end": "0.10", "step": "0.01"},  # inverted
+            {"start": "0.01", "end": "2.00", "step": "0.01"},  # above a dollar
+            {"start": "0.01", "end": "0.99", "step": "0.01"},
+        ]
+        source, _ = data({f"{BASE}/markets/{TICKER}": row})
+        self.assertEqual(len(source.price_ranges(TICKER)), 1)
+
+    def test_a_market_without_bands_reports_none(self):
+        source, _ = data({f"{BASE}/markets/{TICKER}": CENTS_MARKET})
+        self.assertEqual(source.price_ranges(TICKER), [])
+
+    def test_the_dollar_spelling_is_preferred_and_never_divided_by_a_hundred(self):
+        row = {"market": dict(CENTS_MARKET["market"])}
+        row["market"]["price_ranges"] = [
+            {"start_dollars": "0.01", "end_dollars": "0.99", "step_dollars": "0.01",
+             "start": "0.99", "end": "0.99", "step": "0.99"}
+        ]
+        source, _ = data({f"{BASE}/markets/{TICKER}": row})
+        self.assertEqual(source.price_ranges(TICKER)[0]["start"], Decimal("0.01"))
+
+
+class OrderbookFlagTests(unittest.TestCase):
+    def test_orderbook_reads_ask_for_yes_leg_pricing(self):
+        source, transport = data({f"{BASE}/markets/{TICKER}/orderbook*": CENTS_BOOK})
+        source.orderbook(TICKER)
+        self.assertEqual(transport.last["query"]["use_yes_price"], "true")

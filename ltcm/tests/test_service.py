@@ -302,10 +302,14 @@ class KillSwitchTests(ServiceCase):
 
 
 class MarkTests(ServiceCase):
-    def test_an_unfunded_desk_is_not_marked(self):
+    def test_a_new_desk_is_funded_before_its_first_session_and_mark(self):
+        # The first tick allocates capital ahead of sessions, so a desk never sees an unfunded book.
         self.tick()
-        self.assertEqual(self.service.log.read(stream=f"ledger:{DESK}", kind="ledger.mark"), [])
-        self.assertEqual(self.service.ledgers[DESK].state().days_live, 0)
+        allocations = self.service.log.read(kind="committee.allocation")
+        self.assertEqual(len(allocations), 1)
+        self.assertIn(DESK, allocations[0].payload["allocations"])
+        self.assertEqual(len(self.service.log.read(stream=f"ledger:{DESK}", kind="ledger.mark")), 1)
+        self.assertGreater(self.service.ledgers[DESK].state().equity, 0)
         self.assertEqual(self.service.log.read(kind="risk.breaker"), [])
 
     def test_marks_run_on_the_interval(self):
@@ -587,3 +591,264 @@ class EnvTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class EventResolutionTests(ServiceCase):
+    """A settled market wakes the desk that held it, at most twice an hour."""
+
+    TICKER = "KXCPI-26SEP-T3.0"
+
+    def setUp(self):
+        super().setUp()
+        self.write_manifest(
+            DESK,
+            cadence={
+                "sessions": ["09:45"],
+                "timezone": "America/New_York",
+                "weekdays_only": True,
+                "triggers": ["event_resolution"],
+            },
+        )
+        self.service.close()
+        self.service = self.build()
+
+    def outcome(self, at, ticker=None, desk=DESK):
+        return self.service.log.append(
+            f"desk:{desk}",
+            "desk.outcome",
+            {
+                "instrument": f"event:CPI:kalshi:yes:{ticker or self.TICKER}",
+                "market_id": ticker or self.TICKER,
+                "result": "yes",
+                "entry_price": "0.40",
+                "exit_price": "1",
+                "quantity": "10",
+                "pnl": "6.00",
+                "held_for_hours": "27.0",
+                "rationale_excerpt": "base rates said 62%",
+            },
+            id=f"outcome:{desk}:{ticker or self.TICKER}:{at}",
+            at=at,
+        )
+
+    def triggers(self, at=None):
+        return [t for _, t in self.service.due_sessions(at or self.service.now())]
+
+    def test_a_new_outcome_makes_a_resolution_session_due(self):
+        self.assertNotIn("event_resolution", self.triggers())
+        self.outcome("2026-09-14T13:45:00.000Z")
+        self.assertIn("event_resolution", self.triggers())
+
+    def test_the_session_runs_and_then_stops_being_due(self):
+        self.outcome("2026-09-14T13:45:00.000Z")
+        self.assertIn("event_resolution", self.tick()["sessions"][0])
+        self.assertIn("event_resolution", self.sessions_started())
+        self.assertNotIn("event_resolution", self.triggers())
+
+    def test_a_second_outcome_inside_thirty_minutes_does_not_fire_again(self):
+        self.outcome("2026-09-14T13:45:00.000Z")
+        self.tick()
+        self.outcome("2026-09-14T13:55:00.000Z", ticker="KXJOBS-26SEP")
+        self.clock.set(moment(2026, 9, 14, 14, 10))  # 20 minutes after the session
+        self.assertNotIn("event_resolution", self.triggers())
+
+    def test_a_second_outcome_after_thirty_minutes_fires_again(self):
+        self.outcome("2026-09-14T13:45:00.000Z")
+        self.tick()
+        self.outcome("2026-09-14T14:30:00.000Z", ticker="KXJOBS-26SEP")
+        self.clock.set(moment(2026, 9, 14, 14, 35))
+        self.assertIn("event_resolution", self.triggers())
+
+    def test_a_weekend_resolution_still_wakes_a_weekdays_only_desk(self):
+        """Markets settle on Saturdays; the cadence slots are what weekdays_only governs."""
+        self.outcome("2026-09-12T13:45:00.000Z")
+        self.clock.set(moment(2026, 9, 12, 14, 0))  # Saturday
+        self.assertEqual(self.triggers(), ["event_resolution"])
+
+    def test_a_desk_that_does_not_declare_the_trigger_is_never_woken_by_one(self):
+        self.write_manifest(
+            DESK,
+            cadence={"sessions": ["09:45"], "timezone": "America/New_York", "weekdays_only": True},
+        )
+        self.service.close()
+        self.service = self.build()
+        self.outcome("2026-09-14T13:45:00.000Z")
+        self.assertNotIn("event_resolution", self.triggers())
+
+    def test_another_desks_outcome_does_not_wake_this_one(self):
+        self.outcome("2026-09-14T13:45:00.000Z", desk="someone-else")
+        self.assertNotIn("event_resolution", self.triggers())
+
+
+class OutcomeContextTests(ServiceCase):
+    def context(self):
+        return DeskContext(self.service, self.service.manifests[DESK], session_id="s1")
+
+    def outcome(self, at, ticker, pnl):
+        self.service.log.append(
+            f"desk:{DESK}",
+            "desk.outcome",
+            {
+                "instrument": f"event:CPI:kalshi:yes:{ticker}",
+                "market_id": ticker,
+                "result": "yes",
+                "entry_price": "0.40",
+                "exit_price": "1",
+                "quantity": "10",
+                "pnl": pnl,
+                "held_for_hours": "27.0",
+                "rationale_excerpt": "base rates",
+            },
+            id=f"outcome:{DESK}:{ticker}:{at}",
+            at=at,
+        )
+
+    def test_outcomes_are_the_scored_records_newest_first(self):
+        self.outcome("2026-09-10T18:00:00.000Z", "KXA", "1.00")
+        self.outcome("2026-09-11T18:00:00.000Z", "KXB", "2.00")
+        self.outcome("2026-09-12T18:00:00.000Z", "KXC", "3.00")
+        rows = self.context().outcomes(2)
+        self.assertEqual([r["market_id"] for r in rows], ["KXC", "KXB"])
+        self.assertEqual(rows[0]["pnl"], "3.00")
+
+    def test_a_desk_with_nothing_resolved_sees_an_empty_list(self):
+        self.assertEqual(self.context().outcomes(10), [])
+
+    def test_another_desks_outcomes_are_not_visible(self):
+        self.service.log.append(
+            "desk:someone-else",
+            "desk.outcome",
+            {"instrument": "event:X:kalshi:yes:KXZ", "market_id": "KXZ", "result": "no",
+             "entry_price": "0.10", "exit_price": "0", "quantity": "1", "pnl": "-0.10",
+             "held_for_hours": "1.0", "rationale_excerpt": ""},
+            id="outcome:someone-else:KXZ:1",
+            at="2026-09-12T18:00:00.000Z",
+        )
+        self.assertEqual(self.context().outcomes(10), [])
+
+
+class SettlementSweepTests(ServiceCase):
+    """One tick: sweep the venue's settlements, close the book, wake the desk."""
+
+    TICKER = "KXCPI-26SEP-T3.0"
+
+    def setUp(self):
+        super().setUp()
+        self.write_manifest(
+            DESK,
+            venues=["paper", "kalshi"],
+            instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+            cadence={
+                "sessions": ["09:45"],
+                "timezone": "America/New_York",
+                "weekdays_only": True,
+                "triggers": ["event_resolution"],
+            },
+        )
+        self.service.close()
+        self.service = self.build()
+        self.service.gateway.brokers["kalshi"] = self.settling()
+
+    def settling(self):
+        from ltcm.tests.test_gateway import SettlingBroker
+
+        return SettlingBroker(
+            rows=[
+                {
+                    "ticker": self.TICKER,
+                    "result": "yes",
+                    "yes_count": Decimal("10"),
+                    "no_count": Decimal("0"),
+                    "revenue": Decimal("10"),
+                    "settled_time": "2026-09-14T13:00:00Z",
+                }
+            ]
+        )
+
+    def hold(self):
+        instrument = Instrument("event", "CPI", "kalshi", market_id=self.TICKER, right="no")
+        self.service.log.append(
+            "broker:kalshi",
+            "broker.fill",
+            {
+                "id": "fl-open", "fill_id": "fl-open", "order_id": "ord-open", "desk_id": DESK,
+                "instrument": instrument.to_dict(), "side": "buy", "quantity": "10",
+                "price": "0.60", "fee": "0.17", "at": "2026-09-13T15:00:00.000Z",
+                "venue": "kalshi",
+            },
+            id="fill:kalshi:fl-open",
+            at="2026-09-13T15:00:00.000Z",
+        )
+
+    def test_a_settlement_closes_the_book_and_wakes_the_desk_on_the_same_tick(self):
+        self.hold()
+        result = self.tick()
+        self.assertEqual(
+            result["settlements"],
+            [f"settlement:{self.TICKER}:2026-09-14T13:00:00.000Z"],
+        )
+        outcome = self.service.log.read(kind="desk.outcome")[0].payload
+        self.assertEqual(outcome["market_id"], self.TICKER)
+        # A NO position on a market that resolved yes is worth nothing.
+        self.assertEqual(outcome["exit_price"], "0")
+        self.assertEqual(outcome["pnl"], "-6.00")
+        self.assertIn("event_resolution", self.sessions_started())
+        self.assertEqual(
+            self.service.ledgers[DESK].state(self.service.now()).positions, {}
+        )
+
+    def test_a_tick_with_no_settlements_writes_nothing(self):
+        result = self.tick()
+        self.assertEqual(result["settlements"], [])
+        self.assertEqual(self.service.log.read(kind="desk.outcome"), [])
+
+    def test_a_venue_without_a_settlements_endpoint_is_skipped(self):
+        self.service.gateway.brokers.pop("kalshi")
+        self.assertEqual(self.tick()["settlements"], [])
+
+
+class RateCardTickTests(ServiceCase):
+    """The frozen rate card is verified against Sail's published one, once a day."""
+
+    class Checking(FakeProvider):
+        def __init__(self, result=None, error=None):
+            super().__init__()
+            self.result = result or {"checked": 14, "drift": [], "unchecked": []}
+            self.error = error
+            self.checks = 0
+
+        def rate_card_check(self):
+            self.checks += 1
+            if self.error is not None:
+                raise self.error
+            return self.result
+
+    def build_with(self, provider):
+        self.provider = provider
+        self.service.close()
+        self.service = self.build()
+        return provider
+
+    def test_the_card_is_checked_once_a_day_and_the_result_rides_the_tick(self):
+        provider = self.build_with(self.Checking())
+        result = self.tick()
+        self.assertEqual(provider.checks, 1)
+        self.assertEqual(result["rate_card"]["checked"], 14)
+        self.tick(moment(2026, 9, 14, 19, 35))  # later the same day
+        self.assertEqual(provider.checks, 1)
+        self.tick(moment(2026, 9, 15, 13, 50))  # the next day
+        self.assertEqual(provider.checks, 2)
+
+    def test_a_check_that_raises_is_an_alert_not_a_broken_tick(self):
+        self.build_with(self.Checking(error=RuntimeError("docs are down")))
+        result = self.tick()
+        self.assertIsNone(result["rate_card"])
+        self.assertIsNotNone(result["published"])
+        alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert")]
+        self.assertTrue(any("rate card check failed" in text for text in alerts), alerts)
+
+    def test_a_provider_without_the_check_is_not_an_error(self):
+        result = self.tick()  # the plain FakeProvider has no rate_card_check
+        self.assertIsNone(result["rate_card"])
+        alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert")]
+        self.assertFalse(any("rate card" in text for text in alerts), alerts)

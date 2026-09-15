@@ -768,9 +768,11 @@ class PaperBroker:
 
     # ---------------------------------------------------------------- settle
     def settle_event(self, market_id: str, payout_per_contract: Any, *, now: Any = None) -> list[Fill]:
-        """Settle every event position on one market. Yes contracts pay $1 or $0.
+        """Settle every event position on one market. `payout_per_contract` is the **yes** value.
 
-        Open orders on the market are cancelled first: a resolved market cannot trade.
+        Yes contracts pay $1 or $0; a `right="no"` instrument on the same market pays the
+        complement, `1 - payout`, because exactly one of the two legs is worth a dollar. Open
+        orders on the market are cancelled first: a resolved market cannot trade.
         """
         payout = money(payout_per_contract)
         if payout < 0 or payout > ONE:
@@ -786,6 +788,11 @@ class PaperBroker:
                 if instrument.asset_class != "event" or instrument.market_id != market_id:
                     continue
                 quantity = position.quantity
+                leg_payout = (
+                    ONE - payout
+                    if str(instrument.right or "yes").lower() == "no"
+                    else payout
+                )
                 side = "sell" if quantity > 0 else "buy"
                 order_id = "ord-st" + hashlib.sha256(
                     f"settle|{market_id}|{instrument.key}|{stamp}".encode("utf-8")
@@ -810,8 +817,8 @@ class PaperBroker:
                     "SELECT 1 FROM orders WHERE id = ?", (order_id,)
                 ).fetchone() is None:
                     self._insert_order(order, None)
-                realized = self._apply_to_position(instrument, side, abs(quantity), payout)
-                proceeds = abs(quantity) * payout * instrument.multiplier
+                realized = self._apply_to_position(instrument, side, abs(quantity), leg_payout)
+                proceeds = abs(quantity) * leg_payout * instrument.multiplier
                 delta = proceeds if side == "sell" else -proceeds
                 account = self._account()
                 self._db.execute(
@@ -835,14 +842,14 @@ class PaperBroker:
                         _dumps(instrument.to_dict()),
                         side,
                         text(abs(quantity)),
-                        text(payout),
+                        text(leg_payout),
                         stamp,
                     ),
                 )
                 self._db.execute(
                     "UPDATE orders SET status = 'filled', filled_quantity = ?, average_price = ?,"
                     " updated_at = ?, reason = 'settled' WHERE id = ?",
-                    (text(abs(quantity)), text(payout), stamp, order_id),
+                    (text(abs(quantity)), text(leg_payout), stamp, order_id),
                 )
                 settled.append(
                     Fill(
@@ -852,7 +859,7 @@ class PaperBroker:
                         instrument=instrument,
                         side=side,
                         quantity=abs(quantity),
-                        price=payout,
+                        price=leg_payout,
                         fee=ZERO,
                         at=stamp,
                     )

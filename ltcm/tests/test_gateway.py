@@ -699,3 +699,244 @@ class CriticScopeTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+KALSHI_TICKER = "KXCPI-26SEP-T3.0"
+CPI_YES = Instrument("event", "CPI", "kalshi", market_id=KALSHI_TICKER, right="yes")
+CPI_NO = Instrument("event", "CPI", "kalshi", market_id=KALSHI_TICKER, right="no")
+SETTLED_AT = "2026-09-15T18:00:00Z"
+
+
+class SettlingBroker(FakeBroker):
+    """A venue that settles markets: it reports settlements and flattens its own positions."""
+
+    venue = "kalshi"
+
+    def __init__(self, rows=(), positions=(), **kwargs):
+        super().__init__(**kwargs)
+        self.rows = list(rows)
+        self.venue_positions = list(positions)
+        self.settlement_calls = []
+        self.settled_markets = []
+
+    def settlements(self, since=None):
+        self.settlement_calls.append(since)
+        return [r for r in self.rows if since is None or r["settled_time"] > since]
+
+    def settle_event(self, market_id, payout_per_contract, *, now=None):
+        self.settled_markets.append((market_id, str(payout_per_contract), now))
+        return []
+
+
+class SettlementCase(GatewayCase):
+    def setUp(self):
+        super().setUp()
+        self.kalshi = SettlingBroker()
+        self.gateway.brokers["kalshi"] = self.kalshi
+
+    def hold(self, instrument, quantity="10", price="0.40", at="2026-09-14T15:00:00.000Z"):
+        """Give the desk a position the honest way: a fill the ledger folds."""
+        tag = "fl-open-" + (instrument.right or "yes")
+        self.log.append(
+            "broker:kalshi",
+            "broker.fill",
+            {
+                "id": tag,
+                "fill_id": tag,
+                "order_id": "ord-open",
+                "desk_id": DESK,
+                "instrument": instrument.to_dict(),
+                "side": "buy",
+                "quantity": quantity,
+                "price": price,
+                "fee": "0.17",
+                "at": at,
+                "venue": "kalshi",
+            },
+            id="fill:kalshi:" + tag,
+            at=at,
+        )
+
+    def row(self, result="yes", ticker=KALSHI_TICKER, settled=SETTLED_AT):
+        return {
+            "ticker": ticker,
+            "result": result,
+            "yes_count": Decimal("10"),
+            "no_count": Decimal("0"),
+            "revenue": Decimal("10"),
+            "settled_time": settled,
+        }
+
+    def outcomes(self):
+        return [e.payload for e in self.log.read(kind="desk.outcome", limit=100)]
+
+    def fills(self):
+        return [e for e in self.log.read(kind="broker.fill", limit=100)]
+
+
+class PollSettlementsTests(SettlementCase):
+    def test_a_winning_yes_position_is_closed_at_a_dollar_and_scored(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes")]
+        written = self.gateway.poll_settlements("kalshi")
+
+        self.assertEqual(len(written), 1)
+        self.assertEqual(written[0]["price"], "1")
+        self.assertEqual(written[0]["side"], "sell")
+        self.assertEqual(written[0]["fee"], "0")
+        self.assertTrue(written[0]["settlement"])
+        self.assertEqual(self.ledger.state("2026-09-16T00:00:00.000Z").positions, {})
+
+        outcome = self.outcomes()[0]
+        self.assertEqual(outcome["market_id"], KALSHI_TICKER)
+        self.assertEqual(outcome["result"], "yes")
+        self.assertEqual(outcome["entry_price"], "0.40")
+        self.assertEqual(outcome["exit_price"], "1")
+        self.assertEqual(outcome["quantity"], "10")
+        self.assertEqual(outcome["pnl"], "6.00")
+        self.assertEqual(outcome["held_for_hours"], "27.0")
+
+    def test_a_winning_no_position_is_closed_at_a_dollar(self):
+        self.hold(CPI_NO, price="0.60")
+        self.kalshi.rows = [self.row("no")]
+        written = self.gateway.poll_settlements("kalshi")
+        self.assertEqual(written[0]["price"], "1")
+        self.assertEqual(self.outcomes()[0]["pnl"], "4.00")
+
+    def test_a_losing_no_position_is_closed_at_nothing(self):
+        self.hold(CPI_NO, price="0.60")
+        self.kalshi.rows = [self.row("yes")]
+        written = self.gateway.poll_settlements("kalshi")
+        self.assertEqual(written[0]["price"], "0")
+        self.assertEqual(self.outcomes()[0]["exit_price"], "0")
+        self.assertEqual(self.outcomes()[0]["pnl"], "-6.00")
+
+    def test_the_fill_is_timed_at_the_venues_settled_time_with_the_runbook_id(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes")]
+        self.gateway.poll_settlements("kalshi")
+        event = [e for e in self.fills() if e.payload.get("settlement")][0]
+        self.assertEqual(
+            event.id, f"fill:kalshi:settlement:{KALSHI_TICKER}:2026-09-15T18:00:00.000Z"
+        )
+        self.assertEqual(event.at, "2026-09-15T18:00:00.000Z")
+        self.assertTrue(event.public)
+
+    def test_polling_twice_writes_nothing_twice(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes")]
+        self.assertEqual(len(self.gateway.poll_settlements("kalshi")), 1)
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+        self.assertEqual(len(self.outcomes()), 1)
+        self.assertEqual(len([e for e in self.fills() if e.payload.get("settlement")]), 1)
+
+    def test_a_market_the_desk_never_held_is_ignored(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes", ticker="KXSOMETHINGELSE")]
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+        self.assertEqual(self.outcomes(), [])
+
+    def test_a_settlement_with_no_winning_leg_is_alerted_and_skipped(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("")]
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+        alerts = [e.payload["text"] for e in self.log.read(kind="ops.alert", limit=50)]
+        self.assertTrue(any("no yes/no result" in text for text in alerts), alerts)
+
+    def test_a_position_the_venue_still_shows_open_is_deferred_not_closed(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes")]
+        self.kalshi.venue_positions = [Position(CPI_YES, Decimal("10"), Decimal("0.40"))]
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+        self.assertEqual(self.outcomes(), [])
+        # The cursor did not move, so the next poll sees the same settlement again.
+        self.kalshi.venue_positions = []
+        self.assertEqual(len(self.gateway.poll_settlements("kalshi")), 1)
+
+    def test_a_venue_whose_positions_cannot_be_read_closes_nothing(self):
+        class Blind(SettlingBroker):
+            def positions(self):
+                raise RuntimeError("kalshi is down")
+
+        self.gateway.brokers["kalshi"] = Blind(rows=[self.row("yes")])
+        self.hold(CPI_YES)
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+        self.assertEqual(self.outcomes(), [])
+
+    def test_a_venue_that_reports_no_settlements_is_a_no_op(self):
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+        self.assertEqual(self.gateway.poll_settlements("paper"), [])
+        self.assertEqual(self.gateway.poll_settlements("nowhere"), [])
+
+    def test_a_settlements_call_that_raises_is_swallowed(self):
+        class Broken(SettlingBroker):
+            def settlements(self, since=None):
+                raise RuntimeError("boom")
+
+        self.gateway.brokers["kalshi"] = Broken()
+        self.hold(CPI_YES)
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+
+    def test_the_cursor_advances_so_old_settlements_are_not_re_read(self):
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes")]
+        self.gateway.poll_settlements("kalshi")
+        self.gateway.poll_settlements("kalshi")
+        self.assertEqual(self.kalshi.settlement_calls, [None, "2026-09-15T18:00:00.000Z"])
+
+    def test_the_outcome_carries_the_desks_own_rationale(self):
+        self.log.append(
+            "desk:" + DESK,
+            "desk.intent",
+            {
+                "intent_id": "oi-x",
+                "desk_id": DESK,
+                "instrument": CPI_YES.to_dict(),
+                "side": "buy",
+                "quantity": "10",
+                "order_type": "limit",
+                "limit_price": "0.40",
+                "time_in_force": "gtc",
+                "rationale": "base rate says 62%, the market says 40%, buying the yes leg",
+                "session_id": "s1",
+                "created_at": "2026-09-14T15:00:00.000Z",
+            },
+            id="intent:oi-x",
+            at="2026-09-14T15:00:00.000Z",
+        )
+        self.hold(CPI_YES)
+        self.kalshi.rows = [self.row("yes")]
+        self.gateway.poll_settlements("kalshi")
+        self.assertIn("base rate says 62%", self.outcomes()[0]["rationale_excerpt"])
+
+    def test_a_paper_position_is_mirrored_into_the_simulator(self):
+        paper = SettlingBroker()
+        self.gateway.brokers["paper"] = paper
+        self.hold(Instrument("event", "CPI", "paper", market_id=KALSHI_TICKER, right="no"))
+        self.kalshi.rows = [self.row("yes")]
+        self.gateway.poll_settlements("kalshi")
+        # The yes payout is what the simulator is told; it pays the NO leg its complement.
+        self.assertEqual(paper.settled_markets, [(KALSHI_TICKER, "1", "2026-09-15T18:00:00.000Z")])
+
+
+class BothLegsSettlementTests(SettlementCase):
+    """A desk can be long both legs of one market; settling must score each exactly once."""
+
+    def test_both_legs_of_one_market_close_without_colliding(self):
+        self.hold(CPI_YES, price="0.40")
+        self.hold(CPI_NO, price="0.55")
+        self.kalshi.rows = [self.row("yes")]
+        written = self.gateway.poll_settlements("kalshi")
+
+        self.assertEqual(len(written), 2)
+        self.assertEqual(len({row["fill_id"] for row in written}), 2)
+        self.assertEqual(sorted(row["price"] for row in written), ["0", "1"])
+        outcomes = self.outcomes()
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual(len({o["instrument"] for o in outcomes}), 2)
+        # Ten of each leg cost $9.50 and paid $10.00, whichever way the market went.
+        self.assertEqual(
+            sum(Decimal(o["pnl"]) for o in outcomes), Decimal("0.50")
+        )
+        self.assertEqual(self.ledger.state("2026-09-16T00:00:00.000Z").positions, {})
+        self.assertEqual(self.gateway.poll_settlements("kalshi"), [])

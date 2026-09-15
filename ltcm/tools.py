@@ -170,7 +170,15 @@ _INSTRUMENT = {
         "venue": {"type": "string", "description": "Optional; the desk's venue is used by default."},
         "expiry": {"type": "string", "description": "YYYY-MM-DD, options and futures only."},
         "strike": {"type": "string", "description": "Decimal string, options only."},
-        "right": {"type": "string", "enum": ["call", "put"]},
+        "right": {
+            "type": "string",
+            "enum": ["call", "put", "yes", "no"],
+            "description": (
+                "call/put for an option; yes/no for the leg of an event contract. `no` buys "
+                "the NO contract, quoted in NO dollars, and is how a desk bets against an "
+                "outcome. Omitted on an event market means the YES leg."
+            ),
+        },
         "market_id": {"type": "string", "description": "Event-contract ticker, event markets only."},
     },
     "required": ["asset_class", "symbol"],

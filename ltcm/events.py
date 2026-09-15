@@ -58,6 +58,7 @@ KINDS: dict[str, str] = {
     "desk.intent": "deferred",
     "desk.playbook_updated": "public",
     "desk.postmortem": "public",
+    "desk.outcome": "public",
     "desk.session_ended": "public",
     "risk.decision": "public",
     "risk.review": "public",

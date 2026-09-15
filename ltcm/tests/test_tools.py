@@ -194,6 +194,25 @@ class InstrumentTests(unittest.TestCase):
         )
         self.assertEqual(kept.venue, "alpaca")
 
+    def test_an_event_instrument_can_name_the_no_leg(self):
+        """A desk bets against an outcome by buying NO, so the schema has to allow it."""
+        rights = tools.TOOL_SCHEMAS["quote"]["parameters"]["properties"]["instrument"][
+            "properties"
+        ]["right"]["enum"]
+        self.assertEqual(sorted(rights), ["call", "no", "put", "yes"])
+        instrument = tools.instrument_from(
+            {
+                "asset_class": "event",
+                "symbol": "CPI",
+                "market_id": "KXCPI-26SEP-T3.0",
+                "right": "no",
+            },
+            manifest(instruments={**SAMPLE["instruments"], "asset_classes": ["event"]}),
+        )
+        self.assertEqual(instrument.right, "no")
+        self.assertEqual(instrument.market_id, "KXCPI-26SEP-T3.0")
+        self.assertIn(":no:", instrument.key)
+
     def test_options_default_to_the_standard_multiplier(self):
         instrument = tools.instrument_from(
             {

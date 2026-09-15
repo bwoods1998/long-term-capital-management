@@ -390,15 +390,235 @@ class V2DefaultTests(unittest.TestCase):
         self.assertTrue(body["reduce_only"])
         self.assertEqual(order.status, "accepted")
 
-    def test_the_no_leg_is_refused_on_v2(self):
-        client, transport, _ = self.make_v2()
-        no_leg = Instrument("event", YES.symbol, "kalshi", market_id=YES.market_id, right="no")
-        with self.assertRaises(RejectedOrder):
-            client.submit(intent(instrument=no_leg, order_type="limit", limit_price="0.40"))
-        self.assertEqual(transport.calls, [])
+    def test_buying_no_at_forty_cents_is_an_ask_at_sixty(self):
+        """`side: "ask"`, `price: "0.6000"` -- buying NO at $0.40 is selling YES at $0.60."""
+        client, transport, _ = self.make_v2(
+            {("POST", BASE + ORDERS_PATH_V2): {"order_id": "n1", "remaining_count": "10.00"}}
+        )
+        client.submit(intent(instrument=NO, order_type="limit", limit_price="0.40"))
+        body = transport.last["body"]
+        self.assertEqual(body["side"], "ask")
+        self.assertEqual(body["price"], "0.6000")
+        self.assertEqual(body["count"], "10.00")
+        self.assertNotIn("no_price", body)
+        self.assertNotIn("reduce_only", body)
+
+    def test_selling_no_is_a_bid_at_the_complement_and_reduces_only(self):
+        client, transport, _ = self.make_v2(
+            {("POST", BASE + ORDERS_PATH_V2): {"order_id": "n2", "remaining_count": "10.00"}}
+        )
+        client.submit(
+            intent(instrument=NO, side="sell", order_type="limit", limit_price="0.30")
+        )
+        body = transport.last["body"]
+        self.assertEqual(body["side"], "bid")
+        self.assertEqual(body["price"], "0.7000")
+        self.assertTrue(body["reduce_only"])
+
+    def test_a_market_buy_of_no_crosses_the_yes_bid_and_is_never_complemented_twice(self):
+        """The reference is read on the YES leg, so it is already the wire's scale.
+
+        Buying NO is selling YES: the marketable price is the yes bid, 0.41 -- not 1 - 0.41.
+        """
+        client, transport, _ = self.make_v2(
+            {("POST", BASE + ORDERS_PATH_V2): {"order_id": "n3", "remaining_count": "10.00"}}
+        )
+        client.submit(intent(instrument=NO, order_type="market"))
+        body = transport.last["body"]
+        self.assertEqual(body["side"], "ask")
+        self.assertEqual(body["price"], "0.4100")
+        self.assertEqual(body["time_in_force"], "immediate_or_cancel")
+
+    def test_a_market_sell_of_no_crosses_the_yes_ask(self):
+        client, transport, _ = self.make_v2(
+            {("POST", BASE + ORDERS_PATH_V2): {"order_id": "n4", "remaining_count": "10.00"}}
+        )
+        client.submit(intent(instrument=NO, side="sell", order_type="market"))
+        body = transport.last["body"]
+        self.assertEqual(body["side"], "bid")
+        self.assertEqual(body["price"], "0.4400")
+        self.assertEqual(body["time_in_force"], "immediate_or_cancel")
+
+    def test_the_no_leg_round_trips_through_the_complement_exactly_once(self):
+        """Every desk price p on the NO leg reaches the wire as 1 - p, and only once."""
+        client, transport, _ = self.make_v2(
+            {("POST", BASE + ORDERS_PATH_V2): {"order_id": "n5", "remaining_count": "1.00"}}
+        )
+        for desk_price, wire in (("0.01", "0.9900"), ("0.50", "0.5000"), ("0.99", "0.0100")):
+            client.submit(
+                intent(
+                    instrument=NO,
+                    quantity="1",
+                    order_type="limit",
+                    limit_price=desk_price,
+                    nonce=desk_price,
+                )
+            )
+            self.assertEqual(transport.last["body"]["price"], wire)
+
+    def test_the_capabilities_advertise_the_no_leg(self):
+        client, _, _ = self.make_v2()
+        self.assertIn("no_leg", client.capabilities())
+        self.assertIn("event", client.capabilities())
 
     def test_prices_outside_the_book_are_refused(self):
         client, transport, _ = self.make_v2()
         with self.assertRaises(RejectedOrder):
             client.submit(intent(order_type="limit", limit_price="1.00"))
         self.assertEqual(transport.calls, [])
+
+
+class PriceGridTests(unittest.TestCase):
+    """Order prices are checked against the market's own `price_ranges`, not a penny grid."""
+
+    class Bands:
+        """A market-data double that publishes bands and counts how often it is read."""
+
+        def __init__(self, bands):
+            self.bands = bands
+            self.reads = []
+
+        def price_ranges(self, ticker):
+            self.reads.append(ticker)
+            return list(self.bands)
+
+        def quote(self, instrument):
+            from ltcm.broker import Quote
+
+            return Quote(instrument, Decimal("0.41"), Decimal("0.44"), Decimal("0.42"),
+                         NOW, "kalshi", delayed=False)
+
+    def build(self, bands, clock=None):
+        from ltcm.adapters.kalshi import KalshiBroker as Broker
+
+        data = self.Bands(bands)
+        transport = FakeTransport(
+            {("POST", BASE + ORDERS_PATH_V2): {"order_id": "g1", "remaining_count": "10.00"}}
+        )
+        client = Broker(
+            KalshiCredentials("2c3d4e5f-0000-4000-8000-000000000009", FakeSigner()),
+            transport=transport,
+            clock=clock or Clock(NOW),
+            market_data=data,
+            order_api="v2",
+        )
+        return client, transport, data
+
+    def band(self, start, end, step):
+        return {"start": Decimal(start), "end": Decimal(end), "step": Decimal(step)}
+
+    def test_a_centi_cent_market_accepts_a_price_a_penny_grid_would_reject(self):
+        client, transport, _ = self.build([self.band("0.0001", "0.9999", "0.0001")])
+        client.submit(intent(order_type="limit", limit_price="0.3750"))
+        self.assertEqual(transport.last["body"]["price"], "0.3750")
+
+    def test_a_price_off_the_published_step_is_refused_before_it_is_sent(self):
+        client, transport, _ = self.build([self.band("0.01", "0.99", "0.01")])
+        with self.assertRaises(RejectedOrder) as caught:
+            client.submit(intent(order_type="limit", limit_price="0.3750"))
+        self.assertIn("price grid", str(caught.exception))
+        self.assertEqual(transport.calls, [])
+
+    def test_a_price_outside_every_band_is_refused(self):
+        client, _, _ = self.build([self.band("0.05", "0.95", "0.01")])
+        for price in ("0.02", "0.98"):
+            with self.assertRaises(RejectedOrder):
+                client.submit(intent(order_type="limit", limit_price=price, nonce=price))
+
+    def test_the_bands_are_read_once_per_ticker_for_ten_minutes(self):
+        clock = Clock(NOW)
+        client, _, data = self.build([self.band("0.01", "0.99", "0.01")], clock=clock)
+        client.submit(intent(order_type="limit", limit_price="0.40", nonce="a"))
+        client.submit(intent(order_type="limit", limit_price="0.41", nonce="b"))
+        self.assertEqual(data.reads, [TICKER])
+        clock.advance(601)
+        client.submit(intent(order_type="limit", limit_price="0.42", nonce="c"))
+        self.assertEqual(data.reads, [TICKER, TICKER])
+
+    def test_a_market_with_no_bands_falls_back_to_the_penny_grid(self):
+        client, transport, _ = self.build([])
+        client.submit(intent(order_type="limit", limit_price="0.40"))
+        self.assertEqual(transport.last["body"]["price"], "0.4000")
+        with self.assertRaises(RejectedOrder):
+            client.submit(intent(order_type="limit", limit_price="0.4050", nonce="sub"))
+
+    def test_a_market_data_failure_falls_back_rather_than_pricing_blind(self):
+        class Broken(self.Bands):
+            def price_ranges(self, ticker):
+                raise RuntimeError("kalshi is down")
+
+        client, transport, _ = self.build([])
+        client.market_data = Broken([])
+        client._price_ranges.clear()
+        client.submit(intent(order_type="limit", limit_price="0.40"))
+        self.assertEqual(transport.last["body"]["price"], "0.4000")
+
+    def test_the_no_leg_is_validated_on_the_wire_price(self):
+        """The complement is what the venue sees, so the complement is what is checked."""
+        client, _, _ = self.build([self.band("0.01", "0.60", "0.01")])
+        # NO at $0.30 is YES at $0.70, which is outside the band the market published.
+        with self.assertRaises(RejectedOrder):
+            client.submit(intent(instrument=NO, order_type="limit", limit_price="0.30"))
+
+
+SETTLEMENTS = {
+    "settlements": [
+        {
+            "ticker": TICKER,
+            "market_result": "yes",
+            "yes_count": 10,
+            "no_count": 0,
+            "revenue": 1000,
+            "settled_time": "2026-09-15T18:00:00Z",
+        },
+        {
+            "ticker": "KXOTHER-26SEP",
+            "market_result": "no",
+            "yes_count_fp": "0.00",
+            "no_count_fp": "4.00",
+            "revenue_dollars": "4.00",
+            "settled_time": "2026-09-15T17:00:00Z",
+        },
+        {"ticker": "", "market_result": "yes", "settled_time": "2026-09-15T16:00:00Z"},
+    ],
+    "cursor": "",
+}
+
+
+class SettlementTests(unittest.TestCase):
+    def test_settlements_are_parsed_to_dollars_oldest_first(self):
+        client, transport, _ = make({BASE + "/portfolio/settlements*": SETTLEMENTS})
+        rows = client.settlements()
+        self.assertEqual([r["ticker"] for r in rows], ["KXOTHER-26SEP", TICKER])
+        self.assertEqual(rows[1]["result"], "yes")
+        self.assertEqual(rows[1]["yes_count"], Decimal("10"))
+        self.assertEqual(rows[1]["revenue"], Decimal("10"))
+        self.assertEqual(rows[1]["settled_time"], "2026-09-15T18:00:00Z")
+        self.assertEqual(rows[0]["result"], "no")
+        self.assertEqual(rows[0]["no_count"], Decimal("4"))
+        self.assertEqual(rows[0]["revenue"], Decimal("4.00"))
+
+    def test_a_since_cursor_becomes_a_min_ts(self):
+        client, transport, _ = make({BASE + "/portfolio/settlements*": SETTLEMENTS})
+        client.settlements(since="2026-09-15T17:30:00Z")
+        self.assertEqual(transport.last["query"]["min_ts"], "1789493400")
+
+    def test_a_result_that_is_neither_yes_nor_no_is_reported_empty(self):
+        client, _, _ = make(
+            {
+                BASE + "/portfolio/settlements*": {
+                    "settlements": [
+                        {"ticker": TICKER, "market_result": "scalar",
+                         "settled_time": "2026-09-15T18:00:00Z"}
+                    ]
+                }
+            }
+        )
+        self.assertEqual(client.settlements()[0]["result"], "")
+
+    def test_the_signature_covers_the_settlements_path(self):
+        client, _, signer = make({BASE + "/portfolio/settlements*": SETTLEMENTS})
+        client.settlements()
+        self.assertEqual(
+            signer.last_message, MILLIS + "GET" + "/trade-api/v2/portfolio/settlements"
+        )

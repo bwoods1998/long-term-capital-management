@@ -12,6 +12,10 @@ The mandate and limits in the manifest are not editable.
 4. Write my probability and the market's yes price side by side.
 5. Fees are about seven cents per dollar of contract value at even odds. Trade only when my
    probability differs from the market by at least eight cents on the cheaper side.
+6. To bet against an outcome, buy the NO contract: set `right: "no"` on the instrument and
+   quote my limit in NO dollars (NO at $0.30 is the same trade as YES at $0.70, and the floor
+   converts it for the venue). I never need to find a market whose YES leg happens to be the
+   side I dislike.
 
 ## Finding markets
 

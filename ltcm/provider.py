@@ -46,6 +46,10 @@ from .events import EventLog, canonical, now_iso
 
 API_HOST = "api.sailresearch.com"
 API_BASE = "https://" + API_HOST
+DOCS_HOST = "docs.sailresearch.com"
+#: The published rate card, in the machine-readable form. The only URL outside `API_HOST` this
+#: transport will fetch, and the only one it fetches without a credential.
+RATE_CARD_URL = "https://" + DOCS_HOST + "/pricing.md"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # profile -> (model, completion_window, input $/Mtok, cached input $/Mtok, output $/Mtok).
@@ -64,7 +68,43 @@ PROFILES: dict[str, tuple[str, str, str, str, str]] = {
     "glm_flex": ("zai-org/GLM-5.3", "flex", "0.40", "0.08", "1.80"),
     "glm_flash_asap": ("zai-org/GLM-5.3-Flash", "asap", "0.11", "0.02", "0.35"),
     "glm_flash_flex": ("zai-org/GLM-5.3-Flash", "flex", "0.05", "0.01", "0.18"),
+    # The cheap tier. Input is a fifteenth of the DeepSeek V4 Pro asap profile the desks run
+    # on, which is what makes high-volume mechanical work affordable. One caveat from
+    # https://docs.sailresearch.com/support: *"Sail cannot currently guarantee
+    # `tool_choice: "required"` for `openai/gpt-oss-*` models. Choose another model when every
+    # successful response must contain a tool call."* The desk loop uses `tool_choice: "auto"`,
+    # so this profile is safe there and unsafe for any forced-tool-call path.
+    "oss_asap": ("openai/gpt-oss-120b", "asap", "0.06", "0.03", "0.40"),
 }
+
+#: The name Sail's pricing page gives each model, for `rate_card_check`. A model missing from
+#: this map is reported as unchecked rather than silently passed.
+DISPLAY_NAMES: dict[str, str] = {
+    "deepseek-ai/DeepSeek-V4-Pro-0813": "DeepSeek V4 Pro",
+    "deepseek-ai/DeepSeek-V4-Flash-0731": "DeepSeek V4 Flash",
+    "moonshotai/Kimi-K2.6": "Kimi K2.6",
+    "moonshotai/Kimi-K3": "Kimi K3",
+    "zai-org/GLM-5.3": "GLM-5.3",
+    "zai-org/GLM-5.3-Flash": "GLM-5.3 Flash",
+    "openai/gpt-oss-120b": "gpt-oss-120b",
+}
+
+#: The completion window as the card labels it.
+WINDOW_LABELS: dict[str, str] = {
+    "asap": "Default (ASAP)",
+    "balanced": "Balanced",
+    "standard": "Standard",
+    "flex": "Flex",
+}
+
+#: The pricing page is JSX-heavy; the machine-readable signal is the row `aria-label`, e.g.
+#: `"GLM-5.3 Balanced pricing: input $0.50, cached $0.12, output $2.50 per 1M tokens."`
+RATE_CARD_ROW = re.compile(
+    r'aria-label="(?P<model>[^"]+?) '
+    r"(?P<window>Default \(ASAP\)|Balanced|Standard|Flex)"
+    r" pricing: input \$(?P<input>[\d.]+), cached \$(?P<cached>[\d.]+), "
+    r"output \$(?P<output>[\d.]+)"
+)
 
 TERMINAL = frozenset({"completed", "incomplete", "failed", "cancelled"})
 PENDING = frozenset({"queued", "in_progress"})
@@ -101,6 +141,15 @@ CREATE TABLE IF NOT EXISTS budget_days (
     PRIMARY KEY (day, desk_id)
 );
 """
+
+
+def _fold(value: Any) -> str:
+    """Compare model and window names on their letters and digits alone.
+
+    "GLM-5.3 Flash", "GLM 5.3 flash" and "glm-5.3-flash" are the same product; the pricing
+    page's punctuation is not a fact about the price.
+    """
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
 
 
 class ProviderError(RuntimeError):
@@ -229,9 +278,21 @@ def _retry_after(value: Any) -> int | None:
 
 
 class Transport:
-    """Allowlisted HTTPS calls to the Sail API. Callable, so tests inject a plain function."""
+    """Allowlisted HTTPS calls to the Sail API. Callable, so tests inject a plain function.
 
-    ROUTES = ("POST /v1/responses", "GET /v1/responses/{id}", "GET /v2/usage/summary")
+    One route is not on the API host: `GET https://docs.sailresearch.com/pricing.md`, the
+    published rate card `rate_card_check` diffs against `PROFILES`. It is fetched as an
+    absolute URL, **without the Authorization header** -- the docs site is not the API and has
+    no business seeing the floor's key -- and returned as `{"text": ...}` because it is
+    markdown, not JSON.
+    """
+
+    ROUTES = (
+        "POST /v1/responses",
+        "GET /v1/responses/{id}",
+        "GET /v2/usage/summary",
+        "GET " + RATE_CARD_URL,
+    )
 
     def __init__(
         self,
@@ -254,11 +315,13 @@ class Transport:
             raise ValueError("caller headers cannot carry credentials")
 
     def allowed(self, method: str, route: str) -> bool:
-        """True for the three routes a desk may reach: create, retrieve, usage summary."""
+        """True for the routes this floor may reach: create, retrieve, usage, the rate card."""
         if method == "POST":
             return route == "/v1/responses"
         if method != "GET":
             return False
+        if route == RATE_CARD_URL:
+            return True
         head, _, query = route.partition("?")
         if head == "/v2/usage/summary":
             return query == "" or bool(re.fullmatch(r"range=(1h|6h|24h|7d|30d|period)", query))
@@ -282,11 +345,16 @@ class Transport:
             data = canonical(body).encode("utf-8")
             if len(data) > MAX_BODY_BYTES:
                 raise TransportError("provider_request_too_large")
+        rate_card = route == RATE_CARD_URL
         headers = {"Content-Type": "application/json", "Accept": "application/json", **self.headers}
-        headers["Authorization"] = "Bearer " + self.key_source()
+        if rate_card:
+            headers["Accept"] = "text/markdown, text/plain, text/html"
+        else:
+            headers["Authorization"] = "Bearer " + self.key_source()
         if idempotency_key and method == "POST":
             headers["Idempotency-Key"] = idempotency_key[:255]
-        request = Request(self.base_url + route, data=data, headers=headers, method=method)
+        url = route if rate_card else self.base_url + route
+        request = Request(url, data=data, headers=headers, method=method)
         # asap foreground generation is awaited inline; background POSTs and every GET are short.
         foreground = method == "POST" and not (body or {}).get("background", False)
         timeout = 600 if foreground else 45
@@ -296,6 +364,8 @@ class Transport:
                 raw = response.read(MAX_BODY_BYTES + 1)
                 if len(raw) > MAX_BODY_BYTES:
                     raise TransportError("provider_response_too_large")
+                if rate_card:
+                    return {"text": raw.decode("utf-8", "replace")}
                 return json.loads(raw)
         except TransportError:
             raise
@@ -648,6 +718,104 @@ class Provider:
             value = None
         self._balance = (now, value)
         return value
+
+    # ------------------------------------------------------------------ rate card
+    def rate_card_check(self) -> dict[str, Any]:
+        """Diff the frozen `PROFILES` against Sail's published card and alert on any drift.
+
+        The floor's cost ticker is only honest if the card underneath it is checked: Sail cut
+        prices between September 7 and today, which proves the card moves. This reads
+        `https://docs.sailresearch.com/pricing.md` through the injected transport, parses the
+        machine-readable `aria-label` rows, and appends one `ops.alert` per profile whose live
+        price differs -- or whose row it could not find at all, because a page whose format
+        changed must fail loudly rather than silently report no drift.
+
+        It never edits `PROFILES`. Guardrails are human-written; this one alerts only, and it
+        is quiet about its own failures: an unreachable page is not an incident.
+        """
+        summary: dict[str, Any] = {
+            "checked": 0, "rows": 0, "drift": [], "unchecked": [], "error": None
+        }
+        try:
+            page = self._rate_card_page()
+        except Exception as exc:  # transport, decoding, anything
+            summary["error"] = type(exc).__name__
+            return summary
+        if not page:
+            summary["error"] = "empty"
+            return summary
+        published: dict[tuple[str, str], tuple[str, str, str]] = {}
+        for match in RATE_CARD_ROW.finditer(page):
+            key = (_fold(match.group("model")), _fold(match.group("window")))
+            published[key] = (match.group("input"), match.group("cached"), match.group("output"))
+        summary["rows"] = len(published)
+        if not published:
+            self._alert_rate_card(
+                "error", "rate card: no pricing rows parsed; the page format has changed"
+            )
+            summary["error"] = "unparsed"
+            return summary
+
+        for profile in sorted(PROFILES):
+            model, window, *ours = PROFILES[profile]
+            display = DISPLAY_NAMES.get(model)
+            label = WINDOW_LABELS.get(window)
+            theirs = (
+                published.get((_fold(display), _fold(label)))
+                if display and label
+                else None
+            )
+            if theirs is None:
+                summary["unchecked"].append(profile)
+                self._alert_rate_card(
+                    "warn", f"rate card: no published row for {profile} ({model}/{window})"
+                )
+                continue
+            summary["checked"] += 1
+            if [Decimal(v) for v in theirs] != [Decimal(v) for v in ours]:
+                summary["drift"].append(
+                    {"profile": profile, "model": model, "window": window,
+                     "ours": list(ours), "published": list(theirs)}
+                )
+                self._alert_rate_card(
+                    "error",
+                    f"rate card drift: {profile} ({model}/{window}) is held at "
+                    f"{'/'.join(ours)} and Sail publishes {'/'.join(theirs)} "
+                    "per 1M tokens (input/cached/output)",
+                )
+        return summary
+
+    def _rate_card_page(self) -> str:
+        """The published rate card as text. Accepts whatever shape the transport returns."""
+        payload = self.transport("GET", RATE_CARD_URL)
+        if isinstance(payload, str):
+            return payload
+        if isinstance(payload, dict):
+            for key in ("text", "content", "body", "markdown"):
+                value = payload.get(key)
+                if isinstance(value, str):
+                    return value
+        if isinstance(payload, bytes):
+            return payload.decode("utf-8", "replace")
+        return ""
+
+    def _alert_rate_card(self, level: str, message: str) -> None:
+        if self.log is None:
+            return
+        at = self._now()
+        try:
+            self.log.append(
+                "ops",
+                "ops.alert",
+                {"level": level, "text": message},
+                id="ratecard:" + hashlib.sha256(
+                    f"{at[:10]}|{message}".encode("utf-8")
+                ).hexdigest()[:24],
+                at=at,
+            )
+        except Exception:
+            # An alert that cannot be written must not take the floor down with it.
+            pass
 
     # ------------------------------------------------------------------ records
     def record(self, request_key: str) -> dict[str, Any] | None:

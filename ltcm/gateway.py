@@ -57,6 +57,7 @@ from .manifest import DeskManifest
 from .risk import Breaker, Decision, RiskContext, RiskEngine
 
 ZERO = Decimal(0)
+ONE = Decimal(1)
 
 #: Asset classes whose orders depend on a regular-hours session.
 SESSION_CLASSES = ("equity", "option")
@@ -68,6 +69,48 @@ AT_FORMAT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
 def _stamp(value: Any, fallback: str) -> str:
     return value if isinstance(value, str) and AT_FORMAT.match(value) else fallback
+
+
+def _log_stamp(value: Any, fallback: str) -> str:
+    """A venue timestamp rewritten into the log's millisecond shape, else `fallback`.
+
+    `_stamp` only accepts a stamp that is already in the log's shape; the venues emit
+    seconds-precision ISO, so a settlement's own time needs converting rather than discarding.
+    """
+    if isinstance(value, str) and AT_FORMAT.match(value):
+        return value
+    try:
+        return iso_time(parse_iso(str(value)))
+    except Exception:
+        return fallback
+
+
+def _max_stamp(current: "str | None", candidate: str) -> str:
+    """The later of two ISO stamps; a cursor never moves backwards."""
+    return candidate if current is None or candidate > current else current
+
+
+def _key_of(instrument: Any) -> str | None:
+    """The `Instrument.key` of a logged instrument dict, or None when it cannot be read."""
+    if not isinstance(instrument, Mapping):
+        return None
+    try:
+        return Instrument.from_dict(dict(instrument)).key
+    except Exception:
+        return None
+
+
+def _hours_between(start: "str | None", end: str) -> str | None:
+    """Hours from `start` to `end` to one decimal, or None when the open is unknown."""
+    if not start:
+        return None
+    try:
+        seconds = (parse_iso(end) - parse_iso(start)).total_seconds()
+    except Exception:
+        return None
+    return format(
+        (Decimal(int(round(seconds))) / Decimal(3600)).quantize(Decimal("0.1")), "f"
+    )
 
 
 class GatewayError(RuntimeError):
@@ -121,6 +164,7 @@ class Gateway:
         self._orders: dict[str, dict[str, Any]] = {}
         self._intent_orders: dict[str, str] = {}
         self._fill_cursor: dict[str, str | None] = {}
+        self._settlement_cursor: dict[str, str | None] = {}
         self._seen_fills: set[str] = set()
         self._scan_seq = 0
         self._decisions: dict[str, bool] = {}
@@ -531,10 +575,14 @@ class Gateway:
         self._fill_cursor[venue] = cursor
         return written
 
-    def _record_fill(self, venue: str, fill: Fill) -> dict[str, Any]:
+    def _record_fill(
+        self, venue: str, fill: Fill, extra: "Mapping[str, Any] | None" = None
+    ) -> dict[str, Any]:
         payload = dict(fill.to_dict())
         payload["fill_id"] = fill.id
         payload["venue"] = venue
+        if extra:
+            payload.update(dict(extra))
         self.log.append(
             f"broker:{venue}",
             "broker.fill",
@@ -544,6 +592,237 @@ class Gateway:
         )
         self._seen_fills.add(fill.id)
         return payload
+
+    # ------------------------------------------------------------------ settlement
+    def poll_settlements(self, venue: str = "kalshi", now: Any = None) -> list[dict[str, Any]]:
+        """Close every desk position on a market this venue has settled, and score it publicly.
+
+        A settled binary contract is worth $1.00 or $0.00 per YES contract -- the complement on
+        the NO leg -- and the venue pays it without a trade. No fill is ever reported, so
+        `ingest_fills` cannot see it and the position would otherwise sit in the desk's book
+        forever at its last mark. This is the only path by which an event position leaves a
+        ledger, and the only input the `event_resolution` trigger and the post-mortem have.
+
+        Two writes per closed position, both idempotent on their ids:
+
+        * a `broker.fill` at the settlement value with no fee, timed at the venue's settled
+          time, which is what actually moves cash and flattens the position; and
+        * a public `desk.outcome`, the scored record: entry, exit, size, P&L, how long it was
+          held and the sentence the desk gave when it opened the trade.
+
+        The venue's own `GET /portfolio/positions` is the guard: a settlement whose market the
+        venue still shows as open is left for the next poll rather than written into a ledger
+        that `reconcile()` would then find disagrees with the venue.
+        """
+        broker = self.brokers.get(venue)
+        reader = getattr(broker, "settlements", None)
+        if broker is None or reader is None:
+            return []
+        self._load()
+        at = iso_time(now) if now is not None else self.now()
+        cursor = self._settlement_cursor.get(venue)
+        try:
+            rows = list(reader(since=cursor))
+        except Exception:
+            # A settlement sweep is never load-bearing for an order; it retries next tick.
+            return []
+        if not rows:
+            return []
+        try:
+            open_tickers = {
+                str(p.instrument.market_id or p.instrument.symbol or "").upper()
+                for p in broker.positions()
+                if p.quantity != 0
+            }
+        except Exception:
+            # Without the venue's own book there is nothing to check the close against, and
+            # closing blind is how a ledger and a venue drift apart.
+            self._alert("warning", f"{venue} positions unavailable; settlements deferred", at)
+            return []
+
+        written: list[dict[str, Any]] = []
+        for row in sorted(rows, key=lambda r: (str(r.get("settled_time") or ""), str(r.get("ticker") or ""))):
+            ticker = str(row.get("ticker") or "").strip().upper()
+            settled_at = _log_stamp(row.get("settled_time"), at)
+            result = str(row.get("result") or "").strip().lower()
+            if not ticker:
+                continue
+            if result not in ("yes", "no"):
+                # Scalar and voided markets have no winning leg to score. Say so once and move
+                # the cursor past it; a human decides what a void was worth.
+                self._alert("warning", f"{venue} {ticker}: settled with no yes/no result", at)
+                cursor = _max_stamp(cursor, settled_at)
+                continue
+            holders = self._holders_of(ticker)
+            if holders and ticker in open_tickers and any(
+                position.instrument.venue == venue for _, position in holders
+            ):
+                self._alert(
+                    "warning",
+                    f"{venue} {ticker}: settled while the venue still shows a position; deferred",
+                    at,
+                )
+                break  # the cursor stays put so this row comes back on the next poll
+            payout_yes = ONE if result == "yes" else ZERO
+            for desk_id, position in holders:
+                written.extend(
+                    self._settle_position(
+                        venue,
+                        desk_id,
+                        position,
+                        ticker=ticker,
+                        result=result,
+                        payout_yes=payout_yes,
+                        settled_at=settled_at,
+                        suffix=len(holders) > 1,
+                    )
+                )
+            # One outcome per desk per market, so a desk holding both legs is scored once per
+            # leg but woken once: `due_sessions` reads the stream, not the count.
+            self._settle_paper(ticker, payout_yes, holders, settled_at)
+            cursor = _max_stamp(cursor, settled_at)
+        self._settlement_cursor[venue] = cursor
+        return written
+
+    def _holders_of(self, ticker: str) -> list[tuple[str, Any]]:
+        """(desk_id, position) for every desk holding that event market, whatever the leg."""
+        found: list[tuple[str, Any]] = []
+        for desk_id, ledger in sorted(self.ledgers.items()):
+            for position in ledger.state(self.now()).positions.values():
+                instrument = position.instrument
+                if instrument.asset_class != "event" or position.quantity == 0:
+                    continue
+                if str(instrument.market_id or instrument.symbol or "").upper() != ticker:
+                    continue
+                found.append((desk_id, position))
+        return found
+
+    def _settle_position(
+        self,
+        venue: str,
+        desk_id: str,
+        position: Any,
+        *,
+        ticker: str,
+        result: str,
+        payout_yes: Decimal,
+        settled_at: str,
+        suffix: bool,
+    ) -> list[dict[str, Any]]:
+        """One desk's close on one settled market: the fill that pays it, then the score."""
+        instrument = position.instrument
+        leg = str(instrument.right or "yes").lower()
+        exit_price = (ONE - payout_yes) if leg == "no" else payout_yes
+        quantity = money(position.quantity)
+        side = "sell" if quantity > 0 else "buy"
+        fill_id = f"settlement:{ticker}:{settled_at}"
+        if suffix:
+            # Two positions closing on one settlement -- two desks, or one desk holding both
+            # legs -- cannot share a fill id. A single position, which is the floor today,
+            # keeps the plain id the runbook names.
+            fill_id += f":{desk_id}:{_short(instrument.key)}"
+        if fill_id in self._seen_fills:
+            return []
+        fill = Fill(
+            id=fill_id,
+            order_id="",
+            desk_id=desk_id,
+            instrument=instrument,
+            side=side,
+            quantity=abs(quantity),
+            price=exit_price,
+            fee=ZERO,
+            at=settled_at,
+        )
+        payload = self._record_fill(venue, fill, {"settlement": True, "result": result})
+        self._record_outcome(
+            desk_id,
+            position,
+            ticker=ticker,
+            result=result,
+            exit_price=exit_price,
+            settled_at=settled_at,
+        )
+        return [payload]
+
+    def _record_outcome(
+        self,
+        desk_id: str,
+        position: Any,
+        *,
+        ticker: str,
+        result: str,
+        exit_price: Decimal,
+        settled_at: str,
+    ) -> Event:
+        """The public score for one resolved position: what was thought, and what happened."""
+        instrument = position.instrument
+        quantity = money(position.quantity)
+        entry = money(position.average_cost)
+        pnl = (exit_price - entry) * quantity * instrument.multiplier
+        opened_at, rationale = self._entry_of(desk_id, instrument.key)
+        manifest = self.manifests.get(desk_id)
+        stream = manifest.stream if manifest else f"desk:{desk_id}"
+        payload = {
+            "instrument": instrument.key,
+            "market_id": ticker,
+            "result": result,
+            "entry_price": text(entry),
+            "exit_price": text(exit_price),
+            "quantity": text(abs(quantity)),
+            "pnl": text(pnl),
+            "held_for_hours": _hours_between(opened_at, settled_at),
+            "rationale_excerpt": rationale,
+        }
+        return self.log.append(
+            stream,
+            "desk.outcome",
+            payload,
+            # A desk can hold both legs of one market, so the instrument decides the id: the
+            # payload names the leg in full, and this keeps two scores from being one event.
+            id=f"outcome:{desk_id}:{ticker}:{settled_at}:{_short(instrument.key)}",
+            at=settled_at,
+        )
+
+    def _entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
+        """When this desk first traded the contract, and the sentence it gave for doing so."""
+        opened_at: str | None = None
+        for event in self.log.read(kind="broker.fill", limit=10_000):
+            payload = event.payload
+            if payload.get("desk_id") != desk_id or _key_of(payload.get("instrument")) != key:
+                continue
+            if opened_at is None or event.at < opened_at:
+                opened_at = event.at
+        rationale = ""
+        manifest = self.manifests.get(desk_id)
+        stream = manifest.stream if manifest else f"desk:{desk_id}"
+        for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000):
+            if _key_of(event.payload.get("instrument")) != key:
+                continue
+            said = event.payload.get("rationale")
+            if isinstance(said, str) and said.strip():
+                rationale = said.strip()[:400]
+        return opened_at, rationale
+
+    def _settle_paper(
+        self, ticker: str, payout_yes: Decimal, holders: Iterable[tuple[str, Any]], settled_at: str
+    ) -> None:
+        """Mirror the close into the paper simulator, so paper and the ledger agree.
+
+        The simulator writes its own settlement fills under the `settlement` desk id, which no
+        desk ledger folds, so the book closes in both places and the cash moves exactly once.
+        """
+        desks = {desk_id for desk_id, position in holders if position.instrument.venue == "paper"}
+        if not desks:
+            return
+        broker = self.brokers.get("paper")
+        settle = getattr(broker, "settle_event", None)
+        if settle is None:
+            return
+        try:
+            settle(ticker, payout_yes, now=settled_at)
+        except Exception as exc:
+            self._alert("warning", f"paper settlement of {ticker} failed: {exc}", settled_at)
 
     # ------------------------------------------------------------------ lifecycle
     def poll_orders(self, now: Any = None) -> list[dict[str, Any]]:

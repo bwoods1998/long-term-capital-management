@@ -6,7 +6,7 @@
   "floor_cap_max_usd_per_day": "120",
   "profit_share": "0.25",
   "reserve_floor_usd": "10",
-  "floor_capital_usd": "5000",
+  "floor_capital_usd": "5400",
   "floor_max_daily_loss_pct": "0.02",
   "mark_interval_seconds": 300,
   "sleep_seconds": 30,

@@ -22,6 +22,7 @@ CALL = Instrument(
     "option", "AAPL", "paper", multiplier="100", expiry="2026-10-16", strike="200", right="call"
 )
 CPI = Instrument("event", "CPI", "paper", market_id="KXCPI-26SEP-T3.0")
+CPI_NO = Instrument("event", "CPI", "paper", market_id="KXCPI-26SEP-T3.0", right="no")
 
 
 def intent(instrument=AAPL, side="buy", quantity="10", **kwargs):
@@ -422,6 +423,50 @@ class SettlementTests(SimTestCase):
         for bad in ("1.01", "-0.5"):
             with self.assertRaises(ValueError):
                 self.broker.settle_event("KXCPI-26SEP-T3.0", bad)
+
+
+class NoLegSettlementTests(SimTestCase):
+    """`payout_per_contract` is the yes value; a NO position is paid its complement."""
+
+    def setUp(self):
+        super().setUp()
+        self.book(CPI_NO, bid="0.59", ask="0.60", last="0.60")
+        self.broker.submit(
+            intent(CPI_NO, quantity="10", order_type="limit", limit_price="0.60",
+                   time_in_force="gtc")
+        )
+        self.entry = self.broker.cash
+
+    def test_a_no_position_is_paid_a_dollar_when_the_market_resolves_no(self):
+        self.clock.advance(3600)
+        settled = self.broker.settle_event("KXCPI-26SEP-T3.0", "0")
+        self.assertEqual(settled[0].price, Decimal("1"))
+        self.assertEqual(settled[0].side, "sell")
+        self.assertEqual(self.broker.cash, self.entry + Decimal("10"))
+        self.assertEqual(self.broker.positions(), [])
+        self.assertEqual(self.broker.realized_pnl, Decimal("4.00") - Decimal("0.17"))
+
+    def test_a_no_position_is_paid_nothing_when_the_market_resolves_yes(self):
+        self.clock.advance(3600)
+        settled = self.broker.settle_event("KXCPI-26SEP-T3.0", "1")
+        self.assertEqual(settled[0].price, Decimal("0"))
+        self.assertEqual(self.broker.cash, self.entry)
+        self.assertEqual(self.broker.realized_pnl, Decimal("-6.00") - Decimal("0.17"))
+
+    def test_both_legs_of_one_market_settle_to_a_dollar_between_them(self):
+        self.book(CPI, bid="0.39", ask="0.40", last="0.40")
+        self.broker.submit(
+            intent(CPI, quantity="10", order_type="limit", limit_price="0.40",
+                   time_in_force="gtc", nonce="yes-leg")
+        )
+        cash = self.broker.cash
+        self.clock.advance(3600)
+        settled = {f.instrument.right or "yes": f.price for f in
+                   self.broker.settle_event("KXCPI-26SEP-T3.0", "1")}
+        self.assertEqual(settled, {"yes": Decimal("1"), "no": Decimal("0")})
+        # Ten of each leg is ten dollars however the market resolves.
+        self.assertEqual(self.broker.cash, cash + Decimal("10"))
+        self.assertEqual(self.broker.positions(), [])
 
 
 class MarkTests(SimTestCase):
