@@ -65,6 +65,10 @@ MAX_STRING = 8000
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 SECRET = re.compile(r"\bsk-\S*|\bAPCA-\S*|\bBearer[ :]\s*\S*")
 URL = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s<>\"\')]+")
+#: The site refuses a string carrying a script-capable URI; a colon followed by whitespace
+#: ("from the data:\n") is prose and passes on both sides. Mirrors `UNSAFE_SCHEME` in the
+#: site's schema.js, so a desk that writes a data URI loses the URI, not the whole thought.
+UNSAFE_SCHEME = re.compile(r"\b(javascript|vbscript|data|file|blob):(?=\S)", re.IGNORECASE)
 ALLOWED_HOSTS = frozenset(
     {
         "sec.gov",
@@ -143,6 +147,7 @@ def sanitize_string(value: str) -> str:
     cleaned = SECRET.sub(REDACTED, cleaned)
     cleaned = URL.sub(lambda m: m.group(0) if _host_allowed(m.group(0)) else DROPPED_LINK, cleaned)
     cleaned = cleaned.replace("<", "\u2039")
+    cleaned = UNSAFE_SCHEME.sub(lambda m: m.group(1) + ": ", cleaned)
     if len(cleaned) > MAX_STRING:
         cleaned = cleaned[: MAX_STRING - 1] + "\u2026"
     return cleaned

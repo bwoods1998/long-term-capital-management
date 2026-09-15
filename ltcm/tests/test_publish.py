@@ -203,6 +203,14 @@ class SanitizerTests(PublisherCase):
         self.assertNotIn("xyz", cleaned["text"])
         self.assertEqual(cleaned["n"], 3)
 
+    def test_prose_colons_survive_but_script_capable_uris_are_defused(self):
+        # The site refuses "data:text/html,..." and "javascript:..." outright, and a refused
+        # thought is a hole in the public tape. Prose such as "from the data:\n" must pass.
+        prose = "The dates near the end are clearly from the data:\n\nLooking at the file: it is closed."
+        self.assertEqual(sanitize_for_site(prose), prose)
+        defused = sanitize_for_site("then javascript:alert(1) and data:text/plain;base64,QQ== ran")
+        self.assertEqual(defused, "then javascript: alert(1) and data: text/plain;base64,QQ== ran")
+
     def test_tabs_and_newlines_survive(self):
         self.assertEqual(sanitize_for_site("a\tb\nc\r"), "a\tb\nc\r")
 
