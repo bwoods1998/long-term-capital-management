@@ -23,6 +23,12 @@ export const COOLDOWN_SECONDS = 1800;
 export const ALERT_EVERY_SECONDS = 6 * 3600;
 export const LOW_BALANCE_USD = 60;
 export const CRITICAL_BALANCE_USD = 20;
+// The floor's spend policy has no daily cap: the credit above the reserve is spent as the work
+// needs it, so "low" is a matter of runway, not of dollars. The owner hears at a week of runway,
+// again at two days, and again when the floor has actually stopped for lack of credit.
+export const RESERVE_USD = 10;
+export const LOW_RUNWAY_DAYS = 7;
+export const CRITICAL_RUNWAY_DAYS = 2;
 export const DIGEST_UTC_HOUR = 21;
 /**
  * Sail's `range` accepts `1h`, `6h`, `24h`, `7d`, `30d` and `period`, and silently falls back to
@@ -62,6 +68,8 @@ export async function readCheckpoint({ url, fetcher }) {
       at: stamp,
       equity_usd: amount(body.floor?.equity),
       daily_pnl_usd: amount(body.floor?.daily_pnl),
+      // The floor's own verdict on its credit, under the runway policy; null under a fixed cap.
+      spend_mode: typeof body.budget?.mode === 'string' ? body.budget.mode : null,
     };
   } catch (error) {
     return {
@@ -78,6 +86,14 @@ export async function readCheckpoint({ url, fetcher }) {
  * `cooldown`, `resumed`, `resume_failed`, `restarted`, `restart_failed`,
  * `stopped_low_balance`, `box_unrecoverable`.
  */
+/** Seconds in a Sail usage range such as `24h`, `6h`, `7d`. Unknown spellings read as a day. */
+export function rangeSeconds(range) {
+  const match = /^(\d+)([hd])$/.exec(String(range || '').trim());
+  if (!match) return 86400;
+  const n = Number(match[1]);
+  return match[2] === 'h' ? n * 3600 : n * 86400;
+}
+
 export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = null, now = Date.now() }) {
   const at = iso(now);
   const apiKey = env.SAIL_API_KEY;
@@ -86,6 +102,9 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   const cooldown = positive(env.RESTART_COOLDOWN_SECONDS, COOLDOWN_SECONDS) * 1000;
   const lowBalance = positive(env.LOW_BALANCE_USD, LOW_BALANCE_USD);
   const criticalBalance = positive(env.CRITICAL_BALANCE_USD, CRITICAL_BALANCE_USD);
+  const reserve = positive(env.RESERVE_USD, RESERVE_USD);
+  const lowRunway = positive(env.LOW_RUNWAY_DAYS, LOW_RUNWAY_DAYS);
+  const criticalRunway = positive(env.CRITICAL_RUNWAY_DAYS, CRITICAL_RUNWAY_DAYS);
   const alertEvery = positive(env.ALERT_EVERY_SECONDS, ALERT_EVERY_SECONDS) * 1000;
 
   // ---- look ------------------------------------------------------------------------------------
@@ -97,6 +116,15 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   const box = apiKey && boxId ? await boxStatus({ apiKey, boxId, fetcher }) : null;
   const balance = usage && !usage.error ? usage.balance_usd : null;
   const status = box && !box.error ? box.status : null;
+  // Runway: credit above the reserve over the trailing day's spend (models and the box together,
+  // as Sail bills them). Sail's 24h window is the burn; a shorter configured window is scaled.
+  const spend = usage && !usage.error && Number.isFinite(usage.spend_usd) ? usage.spend_usd : null;
+  const burn = spend === null ? null : Math.max(spend * (86400 / rangeSeconds(env.SAIL_USAGE_RANGE || USAGE_RANGE)), 0.5);
+  const spendable = balance === null ? null : Math.max(balance - reserve, 0);
+  const runwayDays = spendable === null || burn === null ? null : spendable / burn;
+  const runOut = runwayDays === null ? null : iso(now + runwayDays * 86400000);
+  const runway = { reserve_usd: reserve, spendable_usd: spendable, burn_usd_per_day: burn, runway_days: runwayDays, run_out_at: runOut };
+  gate.recordSail(runway);
 
   gate.recordSail({
     checked_at: at,
@@ -122,8 +150,9 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     action = 'stale_no_sailbox';
   } else if (stopped && !RESUMABLE.includes(status)) {
     action = 'box_unrecoverable';
-  } else if (stopped && balance !== null && balance <= lowBalance) {
-    // Resuming a box on the last of the credit only spends it faster and stops mid-session.
+  } else if (stopped && balance !== null && balance <= reserve) {
+    // Under the reserve the floor itself would refuse every model call, so a resumed box
+    // would only burn its own hourly rate. Above it the floor throttles on its own.
     action = 'stopped_low_balance';
   } else if (cooling) {
     action = 'cooldown';
@@ -161,6 +190,7 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
   // ---- tell, only when telling is the last resort -----------------------------------------------
   const today = gate.status(now).today;
   const facts = {
+    ...runway,
     balance_usd: balance,
     spend_usd: usage && !usage.error ? usage.spend_usd : null,
     range: usage && !usage.error ? usage.range : null,
@@ -192,9 +222,11 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     }
   };
 
-  if (balance !== null && balance < criticalBalance) await send('sail_balance_critical', { threshold_usd: criticalBalance });
-  else if (balance !== null && balance < lowBalance) await send('sail_balance_low', { threshold_usd: lowBalance });
 
+  const floorMode = checkpoint.error ? null : checkpoint.spend_mode;
+  if (floorMode === 'stopped' || (balance !== null && balance <= reserve)) await send('floor_stopped', runway);
+  else if (balance !== null && (balance < criticalBalance || (runwayDays !== null && runwayDays < criticalRunway))) await send('sail_balance_critical', { threshold_usd: criticalBalance, threshold_days: criticalRunway, ...runway });
+  else if (balance !== null && (balance < lowBalance || (runwayDays !== null && runwayDays < lowRunway))) await send('sail_balance_low', { threshold_usd: lowBalance, threshold_days: lowRunway, ...runway });
   // "Not running" is a verdict, not a symptom. A stale checkpoint on the first pass gets a
   // restart and the benefit of the doubt: the loop needs a minute to publish again, and a mail
   // sent before that minute is up is a false alarm on every deploy. The mail goes out when a

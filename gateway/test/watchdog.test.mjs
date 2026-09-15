@@ -79,7 +79,10 @@ test('Sail reports money in fractional cents, so 3106.14 is $31.06', async () =>
   const { mailer, sent } = recorder();
   await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW });
   assert.equal(gate.status(NOW).sail.balance_usd, 31.0614);
-  assert.equal(sent[0].subject, 'LTCM: Sail balance $31.06 \u2014 top up to keep the desks working');
+  // $21.06 above the reserve at $4.13 a day is five days of runway: the first, gentle warning.
+  assert.equal(sent[0].subject, 'LTCM: 5.1 days of Sail credit left \u2014 top up when you can');
+  assert.match(sent[0].text, /credit lasts 5\.1 days, to about 2026-09-20 /);
+  assert.match(sent[0].text, /There is no daily cap/);
 });
 
 test('a checkpoint older than fifteen minutes restarts the box, once', async () => {
@@ -143,17 +146,38 @@ test('a paused box with credit behind it is resumed and restarted, with no human
   assert.equal(gate.status(NOW).sail.last_resume_state, 'running');
 });
 
-test('a paused box on the last of the credit is left paused and the owner is told', async () => {
+test('a paused box under the reserve is left paused and the owner is told', async () => {
   const gate = gateWith();
-  const { fetcher, calls } = cloud({ ago: 60, status: 'paused', balanceCents: 1500 });
+  const { fetcher, calls } = cloud({ ago: 60, status: 'paused', balanceCents: 800 });
   const { mailer, sent } = recorder();
   const result = await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW });
   assert.equal(result.action, 'stopped_low_balance');
   assert.equal(calls.some(call => call.url.endsWith('/resume')), false);
   assert.deepEqual(sent.map(message => message.subject), [
-    'LTCM: Sail balance $15.00 — top up to keep the desks working',
+    'LTCM: the desks have stopped — Sail credit is at the reserve',
     'LTCM: the desks are not running',
   ]);
+});
+
+test('a paused box with credit above the reserve is resumed even when the credit is short', async () => {
+  // The floor throttles itself above the reserve; a stopped box would only forfeit the runway.
+  const gate = gateWith();
+  const { fetcher, calls } = cloud({ ago: 60, status: 'paused', balanceCents: 1500 });
+  const result = await runWatchdog({ gate, env: ENV, fetcher, now: NOW });
+  assert.equal(result.action, 'resumed');
+  assert.equal(calls.some(call => call.url.endsWith('/resume')), true);
+});
+
+test('a floor that reports itself stopped is mailed as stopped, whatever the balance', async () => {
+  const gate = gateWith();
+  const { mailer, sent } = recorder();
+  const { fetcher } = cloud();
+  const stoppedFloor = async (url, options) => {
+    if (String(url).startsWith(CHECKPOINT)) return reply({ ...checkpointBody(NOW, 60), budget: { spent_today_usd: '0', cap_usd: '0', mode: 'stopped' } });
+    return fetcher(url, options);
+  };
+  await runWatchdog({ gate, env: ENV, fetcher: stoppedFloor, mailer, now: NOW });
+  assert.deepEqual(sent.map(message => message.subject), ['LTCM: the desks have stopped — Sail credit is at the reserve']);
 });
 
 test('a terminated box is never resumed', async () => {
@@ -206,8 +230,9 @@ test('a balance under the floor warns once, and under the critical line warns di
   const low = cloud({ balanceCents: 4500 });
   await runWatchdog({ gate, env: ENV, fetcher: low.fetcher, mailer, now: NOW });
   assert.equal(sent.length, 1);
-  assert.match(sent[0].subject, /Sail balance \$45\.00/);
-  assert.match(sent[0].text, /under the \$60\.00 floor/);
+  // $35 above the reserve at $4.13 a day: eight days of runway, but under the $60 floor.
+  assert.match(sent[0].subject, /8\.5 days of Sail credit left/);
+  assert.match(sent[0].text, /Sail credit: \$45\.00; \$35\.00 of it is above the \$10\.00 reserve/);
 
   // Inside six hours, nothing more.
   low.at(NOW + 3600000);
@@ -215,11 +240,12 @@ test('a balance under the floor warns once, and under the critical line warns di
   assert.equal(sent.length, 1);
 
   // The critical warning is its own kind, so it is not suppressed by the low one.
-  const critical = cloud({ balanceCents: 900 });
+  const critical = cloud({ balanceCents: 1500 });
   critical.at(NOW + 3600000);
   await runWatchdog({ gate, env: ENV, fetcher: critical.fetcher, mailer, now: NOW + 3600000 });
   assert.equal(sent.length, 2);
-  assert.match(sent[1].text, /second and last warning/);
+  assert.match(sent[1].subject, /1\.2 days of Sail credit left — top up now/);
+  assert.match(sent[1].text, /last warning before the floor throttles/);
 });
 
 test('the kill switch and exhausted caps each raise their own alert', async () => {
@@ -246,7 +272,7 @@ test('the digest goes out in the 21:00 UTC hour and carries the floor s own numb
   await runWatchdog({ gate, env: ENV, fetcher, mailer, now: evening });
   assert.equal(sent.length, 1);
   assert.equal(sent[0].subject, 'LTCM daily: equity $4999.97, day P&L -$12.50');
-  assert.match(sent[0].text, /Sail balance: \$120\.00; spend over 24h: \$4\.13\./);
+  assert.match(sent[0].text, /Sail balance: \$120\.00; spend over 24h: \$4\.13; runway 26 days\./);
   assert.match(sent[0].text, /Box: running\. Kill switch: open\./);
   // The next tick five minutes later is inside the window, so it stays quiet.
   at(evening + 300000);

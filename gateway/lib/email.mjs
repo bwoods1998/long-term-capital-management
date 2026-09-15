@@ -9,6 +9,7 @@
 export const ALERT_KINDS = [
   'sail_balance_low',
   'sail_balance_critical',
+  'floor_stopped',
   'box_not_running',
   'kill_switch_engaged',
   'caps_exhausted',
@@ -21,6 +22,14 @@ export const CONSOLE = 'https://app.sailresearch.com/';
 export const FLOOR = 'https://blakewoods.us/capital/';
 
 const money = value => (Number.isFinite(value) ? `$${Number(value).toFixed(2)}` : 'unknown');
+const days = value => (Number.isFinite(value) ? `${value < 10 ? value.toFixed(1) : Math.floor(value)} days` : 'an unknown time');
+const when = value => (typeof value === 'string' && value ? value.slice(0, 16).replace('T', ' ') + ' UTC' : 'an unknown date');
+const runwayLines = facts => [
+  `Sail credit: ${money(facts.balance_usd)}; ${money(facts.spendable_usd)} of it is above the ${money(facts.reserve_usd)} reserve.`,
+  `The floor is burning about ${money(facts.burn_usd_per_day)} a day (models and the box), so the credit lasts ${days(facts.runway_days)}, to about ${when(facts.run_out_at)}.`,
+  'There is no daily cap. Under three days of runway the desks throttle to the live sleeves; at the reserve they stop and wait.',
+  'Adding credit at Sail is the only step. The floor opens up again on its own within a minute of the balance changing.',
+];
 const signed = value => (Number.isFinite(value) ? `${value < 0 ? '-' : '+'}$${Math.abs(value).toFixed(2)}` : 'unknown');
 const number = value => (Number.isFinite(value) ? String(value) : 'unknown');
 
@@ -30,19 +39,22 @@ export function compose(kind, facts = {}) {
   let subject;
   switch (kind) {
     case 'sail_balance_low':
-      subject = `LTCM: Sail balance ${money(facts.balance_usd)} — top up to keep the desks working`;
-      lines.push(
-        `The Sail credit balance is ${money(facts.balance_usd)}, under the ${money(facts.threshold_usd)} floor.`,
-        'The desks keep running until it reaches zero, then the box stops and the floor goes quiet.',
-        'Adding credit is the only step: the gateway resumes the box and restarts the desks on its own.',
-      );
+      subject = `LTCM: ${days(facts.runway_days)} of Sail credit left — top up when you can`;
+      lines.push(...runwayLines(facts));
       break;
     case 'sail_balance_critical':
-      subject = `LTCM: Sail balance ${money(facts.balance_usd)} — top up to keep the desks working`;
+      subject = `LTCM: ${days(facts.runway_days)} of Sail credit left — top up now`;
       lines.push(
-        `The Sail credit balance is ${money(facts.balance_usd)}. This is the second and last warning.`,
-        'When it reaches zero the box stops mid-session and open orders are left resting at the venues.',
-        'Add credit now; the gateway brings the floor back by itself once there is balance.',
+        ...runwayLines(facts),
+        'This is the last warning before the floor throttles and then stops.',
+      );
+      break;
+    case 'floor_stopped':
+      subject = 'LTCM: the desks have stopped — Sail credit is at the reserve';
+      lines.push(
+        `Sail credit is ${money(facts.balance_usd)}, at or under the ${money(facts.reserve_usd)} reserve.`,
+        'No new desk session starts. Marks, order polling, settlements and publication continue; open orders rest at the venues.',
+        'Add credit at Sail and the floor resumes on its own within a minute. Nothing else is needed.',
       );
       break;
     case 'box_not_running':
@@ -78,7 +90,7 @@ export function compose(kind, facts = {}) {
         `Equity: ${money(facts.equity_usd)}.`,
         `Day P&L: ${signed(facts.daily_pnl_usd)}.`,
         `Orders through the gateway today: ${number(facts.orders)} for ${money(facts.notional_usd)}.`,
-        `Sail balance: ${money(facts.balance_usd)}; spend over ${facts.range || 'the window'}: ${money(facts.spend_usd)}.`,
+        `Sail balance: ${money(facts.balance_usd)}; spend over ${facts.range || 'the window'}: ${money(facts.spend_usd)}; runway ${days(facts.runway_days)}.`,
         `Box: ${facts.box_status || 'unknown'}. Kill switch: ${facts.kill_switch ? 'engaged' : 'open'}.`,
         facts.published_at ? `Checkpoint published ${facts.published_at}.` : 'No checkpoint has been published.',
       );
