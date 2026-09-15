@@ -66,6 +66,26 @@ export const randomNonce = () =>
   [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
 
 /**
+ * One CDP JWT for the Advanced Trade WebSocket user channel. Same key, same header, but the
+ * claim set carries no `uri` (and no `aud`): the socket is not one method and one path
+ * (https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-overview).
+ * The docs' Python sample says `iss: "coinbase-cloud"`; their JavaScript sample and every REST
+ * sample say `"cdp"`, which is what the REST path already uses successfully, so `"cdp"` it is.
+ * Two minutes long; the VM mints one per subscribe message and never holds the key.
+ */
+export async function mintWsJwt({ keyName, secret, now = Date.now(), nonce = randomNonce() }) {
+  const { key, algorithm } = await keyFor(secret);
+  const seconds = Math.floor(now / 1000);
+  const header = { alg: algorithm, kid: keyName, nonce, typ: 'JWT' };
+  const payload = { sub: keyName, iss: 'cdp', nbf: seconds, exp: seconds + LIFETIME_SECONDS };
+  const signingInput =
+    b64url(Buffer.from(JSON.stringify(header))) + '.' + b64url(Buffer.from(JSON.stringify(payload)));
+  const parameters = algorithm === 'EdDSA' ? { name: 'Ed25519' } : { name: 'ECDSA', hash: 'SHA-256' };
+  const signature = await crypto.subtle.sign(parameters, key, new TextEncoder().encode(signingInput));
+  return signingInput + '.' + b64url(new Uint8Array(signature));
+}
+
+/**
  * One CDP JWT for `METHOD api.coinbase.com/<path>`.
  * `path` is the venue path without a leading slash and without a query string.
  */

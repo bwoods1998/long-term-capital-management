@@ -1193,6 +1193,133 @@ class FakeVenue:
         return Balance(self.venue, self.cash, self.equity, self.cash, self.as_of)
 
 
+class FakeHub:
+    """Stands in for `feeds.FeedHub`: what the sockets saw, handed to the tick on request."""
+
+    def __init__(self, *, fill_venues=(), resolutions=(), quote=None):
+        self.pending = {"fill_venues": list(fill_venues), "resolutions": list(resolutions)}
+        self.fixed_quote = quote
+        self.drains = 0
+        self.health_checks = 0
+        self.started = False
+
+    def drain(self):
+        self.drains += 1
+        out, self.pending = self.pending, {"fill_venues": [], "resolutions": []}
+        return out
+
+    def quote(self, instrument):
+        return self.fixed_quote
+
+    def check_health(self):
+        self.health_checks += 1
+        return []
+
+    def start(self):
+        self.started = True
+
+    def stop(self, timeout=2.0):
+        self.started = False
+
+
+class FillingVenue(FakeVenue):
+    """A venue whose REST fills endpoint answers, so a socket candidate can be confirmed."""
+
+    def __init__(self, venue, fills=(), **kw):
+        super().__init__(venue, **kw)
+        self.fill_rows = list(fills)
+        self.fill_calls = 0
+        self.upgrades = 0
+        self.upgrade_error = None
+
+    def fills(self, since=None):
+        self.fill_calls += 1
+        return list(self.fill_rows)
+
+    def upgrade_api_tier(self):
+        self.upgrades += 1
+        if self.upgrade_error is not None:
+            raise self.upgrade_error
+        return {"usage_tier": "advanced"}
+
+
+class FeedsTests(ServiceCase):
+    """leap: feeds -- the sockets make the REST sweeps run sooner; they never write the ledger."""
+
+    def live(self, **venues):
+        self.venues = venues
+        self.service.close()
+        self.service = self.build(live_venues=sorted(venues))
+        return self.service
+
+    def test_without_a_gateway_there_are_no_feeds_and_a_tick_says_so(self):
+        self.assertIsNone(self.service.feeds)
+        self.assertIsNone(self.tick()["feeds"])
+
+    def test_a_socket_fill_candidate_is_confirmed_by_rest_on_the_same_tick(self):
+        from ltcm.broker import Fill, Instrument
+
+        instrument = Instrument("event", "KXFED-26SEP-T3.75", "kalshi", market_id="KXFED-26SEP-T3.75")
+        fill = Fill("t-1", "o-1", "", instrument, "buy", Decimal("10"), Decimal("0.89"), Decimal("0.05"), "2026-09-14T13:49:00.000Z")
+        venue = FillingVenue("kalshi", fills=[fill])
+        service = self.live(kalshi=venue)
+        service.feeds = FakeHub(fill_venues=["kalshi"])
+        result = self.tick()
+        self.assertEqual(result["feeds"]["fill_venues"], ["kalshi"])
+        self.assertEqual(result["feeds"]["fills_confirmed"], ["t-1"])
+        self.assertEqual(venue.fill_calls, 1)
+        events = service.log.read(stream="broker:kalshi", kind="broker.fill")
+        self.assertEqual([e.id for e in events], ["fill:kalshi:t-1"])
+        self.assertEqual(service.feeds.health_checks, 1)
+        # Nothing pending: the next tick confirms nothing and the ledger is not written twice.
+        self.tick(moment(2026, 9, 14, 13, 51))
+        self.assertEqual(len(service.log.read(stream="broker:kalshi", kind="broker.fill")), 1)
+
+    def test_a_fresh_socket_price_beats_every_poll_and_its_absence_changes_nothing(self):
+        from ltcm.broker import Instrument, Quote
+
+        instrument = Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD")
+        live = Quote(instrument, Decimal("76790"), Decimal("76800"), Decimal("76795"), "2026-09-14T13:50:00.000Z", "coinbase:ws", False)
+        self.service.feeds = FakeHub(quote=live)
+        self.assertEqual(self.service.quote(instrument).source, "coinbase:ws")
+        self.service.feeds = FakeHub(quote=None)
+        self.assertEqual(self.service.quote(instrument).source, "fake")
+
+    def test_the_kalshi_tier_is_asked_for_once_after_the_first_api_fill(self):
+        venue = FillingVenue("kalshi")
+        service = self.live(kalshi=venue)
+        self.tick()
+        self.assertEqual(venue.upgrades, 0, "no fill yet, nothing to ask for")
+        service.log.append(
+            "broker:kalshi", "broker.fill",
+            {"fill_id": "t-1", "order_id": "o-1", "desk_id": DESK, "side": "buy", "quantity": "10", "price": "0.89", "fee": "0.05"},
+            id="fill:kalshi:t-1", at="2026-09-14T13:50:30.000Z",
+        )
+        self.tick(moment(2026, 9, 14, 13, 51))
+        self.assertEqual(venue.upgrades, 1)
+        self.assertEqual(service.state()["kalshi_tier_upgraded"], "2026-09-14T13:51:00.000Z")
+        texts = [e.payload["text"] for e in service.log.read(kind="ops.alert") if "tier" in e.payload["text"]]
+        self.assertEqual(len(texts), 1)
+        self.assertIn("upgraded to advanced", texts[0])
+        self.tick(moment(2026, 9, 14, 13, 52))
+        self.assertEqual(venue.upgrades, 1, "granted once, never asked again")
+
+    def test_a_refused_upgrade_is_retried_a_day_later_not_every_tick(self):
+        from ltcm.broker import BrokerError
+
+        venue = FillingVenue("kalshi")
+        venue.upgrade_error = BrokerError("kalshi api tier upgrade: 403 No API-created order was found")
+        service = self.live(kalshi=venue)
+        service.log.append("broker:kalshi", "broker.fill", {"fill_id": "t-1"}, id="fill:kalshi:t-1", at="2026-09-14T13:49:00.000Z")
+        self.tick()
+        self.assertEqual(venue.upgrades, 1)
+        self.assertNotIn("kalshi_tier_upgraded", service.state())
+        self.tick(moment(2026, 9, 14, 15, 0))
+        self.assertEqual(venue.upgrades, 1, "inside the day: not again")
+        self.tick(moment(2026, 9, 15, 14, 0))
+        self.assertEqual(venue.upgrades, 2, "a day later: asked again")
+
+
 class AccountBalanceTests(ServiceCase):
     """The masthead number the owner asked for: the venues' own balances, added up."""
 

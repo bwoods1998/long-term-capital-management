@@ -225,6 +225,69 @@ test('an order body that is not JSON is refused, and so is a missing credential'
   assert.match(unconfigured.body.error, /credentials for coinbase are unusable/);
 });
 
+test('the VM can fetch Kalshi WebSocket handshake headers, signed over the ws path, never the key', async () => {
+  const { response, body } = await call(ask('GET', '/v1/kalshi/ws-auth'));
+  assert.equal(response.status, 200);
+  assert.equal(body.path, '/trade-api/ws/v2');
+  assert.equal(body.expires_in, 30);
+  assert.equal(body.headers['KALSHI-ACCESS-KEY'], 'a1b2c3');
+  assert.equal(body.headers['KALSHI-ACCESS-TIMESTAMP'], String(NOW));
+  const verified = await crypto.subtle.verify(
+    { name: 'RSA-PSS', saltLength: 32 },
+    keys.kalshi.publicKey,
+    Buffer.from(body.headers['KALSHI-ACCESS-SIGNATURE'], 'base64'),
+    new TextEncoder().encode(`${NOW}GET/trade-api/ws/v2`),
+  );
+  assert.equal(verified, true);
+  assert.equal(JSON.stringify(body).includes('PRIVATE KEY'), false);
+  assert.equal((await call(ask('POST', '/v1/kalshi/ws-auth'))).response.status, 405);
+  assert.equal((await call(ask('GET', '/v1/kalshi/ws-auth', { token: 'wrong' }))).response.status, 401);
+});
+
+test('the VM can fetch a Coinbase socket JWT with no uri claim and two minutes of life', async () => {
+  const { response, body } = await call(ask('GET', '/v1/coinbase/ws-jwt'));
+  assert.equal(response.status, 200);
+  assert.equal(body.expires_in, 120);
+  const [header, payload, signature] = body.jwt.split('.');
+  const head = decodeSegment(header);
+  const claims = decodeSegment(payload);
+  assert.equal(head.alg, 'EdDSA');
+  assert.equal(head.kid, 'organizations/o/apiKeys/k');
+  assert.equal(typeof head.nonce, 'string');
+  assert.deepEqual(Object.keys(claims).sort(), ['exp', 'iss', 'nbf', 'sub']);
+  assert.equal(claims.iss, 'cdp');
+  assert.equal(claims.sub, 'organizations/o/apiKeys/k');
+  assert.equal(claims.exp - claims.nbf, 120);
+  assert.equal(claims.nbf, Math.floor(NOW / 1000));
+  const verified = await crypto.subtle.verify(
+    { name: 'Ed25519' },
+    keys.coinbase.publicKey,
+    Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
+    new TextEncoder().encode(`${header}.${payload}`),
+  );
+  assert.equal(verified, true);
+  // Two fetches are two tokens: a nonce per mint, never a reused JWT.
+  const again = (await call(ask('GET', '/v1/coinbase/ws-jwt'))).body;
+  assert.notEqual(again.jwt, body.jwt);
+});
+
+test('a missing credential turns a ws route into a 503, not a crash', async () => {
+  const { response } = await call(ask('GET', '/v1/coinbase/ws-jwt'), { settings: { COINBASE_API_SECRET: '' } });
+  assert.equal(response.status, 503);
+  const kalshi = await call(ask('GET', '/v1/kalshi/ws-auth'), { settings: { KALSHI_PRIVATE_KEY: '' } });
+  assert.equal(kalshi.response.status, 503);
+});
+
+test('the Kalshi tier upgrade is forwarded as a plain write and never counted as an order', async () => {
+  const gate = gateFor();
+  const { response, calls } = await call(ask('POST', '/v1/kalshi/account/api_usage_level/upgrade', { body: {} }), { gate });
+  assert.equal(response.status, 200);
+  assert.equal(calls[0].url, 'https://api.elections.kalshi.com/trade-api/v2/account/api_usage_level/upgrade');
+  assert.equal(calls[0].method, 'POST');
+  assert.ok(calls[0].headers['KALSHI-ACCESS-SIGNATURE']);
+  assert.equal(gate.status(NOW).today.orders, 0, 'an upgrade is not an order');
+});
+
 test('only the documented routes and methods exist', async () => {
   assert.deepEqual(parseRoute('/v1/kalshi/portfolio/balance'), { venue: 'kalshi', path: 'portfolio/balance' });
   assert.equal(parseRoute('/v1/kalshi'), null);

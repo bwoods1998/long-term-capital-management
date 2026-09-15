@@ -257,6 +257,20 @@ class KalshiBroker:
     def capabilities(self) -> set[str]:
         return set(CAPABILITIES)
 
+    def upgrade_api_tier(self) -> Any:
+        """`POST /account/api_usage_level/upgrade`: the free, permanent Advanced tier.
+
+        https://docs.kalshi.com/api-reference/account/upgrade-account-api-usage-level:
+        "Grants a permanent Advanced API usage-level grant... Criteria: at least 1 of the
+        user's last 100 Predictions orders was created via API." Basic's write budget is 100
+        tokens a second and Advanced's 300; an order costs 10. A 403 means the criteria are
+        not met yet and is raised as a `BrokerError` for the caller to retry later.
+        """
+        return self._call(
+            "POST", "/account/api_usage_level/upgrade", body={}, what="kalshi api tier upgrade",
+            ok=(200, 201, 204),
+        )
+
     # --------------------------------------------------------------- account
     def balance(self) -> Balance:
         """`GET /portfolio/balance`. `balance` is integer cents; `balance_dollars` is a string."""

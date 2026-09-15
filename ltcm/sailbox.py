@@ -57,6 +57,12 @@ FLOOR_HOSTS: tuple[str, ...] = (
     "api.sailresearch.com",
     "api.elections.kalshi.com",
     "api.coinbase.com",
+    # The venue WebSockets (contract v2, section 6). Read-only by construction: neither venue
+    # accepts an order over its socket, and the credential material the box uses to open them
+    # is minted by the gateway and lives seconds (Kalshi) or two minutes (Coinbase). Kalshi's
+    # socket is on the API host above; Coinbase's are on their own.
+    "advanced-trade-ws.coinbase.com",
+    "advanced-trade-ws-user.coinbase.com",
     "blakewoods.us",
     "www.sec.gov",
     "data.sec.gov",

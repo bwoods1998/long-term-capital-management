@@ -157,6 +157,7 @@ in `.data/ltcm/box.json`, which is what `status` checks against and what a fork 
 |---|---|
 | `api.sailresearch.com` | the model provider: every desk session, the critic, the committee |
 | `api.elections.kalshi.com`, `api.coinbase.com` | the live venues |
+| `advanced-trade-ws.coinbase.com`, `advanced-trade-ws-user.coinbase.com` | the Coinbase WebSockets (prices, order state); Kalshi's socket shares its API host. Read-only: no venue takes an order over a socket, and the box opens them with credential material the gateway mints for seconds |
 | `blakewoods.us` | the public site the publisher pushes the tape to |
 | `*.workers.dev` | the owner's publish gateway |
 | `www.sec.gov`, `data.sec.gov`, `efts.sec.gov` | EDGAR: filings, company facts, full-text search |

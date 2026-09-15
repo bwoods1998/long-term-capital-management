@@ -62,6 +62,31 @@ export async function authHeaders({ keyId, privateKeyPem, method, path, now = Da
   };
 }
 
+/**
+ * The WebSocket handshake path and the three headers that authenticate it. Kalshi authenticates a
+ * WebSocket in the HTTP upgrade, with the same recipe as a REST call over `timestamp + "GET" +
+ * path` -- but the path is `/trade-api/ws/v2`, outside the REST prefix
+ * (https://docs.kalshi.com/getting_started/quick_start_websockets). The floor's VM asks the
+ * gateway for these, connects within seconds, and never holds the key.
+ */
+export const WS_PATH = '/trade-api/ws/v2';
+export const WS_AUTH_TTL_SECONDS = 30;
+
+export async function wsAuthHeaders({ keyId, privateKeyPem, now = Date.now() }) {
+  const timestamp = String(Math.floor(now));
+  const key = await keyFor(privateKeyPem);
+  const signature = await crypto.subtle.sign(
+    { name: 'RSA-PSS', saltLength: SALT_LENGTH },
+    key,
+    new TextEncoder().encode(signingInput(timestamp, 'GET', WS_PATH)),
+  );
+  return {
+    'KALSHI-ACCESS-KEY': keyId,
+    'KALSHI-ACCESS-TIMESTAMP': timestamp,
+    'KALSHI-ACCESS-SIGNATURE': Buffer.from(signature).toString('base64'),
+  };
+}
+
 /** The upstream URL one forwarded call goes to. `search` includes its leading `?`, or is empty. */
 export const target = (path, search = '') =>
   `${HOST}${PREFIX}/${String(path).replace(/^\/+/, '')}${search || ''}`;

@@ -3,8 +3,15 @@
 //
 //   GET|POST|DELETE /v1/kalshi/<path>     signed with the Kalshi key, forwarded to the venue
 //   GET|POST|DELETE /v1/coinbase/<path>   signed with the Coinbase key, forwarded to the venue
+//   GET             /v1/kalshi/ws-auth    handshake headers for the Kalshi WebSocket, 30 s of life
+//   GET             /v1/coinbase/ws-jwt   a JWT for the Coinbase user WebSocket, 120 s of life
 //   GET             /v1/health            caps, counters, kill switch, watchdog
 //   POST            /v1/kill /v1/unkill   the kill switch, which lives outside the trading VM
+//
+// The two ws-* routes are the only ones that hand the VM credential material, and what they hand
+// over is short-lived and read-only: neither venue accepts an order over its WebSocket. A POST to
+// `/v1/kalshi/account/api_usage_level/upgrade` passes as an ordinary forwarded write; it creates
+// no order, so the caps do not see it (`caps.createsOrder`).
 //
 // `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
 // the same router works against both.
@@ -44,6 +51,15 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     await gate.setKill(path === '/v1/kill');
     return json(await gate.status());
+  }
+
+  if (path === '/v1/kalshi/ws-auth' || path === '/v1/coinbase/ws-jwt') {
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    try {
+      return json(await wsCredential(path, env, { now: now(), nonce }));
+    } catch (error) {
+      return fail(`Gateway credentials are unusable: ${error.message}`, 503);
+    }
   }
 
   const target = parseRoute(path);
@@ -100,6 +116,20 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (reservation) await gate.refund(reservation);
     return fail(`The ${target.venue} API did not answer.`, 502);
   }
+}
+
+/** Short-lived WebSocket credential material for the VM: handshake headers, or a socket JWT. */
+async function wsCredential(path, env, { now, nonce }) {
+  if (path === '/v1/kalshi/ws-auth') {
+    if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error('kalshi not configured');
+    const headers = await kalshi.wsAuthHeaders({ keyId: env.KALSHI_KEY_ID, privateKeyPem: env.KALSHI_PRIVATE_KEY, now });
+    return { headers, path: kalshi.WS_PATH, expires_in: kalshi.WS_AUTH_TTL_SECONDS };
+  }
+  if (!env.COINBASE_KEY_NAME || !env.COINBASE_API_SECRET) throw new Error('coinbase not configured');
+  const jwt = await coinbase.mintWsJwt({
+    keyName: env.COINBASE_KEY_NAME, secret: env.COINBASE_API_SECRET, now, ...(nonce ? { nonce } : {}),
+  });
+  return { jwt, expires_in: coinbase.LIFETIME_SECONDS };
 }
 
 async function sign({ venue, path }, request, env, { now, nonce }) {
