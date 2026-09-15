@@ -651,6 +651,15 @@ class DailyResult(AnalyticsCase):
             metrics = payload["metrics"]
             self.assertTrue(metrics)
             for key, value in metrics.items():
+                if key == "by_generation":  # leap: lab -- the one list in the block, per the contract
+                    self.assertIsInstance(value, list)
+                    for row in value:
+                        self.assertEqual(
+                            sorted(row),
+                            ["brier", "cost_adjusted_excess_pct", "cost_usd", "decisions", "desks",
+                             "generation", "pnl_per_inference_usd", "pnl_usd"],
+                        )
+                    continue
                 self.assertIsInstance(value, str, key)
                 self.assertNotIn("<", value)
                 self.assertNotIn("<", key)
@@ -789,7 +798,7 @@ class CommandLine(AnalyticsCase):
         code, out, _ = self.run_cli(["report", "--days", "30"])
         self.assertEqual(code, 0)
         body = json.loads(out)
-        self.assertEqual(sorted(body), ["desks", "families", "floor", "generated_at", "profiles", "window", "window_days"])
+        self.assertEqual(sorted(body), ["by_generation", "desks", "families", "floor", "generated_at", "profiles", "window", "window_days"])
         self.assertEqual(body["window_days"], 30)
         self.assertIn("mullins", body["desks"])
 

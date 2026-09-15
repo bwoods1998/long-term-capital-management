@@ -23,6 +23,8 @@ money. A shadow desk earns a live sleeve by passing gate A, and only then does c
 """
 
 from __future__ import annotations
+import hashlib
+import random
 
 import time
 from datetime import timedelta
@@ -53,6 +55,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "min_multiple": "0.5",
     "max_multiple": "2",
     "back_to_shadow_drawdown_pct": "0.15",
+    # leap: lab -- capital as a bandit. On a resize day each live desk's multiple is drawn from
+    # a posterior over its cost-adjusted excess return (Thompson sampling) instead of read off
+    # its score; see `Committee._bandit_multiple` for the arithmetic. False restores the ratio.
+    "bandit_enabled": True,
+    "bandit_prior_sd_pct": "5",
+    "bandit_scale_pct": "10",
+    "bandit_decisions_scale": 10,
     # Inference budget. The floor's daily model spend is a fixed base plus a share of the profit
     # the floor actually realized in the last week: the swarm earns its own compute, and a losing
     # week cannot quietly raise the bill.
@@ -398,6 +407,11 @@ class Committee:
                 targets[desk_id] = _quantize(held)
                 reasons[desk_id] = "held between weekly resizes"
                 continue
+            if bool(self.config.get("bandit_enabled", True)):  # leap: lab
+                multiple, why = self._bandit_multiple(desk_id, at, low, high)
+                targets[desk_id] = _quantize(base * multiple)
+                reasons[desk_id] = why
+                continue
             score = live_scores.get(desk_id, ZERO)
             if best > 0 and score > 0:
                 multiple = (high * score / best)
@@ -443,6 +457,48 @@ class Committee:
                 at=at,
             )
         return targets
+
+    # leap: lab ------------------------------------------------------- the bandit
+    def bandit_sigma(self, decisions: int) -> Decimal:
+        """The posterior's spread, in percentage points, after `decisions` fills.
+
+        `sigma = prior_sd / sqrt(1 + decisions / decisions_scale)`: a desk with no record is
+        as uncertain as the prior says, and the uncertainty shrinks with the square root of
+        the evidence, the way a sample mean's does.
+        """
+        prior = money(self.config["bandit_prior_sd_pct"])
+        scale = Decimal(int(self.config["bandit_decisions_scale"]))
+        return (prior / (Decimal(1) + Decimal(int(decisions)) / scale).sqrt()).quantize(Decimal("0.0001"))
+
+    def _bandit_multiple(
+        self, desk_id: str, at: str, low: Decimal, high: Decimal
+    ) -> tuple[Decimal, str]:
+        """Thompson sampling over one live desk's cost-adjusted excess return.
+
+        The posterior is normal: its mean is the desk's cost-adjusted excess return in
+        percentage points (the same number the published gate carries), its spread is
+        `bandit_sigma(decisions)`. One draw is taken from it with a generator seeded by the
+        allocation date and the desk id, so the draw is reproducible from the public record
+        and identical however many times the day's allocation is recomputed. The draw maps
+        to a multiple of manifest capital linearly, `1 + draw / bandit_scale_pct`, clamped to
+        the committee's floor and ceiling: a draw of +10 points doubles the sleeve at the
+        default scale, a draw of -5 halves it. Over weeks the desks that keep earning are
+        sampled high more often than not and compound; the ones that do not are starved, but
+        never to zero by the bandit alone -- the gates and the breach rules do that.
+        """
+        evidence = self.gates(desk_id, at)["evidence"]
+        mean = money(evidence.get("cost_adjusted_excess_pct") or "0")
+        decisions = int(evidence.get("decisions") or 0)
+        sigma = self.bandit_sigma(decisions)
+        seed = int(hashlib.sha256(f"alloc:{at[:10]}:{desk_id}".encode("utf-8")).hexdigest(), 16)
+        draw = Decimal(str(round(random.Random(seed).gauss(float(mean), float(sigma)), 4)))
+        scale = money(self.config["bandit_scale_pct"])
+        multiple = min(high, max(low, Decimal(1) + draw / scale))
+        why = (
+            f"thompson: drew {draw:+.2f}pp from N({mean:.2f}, {sigma:.2f}) over {decisions} "
+            f"decisions -> {multiple.quantize(Decimal('0.01'))}x manifest capital"
+        )
+        return multiple, why
 
     def _publish_gates(self, active: Mapping[str, DeskManifest], at: str) -> None:
         for desk_id in sorted(active):

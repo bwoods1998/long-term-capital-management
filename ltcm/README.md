@@ -44,7 +44,9 @@ Design rules, inherited from the first generation and kept on purpose:
 | `tools.py` | The research and action tools a desk may call, each with a JSON schema and an executor. |
 | `desk.py` | The desk runtime: builds context, runs the tool-calling loop within budget, emits events, writes memory and memos, proposes orders. |
 | `committee.py` | Meriwether: rules-based capital allocation across desks (weekly), the daily public memo, promotion and demotion by the fixed gates. |
-| `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks. |
+| `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. |
+| `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
+| `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
 | `publish.py` | Batches public events and leaderboard rows to the site API. |
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
 | `service.py` | The always-on loop: schedule desk sessions, tick simulators, mark ledgers, run risk breakers, run the committee and evolution on their cadences, publish. |
@@ -79,6 +81,11 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `ledger.mark` | ledger | yes | `equity`, `cash`, `positions[]`, `daily_pnl`, `as_of`, `shadow?` |
 | `committee.allocation` | committee | yes | `allocations{desk_id: usd}`, `shadow{desk_id: true}`, `reasons{}` |
 | `committee.memo` | committee | yes | `period`, `text` |
+| `desk.forecast` | desk | yes | `session_id`, `market`, `venue`, `probability`, `market_price`, `side`, `resolves_at`, `reasoning` |
+| `lab.calibration` | lab | yes | `scope`, `desk_id`, `family`, `generation`, `n`, `brier`, `reliability[]`, `as_of`, `since` |
+| `lab.experiment` | lab | yes | `experiment_id`, `hypothesis`, `family`, `parent_id`, `change`, `variant_desk_id`, `status`, `proposed_at`, `evaluate_after`, `reason?` |
+| `lab.verdict` | lab | yes | `experiment_id`, `status` (`adopted` or `rejected`), `evidence`, `reason`, `as_of` |
+| `lab.resolution` | lab | no | `market`, `venue`, `result`, `settled_at`, `source` (the fact a market resolved, recorded once) |
 | `committee.gate` | committee | yes | `desk_id`, `gate`, `passed`, `evidence{}` |
 | `evolution.spawned` | evolution | yes | `desk_id`, `family`, `parent_id`, `generation`, `mutation` |
 | `evolution.retired` | evolution | yes | `desk_id`, `reason`, `score{}` |
@@ -91,6 +98,35 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 
 "After fill" means the event is written immediately but marked `public: false`; the publisher
 releases it when the matching order reaches a terminal state. Nobody can trade ahead of a desk.
+
+## The lab and the calibration record
+
+Two records feed the loop that improves the loop.
+
+**Calibration** (`calibration.py`). An event desk states its probability of YES with the
+`record_forecast` tool whether or not it trades; the statement is a public `desk.forecast`. When
+the market resolves -- the floor's own settlement path says so when a desk held it, the venue
+says so when none did, asked once and recorded privately as `lab.resolution` -- every forecast on
+it is scored: Brier, `(p - outcome)^2`, and a reliability table by decile of stated probability.
+The record is published daily as `lab.calibration` per desk, family, generation and floor, rides
+in the checkpoint, and the desk's post-mortem reads its own two-sentence brief.
+
+**The lab** (`lab.py`). Once a night, at `lab_time`, for each family with a live desk, a model
+reads the results ledger, the last lab reports, the calibration and the recent post-mortems and
+proposes at most two experiments: a hypothesis and a change from a fixed vocabulary (model,
+effort, session times, memory, a tool, a symbol, a limit inside `lab.hard_limits`, a playbook
+note). Each proposal is validated before anything else happens; a valid one is published as a
+`lab.experiment` and bred at once as a directed shadow variant of the live desk. After the
+evolution loop's `min_days`, the verdict compares the variant's gate evidence with its parent's
+and is published as a `lab.verdict`: adopted means the change joins the family's house genome
+(`ltcm/desks/genomes/<family>.json`), which every future child inherits; rejected retires the
+variant. A live desk's manifest is never edited by the lab -- promotion through the gates is
+the only way a live sleeve changes hands.
+
+**Capital as a bandit** (`committee.py`). On a resize day each live desk's sleeve is a draw from
+a normal posterior over its cost-adjusted excess return, seeded by the date so the draw is
+reproducible from the public record, mapped to a multiple of manifest capital inside the
+committee's floor and ceiling. `committee.bandit_enabled: false` restores the ratio rule.
 
 ## Spend policy: a runway, not a cap
 

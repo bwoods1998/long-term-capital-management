@@ -110,6 +110,19 @@ class FakeContext:
         self._note("memo", title, text)
         return {"title": title, "chars": len(text)}
 
+    def record_forecast(self, market, probability, market_price, side, resolves_at, reasoning):
+        self._note("record_forecast", market, probability, market_price, side, resolves_at, reasoning)
+        return {
+            "event_id": f"forecast:earnings-01:{market}:2026-09-15T13:30:00.000Z",
+            "market": market,
+            "probability": probability,
+            "market_price": market_price,
+        }
+
+    def memo_read(self, desk_id, limit):
+        self._note("memo_read", desk_id, limit)
+        return [{"desk_id": desk_id, "at": "2026-09-15T12:00:00.000Z", "title": "No trade", "text": "Priced fairly."}]
+
     def propose_order(self, intent):
         self._note("propose_order", intent)
         self.intents.append(intent)
@@ -415,3 +428,67 @@ class PublicationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def event_manifest():
+    return manifest(instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []})
+
+
+class LeapLabToolTests(unittest.TestCase):
+    """record_forecast and memo_read: schemas, dispatch, publication summaries."""  # leap: lab
+
+    def test_record_forecast_is_for_event_desks_only(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="earnings-01")
+        out = json.loads(tools.execute(
+            "record_forecast", {"market": "M", "probability": "0.6", "reasoning": "r"}, ctx, manifest(), session,
+        ))
+        self.assertIn("event contracts", out["error"])
+        self.assertEqual(ctx.seen, [])
+
+    def test_record_forecast_reaches_the_context_with_optional_fields_blank(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="earnings-01")
+        out = json.loads(tools.execute(
+            "record_forecast",
+            {"market": "KXFED-26SEP-H25", "probability": "0.93", "reasoning": "Hot CPI, Reuters poll."},
+            ctx, event_manifest(), session,
+        ))
+        self.assertEqual(out["market"], "KXFED-26SEP-H25")
+        name, args = ctx.seen[-1]
+        self.assertEqual(name, "record_forecast")
+        self.assertEqual(args, ("KXFED-26SEP-H25", "0.93", None, None, None, "Hot CPI, Reuters poll."))
+        summary = tools.summarize_result("record_forecast", tools.dumps(out))
+        self.assertEqual(summary, "forecast recorded: KXFED-26SEP-H25 p(yes)=0.93")
+
+    def test_record_forecast_passes_the_market_price_and_side_through(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="earnings-01")
+        out = json.loads(tools.execute(
+            "record_forecast",
+            {"market": "M", "probability": "0.6", "market_price": "0.5", "side": "yes",
+             "resolves_at": "2026-09-16T18:00:00Z", "reasoning": "r"},
+            ctx, event_manifest(), session,
+        ))
+        self.assertEqual(ctx.seen[-1][1][2:5], ("0.5", "yes", "2026-09-16T18:00:00Z"))
+        self.assertIn("vs market 0.5", tools.summarize_result("record_forecast", tools.dumps(out)))
+
+    def test_record_forecast_needs_its_required_fields(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="earnings-01")
+        out = json.loads(tools.execute("record_forecast", {"market": "M", "probability": "0.6"}, ctx, event_manifest(), session))
+        self.assertIn("reasoning", out["error"])
+
+    def test_memo_read_is_bounded_and_summarized_as_a_list(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="earnings-01")
+        raw = tools.execute("memo_read", {"desk_id": "mullins", "limit": 500}, ctx, manifest(), session)
+        self.assertEqual(ctx.seen[-1], ("memo_read", ("mullins", 20)))
+        self.assertEqual(tools.summarize_result("memo_read", raw), "memo_read: 1 item; first: No trade")
+
+    def test_the_new_tools_are_in_the_schema_list_and_the_manifest_allowlist(self):
+        names = [schema["name"] for schema in tools.schemas_for(manifest())]
+        self.assertIn("record_forecast", names)
+        self.assertIn("memo_read", names)
+        self.assertNotIn("record_forecast", [s["name"] for s in tools.schemas_for(manifest(tools=["quote"]))])
+

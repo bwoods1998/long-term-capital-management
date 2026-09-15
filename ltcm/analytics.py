@@ -346,6 +346,7 @@ class ResultsLedger:
             families[family] = row
 
         profiles = self._profiles(rolls, raws, meta, totals)
+        by_generation = self._generations(rolls, raws)  # leap: lab
         merged = _merge(raws.values())
         floor = self._render(merged, {}, kind="floor")
         # The floor's cost is every request the floor paid for, not only the ones a desk made:
@@ -376,7 +377,64 @@ class ResultsLedger:
             "desks": desks,
             "families": dict(sorted(families.items())),
             "profiles": profiles,
+            "by_generation": by_generation,  # leap: lab
         }
+
+    def _generations(
+        self, rolls: Mapping[str, _Roll], raws: Mapping[str, Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """leap: lab -- the improvement curve's rows: one per generation, across families.
+
+        Generation comes from the manifest; a desk the roster no longer describes is left out
+        rather than guessed at. `cost_adjusted_excess_pct` is the generation's net P&L after
+        fees and inference over the capital it was working, in percentage points, where the
+        capital is the sum of each desk's latest allocation inside the window (its last
+        `committee.allocation` flow) and, failing that, its equity. It is the generation-level
+        cousin of the gate's number, not the same arithmetic: the gate is time-weighted and
+        benchmark-relative; this is a window's dollars over a window's capital, which is what a
+        curve across generations can honestly compare.
+        """
+        groups: dict[int, list[str]] = {}
+        for desk_id in raws:
+            manifest = self.manifests.get(desk_id)
+            if manifest is None:
+                continue
+            try:
+                generation = int(getattr(manifest, "generation", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if generation > 0:
+                groups.setdefault(generation, []).append(desk_id)
+        rows: list[dict[str, Any]] = []
+        for generation in sorted(groups):
+            ids = sorted(groups[generation])
+            merged = _merge(raws[i] for i in ids)
+            cost = merged["cost"]
+            trading = merged["closed_pnl"] - merged["fees"]
+            capital = ZERO
+            for desk_id in ids:
+                roll = rolls[desk_id]
+                if roll.flows:
+                    capital += roll.flows[-1][1]
+                elif roll.equity is not None:
+                    capital += roll.equity
+            if capital <= 0:
+                continue  # no capital worked, no return to plot: the curve has no point here
+            net = trading - cost
+            brier = _div(merged["brier_sum"], Decimal(merged["brier_n"]))
+            rows.append(
+                {
+                    "generation": generation,
+                    "desks": len(ids),
+                    "decisions": int(merged["decisions"]),
+                    "cost_usd": _usd(cost),
+                    "pnl_usd": _usd(trading),
+                    "cost_adjusted_excess_pct": _div(net * 100, capital),
+                    "brier": brier,
+                    "pnl_per_inference_usd": _div(trading, cost, MONEY_PLACES) or "0.0000",
+                }
+            )
+        return rows
 
     # ------------------------------------------------------------------ the fold
     def _fold(self, start: str, end: str) -> tuple[dict[str, _Roll], dict[str, Any]]:
@@ -938,12 +996,13 @@ PROFILE_METRICS = (
 )
 
 
-def metrics_block(report: Mapping[str, Any], limit: int = MAX_METRICS_BYTES) -> dict[str, str]:
+def metrics_block(report: Mapping[str, Any], limit: int = MAX_METRICS_BYTES) -> dict[str, Any]:
     """The report as a flat `{dotted key: string}` block, small enough to publish.
 
     Flat on purpose: a `lab.result` from a year ago has to be readable by whatever reads it then,
     and `desk.mullins.win_rate` needs no schema. Undefined ratios are left out rather than
-    published as zero.
+    published as zero. The one exception is `by_generation`, the improvement curve's rows,
+    which the floor contract carries here as a list.
     """
     out: dict[str, str] = {
         "window.start": str(report["window"]["start"]),
@@ -959,6 +1018,15 @@ def metrics_block(report: Mapping[str, Any], limit: int = MAX_METRICS_BYTES) -> 
     for desk_id, row in report["desks"].items():
         for key in DESK_METRICS:
             _put(out, f"desk.{desk_id}.{key}", row.get(key))
+    # leap: lab -- the improvement curve rides the daily result as rows, per the floor contract:
+    # the one value in the block that is not a flat string. It is the first thing shed when a
+    # busy day would not fit, because the desk numbers are what a year-old record is read for.
+    curve = [dict(row) for row in (report.get("by_generation") or [])]
+    if curve:
+        out["by_generation"] = curve
+        if len(canonical(out).encode("utf-8")) > limit:
+            out.pop("by_generation", None)
+            out["metrics.truncated"] = "true"
 
     for optional in DESK_OPTIONAL:  # shed detail before the block can overflow the site's cap
         if len(canonical(out).encode("utf-8")) <= limit:

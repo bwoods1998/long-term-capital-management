@@ -51,6 +51,20 @@ ROMAN_SUFFIX = re.compile(r"\s+[IVXLCDM]+$")
 
 #: Mutations are drawn from these fixed menus. Anything not listed cannot be invented at runtime.
 EFFORTS = ("low", "medium", "high")
+#: leap: lab -- a family's house genome: the changes its experiments proved, kept beside the
+#: manifests in a subdirectory so `load_all()` never mistakes one for a desk.
+GENOME_DIR = "genomes"
+#: The keys a directed change may carry. The lab validates values; this module applies them.
+CHANGE_KEYS = (
+    "model.profile",
+    "model.reasoning_effort",
+    "cadence.sessions",
+    "memory_limit",
+    "tools_add",
+    "instruments.allow_add",
+    "limits",
+    "playbook_note",
+)
 MEMORY_LIMITS = (20, 40, 60, 80)
 SESSION_SHIFTS = (-45, -20, 20, 45)
 #: The model is part of the genome. A child may be born on a different model from its parent,
@@ -133,6 +147,48 @@ def _shift_clock(value: str, minutes: int) -> str:
     hour, minute = int(value[:2]), int(value[3:5])
     total = (hour * 60 + minute + minutes) % (24 * 60)
     return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def apply_change(data: dict[str, Any], change: Mapping[str, Any] | None) -> tuple[dict[str, Any], str | None]:
+    """leap: lab -- apply one directed change to a manifest dict. Returns the new dict and the
+    playbook note the change carries, if any. Unknown keys are ignored: validation is the lab's
+    job (`ltcm.lab.validate_change`), application is this function's, and a genome record
+    written by an older lab must still apply cleanly."""
+    out = json.loads(json.dumps(data))
+    note: str | None = None
+    if not change:
+        return out, note
+    if "model.profile" in change:
+        out["model"] = {**out.get("model", {}), "profile": str(change["model.profile"])}
+    if "model.reasoning_effort" in change:
+        out["model"] = {**out.get("model", {}), "reasoning_effort": str(change["model.reasoning_effort"])}
+    if "cadence.sessions" in change:
+        sessions = [str(s) for s in change["cadence.sessions"]]
+        out["cadence"] = {**out.get("cadence", {}), "sessions": sorted(set(sessions))}
+    if "memory_limit" in change:
+        out["memory_limit"] = int(change["memory_limit"])
+    if "tools_add" in change:
+        tools = list(out.get("tools") or [])
+        for name in change["tools_add"]:
+            if name not in tools:
+                tools.append(str(name))
+        out["tools"] = tools
+    if "instruments.allow_add" in change:
+        instruments = dict(out.get("instruments") or {})
+        allow = list(instruments.get("allow") or [])
+        for symbol in change["instruments.allow_add"]:
+            if symbol not in allow:
+                allow.append(str(symbol))
+        instruments["allow"] = allow
+        out["instruments"] = instruments
+    if "limits" in change and isinstance(change["limits"], Mapping):
+        limits = dict(out.get("limits") or {})
+        for key, value in change["limits"].items():
+            limits[str(key)] = int(value) if key == "max_orders_per_day" else str(value)
+        out["limits"] = limits
+    if change.get("playbook_note"):
+        note = str(change["playbook_note"])
+    return out, note
 
 
 def _atomic_write(path: Path, body: str) -> None:
@@ -341,8 +397,42 @@ class Evolution:
             generation += 1
         return f"{parent.id}-{generation}", generation
 
+    # leap: lab ------------------------------------------------------- genome
+    def genome_path(self, family: str) -> Path:
+        return self.manifests_dir / GENOME_DIR / f"{family}.json"
+
+    def genome(self, family: str) -> list[dict[str, Any]]:
+        """The changes a family's experiments proved, oldest first. Empty when none have."""
+        try:
+            data = json.loads(self.genome_path(family).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        changes = data.get("changes") if isinstance(data, dict) else None
+        return [c for c in changes if isinstance(c, dict)] if isinstance(changes, list) else []
+
+    def adopt_change(
+        self, family: str, change: Mapping[str, Any], experiment_id: str, at: str
+    ) -> dict[str, Any]:
+        """Add a proven change to the family's house genome. Every future child inherits it;
+        no living desk's manifest is touched."""
+        records = self.genome(family)
+        record = {"experiment_id": experiment_id, "change": dict(change), "adopted_at": at}
+        if any(r.get("experiment_id") == experiment_id for r in records):
+            return record
+        records.append(record)
+        _atomic_write(
+            self.genome_path(family),
+            json.dumps({"family": family, "changes": records}, indent=2, ensure_ascii=False) + "\n",
+        )
+        return record
+
     def mutate(
-        self, parent: DeskManifest, desk_id: str, generation: int | None = None
+        self,
+        parent: DeskManifest,
+        desk_id: str,
+        generation: int | None = None,
+        *,
+        change: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Derive the child's manifest from the parent. Deterministic in the child's id.
 
@@ -389,18 +479,50 @@ class Evolution:
             "parent_model_profile": parent.model.profile,
             "model_changed": profile != parent.model.profile,
         }
+        # leap: lab -- the house genome first, then the directed change, which is why a lab
+        # experiment can override anything the random draw or an earlier adoption decided.
+        notes: list[str] = []
+        genome = self.genome(parent.family)
+        for record in genome:
+            data, note = apply_change(data, record.get("change") or {})
+            if note:
+                notes.append(note)
+        if change:
+            data, note = apply_change(data, change)
+            if note:
+                notes.append(note)
+            mutation["change"] = dict(change)
+        if genome or change:
+            mutation["reasoning_effort"] = data["model"]["reasoning_effort"]
+            mutation["memory_limit"] = data["memory_limit"]
+            mutation["model_profile"] = data["model"]["profile"]
+            mutation["model_changed"] = data["model"]["profile"] != parent.model.profile
+        mutation["genome"] = [str(r.get("experiment_id")) for r in genome]
+        mutation["playbook_notes"] = notes
         return data, mutation
 
     def spawn(
-        self, parent: DeskManifest, best_sibling: DeskManifest | None, now: Any = None
+        self,
+        parent: DeskManifest,
+        best_sibling: DeskManifest | None,
+        now: Any = None,
+        *,
+        change: Mapping[str, Any] | None = None,
+        experiment_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Write a new manifest and playbook for a child of `parent`. Never edits the parent."""
+        """Write a new manifest and playbook for a child of `parent`. Never edits the parent.
+
+        leap: lab -- `change` is a validated directed change (see `apply_change`) and
+        `experiment_id` names the lab experiment it belongs to; both are published in the
+        spawn record so the lineage says why a child differs from its parent.
+        """
         at = iso_time(now) if now is not None else self.now()
         family = parent.family
         if len(self.families().get(family, [])) >= int(self.config["max_variants"]):
             return None
         desk_id, generation = self.next_id(parent)
-        data, mutation = self.mutate(parent, desk_id, generation)
+        data, mutation = self.mutate(parent, desk_id, generation, change=change)
+        notes = mutation.pop("playbook_notes", [])
         try:
             DeskManifest.from_dict(data)
         except ManifestError as exc:
@@ -415,6 +537,10 @@ class Evolution:
 
         playbook_path = self.playbooks_dir / f"{desk_id}.md"
         playbook = self.write_playbook(parent, best_sibling, desk_id, at)
+        if notes:  # leap: lab -- the house view, appended verbatim below the rewritten playbook
+            playbook = playbook.rstrip("\n") + "\n\n## House view\n\n" + "\n\n".join(
+                f"- {note}" for note in notes
+            ) + "\n"
         _atomic_write(playbook_path, playbook)
         manifest_path = self.manifests_dir / f"{desk_id}.json"
         _atomic_write(manifest_path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
@@ -433,6 +559,8 @@ class Evolution:
             "playbook": data["playbook"],
             "as_of": at,
         }
+        if experiment_id:  # leap: lab
+            payload["experiment_id"] = experiment_id
         self.log.append("evolution", "evolution.spawned", payload, id=f"spawned:{desk_id}", at=at)
         return {"action": "spawned", **payload}
 
