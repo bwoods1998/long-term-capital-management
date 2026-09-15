@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ltcm.broker import Instrument
-from ltcm.evolve import EFFORTS, MEMORY_LIMITS, Evolution, lineage
+from ltcm.evolve import EFFORTS, MEMORY_LIMITS, Evolution, base_name, lineage, roman
 from ltcm.events import EventLog
 from ltcm.manifest import DeskManifest, load_manifest
 from ltcm.tests.test_manifest import SAMPLE
@@ -159,22 +159,22 @@ class SelectionTests(EvolveCase):
         self.assertEqual(retired["reason"], "below family median")
         self.assertIn("family_median", retired["score"])
 
-        self.assertEqual(spawned["desk_id"], "earnings-03")
+        self.assertEqual(spawned["desk_id"], "earnings-02-2")
         self.assertEqual(spawned["parent_id"], "earnings-02")
         self.assertEqual(spawned["generation"], 2)
         self.assertIn(spawned["mutation"]["reasoning_effort"], EFFORTS)
         self.assertIn(spawned["mutation"]["memory_limit"], MEMORY_LIMITS)
 
         # The spawned manifest is real, valid and loadable by the service.
-        path = self.desks / "earnings-03.json"
+        path = self.desks / "earnings-02-2.json"
         child = load_manifest(path)
-        self.assertEqual(child.id, "earnings-03")
+        self.assertEqual(child.id, "earnings-02-2")
         self.assertEqual(child.family, "earnings")
         self.assertEqual(child.generation, 2)
         self.assertEqual(child.parent_id, "earnings-02")
         self.assertEqual(child.capital_mode, "paper")
-        self.assertEqual(child.playbook, "playbooks/earnings-03.md")
-        self.assertTrue((self.playbooks / "earnings-03.md").exists())
+        self.assertEqual(child.playbook, "playbooks/earnings-02-2.md")
+        self.assertTrue((self.playbooks / "earnings-02-2.md").exists())
         self.assertNotEqual(child.persona, load_manifest(self.desks / "earnings-02.json").persona)
 
         # The parent's own manifest was not touched.
@@ -278,11 +278,47 @@ class LineageTests(EvolveCase):
             {"earnings": ["earnings-01", "earnings-03"], "kalshi": ["kalshi-01"]},
         )
 
-    def test_next_id_skips_used_numbers(self):
-        self.write_manifest("earnings-01")
-        self.write_manifest("earnings-07", generation=2, parent_id="earnings-01")
-        self.assertEqual(self.evolution().next_id("earnings"), "earnings-08")
-        self.assertEqual(self.evolution().next_id("kalshi"), "kalshi-01")
+    def test_a_child_is_named_after_its_parent_and_generation(self):
+        self.write_manifest("rosenfeld", name="Rosenfeld", family="earnings")
+        parent = load_manifest(self.desks / "rosenfeld.json")
+        self.assertEqual(self.evolution().next_id(parent), ("rosenfeld-2", 2))
+        data, _ = self.evolution().mutate(parent, "rosenfeld-2", 2)
+        self.assertEqual(data["name"], "Rosenfeld II")
+        self.assertEqual(data["family"], "earnings")
+        self.assertEqual(data["parent_id"], "rosenfeld")
+        self.assertEqual(data["generation"], 2)
+        DeskManifest.from_dict(data)  # the manifest schema accepts the lineage id
+
+    def test_a_grandchild_counts_on_without_repeating_the_numeral(self):
+        self.write_manifest(
+            "rosenfeld-2", name="Rosenfeld II", generation=2, parent_id="rosenfeld"
+        )
+        child = load_manifest(self.desks / "rosenfeld-2.json")
+        desk_id, generation = self.evolution().next_id(child)
+        self.assertEqual((desk_id, generation), ("rosenfeld-2-3", 3))
+        data, _ = self.evolution().mutate(child, desk_id, generation)
+        self.assertEqual(data["name"], "Rosenfeld III")
+        DeskManifest.from_dict(data)
+
+    def test_an_id_is_never_reused_even_after_a_retirement(self):
+        self.write_manifest("rosenfeld", name="Rosenfeld")
+        self.write_manifest(
+            "rosenfeld-2", name="Rosenfeld II", generation=2, parent_id="rosenfeld"
+        )
+        parent = load_manifest(self.desks / "rosenfeld.json")
+        self.log.append(
+            "evolution",
+            "evolution.retired",
+            {"desk_id": "rosenfeld-2", "reason": "below family median", "score": {}},
+            at="2026-09-20T20:00:00.000Z",
+        )
+        self.assertEqual(self.evolution().next_id(parent), ("rosenfeld-3", 3))
+
+    def test_roman_numerals_and_base_names(self):
+        self.assertEqual([roman(n) for n in (1, 2, 3, 4, 9, 14)], ["I", "II", "III", "IV", "IX", "XIV"])
+        self.assertEqual(base_name("Rosenfeld II"), "Rosenfeld")
+        self.assertEqual(base_name("Rosenfeld"), "Rosenfeld")
+        self.assertEqual(base_name("Meriwether XIV"), "Meriwether")
 
 
 if __name__ == "__main__":  # pragma: no cover

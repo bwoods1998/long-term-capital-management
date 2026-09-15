@@ -1,3 +1,4 @@
+import copy
 import tempfile
 import unittest
 from decimal import Decimal
@@ -14,6 +15,7 @@ from ltcm.broker import (
     UnknownOutcome,
     VenueUnavailable,
 )
+from ltcm.critic import CriticReview
 from ltcm.events import EventLog
 from ltcm.gateway import Gateway, GatewayError
 from ltcm.ledger import DeskLedger
@@ -390,6 +392,309 @@ class LifecycleTests(GatewayCase):
         )
         self.assertEqual([o["order_id"] for o in rebuilt.orders(DESK)], [result["order_id"]])
         self.assertEqual(rebuilt.open_orders(DESK)[0]["status"], "accepted")
+
+
+# --------------------------------------------------------------------------- the live critic
+
+ALPACA_AAPL = Instrument("equity", "AAPL", "alpaca")
+
+
+class RecordingCritic:
+    """Stands in for `critic.LiveOrderCritic`: replays a verdict and records the packet inputs."""
+
+    def __init__(self, verdict="approve", reason="Consistent with the rationale."):
+        self.verdict = verdict
+        self.reason = reason
+        self.raises = None
+        self.calls = []
+
+    def review(self, *, intent, manifest, decision, positions=None, memo=None):
+        self.calls.append(
+            {
+                "intent": intent,
+                "manifest": manifest,
+                "decision": decision,
+                "positions": dict(positions or {}),
+                "memo": memo,
+            }
+        )
+        if self.raises is not None:
+            raise self.raises
+        return CriticReview(self.verdict, self.reason, "zai-org/GLM-5.3")
+
+
+class LiveCriticCase(unittest.TestCase):
+    """A desk on live capital, on a live venue, with the critic in the path."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.log = EventLog(self.root / "events.sqlite")
+        data = copy.deepcopy(SAMPLE)
+        data["venues"] = ["alpaca"]
+        data["capital"] = {"mode": "live", "usd": "1000"}
+        self.manifest = DeskManifest.from_dict(data)
+        self.ledger = DeskLedger(self.log, DESK)
+        self.broker = FakeBroker()
+        self.broker.venue = "alpaca"
+        self.critic = RecordingCritic()
+        self.gateway = Gateway(
+            self.log,
+            RiskEngine(),
+            {"alpaca": self.broker},
+            {DESK: self.ledger},
+            manifests={DESK: self.manifest},
+            kill_switch_path=self.root / "KILL",
+            critic=self.critic,
+        )
+        self.log.append(
+            "committee",
+            "committee.allocation",
+            {"allocations": {DESK: "1000"}, "reasons": {}},
+            at="2026-09-14T12:00:00.000Z",
+        )
+
+    def tearDown(self):
+        self.log.close()
+        self.tmp.cleanup()
+
+    def intent(self, **overrides):
+        fields = {
+            "desk_id": DESK,
+            "instrument": ALPACA_AAPL,
+            "side": "buy",
+            "quantity": "2",
+            "order_type": "market",
+            "rationale": "post-earnings drift on a documented revenue beat; exit in ten days",
+            "created_at": NOW,
+            "session_id": "s1",
+        }
+        fields.update(overrides)
+        return OrderIntent.new(**fields)
+
+    def reviews(self):
+        return self.log.read(kind="risk.review")
+
+    def decisions(self):
+        return self.log.read(kind="risk.decision")
+
+
+class CriticApprovalTests(LiveCriticCase):
+    def test_an_approved_order_is_sent_and_the_review_is_public(self):
+        order = self.intent()
+        result = self.gateway.propose(order, NOW)
+        self.assertTrue(result["approved"], result["reasons"])
+        self.assertEqual(result["status"], "filled")
+        self.assertEqual(self.broker.submitted, [order.id])
+
+        review = self.reviews()[0]
+        self.assertTrue(review.public)
+        self.assertEqual(review.stream, "risk")
+        self.assertEqual(
+            review.payload,
+            {
+                "intent_id": order.id,
+                "desk_id": DESK,
+                "verdict": "approve",
+                "reason": "Consistent with the rationale.",
+                "model": "zai-org/GLM-5.3",
+            },
+        )
+        self.assertEqual(len(self.decisions()), 1)
+
+    def test_every_published_review_matches_the_sites_contract(self):
+        for verdict in ("approve", "block"):
+            self.critic.verdict = verdict
+            self.critic.reason = "x" * 5000  # a model that will not stop talking
+            self.gateway.propose(self.intent(quantity="1", nonce=verdict), NOW)
+        reviews = self.reviews()
+        self.assertEqual(len(reviews), 2)
+        for review in reviews:
+            self.assertEqual(review.stream, "risk")
+            self.assertTrue(review.public)
+            self.assertEqual(
+                sorted(review.payload), ["desk_id", "intent_id", "model", "reason", "verdict"]
+            )
+            self.assertIn(review.payload["verdict"], ("approve", "block"))
+            self.assertRegex(review.payload["desk_id"], r"^[a-z0-9-]{1,40}$")
+            self.assertLessEqual(len(review.payload["reason"]), 2000)
+            self.assertLessEqual(len(review.payload["model"]), 80)
+
+    def test_the_critic_reads_the_mandate_the_book_and_the_latest_memo(self):
+        self.log.append(
+            self.manifest.stream,
+            "desk.memo",
+            {"session_id": "s0", "title": "Into the print", "text": "Half size until services confirm."},
+            at="2026-09-14T13:00:00.000Z",
+        )
+        self.gateway.propose(self.intent(quantity="1"), NOW)
+        self.gateway.propose(self.intent(quantity="1", nonce="second"), NOW)
+        self.assertEqual(len(self.critic.calls), 2)
+        call = self.critic.calls[-1]
+        self.assertEqual(call["manifest"].id, DESK)
+        self.assertEqual(call["memo"], "Half size until services confirm.")
+        self.assertTrue(call["decision"].approved)
+        # The second order is judged against the book the first one created.
+        self.assertEqual(call["positions"][ALPACA_AAPL.key].quantity, Decimal("1"))
+
+
+class CriticBlockTests(LiveCriticCase):
+    def test_a_block_stops_the_order_and_is_published_as_a_second_decision(self):
+        self.critic.verdict = "block"
+        self.critic.reason = "The rationale argues the stock is expensive but the order buys."
+        order = self.intent()
+        result = self.gateway.propose(order, NOW)
+
+        self.assertFalse(result["approved"])
+        self.assertEqual(
+            result["reasons"],
+            ["critic: The rationale argues the stock is expensive but the order buys."],
+        )
+        self.assertIsNone(result["order"])
+        self.assertEqual(self.broker.submitted, [])
+        self.assertNotIn("broker.order", [e.kind for e in self.log.read(limit=1000)])
+
+        decisions = self.decisions()
+        self.assertEqual([d.payload["approved"] for d in decisions], [True, False])
+        self.assertEqual(
+            decisions[1].payload["reasons"],
+            ["critic: The rationale argues the stock is expensive but the order buys."],
+        )
+        # The engine's own numbers are carried over so the public sees what was nearly sent.
+        self.assertEqual(decisions[1].payload["reference_price"], "101")  # the ask a buy pays
+        self.assertEqual(self.reviews()[0].payload["verdict"], "block")
+        self.assertEqual(self.ledger.state(NOW).positions, {})
+
+    def test_a_blocked_intent_is_released_because_there_is_nothing_to_front_run(self):
+        self.critic.verdict = "block"
+        self.critic.reason = "No exit is stated."
+        self.gateway.propose(self.intent(), NOW)
+        intent_event = self.log.read(kind="desk.intent")[0]
+        self.assertFalse(intent_event.public)
+        self.assertEqual(self.gateway.release_deferred_events(), [intent_event.id])
+
+    def test_a_rebuilt_gateway_still_knows_the_block_was_the_last_word(self):
+        self.critic.verdict = "block"
+        self.gateway.propose(self.intent(), NOW)
+        rebuilt = Gateway(
+            self.log,
+            RiskEngine(),
+            {"alpaca": self.broker},
+            {DESK: DeskLedger(self.log, DESK)},
+            manifests={DESK: self.manifest},
+        )
+        intent_event = self.log.read(kind="desk.intent")[0]
+        self.assertEqual(rebuilt.release_deferred_events(), [intent_event.id])
+
+
+class CriticFailureTests(LiveCriticCase):
+    def test_a_critic_that_cannot_answer_lets_the_order_through_with_an_alert(self):
+        self.critic.verdict = "error"
+        self.critic.reason = "critic call failed: provider_timeout"
+        order = self.intent()
+        result = self.gateway.propose(order, NOW)
+
+        self.assertTrue(result["approved"], result["reasons"])
+        self.assertEqual(self.broker.submitted, [order.id])
+        # The site's `risk.review` contract admits approve and block only, so an unanswered
+        # review is an alert and nothing on the tape.
+        self.assertEqual(self.reviews(), [])
+        alert = self.log.last("ops", "ops.alert")
+        self.assertEqual(alert.payload["level"], "warning")
+        self.assertIn("proceeds on the deterministic engine", alert.payload["text"])
+        self.assertEqual(len(self.decisions()), 1)
+
+    def test_a_critic_that_raises_is_not_a_halt(self):
+        self.critic.raises = RuntimeError("boom")
+        result = self.gateway.propose(self.intent(), NOW)
+        self.assertTrue(result["approved"], result["reasons"])
+        self.assertEqual(self.reviews(), [])
+        self.assertIn("critic failed", self.log.last("ops", "ops.alert").payload["text"])
+
+    def test_the_engine_still_rejects_before_the_critic_is_ever_asked(self):
+        result = self.gateway.propose(self.intent(quantity="100"), NOW)
+        self.assertFalse(result["approved"])
+        self.assertEqual(self.critic.calls, [])
+        self.assertEqual(self.reviews(), [])
+
+    def test_the_real_critic_blocks_end_to_end(self):
+        from ltcm.critic import LiveOrderCritic
+        from ltcm.tests.test_critic import FakeProvider
+
+        provider = FakeProvider('{"verdict": "block", "reason": "AAPL is never named."}')
+        self.gateway.critic = LiveOrderCritic(provider)
+        order = self.intent()
+        result = self.gateway.propose(order, NOW)
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["reasons"], ["critic: AAPL is never named."])
+        self.assertEqual(self.broker.submitted, [])
+        self.assertEqual(provider.calls[0]["request_key"], f"critic:{order.id}")
+
+
+class CriticScopeTests(unittest.TestCase):
+    """Who the critic is asked about, and who it is not."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.log = EventLog(self.root / "events.sqlite")
+        self.manifest = DeskManifest.from_dict(SAMPLE)  # paper
+        self.critic = RecordingCritic()
+        self.gateway = Gateway(
+            self.log,
+            RiskEngine(),
+            {"paper": FakeBroker()},
+            {DESK: DeskLedger(self.log, DESK)},
+            manifests={DESK: self.manifest},
+            critic=self.critic,
+        )
+        self.log.append(
+            "committee",
+            "committee.allocation",
+            {"allocations": {DESK: "1000"}, "reasons": {}},
+            at="2026-09-14T12:00:00.000Z",
+        )
+
+    def tearDown(self):
+        self.log.close()
+        self.tmp.cleanup()
+
+    def intent(self):
+        return OrderIntent.new(
+            desk_id=DESK,
+            instrument=AAPL,
+            side="buy",
+            quantity="2",
+            rationale="paper money, paper rules",
+            created_at=NOW,
+            session_id="s1",
+        )
+
+    def test_a_paper_desk_never_pays_for_a_critic(self):
+        result = self.gateway.propose(self.intent(), NOW)
+        self.assertTrue(result["approved"], result["reasons"])
+        self.assertEqual(self.critic.calls, [])
+        self.assertEqual(self.log.read(kind="risk.review"), [])
+        self.assertFalse(self.gateway.live_desk(DESK))
+
+    def test_a_promoted_desk_is_live_even_though_its_manifest_says_paper(self):
+        self.log.append(
+            "evolution",
+            "evolution.promoted",
+            {"desk_id": DESK, "family": "earnings", "from": "paper", "to": "live", "score": {}},
+            at="2026-09-14T13:00:00.000Z",
+        )
+        self.assertTrue(self.gateway.live_desk(DESK))
+        self.gateway.propose(self.intent(), NOW)
+        self.assertEqual(len(self.critic.calls), 1)
+
+    def test_an_unknown_desk_is_not_live(self):
+        self.assertFalse(self.gateway.live_desk("nobody"))
+
+    def test_no_critic_configured_is_simply_no_review(self):
+        self.gateway.critic = None
+        self.gateway.propose(self.intent(), NOW)
+        self.assertEqual(self.log.read(kind="risk.review"), [])
 
 
 if __name__ == "__main__":  # pragma: no cover

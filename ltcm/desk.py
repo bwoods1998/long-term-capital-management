@@ -330,6 +330,14 @@ class MemoryStore:
         ranked.sort(key=lambda item: (item[0], item[1]))
         return [_memory_dict(row) for _, _, row in ranked[:limit]]
 
+    def get(self, entry_id: str) -> dict[str, Any] | None:
+        """One entry by id, or None. An importer uses this to skip what it already wrote."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM entries WHERE id = ?", (str(entry_id),)
+            ).fetchone()
+        return _memory_dict(row) if row is not None else None
+
     def count(self, desk_id: str | None = None) -> int:
         with self._lock:
             if desk_id is None:

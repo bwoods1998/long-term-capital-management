@@ -1,4 +1,4 @@
-"""Helm, the investment committee: capital follows evidence, not narrative.
+"""Meriwether, the investment committee: capital follows evidence, not narrative.
 
 Two things happen here and they are deliberately separated.
 
@@ -9,8 +9,9 @@ mandate, no circuit breakers, clean reconciliations. A desk that is bankrupt or 
 mandate goes to zero. The sum of every sleeve never exceeds the floor's own capital. No model is
 consulted, and nothing here can be talked out of a number.
 
-**Narrative.** `memo()` asks the provider for the weekly committee memo. It is published, it is
-read, and it cannot move a single dollar.
+**Narrative.** `memo()` asks the provider for the committee memo, written every day the floor
+runs (`memo_daily`, the default) or once a week when it is switched off. It is published, it is
+read, and it cannot move a single dollar. The reader is the public, not the floor.
 
 Allocations are published as `committee.allocation` events, which every desk sub-ledger folds as
 external flows: a raise is a deposit, a cut is a withdrawal, and neither is mistaken for skill.
@@ -30,6 +31,9 @@ from .manifest import DeskManifest
 
 ZERO = Decimal(0)
 CENTS = Decimal("0.01")
+
+#: The memo is signed, always, whether or not the model remembered to.
+SIGNATURE = "\u2014 Meriwether"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     # Gate A, the only gate this phase can reach: paper to seed capital.
@@ -51,10 +55,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "profit_share": "0.25",
     "profit_window_days": 7,
     "floor_cap_max_usd_per_day": "60",
-    # The weekly memo.
+    # The memo. Daily by default: the floor trades every day, so it reports every day.
+    "memo_daily": True,
     "memo_profile": "pro_flex",
     "memo_budget_usd_per_day": "1.00",
-    "memo_max_chars": 3000,
+    "memo_max_chars": 2000,
     "memo_reasoning_effort": "medium",
     "memo_max_output_tokens": 4096,
 }
@@ -103,8 +108,17 @@ def _quantize(value: Decimal) -> Decimal:
     return value.quantize(CENTS, rounding=ROUND_DOWN)
 
 
+def signed(body: str, limit: int) -> str:
+    """The memo as it is published: inside the character limit and signed by the chair."""
+    body = body.strip()
+    if SIGNATURE.lower() in body[-80:].lower() or "meriwether" in body[-80:].lower():
+        return body[:limit]
+    tail = "\n\n" + SIGNATURE
+    return body[: max(0, limit - len(tail))].rstrip() + tail
+
+
 class Committee:
-    """Rules-based capital allocation across the floor, plus the published weekly memo."""
+    """Rules-based capital allocation across the floor, plus the published committee memo."""
 
     def __init__(
         self,
@@ -416,13 +430,14 @@ class Committee:
     # ------------------------------------------------------------------ the memo
     def brief(self, at: str) -> str:
         """The factual packet the memo is written from. No prices, no prompts, no secrets."""
-        lines = [f"Floor review for the week ending {at[:10]}.", ""]
+        lines = [f"Floor review as of {at[:10]}.", ""]
         modes = self.modes()
         for desk_id, manifest in sorted(self.active().items()):
             state = self.ledger(desk_id).state(at)
             report = self.gates(desk_id, at)
             lines.append(
-                f"- {desk_id} ({capital_mode(manifest, modes)}, {manifest.family} gen "
+                f"- {manifest.name} [{desk_id}] ({capital_mode(manifest, modes)}, "
+                f"{manifest.family} gen "
                 f"{manifest.generation}): equity {text(state.equity)}, return "
                 f"{text(state.time_weighted_return_pct)}%, max drawdown "
                 f"{text(state.max_drawdown_pct)}, {state.decisions} decisions over "
@@ -438,22 +453,40 @@ class Committee:
             )
         return "\n".join(lines)
 
+    def period(self, at: str) -> str:
+        """The memo's identity: one a day by default, one a week when `memo_daily` is off."""
+        return at[:10] if self.config.get("memo_daily", True) else iso_week(at)
+
     def memo(self, now: Any = None) -> str | None:
-        """Write and publish the weekly committee memo. Returns the text, or None on failure."""
+        """Write and publish the committee memo. Returns the text, or None on failure.
+
+        One memo per period, keyed by the period, so however many times a tick comes round the
+        floor pays for it once. `memo_daily` (the default) makes the period a day.
+        """
         at = iso_time(now) if now is not None else self.now()
-        period = iso_week(at)
+        period = self.period(at)
         existing = self.log.get(f"memo:{period}")
         if existing is not None:
             return existing.payload.get("text")
         if self.provider is None:
             return None
         limit = int(self.config["memo_max_chars"])
+        daily = bool(self.config.get("memo_daily", True))
         instructions = (
-            "You are Helm, the investment committee of a public, fully automated trading floor. "
-            "Write this week's committee memo for the floor's public site. Be specific and "
-            f"concrete, cite the numbers you are given, and stay under {limit} characters. "
-            "State what the evidence supports and what it does not. You do not allocate capital: "
-            "the published gates do that, mechanically. Never invent a number that is not below."
+            "You are Meriwether, who chairs the investment committee of a public, fully "
+            "automated trading floor. Write "
+            + ("today's" if daily else "this week's")
+            + " committee memo for the floor's public site.\n"
+            "You are writing for the public: people who do not work here, hold none of these "
+            "positions and did not see the trades. Address them directly, explain in plain "
+            "English what the floor did and what it means, and define any term a reader would "
+            "not know.\n"
+            "Name each desk by its partner name -- the name before the bracketed id below -- and "
+            "not by its id.\n"
+            f"Be specific and concrete, cite the numbers you are given, and stay under {limit} "
+            "characters. State what the evidence supports and what it does not. You do not "
+            "allocate capital: the published gates do that, mechanically. Never invent a number "
+            "that is not below. Sign the memo \"Meriwether\"."
         )
         items = [
             {"role": "system", "content": instructions},
@@ -483,7 +516,7 @@ class Committee:
         body = (response.output_text or "").strip()
         if not body:
             return None
-        body = body[:limit]
+        body = signed(body, limit)
         self.log.append(
             "committee",
             "committee.memo",

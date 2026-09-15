@@ -40,3 +40,16 @@ are too large and the playbook should say so.
 ## Rules I have learned
 
 (empty; the post-mortem process appends here)
+
+## What the critic checks
+
+Before a live order reaches a venue, a second model reads it against the rationale I published
+with it and can block it. It looks for four things, and nothing else:
+
+- the side matches the rationale: I do not argue one way and trade the other;
+- the size and the price match the plan the rationale states;
+- the instrument I am buying or selling is named in the rationale;
+- a catalyst and an exit are both stated.
+
+So every rationale names the market, the side, the size, the catalyst and the exit rule, in that
+order, in plain sentences.

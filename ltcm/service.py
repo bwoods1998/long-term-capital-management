@@ -57,8 +57,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "session_catchup_seconds": 3600,
     "committee_weekday": 6,
     "committee_time": "18:00",
+    # The memo is written every day; capital is only resized on the committee's weekday.
+    "committee_memo_daily": True,
     "evolution_time": "19:00",
     "postmortem_time": "21:30",
+    # The live-order critic: a second model reads every real-money order the engine approved.
+    "critic_enabled": True,
+    "critic_profile": "glm_asap",
     # Research sources a desk may reach. Absent means enabled; set false to run without one.
     "sources": {},
     "profit_share": "0.25",
@@ -490,7 +495,9 @@ class Service:
         self._budget: dict[str, Any] = {}
         self._sources: dict[str, Any] = {}
 
-        self.capital_dir = self.root / ".data" / "capital"
+        # Everything the floor writes lives here: events, provider records, memory, paper books,
+        # health and the kill switch. `.data/ltcm/keys/` holds the venue credentials.
+        self.capital_dir = self.root / ".data" / "ltcm"
         self.capital_dir.mkdir(parents=True, exist_ok=True)
         self.desks_dir = Path(self.config.get("desks_dir") or (PACKAGE_DIR / "desks"))
         self.playbooks_dir = Path(self.config.get("playbooks_dir") or (self.root / "playbooks"))
@@ -519,6 +526,7 @@ class Service:
             self.memory = self._build_memory()
 
         self.risk_engine = risk_engine or RiskEngine()
+        self.critic = self._build_critic()
         self.gateway = Gateway(
             self.log,
             self.risk_engine,
@@ -529,6 +537,7 @@ class Service:
             clock=clock,
             kill_switch_path=self.kill_switch_path,
             floor_max_daily_loss_pct=self.config["floor_max_daily_loss_pct"],
+            critic=self.critic,
         )
         self.committee = Committee(
             self.log,
@@ -542,6 +551,7 @@ class Service:
                 "floor_cap_usd_per_day": self.config["floor_cap_usd_per_day"],
                 "profit_share": self.config["profit_share"],
                 "floor_cap_max_usd_per_day": self.config["floor_cap_max_usd_per_day"],
+                "memo_daily": bool(self.config.get("committee_memo_daily", True)),
             },
         )
         self.evolution = Evolution(
@@ -783,6 +793,18 @@ class Service:
             )
         except Exception as exc:
             self.alert("warning", f"provider unavailable: {exc}")
+            return None
+
+    def _build_critic(self) -> Any:
+        """The live-order critic, unless this deployment switched it off or has no provider."""
+        try:
+            from . import critic as critic_module
+        except Exception:  # pragma: no cover - the module is part of the package
+            return None
+        try:
+            return critic_module.build(self.provider, self.config)
+        except Exception as exc:
+            self.alert("warning", f"live-order critic unavailable: {exc}")
             return None
 
     def _build_memory(self) -> Any:
@@ -1069,6 +1091,7 @@ class Service:
             "marked": 0,
             "breakers": [],
             "committee": False,
+            "memo": False,
             "evolution": [],
             "published": None,
             "budget": None,
@@ -1117,11 +1140,15 @@ class Service:
             self.committee.allocate(at)
             result["committee"] = True
         if self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
-            if local.weekday() == int(self.config["committee_weekday"]):
+            # Meriwether writes every day; capital is only resized on the committee's weekday.
+            resize_day = local.weekday() == int(self.config["committee_weekday"])
+            memo_daily = bool(self.config.get("committee_memo_daily", True))
+            if resize_day:
                 self.committee.allocate(at)
-                self.committee.memo(at)
-                self._save_state(last_committee_day=day)
                 result["committee"] = True
+            if resize_day or memo_daily:
+                result["memo"] = bool(self.committee.memo(at))
+                self._save_state(last_committee_day=day)
         if self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day):
             actions = list(self.evolution.select(at)) + list(self.evolution.promote(at))
             self.reload_manifests()

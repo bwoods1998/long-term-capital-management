@@ -13,6 +13,7 @@ __all__ = [
     "desk",
     "ledger",
     "gateway",
+    "critic",
     "committee",
     "evolve",
     "publish",

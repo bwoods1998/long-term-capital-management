@@ -37,7 +37,13 @@ from .manifest import DeskManifest, ManifestError, load_manifest
 
 ZERO = Decimal(0)
 
-VARIANT_ID = re.compile(r"^(?P<family>[a-z0-9-]+)-(?P<number>\d{2,})$")
+#: A child's id is its parent's id and the child's generation: `rosenfeld` -> `rosenfeld-2` ->
+#: `rosenfeld-2-3`. The lineage is legible in the id itself, which is the point.
+ROMAN = (
+    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+    (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+)
+ROMAN_SUFFIX = re.compile(r"\s+[IVXLCDM]+$")
 
 #: Mutations are drawn from these fixed menus. Anything not listed cannot be invented at runtime.
 EFFORTS = ("low", "medium", "high")
@@ -64,6 +70,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "playbook_max_output_tokens": 6144,
     "playbook_max_chars": 12_000,
 }
+
+
+def roman(number: int) -> str:
+    """`2` -> `II`. Generations are counted in the old way, like the partners themselves."""
+    number = int(number)
+    if not 1 <= number <= 3999:
+        return str(number)
+    out = []
+    for value, glyph in ROMAN:
+        while number >= value:
+            out.append(glyph)
+            number -= value
+    return "".join(out)
+
+
+def base_name(name: str) -> str:
+    """A desk name without its generation suffix, so `Rosenfeld II` breeds `Rosenfeld III`."""
+    stripped = ROMAN_SUFFIX.sub("", str(name).strip())
+    return stripped.strip() or str(name).strip()
 
 
 def _hash_int(value: str) -> int:
@@ -235,16 +260,23 @@ class Evolution:
         return {"action": "retired", **payload}
 
     # ------------------------------------------------------------------ spawning
-    def next_id(self, family: str) -> str:
-        highest = 0
-        for desk_id in self.manifests():
-            match = VARIANT_ID.match(desk_id)
-            if match and match.group("family") == family:
-                highest = max(highest, int(match.group("number")))
-        return f"{family}-{highest + 1:02d}"
+    def next_id(self, parent: DeskManifest) -> tuple[str, int]:
+        """`(id, generation)` for the next child of `parent`: `rosenfeld` -> `rosenfeld-2`.
 
-    def mutate(self, parent: DeskManifest, desk_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        An id is never reused, not even for a retired variant, so a lineage read years later is
+        unambiguous. When `rosenfeld-2` already exists the generation counts on until one is free.
+        """
+        taken = set(self.manifests())
+        generation = max(2, int(parent.generation) + 1)
+        while f"{parent.id}-{generation}" in taken:
+            generation += 1
+        return f"{parent.id}-{generation}", generation
+
+    def mutate(
+        self, parent: DeskManifest, desk_id: str, generation: int | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Derive the child's manifest from the parent. Deterministic in the child's id."""
+        generation = int(generation if generation is not None else parent.generation + 1)
         seed = _hash_int(desk_id)
         effort = EFFORTS[seed % len(EFFORTS)]
         memory_limit = MEMORY_LIMITS[(seed >> 8) % len(MEMORY_LIMITS)]
@@ -253,9 +285,10 @@ class Evolution:
 
         data = parent.to_dict()
         data["id"] = desk_id
-        data["generation"] = parent.generation + 1
+        data["generation"] = generation
         data["parent_id"] = parent.id
-        data["name"] = f"{parent.name} g{parent.generation + 1}"[:60]
+        data["family"] = parent.family
+        data["name"] = f"{base_name(parent.name)} {roman(generation)}"[:60]
         persona = f"{parent.persona} {trait}".strip()
         data["persona"] = persona[:2000]
         data["model"] = {**data["model"], "reasoning_effort": effort}
@@ -280,8 +313,8 @@ class Evolution:
         family = parent.family
         if len(self.families().get(family, [])) >= int(self.config["max_variants"]):
             return None
-        desk_id = self.next_id(family)
-        data, mutation = self.mutate(parent, desk_id)
+        desk_id, generation = self.next_id(parent)
+        data, mutation = self.mutate(parent, desk_id, generation)
         try:
             DeskManifest.from_dict(data)
         except ManifestError as exc:

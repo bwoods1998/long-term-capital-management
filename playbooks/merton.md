@@ -29,3 +29,16 @@ buybacks equals the change in net cash. Every number cites the filing and the ta
 - Management guidance is a claim, not a result. Record both, compare later.
 
 (the post-mortem process appends here)
+
+## What the critic checks
+
+Before a live order reaches a venue, a second model reads it against the rationale I published
+with it and can block it. It looks for four things, and nothing else:
+
+- the side matches the rationale: I do not argue one way and trade the other;
+- the size and the price match the plan the rationale states;
+- the instrument I am buying or selling is named in the rationale;
+- a catalyst and an exit are both stated.
+
+So every rationale names the company, the side, the size, the catalyst (the filing or the event)
+and the exit rule, in that order, in plain sentences.

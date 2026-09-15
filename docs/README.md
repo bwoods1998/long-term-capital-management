@@ -1,10 +1,13 @@
-# Project reference
+# Documentation
 
-[Public portfolio](https://blakewoods.us/portfolio/) · [Project overview](../README.md)
+[Live floor](https://blakewoods.us/capital/) · [Project overview](../README.md)
 
-- [Architecture](ARCHITECTURE.md): evidence, agent memory, portfolio and publication.
-- [Evaluation](EVALUATION.md): what the Sail experiments measure and what they cannot prove.
-- [Operations](OPERATIONS.md): setup, execution and recovery.
-- [Roadmap](ROADMAP.md): current implementation and next milestones.
-
-[Earlier experiments](history/README.md) are retained as dated records. Their models, protocols and project descriptions are historical.
+- [The floor](proposals/2026-09-14-the-floor.md) — the proposal the current system was built from:
+  desks, committee, risk engine, evolution and publication policy.
+- [Launch record, September 15, 2026](runs/2026-09-15-ltcm-launch.md) — what was running at
+  hand-off, what was verified live, and what is deliberately not on.
+- [Runtime design](../ltcm/README.md) — modules, event kinds, budget and publication policy.
+- [Deploy runbook](../deploy/README.md) — installing the floor as an always-on user service.
+- [History](history/portfolio-agent/README.md) — Portfolio Agent, the first generation: one
+  persistent S&P 500 paper portfolio on Sail with a Cloudflare supervisor, retired on
+  September 15, 2026.

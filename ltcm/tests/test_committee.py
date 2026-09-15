@@ -368,14 +368,14 @@ class BudgetTests(CommitteeCase):
 
 
 class MemoTests(CommitteeCase):
-    def test_memo_is_written_once_per_week_and_published(self):
+    def test_memo_is_written_once_a_day_and_published(self):
         self.add(manifest())
         self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
         committee = self.committee()
         text = committee.memo("2026-09-13T22:00:00.000Z")
-        self.assertEqual(text, "The week in one paragraph.")
+        self.assertEqual(text, "The week in one paragraph.\n\n— Meriwether")
         event = self.log.last("committee", "committee.memo")
-        self.assertEqual(event.payload["period"], iso_week("2026-09-13T22:00:00.000Z"))
+        self.assertEqual(event.payload["period"], "2026-09-13")
         self.assertTrue(event.public)
         self.assertEqual(len(self.provider.calls), 1)
         call = self.provider.calls[0]
@@ -383,15 +383,48 @@ class MemoTests(CommitteeCase):
         self.assertIsNone(call["tools"])
         self.assertEqual(call["desk_id"], "committee")
         self.assertIn("earnings-01", call["items"][1]["content"])
-        # A second run in the same week reads the log instead of paying again.
+        # A second run on the same day reads the log instead of paying again.
         self.assertEqual(committee.memo("2026-09-13T23:00:00.000Z"), text)
         self.assertEqual(len(self.provider.calls), 1)
+        # The next day is a new memo.
+        self.assertIsNotNone(committee.memo("2026-09-14T22:00:00.000Z"))
+        self.assertEqual(len(self.provider.calls), 2)
+        self.assertEqual(len(self.log.read(kind="committee.memo")), 2)
 
-    def test_memo_is_capped_at_three_thousand_characters(self):
+    def test_the_memo_addresses_the_public_names_the_partners_and_is_signed(self):
+        self.add(manifest(name="Rosenfeld"))
+        self.committee().memo("2026-09-13T22:00:00.000Z")
+        instructions = self.provider.calls[0]["items"][0]["content"]
+        self.assertIn("Meriwether", instructions)
+        self.assertIn("public", instructions)
+        self.assertIn("partner name", instructions)
+        self.assertIn("under 2000 characters", instructions)
+        self.assertEqual(self.provider.calls[0]["request_key"], "committee-memo:2026-09-13")
+        # The packet names the desk the way the memo should.
+        self.assertIn("Rosenfeld [earnings-01]", self.provider.calls[0]["items"][1]["content"])
+
+    def test_the_memo_is_signed_only_once(self):
+        self.add(manifest())
+        self.provider.text = "A quiet day on the floor.\n\n— Meriwether"
+        body = self.committee().memo("2026-09-13T22:00:00.000Z")
+        self.assertEqual(body, "A quiet day on the floor.\n\n— Meriwether")
+
+    def test_memo_is_capped_at_two_thousand_characters_including_the_signature(self):
         self.add(manifest())
         self.provider.text = "x" * 5000
         body = self.committee().memo("2026-09-13T22:00:00.000Z")
-        self.assertEqual(len(body), 3000)
+        self.assertEqual(len(body), 2000)
+        self.assertTrue(body.endswith("— Meriwether"))
+
+    def test_a_weekly_memo_is_still_available(self):
+        self.add(manifest())
+        committee = self.committee(memo_daily=False)
+        committee.memo("2026-09-14T22:00:00.000Z")  # Monday
+        event = self.log.last("committee", "committee.memo")
+        self.assertEqual(event.payload["period"], iso_week("2026-09-14T22:00:00.000Z"))
+        # Tuesday falls in the same ISO week, so nothing is written or paid for.
+        committee.memo("2026-09-15T22:00:00.000Z")
+        self.assertEqual(len(self.provider.calls), 1)
 
     def test_a_provider_failure_is_an_alert_not_a_crash(self):
         self.add(manifest())

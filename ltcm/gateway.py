@@ -20,6 +20,12 @@ Three failure modes are handled explicitly, because they are the ones that lose 
 `desk.intent` and `broker.order` events are written private ("deferred") so nobody can trade ahead
 of the floor. `release_deferred_events()` names the ones whose order has reached a terminal state;
 the publisher sends exactly those.
+
+One model call stands between the engine and a live venue. When a desk trading real money passes
+every deterministic rule, `critic.LiveOrderCritic` reads the intent against the desk's own words
+and can `block` it (a second `risk.decision`, no submission). It fails open by construction: a
+provider error, a timeout or an unusable answer is an `ops.alert` and the order proceeds on the
+engine alone. Paper desks never reach it.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ from .broker import (
     money,
     text,
 )
+from .committee import capital_mode, promoted_desks
 from .events import Event, EventLog, canonical, now_iso
 from .ledger import DeskLedger, floor_totals, iso_time, parse_iso
 from .manifest import DeskManifest
@@ -89,9 +96,12 @@ class Gateway:
         clock=time.time,
         kill_switch_path: str | Path | None = None,
         floor_max_daily_loss_pct: Any = "0.02",
+        critic: Any = None,
     ):
         self.log = log
         self.risk_engine = risk_engine
+        #: `critic.LiveOrderCritic` or None. Consulted only for desks on live capital.
+        self.critic = critic
         self.brokers = dict(brokers)
         self.ledgers = dict(ledgers)
         self.data = data
@@ -130,8 +140,9 @@ class Gateway:
                 elif event.kind == "risk.decision":
                     intent_id = event.payload.get("intent_id")
                     if isinstance(intent_id, str):
-                        approved = bool(event.payload.get("approved"))
-                        self._decisions[intent_id] = self._decisions.get(intent_id, False) or approved
+                        # Last decision wins: the critic can write a second, blocking decision
+                        # after the engine approved, and that one is the one that stands.
+                        self._decisions[intent_id] = bool(event.payload.get("approved"))
                 elif event.kind == "broker.fill":
                     fill_id = event.payload.get("fill_id") or event.payload.get("id")
                     if isinstance(fill_id, str):
@@ -285,8 +296,78 @@ class Gateway:
         self._record_decision(decision)
         if not decision.approved:
             return self._outcome(intent, decision, None, [])
+
+        review = self.review(intent, decision, ctx, at)
+        if review is not None and review.blocked:
+            blocked = Decision(
+                intent_id=intent.id,
+                desk_id=intent.desk_id,
+                approved=False,
+                reasons=(f"critic: {review.reason}",),
+                reference_price=decision.reference_price,
+                notional=decision.notional,
+                checked_at=at,
+            )
+            self._record_decision(blocked)
+            return self._outcome(intent, blocked, None, [])
+
         order_row, fills = self._submit(intent, at)
         return self._outcome(intent, decision, order_row, fills)
+
+    # ------------------------------------------------------------------ the second pair of eyes
+    def live_desk(self, desk_id: str) -> bool:
+        """True when this desk is trading real money, promotions included."""
+        manifest = self.manifests.get(desk_id)
+        if manifest is None:
+            return False
+        try:
+            return capital_mode(manifest, promoted_desks(self.log)) == "live"
+        except Exception:  # pragma: no cover - a log read that fails is not a licence to trade
+            return manifest.live
+
+    def review(
+        self, intent: OrderIntent, decision: Decision, ctx: RiskContext, at: str
+    ) -> Any | None:
+        """Ask the critic about one approved live order. None when it does not apply.
+
+        Fails open on purpose: anything other than a clean `block` lets the order through, and
+        every failure to get a verdict is an `ops.alert`. A verdict, either way, is published as
+        `risk.review`.
+        """
+        if self.critic is None or not self.live_desk(intent.desk_id):
+            return None
+        try:
+            memo = self.log.last(ctx.manifest.stream, "desk.memo")
+            review = self.critic.review(
+                intent=intent,
+                manifest=ctx.manifest,
+                decision=decision,
+                positions=ctx.positions,
+                memo=(memo.payload.get("text") if memo is not None else None),
+            )
+        except Exception as exc:  # pragma: no cover - the critic catches its own failures
+            self._alert("warning", f"critic failed for {intent.id}: {type(exc).__name__}", at)
+            return None
+        if review.verdict not in ("approve", "block"):
+            # No verdict, so nothing to publish: the site's `risk.review` contract admits only
+            # `approve` and `block`, and one malformed row rejects the whole batch. The alert is
+            # the record that the second pair of eyes was shut.
+            self._alert(
+                "warning",
+                f"critic gave no verdict on {intent.id} ({review.reason}); "
+                "the order proceeds on the deterministic engine",
+                at,
+            )
+            return None
+        payload = review.payload(intent.id, intent.desk_id)
+        self.log.append(
+            "risk",
+            "risk.review",
+            payload,
+            id=f"review:{intent.id}:{_short(canonical(payload))}",
+            at=at,
+        )
+        return review
 
     def _outcome(
         self,
@@ -332,9 +413,7 @@ class Gateway:
         payload = decision.to_dict()
         payload["desk_id"] = decision.desk_id
         event_id = f"risk:{decision.intent_id}:{_short(canonical(payload))}"
-        self._decisions[decision.intent_id] = (
-            self._decisions.get(decision.intent_id, False) or decision.approved
-        )
+        self._decisions[decision.intent_id] = decision.approved
         return self.log.append("risk", "risk.decision", payload, id=event_id, at=decision.checked_at)
 
     # ------------------------------------------------------------------ submission
@@ -611,8 +690,8 @@ class Gateway:
         """Ids of deferred events that may now be published, oldest first.
 
         A `broker.order` is releasable once that order is terminal. A `desk.intent` is releasable
-        once its order is terminal, or immediately once risk rejected it: there is no order to
-        trade ahead of.
+        once its order is terminal, or immediately once the engine or the critic rejected it:
+        there is no order to trade ahead of.
         """
         self._load()
         released: dict[str, int] = {}

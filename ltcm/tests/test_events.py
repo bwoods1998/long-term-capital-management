@@ -53,6 +53,22 @@ class EventLogTests(unittest.TestCase):
         forced = self.log.append("desk:a", "desk.thought", {"text": "x"}, public=False)
         self.assertFalse(forced.public)
 
+    def test_a_live_order_review_is_public(self):
+        self.assertEqual(events.KINDS["risk.review"], "public")
+        review = self.log.append(
+            "risk",
+            "risk.review",
+            {
+                "intent_id": "i",
+                "desk_id": "rosenfeld",
+                "verdict": "block",
+                "reason": "The rationale argues to sell.",
+                "model": "zai-org/GLM-5.3",
+            },
+        )
+        self.assertTrue(review.public)
+        self.assertEqual(review.to_public()["payload"]["verdict"], "block")
+
     def test_validation(self):
         with self.assertRaises(EventError):
             self.log.append("bogus", "desk.thought", {})

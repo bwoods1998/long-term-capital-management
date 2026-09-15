@@ -191,6 +191,10 @@ class ServiceCase(unittest.TestCase):
             "mark_interval_seconds": 300,
             "sleep_seconds": 0,
             "publish": True,
+            # Pinned here so the assertions below test the code, not the deployment's tuning
+            # in `ltcm/config.json`.
+            "floor_cap_usd_per_day": "15",
+            "floor_cap_max_usd_per_day": "60",
             "sources": {"news": False, "edgar": False, "event": False, "chain": False},
         }
         base.update(config)
@@ -377,6 +381,33 @@ class ScheduleTests(ServiceCase):
         self.tick(moment(2026, 9, 13, 22, 30))  # the same evening: once only
         self.assertEqual(len(self.service.log.read(kind="committee.allocation")), 1)
 
+    def test_the_memo_is_written_every_evening_while_capital_moves_weekly(self):
+        self.fund()  # the roster's first allocation, so the tick has nothing new to fund
+        result = self.tick(moment(2026, 9, 14, 22, 5))  # Monday 18:05 New York
+        self.assertTrue(result["memo"])
+        self.assertFalse(result["committee"])
+        memos = self.service.log.read(kind="committee.memo")
+        self.assertEqual([m.payload["period"] for m in memos], ["2026-09-14"])
+        self.assertTrue(memos[0].payload["text"].endswith("— Meriwether"))
+        self.assertEqual(len(self.service.log.read(kind="committee.allocation")), 1)
+        self.assertEqual(self.service.state()["last_committee_day"], "2026-09-14")
+        # Twice in one evening is still one memo, and one model call.
+        self.tick(moment(2026, 9, 14, 22, 40))
+        self.assertEqual(len(self.service.log.read(kind="committee.memo")), 1)
+        # The next evening is a new memo, and still no capital moves.
+        self.tick(moment(2026, 9, 15, 22, 5))
+        self.assertEqual(len(self.service.log.read(kind="committee.memo")), 2)
+        self.assertEqual(len(self.service.log.read(kind="committee.allocation")), 1)
+
+    def test_the_daily_memo_can_be_switched_off(self):
+        self.service.close()
+        self.service = self.build(committee_memo_daily=False)
+        self.fund()
+        result = self.tick(moment(2026, 9, 14, 22, 5))  # Monday
+        self.assertFalse(result["memo"])
+        self.assertEqual(self.service.log.read(kind="committee.memo"), [])
+        self.assertIsNone(self.service.state().get("last_committee_day"))
+
     def test_evolution_runs_daily_after_its_slot(self):
         result = self.tick(moment(2026, 9, 14, 23, 5))  # 19:05 New York
         self.assertEqual(self.service.state()["last_evolution_day"], "2026-09-14")
@@ -393,11 +424,47 @@ class ScheduleTests(ServiceCase):
         self.assertLessEqual(checkpoint["desks"][0]["updated_at"], checkpoint["published_at"])
 
 
+class CriticWiringTests(ServiceCase):
+    def test_the_gateway_gets_a_critic_built_from_the_configuration(self):
+        critic = self.service.gateway.critic
+        self.assertIsNotNone(critic)
+        self.assertIs(critic, self.service.critic)
+        self.assertIs(critic.provider, self.provider)
+        self.assertEqual(critic.profile, "glm_asap")
+        self.assertEqual(critic.reasoning_effort, "low")
+        self.assertEqual(critic.max_output_tokens, 1024)
+
+    def test_a_configured_profile_reaches_the_critic(self):
+        self.service.close()
+        self.service = self.build(critic_profile="glm_flash_asap")
+        self.assertEqual(self.service.gateway.critic.profile, "glm_flash_asap")
+
+    def test_the_critic_can_be_switched_off(self):
+        self.service.close()
+        self.service = self.build(critic_enabled=False)
+        self.assertIsNone(self.service.critic)
+        self.assertIsNone(self.service.gateway.critic)
+
+    def test_a_paper_desk_order_never_reaches_the_critic(self):
+        from ltcm.broker import OrderIntent
+
+        self.fund()
+        intent = OrderIntent.new(
+            desk_id=DESK, instrument=AAPL, side="buy", quantity="2",
+            rationale="a documented beat", created_at=self.service.now(), session_id="s",
+        )
+        result = self.service.gateway.propose(intent, self.service.now())
+        self.assertTrue(result["approved"], result["reasons"])
+        self.assertEqual(self.service.log.read(kind="risk.review"), [])
+        self.assertEqual(self.provider.calls, [])
+
+
 class HealthTests(ServiceCase):
     def test_the_health_file_is_written_every_tick(self):
         self.fund()
         self.tick()
-        path = self.root / ".data" / "capital" / "health.json"
+        path = self.root / ".data" / "ltcm" / "health.json"
+        self.assertEqual(path, self.service.health_path)
         report = json.loads(path.read_text())
         self.assertEqual(report["schema_version"], 1)
         self.assertEqual(report["status"], "running")
@@ -410,14 +477,14 @@ class HealthTests(ServiceCase):
     def test_run_once_ticks_and_stops(self):
         result = self.service.run(once=True)
         self.assertEqual(result["at"][:10], "2026-09-14")
-        self.assertTrue((self.root / ".data" / "capital" / "health.json").exists())
+        self.assertTrue((self.root / ".data" / "ltcm" / "health.json").exists())
 
     def test_status_reports_the_roster_without_writing(self):
         status = self.service.status()
         self.assertEqual(status["desks"][0]["id"], DESK)
         self.assertEqual(status["desks"][0]["mode"], "paper")
         self.assertEqual(status["floor"]["equity"], "0")
-        self.assertFalse((self.root / ".data" / "capital" / "health.json").exists())
+        self.assertFalse((self.root / ".data" / "ltcm" / "health.json").exists())
 
 
 class ContextTests(ServiceCase):

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "site_url": "https://blakewoods.us",
   "timezone": "America/New_York",
-  "floor_cap_usd_per_day": "15",
-  "floor_cap_max_usd_per_day": "60",
+  "floor_cap_usd_per_day": "40",
+  "floor_cap_max_usd_per_day": "120",
   "profit_share": "0.25",
   "reserve_floor_usd": "10",
   "floor_capital_usd": "5000",
@@ -13,13 +13,23 @@
   "session_catchup_seconds": 3600,
   "committee_weekday": 6,
   "committee_time": "18:00",
+  "committee_memo_daily": true,
   "evolution_time": "19:00",
   "postmortem_time": "21:30",
+  "critic_enabled": true,
+  "critic_profile": "glm_asap",
+  "evolution": {
+    "min_days": 3,
+    "min_decisions": 5
+  },
   "sources": {},
   "publish": true,
   "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
   "paper_slippage_bps": 5,
-  "live_venues": [],
+  "live_venues": [
+    "kalshi",
+    "coinbase"
+  ],
   "venues": {
     "alpaca": {
       "paper": true,
@@ -28,12 +38,12 @@
     },
     "kalshi": {
       "key_id_env": "KALSHI_KEY_ID",
-      "private_key_path": ".data/capital/keys/kalshi.pem"
+      "private_key_path": ".data/ltcm/keys/kalshi.pem"
     },
     "coinbase": {
       "key_name_env": "COINBASE_KEY_NAME",
       "secret_env": "COINBASE_API_SECRET",
-      "private_key_path": ".data/capital/keys/coinbase.pem"
+      "private_key_path": ".data/ltcm/keys/coinbase.pem"
     }
   }
 }

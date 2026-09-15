@@ -60,6 +60,7 @@ KINDS: dict[str, str] = {
     "desk.postmortem": "public",
     "desk.session_ended": "public",
     "risk.decision": "public",
+    "risk.review": "public",
     "risk.breaker": "public",
     "broker.order": "deferred",
     "broker.fill": "public",

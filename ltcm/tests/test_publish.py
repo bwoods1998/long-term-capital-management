@@ -240,6 +240,28 @@ class ShapeTests(PublisherCase):
     def test_a_well_formed_event_has_no_problem(self):
         self.assertIsNone(shape_problem(self.thought()))
 
+    def test_a_live_order_review_is_publishable(self):
+        event = self.log.append(
+            "risk",
+            "risk.review",
+            {
+                "intent_id": "int-0123456789ab",
+                "desk_id": "rosenfeld",
+                "verdict": "block",
+                "reason": "The rationale argues to sell.",
+                "model": "zai-org/GLM-5.3",
+            },
+            id="review:int-0123456789ab:0123456789ab",
+        )
+        self.assertIsNone(shape_problem(event))
+        summary = self.publisher.push_events()
+        self.assertEqual(summary["skipped"], 0)
+        sent = self.transport.calls[-1]["payload"]["events"]
+        review = [e for e in sent if e["kind"] == "risk.review"][0]
+        self.assertEqual(
+            sorted(review["payload"]), ["desk_id", "intent_id", "model", "reason", "verdict"]
+        )
+
     def test_a_bad_timestamp_is_named_and_skipped(self):
         self.log.append(
             "desk:earnings-01", "desk.thought", {"session_id": "s", "text": "x"},
