@@ -580,44 +580,37 @@ class Service:
         return None
 
     def event_index(self, source: Any) -> list[dict[str, Any]]:
-        """Open Kalshi events with nested markets, flattened to market rows; cached ten minutes."""
+        """Open Kalshi markets closing within 60 days, priced in dollars; cached ten minutes.
+
+        `/markets` filters by close time and pages 1000 rows at a time, so the whole tradable
+        near-term universe (a few thousand markets) is one cheap sweep.
+        """
         now = time.time()
         cached = getattr(self, "_event_index", None)
         if cached is not None and now - cached[0] < 600:
             return cached[1]
         rows: list[dict[str, Any]] = []
         cursor = None
-        parse = getattr(source, "parse_market", None)
-        horizon = (datetime.now(ZoneInfo("UTC")) + timedelta(days=60)).date().isoformat()
-        for _ in range(16):
-            # Nested pages are large; 50 events per page keeps each response under the 4 MB cap.
-            page = source.events(status="open", limit=50, cursor=cursor, with_nested_markets=True)
-            for event in page.get("events", []):
-                if not isinstance(event, Mapping):
+        for _ in range(12):
+            page = source.markets(
+                status="open",
+                limit=1000,
+                cursor=cursor,
+                min_close_ts=int(now),
+                max_close_ts=int(now) + 60 * 86400,
+            )
+            for row in page.get("markets", []):
+                if not isinstance(row, Mapping):
                     continue
-                title = str(event.get("title") or "")
-                markets = event.get("markets") or []
-                for market in markets:
-                    if not isinstance(market, Mapping):
-                        continue
-                    try:
-                        row = parse(market) if parse else dict(market)
-                    except Exception:
-                        continue
-                    if row.get("status") not in (None, "open", "active"):
-                        continue
-                    close = str(row.get("close_time") or "")
-                    if close[:10] and close[:10] > horizon:
-                        continue  # a desk wants markets that resolve soon, not in 2040
-                    row["event_title"] = title
-                    row["event_ticker"] = event.get("event_ticker")
-                    row["series_ticker"] = event.get("series_ticker")
-                    row["_haystack"] = " ".join(
-                        str(x or "") for x in (title, event.get("sub_title"), row.get("title"),
-                                              row.get("yes_sub_title"), event.get("series_ticker"),
-                                              event.get("event_ticker"), row.get("ticker"))
-                    ).lower()
-                    rows.append(row)
+                row = dict(row)
+                ticker = str(row.get("ticker") or "")
+                row["series_ticker"] = ticker.split("-")[0] if ticker else None
+                row["_haystack"] = " ".join(
+                    str(x or "") for x in (row.get("title"), row.get("yes_sub_title"),
+                                          row.get("no_sub_title"), row.get("event_ticker"),
+                                          row["series_ticker"], ticker)
+                ).lower()
+                rows.append(row)
             cursor = page.get("cursor")
             if not cursor:
                 break
