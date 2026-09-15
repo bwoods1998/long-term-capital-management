@@ -99,6 +99,7 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `evolution.promoted` | evolution | yes | `desk_id`, `from`, `to`, `score{}` |
 | `lab.hypothesis` | lab | yes | `hypothesis_id`, `text`, `test_plan` |
 | `lab.result` | lab | yes | `hypothesis_id`, `metrics{}`, `verdict` |
+| `lab.asked` | lab | no | `family`, `as_of` (the lab asked this family for experiments today; bounds one ask a night) |
 | `ops.alert` | ops | yes | `level`, `text` |
 | `ops.budget` | ops | yes | `scope`, `spent_usd`, `cap_usd` |
 | `provider.request` | ops | no | `request_id`, `desk_id`, `profile`, `cost_usd`, `usage{}` |

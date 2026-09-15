@@ -113,8 +113,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # leap: lab -- the research lab's nightly slot (local time) and its bounds (`ltcm.lab`),
     # and how often forecasts are checked against the venue for resolution, in seconds.
     "lab_time": "20:00",
+    "lab_budget_seconds": 120,
     "lab": {},
-    "calibration_interval_seconds": 3600,
+    "calibration_interval_seconds": 600,
     "publish": True,
     "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
     "shadow_slippage_bps": 5,
@@ -491,10 +492,18 @@ class DeskContext:
 
     # -- memory and writing ------------------------------------------------
     def memory_read(self, query: str, limit: int) -> list[dict[str, Any]]:
+        """This desk's own memory, and only its own.
+
+        Every desk on the floor used to read one shared pool, so a crypto desk's post-mortem
+        came back full of the Fed forecasts a Kalshi desk had written and four variants of one
+        mandate converged on the same three "lessons" in the same evening. Variants are only
+        an experiment if they think for themselves; `memo_read` is the deliberate channel for
+        reading another desk, on the record.
+        """
         store = self.service.memory
         if store is None:
             return []
-        return list(store.read(query, limit or self.manifest.memory_limit))
+        return list(store.read(query, limit or self.manifest.memory_limit, desk_id=self.desk_id))
 
     def memory_write(self, entry: dict[str, Any]) -> dict[str, Any]:
         store = self.service.memory
@@ -1530,8 +1539,30 @@ class Service:
                     continue
                 if self.ran_today(manifest, trigger, day):
                     continue
+                if trigger == "postmortem" and not self.worked_since_last_postmortem(manifest):
+                    continue  # nothing to review: a desk bred an hour ago has no day to look back on
                 due.append((manifest, trigger))
         return due
+
+    def worked_since_last_postmortem(self, manifest: DeskManifest) -> bool:
+        """True when the desk has sat down for a trading session since its last post-mortem.
+
+        A post-mortem costs a model call and rewrites the playbook; run with nothing behind it,
+        it rewrites the playbook from another desk's day. Variants bred in the afternoon wait
+        for their first real session before they review anything.
+        """
+        last_review: str | None = None
+        last_work: str | None = None
+        for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=10_000):
+            trigger = str(event.payload.get("trigger") or "")
+            if trigger == "postmortem":
+                if last_review is None or event.at > last_review:
+                    last_review = event.at
+            elif last_work is None or event.at > last_work:
+                last_work = event.at
+        if last_work is None:
+            return False
+        return last_review is None or last_work > last_review
 
     def interrupted_session(
         self, manifest: DeskManifest, trigger: str, day: str, at: str
@@ -1840,9 +1871,9 @@ class Service:
     def _forecast_resolver(self) -> Any:
         """Ask the event venue whether a market has settled. Kalshi only, for now.
 
-        UNVERIFIED: which of Kalshi's timestamps carries the settlement moment. The market row
-        exposes `expiration_time` and `close_time`; the earlier of the two that is in the past
-        is used, and the tick's own time when neither is.
+        Kalshi's market row carries no settlement timestamp (`settlement_time` is null on a
+        finalized market, verified 2026-09-15); of `expiration_time` and `close_time` the earlier
+        that is in the past is used, and the tick's own time when neither is.
         """
         source = self.source("event")
         reader = getattr(source, "market", None)
@@ -1853,7 +1884,10 @@ class Service:
             if venue != "kalshi":
                 return None
             row = reader(market)
-            if not isinstance(row, dict) or row.get("status") != "settled":
+            # Verified against the venue on 2026-09-15: a settled market reads `status:
+            # "finalized"` with `result: "yes"|"no"`; `determined` is a result that can still be
+            # disputed, so it does not count, and the older `settled` spelling is kept.
+            if not isinstance(row, dict) or str(row.get("status") or "") not in ("finalized", "settled"):
                 return None
             result = str(row.get("result") or "").strip().lower()
             if result not in ("yes", "no"):

@@ -776,15 +776,47 @@ def _rows(value: Any, *keys: str) -> list[Any]:
     return []
 
 
+_INLINE_RULE = re.compile(r"\(?(?<![\d.])(\d{1,2})[).]\s+")
+_RULES_LEAD = re.compile(r"(?i)\b(rules?(?: changed| added| learned)?|lessons?)\s*[:\u2014-]\s*")
+
+
 def _lessons_from(summary: str) -> list[str]:
-    """Pull bullet or numbered lines out of a post-mortem summary as the lessons list."""
+    """The lessons a post-mortem states, as a list, however the model laid them out.
+
+    Desks write post-mortems as one paragraph -- "Rules changed: (1) ... (2) ... (3) ..." --
+    far more often than as bullet lines, and the first version of this only read bullets, so
+    every lesson of the first night reached the log as `[]`. Bulleted and numbered lines are
+    still read; inline "(1) ...; (2) ..." runs are split into their items; and a sentence led
+    by "Rules changed:" or "Lesson:" counts as one lesson when it enumerates nothing.
+    """
     lessons: list[str] = []
-    for line in summary.splitlines():
-        stripped = line.strip()
-        if len(stripped) > 3 and (stripped[0] in "-*" or stripped[:2].rstrip(".)").isdigit()):
-            text = stripped.lstrip("-*0123456789.) ").strip()
-            if text:
-                lessons.append(text[:400])
+
+    def add(text: str) -> None:
+        text = text.strip().strip(";,").strip()
+        if len(text) > 1 and text[:400] not in lessons:
+            lessons.append(text[:400])
+
+    lines = [line.strip() for line in summary.splitlines() if line.strip()]
+    for line in lines:
+        if line[0] in "-*" or line[:2].rstrip(".)").isdigit():
+            add(line.lstrip("-*0123456789.) ").strip())
+    if lessons:
+        return lessons[:10]
+    text = " ".join(lines)
+    parts = _INLINE_RULE.split(text)
+    # split() yields [lead, "1", item, "2", item, ...]; an item ends at the next number or the
+    # sentence that closes the enumeration.
+    if len(parts) >= 3:
+        for number, item in zip(parts[1::2], parts[2::2]):
+            item = re.split(r"(?<=[.;])\s+(?=[A-Z][a-z]+ (?:changed|added|deleted|remain|were|was)\b|Calibration\b|Waiting\b|No\b)", item, 1)[0]
+            add(item)
+        if lessons:
+            return lessons[:10]
+    match = _RULES_LEAD.search(text)
+    if match:
+        tail = text[match.end():].strip()
+        sentence = re.split(r"(?<=[.!?])\s+", tail, 1)[0]
+        add(sentence)
     return lessons[:10]
 
 

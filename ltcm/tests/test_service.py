@@ -118,15 +118,18 @@ class FakeProvider:
 
 
 class FakeMemory:
+    """Stands in for `desk.MemoryStore`: records writes and answers reads, scoped by desk."""
+
     def __init__(self):
         self.entries = []
 
     def write(self, entry):
-        self.entries.append(entry)
-        return {"written": True, "id": f"m{len(self.entries)}"}
+        self.entries.append(dict(entry))
+        return {"written": True}
 
-    def read(self, query, limit):
-        return self.entries[-limit:]
+    def read(self, query, limit, *, desk_id=None):
+        rows = [e for e in self.entries if desk_id is None or e.get("desk_id") == desk_id]
+        return rows[-limit:] if limit else rows
 
 
 class FakePublisher:
@@ -338,11 +341,19 @@ class CadenceTests(ServiceCase):
         # A slot long past that never ran is not resurrected.
         self.assertEqual(self.service.next_session_at(manifest, moment_iso(2026, 9, 14, 18, 0)), "2026-09-14T19:30:00.000Z")
 
-    def test_the_postmortem_runs_after_the_close(self):
+    def test_the_postmortem_runs_after_the_close_and_only_after_real_work(self):
+        # A desk that never sat down has nothing to review: no post-mortem on an empty day.
         self.tick(moment(2026, 9, 15, 1, 40))  # 21:40 New York on the 14th
-        self.assertEqual(self.sessions_started(), ["postmortem"])
-        self.tick(moment(2026, 9, 15, 1, 50))
-        self.assertEqual(self.sessions_started(), ["postmortem"])
+        self.assertEqual(self.sessions_started(), [])
+        # After a trading session the evening review is due, once.
+        self.tick(moment(2026, 9, 15, 13, 50))  # 09:50 New York on the 15th: the 09:45 slot
+        self.tick(moment(2026, 9, 16, 1, 40))  # 21:40 New York on the 15th
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
+        self.tick(moment(2026, 9, 16, 1, 50))
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
+        # The next evening, with no session in between, there is again nothing to review.
+        self.tick(moment(2026, 9, 17, 1, 40))
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
 
     def test_triggers_match_the_desk_runtime_grammar(self):
         import re
@@ -1577,6 +1588,39 @@ class LeapSandboxAndRunClockTests(ServiceCase):
         self.assertIsInstance(run["models_used"], list)
         desk = self.publisher.checkpoints[-1]["desks"][0]
         self.assertEqual(desk["next_session_at"], "2026-09-14T19:30:00.000Z")  # 15:30 New York, after the 09:45 ran
+
+
+class ForecastResolverTests(ServiceCase):
+    """Kalshi reports a settled market as `finalized`; the resolver must read it that way."""
+
+    def resolver_with(self, row):
+        self.service.source = lambda name: SimpleNamespace(market=lambda ticker: row) if name == "event" else None
+        return self.service._forecast_resolver()
+
+    def test_a_finalized_market_resolves_and_a_determined_one_waits(self):
+        finalized = {"status": "finalized", "result": "no", "close_time": "2026-09-15T22:00:00Z", "expiration_time": "2026-09-15T22:05:00Z", "settlement_time": None}
+        self.clock.set(moment(2026, 9, 15, 22, 10))
+        answer = self.resolver_with(finalized)("kalshi", "KXBTCD-26SEP1518-T86799.99")
+        self.assertEqual(answer["result"], "no")
+        self.assertEqual(answer["settled_at"], "2026-09-15T22:00:00Z")
+        self.assertEqual(self.resolver_with({**finalized, "status": "settled"})("kalshi", "X")["result"], "no")
+        self.assertIsNone(self.resolver_with({**finalized, "status": "determined"})("kalshi", "X"))
+        self.assertIsNone(self.resolver_with({**finalized, "status": "active", "result": ""})("kalshi", "X"))
+        self.assertIsNone(self.resolver_with(finalized)("coinbase", "X"))
+
+
+class MemoryScopeTests(ServiceCase):
+    def test_a_desk_reads_only_its_own_memory(self):
+        self.write_manifest("earnings-02")
+        self.service.close()
+        self.service = self.build()
+        mine = self.service.context(self.service.manifests[DESK], session_id="s-1")
+        other = self.service.context(self.service.manifests["earnings-02"], session_id="s-2")
+        mine.memory_write({"kind": "note", "text": "AAPL trend up"})
+        other.memory_write({"kind": "note", "text": "Fed hike at 93%"})
+        texts = [row["text"] for row in mine.memory_read("", 10)]
+        self.assertEqual(texts, ["AAPL trend up"])
+        self.assertEqual([row["text"] for row in other.memory_read("", 10)], ["Fed hike at 93%"])
 
 
 class LeapLabServiceTests(ServiceCase):

@@ -81,6 +81,7 @@ KINDS: dict[str, str] = {
     "evolution.promoted": "public",
     "lab.hypothesis": "public",
     "lab.result": "public",
+    "lab.asked": "private",  # the lab asked a family for experiments tonight; never published
     # leap: lab -- forecasts and their scoring, and the lab's directed experiments.
     "desk.forecast": "public",
     "lab.calibration": "public",
