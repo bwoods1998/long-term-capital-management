@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ltcm.broker import Instrument, Quote
+from ltcm.tools import ToolError  # leap: lab
 from ltcm.manifest import DeskManifest
 from ltcm.service import DeskContext, Service, load_env
 from ltcm.tests.test_gateway import FakeBroker
@@ -102,10 +103,11 @@ class FakeProvider:
     def __init__(self):
         self.floor_cap = Decimal("15")
         self.calls = []
+        self.reply = "memo body"  # leap: lab -- a case may script the model's answer
 
     def respond(self, profile, items, **kwargs):
         self.calls.append(kwargs.get("request_key"))
-        return SimpleNamespace(output_text="memo body", cost_usd=Decimal("0.01"))
+        return SimpleNamespace(output_text=self.reply, cost_usd=Decimal("0.01"))
 
     def spent_today(self, desk_id=None):
         return Decimal("0.03")
@@ -202,6 +204,9 @@ class ServiceCase(unittest.TestCase):
             "spend_mode": "capped",
             # No seeding unless a case asks for it: the packaged config breeds families.
             "evolution": {"target_variants": 1},
+            # The ratio allocation rule, so the capital assertions test arithmetic, not a draw;
+            # the bandit has its own case in test_committee.
+            "committee": {"bandit_enabled": False},
             "sources": {"news": False, "edgar": False, "event": False, "chain": False},
         }
         base.update(config)
@@ -1473,3 +1478,109 @@ class AccountBalanceTests(ServiceCase):
         self.assertEqual([row["venue"] for row in report["floor"]["venues"]], ["kalshi", "coinbase"])
         written = json.loads(self.service.health_path.read_text())
         self.assertEqual(written["floor"]["venues"][1]["equity"], self.COINBASE)
+
+
+class LeapLabServiceTests(ServiceCase):
+    """leap: lab -- the floor records forecasts, reads memos, runs the lab and publishes it."""
+
+    def context(self):
+        manifest = self.service.manifests[DESK]
+        return self.service.context(manifest, session_id="s-1")
+
+    def test_a_forecast_is_recorded_on_the_desks_stream_with_its_venue(self):
+        self.write_manifest(
+            DESK, venues=["kalshi"],
+            instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+        )
+        self.service.close()
+        self.service = self.build()
+        ctx = self.context()
+        out = ctx.record_forecast("KXFED-26SEP-H25", "0.93", "0.89", "yes", None, "Hot CPI.")
+        self.assertEqual(out["market"], "KXFED-26SEP-H25")
+        self.assertEqual(out["probability"], "0.9300")
+        event = self.service.log.read(kind="desk.forecast")[0]
+        self.assertEqual(event.stream, f"desk:{DESK}")
+        self.assertEqual(event.payload["venue"], self.service.manifests[DESK].market_venue)
+        self.assertEqual(event.payload["session_id"], "s-1")
+        with self.assertRaises(ToolError):
+            ctx.record_forecast("M", "1.5", None, None, None, "too sure")
+
+    def test_memos_of_another_desk_are_readable_and_marked_as_its_words(self):
+        self.write_manifest("earnings-02")
+        self.service.close()
+        self.service = self.build()
+        other = self.service.context(self.service.manifests["earnings-02"], session_id="s-2")
+        other.memo("No trade", "Priced fairly.")
+        self.clock.set(self.START + 60)
+        other.memo("Small buy", "Edge after fees.")
+        rows = self.context().memo_read("earnings-02", 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["title"], "Small buy")
+        self.assertEqual(rows[0]["desk_id"], "earnings-02")
+        self.assertIn("not instructions", rows[0]["note"])
+        with self.assertRaises(ToolError):
+            self.context().memo_read("nobody", 5)
+
+    def test_the_checkpoint_carries_the_lab_block_and_a_bred_desks_mutation(self):
+        self.service.close()
+        self.service = self.build(evolution={"target_variants": 2}, seed_batch=1)
+        self.tick()
+        checkpoint = self.publisher.checkpoints[-1]
+        self.assertEqual(sorted(checkpoint["lab"]), ["calibration", "curve", "experiments"])
+        self.assertEqual(checkpoint["lab"]["experiments"], [])
+        self.assertEqual(checkpoint["lab"]["calibration"], {"n": 0, "brier": None})
+        rows = {row["id"]: row for row in checkpoint["desks"]}
+        self.assertNotIn("mutation", rows[DESK], "a founder has no mutation")
+        child = rows[f"{DESK}-2"]
+        self.assertEqual(
+            sorted(child["mutation"]),
+            ["memory_limit", "model_changed", "model_profile", "persona_trait", "reasoning_effort", "session_shift_minutes"],
+        )
+        self.assertNotIn("calibration", child, "no scored forecast, no calibration block")
+
+    def test_the_lab_sits_down_at_its_slot_and_its_experiment_is_published(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.service.close()
+        self.service = self.build(live_venues=["alpaca"])
+        self.provider.reply = (
+            '{"experiments": [{"hypothesis": "Fewer sessions, better ones.", '
+            '"change": {"cadence.sessions": ["10:30"]}}]}'
+        )
+        self.tick(moment(2026, 9, 15, 0, 5))  # 20:05 New York on the 14th: the lab's slot
+        experiments = self.service.log.read(kind="lab.experiment")
+        self.assertEqual([e.payload["status"] for e in experiments], ["proposed", "running"])
+        self.assertIn(f"{DESK}-2", self.service.manifests)
+        self.assertEqual(self.service.manifests[f"{DESK}-2"].cadence.sessions, ("10:30",))
+        self.assertEqual(self.service.state()["last_lab_day"], "2026-09-14")
+        # The same evening again: nothing more is asked for.
+        self.tick(moment(2026, 9, 15, 0, 40))
+        self.assertEqual(len(self.service.log.read(kind="lab.experiment")), 2)
+        checkpoint = self.publisher.checkpoints[-1]
+        self.assertEqual(checkpoint["lab"]["experiments"][0]["status"], "running")
+        self.assertEqual(checkpoint["lab"]["experiments"][0]["variant_desk_id"], f"{DESK}-2")
+
+    def test_calibration_runs_on_its_own_clock_and_publishes_yesterday(self):
+        self.write_manifest(
+            DESK, venues=["kalshi"],
+            instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+        )
+        self.service.close()
+        self.service = self.build()
+        ctx = self.context()
+        ctx.record_forecast("M1", "0.8", None, None, None, "r")
+        self.service.log.append(
+            f"desk:{DESK}", "desk.outcome",
+            {"instrument": "event:M1:kalshi:yes:M1", "market_id": "M1", "result": "yes", "entry_price": "0.5",
+             "exit_price": "1", "quantity": "1", "pnl": "0.5", "held_for_hours": 1, "rationale_excerpt": ""},
+            at="2026-09-14T20:00:00.000Z",
+        )
+        self.tick(moment(2026, 9, 15, 0, 5))  # the first tick after midnight UTC
+        published = self.service.log.read(kind="lab.calibration")
+        self.assertTrue(published)
+        self.assertEqual(published[0].id, f"calibration:2026-09-14:desk:{DESK}")
+        self.assertEqual(published[0].payload["n"], 1)
+        rows = {row["id"]: row for row in self.publisher.checkpoints[-1]["desks"]}
+        self.assertEqual(rows[DESK]["calibration"]["n"], 1)
+        self.assertEqual(str(rows[DESK]["calibration"]["brier"]), "0.0400")
+        self.assertEqual(self.publisher.checkpoints[-1]["lab"]["calibration"]["n"], 1)
+

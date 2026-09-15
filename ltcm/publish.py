@@ -605,6 +605,66 @@ def runway_fields(budget: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def mutation_block(value: Any) -> dict[str, Any] | None:
+    """leap: lab -- a bred desk's mutation in the contract's shape, or None for a founder."""
+    if not isinstance(value, Mapping):
+        return None
+    return {
+        "model_profile": str(value.get("model_profile") or "")[:80],
+        "reasoning_effort": str(value.get("reasoning_effort") or "")[:20],
+        "session_shift_minutes": int(value.get("session_shift_minutes") or 0),
+        "memory_limit": counted(value.get("memory_limit")),
+        "persona_trait": str(value.get("persona_trait") or "")[:200],
+        "model_changed": bool(value.get("model_changed")),
+    }
+
+
+def calibration_block(value: Any) -> dict[str, Any] | None:
+    """leap: lab -- `{n, brier, since}` when a desk has scored forecasts, else None."""
+    if not isinstance(value, Mapping) or not int(value.get("n") or 0):
+        return None
+    brier = value.get("brier")
+    return {
+        "n": counted(value.get("n")),
+        "brier": None if brier is None else floor_at_zero(brier),
+        "since": value.get("since"),
+    }
+
+
+def lab_block(value: Any) -> dict[str, Any]:
+    """leap: lab -- the checkpoint's lab block: experiments, the improvement curve, calibration."""
+    lab = value if isinstance(value, Mapping) else {}
+    experiments = []
+    for row in list(lab.get("experiments") or [])[:12]:
+        if not isinstance(row, Mapping):
+            continue
+        entry = {
+            "experiment_id": str(row.get("experiment_id") or ""),
+            "hypothesis": str(row.get("hypothesis") or "")[:600],
+            "family": str(row.get("family") or ""),
+            "parent_id": row.get("parent_id"),
+            "change": dict(row.get("change") or {}) if isinstance(row.get("change"), Mapping) else {},
+            "variant_desk_id": row.get("variant_desk_id"),
+            "status": str(row.get("status") or ""),
+            "proposed_at": row.get("proposed_at"),
+            "evaluate_after": row.get("evaluate_after"),
+        }
+        if row.get("verdict_reason"):
+            entry["verdict_reason"] = str(row["verdict_reason"])[:600]
+        experiments.append(entry)
+    curve = [dict(row) for row in list(lab.get("curve") or [])[:40] if isinstance(row, Mapping)]
+    calibration = lab.get("calibration") if isinstance(lab.get("calibration"), Mapping) else {}
+    brier = calibration.get("brier")
+    return {
+        "experiments": experiments,
+        "curve": curve,
+        "calibration": {
+            "n": counted(calibration.get("n")),
+            "brier": None if brier is None else floor_at_zero(brier),
+        },
+    }
+
+
 def checkpoint_body(
     *,
     published_at: str,
@@ -614,6 +674,7 @@ def checkpoint_body(
     budget: Mapping[str, Any],
     infra: Mapping[str, Any] | None = None,
     watch: Mapping[str, Any] | None = None,
+    lab: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact shape the site expects. Money stays `Decimal` for `jsonable` to render.
 
@@ -673,6 +734,9 @@ def checkpoint_body(
                    if desk.get("positions") is not None else {}),
                 **({"live_session": live_session_row(desk.get("live_session"))}
                    if desk.get("live_session") else {}),
+                # leap: lab -- optional, absent for a founder or a desk with no scored forecast.
+                **({"mutation": mutation_block(desk["mutation"])} if mutation_block(desk.get("mutation")) else {}),
+                **({"calibration": calibration_block(desk["calibration"])} if calibration_block(desk.get("calibration")) else {}),
             }
             for desk in desks
         ],
@@ -702,6 +766,8 @@ def checkpoint_body(
         },
         # leap: watch. What the night desk did today; absent on a floor without one.
         **({"watch": watch_row(watch)} if watch is not None else {}),
+        # leap: lab -- present whenever the floor runs a lab, however empty its record.
+        **({"lab": lab_block(lab)} if lab is not None else {}),
     }
 
 

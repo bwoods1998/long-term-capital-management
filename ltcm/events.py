@@ -80,6 +80,14 @@ KINDS: dict[str, str] = {
     "evolution.promoted": "public",
     "lab.hypothesis": "public",
     "lab.result": "public",
+    # leap: lab -- forecasts and their scoring, and the lab's directed experiments.
+    "desk.forecast": "public",
+    "lab.calibration": "public",
+    "lab.experiment": "public",
+    "lab.verdict": "public",
+    # The fact that a market resolved, recorded once so a venue is asked once. Never published:
+    # the public record of a resolution is the desk.outcome or the lab.calibration it feeds.
+    "lab.resolution": "private",
     "ops.alert": "public",
     "ops.budget": "public",
     "provider.request": "private",

@@ -69,5 +69,40 @@
     "image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
     "daily_seconds": 1800,
     "timeout_seconds": 120
+  },
+  "lab_time": "20:00",
+  "lab": {
+    "profile": "pro_asap",
+    "reasoning_effort": "high",
+    "max_output_tokens": 6144,
+    "budget_usd_per_day": "5.00",
+    "max_experiments_per_family": 2,
+    "max_experiments_per_day": 4,
+    "max_running_per_family": 2,
+    "grace_days": 7,
+    "hard_limits": {
+      "max_position_pct": [
+        "0.01",
+        "0.50"
+      ],
+      "max_order_notional_pct": [
+        "0.01",
+        "0.50"
+      ],
+      "max_daily_loss_pct": [
+        "0.01",
+        "0.15"
+      ],
+      "max_orders_per_day": [
+        1,
+        40
+      ]
+    }
+  },
+  "calibration_interval_seconds": 3600,
+  "committee": {
+    "bandit_enabled": true,
+    "bandit_prior_sd_pct": "5",
+    "bandit_scale_pct": "10"
   }
 }

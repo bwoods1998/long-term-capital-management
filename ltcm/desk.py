@@ -505,6 +505,10 @@ class Desk:
         ))
         if trigger.startswith("watch:"):  # leap: watch
             parts.append("\n# Why you were woken\n" + self._watch_block())
+        # leap: lab -- the desk's own calibration, when it has one; the post-mortem reads it.
+        brief = self._safe(lambda: str(getattr(self.ctx, "calibration_brief")() or ""), "")
+        if brief:
+            parts.append("\n# Your calibration\n" + brief)
         if trigger == "postmortem":
             parts.append(
                 "\nThis is a POST-MORTEM session, not a trading session. Do not propose orders. "
@@ -513,8 +517,10 @@ class Desk:
                 "evidence you had, what you assumed, and what actually happened. Then write one to "
                 "three concrete, testable rules (or delete a rule that failed) and append them under "
                 "'Rules I have learned' in your playbook with playbook_write, giving the reason. "
-                "Write one memory entry with kind 'lesson' per rule. Finish with end_session whose "
-                "summary is the post-mortem itself: worst decision, best decision, rules changed."
+                "Write one memory entry with kind 'lesson' per rule. If a calibration block is "
+                "shown above, say in one sentence whether you have been over- or under-confident "
+                "and in which range. Finish with end_session whose summary is the post-mortem "
+                "itself: worst decision, best decision, rules changed."
             )
         else:
             parts.append(

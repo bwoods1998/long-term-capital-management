@@ -214,7 +214,7 @@ class AllocationTests(CommitteeCase):
         """A shadow desk is scored against a budget, not funded out of the floor's money."""
         self.add(manifest("earnings-01"))
         self.add(live_manifest("live-01", capital="4000"))
-        committee = self.committee(floor_capital_usd="4000")
+        committee = self.committee(floor_capital_usd="4000", bandit_enabled=False)
         targets = committee.allocate("2026-09-14T22:00:00.000Z")
         event = self.log.last("committee", "committee.allocation")
         self.assertEqual(event.payload["shadow"], {"earnings-01": True})
@@ -243,7 +243,7 @@ class AllocationTests(CommitteeCase):
             self.ledgers[desk].mark(
                 {ALPACA_AAPL.key: Decimal(price)}, "2026-09-09T20:00:00.000Z"
             )
-        committee = self.committee()
+        committee = self.committee(bandit_enabled=False)  # the ratio rule, pinned
         self.assertEqual(committee.score("earnings-01", "2026-09-09T20:00:00.000Z"), Decimal("20"))
         self.assertEqual(committee.score("earnings-02", "2026-09-09T20:00:00.000Z"), Decimal("5"))
         targets = committee.allocate("2026-09-09T20:00:00.000Z")
@@ -273,7 +273,7 @@ class AllocationTests(CommitteeCase):
         for desk, price in (("earnings-01", "120"), ("earnings-02", "105")):
             self.fill(desk, "buy", "10", "100", "2026-09-01T14:00:00.000Z", instrument=ALPACA_AAPL)
             self.ledgers[desk].mark({ALPACA_AAPL.key: Decimal(price)}, "2026-09-09T20:00:00.000Z")
-        targets = self.committee(floor_capital_usd="1000").allocate("2026-09-09T20:00:00.000Z")
+        targets = self.committee(floor_capital_usd="1000", bandit_enabled=False).allocate("2026-09-09T20:00:00.000Z")
         self.assertEqual(targets["earnings-01"], Decimal("800.00"))
         self.assertEqual(targets["earnings-02"], Decimal("200.00"))
         self.assertLessEqual(sum(targets.values()), Decimal("1000"))
@@ -472,3 +472,59 @@ class LineageTests(CommitteeCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class BanditTests(CommitteeCase):
+    """leap: lab -- capital as a bandit: a reproducible draw from each live desk's posterior."""
+
+    def race(self):
+        self.add(live_manifest("earnings-01"))
+        self.add(live_manifest("earnings-02"))
+        self.allocate_event({"earnings-01": "1000", "earnings-02": "1000"}, "2026-09-01T13:00:00.000Z")
+        for desk, price in (("earnings-01", "120"), ("earnings-02", "95")):
+            self.fill(desk, "buy", "10", "100", "2026-09-01T14:00:00.000Z", instrument=ALPACA_AAPL)
+            self.ledgers[desk].mark({ALPACA_AAPL.key: Decimal(price)}, "2026-09-09T20:00:00.000Z")
+
+    def test_the_draw_is_reproducible_from_the_date_and_stays_inside_the_bounds(self):
+        self.race()
+        committee = self.committee()
+        bounds = (Decimal("0.5"), Decimal("2"))
+        once = committee._bandit_multiple("earnings-01", "2026-09-09T20:00:00.000Z", *bounds)
+        twice = committee._bandit_multiple("earnings-01", "2026-09-09T20:00:00.000Z", *bounds)
+        self.assertEqual(once, twice)
+        first = committee.allocate("2026-09-09T20:00:00.000Z")
+        for desk_id, usd in first.items():
+            self.assertGreaterEqual(usd, Decimal("500.00"))
+            self.assertLessEqual(usd, Decimal("2000.00"))
+        event = self.log.last("committee", "committee.allocation")
+        why = event.payload["reasons"]["earnings-01"]
+        self.assertRegex(why, r"^thompson: drew [+-]\d+\.\d+pp from N\(\d+\.\d+, \d+\.\d+\) over \d+ decisions -> \d\.\d\dx manifest capital")
+        # A different resize date is a different draw.
+        other = self.committee().allocate("2026-09-16T20:00:00.000Z")
+        self.assertNotEqual(other, first)
+
+    def test_the_posterior_narrows_with_evidence(self):
+        committee = self.committee()
+        self.assertEqual(committee.bandit_sigma(0), Decimal("5.0000"))
+        self.assertEqual(committee.bandit_sigma(10), Decimal("3.5355"))
+        self.assertEqual(committee.bandit_sigma(90), Decimal("1.5811"))
+        self.assertLess(committee.bandit_sigma(400), committee.bandit_sigma(90))
+
+    def test_the_multiple_is_the_draw_over_the_scale_clamped(self):
+        self.race()
+        committee = self.committee(bandit_scale_pct="1000")  # a huge scale: the draw barely moves it
+        multiple, why = committee._bandit_multiple("earnings-01", "2026-09-09T20:00:00.000Z", Decimal("0.5"), Decimal("2"))
+        self.assertGreater(multiple, Decimal("0.9"))
+        self.assertLess(multiple, Decimal("1.1"))
+        tiny = self.committee(bandit_scale_pct="0.01")  # a tiny scale: every draw hits a bound
+        multiple, _ = tiny._bandit_multiple("earnings-01", "2026-09-09T20:00:00.000Z", Decimal("0.5"), Decimal("2"))
+        self.assertIn(multiple, (Decimal("0.5"), Decimal("2")))
+
+    def test_switching_the_bandit_off_restores_the_ratio_rule(self):
+        self.race()
+        targets = self.committee(bandit_enabled=False).allocate("2026-09-09T20:00:00.000Z")
+        event = self.log.last("committee", "committee.allocation")
+        self.assertIn("x manifest capital", event.payload["reasons"]["earnings-01"])
+        self.assertNotIn("thompson", event.payload["reasons"]["earnings-01"])
+        self.assertEqual(targets["earnings-01"], Decimal("2000.00"))
+

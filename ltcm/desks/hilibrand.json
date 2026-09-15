@@ -63,7 +63,8 @@
     "propose_order",
     "cancel_order",
     "playbook_read",
-    "playbook_write"
+    "playbook_write",
+    "memo_read"
   ],
   "budget": {
     "usd_per_day": "25"
