@@ -55,6 +55,9 @@ REMOTE_ROOT = "/workspace"
 #: `pypi.org` with `files.pythonhosted.org` are needed once, to install `cryptography`.
 FLOOR_HOSTS: tuple[str, ...] = (
     "api.sailresearch.com",
+    # The Sailbox control API: forking, waking and running the desks' own sandboxes (run_code)
+    # goes through this host, not the model host. Without it every run_code fails with URLError.
+    "sailbox-api.sailresearch.com",
     "api.elections.kalshi.com",
     "api.coinbase.com",
     # The venue WebSockets (contract v2, section 6). Read-only by construction: neither venue

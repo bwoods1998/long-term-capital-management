@@ -125,8 +125,10 @@ class FakeMemory:
         self.entries.append(entry)
         return {"written": True, "id": f"m{len(self.entries)}"}
 
-    def read(self, query, limit):
-        return self.entries[-limit:]
+    def read(self, query, limit, *, desk_id=None):
+        # The real store scopes by desk; the fake does too, so the context's contract is tested.
+        rows = [e for e in self.entries if desk_id is None or e.get("desk_id") == desk_id]
+        return rows[-limit:]
 
 
 class FakePublisher:
@@ -338,11 +340,23 @@ class CadenceTests(ServiceCase):
         # A slot long past that never ran is not resurrected.
         self.assertEqual(self.service.next_session_at(manifest, moment_iso(2026, 9, 14, 18, 0)), "2026-09-14T19:30:00.000Z")
 
-    def test_the_postmortem_runs_after_the_close(self):
+    def test_the_postmortem_runs_after_the_close_when_there_is_a_session_to_review(self):
+        self.tick()  # 09:50 New York: the morning session
         self.tick(moment(2026, 9, 15, 1, 40))  # 21:40 New York on the 14th
-        self.assertEqual(self.sessions_started(), ["postmortem"])
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
         self.tick(moment(2026, 9, 15, 1, 50))
-        self.assertEqual(self.sessions_started(), ["postmortem"])
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
+
+    def test_a_desk_that_did_nothing_gets_no_postmortem(self):
+        # Bred at lunchtime, never sat down: a review of nothing wrote invented rules tonight.
+        self.tick(moment(2026, 9, 15, 1, 40))
+        self.assertEqual(self.sessions_started(), [])
+        # After a review, the next review needs a new session too.
+        self.tick(moment(2026, 9, 15, 13, 50))  # the 15th: a morning session
+        self.tick(moment(2026, 9, 16, 1, 40))   # the 15th's review
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
+        self.tick(moment(2026, 9, 17, 1, 40))   # the 16th's evening with no session that day
+        self.assertEqual(self.sessions_started(), ["cadence:09:45", "postmortem"])
 
     def test_triggers_match_the_desk_runtime_grammar(self):
         import re
@@ -894,11 +908,42 @@ class ContextTests(ServiceCase):
         ctx = self.context()
         ctx.memory_write({"kind": "note", "text": "AAPL beat on cash"})
         self.assertEqual(ctx.memory_read("AAPL", 5)[0]["text"], "AAPL beat on cash")
+        # Another desk's notes are its own: a child must race its parent, not read its mind.
+        self.write_manifest("earnings-02")
+        self.service.close()
+        self.service = self.build()
+        other = self.service.context(self.service.manifests["earnings-02"], session_id="s-2")
+        self.assertEqual(other.memory_read("", 10), [])
+        other.memory_write({"kind": "note", "text": "MSFT guided down"})
+        self.assertEqual([e["text"] for e in other.memory_read("", 10)], ["MSFT guided down"])
+        mine = self.service.context(self.service.manifests[DESK], session_id="s-3")
+        self.assertEqual([e["text"] for e in mine.memory_read("", 10)], ["AAPL beat on cash"])
+        ctx = mine
         self.assertIn("Drift", ctx.playbook_read())
         ctx.playbook_write("# new\n\nRules.\n", "learned something")
         self.assertEqual(ctx.playbook_read(), "# new\n\nRules.\n")
         # Versioning belongs to the desk runtime, not to the context.
         self.assertEqual(self.service.log.read(kind="desk.playbook_updated"), [])
+
+    def test_bars_reach_the_desk_without_the_instrument_echoed_on_every_row(self):
+        from types import SimpleNamespace
+
+        rows = [SimpleNamespace(to_dict=lambda: {"instrument": {"symbol": "BTC-USD"}, "start": "2026-09-14T00:00:00Z", "close": "76799.85"})]
+        self.service.market_data.bars = lambda instrument, interval, limit: rows
+        out = self.context().bars(AAPL, "1d", 1)
+        self.assertEqual(out, [{"start": "2026-09-14T00:00:00Z", "close": "76799.85"}])
+
+    def test_market_search_matches_tickers_inside_and_titles_as_whole_words(self):
+        fed = {"ticker": "KXFEDDECISION-26SEP-H25", "event_ticker": "KXFEDDECISION-26SEP", "series_ticker": "KXFEDDECISION",
+               "title": "Will the Federal Reserve hike rates by 25bps at their September 2026 meeting?", "volume_24h": "100"}
+        fight = {"ticker": "KXUFC-26SEP20-DEC", "event_ticker": "KXUFC-26SEP20", "series_ticker": "KXUFC",
+                 "title": "Will the fight end by decision?", "volume_24h": "9000"}
+        self.service.event_index = lambda source: [fight, fed]
+        self.service.source = lambda name: object()
+        ctx = self.context()
+        self.assertEqual([r["ticker"] for r in ctx.event_markets("fed decision")], [fed["ticker"], fight["ticker"]])
+        self.assertEqual([r["ticker"] for r in ctx.event_markets("fed")], [fed["ticker"]])
+        self.assertEqual([r["ticker"] for r in ctx.event_markets("federal reserve")], [fed["ticker"]])
 
     def test_calendar_returns_one_row_per_day(self):
         rows = self.context().calendar(3)

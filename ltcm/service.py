@@ -333,8 +333,16 @@ class DeskContext:
         return found
 
     def bars(self, instrument: Instrument, interval: str, limit: int) -> list[dict[str, Any]]:
+        """Bars without the instrument echoed on every row: the desk named it in the call, and
+        forty bars carrying nine fields of the same instrument each cost more context than the
+        prices did. Eight pairs of daily and hourly bars in one turn timed a model out."""
         rows = self._data().bars(instrument, interval, limit)
-        return [row.to_dict() if hasattr(row, "to_dict") else dict(row) for row in rows]
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+            data.pop("instrument", None)
+            out.append(data)
+        return out
 
     def news(self, query: str, limit: int) -> list[dict[str, Any]]:
         source = self.service.source("news")
@@ -432,7 +440,12 @@ class DeskContext:
             haystack = row.get("_haystack") or " ".join(
                 str(x or "") for x in (row.get("title"), row.get("yes_sub_title"), row.get("ticker"), row.get("event_ticker"))
             ).lower()
-            hits = sum(1 for pattern in patterns if pattern.search(haystack))
+            # Tickers are compound words (KXFEDDECISION), so a word may sit inside one; titles
+            # are prose, so there a word must stand alone.
+            tickers = " ".join(
+                str(x or "") for x in (row.get("ticker"), row.get("event_ticker"), row.get("series_ticker"))
+            ).lower()
+            hits = sum(1 for w, pattern in zip(words, patterns) if pattern.search(haystack) or w in tickers)
             if words and hits == 0:
                 continue
             volume = row.get("volume_24h") or ZERO
@@ -481,10 +494,17 @@ class DeskContext:
 
     # -- memory and writing ------------------------------------------------
     def memory_read(self, query: str, limit: int) -> list[dict[str, Any]]:
+        """The desk's own notes, and only its own.
+
+        A shared pool made every desk read every other desk's lessons: children copied their
+        parents' conclusions instead of racing them, a range desk wrote rules about the Fed,
+        and a threshold one desk had abandoned came back through three others. Another desk's
+        words reach a desk only through `memo_read`, deliberately and labelled as its words.
+        """
         store = self.service.memory
         if store is None:
             return []
-        return list(store.read(query, limit or self.manifest.memory_limit))
+        return list(store.read(query, limit or self.manifest.memory_limit, desk_id=self.desk_id))
 
     def memory_write(self, entry: dict[str, Any]) -> dict[str, Any]:
         store = self.service.memory
@@ -1503,6 +1523,8 @@ class Service:
                 minutes_slot = _clock_minutes(slot) if trigger != "postmortem" else postmortem_at
                 if minutes_now < minutes_slot:
                     continue
+                if trigger == "postmortem" and not self.reviewable(manifest):
+                    continue  # nothing happened since the last review: no rules from nothing
                 if self.interrupted_session(manifest, trigger, day, at) is not None:
                     due.append((manifest, trigger))
                     continue
@@ -1512,6 +1534,25 @@ class Service:
                     continue
                 due.append((manifest, trigger))
         return due
+
+    def reviewable(self, manifest: DeskManifest) -> bool:
+        """True when the desk has sat down for a trading session since its last post-mortem.
+
+        A post-mortem for a desk that did nothing, or that was bred minutes ago, has no record
+        to read; tonight four such desks invented histories from other desks' memory and wrote
+        rules from them. Evidence first, review second.
+        """
+        last_review: str | None = None
+        starts: list[tuple[str, str]] = []
+        for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=10_000):
+            trigger = str(event.payload.get("trigger") or "")
+            starts.append((event.at, trigger))
+            if trigger == "postmortem" and (last_review is None or event.at > last_review):
+                last_review = event.at
+        return any(
+            trigger != "postmortem" and (last_review is None or at > last_review)
+            for at, trigger in starts
+        )
 
     def interrupted_session(
         self, manifest: DeskManifest, trigger: str, day: str, at: str
