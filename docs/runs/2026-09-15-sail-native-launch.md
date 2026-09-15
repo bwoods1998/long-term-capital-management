@@ -176,3 +176,30 @@ past the watchdog's threshold, post-mortems run only after a trading session, le
 as prose are parsed, incomplete playbook rewrites fall back to the parent's, bars are five
 times smaller on the wire, search matches inside tickers, idle lines carry the next session,
 end reasons read as words, and bred desks outside the partner table render by name.
+
+## Addendum, 23:30 UTC: the verification sweep
+
+Four more agents checked the merged floor for bugs. What they found and what was done:
+
+- **The trading review had been lost.** An aborted merge earlier in the evening silently
+  discarded it; the memory fix survived through another branch but the bars, search, playbook
+  and header fixes did not. Re-merged, with a broken post-mortem gate found and fixed on top.
+- **Venue keys were on the box and in every checkpoint.** The secrets command had uploaded the
+  whole `.env` and the key directory, which gateway mode never uses. The box now holds exactly
+  three values (the Sail key, the gateway token, the publish token); the keys and the
+  `*.workers.dev` wildcard are gone; a fresh checkpoint was taken. Sail has no way to delete the
+  older checkpoints (they expire October 15), so the Coinbase secret and the Kalshi key should
+  be rotated and `place_secrets.sh` run again.
+- **The gateway signed any venue path.** It now signs only the reads, single orders, cancels,
+  settlements, market data and the tier upgrade the floor uses; everything else is refused.
+- **Three validators would have refused the first real position, exit plan and one
+  calibration record.** Fixed on the site before any of them could happen.
+- **Also fixed**: the Kalshi feed reconnect churn (pings did not reset the idle clock), stale
+  provider reservations inflating today's spend, the gateway hiding its runway, a lab failure
+  alerting every tick, sandbox forks inheriting package mirrors, and the floor's own credential
+  values are now redacted from every published string.
+- **One regression caught and reverted**: polling every model turn in the background, which
+  Sail refuses in the asap window.
+
+The Sail key on the box comes from `.env`, not credential injection; the design note was wrong
+and the README now says so.
