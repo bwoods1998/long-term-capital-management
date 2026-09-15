@@ -55,7 +55,7 @@ Design rules, inherited from the first generation and kept on purpose:
 | `adapters/` | Live venue adapters (`alpaca.py`, `kalshi.py`, `coinbase.py`, later `schwab.py`, `tastytrade.py`). |
 | `data/ws.py` | A standard-library RFC 6455 WebSocket client: TLS, handshake with extra headers, masked frames out, control frames answered, fragmentation reassembled, read deadlines. |
 | `feeds/` | The floor's ears: `FeedHub` keeps venue sockets open on their own threads (Kalshi `fill`, `market_lifecycle_v2`, `ticker`; Coinbase `ticker` and `user`), caches fresh prices for `Service.quote`, and hands the tick fill candidates and resolutions. The REST sweeps stay the record; the sockets make them run sooner. Credential material comes from the gateway (`GET /v1/kalshi/ws-auth`, `GET /v1/coinbase/ws-jwt`). |
-| `data/` | Market and document sources (`yahoo.py`, `alpaca.py`, `kalshi.py`, `coinbase.py`, `edgar.py`, `news.py`). |
+| `data/` | Market and document sources (`yahoo.py`, `alpaca.py`, `kalshi.py`, `coinbase.py`, `edgar.py`, `news.py`, `weather.py` for the National Weather Service forecasts and readings the weather desk prices from). |
 | `desks/` | Desk manifests (JSON). `playbooks/` at the repository root holds the versioned playbooks desks edit. |
 
 ## Streams and event kinds
@@ -152,6 +152,17 @@ the only way a live sleeve changes hands.
 a normal posterior over its cost-adjusted excess return, seeded by the date so the draw is
 reproducible from the public record, mapped to a multiple of manifest capital inside the
 committee's floor and ceiling. `committee.bandit_enabled: false` restores the ratio rule.
+
+## The weather desk
+
+Kalshi's daily high and low temperature markets settle every day on one named National Weather
+Service station per city, and the NWS publishes the point forecast for that station. Haghani
+(`ltcm/desks/haghani.json`, family `weather`) reads both through the `weather_forecast` tool
+(`ltcm/data/weather.py`: today's and tomorrow's highs and lows, the hourly path, the latest
+reading, an explicit error band), prices every bucket a market lists against that band, records
+a `record_forecast` for each bucket priced whether or not it trades, and buys the cheaper side
+only when the edge after fees clears three cents. Daily resolution is the point: it is the
+fastest source of scored decisions the loop can get.
 
 ## Spend policy: a runway, not a cap
 

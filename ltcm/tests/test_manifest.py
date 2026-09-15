@@ -103,6 +103,25 @@ class ManifestTests(unittest.TestCase):
 
 
 
+class WeatherDeskTests(unittest.TestCase):
+    def test_haghani_loads_as_a_live_kalshi_desk_with_the_weather_tool(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / "desks" / "haghani.json"
+        manifest = load_manifest(path)
+        self.assertEqual(manifest.id, "haghani")
+        self.assertEqual(manifest.family, "weather")
+        self.assertEqual(manifest.market_venue, "kalshi")
+        self.assertEqual(manifest.capital_mode, "live")
+        self.assertEqual(str(manifest.capital_usd), "150")
+        self.assertIn("weather_forecast", manifest.tools)
+        self.assertIn("record_forecast", manifest.tools)
+        self.assertIn("run_code", manifest.tools)
+        self.assertEqual(manifest.cadence.sessions, ("06:00", "09:30", "13:00", "16:30", "20:00"))
+        self.assertIn("event_resolution", manifest.cadence.triggers)
+        self.assertEqual(manifest.model.profile, "pro_asap")
+
+
 class FamilyToolTests(unittest.TestCase):
     """A bred desk carries every tool its founder carries, along the parent chain."""
 

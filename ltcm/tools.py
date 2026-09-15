@@ -70,6 +70,9 @@ class ToolContext(Protocol):
 
     def event_markets(self, query: str) -> list[dict[str, Any]]: ...
 
+    # leap: weather
+    def weather_forecast(self, city: str) -> dict[str, Any]: ...
+
     def positions(self) -> list[Position]: ...
 
     def balance(self) -> Balance: ...
@@ -262,6 +265,15 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "Reported fundamentals for one symbol: revenue, margins, guidance and reporting dates.",
         {"symbol": {"type": "string"}},
         ["symbol"],
+    ),
+    # leap: weather
+    "weather_forecast": _schema(
+        "weather_forecast",
+        "The National Weather Service forecast for a Kalshi weather city: today's and tomorrow's "
+        "high and low, the hourly temperature path for 36 hours, the settlement station's latest "
+        "reading, and the error band to price with.",
+        {"city": {"type": "string", "description": "New York, Chicago, Miami, Austin, Denver, Los Angeles and the other listed cities."}},
+        ["city"],
     ),
     "calendar": _schema(
         "calendar",
@@ -566,6 +578,8 @@ def _dispatch(
         return ctx.chain(_text(arguments, "symbol", limit=40), _text(arguments, "expiry", limit=10))
     if name == "event_markets":
         return ctx.event_markets(_text(arguments, "query", limit=200))
+    if name == "weather_forecast":  # leap: weather
+        return ctx.weather_forecast(_text(arguments, "city", limit=40))
     if name == "positions":
         return ctx.positions()
     if name == "outcomes":
@@ -797,6 +811,14 @@ def _summarize(name: str, data: Any) -> str:
         return f"{name}: {len(data)} item{'s' if len(data) != 1 else ''}{head}"
     if not isinstance(data, dict):
         return f"{name}: {str(data)}"
+    if name == "weather_forecast":  # leap: weather
+        days = data.get("days") or []
+        target = days[1] if len(days) > 1 else (days[0] if days else {})
+        high = target.get("hourly_max") or target.get("day_high") or "?"
+        when = "tomorrow" if len(days) > 1 else "today"
+        obs = data.get("observation") or {}
+        seen = f", obs {obs.get('temperature')}F at {str(obs.get('at') or '')[11:16]}Z" if obs.get("temperature") else ""
+        return f"weather_forecast: {data.get('city', '?')} high {high}F {when}{seen}"
     if name == "quote":
         inst = data.get("instrument") or {}
         symbol = inst.get("symbol", "?") if isinstance(inst, dict) else "?"

@@ -86,6 +86,14 @@ class FakeContext:
         self._note("event_markets", query)
         return [{"market_id": "CPI-26SEP", "yes": "0.42"}]
 
+    def weather_forecast(self, city):
+        self._note("weather_forecast", city)
+        return {
+            "city": "New York", "station": "KNYC",
+            "days": [{"date": "2026-09-15", "hourly_max": "74.0"}, {"date": "2026-09-16", "hourly_max": "78.0", "day_high": "78.0"}],
+            "observation": {"temperature": "73.9", "at": "2026-09-15T18:51:00Z"},
+        }
+
     def positions(self):
         self._note("positions")
         return [
@@ -502,6 +510,17 @@ class LeapLabToolTests(unittest.TestCase):
         bare = tools.execute("run_code", {"code": "print(1)", "purpose": "p"}, ctx, manifest(tools=["run_code"]), session)
         self.assertEqual(ctx.seen[-1], ("run_code", ("print(1)", "p", None)))
         self.assertIn("run_code", [s["name"] for s in tools.schemas_for(manifest(tools=["run_code"]))])
+
+    def test_weather_forecast_reaches_the_source_and_is_summarized_as_a_sentence(self):
+        ctx = FakeContext()
+        session = tools.ToolSession(session_id="s1", desk_id="haghani")
+        raw = tools.execute("weather_forecast", {"city": "New York"}, ctx, manifest(tools=["weather_forecast"]), session)
+        self.assertEqual(ctx.seen[-1], ("weather_forecast", ("New York",)))
+        self.assertEqual(
+            tools.summarize_result("weather_forecast", raw),
+            "weather_forecast: New York high 78.0F tomorrow, obs 73.9F at 18:51Z",
+        )
+        self.assertEqual(tools.public_arguments("weather_forecast", {"city": "New York"}), {"city": "New York"})
 
     def test_the_new_tools_are_in_the_schema_list_and_the_manifest_allowlist(self):
         names = [schema["name"] for schema in tools.schemas_for(manifest())]

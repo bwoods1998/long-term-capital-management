@@ -69,6 +69,9 @@ FLOOR_HOSTS: tuple[str, ...] = (
     "efts.sec.gov",
     "query2.finance.yahoo.com",
     "feeds.finance.yahoo.com",
+    # leap: weather -- the National Weather Service point forecasts and station readings the
+    # weather desk prices Kalshi's daily temperature markets from. Public, no key.
+    "api.weather.gov",
     "news.google.com",
     "docs.sailresearch.com",
     "pypi.org",
