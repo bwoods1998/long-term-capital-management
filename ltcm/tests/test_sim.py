@@ -1,4 +1,4 @@
-"""`PaperBroker`: fills, resting limits, expiry, settlement, fees, idempotency and marks.
+"""`ShadowBook`: fills, resting limits, expiry, settlement, fees, idempotency and marks.
 
 Everything here runs against a scripted `MarketData` and an injected clock, so the same inputs
 always produce the same fills, the same fill ids and the same equity curve.
@@ -10,19 +10,19 @@ from decimal import Decimal
 from pathlib import Path
 
 from ltcm.broker import Instrument, OrderIntent, RejectedOrder
-from ltcm.sim import FeeModel, PAPER_CAPABILITIES, PaperBroker, ceil_cents
+from ltcm.sim import FeeModel, SHADOW_CAPABILITIES, ShadowBook, ceil_cents
 from ltcm.tests.fakes import Clock, ScriptedMarketData
 
 OPEN = "2026-09-15T14:00:00Z"  # inside the 13:30-20:00Z session of Tuesday 15 September 2026
 CLOSE = "2026-09-15T20:00:00Z"
 
-AAPL = Instrument("equity", "AAPL", "paper")
-BTC = Instrument("crypto", "BTC-USD", "paper", market_id="BTC-USD")
+AAPL = Instrument("equity", "AAPL", "shadow")
+BTC = Instrument("crypto", "BTC-USD", "shadow", market_id="BTC-USD")
 CALL = Instrument(
-    "option", "AAPL", "paper", multiplier="100", expiry="2026-10-16", strike="200", right="call"
+    "option", "AAPL", "shadow", multiplier="100", expiry="2026-10-16", strike="200", right="call"
 )
-CPI = Instrument("event", "CPI", "paper", market_id="KXCPI-26SEP-T3.0")
-CPI_NO = Instrument("event", "CPI", "paper", market_id="KXCPI-26SEP-T3.0", right="no")
+CPI = Instrument("event", "CPI", "shadow", market_id="KXCPI-26SEP-T3.0")
+CPI_NO = Instrument("event", "CPI", "shadow", market_id="KXCPI-26SEP-T3.0", right="no")
 
 
 def intent(instrument=AAPL, side="buy", quantity="10", **kwargs):
@@ -48,7 +48,7 @@ class SimTestCase(unittest.TestCase):
 
     def make_broker(self, name="sim.db", **kwargs):
         options = {
-            "venue": "paper",
+            "venue": "shadow",
             "data": self.data,
             "clock": self.clock,
             "initial_cash": self.initial_cash,
@@ -56,7 +56,7 @@ class SimTestCase(unittest.TestCase):
             "allow_short": self.allow_short,
         }
         options.update(kwargs)
-        return PaperBroker(Path(self._directory.name) / name, **options)
+        return ShadowBook(Path(self._directory.name) / name, **options)
 
     def book(self, instrument=AAPL, *, bid="99", ask="101", last="100"):
         return self.data.set(instrument, bid=bid, ask=ask, last=last)
@@ -65,8 +65,8 @@ class SimTestCase(unittest.TestCase):
 class CapabilityTests(SimTestCase):
     def test_capabilities_reflect_the_configuration(self):
         caps = self.broker.capabilities()
-        self.assertEqual(caps, set(PAPER_CAPABILITIES))
-        self.assertIn("paper", caps)
+        self.assertEqual(caps, set(SHADOW_CAPABILITIES))
+        self.assertIn("shadow", caps)
         self.assertNotIn("short", caps)
         shorting = self.make_broker("short.db", allow_short=True)
         self.addCleanup(shorting.close)
@@ -315,7 +315,7 @@ class FractionalTests(SimTestCase):
 
 class FeeTests(unittest.TestCase):
     def setUp(self):
-        self.fees = FeeModel.for_venue("paper")
+        self.fees = FeeModel.for_venue("alpaca")
 
     def test_equities_are_free(self):
         self.assertEqual(self.fees.fee(AAPL, "buy", Decimal("100"), Decimal("50")), Decimal("0"))
@@ -356,7 +356,7 @@ class FeeTests(unittest.TestCase):
             clock = Clock(OPEN)
             data = ScriptedMarketData(clock)
             data.set(BTC, bid="64000", ask="64000", last="64000")
-            broker = PaperBroker(
+            broker = ShadowBook(
                 Path(directory) / "fees.db",
                 data=data,
                 clock=clock,
@@ -511,7 +511,7 @@ class MarkTests(SimTestCase):
         self.broker.submit(intent())
         self.broker.mark()
         snapshot = self.broker.snapshot()
-        self.assertEqual(snapshot["venue"], "paper")
+        self.assertEqual(snapshot["venue"], "shadow")
         self.assertEqual(Decimal(snapshot["initial_cash"]), Decimal("100000"))
         self.assertEqual(len(snapshot["positions"]), 1)
         self.assertIn("fees_paid", snapshot)

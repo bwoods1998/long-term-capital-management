@@ -1,0 +1,52 @@
+{
+  // The order gateway. It holds the Kalshi and Coinbase private keys as Worker secrets so the
+  // Sail VM that runs the desks never has them: the VM can ask for an order, but only this
+  // Worker can sign one, and only within the caps below.
+  //
+  // It is also the floor's supervisor. Every five minutes it reads the published checkpoint, the
+  // Sail credit balance and the state of the box, resumes and restarts the box when it can, and
+  // mails the owner only when it cannot -- so the single human step left is adding Sail credit.
+  "name": "ltcm-gateway",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "Gate" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Gate"] }],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "destination_address": "blakewoods98@gmail.com",
+      "allowed_sender_addresses": ["agent@blakewoods.us"]
+    }
+  ],
+  "vars": {
+    // Hard caps, in US dollars. A cap is only ever lowered by editing this file and redeploying,
+    // which is a change the owner makes, not a change the VM can make.
+    "MAX_ORDER_USD": "50",
+    "MAX_DAY_USD": "400",
+    "MAX_DAY_ORDERS": "60",
+    // The calendar the daily counters roll on: the floor's own trading day.
+    "CAP_TIMEZONE": "America/New_York",
+
+    // Watchdog.
+    "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",
+    "CHECKPOINT_STALE_SECONDS": "900",
+    "RESTART_COOLDOWN_SECONDS": "1800",
+    "RESTART_COMMAND": "/workspace/restart.sh",
+    // Set to the Sailbox id once the box exists. Empty means the watchdog only reports.
+    "SAILBOX_ID": "sb_d36bc830-0d04-4761-8898-0ff4daa199dc",
+
+    // Funding and mail. Sail's `range` understands 1h/6h/24h/7d/30d/period and silently falls
+    // back to 30d for anything else, so "a day" is spelled 24h.
+    "SAIL_USAGE_RANGE": "24h",
+    "LOW_BALANCE_USD": "60",
+    "CRITICAL_BALANCE_USD": "20",
+    "ALERT_EVERY_SECONDS": "21600",
+    "ALERT_FROM": "agent@blakewoods.us",
+    "ALERT_TO": "blakewoods98@gmail.com"
+  },
+  "observability": { "enabled": false }
+}

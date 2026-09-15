@@ -6,7 +6,7 @@ from ltcm.manifest import DeskManifest
 from ltcm.risk import Breaker, RiskContext, RiskEngine, circuit_breakers
 from ltcm.tests.test_manifest import SAMPLE
 
-AAPL = Instrument("equity", "AAPL", "paper")
+AAPL = Instrument("equity", "AAPL", "alpaca")
 
 
 def manifest(**overrides):
@@ -35,7 +35,7 @@ def context(**overrides):
         positions={},
         quote=quote(),
         now="2026-09-14T14:30:00.000Z",
-        venue_capabilities={"equity", "option", "limit", "paper"},
+        venue_capabilities={"equity", "option", "limit", "shadow"},
         market_open=True,
     )
     base.update(overrides)
@@ -62,10 +62,10 @@ class RiskEngineTests(unittest.TestCase):
         self.assertTrue(any("order notional" in r for r in decision.reasons))  # 500 > 25% of 1000
 
     def test_mandate_rules(self):
-        crypto = Instrument("crypto", "BTC-USD", "paper")
+        crypto = Instrument("crypto", "BTC-USD", "alpaca")
         decision = self.engine.check(intent(instrument=crypto, quantity="0.001"), context())
         self.assertTrue(any("asset class" in r for r in decision.reasons))
-        gme = Instrument("equity", "GME", "paper")
+        gme = Instrument("equity", "GME", "alpaca")
         decision = self.engine.check(intent(instrument=gme, quantity="1"), context(quote=Quote(gme, None, None, Decimal("20"), "t", "sim")))
         self.assertTrue(any("not permitted by mandate" in r for r in decision.reasons))
         other_venue = Instrument("equity", "AAPL", "kalshi")
@@ -103,7 +103,7 @@ class RiskEngineTests(unittest.TestCase):
         held = {AAPL.key: Position(AAPL, "2", "100", mark="100")}
         decision = self.engine.check(intent(quantity="1"), context(positions=held, desk_cash=Decimal("800")))
         self.assertTrue(any("position would be" in r for r in decision.reasons))  # 300 > 25% of 1000
-        msft = Instrument("equity", "MSFT", "paper")
+        msft = Instrument("equity", "MSFT", "alpaca")
         held = {msft.key: Position(msft, "2", "400", mark="400")}
         wide = manifest(limits={**SAMPLE["limits"], "max_position_pct": "1", "max_order_notional_pct": "1"})
         decision = self.engine.check(intent(quantity="2"), context(manifest=wide, positions=held, desk_cash=Decimal("200")))

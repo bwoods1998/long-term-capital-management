@@ -391,9 +391,10 @@ def _count(arguments: dict[str, Any], key: str, *, low: int, high: int, default:
 def instrument_from(arguments: Any, manifest: DeskManifest) -> Instrument:
     """Build an `Instrument` from model-supplied fields, filling the venue from the manifest.
 
-    A live desk routes to its first non-paper venue; a paper desk routes to `paper`. A venue the
-    model names is honoured only when the manifest permits it, so a model cannot route itself
-    onto a venue the desk does not hold.
+    Every desk names a real venue, live or shadow: an order says where it would trade, and
+    whether it is actually sent is the gateway's decision, taken from the desk's capital mode.
+    A venue the model names is honoured only when the manifest permits it, so a model cannot
+    route itself onto a venue the desk does not hold.
     """
     if not isinstance(arguments, dict):
         raise ToolError("instrument must be an object")
@@ -413,12 +414,13 @@ def instrument_from(arguments: Any, manifest: DeskManifest) -> Instrument:
 
 
 def default_venue(manifest: DeskManifest) -> str:
-    """Where a desk's orders go when the model does not say: its first real venue, or paper."""
-    if manifest.live:
-        for venue in manifest.venues:
-            if venue != "paper":
-                return venue
-    return "paper"
+    """The venue a desk trades on when the model does not name one.
+
+    The same answer for a shadow desk and a live one: the venue the desk holds. A shadow desk's
+    order is routed to its scoring book instead of being sent, but it is still an order about a
+    real market, so it names that market's venue.
+    """
+    return manifest.market_venue
 
 
 # --------------------------------------------------------------------------- execution

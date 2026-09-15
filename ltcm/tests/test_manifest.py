@@ -16,14 +16,14 @@ SAMPLE = {
     "name": "Earnings",
     "persona": "Fast reader of transcripts.",
     "mandate": "Trade post-earnings drift in liquid US equities.",
-    "venues": ["paper", "alpaca"],
+    "venues": ["alpaca"],
     "instruments": {"asset_classes": ["equity", "option"], "allow": [], "deny": ["GME"], "min_price": "5", "min_adv_usd": "5000000", "allow_short": False},
     "limits": {"max_position_pct": "0.25", "max_gross_pct": "1.0", "max_order_notional_pct": "0.25", "max_daily_loss_pct": "0.10", "max_orders_per_day": 20},
     "model": {"profile": "pro_flex", "reasoning_effort": "medium", "max_output_tokens": 8192, "max_turns": 24},
     "cadence": {"sessions": ["09:35", "15:30"], "timezone": "America/New_York", "triggers": ["earnings_release"]},
     "tools": ["quote", "bars", "news", "filing", "memory_read", "memory_write", "memo", "propose_order", "playbook_read", "playbook_write"],
     "budget": {"usd_per_day": "3"},
-    "capital": {"mode": "paper", "usd": "1000"},
+    "capital": {"mode": "shadow", "usd": "1000"},
     "playbook": "playbooks/earnings-01.md",
 }
 
@@ -57,9 +57,29 @@ class ManifestTests(unittest.TestCase):
         self.assertInvalid(lambda d: d["cadence"].update(sessions=[], triggers=[]))
         self.assertInvalid(lambda d: d.update(tools=["teleport"]))
         self.assertInvalid(lambda d: d["budget"].update(usd_per_day="0"))
-        self.assertInvalid(lambda d: d["capital"].update(mode="live"))  # paper venue listed
+        self.assertInvalid(lambda d: d["capital"].update(mode="margin"))
+        self.assertInvalid(lambda d: d.update(venues=["shadow"]))  # routing key, never a venue
         self.assertInvalid(lambda d: d.update(playbook="../etc/passwd"))
         self.assertInvalid(lambda d: d.update(schema_version=2))
+
+    def test_a_shadow_desk_names_the_venue_it_would_trade_on(self):
+        manifest = DeskManifest.from_dict(SAMPLE)
+        self.assertEqual(manifest.capital_mode, "shadow")
+        self.assertTrue(manifest.shadow)
+        self.assertFalse(manifest.live)
+        self.assertEqual(manifest.market_venue, "alpaca")
+        self.assertEqual(manifest.venues, ("alpaca",))
+
+    def test_a_manifest_written_before_the_rename_still_loads(self):
+        data = copy.deepcopy(SAMPLE)
+        data["capital"] = {"mode": "paper", "usd": "1000"}
+        data["venues"] = ["paper", "alpaca"]
+        manifest = DeskManifest.from_dict(data)
+        self.assertEqual(manifest.capital_mode, "shadow")
+        self.assertEqual(manifest.venues, ("alpaca",))
+        # What is written back is the new vocabulary, so the old word dies on the next save.
+        self.assertEqual(manifest.to_dict()["capital"]["mode"], "shadow")
+        self.assertEqual(DeskManifest.from_dict(manifest.to_dict()), manifest)
 
     def test_live_desk_needs_live_venues(self):
         data = copy.deepcopy(SAMPLE)

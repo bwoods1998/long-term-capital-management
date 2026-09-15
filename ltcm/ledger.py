@@ -477,8 +477,12 @@ class DeskLedger:
         return self.state(now).equity
 
     # ------------------------------------------------------------------ writes
-    def mark(self, quotes: Any, now: Any = None) -> Event:
-        """Append a `ledger.mark` valuation. Idempotent on `mark:<desk>:<as_of>`."""
+    def mark(self, quotes: Any, now: Any = None, *, shadow: bool = False) -> Event:
+        """Append a `ledger.mark` valuation. Idempotent on `mark:<desk>:<as_of>`.
+
+        `shadow` marks the valuation of a scoring book: the numbers are hypothetical and the
+        site must never fold them into the floor's real equity.
+        """
         as_of = iso_time(now)
         state = self.state(as_of)
         prices = quote_prices(quotes)
@@ -510,15 +514,26 @@ class DeskLedger:
             "daily_pnl": text(equity - start_of_day),
             "as_of": as_of,
         }
+        if shadow:
+            payload["shadow"] = True
         return self.log.append(
             self.stream, "ledger.mark", payload, id=f"mark:{self.desk_id}:{as_of}", at=as_of
         )
 
 
-def floor_totals(ledgers: Mapping[str, DeskLedger], now: Any = None) -> dict[str, Decimal]:
-    """Equity, cash and daily P&L summed across every desk sub-ledger."""
+def floor_totals(
+    ledgers: Mapping[str, DeskLedger], now: Any = None, *, include: Any = None
+) -> dict[str, Decimal]:
+    """Equity, cash and daily P&L summed across desk sub-ledgers.
+
+    `include` is an optional container of desk ids to count. The floor's real book is the sum of
+    the **live** sleeves only: a shadow desk's book is a score, not money, and adding it to the
+    floor's equity would publish a number nobody owns.
+    """
     equity = cash = daily = deposits = ZERO
-    for ledger in ledgers.values():
+    for desk_id, ledger in ledgers.items():
+        if include is not None and desk_id not in include:
+            continue
         state = ledger.state(now)
         equity += state.equity
         cash += state.cash

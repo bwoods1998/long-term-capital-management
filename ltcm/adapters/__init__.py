@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import json
 import secrets
+import urllib.parse
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -153,6 +154,38 @@ class CdpSigner:
         return "CdpSigner(<secret>)"
 
 
+class GatewaySigner:
+    """Gateway mode: this process holds no venue key at all, only a bearer token.
+
+    The order gateway (a separate Cloudflare Worker) holds the Kalshi and Coinbase private keys,
+    signs every request itself, and enforces the hard caps and the kill switch before it forwards
+    anything. So an adapter running in gateway mode still builds the same request, but the
+    signature it would have produced is empty and `VenueClient` replaces the venue's auth headers
+    with `Authorization: Bearer <token>` on the way out.
+
+    The difference this makes is the whole point of the arrangement: a machine running the desks
+    can ask for an order, but it cannot sign one, and it cannot raise its own limits.
+    """
+
+    algorithm = "none"
+
+    def __init__(self, token: str):
+        if not isinstance(token, str) or len(token.strip()) < 32:
+            raise ValueError("gateway token must be at least 32 characters")
+        self._token = token.strip()
+
+    def headers(self) -> dict[str, str]:
+        """The only credential this process has: the gateway's bearer token."""
+        return {"Authorization": "Bearer " + self._token}
+
+    def sign(self, message: bytes) -> bytes:
+        """No key, no signature. The gateway signs; `VenueClient` drops what this produces."""
+        return b""
+
+    def __repr__(self) -> str:  # never print the token
+        return "GatewaySigner(<token>)"
+
+
 def b64url(data: bytes) -> str:
     """Unpadded base64url, the only encoding a JWS uses."""
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
@@ -278,20 +311,106 @@ def message_of(payload: Any, *, limit: int = 300) -> str:
     return ""
 
 
+#: What has to come off a venue path to leave the path the gateway routes on. Kalshi signs (and
+#: therefore carries) its `/trade-api/v2` prefix; Coinbase's paths are already absolute.
+GATEWAY_PREFIXES: dict[str, str] = {"kalshi": "/trade-api/v2/", "coinbase": "/"}
+
+#: Venue auth headers an adapter builds and gateway mode throws away: this process cannot sign.
+VENUE_AUTH_HEADERS = (
+    "authorization",
+    "kalshi-access-key",
+    "kalshi-access-timestamp",
+    "kalshi-access-signature",
+    "apca-api-key-id",
+    "apca-api-secret-key",
+)
+
+#: The header a Coinbase order carries so the gateway can price a `base_size` in dollars.
+REFERENCE_HEADER = "X-LTCM-Reference-Price"
+
+#: The one Coinbase path whose POST creates an order, which is the only one that needs the price.
+COINBASE_ORDERS_PATH = "api/v3/brokerage/orders"
+
+
+def gateway_path(venue: str, url: str) -> tuple[str, str]:
+    """Split a venue URL into `(path, query)` as the gateway wants them: no host, no prefix."""
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path
+    prefix = GATEWAY_PREFIXES.get(venue, "/")
+    path = path[len(prefix):] if path.startswith(prefix) else path.lstrip("/")
+    return path.lstrip("/"), parts.query
+
+
+def gateway_url_for(gateway_url: str, venue: str, url: str) -> str:
+    """A venue URL rewritten onto the order gateway: `<gateway_url>/v1/<venue>/<path>?<query>`."""
+    path, query = gateway_path(venue, url)
+    rewritten = f"{gateway_url.rstrip('/')}/v1/{venue}/{path}"
+    return rewritten + ("?" + query if query else "")
+
+
 class VenueClient:
     """A thin signed-or-keyed HTTP client shared by the adapters.
 
     Wraps a transport exposing `request(method, url, headers=, body=, timeout=)`. HTTP status
     codes come back to the caller; only a transport failure raises, and it raises
     `TransportError` so the caller can decide whether that means `UnknownOutcome`.
+
+    **Gateway mode.** Given `gateway_url`, a `venue` and a `GatewaySigner`, every request is
+    rewritten onto the order gateway instead of the venue, the venue's own auth headers are
+    dropped, and the gateway's bearer token is the only credential that leaves this process. The
+    adapters above are unchanged by this: they build the same request either way, and the one
+    thing they cannot do in gateway mode is produce a valid venue signature.
     """
 
-    def __init__(self, transport: Any = None, *, timeout: float = 20.0, user_agent: Any = None):
+    def __init__(
+        self,
+        transport: Any = None,
+        *,
+        timeout: float = 20.0,
+        user_agent: Any = None,
+        gateway_url: "str | None" = None,
+        gateway: Any = None,
+        venue: "str | None" = None,
+        reference_price: Any = None,
+    ):
         self.transport = transport or HttpTransport(
             **({"user_agent": user_agent} if user_agent else {})
         )
         self.timeout = float(timeout)
         self.calls: list[dict[str, Any]] = []
+        if gateway_url and (gateway is None or not venue):
+            raise ValueError("gateway mode needs a GatewaySigner and a venue name")
+        self.gateway_url = gateway_url.rstrip("/") if gateway_url else None
+        self.gateway = gateway
+        self.venue = venue
+        #: `product_id -> Decimal | None`, used only to price a Coinbase order for the caps.
+        self.reference_price = reference_price
+
+    def _to_gateway(
+        self, method: str, url: str, headers: dict[str, str], body: Any
+    ) -> tuple[str, dict[str, str]]:
+        """Rewrite one request for the gateway: its URL, its auth, and a price when it needs one."""
+        path, _ = gateway_path(self.venue or "", url)
+        sent = {
+            name: value
+            for name, value in headers.items()
+            if name.lower() not in VENUE_AUTH_HEADERS
+        }
+        sent.update(self.gateway.headers())
+        if (
+            self.venue == "coinbase"
+            and method.upper() == "POST"
+            and path == COINBASE_ORDERS_PATH
+            and self.reference_price is not None
+            and isinstance(body, dict)
+        ):
+            # The gateway prices a `base_size` order in dollars to check it against the caps, and
+            # it has no market data of its own. A quote this desk already has is cheaper and more
+            # honest than one the gateway would have to go and fetch.
+            price = self.reference_price(body.get("product_id"))
+            if price is not None and price > 0:
+                sent[REFERENCE_HEADER] = format(money(price), "f")
+        return gateway_url_for(self.gateway_url or "", self.venue or "", url), sent
 
     def request(
         self,
@@ -307,6 +426,8 @@ class VenueClient:
         if body is not None:
             sent["Content-Type"] = JSON
         sent.update(headers or {})
+        if self.gateway_url:
+            url, sent = self._to_gateway(method, url, sent, body)
         payload = encode(body) if body is not None else None
         status, _, raw = self.transport.request(
             method, url, headers=sent, body=payload, timeout=self.timeout
@@ -361,10 +482,16 @@ __all__ = [
     "Signer",
     "RsaPssSigner",
     "CdpSigner",
+    "GatewaySigner",
     "AlpacaCredentials",
     "KalshiCredentials",
     "CoinbaseCredentials",
     "VenueClient",
+    "gateway_path",
+    "gateway_url_for",
+    "GATEWAY_PREFIXES",
+    "REFERENCE_HEADER",
+    "COINBASE_ORDERS_PATH",
     "b64url",
     "jws",
     "encode",

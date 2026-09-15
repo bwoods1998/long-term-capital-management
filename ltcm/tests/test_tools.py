@@ -86,13 +86,13 @@ class FakeContext:
         self._note("positions")
         return [
             Position(
-                Instrument("equity", "AAPL", "paper"), Decimal("3"), Decimal("99"), Decimal("101")
+                Instrument("equity", "AAPL", "alpaca"), Decimal("3"), Decimal("99"), Decimal("101")
             )
         ]
 
     def balance(self):
         self._note("balance")
-        return Balance("paper", Decimal("500"), Decimal("803"), Decimal("500"), "2026-09-15T13:30:00.000Z")
+        return Balance("alpaca", Decimal("500"), Decimal("803"), Decimal("500"), "2026-09-15T13:30:00.000Z")
 
     def outcomes(self, limit):
         self._note("outcomes", limit)
@@ -175,9 +175,11 @@ class SchemaTests(unittest.TestCase):
 
 
 class InstrumentTests(unittest.TestCase):
-    def test_a_paper_desk_routes_to_paper(self):
+    def test_a_shadow_desk_names_the_venue_it_would_trade_on(self):
+        """A shadow order is about a real market. Where it goes is the gateway's decision."""
         instrument = tools.instrument_from({"asset_class": "equity", "symbol": "AAPL"}, manifest())
-        self.assertEqual(instrument.venue, "paper")
+        self.assertEqual(instrument.venue, "alpaca")
+        self.assertEqual(tools.default_venue(manifest()), "alpaca")
 
     def test_a_live_desk_routes_to_its_first_real_venue(self):
         instrument = tools.instrument_from({"asset_class": "equity", "symbol": "AAPL"}, live_manifest())
@@ -188,7 +190,7 @@ class InstrumentTests(unittest.TestCase):
         instrument = tools.instrument_from(
             {"asset_class": "equity", "symbol": "AAPL", "venue": "coinbase"}, manifest()
         )
-        self.assertEqual(instrument.venue, "paper")
+        self.assertEqual(instrument.venue, "alpaca")
         kept = tools.instrument_from(
             {"asset_class": "equity", "symbol": "AAPL", "venue": "alpaca"}, manifest()
         )

@@ -1,5 +1,6 @@
 import copy
 import json
+import random
 import tempfile
 import unittest
 from decimal import Decimal
@@ -7,12 +8,22 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ltcm.broker import Instrument
-from ltcm.evolve import EFFORTS, MEMORY_LIMITS, Evolution, base_name, lineage, roman
+from ltcm.evolve import (
+    EFFORTS,
+    MEMORY_LIMITS,
+    MODEL_PROFILES,
+    PROFILE_MUTATION_ODDS,
+    Evolution,
+    base_name,
+    lineage,
+    roman,
+)
 from ltcm.events import EventLog
 from ltcm.manifest import DeskManifest, load_manifest
+from ltcm.provider import PROFILES
 from ltcm.tests.test_manifest import SAMPLE
 
-AAPL = Instrument("equity", "AAPL", "paper")
+AAPL = Instrument("equity", "AAPL", "alpaca")
 
 
 class FakeProvider:
@@ -55,6 +66,7 @@ class EvolveCase(unittest.TestCase):
         return data
 
     def evolution(self, **config):
+        config = {"live_venues": ("alpaca", "kalshi"), **config}
         return Evolution(
             self.log, self.desks, self.playbooks, provider=self.provider, config=config
         )
@@ -70,7 +82,7 @@ class EvolveCase(unittest.TestCase):
     def fill(self, desk, side, quantity, price, at):
         seq = self.log.latest_seq() + 1
         self.log.append(
-            "broker:paper",
+            "broker:shadow",
             "broker.fill",
             {
                 "fill_id": f"f{seq}",
@@ -149,7 +161,7 @@ class SelectionTests(EvolveCase):
         self.run_variant("earnings-02", exit_price="90")
         self.assertEqual(self.evolution(min_days=90).select("2026-09-30T20:00:00.000Z"), [])
 
-    def test_the_worst_paper_variant_is_retired_and_replaced(self):
+    def test_the_worst_shadow_variant_is_retired_and_replaced(self):
         self.run_variant("earnings-01", exit_price="130")  # +30
         self.run_variant("earnings-02", exit_price="90")  # -10
         actions = self.evolution(margin="1").select("2026-09-30T20:00:00.000Z")
@@ -172,7 +184,7 @@ class SelectionTests(EvolveCase):
         self.assertEqual(child.family, "earnings")
         self.assertEqual(child.generation, 2)
         self.assertEqual(child.parent_id, "earnings-02")
-        self.assertEqual(child.capital_mode, "paper")
+        self.assertEqual(child.capital_mode, "shadow")
         self.assertEqual(child.playbook, "playbooks/earnings-02-2.md")
         self.assertTrue((self.playbooks / "earnings-02-2.md").exists())
         self.assertNotEqual(child.persona, load_manifest(self.desks / "earnings-02.json").persona)
@@ -180,7 +192,7 @@ class SelectionTests(EvolveCase):
         # The parent's own manifest was not touched.
         parent = json.loads((self.desks / "earnings-02.json").read_text())
         self.assertEqual(parent["generation"], 1)
-        self.assertEqual(parent["capital"]["mode"], "paper")
+        self.assertEqual(parent["capital"]["mode"], "shadow")
 
     def test_retirement_needs_enough_decisions(self):
         self.run_variant("earnings-01", exit_price="130")
@@ -257,14 +269,57 @@ class PromotionTests(EvolveCase):
         promoted = evolution.promote("2026-09-21T20:00:00.000Z")
         self.assertEqual([p["desk_id"] for p in promoted], ["earnings-01"])
         event = self.log.last("evolution", "evolution.promoted")
-        self.assertEqual(event.payload["from"], "paper")
+        self.assertEqual(event.payload["from"], "shadow")
         self.assertEqual(event.payload["to"], "live")
         self.assertEqual(event.payload["gate"], "A")
         self.assertTrue(event.public)
-        # Promotion is a log fact; the manifest file still says paper.
-        self.assertEqual(load_manifest(self.desks / "earnings-01.json").capital_mode, "paper")
+        # Promotion is a log fact; the manifest file still says shadow.
+        self.assertEqual(load_manifest(self.desks / "earnings-01.json").capital_mode, "shadow")
         # And it does not happen twice.
         self.assertEqual(evolution.promote("2026-09-22T20:00:00.000Z"), [])
+
+
+class VenueGateTests(EvolveCase):
+    """A desk can earn a live sleeve on a venue the floor has not opened. Say so, and wait."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_manifest("earnings-01")
+        self.allocate({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
+        for n in range(10):
+            day = f"2026-09-{2 + n:02d}"
+            self.fill("earnings-01", "buy", "1", "100", f"{day}T14:00:00.000Z")
+            self.fill("earnings-01", "sell", "1", "101", f"{day}T15:00:00.000Z")
+
+    def evolve(self, **config):
+        evolution = self.evolution(**config)
+        evolution.ledger("earnings-01").mark({}, "2026-09-21T20:00:00.000Z")
+        return evolution
+
+    def test_a_passing_desk_on_a_closed_venue_is_deferred_in_public(self):
+        evolution = self.evolve(live_venues=("kalshi",))  # alpaca is not open yet
+        self.assertEqual(evolution.promote("2026-09-21T20:00:00.000Z"), [])
+        self.assertEqual(self.log.read(kind="evolution.promoted"), [])
+        gate = self.log.last("committee", "committee.gate")
+        self.assertEqual(gate.payload["desk_id"], "earnings-01")
+        self.assertEqual(gate.payload["reason"], "venue not enabled")
+        self.assertFalse(gate.payload["passed"])
+        self.assertEqual(gate.payload["failed"], ["venue"])
+        self.assertEqual(gate.payload["evidence"]["venue"], "alpaca")
+        self.assertFalse(gate.payload["evidence"]["venue_enabled"])
+        self.assertTrue(gate.payload["evidence"]["gate_evidence_passed"])
+        self.assertTrue(gate.public)
+
+    def test_the_next_run_after_the_venue_opens_promotes_it_on_the_same_evidence(self):
+        self.evolve(live_venues=("kalshi",)).promote("2026-09-21T20:00:00.000Z")
+        promoted = self.evolve(live_venues=("kalshi", "alpaca")).promote("2026-09-22T20:00:00.000Z")
+        self.assertEqual([p["desk_id"] for p in promoted], ["earnings-01"])
+        event = self.log.last("evolution", "evolution.promoted")
+        self.assertEqual(event.payload["venue"], "alpaca")
+        self.assertEqual(event.payload["from"], "shadow")
+
+    def test_a_desk_with_no_live_venues_configured_is_never_promoted(self):
+        self.assertEqual(self.evolve(live_venues=()).promote("2026-09-21T20:00:00.000Z"), [])
 
 
 class LineageTests(EvolveCase):
@@ -313,6 +368,78 @@ class LineageTests(EvolveCase):
             at="2026-09-20T20:00:00.000Z",
         )
         self.assertEqual(self.evolution().next_id(parent), ("rosenfeld-3", 3))
+
+    def test_the_curated_model_list_is_one_the_provider_prices(self):
+        self.assertTrue(MODEL_PROFILES)
+        for profile in MODEL_PROFILES:
+            self.assertIn(profile, PROFILES)
+
+    def test_about_one_child_in_three_is_born_on_another_model(self):
+        self.write_manifest("rosenfeld", name="Rosenfeld")
+        parent = load_manifest(self.desks / "rosenfeld.json")
+        self.assertEqual(parent.model.profile, "pro_flex")
+        evolution = self.evolution()
+
+        rng = random.Random(20260915)
+        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+        sample = 300
+        changed = []
+        for _ in range(sample):
+            desk_id = "rosenfeld-" + "".join(rng.choice(alphabet) for _ in range(6))
+            data, mutation = evolution.mutate(parent, desk_id, 2)
+            profile = data["model"]["profile"]
+            self.assertIn(profile, PROFILES)  # never a profile the provider cannot price
+            self.assertEqual(mutation["model_profile"], profile)
+            self.assertEqual(mutation["parent_model_profile"], "pro_flex")
+            self.assertEqual(mutation["model_changed"], profile != "pro_flex")
+            # The rest of the genome still moves on every child.
+            self.assertIn(mutation["reasoning_effort"], EFFORTS)
+            self.assertIn(mutation["memory_limit"], MEMORY_LIMITS)
+            if mutation["model_changed"]:
+                self.assertIn(profile, MODEL_PROFILES)
+                self.assertNotEqual(profile, parent.model.profile)
+                changed.append(profile)
+
+        expected = sample / PROFILE_MUTATION_ODDS
+        self.assertGreater(len(changed), expected * 0.7, "the model almost never moves")
+        self.assertLess(len(changed), expected * 1.3, "the model moves too often to keep a control")
+        # Every alternative is reachable; none of them is the parent's own profile.
+        self.assertEqual(set(changed), set(MODEL_PROFILES) - {"pro_flex"})
+
+    def test_the_mutation_is_deterministic_in_the_childs_id(self):
+        self.write_manifest("rosenfeld", name="Rosenfeld")
+        parent = load_manifest(self.desks / "rosenfeld.json")
+        first = self.evolution().mutate(parent, "rosenfeld-2", 2)
+        second = self.evolution().mutate(parent, "rosenfeld-2", 2)
+        self.assertEqual(first, second)
+
+    def test_a_parent_on_an_uncurated_model_still_breeds_onto_the_list(self):
+        self.write_manifest("krasker", name="Krasker", model={**SAMPLE["model"], "profile": "k3"})
+        parent = load_manifest(self.desks / "krasker.json")
+        evolution = self.evolution()
+        rng = random.Random(7)
+        seen = set()
+        for _ in range(60):
+            desk_id = "krasker-" + "".join(rng.choice("abcdefghij") for _ in range(5))
+            data, mutation = evolution.mutate(parent, desk_id, 2)
+            if mutation["model_changed"]:
+                seen.add(data["model"]["profile"])
+            else:
+                self.assertEqual(data["model"]["profile"], "k3")  # inherited, not invented
+        self.assertTrue(seen <= set(MODEL_PROFILES))
+        self.assertTrue(seen)
+
+    def test_a_spawned_desk_publishes_the_model_it_was_born_on(self):
+        self.write_manifest("earnings-01")
+        self.write_manifest("earnings-02")
+        parent = load_manifest(self.desks / "earnings-02.json")
+        spawned = self.evolution().spawn(parent, None, "2026-09-30T20:00:00.000Z")
+        child = load_manifest(self.desks / f"{spawned['desk_id']}.json")
+        self.assertEqual(spawned["mutation"]["model_profile"], child.model.profile)
+        self.assertEqual(spawned["mutation"]["parent_model_profile"], parent.model.profile)
+        self.assertIn(child.model.profile, PROFILES)
+        event = self.log.last("evolution", "evolution.spawned")
+        self.assertEqual(event.payload["mutation"]["model_profile"], child.model.profile)
 
     def test_roman_numerals_and_base_names(self):
         self.assertEqual([roman(n) for n in (1, 2, 3, 4, 9, 14)], ["I", "II", "III", "IV", "IX", "XIV"])

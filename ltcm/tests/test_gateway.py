@@ -23,7 +23,7 @@ from ltcm.manifest import DeskManifest
 from ltcm.risk import RiskEngine
 from ltcm.tests.test_manifest import SAMPLE
 
-AAPL = Instrument("equity", "AAPL", "paper")
+AAPL = Instrument("equity", "AAPL", "alpaca")
 DESK = "earnings-01"
 NOW = "2026-09-14T14:30:00.000Z"
 
@@ -31,13 +31,13 @@ NOW = "2026-09-14T14:30:00.000Z"
 class FakeBroker:
     """A venue that does exactly what the test tells it to, and nothing else."""
 
-    venue = "paper"
+    venue = "shadow"
 
     def __init__(self, *, price="100", instant_fill=True, raises=None, caps=None):
         self.price = Decimal(price)
         self.instant_fill = instant_fill
         self.raises = raises
-        self.caps = caps or {"equity", "option", "limit", "paper", "fractional"}
+        self.caps = caps or {"equity", "option", "limit", "shadow", "fractional"}
         self.orders: dict[str, Order] = {}
         self._fills: list[Fill] = []
         self.venue_positions: list[Position] = []
@@ -54,7 +54,7 @@ class FakeBroker:
     def balance(self):
         from ltcm.broker import Balance
 
-        return Balance("paper", Decimal("1000"), Decimal("1000"), Decimal("1000"), NOW)
+        return Balance("shadow", Decimal("1000"), Decimal("1000"), Decimal("1000"), NOW)
 
     def positions(self):
         return list(self.venue_positions)
@@ -139,7 +139,7 @@ class GatewayCase(unittest.TestCase):
         self.gateway = Gateway(
             self.log,
             RiskEngine(),
-            {"paper": self.broker},
+            {"shadow": self.broker},
             {DESK: self.ledger},
             data=None,
             manifests={DESK: self.manifest},
@@ -241,12 +241,42 @@ class ApprovalTests(GatewayCase):
         ctx = self.gateway.risk_context(self.intent(), NOW)
         self.assertEqual(ctx.desk_equity, Decimal("1000"))
         self.assertEqual(ctx.desk_cash, Decimal("1000"))
-        self.assertEqual(ctx.floor_equity, Decimal("1000"))
+        # This desk is shadow, and a scored book is never part of the floor's real equity.
+        self.assertEqual(ctx.floor_equity, Decimal("0"))
         self.assertEqual(ctx.quote.last, Decimal("100"))
         self.assertEqual(ctx.venue_capabilities, self.broker.capabilities())
         self.assertFalse(ctx.kill_switch)
         self.assertIsNone(ctx.market_open)  # no calendar source configured
         self.assertEqual(ctx.desk_orders_today, 0)
+
+    def test_a_shadow_order_is_routed_to_the_book_and_says_so(self):
+        """Same intent, same engine, same decision -- and nothing sent anywhere."""
+        result = self.gateway.propose(self.intent(), NOW)
+        self.assertTrue(result["approved"], result["reasons"])
+        self.assertTrue(self.gateway.shadow_desk(DESK))
+        self.assertEqual(self.gateway.route(DESK, "alpaca"), "shadow")
+        order = self.log.read(kind="broker.order")[-1]
+        self.assertEqual(order.stream, "broker:shadow")
+        self.assertEqual(order.payload["venue"], "shadow")
+        self.assertTrue(order.payload["shadow"])
+        # The instrument still names the venue the desk would have traded on.
+        self.assertEqual(order.payload["instrument"]["venue"], "alpaca")
+        fill = self.log.read(kind="broker.fill")[-1]
+        self.assertTrue(fill.payload["shadow"])
+        self.assertEqual(fill.payload["venue"], "shadow")
+
+    def test_a_live_order_carries_no_shadow_flag(self):
+        self.gateway.manifests[DESK] = DeskManifest.from_dict(
+            {**copy.deepcopy(SAMPLE), "capital": {"mode": "live", "usd": "1000"}}
+        )
+        self.gateway.brokers["alpaca"] = FakeBroker()
+        self.gateway.brokers["alpaca"].venue = "alpaca"
+        result = self.gateway.propose(self.intent(), NOW)
+        self.assertTrue(result["approved"], result["reasons"])
+        order = self.log.read(kind="broker.order")[-1]
+        self.assertEqual(order.stream, "broker:alpaca")
+        self.assertNotIn("shadow", order.payload)
+        self.assertNotIn("shadow", self.log.read(kind="broker.fill")[-1].payload)
 
     def test_orders_today_feeds_the_daily_count(self):
         self.gateway.propose(self.intent(quantity="1", nonce="a"), NOW)
@@ -285,7 +315,7 @@ class UnknownOutcomeTests(GatewayCase):
         self.assertIn("reconcile first", blocked["reasons"][0])
         self.assertEqual(self.broker.submitted, [])
 
-        report = self.gateway.reconcile("paper", NOW)
+        report = self.gateway.reconcile("shadow", NOW)
         self.assertEqual(report["mismatches"], [])
         self.assertEqual(self.gateway.blocked_desks, {})
         self.assertFalse(self.gateway.reconciliation_mismatch)
@@ -297,7 +327,7 @@ class UnknownOutcomeTests(GatewayCase):
     def test_unknown_order_is_never_left_pending_after_reconciliation(self):
         self.broker.raises = UnknownOutcome("timeout")
         result = self.gateway.propose(self.intent(), NOW)
-        self.gateway.reconcile("paper", NOW)
+        self.gateway.reconcile("shadow", NOW)
         statuses = [
             e.payload["status"]
             for e in self.log.read(kind="broker.order")
@@ -310,8 +340,8 @@ class UnknownOutcomeTests(GatewayCase):
 class ReconcileTests(GatewayCase):
     def test_clean_reconciliation_counts_matches(self):
         self.gateway.propose(self.intent(), NOW)
-        report = self.gateway.reconcile("paper", NOW)
-        self.assertEqual(report["venue"], "paper")
+        report = self.gateway.reconcile("shadow", NOW)
+        self.assertEqual(report["venue"], "shadow")
         self.assertEqual(report["matches"], 1)
         self.assertEqual(report["mismatches"], [])
         event = self.log.read(kind="broker.reconciled")[-1]
@@ -320,7 +350,7 @@ class ReconcileTests(GatewayCase):
     def test_mismatch_trips_the_floor_breaker(self):
         self.gateway.propose(self.intent(), NOW)
         self.broker.venue_positions = [Position(AAPL, Decimal("7"), Decimal("100"))]
-        report = self.gateway.reconcile("paper", NOW)
+        report = self.gateway.reconcile("shadow", NOW)
         self.assertEqual(
             report["mismatches"], [{"instrument": AAPL.key, "ledger": "2", "venue": "7"}]
         )
@@ -385,7 +415,7 @@ class LifecycleTests(GatewayCase):
         rebuilt = Gateway(
             self.log,
             RiskEngine(),
-            {"paper": self.broker},
+            {"shadow": self.broker},
             {DESK: DeskLedger(self.log, DESK)},
             manifests={DESK: self.manifest},
             kill_switch_path=self.kill,
@@ -631,6 +661,12 @@ class CriticFailureTests(LiveCriticCase):
         self.assertEqual(provider.calls[0]["request_key"], f"critic:{order.id}")
 
 
+def live_broker(venue="alpaca"):
+    broker = FakeBroker()
+    broker.venue = venue
+    return broker
+
+
 class CriticScopeTests(unittest.TestCase):
     """Who the critic is asked about, and who it is not."""
 
@@ -638,12 +674,12 @@ class CriticScopeTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.log = EventLog(self.root / "events.sqlite")
-        self.manifest = DeskManifest.from_dict(SAMPLE)  # paper
+        self.manifest = DeskManifest.from_dict(SAMPLE)  # shadow
         self.critic = RecordingCritic()
         self.gateway = Gateway(
             self.log,
             RiskEngine(),
-            {"paper": FakeBroker()},
+            {"shadow": FakeBroker(), "alpaca": live_broker()},
             {DESK: DeskLedger(self.log, DESK)},
             manifests={DESK: self.manifest},
             critic=self.critic,
@@ -665,23 +701,23 @@ class CriticScopeTests(unittest.TestCase):
             instrument=AAPL,
             side="buy",
             quantity="2",
-            rationale="paper money, paper rules",
+            rationale="shadow money, real rules",
             created_at=NOW,
             session_id="s1",
         )
 
-    def test_a_paper_desk_never_pays_for_a_critic(self):
+    def test_a_shadow_desk_never_pays_for_a_critic(self):
         result = self.gateway.propose(self.intent(), NOW)
         self.assertTrue(result["approved"], result["reasons"])
         self.assertEqual(self.critic.calls, [])
         self.assertEqual(self.log.read(kind="risk.review"), [])
         self.assertFalse(self.gateway.live_desk(DESK))
 
-    def test_a_promoted_desk_is_live_even_though_its_manifest_says_paper(self):
+    def test_a_promoted_desk_is_live_even_though_its_manifest_says_shadow(self):
         self.log.append(
             "evolution",
             "evolution.promoted",
-            {"desk_id": DESK, "family": "earnings", "from": "paper", "to": "live", "score": {}},
+            {"desk_id": DESK, "family": "earnings", "from": "shadow", "to": "live", "score": {}},
             at="2026-09-14T13:00:00.000Z",
         )
         self.assertTrue(self.gateway.live_desk(DESK))
@@ -729,14 +765,23 @@ class SettlingBroker(FakeBroker):
 
 
 class SettlementCase(GatewayCase):
+    """Settlement is a venue fact, so the desk under test trades that venue for real."""
+
     def setUp(self):
         super().setUp()
+        data = copy.deepcopy(SAMPLE)
+        data["venues"] = ["kalshi"]
+        data["instruments"] = {**data["instruments"], "asset_classes": ["event"]}
+        data["capital"] = {"mode": "live", "usd": "1000"}
+        self.manifest = DeskManifest.from_dict(data)
+        self.gateway.manifests[DESK] = self.manifest
         self.kalshi = SettlingBroker()
         self.gateway.brokers["kalshi"] = self.kalshi
 
-    def hold(self, instrument, quantity="10", price="0.40", at="2026-09-14T15:00:00.000Z"):
+    def hold(self, instrument, quantity="10", price="0.40", at="2026-09-14T15:00:00.000Z",
+             desk_id=DESK):
         """Give the desk a position the honest way: a fill the ledger folds."""
-        tag = "fl-open-" + (instrument.right or "yes")
+        tag = "fl-open-" + desk_id + "-" + (instrument.right or "yes")
         self.log.append(
             "broker:kalshi",
             "broker.fill",
@@ -744,7 +789,7 @@ class SettlementCase(GatewayCase):
                 "id": tag,
                 "fill_id": tag,
                 "order_id": "ord-open",
-                "desk_id": DESK,
+                "desk_id": desk_id,
                 "instrument": instrument.to_dict(),
                 "side": "buy",
                 "quantity": quantity,
@@ -865,7 +910,7 @@ class PollSettlementsTests(SettlementCase):
 
     def test_a_venue_that_reports_no_settlements_is_a_no_op(self):
         self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
-        self.assertEqual(self.gateway.poll_settlements("paper"), [])
+        self.assertEqual(self.gateway.poll_settlements("shadow"), [])
         self.assertEqual(self.gateway.poll_settlements("nowhere"), [])
 
     def test_a_settlements_call_that_raises_is_swallowed(self):
@@ -909,14 +954,25 @@ class PollSettlementsTests(SettlementCase):
         self.gateway.poll_settlements("kalshi")
         self.assertIn("base rate says 62%", self.outcomes()[0]["rationale_excerpt"])
 
-    def test_a_paper_position_is_mirrored_into_the_simulator(self):
-        paper = SettlingBroker()
-        self.gateway.brokers["paper"] = paper
-        self.hold(Instrument("event", "CPI", "paper", market_id=KALSHI_TICKER, right="no"))
+    def test_a_shadow_position_is_mirrored_into_the_shadow_book(self):
+        """A shadow desk's event contract settles too: the score has to know how it came out."""
+        book = SettlingBroker()
+        book.venue = "shadow"
+        self.gateway.brokers["shadow"] = book
+        shadow_desk = "earnings-02"
+        data = copy.deepcopy(SAMPLE)
+        data["id"] = shadow_desk
+        data["venues"] = ["kalshi"]
+        data["instruments"] = {**data["instruments"], "asset_classes": ["event"]}
+        data["playbook"] = f"playbooks/{shadow_desk}.md"
+        self.gateway.manifests[shadow_desk] = DeskManifest.from_dict(data)
+        self.gateway.ledgers[shadow_desk] = DeskLedger(self.log, shadow_desk)
+        self.hold(CPI_NO, desk_id=shadow_desk)
         self.kalshi.rows = [self.row("yes")]
         self.gateway.poll_settlements("kalshi")
-        # The yes payout is what the simulator is told; it pays the NO leg its complement.
-        self.assertEqual(paper.settled_markets, [(KALSHI_TICKER, "1", "2026-09-15T18:00:00.000Z")])
+        self.assertTrue(self.gateway.shadow_desk(shadow_desk))
+        # The yes payout is what the book is told; it pays the NO leg its complement.
+        self.assertEqual(book.settled_markets, [(KALSHI_TICKER, "1", "2026-09-15T18:00:00.000Z")])
 
 
 class BothLegsSettlementTests(SettlementCase):

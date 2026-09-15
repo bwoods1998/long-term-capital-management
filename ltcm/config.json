@@ -6,7 +6,7 @@
   "floor_cap_max_usd_per_day": "120",
   "profit_share": "0.25",
   "reserve_floor_usd": "10",
-  "floor_capital_usd": "5400",
+  "floor_capital_usd": "979",
   "floor_max_daily_loss_pct": "0.02",
   "mark_interval_seconds": 300,
   "sleep_seconds": 30,
@@ -25,7 +25,9 @@
   "sources": {},
   "publish": true,
   "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
-  "paper_slippage_bps": 5,
+  "shadow_slippage_bps": 5,
+  "gateway_url": "https://ltcm-gateway.blake-woods-personal-site.workers.dev",
+  "gateway_token_env": "GATEWAY_TOKEN",
   "live_venues": [
     "kalshi",
     "coinbase"

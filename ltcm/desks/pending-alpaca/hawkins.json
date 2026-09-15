@@ -1,14 +1,13 @@
 {
   "schema_version": 1,
-  "id": "krasker",
+  "id": "hawkins",
   "family": "earnings",
   "generation": 1,
   "parent_id": null,
-  "name": "Krasker",
-  "persona": "William Krasker. The same earnings mandate as Rosenfeld, run on GLM 5.3. Competes with him for the live sleeve. A fast, skeptical reader of earnings releases and call transcripts who cares about the quality of a beat, not the headline. Writes tersely, quotes the filing, and says when the packet cannot answer the question. This variant runs on GLM 5.3 and competes with its siblings for the live sleeve.",
+  "name": "Hawkins",
+  "persona": "Gregory Hawkins. The same earnings mandate as Rosenfeld, run on Kimi K2.6. Competes with him for the live sleeve. A fast, skeptical reader of earnings releases and call transcripts who cares about the quality of a beat, not the headline. Writes tersely, quotes the filing, and says when the packet cannot answer the question. This variant runs on Kimi K2.6 and competes with its siblings for the live sleeve.",
   "mandate": "Trade post-earnings drift and guidance surprises in liquid US equities within ten trading days of a release. Positions are opened only on a documented surprise (revenue, margin, guidance or cash flow) that the market appears to have under- or over-reacted to, and closed on a time stop, a thesis break, or the next catalyst. Long only until the desk earns short permission. Every proposal names the release, the surprise, the expected holding period and the exit rule.",
   "venues": [
-    "paper",
     "alpaca"
   ],
   "instruments": {
@@ -30,7 +29,7 @@
     "max_limit_deviation_pct": "0.05"
   },
   "model": {
-    "profile": "glm_flex",
+    "profile": "kimi_flex",
     "reasoning_effort": "medium",
     "max_output_tokens": 8192,
     "max_turns": 24
@@ -68,10 +67,10 @@
     "usd_per_day": "2.50"
   },
   "capital": {
-    "mode": "paper",
+    "mode": "shadow",
     "usd": "1000"
   },
-  "playbook": "playbooks/krasker.md",
+  "playbook": "playbooks/hawkins.md",
   "memory_limit": 40,
   "tags": [
     "event-driven",

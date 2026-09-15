@@ -7,10 +7,13 @@ survives contact with this module.
 
 Three operations, all of them additive:
 
-* `select()` retires the worst paper variant in a family when it sits below the family median by
+* `select()` retires the worst shadow variant in a family when it sits below the family median by
   a published margin, then spawns a replacement whose parent is the retired variant and whose
   playbook is rewritten from the parent's post-mortems and the best sibling's playbook.
-* `promote()` moves a paper variant to live capital, and only when `Committee.gates` pass.
+* `promote()` moves a shadow variant to live capital, and only when `Committee.gates` pass *and*
+  the venue it would trade on is enabled. A desk that has earned a sleeve on a venue the floor
+  has not opened yet is deferred, in public, with the reason: the evidence is not thrown away,
+  and the next run after the venue opens promotes it.
 * `score()` is the same return-over-pain number the committee uses, so a desk cannot be good by
   one measure and bad by another depending on who is asking.
 
@@ -34,6 +37,7 @@ from .committee import Committee, capital_mode, promoted_desks, retired_desks
 from .events import EventLog, now_iso
 from .ledger import DeskLedger, iso_time
 from .manifest import DeskManifest, ManifestError, load_manifest
+from .provider import PROFILES
 
 ZERO = Decimal(0)
 
@@ -49,6 +53,20 @@ ROMAN_SUFFIX = re.compile(r"\s+[IVXLCDM]+$")
 EFFORTS = ("low", "medium", "high")
 MEMORY_LIMITS = (20, 40, 60, 80)
 SESSION_SHIFTS = (-45, -20, 20, 45)
+#: The model is part of the genome. A child may be born on a different model from its parent,
+#: and `evolution.spawned` says which, so the lab report can compare a family's variants on the
+#: one axis nobody can argue about: what the desk costs per decision and what it earned. Only
+#: profiles the provider actually prices can be inherited -- a manifest naming an unknown profile
+#: would fail its first request, not its validation.
+MODEL_PROFILES = tuple(
+    profile
+    for profile in ("pro_flex", "kimi_flex", "glm_flex", "oss_asap", "flash_flex")
+    if profile in PROFILES
+)
+#: One child in three changes model. Any more and a family has no control group left; any fewer
+#: and the evidence takes a season to arrive.
+PROFILE_MUTATION_ODDS = 3
+
 PERSONA_TRAITS = (
     "Prefers fewer, larger decisions and says so when the evidence is thin.",
     "Reads the cash flow statement before the income statement, always.",
@@ -69,6 +87,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "playbook_reasoning_effort": "medium",
     "playbook_max_output_tokens": 6144,
     "playbook_max_chars": 12_000,
+    #: Venues the floor can actually send an order to. A promotion onto anything else is deferred.
+    "live_venues": (),
 }
 
 
@@ -205,7 +225,7 @@ class Evolution:
 
     # ------------------------------------------------------------------ selection
     def select(self, now: Any = None) -> list[dict[str, Any]]:
-        """Retire underperforming paper variants and spawn their replacements."""
+        """Retire underperforming shadow variants and spawn their replacements."""
         at = iso_time(now) if now is not None else self.now()
         actions: list[dict[str, Any]] = []
         modes = promoted_desks(self.log)
@@ -226,7 +246,7 @@ class Evolution:
             candidates = [
                 m
                 for m in mature
-                if capital_mode(m, modes) == "paper"
+                if capital_mode(m, modes) != "live"
                 and states[m.id].decisions >= min_decisions
                 and scores[m.id] < median - margin
             ]
@@ -275,13 +295,26 @@ class Evolution:
     def mutate(
         self, parent: DeskManifest, desk_id: str, generation: int | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Derive the child's manifest from the parent. Deterministic in the child's id."""
+        """Derive the child's manifest from the parent. Deterministic in the child's id.
+
+        Reasoning effort, memory budget, session times and one persona trait always move. The
+        **model profile** moves for one child in three, to another priced profile that is never
+        the parent's, because "which model should a desk run on" is an architectural question and
+        the only honest way to answer it is to run two variants of the same mandate side by side
+        and read the lab report a month later. Every mutation is recorded in `evolution.spawned`.
+        """
         generation = int(generation if generation is not None else parent.generation + 1)
         seed = _hash_int(desk_id)
         effort = EFFORTS[seed % len(EFFORTS)]
         memory_limit = MEMORY_LIMITS[(seed >> 8) % len(MEMORY_LIMITS)]
         shift = SESSION_SHIFTS[(seed >> 16) % len(SESSION_SHIFTS)]
         trait = PERSONA_TRAITS[(seed >> 24) % len(PERSONA_TRAITS)]
+        alternatives = [p for p in MODEL_PROFILES if p != parent.model.profile]
+        profile = (
+            alternatives[(seed >> 40) % len(alternatives)]
+            if alternatives and (seed >> 32) % PROFILE_MUTATION_ODDS == 0
+            else parent.model.profile
+        )
 
         data = parent.to_dict()
         data["id"] = desk_id
@@ -291,17 +324,21 @@ class Evolution:
         data["name"] = f"{base_name(parent.name)} {roman(generation)}"[:60]
         persona = f"{parent.persona} {trait}".strip()
         data["persona"] = persona[:2000]
-        data["model"] = {**data["model"], "reasoning_effort": effort}
+        data["model"] = {**data["model"], "reasoning_effort": effort, "profile": profile}
         data["memory_limit"] = memory_limit
         sessions = [_shift_clock(s, shift) for s in parent.cadence.sessions]
         data["cadence"] = {**data["cadence"], "sessions": sorted(set(sessions))}
-        data["capital"] = {"mode": "paper", "usd": data["capital"]["usd"]}
+        # Every child is born shadow, whatever its parent earned. Nothing inherits real money.
+        data["capital"] = {"mode": "shadow", "usd": data["capital"]["usd"]}
         data["playbook"] = f"playbooks/{desk_id}.md"
         mutation = {
             "reasoning_effort": effort,
             "memory_limit": memory_limit,
             "session_shift_minutes": shift,
             "persona_trait": trait,
+            "model_profile": profile,
+            "parent_model_profile": parent.model.profile,
+            "model_changed": profile != parent.model.profile,
         }
         return data, mutation
 
@@ -435,26 +472,45 @@ class Evolution:
         return body[: int(self.config["playbook_max_chars"])] + "\n"
 
     # ------------------------------------------------------------------ promotion
+    def live_venues(self) -> set[str]:
+        """The venues the floor can send a real order to today."""
+        configured = self.config.get("live_venues") or ()
+        return {str(v) for v in configured}
+
     def promote(self, now: Any = None) -> list[dict[str, Any]]:
-        """Promote the best paper variant of each family whose gates pass. Live desks stay live."""
+        """Promote the best shadow variant of each family whose gates pass.
+
+        Two conditions, both published. The gate is the evidence: days live, decisions, a
+        cost-adjusted excess return, drawdown inside mandate, no breakers, clean reconciliations.
+        The second is plumbing: the venue the desk would trade on has to be enabled. A desk that
+        passes the gate onto a venue the floor has not opened is **deferred**, not failed -- a
+        `committee.gate` says "venue not enabled" in public, and the next run after the venue
+        opens promotes it on the same evidence. Live desks stay live.
+        """
         at = iso_time(now) if now is not None else self.now()
         modes = promoted_desks(self.log)
         active = self.active()
         committee = self.committee(active)
+        enabled = self.live_venues()
         promoted: list[dict[str, Any]] = []
         for family, variants in sorted(self.families().items()):
-            papers = [m for m in variants if capital_mode(m, modes) == "paper"]
-            if not papers:
+            candidates = [m for m in variants if capital_mode(m, modes) != "live"]
+            if not candidates:
                 continue
-            best = max(papers, key=lambda m: (self.score(m.id, at), m.id))
+            best = max(candidates, key=lambda m: (self.score(m.id, at), m.id))
             report = committee.gates(best.id, at)
             if not report["passed"]:
+                continue
+            venue = best.market_venue
+            if venue not in enabled:
+                self.defer(best, venue, report, at)
                 continue
             payload = {
                 "desk_id": best.id,
                 "family": family,
-                "from": "paper",
+                "from": "shadow",
                 "to": "live",
+                "venue": venue,
                 "score": self.evidence(best.id, at),
                 "gate": report["gate"],
                 "evidence": report["evidence"],
@@ -465,6 +521,33 @@ class Evolution:
             )
             promoted.append({"action": "promoted", **payload})
         return promoted
+
+    def defer(
+        self, manifest: DeskManifest, venue: str, report: Mapping[str, Any], at: str
+    ) -> dict[str, Any]:
+        """Say in public that a desk earned a sleeve the floor cannot open yet."""
+        payload = {
+            "desk_id": manifest.id,
+            "gate": report["gate"],
+            "passed": False,
+            "reason": "venue not enabled",
+            "evidence": {
+                **dict(report.get("evidence") or {}),
+                "venue": venue,
+                "venue_enabled": False,
+                "gate_evidence_passed": True,
+            },
+            "failed": ["venue"],
+            "as_of": at,
+        }
+        self.log.append(
+            "committee",
+            "committee.gate",
+            payload,
+            id=f"gate:{manifest.id}:{at}:venue",
+            at=at,
+        )
+        return {"action": "deferred", **payload}
 
 
 def lineage(manifests: Iterable[DeskManifest]) -> dict[str, list[str]]:

@@ -8,7 +8,6 @@
   "persona": "David Mullins. Former vice chairman of the Federal Reserve. Prices Fed decisions, inflation prints, jobs numbers and other public events like a bookmaker, and only trades when the market is far from his number. A base-rate forecaster who prices events like a bookmaker. Starts from the historical frequency, adjusts only for evidence that is specific and dated, states a probability with a reason, and only trades when the market price is far enough from that probability to pay the fee and the noise.",
   "mandate": "Trade regulated event contracts on Kalshi: US economic releases (CPI, jobs, GDP, Fed decisions), weather and climate, and scheduled corporate or political events with public resolution criteria. For each market: estimate the probability from base rates and current data, compare with the market's yes price, and buy the cheaper side only when the edge after fees is at least eight cents per contract. Prefer markets resolving within fourteen days. Never trade markets whose resolution depends on a private source. Record the estimate, the market price and the reasoning for every trade so calibration can be scored on resolution.",
   "venues": [
-    "paper",
     "kalshi"
   ],
   "instruments": {
@@ -65,8 +64,8 @@
     "usd_per_day": "2.50"
   },
   "capital": {
-    "mode": "paper",
-    "usd": "200"
+    "mode": "live",
+    "usd": "492"
   },
   "playbook": "playbooks/mullins.md",
   "memory_limit": 40,

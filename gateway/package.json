@@ -1,0 +1,16 @@
+{
+  "name": "ltcm-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Order gateway: venue keys, hard caps and the kill switch live here, never in the trading VM.",
+  "scripts": {
+    "check": "node --check worker.mjs && node --check lib/money.mjs && node --check lib/http.mjs && node --check lib/kalshi.mjs && node --check lib/coinbase.mjs && node --check lib/caps.mjs && node --check lib/gate.mjs && node --check lib/watchdog.mjs && node --check lib/router.mjs && node --check lib/pem.mjs && node --check lib/sail.mjs && node --check lib/email.mjs",
+    "test": "node --test test/*.test.mjs",
+    "dev": "wrangler dev --port 4180 --host localhost",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.1"
+  }
+}

@@ -56,6 +56,8 @@ STREAM_FOR: dict[str, str] = {
     "evolution": "evolution",
     "lab": "lab",
     "ops": "ops",
+    # The floor's balance mark belongs to the whole floor, not to a desk, so it rides `ops`.
+    "floor": "ops",
 }
 
 MAX_STRING = 8000
@@ -113,7 +115,8 @@ def jsonable(value: Any, *, key: str = "") -> Any:
 
 MONEY_KEYS = frozenset(
     {"equity", "cash", "daily_pnl", "capital_usd", "cost_usd", "spent_today_usd", "cap_usd",
-     "trailing_realized_usd", "base_usd", "ceiling_usd"}
+     "trailing_realized_usd", "base_usd", "ceiling_usd", "live_equity", "live_daily_pnl",
+     "spend_usd", "account_equity", "account_cash"}
 )
 
 
@@ -497,6 +500,92 @@ def not_after(stamp: Any, limit: str) -> Any:
     return stamp if stamp <= limit else limit
 
 
+#: A venue name the site will accept on a balance row.
+VENUE_PATTERN = re.compile(r"^[a-z0-9-]{1,24}$")
+#: `...THH:MM:SS` with an optional fraction and a UTC marker, which is what a venue answers with.
+STAMP_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(?:Z|\+00:00)$")
+
+
+def millis(value: Any) -> str | None:
+    """A venue timestamp in the log's `YYYY-MM-DDTHH:MM:SS.mmmZ` form, or None if unreadable.
+
+    The venue adapters stamp a balance to the second; the site accepts milliseconds and nothing
+    else, so the missing digits are added here rather than invented anywhere upstream.
+    """
+    if not isinstance(value, str):
+        return None
+    found = STAMP_PATTERN.match(value.strip())
+    if found is None:
+        return None
+    return f"{found.group(1)}.{((found.group(2) or '')[:3]).ljust(3, '0')}Z"
+
+
+def venue_rows(rows: Any, published_at: str) -> list[dict[str, Any]]:
+    """One row per venue account the box could read: `{venue, equity, cash, as_of}`.
+
+    Balances are unsigned and stamped no later than the checkpoint that carries them. A row the
+    box could not refresh keeps its last known numbers and says `stale: true` rather than
+    disappearing, so a venue outage reads as an outage instead of as a fall in the balance.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows or ():
+        if not isinstance(row, Mapping):
+            continue
+        venue = str(row.get("venue") or "")
+        if not VENUE_PATTERN.match(venue) or venue in seen:
+            continue
+        seen.add(venue)
+        clean: dict[str, Any] = {
+            "venue": venue,
+            "equity": floor_at_zero(row.get("equity")),
+            "cash": floor_at_zero(row.get("cash")),
+            "as_of": not_after(millis(row.get("as_of")), published_at) or published_at,
+        }
+        if row.get("stale"):
+            clean["stale"] = True
+        out.append(clean)
+    return out
+
+
+def account_totals(rows: Sequence[Mapping[str, Any]]) -> dict[str, Decimal]:
+    """The whole portfolio: every venue balance added up, which is the number the owner asked for."""
+    total_equity = Decimal(0)
+    total_cash = Decimal(0)
+    for row in rows:
+        total_equity += Decimal(str(row.get("equity") or 0))
+        total_cash += Decimal(str(row.get("cash") or 0))
+    return {"equity": total_equity, "cash": total_cash}
+
+
+def account_block(rows: Any, published_at: str) -> dict[str, Any]:
+    """The floor's real account balances, or `{}` when no venue has answered even once.
+
+    Absent is the honest answer for a box with no live venue: the site draws nothing rather than
+    a zero that would read as a portfolio that lost everything.
+    """
+    venues = venue_rows(rows, published_at)
+    if not venues:
+        return {}
+    totals = account_totals(venues)
+    return {
+        "account_equity": totals["equity"],
+        "account_cash": totals["cash"],
+        "venues": venues,
+    }
+
+
+def counted(value: Any) -> int | None:
+    """A whole non-negative count, or None. The site types these and refuses anything else."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else 0
+
+
 def checkpoint_body(
     *,
     published_at: str,
@@ -504,12 +593,21 @@ def checkpoint_body(
     desks: Sequence[Mapping[str, Any]],
     committee: Mapping[str, Any],
     budget: Mapping[str, Any],
+    infra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact shape the site expects. Money stays `Decimal` for `jsonable` to render.
 
     The desks array replaces the published roster wholesale, so it always carries every desk,
     retired ones included, rather than a delta.
+
+    The floor block is **real money only**. `live_equity` and `live_daily_pnl` are the ledger's
+    numbers, which is what attributes a gain to a desk, and `shadow_desks` counts the desks whose
+    books are hypothetical. `account_equity`, `account_cash` and `venues` are the venue accounts
+    themselves -- Kalshi plus Coinbase -- and are present only when a venue answered.
+    A shadow desk still gets a row, with its notional equity and its hypothetical return, so the
+    competition for a live sleeve is legible -- but nothing on that row is ever added to the floor.
     """
+    infra = dict(infra or {})
     return {
         "schema_version": SCHEMA_VERSION,
         "published_at": published_at,
@@ -520,6 +618,14 @@ def checkpoint_body(
             "capital_usd": floor_at_zero(floor.get("capital_usd")),
             "since_inception_pct": floor.get("since_inception_pct"),
             "benchmark": floor.get("benchmark"),
+            "live_equity": floor_at_zero(floor.get("live_equity", floor.get("equity"))),
+            "live_daily_pnl": floor.get("live_daily_pnl", floor.get("daily_pnl")),
+            "live_desks": counted(floor.get("live_desks")),
+            "shadow_desks": counted(floor.get("shadow_desks")),
+            # The owner's actual money, read from the venues themselves rather than folded from
+            # the tape. `live_equity` above stays the ledger's number, which is what attributes a
+            # gain to a desk; this is what the bank says the account holds.
+            **account_block(floor.get("venues"), published_at),
         },
         "desks": [
             {
@@ -555,5 +661,16 @@ def checkpoint_body(
         "budget": {
             "spent_today_usd": floor_at_zero(budget.get("spent_today_usd")),
             "cap_usd": floor_at_zero(budget.get("cap_usd")),
+        },
+        # Where the floor runs and what the box has cost today. Absent facts stay null rather
+        # than guessing: the site prints what it is given and nothing more.
+        "infra": {
+            "host": infra.get("host") or "local",
+            "box_id": infra.get("box_id"),
+            "checkpoint_count": counted(infra.get("checkpoint_count")),
+            "spend_usd": floor_at_zero(infra.get("spend_usd")),
+            "uptime_seconds": counted(infra.get("uptime_seconds")),
+            "region": infra.get("region"),
+            "requests_today": counted(infra.get("requests_today")),
         },
     }

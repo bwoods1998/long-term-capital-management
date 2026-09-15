@@ -15,6 +15,11 @@ read, and it cannot move a single dollar. The reader is the public, not the floo
 
 Allocations are published as `committee.allocation` events, which every desk sub-ledger folds as
 external flows: a raise is a deposit, a cut is a withdrawal, and neither is mistaken for skill.
+
+A **shadow** desk is never funded. Its allocation is a notional scoring budget -- the capital its
+manifest asks for -- so that its hypothetical book is comparable with a live one; the event names
+those desks under `shadow`, and nothing that carries that flag is ever counted as the floor's
+money. A shadow desk earns a live sleeve by passing gate A, and only then does capital move.
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ CENTS = Decimal("0.01")
 SIGNATURE = "\u2014 Meriwether"
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    # Gate A, the only gate this phase can reach: paper to seed capital.
+    # Gate A, the gate a shadow desk passes to earn a live sleeve.
     "gate_min_days": 14,
     "gate_min_decisions": 20,
     "gate_min_excess_pct": "0",  # cost-adjusted excess must be strictly greater than this
@@ -47,7 +52,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "resize_interval_days": 7,
     "min_multiple": "0.5",
     "max_multiple": "2",
-    "back_to_paper_drawdown_pct": "0.15",
+    "back_to_shadow_drawdown_pct": "0.15",
     # Inference budget. The floor's daily model spend is a fixed base plus a share of the profit
     # the floor actually realized in the last week: the swarm earns its own compute, and a losing
     # week cannot quietly raise the bill.
@@ -77,18 +82,34 @@ def retired_desks(log: EventLog) -> set[str]:
 
 
 def promoted_desks(log: EventLog) -> dict[str, str]:
-    """desk_id -> capital mode, for desks promoted or demoted after their manifest was written."""
+    """desk_id -> capital mode, for desks promoted or demoted after their manifest was written.
+
+    "paper" is the old name for "shadow" and is read as such, so a promotion recorded before the
+    rename still says the same thing years later.
+    """
     modes: dict[str, str] = {}
     for event in log.read(kind="evolution.promoted", limit=10_000):
         desk_id = event.payload.get("desk_id")
         to = event.payload.get("to")
-        if isinstance(desk_id, str) and to in ("paper", "live"):
+        if to == "paper":
+            to = "shadow"
+        if isinstance(desk_id, str) and to in ("shadow", "live"):
             modes[desk_id] = to
     return modes
 
 
 def capital_mode(manifest: DeskManifest, modes: Mapping[str, str]) -> str:
+    """"shadow" or "live". The log wins over the manifest: promotion is an event, not an edit."""
     return modes.get(manifest.id, manifest.capital_mode)
+
+
+def live_desks(manifests: Mapping[str, DeskManifest], modes: Mapping[str, str]) -> set[str]:
+    """The desks trading real money. Everything else is scored, not funded."""
+    return {
+        desk_id
+        for desk_id, manifest in manifests.items()
+        if capital_mode(manifest, modes) == "live"
+    }
 
 
 def iso_week(at: str) -> str:
@@ -249,8 +270,8 @@ class Committee:
         at = iso_time(now) if now is not None else self.now()
         manifest = self.manifests.get(desk_id)
         state = self.ledger(desk_id).state(at)
-        mode = capital_mode(manifest, self.modes()) if manifest else "paper"
-        gate = "A" if mode == "paper" else "B"
+        mode = capital_mode(manifest, self.modes()) if manifest else "shadow"
+        gate = "B" if mode == "live" else "A"
 
         capital = state.net_deposits if state.net_deposits > 0 else (
             manifest.capital_usd if manifest else ZERO
@@ -330,7 +351,10 @@ class Committee:
         resize = self._resize_due(last_at, at)
         modes = self.modes()
         active = self.active()
-        breach_limit = money(self.config["back_to_paper_drawdown_pct"])
+        breach_limit = money(
+            self.config.get("back_to_shadow_drawdown_pct")
+            or self.config.get("back_to_paper_drawdown_pct")
+        )
         low = money(self.config["min_multiple"])
         high = money(self.config["max_multiple"])
 
@@ -343,6 +367,8 @@ class Committee:
 
         targets: dict[str, Decimal] = {}
         reasons: dict[str, str] = {}
+        #: desk_id -> True for every target that is a notional scoring budget, not money.
+        shadow: dict[str, bool] = {}
         for desk_id, manifest in sorted(active.items()):
             state = states[desk_id]
             base = manifest.capital_usd
@@ -361,8 +387,11 @@ class Committee:
                 )
                 continue
             if capital_mode(manifest, modes) != "live":
+                # A shadow desk is never funded. Its "allocation" is the notional book its
+                # proposals are scored against, so the scoreboard compares like with like.
                 targets[desk_id] = _quantize(base)
-                reasons[desk_id] = "paper sleeve at manifest capital"
+                shadow[desk_id] = True
+                reasons[desk_id] = "shadow sleeve: notional scoring budget at manifest capital"
                 continue
             if not resize:
                 held = previous.get(desk_id, base)
@@ -384,11 +413,13 @@ class Committee:
                 targets[desk_id] = ZERO
                 reasons[desk_id] = "desk retired or removed from the roster"
 
+        # Only real sleeves compete for the floor's real capital; a notional budget costs nothing.
         cap = money(self.config["floor_capital_usd"])
-        total = sum(targets.values(), ZERO)
+        funded = {k: v for k, v in targets.items() if not shadow.get(k)}
+        total = sum(funded.values(), ZERO)
         if cap > 0 and total > cap:
             factor = cap / total
-            for desk_id in targets:
+            for desk_id in funded:
                 targets[desk_id] = _quantize(targets[desk_id] * factor)
             reasons = {
                 k: f"{v}; scaled to the floor's {text(cap)} of capital" for k, v in reasons.items()
@@ -401,6 +432,9 @@ class Committee:
                 "committee.allocation",
                 {
                     "allocations": {k: text(v) for k, v in sorted(targets.items())},
+                    # Which of those targets are notional. A desk named here is never funded:
+                    # its book is a score and the floor's equity never counts it.
+                    "shadow": {k: True for k in sorted(shadow)},
                     "reasons": reasons,
                     "floor_capital_usd": text(cap),
                     "as_of": at,

@@ -3,14 +3,14 @@
 `Service.tick()` is the whole runtime in one method, and it is deliberately boring:
 
 1. run any desk session whose cadence slot has come round in the desk's own timezone,
-2. advance the paper venues and poll every live order,
+2. advance the shadow books and poll every live order,
 3. mark every sub-ledger on the mark interval,
 4. evaluate the circuit breakers and publish any that tripped,
 5. run the committee on its weekday and the evolution loop on its daily slot,
 6. push the event tape and the leaderboard checkpoint to the site,
 7. write the health file the supervisor watches.
 
-Everything with an external dependency -- the model provider, the paper simulator, the live venue
+Everything with an external dependency -- the model provider, the shadow book, the live venue
 adapters, the desk runtime, the market data sources -- is constructed through a small factory that
 tests replace. Nothing in this module opens a socket by itself, and `.env` is read only to hand
 credentials straight to an adapter: they are never logged, never published and never returned.
@@ -32,17 +32,32 @@ from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from .broker import Instrument, OrderIntent, money, text
-from .committee import Committee, capital_mode, promoted_desks, retired_desks
+from .analytics import ResultsLedger
+from .committee import Committee, capital_mode, live_desks, promoted_desks, retired_desks
 from .events import EventLog, canonical, now_iso
 from .evolve import Evolution
 from .gateway import Gateway
 from .ledger import DeskLedger, floor_totals, iso_time, parse_iso
 from .manifest import DeskManifest, load_all
-from .publish import Publisher, checkpoint_body
+from .publish import Publisher, account_block, checkpoint_body, jsonable
 from .risk import RiskEngine, circuit_breakers
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 ZERO = Decimal(0)
+
+#: The gateway's routing key for a scored book. A shadow desk's orders go here and no further.
+SHADOW_VENUE = "shadow"
+
+#: How long a checkpoint will wait for *every* live venue to report its balance, in total. The
+#: venues are read together, so one slow exchange costs this much and not a multiple of it.
+VENUE_BALANCE_TIMEOUT = 3.0
+#: How long a balance is reused before the venue is asked again. The floor publishes every tick;
+#: an account balance does not move fast enough to be worth a request each time.
+VENUE_BALANCE_TTL = 60.0
+#: A `floor.mark` is appended at most this often, and only when the portfolio actually moved.
+FLOOR_MARK_INTERVAL_SECONDS = 300
+#: The order the owner reads their accounts in. Anything else follows, alphabetically.
+VENUE_ORDER = ("kalshi", "coinbase", "alpaca")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "schema_version": 1,
@@ -70,8 +85,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "floor_cap_max_usd_per_day": "60",
     "publish": True,
     "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
-    "paper_slippage_bps": 5,
-    # Live venues are configured but not enabled: this phase is paper only.
+    "shadow_slippage_bps": 5,
+    # Venues the floor may actually send an order to. A desk whose venue is missing from this
+    # list stays shadow however good its evidence is, and the committee says so in public.
     "live_venues": [],
     "venues": {
         "alpaca": {
@@ -132,8 +148,25 @@ def load_env(path: str | Path) -> dict[str, str]:
 RESOLUTION_COOLDOWN_SECONDS = 1800
 
 
+def _venue_rank(venue: str) -> tuple[int, str]:
+    """Sort key: the owner's own reading order first, anything else alphabetically after it."""
+    return (VENUE_ORDER.index(venue) if venue in VENUE_ORDER else len(VENUE_ORDER), venue)
+
+
 def _clock_minutes(value: str) -> int:
     return int(value[:2]) * 60 + int(value[3:5])
+
+
+#: An identifier safe to publish: the box id, the region and the host name come from the guest
+#: environment, and one odd variable must not make the site refuse every checkpoint after it.
+_TAG = re.compile(r"[^A-Za-z0-9._:\- ]")
+
+
+def _tag(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = _TAG.sub("", value).strip()[:120]
+    return cleaned or None
 
 
 # --------------------------------------------------------------------------- the tool context
@@ -504,8 +537,8 @@ class Service:
         self._budget: dict[str, Any] = {}
         self._sources: dict[str, Any] = {}
 
-        # Everything the floor writes lives here: events, provider records, memory, paper books,
-        # health and the kill switch. `.data/ltcm/keys/` holds the venue credentials.
+        # Everything the floor writes lives here: events, provider records, memory, shadow
+        # books, health and the kill switch. `.data/ltcm/keys/` holds the venue credentials.
         self.capital_dir = self.root / ".data" / "ltcm"
         self.capital_dir.mkdir(parents=True, exist_ok=True)
         self.desks_dir = Path(self.config.get("desks_dir") or (PACKAGE_DIR / "desks"))
@@ -523,8 +556,11 @@ class Service:
             desk_id: DeskLedger(self.log, desk_id) for desk_id in self.manifests
         }
         self.brokers: dict[str, Any] = {}
-        self.paper_brokers: dict[str, Any] = {}
+        #: desk_id -> its own scoring book. A shadow desk trades this and nothing else.
+        self.shadow_books: dict[str, Any] = {}
         self._env: dict[str, str] | None = None
+        self._started_at = float(clock())
+        self._checkpoints = int(self.state().get("checkpoint_count") or 0)
 
         if self.market_data is None:
             self.market_data = self._build_market_data()
@@ -569,7 +605,10 @@ class Service:
             self.playbooks_dir,
             provider=self.provider,
             clock=clock,
-            config=self.config.get("evolution") or {},
+            config={
+                **(self.config.get("evolution") or {}),
+                "live_venues": tuple(self.config.get("live_venues") or ()),
+            },
         )
         self.publisher = publisher if publisher is not None else self._build_publisher()
 
@@ -630,50 +669,132 @@ class Service:
         return built
 
     def _build_brokers(self) -> None:
-        paper_dir = self.capital_dir / "paper"
-        paper_dir.mkdir(parents=True, exist_ok=True)
+        (self.capital_dir / "shadow").mkdir(parents=True, exist_ok=True)
         modes = promoted_desks(self.log)
         for desk_id, manifest in sorted(self.manifests.items()):
-            if capital_mode(manifest, modes) != "paper" and "paper" not in manifest.venues:
+            if capital_mode(manifest, modes) == "live":
                 continue
-            broker = self._make_paper_broker(manifest, paper_dir / f"{desk_id}.sqlite")
+            broker = self._make_shadow_book(manifest, self.book_path(desk_id))
             if broker is not None:
-                self.paper_brokers[desk_id] = broker
-        # Every paper desk shares the "paper" venue name; the gateway routes by venue, so the
-        # first paper broker is the venue's broker and per-desk books stay in their own files.
+                self.shadow_books[desk_id] = broker
         for venue in self.config.get("live_venues") or []:
             broker = self._make_live_broker(venue)
             if broker is not None:
                 self.brokers[venue] = broker
-        if self.paper_brokers:
-            self.brokers.setdefault("paper", _PaperRouter(self.paper_brokers, self.manifests))
+        # Every shadow desk routes to the one "shadow" key; the router hands each desk its own
+        # book, so a bug in one desk's scoring can never touch another's.
+        if self.shadow_books:
+            self.brokers.setdefault(
+                SHADOW_VENUE, _ShadowRouter(self.shadow_books, self.manifests)
+            )
+        for desk_id, manifest in sorted(self.manifests.items()):
+            if capital_mode(manifest, modes) == "live" and manifest.market_venue not in self.brokers:
+                self.alert(
+                    "critical",
+                    f"{desk_id} is live on {manifest.market_venue}, which has no broker",
+                )
 
-    def _make_paper_broker(self, manifest: DeskManifest, path: Path) -> Any:
+    def book_path(self, desk_id: str) -> Path:
+        """Where one desk's scoring book lives.
+
+        The directory was called `paper/` before the floor dropped the word. A desk that already
+        has a book there keeps it: the file holds the positions and cash its ledger was folded
+        from, and starting it over would put the two out of step for a rename.
+        """
+        current = self.capital_dir / "shadow" / f"{desk_id}.sqlite"
+        legacy = self.capital_dir / "paper" / f"{desk_id}.sqlite"
+        if not current.exists() and legacy.exists():
+            return legacy
+        return current
+
+    def _make_shadow_book(self, manifest: DeskManifest, path: Path) -> Any:
+        """One desk's scoring book, priced and charged like the venue it would trade on."""
         if self.broker_factory is not None:
-            return self.broker_factory("paper", manifest=manifest, path=path, service=self)
+            return self.broker_factory(
+                SHADOW_VENUE, manifest=manifest, path=path, service=self
+            )
         try:
             from . import sim
         except Exception:
             return None
         try:
-            return sim.PaperBroker(
+            return sim.ShadowBook(
                 path,
-                venue="paper",
+                venue=SHADOW_VENUE,
+                market_venue=manifest.market_venue,
                 data=self.market_data,
                 clock=self.clock,
                 initial_cash=manifest.capital_usd,
-                slippage_bps=int(self.config["paper_slippage_bps"]),
+                slippage_bps=int(
+                    self.config.get("shadow_slippage_bps")
+                    or self.config.get("paper_slippage_bps")
+                    or 5
+                ),
                 allow_short=manifest.instruments.allow_short,
             )
         except Exception as exc:
-            self.alert("warning", f"paper broker for {manifest.id} unavailable: {exc}")
+            self.alert("warning", f"shadow book for {manifest.id} unavailable: {exc}")
             return None
 
     def _make_live_broker(self, venue: str) -> Any:
-        """Build a live venue adapter from configured env names and key files. Never logs secrets."""
+        """Build a live venue adapter from configured env names and key files. Never logs secrets.
+
+        With `gateway_url` set, Kalshi and Coinbase are built in **gateway mode** instead: the
+        adapter is the same, but it signs nothing and reaches the venue only through the order
+        gateway, which holds the private keys and enforces the caps and the kill switch outside
+        this process. Nothing here ever reads a key file in that mode, because there is none.
+        """
         settings = (self.config.get("venues") or {}).get(venue) or {}
         if self.broker_factory is not None:
             return self.broker_factory(venue, settings=settings, service=self)
+        gateway_url = self.config.get("gateway_url")
+        if gateway_url and venue in ("kalshi", "coinbase"):
+            try:
+                from .adapters import (
+                    CoinbaseCredentials,
+                    GatewaySigner,
+                    KalshiCredentials,
+                    VenueClient,
+                    coinbase,
+                    kalshi,
+                )
+
+                token = self.secret(self.config.get("gateway_token_env") or "GATEWAY_TOKEN")
+                if not token:
+                    raise RuntimeError("missing gateway token")
+                client = VenueClient(
+                    self.transport, gateway_url=str(gateway_url), gateway=GatewaySigner(token), venue=venue
+                )
+                # The key id belongs to the gateway, not to this process: it is part of the
+                # credential, and a machine that cannot sign has no use for the name of the key.
+                if venue == "kalshi":
+                    return kalshi.KalshiBroker(
+                        KalshiCredentials("gateway", GatewaySigner(token)), client=client, clock=self.clock
+                    )
+                broker = coinbase.CoinbaseBroker(
+                    CoinbaseCredentials("gateway", GatewaySigner(token)), client=client, clock=self.clock
+                )
+
+                def reference_price(product_id: Any) -> Any:
+                    """The desk's own quote, so the gateway can price an order against the caps."""
+                    if not product_id:
+                        return None
+                    from .broker import Instrument
+
+                    name = str(product_id)
+                    try:
+                        found = broker.market_data.quote(
+                            Instrument("crypto", name, venue, market_id=name)
+                        )
+                    except Exception:
+                        return None
+                    return found.mid if found.mid is not None else found.last
+
+                client.reference_price = reference_price
+                return broker
+            except Exception as exc:
+                self.alert("warning", f"live venue {venue} not enabled: {type(exc).__name__}")
+                return None
         try:
             if venue == "alpaca":
                 from .adapters import AlpacaCredentials, alpaca
@@ -900,11 +1021,15 @@ class Service:
             self.gateway.ledgers[manifest.id] = self.ledgers[manifest.id]
             self.committee.manifests[manifest.id] = manifest
             self.committee.ledgers[manifest.id] = self.ledgers[manifest.id]
-            broker = self._make_paper_broker(
-                manifest, self.capital_dir / "paper" / f"{manifest.id}.sqlite"
-            )
+            broker = self._make_shadow_book(manifest, self.book_path(manifest.id))
             if broker is not None:
-                self.paper_brokers[manifest.id] = broker
+                self.shadow_books[manifest.id] = broker
+                self.brokers.setdefault(
+                    SHADOW_VENUE, _ShadowRouter(self.shadow_books, self.manifests)
+                )
+                router = self.brokers.get(SHADOW_VENUE)
+                if isinstance(router, _ShadowRouter):
+                    router.add(manifest.id, broker)
 
     def quote(self, instrument: Instrument):
         broker = self.brokers.get(instrument.venue)
@@ -1092,8 +1217,13 @@ class Service:
     # ------------------------------------------------------------------ marks
     def mark_all(self, at: str) -> int:
         """Value every funded sleeve. A desk with no capital and no book is not marked: its
-        clock starts when the committee funds it, not when the process does."""
+        clock starts when the committee funds it, not when the process does.
+
+        A shadow desk's mark is written with `shadow: true`, so nothing downstream can mistake
+        a scored book for money.
+        """
         marked = 0
+        live = self.live_ids()
         for desk_id, ledger in sorted(self.ledgers.items()):
             state = ledger.state(at)
             if state.net_deposits <= ZERO and not state.positions:
@@ -1103,12 +1233,17 @@ class Service:
                 found = self.quote(position.instrument)
                 if found is not None:
                     quotes[key] = found
-            ledger.mark(quotes, at)
+            ledger.mark(quotes, at, shadow=desk_id not in live)
             marked += 1
         return marked
 
+    def live_ids(self) -> set[str]:
+        """The desks on real capital, promotions included. The floor's book is these and no more."""
+        return live_desks(self.manifests, promoted_desks(self.log))
+
     def breakers(self, at: str) -> list[dict[str, Any]]:
-        floor = floor_totals(self.ledgers, at)
+        # The floor's daily loss limit is about real money, so a shadow book cannot trip it.
+        floor = floor_totals(self.ledgers, at, include=self.live_ids())
         tripped: list[dict[str, Any]] = []
         for desk_id, manifest in sorted(self.active_manifests().items()):
             state = self.ledgers[desk_id].state(at)
@@ -1166,13 +1301,13 @@ class Service:
             self.start_sessions(due)
             result["sessions"] = [f"{m.id}/{trigger}" for m, trigger in due]
 
-        for broker in self.paper_brokers.values():
+        for broker in self.shadow_books.values():
             ticker = getattr(broker, "tick", None)
             if ticker is not None:
                 try:
                     ticker()
                 except Exception as exc:
-                    self.alert("warning", f"paper venue tick failed: {exc}")
+                    self.alert("warning", f"shadow book tick failed: {exc}")
         try:
             result["orders"] = [row["order_id"] for row in self.gateway.poll_orders(at)]
         except Exception as exc:
@@ -1214,6 +1349,11 @@ class Service:
             self._save_state(last_evolution_day=day)
             result["evolution"] = actions
 
+        try:
+            event = ResultsLedger.publish_daily(self.log, at, manifests=self.manifests)
+            result["lab"] = None if event is None else event.id
+        except Exception as exc:  # a scoreboard may never stop the floor
+            self.alert("warning", f"lab result failed: {type(exc).__name__}")
         result["published"] = self.publish()
         self.health(at, result)
         return result
@@ -1265,10 +1405,135 @@ class Service:
             released = self.gateway.release_deferred_events()
             summary = self.publisher.push_events(released)
             self.publisher.push_checkpoint(self.checkpoint())
+            self._checkpoints += 1
+            self._save_state(checkpoint_count=self._checkpoints)
             return summary
         except Exception as exc:
             self.last_error = f"publish: {exc}"
             self.alert("warning", f"publish failed: {exc}")
+            return None
+
+    # ------------------------------------------------- the owner's real account balances
+    def venue_brokers(self) -> dict[str, Any]:
+        """The live venues this box can ask for a balance. The shadow router is not one of them."""
+        found = {
+            venue: broker
+            for venue, broker in self.brokers.items()
+            if venue != SHADOW_VENUE and hasattr(broker, "balance")
+        }
+        return {venue: found[venue] for venue in sorted(found, key=_venue_rank)}
+
+    def _read_balances(self, brokers: Mapping[str, Any], timeout: float) -> dict[str, Any]:
+        """Ask every venue at once and give up on the slow ones. Never raises and never blocks
+        longer than `timeout` however many venues there are: a checkpoint is a report, and a
+        report that waits on an exchange is a report that does not get written."""
+        answers: dict[str, Any] = {}
+        threads: list[threading.Thread] = []
+        for venue, broker in brokers.items():
+            def read(venue: str = venue, broker: Any = broker) -> None:
+                try:
+                    answers[venue] = broker.balance()
+                except Exception:
+                    answers[venue] = None
+
+            thread = threading.Thread(target=read, name=f"balance-{venue}", daemon=True)
+            thread.start()
+            threads.append(thread)
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return answers
+
+    def venue_balances(self) -> list[dict[str, Any]]:
+        """Each live venue's account balance, cached for `VENUE_BALANCE_TTL` seconds.
+
+        A venue that fails or does not answer in time keeps its last known numbers and is marked
+        `stale`; a venue that has never answered is simply absent, because publishing a zero for
+        an account nobody could read would look exactly like an account that lost everything.
+        """
+        cache = getattr(self, "_venue_balances", None)
+        if cache is None:
+            cache = self._venue_balances = {}
+        brokers = self.venue_brokers()
+        now = float(self.clock())
+        due = {
+            venue: broker
+            for venue, broker in brokers.items()
+            if now - float((cache.get(venue) or {}).get("read_at", 0.0)) >= VENUE_BALANCE_TTL
+        }
+        answers = self._read_balances(due, VENUE_BALANCE_TIMEOUT) if due else {}
+        rows: list[dict[str, Any]] = []
+        for venue in brokers:
+            cached = cache.get(venue)
+            if venue not in due and cached is not None:
+                rows.append(dict(cached["row"]))
+                continue
+            row = self._balance_row(venue, answers.get(venue))
+            if row is None:
+                if cached is None:
+                    continue
+                rows.append({**cached["row"], "stale": True})
+                # Said once, when the venue stops answering. A checkpoint every half minute
+                # must not turn one outage into a wall of identical alerts.
+                if not cached.get("stale"):
+                    cached["stale"] = True
+                    self.alert("warning", f"{venue} balance is stale: the venue did not answer")
+                continue
+            cache[venue] = {"read_at": now, "row": row, "stale": False}
+            rows.append(dict(row))
+        return rows
+
+    def _balance_row(self, venue: str, balance: Any) -> dict[str, Any] | None:
+        """One venue's answer as a row, or None when it did not answer with usable money."""
+        if balance is None:
+            return None
+        try:
+            return {
+                "venue": venue,
+                "equity": money(getattr(balance, "equity", 0)),
+                "cash": money(getattr(balance, "cash", 0)),
+                "as_of": getattr(balance, "as_of", None) or self.now(),
+            }
+        except (ValueError, ArithmeticError, TypeError):
+            return None
+
+    def account(self, at: str) -> dict[str, Any]:
+        """The portfolio the owner sees: Kalshi plus Coinbase (plus Alpaca when it is live),
+        summed. Empty when no venue has ever answered."""
+        return account_block(self.venue_balances(), at)
+
+    def floor_mark(self, account: Mapping[str, Any], at: str) -> Any:
+        """Append the floor's own balance mark, the way a desk appends `ledger.mark`.
+
+        This is the series the site draws the real balance history from, so it is written at most
+        once every five minutes and only when the portfolio actually moved: a tape full of
+        identical marks is a chart that says nothing.
+        """
+        if not account:
+            return None
+        payload = jsonable(
+            {
+                "account_equity": account["account_equity"],
+                "account_cash": account["account_cash"],
+                "venues": account["venues"],
+                "as_of": at,
+            }
+        )
+        last = self.log.last("ops", "floor.mark")
+        if last is not None:
+            if payload["account_equity"] == last.payload.get("account_equity"):
+                return None
+            previous = last.payload.get("as_of") or last.at
+            try:
+                elapsed = (parse_iso(at) - parse_iso(str(previous))).total_seconds()
+            except (TypeError, ValueError):
+                elapsed = FLOOR_MARK_INTERVAL_SECONDS
+            if elapsed < FLOOR_MARK_INTERVAL_SECONDS:
+                return None
+        try:
+            return self.log.append("ops", "floor.mark", payload, id=f"floor.mark:{at}", at=at)
+        except Exception as exc:
+            self.alert("warning", f"floor mark not recorded: {exc}")
             return None
 
     # ------------------------------------------------------------------ projections
@@ -1277,7 +1542,10 @@ class Service:
         modes = promoted_desks(self.log)
         retired = retired_desks(self.log)
         allocations, _ = self.committee.last_allocation()
-        floor = floor_totals(self.ledgers, at)
+        live = live_desks(self.manifests, modes)
+        # Two floors, and only one of them is money. `floor` is every sleeve the floor really
+        # owns; the shadow books are counted, never added.
+        floor = floor_totals(self.ledgers, at, include=live)
         weighted = ZERO
         weights = ZERO
         desks: list[dict[str, Any]] = []
@@ -1289,7 +1557,8 @@ class Service:
         for desk_id, manifest in sorted(self.manifests.items()):
             state = self.ledgers[desk_id].state(at)
             report = self.committee.gates(desk_id, at)
-            if state.net_deposits > 0:
+            if desk_id in live and state.net_deposits > 0:
+                # Since-inception is the floor's own return, so a hypothetical book cannot move it.
                 weighted += state.time_weighted_return_pct * state.net_deposits
                 weights += state.net_deposits
             desks.append(
@@ -1322,6 +1591,7 @@ class Service:
                     "updated_at": state.as_of,
                 }
             )
+        shadow_count = sum(1 for desk_id in self.manifests if desk_id not in live and desk_id not in retired)
         memo = self.log.last("committee", "committee.memo")
         budget = self._budget or self.committee.compute_budget(at)
         spent = budget.get("spent_today_usd")
@@ -1330,15 +1600,28 @@ class Service:
                 spent = money(self.provider.spent_today())
             except Exception:
                 spent = ZERO
+        funded = sum(
+            (amount for desk_id, amount in allocations.items() if desk_id in live), ZERO
+        )
+        # The venue accounts, and the floor's own mark of them. The read is cached and bounded,
+        # so a checkpoint costs at most one short request per venue per minute.
+        account = self.account(at)
+        self.floor_mark(account, at)
         return checkpoint_body(
             published_at=at,
             floor={
+                **account,
                 "equity": floor["equity"],
                 "cash": floor["cash"],
                 "daily_pnl": floor["daily_pnl"],
-                "capital_usd": sum(allocations.values(), ZERO) or floor["net_deposits"],
+                "capital_usd": funded or floor["net_deposits"],
                 "since_inception_pct": (weighted / weights) if weights > 0 else ZERO,
                 "benchmark": None,
+                # Named so the site cannot accidentally render a shadow book as the floor's money.
+                "live_equity": floor["equity"],
+                "live_daily_pnl": floor["daily_pnl"],
+                "live_desks": len(live),
+                "shadow_desks": shadow_count,
             },
             desks=desks,
             committee={
@@ -1352,7 +1635,44 @@ class Service:
                 "profit_share": money(budget["profit_share"]),
                 "trailing_realized_usd": money(budget["trailing_realized_usd"]),
             },
+            infra=self.infra(at, spend_usd=spent if spent is not None else ZERO),
         )
+
+    # ------------------------------------------------------------------ the box
+    def infra(self, at: str, *, spend_usd: Any = ZERO) -> dict[str, Any]:
+        """Where the floor is running, and what it has cost to run it today.
+
+        `ltcm.hostinfo.describe_host()` owns the facts about the box. It is imported lazily and
+        every failure degrades to `{"host": "local"}`: the floor publishes its numbers whether
+        or not it can say which machine produced them.
+        """
+        described: dict[str, Any] = {}
+        try:
+            from . import hostinfo  # type: ignore[attr-defined]
+
+            found = hostinfo.describe_host()
+            if isinstance(found, Mapping):
+                described = dict(found)
+        except Exception:
+            described = {}
+        uptime = described.get("uptime_seconds")
+        if not isinstance(uptime, (int, float)) or isinstance(uptime, bool):
+            uptime = max(0, int(float(self.clock()) - self._started_at))
+        checkpoints = described.get("checkpoint_count")
+        if not isinstance(checkpoints, int) or isinstance(checkpoints, bool):
+            checkpoints = self._checkpoints
+        spend = described.get("spend_usd")
+        if spend is None:
+            spend = spend_usd
+        return {
+            "host": _tag(described.get("host")) or "local",
+            "box_id": _tag(described.get("box_id")),
+            "checkpoint_count": int(checkpoints),
+            "spend_usd": money(spend),
+            "uptime_seconds": int(uptime),
+            "region": _tag(described.get("region")),
+            "requests_today": described.get("requests_today"),
+        }
 
     def desk_status(self, desk_id: str, retired: set[str] | None = None) -> str:
         retired = retired if retired is not None else retired_desks(self.log)
@@ -1367,7 +1687,9 @@ class Service:
     # ------------------------------------------------------------------ health
     def status(self, at: str | None = None) -> dict[str, Any]:
         at = at or self.now()
-        floor = floor_totals(self.ledgers, at)
+        live = self.live_ids()
+        floor = floor_totals(self.ledgers, at, include=live)
+        shadow_floor = floor_totals(self.ledgers, at, include=set(self.ledgers) - live)
         state = self.state()
         modes = promoted_desks(self.log)
         desks = []
@@ -1407,6 +1729,9 @@ class Service:
                 "cash": text(floor["cash"]),
                 "daily_pnl": text(floor["daily_pnl"]),
                 "net_deposits": text(floor["net_deposits"]),
+                "live_desks": len(live),
+                "shadow_desks": len(self.ledgers) - len(live),
+                "shadow_equity": text(shadow_floor["equity"]),
             },
             "budget": {
                 "spent_today_usd": spent,
@@ -1423,6 +1748,11 @@ class Service:
 
     def health(self, at: str | None = None, tick: Mapping[str, Any] | None = None) -> dict[str, Any]:
         report = self.status(at)
+        # The supervisor's view of the money is the venues' own view of it. A stale row here is
+        # how an operator learns a venue stopped answering before the site shows a flat line.
+        account = self.account(report["updated_at"])
+        if account:
+            report["floor"].update(jsonable(account))
         if tick is None:
             tick = self._last_tick
         else:
@@ -1490,7 +1820,7 @@ class Service:
     def close(self) -> None:
         for thread in self._sessions:
             thread.join(timeout=1.0)
-        for broker in list(self.paper_brokers.values()) + list(self.brokers.values()):
+        for broker in list(self.shadow_books.values()) + list(self.brokers.values()):
             closer = getattr(broker, "close", None)
             if closer is not None:
                 try:
@@ -1506,25 +1836,30 @@ class Service:
         self.log.close()
 
 
-class _PaperRouter:
-    """One `Broker` face over the per-desk paper books.
+class _ShadowRouter:
+    """One `Broker` face over the per-desk shadow books.
 
-    Each paper desk keeps its own simulator file so a bug in one desk cannot spend another's
-    cash. The gateway routes by venue, so this router sends each order to the book that belongs
-    to the desk named on the intent, and aggregates the reads.
+    Each shadow desk keeps its own scoring file so a bug in one desk cannot spend another's
+    notional cash. The gateway routes every shadow desk to the one `shadow` key, so this router
+    sends each order to the book that belongs to the desk named on the intent, and aggregates
+    the reads. Nothing here is a venue and nothing here sends an order anywhere.
     """
 
-    venue = "paper"
+    venue = SHADOW_VENUE
 
     def __init__(self, brokers: Mapping[str, Any], manifests: Mapping[str, DeskManifest]):
         self.brokers = dict(brokers)
         self.manifests = dict(manifests)
         self._orders: dict[str, str] = {}
 
+    def add(self, desk_id: str, broker: Any) -> None:
+        """Adopt a book the evolution loop spawned after the service started."""
+        self.brokers[desk_id] = broker
+
     def _for(self, desk_id: str) -> Any:
         broker = self.brokers.get(desk_id)
         if broker is None:
-            raise KeyError(f"no paper book for desk {desk_id}")
+            raise KeyError(f"no shadow book for desk {desk_id}")
         return broker
 
     def capabilities(self) -> set[str]:
@@ -1585,9 +1920,9 @@ class _PaperRouter:
         return out
 
     def settle_event(self, market_id: str, payout_per_contract: Any, *, now: Any = None) -> list[Any]:
-        """Settle one resolved market in every paper book. A book with no position pays nothing.
+        """Settle one resolved market in every shadow book. A book with no position pays nothing.
 
-        `payout_per_contract` is the **yes** value; each simulator pays its NO holdings the
+        `payout_per_contract` is the **yes** value; each book pays its NO holdings the
         complement. Fanning out is safe because a book that never traded the market returns
         no fills, and it keeps the router from having to know which desk held what.
         """

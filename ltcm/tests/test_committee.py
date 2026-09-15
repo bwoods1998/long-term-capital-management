@@ -12,7 +12,7 @@ from ltcm.ledger import DeskLedger
 from ltcm.manifest import DeskManifest
 from ltcm.tests.test_manifest import SAMPLE
 
-AAPL = Instrument("equity", "AAPL", "paper")
+AAPL = Instrument("equity", "AAPL", "alpaca")
 ALPACA_AAPL = Instrument("equity", "AAPL", "alpaca")
 
 
@@ -78,7 +78,7 @@ class CommitteeCase(unittest.TestCase):
     def fill(self, desk, side, quantity, price, at, *, instrument=AAPL, fee="0"):
         seq = self.log.latest_seq() + 1
         self.log.append(
-            "broker:paper",
+            "broker:shadow",
             "broker.fill",
             {
                 "fill_id": f"f{seq}",
@@ -108,7 +108,7 @@ class GateTests(CommitteeCase):
         self.assertEqual(
             report["failed"], ["cost_adjusted_return", "days_live", "decisions"]
         )
-        self.assertEqual(report["evidence"]["mode"], "paper")
+        self.assertEqual(report["evidence"]["mode"], "shadow")
         self.assertEqual(report["evidence"]["decisions"], 0)
 
     def test_gate_a_passes_on_days_decisions_and_cost_adjusted_return(self):
@@ -180,9 +180,9 @@ class GateTests(CommitteeCase):
             at="2026-09-05T20:00:00.000Z",
         )
         self.log.append(
-            "broker:paper",
+            "broker:shadow",
             "broker.reconciled",
-            {"venue": "paper", "matches": 0,
+            {"venue": "alpaca", "matches": 0,
              "mismatches": [{"instrument": AAPL.key, "ledger": "1", "venue": "2"}]},
             at="2026-09-06T20:00:00.000Z",
         )
@@ -193,7 +193,7 @@ class GateTests(CommitteeCase):
 
 
 class AllocationTests(CommitteeCase):
-    def test_paper_sleeves_sit_at_manifest_capital_and_publish_gates(self):
+    def test_shadow_sleeves_sit_at_manifest_capital_and_publish_gates(self):
         self.add(manifest("earnings-01"))
         self.add(manifest("kalshi-01", family="kalshi", playbook="playbooks/kalshi-01.md"))
         targets = self.committee().allocate("2026-09-14T22:00:00.000Z")
@@ -209,6 +209,20 @@ class AllocationTests(CommitteeCase):
         self.assertEqual(
             self.ledgers["earnings-01"].state("2026-09-14T22:00:00.000Z").cash, Decimal("1000.00")
         )
+
+    def test_a_shadow_allocation_is_named_as_notional_and_costs_the_floor_nothing(self):
+        """A shadow desk is scored against a budget, not funded out of the floor's money."""
+        self.add(manifest("earnings-01"))
+        self.add(live_manifest("live-01", capital="4000"))
+        committee = self.committee(floor_capital_usd="4000")
+        targets = committee.allocate("2026-09-14T22:00:00.000Z")
+        event = self.log.last("committee", "committee.allocation")
+        self.assertEqual(event.payload["shadow"], {"earnings-01": True})
+        self.assertIn("notional scoring budget", event.payload["reasons"]["earnings-01"])
+        # The live sleeve keeps the whole floor: the notional budget never competed for it.
+        self.assertEqual(targets["live-01"], Decimal("4000.00"))
+        self.assertEqual(targets["earnings-01"], Decimal("1000.00"))
+        self.assertNotIn("scaled to the floor", event.payload["reasons"]["live-01"])
 
     def test_an_unchanged_allocation_is_not_republished(self):
         self.add(manifest())
@@ -443,15 +457,15 @@ class MemoTests(CommitteeCase):
 class LineageTests(CommitteeCase):
     def test_promotion_changes_the_mode_without_touching_the_manifest(self):
         desk = self.add(manifest())
-        self.assertEqual(capital_mode(desk, promoted_desks(self.log)), "paper")
+        self.assertEqual(capital_mode(desk, promoted_desks(self.log)), "shadow")
         self.log.append(
             "evolution",
             "evolution.promoted",
-            {"desk_id": "earnings-01", "from": "paper", "to": "live", "score": {}},
+            {"desk_id": "earnings-01", "from": "shadow", "to": "live", "score": {}},
             at="2026-09-10T20:00:00.000Z",
         )
         self.assertEqual(capital_mode(desk, promoted_desks(self.log)), "live")
-        self.assertEqual(desk.capital_mode, "paper")  # the file on disk is untouched
+        self.assertEqual(desk.capital_mode, "shadow")  # the file on disk is untouched
         report = self.committee().gates("earnings-01", "2026-09-14T20:00:00.000Z")
         self.assertEqual(report["gate"], "B")
 

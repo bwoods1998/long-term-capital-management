@@ -1,9 +1,16 @@
-"""`PaperBroker`: a deterministic venue simulator with the live `Broker` surface.
+"""`ShadowBook`: a deterministic scoring book with the live `Broker` surface.
 
-The simulator is the default venue for every desk. It holds its state in one SQLite file
-(`account`, `positions`, `orders`, `fills`, `marks`), keeps all money as TEXT decimals, and takes
-its prices from any `MarketData` implementation and its time from an injected clock, so a test and
-a live paper session run exactly the same code path.
+This is the engine behind a **shadow desk**. No order it accepts is ever sent anywhere: it prices
+the desk's proposal against the real venue's quote, charges the real venue's fee model, and keeps
+the result as a hypothetical book. It holds its state in one SQLite file (`account`, `positions`,
+`orders`, `fills`, `marks`), keeps all money as TEXT decimals, and takes its prices from any
+`MarketData` implementation and its time from an injected clock, so a test and a live shadow
+session run exactly the same code path.
+
+The book's own `venue` is `"shadow"` -- the gateway's routing key -- while `market_venue` names the
+real venue it prices and charges like, which is the venue the desk would trade on once it is
+promoted. Instruments keep the real venue, so nothing about the fill is a fiction except that it
+never happened.
 
 What is modelled
   - Market orders fill immediately at `Quote.reference(side)` moved by `slippage_bps`.
@@ -52,7 +59,7 @@ CENT = Decimal("0.01")
 PRICE_PLACES = Decimal("0.00000001")
 BPS = Decimal(10_000)
 
-PAPER_CAPABILITIES = {
+SHADOW_CAPABILITIES = {
     "equity",
     "option",
     "crypto",
@@ -62,8 +69,11 @@ PAPER_CAPABILITIES = {
     "gtc",
     "ioc",
     "fractional",
-    "paper",
+    "shadow",
 }
+
+#: The routing key of the scoring book, matching `manifest.SHADOW_VENUE`.
+SHADOW_VENUE = "shadow"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS account (
@@ -183,7 +193,7 @@ class FeeModel:
     @classmethod
     def for_venue(cls, venue: str) -> "FeeModel":
         """The default model for a venue. Unknown venues get the conservative defaults."""
-        if venue in ("alpaca", "paper"):
+        if venue == "alpaca":
             return cls(option_per_contract=Decimal("0.65"), crypto_taker_pct=Decimal("0.0025"))
         if venue == "kalshi":
             return cls(event_fee_rate=Decimal("0.07"))
@@ -238,14 +248,19 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-class PaperBroker:
-    """A `Broker` over simulated state. Deterministic given the same data, clock and inputs."""
+class ShadowBook:
+    """A `Broker` over scored state. Deterministic given the same data, clock and inputs.
+
+    Nothing here reaches a venue. `market_venue` is the real venue whose quotes price the fills
+    and whose fee schedule charges them, so a shadow result is comparable with a live one.
+    """
 
     def __init__(
         self,
         path: "str | Path",
         *,
-        venue: str = "paper",
+        venue: str = SHADOW_VENUE,
+        market_venue: "str | None" = None,
         data: MarketData,
         clock: Callable[[], Any],
         initial_cash: Any = Decimal("100000"),
@@ -257,9 +272,11 @@ class PaperBroker:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.venue = venue
+        #: The real venue this book prices and charges like. Defaults to its own name.
+        self.market_venue = market_venue or venue
         self.data = data
         self.clock = clock
-        self.fee_model = fee_model or FeeModel.for_venue(venue)
+        self.fee_model = fee_model or FeeModel.for_venue(self.market_venue)
         self.slippage_bps = money(slippage_bps)
         if self.slippage_bps < 0:
             raise ValueError("slippage_bps must not be negative")
@@ -294,8 +311,12 @@ class PaperBroker:
         """The injected clock as an ISO-8601 UTC stamp."""
         return iso(self.clock())
 
+    def accepts(self, venue: str) -> bool:
+        """An instrument routes here when it names this book or the venue it stands in for."""
+        return venue in (self.venue, self.market_venue)
+
     def capabilities(self) -> set[str]:
-        caps = set(PAPER_CAPABILITIES)
+        caps = set(SHADOW_CAPABILITIES)
         if self.allow_short:
             caps.add("short")
         return caps
@@ -439,9 +460,9 @@ class PaperBroker:
             existing = self.order_for_intent(intent.id)
             if existing is not None:
                 return existing
-            if intent.instrument.venue != self.venue:
+            if not self.accepts(intent.instrument.venue):
                 raise RejectedOrder(
-                    f"instrument routes to {intent.instrument.venue}, not {self.venue}"
+                    f"instrument routes to {intent.instrument.venue}, not {self.market_venue}"
                 )
             self._check_quantity(intent)
             stamp = self.now()
@@ -900,4 +921,17 @@ class PaperBroker:
         }
 
 
-__all__ = ["PaperBroker", "FeeModel", "PAPER_CAPABILITIES", "ceil_cents", "quantize_cash", "quantize_price"]
+#: The book was called `PaperBroker` before the floor dropped the word "paper". Same class.
+PaperBroker = ShadowBook
+PAPER_CAPABILITIES = SHADOW_CAPABILITIES
+
+__all__ = [
+    "ShadowBook",
+    "PaperBroker",
+    "FeeModel",
+    "SHADOW_CAPABILITIES",
+    "SHADOW_VENUE",
+    "ceil_cents",
+    "quantize_cash",
+    "quantize_price",
+]

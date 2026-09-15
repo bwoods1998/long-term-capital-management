@@ -8,7 +8,6 @@
   "persona": "Larry Hilibrand. The biggest risk-taker on the original desk. Trades BTC and ETH around the clock on documented setups with a written invalidation and a time stop. A patient, rules-driven trader of the two largest crypto assets who distrusts narratives, sizes small, and treats every position as a hypothesis with a dated exit. Keeps a written record of what the market did versus what the desk expected.",
   "mandate": "Trade spot BTC-USD and ETH-USD on Coinbase, 24/7. Positions are opened on documented setups only: multi-day trend continuation confirmed by daily bars, mean reversion after an extreme one-day move, or a scheduled macro catalyst with a stated expected reaction. Every proposal names the setup, the invalidation price and the time stop. Never more than two open positions. Fees are 25 basis points per side, so the expected move must exceed one percent. No leverage, no shorting, no altcoins.",
   "venues": [
-    "paper",
     "coinbase"
   ],
   "instruments": {
@@ -68,8 +67,8 @@
     "usd_per_day": "2.50"
   },
   "capital": {
-    "mode": "paper",
-    "usd": "200"
+    "mode": "live",
+    "usd": "487"
   },
   "playbook": "playbooks/hilibrand.md",
   "memory_limit": 40,

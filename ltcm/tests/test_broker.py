@@ -13,7 +13,7 @@ from ltcm.broker import (
 )
 
 
-def equity(symbol="AAPL", venue="paper"):
+def equity(symbol="AAPL", venue="alpaca"):
     return Instrument("equity", symbol, venue)
 
 
@@ -34,7 +34,7 @@ class MoneyTests(unittest.TestCase):
 class InstrumentTests(unittest.TestCase):
     def test_keys_and_roundtrip(self):
         inst = equity()
-        self.assertEqual(inst.key, "equity:AAPL:paper")
+        self.assertEqual(inst.key, "equity:AAPL:alpaca")
         self.assertEqual(Instrument.from_dict(inst.to_dict()), inst)
         option = Instrument("option", "AAPL", "schwab", multiplier="100", expiry="2026-10-16", strike="200", right="call")
         self.assertEqual(option.key, "option:AAPL:schwab:2026-10-16:200:call")
@@ -44,13 +44,13 @@ class InstrumentTests(unittest.TestCase):
 
     def test_validation(self):
         with self.assertRaises(ValueError):
-            Instrument("bond", "X", "paper")
+            Instrument("bond", "X", "alpaca")
         with self.assertRaises(ValueError):
-            Instrument("option", "AAPL", "paper")
+            Instrument("option", "AAPL", "alpaca")
         with self.assertRaises(ValueError):
             Instrument("event", "X", "kalshi")
         with self.assertRaises(ValueError):
-            Instrument("equity", "AAPL", "paper", multiplier="0")
+            Instrument("equity", "AAPL", "alpaca", multiplier="0")
 
 
 class QuoteTests(unittest.TestCase):
@@ -118,7 +118,7 @@ class OrderAndFillTests(unittest.TestCase):
         self.assertIsNone(Position(equity(), "1", "10").market_value)
 
     def test_balance(self):
-        bal = Balance("paper", "100", "120", "100", "t")
+        bal = Balance("alpaca", "100", "120", "100", "t")
         self.assertEqual(bal.to_dict()["equity"], "120")
 
 

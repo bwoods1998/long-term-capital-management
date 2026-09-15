@@ -2,6 +2,7 @@ import copy
 import datetime as dt
 import json
 import tempfile
+import time
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -14,7 +15,7 @@ from ltcm.tests.test_gateway import FakeBroker
 from ltcm.tests.test_manifest import SAMPLE
 
 UTC = dt.timezone.utc
-AAPL = Instrument("equity", "AAPL", "paper")
+AAPL = Instrument("equity", "AAPL", "alpaca")
 DESK = "earnings-01"
 
 
@@ -152,6 +153,7 @@ class ServiceCase(unittest.TestCase):
         self.write_manifest(DESK)
         self.clock = FakeClock(self.START)
         self.brokers = {}
+        self.venues = {}
         self.publisher = FakePublisher()
         self.provider = FakeProvider()
         self.memory = FakeMemory()
@@ -177,8 +179,8 @@ class ServiceCase(unittest.TestCase):
         return data
 
     def broker_factory(self, venue, *, manifest=None, path=None, settings=None, service=None):
-        if manifest is None:
-            return None
+        if manifest is None:  # a live venue adapter, which a test supplies only when it needs one
+            return self.venues.get(venue)
         broker = self.brokers.get(manifest.id)
         if broker is None:
             broker = self.brokers[manifest.id] = FakeBroker()
@@ -362,7 +364,7 @@ class BudgetTests(ServiceCase):
         )
         for n, (side, price) in enumerate((("buy", "100"), ("sell", "120"))):
             log.append(
-                "broker:paper", "broker.fill",
+                "broker:shadow", "broker.fill",
                 {"fill_id": f"f{n}", "order_id": "o1", "desk_id": DESK,
                  "instrument": AAPL.to_dict(), "side": side, "quantity": "10",
                  "price": price, "fee": "0", "at": f"2026-09-1{1 + n}T14:00:00.000Z"},
@@ -449,7 +451,7 @@ class CriticWiringTests(ServiceCase):
         self.assertIsNone(self.service.critic)
         self.assertIsNone(self.service.gateway.critic)
 
-    def test_a_paper_desk_order_never_reaches_the_critic(self):
+    def test_a_shadow_desk_order_never_reaches_the_critic(self):
         from ltcm.broker import OrderIntent
 
         self.fund()
@@ -461,6 +463,146 @@ class CriticWiringTests(ServiceCase):
         self.assertTrue(result["approved"], result["reasons"])
         self.assertEqual(self.service.log.read(kind="risk.review"), [])
         self.assertEqual(self.provider.calls, [])
+
+
+class CheckpointTests(ServiceCase):
+    """What the site is told. A shadow book is legible, and never counted as money."""
+
+    def live_desk(self, desk_id="live-01"):
+        self.write_manifest(
+            desk_id, venues=["kalshi"], capital={"mode": "live", "usd": "500"},
+            instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+        )
+        self.service.close()
+        self.service = self.build()
+        return desk_id
+
+    def test_the_floor_block_counts_live_desks_only(self):
+        live = self.live_desk()
+        self.fund()
+        self.tick()
+        body = self.service.checkpoint()
+        floor = body["floor"]
+        self.assertEqual(floor["live_desks"], 1)
+        self.assertEqual(floor["shadow_desks"], 1)
+        self.assertEqual(floor["equity"], floor["live_equity"])
+        self.assertEqual(floor["daily_pnl"], floor["live_daily_pnl"])
+        rows = {row["id"]: row for row in body["desks"]}
+        self.assertEqual(rows[DESK]["mode"], "shadow")
+        self.assertEqual(rows[live]["mode"], "live")
+        # The shadow desk carries its notional book; the floor's equity is the live sleeve alone.
+        self.assertEqual(rows[DESK]["equity"], Decimal("1000.00"))
+        self.assertEqual(floor["live_equity"], rows[live]["equity"])
+        self.assertEqual(floor["capital_usd"], Decimal("500.00"))
+
+    def test_a_floor_of_shadow_desks_publishes_no_equity_at_all(self):
+        self.fund()
+        self.tick()
+        floor = self.service.checkpoint()["floor"]
+        self.assertEqual(floor["live_desks"], 0)
+        self.assertEqual(floor["shadow_desks"], 1)
+        self.assertEqual(floor["live_equity"], Decimal("0"))
+        self.assertEqual(floor["since_inception_pct"], Decimal("0"))
+
+    def test_the_infra_block_reports_the_box_and_the_spend(self):
+        self.fund()
+        self.tick()
+        infra = self.service.checkpoint()["infra"]
+        self.assertEqual(
+            sorted(infra),
+            ["box_id", "checkpoint_count", "host", "region", "requests_today", "spend_usd",
+             "uptime_seconds"],
+        )
+        self.assertIn(infra["host"], ("local", "sailbox"))
+        self.assertEqual(infra["checkpoint_count"], 1)
+        self.assertEqual(infra["spend_usd"], Decimal("0.03"))  # the fake provider's spend
+        self.assertGreaterEqual(infra["uptime_seconds"], 0)
+        # Nothing the site was not promised leaks out of describe_host().
+        self.assertNotIn("hostname", infra)
+        self.assertNotIn("pid", infra)
+
+    def test_a_missing_hostinfo_module_degrades_to_the_local_box(self):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def blocked(name, globals=None, locals=None, fromlist=(), level=0):
+            if "hostinfo" in (fromlist or ()) or name.endswith("hostinfo"):
+                raise ImportError("no hostinfo on this box")
+            return real_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = blocked
+        try:
+            infra = self.service.infra(self.service.now())
+        finally:
+            builtins.__import__ = real_import
+        self.assertEqual(infra["host"], "local")
+        self.assertIsNone(infra["box_id"])
+        self.assertIsNone(infra["region"])
+
+    def test_a_hostinfo_that_names_a_sailbox_is_published_as_one(self):
+        from ltcm import hostinfo
+
+        real = hostinfo.describe_host
+        hostinfo.describe_host = lambda *a, **k: {
+            "host": "sailbox", "box_id": "sb-77c1", "region": "us-east",
+            "uptime_seconds": 4200.5, "hostname": "private-box", "pid": 4,
+        }
+
+        try:
+            infra = self.service.infra(self.service.now())
+        finally:
+            hostinfo.describe_host = real
+        self.assertEqual(infra["host"], "sailbox")
+        self.assertEqual(infra["box_id"], "sb-77c1")
+        self.assertEqual(infra["region"], "us-east")
+        self.assertEqual(infra["uptime_seconds"], 4200)
+        self.assertNotIn("hostname", infra)
+
+    def test_an_environment_variable_cannot_break_publication(self):
+        """A box id or region is a guest environment string. The site refuses markup; clean it."""
+        from ltcm import hostinfo
+
+        real = hostinfo.describe_host
+        hostinfo.describe_host = lambda *a, **k: {
+            "host": "sailbox", "box_id": "sb-<script>77c1", "region": "us east\n", "uptime_seconds": 1,
+        }
+        try:
+            infra = self.service.infra(self.service.now())
+        finally:
+            hostinfo.describe_host = real
+        self.assertEqual(infra["box_id"], "sb-script77c1")
+        self.assertEqual(infra["region"], "us east")
+
+
+class ShadowRoutingTests(ServiceCase):
+    """A shadow desk runs the whole session and reaches a scoring book, never a venue."""
+
+    def test_a_shadow_desk_gets_its_own_book_under_the_shadow_key(self):
+        self.assertEqual(sorted(self.service.shadow_books), [DESK])
+        self.assertIn("shadow", self.service.brokers)
+        self.assertEqual(self.service.brokers["shadow"].venue, "shadow")
+        self.assertEqual(self.service.live_ids(), set())
+
+    def test_a_book_written_under_the_old_name_is_kept(self):
+        """The directory was renamed; the desk's positions and cash were not."""
+        legacy = self.root / ".data" / "ltcm" / "paper"
+        legacy.mkdir(parents=True, exist_ok=True)
+        (legacy / f"{DESK}.sqlite").write_bytes(b"")
+        self.assertEqual(self.service.book_path(DESK), legacy / f"{DESK}.sqlite")
+        current = self.root / ".data" / "ltcm" / "shadow" / f"{DESK}.sqlite"
+        current.parent.mkdir(parents=True, exist_ok=True)
+        current.write_bytes(b"")
+        self.assertEqual(self.service.book_path(DESK), current)
+
+    def test_a_live_desk_has_no_shadow_book(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.service.close()
+        self.service = self.build(live_venues=[])
+        self.assertEqual(self.service.shadow_books, {})
+        self.assertEqual(self.service.live_ids(), {DESK})
+        alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert", limit=50)]
+        self.assertTrue(any("has no broker" in text for text in alerts), alerts)
 
 
 class HealthTests(ServiceCase):
@@ -486,7 +628,7 @@ class HealthTests(ServiceCase):
     def test_status_reports_the_roster_without_writing(self):
         status = self.service.status()
         self.assertEqual(status["desks"][0]["id"], DESK)
-        self.assertEqual(status["desks"][0]["mode"], "paper")
+        self.assertEqual(status["desks"][0]["mode"], "shadow")
         self.assertEqual(status["floor"]["equity"], "0")
         self.assertFalse((self.root / ".data" / "ltcm" / "health.json").exists())
 
@@ -736,7 +878,7 @@ class SettlementSweepTests(ServiceCase):
         super().setUp()
         self.write_manifest(
             DESK,
-            venues=["paper", "kalshi"],
+            venues=["kalshi"],
             instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
             cadence={
                 "sessions": ["09:45"],
@@ -852,3 +994,173 @@ class RateCardTickTests(ServiceCase):
         self.assertIsNone(result["rate_card"])
         alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert")]
         self.assertFalse(any("rate card" in text for text in alerts), alerts)
+
+
+class FakeVenue:
+    """A live venue adapter that answers with whatever the test put in it, or refuses to."""
+
+    def __init__(self, venue, *, equity="500", cash="500", as_of="2026-09-14T13:50:00Z"):
+        self.venue = venue
+        self.equity = Decimal(equity)
+        self.cash = Decimal(cash)
+        self.as_of = as_of
+        self.error = None
+        self.delay = 0.0
+        self.calls = 0
+
+    def balance(self):
+        from ltcm.broker import Balance
+
+        self.calls += 1
+        if self.delay:
+            time.sleep(self.delay)
+        if self.error is not None:
+            raise self.error
+        return Balance(self.venue, self.cash, self.equity, self.cash, self.as_of)
+
+
+class AccountBalanceTests(ServiceCase):
+    """The masthead number the owner asked for: the venues' own balances, added up."""
+
+    KALSHI = "492.29"
+    COINBASE = "487.40"
+
+    def live_floor(self, **venues):
+        self.venues = venues or {
+            "kalshi": FakeVenue("kalshi", equity=self.KALSHI, cash=self.KALSHI),
+            "coinbase": FakeVenue("coinbase", equity=self.COINBASE, cash="12.60"),
+        }
+        self.service.close()
+        self.service = self.build(live_venues=sorted(self.venues))
+        return self.service
+
+    def marks(self):
+        return [
+            event.payload["account_equity"]
+            for event in self.service.log.read(stream="ops", kind="floor.mark")
+        ]
+
+    def test_the_checkpoint_carries_every_venue_balance_and_their_sum(self):
+        floor = self.live_floor().checkpoint()["floor"]
+        self.assertEqual(floor["account_equity"], Decimal("979.69"))
+        self.assertEqual(floor["account_cash"], Decimal("504.89"))
+        # Kalshi first, the way the owner reads the two accounts.
+        self.assertEqual([row["venue"] for row in floor["venues"]], ["kalshi", "coinbase"])
+        self.assertEqual(floor["venues"][0]["equity"], Decimal(self.KALSHI))
+        self.assertEqual(floor["venues"][1]["cash"], Decimal("12.60"))
+        # A venue stamps to the second; the site accepts milliseconds and nothing else.
+        self.assertEqual(floor["venues"][0]["as_of"], "2026-09-14T13:50:00.000Z")
+        self.assertNotIn("stale", floor["venues"][0])
+        # The ledger's own number is untouched: it is what attributes a gain to a desk.
+        self.assertEqual(floor["live_equity"], Decimal("0"))
+
+    def test_a_floor_with_no_live_venue_publishes_no_account_block_at_all(self):
+        floor = self.service.checkpoint()["floor"]
+        for field in ("account_equity", "account_cash", "venues"):
+            self.assertNotIn(field, floor)
+        self.assertEqual(self.marks(), [])
+
+    def test_a_venue_that_never_answered_is_absent_rather_than_zero(self):
+        broken = FakeVenue("kalshi")
+        broken.error = RuntimeError("down")
+        floor = self.live_floor(kalshi=broken, coinbase=FakeVenue("coinbase", equity="10")).checkpoint()["floor"]
+        self.assertEqual([row["venue"] for row in floor["venues"]], ["coinbase"])
+        self.assertEqual(floor["account_equity"], Decimal("10"))
+
+    def test_a_venue_that_stops_answering_keeps_its_last_numbers_and_says_they_are_stale(self):
+        service = self.live_floor()
+        service.checkpoint()
+        self.venues["kalshi"].error = RuntimeError("venue down")
+        self.clock.set(self.START + 61)
+        floor = service.checkpoint()["floor"]
+        kalshi = floor["venues"][0]
+        self.assertEqual(kalshi["venue"], "kalshi")
+        self.assertTrue(kalshi["stale"])
+        self.assertEqual(kalshi["equity"], Decimal(self.KALSHI))
+        self.assertNotIn("stale", floor["venues"][1])
+        # The total still counts the stale sleeve: the money is there, the reading is old.
+        self.assertEqual(floor["account_equity"], Decimal("979.69"))
+        alerts = [e.payload["text"] for e in service.log.read(kind="ops.alert")]
+        self.assertEqual([t for t in alerts if "stale" in t], ["kalshi balance is stale: the venue did not answer"])
+        # An outage every half minute must not become a wall of identical alerts.
+        self.clock.set(self.START + 122)
+        service.checkpoint()
+        alerts = [e.payload["text"] for e in service.log.read(kind="ops.alert")]
+        self.assertEqual(len([t for t in alerts if "stale" in t]), 1)
+
+    def test_a_balance_is_read_once_a_minute_however_often_the_floor_publishes(self):
+        service = self.live_floor()
+        service.checkpoint()
+        service.checkpoint()
+        self.assertEqual(self.venues["kalshi"].calls, 1)
+        self.clock.set(self.START + 30)
+        service.checkpoint()
+        self.assertEqual(self.venues["kalshi"].calls, 1)
+        self.clock.set(self.START + 61)
+        service.checkpoint()
+        self.assertEqual(self.venues["kalshi"].calls, 2)
+
+    def test_a_slow_venue_never_holds_up_the_checkpoint(self):
+        from ltcm import service as service_module
+
+        service = self.live_floor()
+        service.checkpoint()  # both venues answer, so both have something to fall back on
+        self.venues["kalshi"].delay = 5.0
+        self.clock.set(self.START + 61)
+        timeout = service_module.VENUE_BALANCE_TIMEOUT
+        service_module.VENUE_BALANCE_TIMEOUT = 0.05
+        try:
+            started = time.monotonic()
+            floor = service.checkpoint()["floor"]
+        finally:
+            service_module.VENUE_BALANCE_TIMEOUT = timeout
+        self.assertLess(time.monotonic() - started, 4.0)
+        self.assertTrue(floor["venues"][0]["stale"])
+        self.assertEqual(floor["account_equity"], Decimal("979.69"))
+
+    def test_the_floor_mark_is_written_at_most_every_five_minutes_and_only_on_a_change(self):
+        service = self.live_floor()
+        service.checkpoint()
+        self.assertEqual(self.marks(), ["979.69"])
+        self.venues["kalshi"].equity = Decimal("500.00")
+        self.clock.set(self.START + 61)
+        service.checkpoint()  # the balance moved, but only a minute has passed
+        self.assertEqual(self.marks(), ["979.69"])
+        self.clock.set(self.START + 400)
+        service.checkpoint()  # five minutes on, and the balance moved
+        self.assertEqual(self.marks(), ["979.69", "987.40"])
+        self.clock.set(self.START + 800)
+        service.checkpoint()  # five minutes on, and nothing moved
+        self.assertEqual(self.marks(), ["979.69", "987.40"])
+
+    def test_the_floor_mark_is_a_public_ops_record_the_site_will_accept(self):
+        from ltcm.publish import shape_problem
+
+        service = self.live_floor()
+        service.checkpoint()
+        event = service.log.last("ops", "floor.mark")
+        self.assertTrue(event.public)
+        self.assertEqual(event.stream, "ops")
+        self.assertEqual(
+            sorted(event.payload), ["account_cash", "account_equity", "as_of", "venues"]
+        )
+        self.assertEqual(event.payload["as_of"], event.at)
+        self.assertEqual(
+            event.payload["venues"][0],
+            {"venue": "kalshi", "equity": self.KALSHI, "cash": self.KALSHI,
+             "as_of": "2026-09-14T13:50:00.000Z"},
+        )
+        self.assertIsNone(shape_problem(event))
+
+    def test_the_health_file_shows_the_venue_balances_and_their_staleness(self):
+        service = self.live_floor()
+        self.venues["coinbase"].error = RuntimeError("down")
+        service.health()
+        self.venues["coinbase"].error = None
+        self.clock.set(self.START + 61)
+        report = service.health()
+        self.assertEqual(report["floor"]["account_equity"], "979.69")
+        self.assertEqual(report["floor"]["account_cash"], "504.89")
+        self.assertEqual([row["venue"] for row in report["floor"]["venues"]], ["kalshi", "coinbase"])
+        written = json.loads(self.service.health_path.read_text())
+        self.assertEqual(written["floor"]["venues"][1]["equity"], self.COINBASE)

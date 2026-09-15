@@ -67,6 +67,9 @@ KINDS: dict[str, str] = {
     "broker.fill": "public",
     "broker.reconciled": "public",
     "ledger.mark": "public",
+    # The floor's own balance: the venue accounts added up, marked on the `ops` stream because
+    # it belongs to the whole floor rather than to any one desk's ledger.
+    "floor.mark": "public",
     "committee.allocation": "public",
     "committee.memo": "public",
     "committee.gate": "public",

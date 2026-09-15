@@ -17,19 +17,35 @@ The name is a joke and a warning. No affiliation with the 1998 fund, its partner
 
 ## Partners
 
-| Desk | The partner | Mandate | Venue | Model |
-|---|---|---|---|---|
-| Merton | Robert Merton, option pricing, Nobel 1997 | Concentrated long book from primary SEC filings and cash-flow bridges; holds for months | Alpaca | DeepSeek V4 Pro |
-| Rosenfeld | Eric Rosenfeld, Salomon arbitrage | Post-earnings drift and guidance surprises within ten trading days of a release | Alpaca | DeepSeek V4 Pro |
-| Hawkins | Greg Hawkins, Salomon arbitrage | The same earnings mandate, run by a different model | Alpaca | Kimi K2.6 |
-| Krasker | William Krasker, Salomon arbitrage | The same earnings mandate, run by a different model | Alpaca | GLM 5.3 |
-| Mullins | David Mullins, former Vice Chairman of the Federal Reserve | Fed decisions, economic releases and other resolvable event contracts | Kalshi | DeepSeek V4 Pro |
-| Hilibrand | Lawrence Hilibrand, Salomon arbitrage | Documented trend, mean-reversion and catalyst setups in BTC and ETH, 24/7 | Coinbase | DeepSeek V4 Pro |
-| Meriwether | John Meriwether, who founded the fund | The committee: allocates capital by track record, promotes and cuts desks, writes the memo | — | DeepSeek V4 Pro |
+| Desk | The partner | Mandate | Venue | Capital | Model |
+|---|---|---|---|---|---|
+| Merton | Robert Merton, option pricing, Nobel 1997 | Concentrated long book from primary SEC filings and cash-flow bridges; holds for months | Alpaca | shadow | DeepSeek V4 Pro |
+| Rosenfeld | Eric Rosenfeld, Salomon arbitrage | Post-earnings drift and guidance surprises within ten trading days of a release | Alpaca | shadow | DeepSeek V4 Pro |
+| Hawkins | Greg Hawkins, Salomon arbitrage | The same earnings mandate, run by a different model | Alpaca | shadow | Kimi K2.6 |
+| Krasker | William Krasker, Salomon arbitrage | The same earnings mandate, run by a different model | Alpaca | shadow | GLM 5.3 |
+| Mullins | David Mullins, former Vice Chairman of the Federal Reserve | Fed decisions, economic releases and other resolvable event contracts | Kalshi | **live** | DeepSeek V4 Pro |
+| Hilibrand | Lawrence Hilibrand, Salomon arbitrage | Documented trend, mean-reversion and catalyst setups in BTC and ETH, 24/7 | Coinbase | **live** | DeepSeek V4 Pro |
+| Meriwether | John Meriwether, who founded the fund | The committee: allocates capital by track record, promotes and cuts desks, writes the memo | — | — | DeepSeek V4 Pro |
 
 Rosenfeld, Hawkins and Krasker share one mandate on three models, so the scoreboard measures the
-model and not the idea. Every desk starts on paper; the committee's gates decide when one earns a
-live sleeve and when it is cut.
+model and not the idea. The four equity desks are shadow until the Alpaca account opens.
+
+## Live and shadow
+
+**There is no paper trading.** Mullins and Hilibrand trade real money on Kalshi and Coinbase now;
+the equity desks will when the account opens. Every other desk is a **shadow** desk, which is not
+the same thing as a paper one:
+
+- it runs full sessions and proposes orders through the same deterministic risk engine;
+- an approved order is **never sent**. It is scored against the real venue's quote with the real
+  venue's fee model, and published as a hypothetical trade marked `shadow`;
+- its capital is a notional scoring budget, never money. No shadow number is ever added to the
+  floor's equity, and the site shows the two apart.
+
+That score is what a shadow desk is for. Meriwether's gates read its forward record -- days live,
+independent decisions, cost-adjusted excess return, drawdown inside mandate, no circuit breakers --
+and a desk that passes takes over a live sleeve and starts trading the owner's money. A desk that
+stays below its family's median is retired and replaced. Children of a live desk are born shadow.
 
 ## How it works
 
@@ -69,8 +85,8 @@ python3 -m ltcm init && python3 -m ltcm run
 ```
 
 `python3 -m ltcm status` prints what the site shows, `verify` re-hashes the event chain, `session`
-runs one desk now, `promote` moves a desk to a live sleeve, and `kill` stops new orders
-immediately. [`deploy/README.md`](deploy/README.md) installs the floor as an always-on user
+runs one desk now, `promote` moves a desk between a shadow book and a live sleeve, and `kill` stops
+new orders immediately. [`deploy/README.md`](deploy/README.md) installs the floor as an always-on user
 service.
 
 ## Repository map
@@ -79,7 +95,7 @@ service.
 |---|---|
 | `ltcm/` | The floor runtime: event log, broker contracts, manifests, risk engine, simulator, data sources, venue adapters, provider, desk runtime, ledgers, gateway, committee, evolution, publisher, service. |
 | `ltcm/desks/` | The six desk manifests: mandate, venue, model, cadence, limits and capital. |
-| `ltcm/tests/` | 474 tests. `python3 -m unittest discover -s ltcm/tests -t .` |
+| `ltcm/tests/` | 723 tests. `python3 -m unittest discover -s ltcm/tests -t .` |
 | `playbooks/` | The playbooks desks rewrite after each post-mortem, with version history. |
 | `scripts/` | `setup_venues.py` for credentials and read-only verification, `check_keys.py` for a quick audit. |
 | `deploy/` | systemd user unit and runbook. |

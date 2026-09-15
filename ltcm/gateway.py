@@ -25,7 +25,14 @@ One model call stands between the engine and a live venue. When a desk trading r
 every deterministic rule, `critic.LiveOrderCritic` reads the intent against the desk's own words
 and can `block` it (a second `risk.decision`, no submission). It fails open by construction: a
 provider error, a timeout or an unusable answer is an `ops.alert` and the order proceeds on the
-engine alone. Paper desks never reach it.
+engine alone. Shadow desks never reach it: no money is at stake, so there is nothing to protect.
+
+**Shadow routing.** A desk whose capital mode is `shadow` proposes exactly as a live desk does --
+same intent, same risk engine, same decision event -- and the approved order is then routed to the
+`shadow` book instead of to a venue. Nothing is sent anywhere. The order, its fills and the mark
+that follows are recorded with `shadow: true` in their payloads and on the `broker:shadow` stream,
+while the instrument keeps the real venue it would have traded on, so the fill is priced and
+charged exactly as the real one would have been.
 """
 
 from __future__ import annotations
@@ -58,6 +65,9 @@ from .risk import Breaker, Decision, RiskContext, RiskEngine
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
+
+#: The routing key of the scoring book. A shadow desk's orders go here and no further.
+SHADOW_VENUE = "shadow"
 
 #: Asset classes whose orders depend on a regular-hours session.
 SESSION_CLASSES = ("equity", "option")
@@ -245,9 +255,18 @@ class Gateway:
             return None
         return None if value is None else money(value)
 
-    def _quote(self, instrument: Instrument):
-        broker = self.brokers.get(instrument.venue)
-        for source in (broker, self.data):
+    def _quote(self, instrument: Instrument, desk_id: str | None = None):
+        """The reference price for an instrument, from the book that would fill it.
+
+        A shadow desk's order is priced by its own book, which reads the same market data the
+        live venue would be quoted from, so a scored fill and a real one are comparable.
+        """
+        routed = (
+            self.brokers.get(self.route(desk_id, instrument.venue))
+            if desk_id is not None
+            else None
+        )
+        for source in (routed, self.brokers.get(instrument.venue), self.data):
             if source is None:
                 continue
             try:
@@ -289,13 +308,14 @@ class Gateway:
         if ledger is None:
             raise GatewayError(f"no ledger for desk {intent.desk_id}")
         state = ledger.state(at)
-        floor = floor_totals(self.ledgers, at)
+        # Only live sleeves are the floor's money, so only they can trip the floor's loss limit.
+        floor = floor_totals(self.ledgers, at, include=self.live_ids())
         return RiskContext(
             manifest=manifest,
             desk_equity=state.equity,
             desk_cash=state.cash,
             positions=state.positions,
-            quote=self._quote(intent.instrument),
+            quote=self._quote(intent.instrument, intent.desk_id),
             now=at,
             desk_daily_pnl=state.daily_pnl,
             desk_orders_today=self.orders_today(intent.desk_id, at[:10]),
@@ -311,7 +331,9 @@ class Gateway:
                 if row.get("desk_id") == intent.desk_id
                 and row.get("status") not in TERMINAL_STATUSES
             ),
-            venue_capabilities=self._capabilities(intent.instrument.venue),
+            venue_capabilities=self._capabilities(
+                self.route(intent.desk_id, intent.instrument.venue)
+            ),
         )
 
     # ------------------------------------------------------------------ the decision
@@ -368,6 +390,22 @@ class Gateway:
             return capital_mode(manifest, promoted_desks(self.log)) == "live"
         except Exception:  # pragma: no cover - a log read that fails is not a licence to trade
             return manifest.live
+
+    def shadow_desk(self, desk_id: str) -> bool:
+        """True when this desk's orders are scored rather than sent."""
+        return not self.live_desk(desk_id)
+
+    def live_ids(self) -> set[str]:
+        """Every desk on real capital. The floor's book is the sum of these and nothing else."""
+        return {desk_id for desk_id in self.ledgers if self.live_desk(desk_id)}
+
+    def route(self, desk_id: str, venue: str) -> str:
+        """Where an approved order actually goes: the venue, or the shadow book.
+
+        A desk the committee has not promoted never reaches a broker, whatever venue its
+        instrument names. This is the single place that decision is made.
+        """
+        return venue if self.live_desk(desk_id) else SHADOW_VENUE
 
     def review(
         self, intent: OrderIntent, decision: Decision, ctx: RiskContext, at: str
@@ -462,7 +500,7 @@ class Gateway:
 
     # ------------------------------------------------------------------ submission
     def _submit(self, intent: OrderIntent, at: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        venue = intent.instrument.venue
+        venue = self.route(intent.desk_id, intent.instrument.venue)
         broker = self.brokers.get(venue)
         if broker is None:
             row = self._record_order(
@@ -521,7 +559,7 @@ class Gateway:
     def _record_order(
         self, order: Order, *, status: str, at: str, reason: str | None = None
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "order_id": order.id,
             "intent_id": order.intent_id,
             "desk_id": order.desk_id,
@@ -539,6 +577,9 @@ class Gateway:
             "updated_at": order.updated_at or at,
             "reason": reason or order.reason,
         }
+        if order.venue == SHADOW_VENUE:
+            # Nothing was sent. The row says so on its face, wherever it is read.
+            payload["shadow"] = True
         event_id = f"order:{order.id}:{status}:{text(order.filled_quantity)}"
         self.log.append(
             f"broker:{order.venue}", "broker.order", payload, id=event_id, at=at
@@ -581,6 +622,8 @@ class Gateway:
         payload = dict(fill.to_dict())
         payload["fill_id"] = fill.id
         payload["venue"] = venue
+        if venue == SHADOW_VENUE:
+            payload["shadow"] = True
         if extra:
             payload.update(dict(extra))
         self.log.append(
@@ -655,7 +698,8 @@ class Gateway:
                 continue
             holders = self._holders_of(ticker)
             if holders and ticker in open_tickers and any(
-                position.instrument.venue == venue for _, position in holders
+                position.instrument.venue == venue and self.live_desk(desk_id)
+                for desk_id, position in holders
             ):
                 self._alert(
                     "warning",
@@ -679,7 +723,7 @@ class Gateway:
                 )
             # One outcome per desk per market, so a desk holding both legs is scored once per
             # leg but woken once: `due_sessions` reads the stream, not the count.
-            self._settle_paper(ticker, payout_yes, holders, settled_at)
+            self._settle_shadow(ticker, payout_yes, holders, settled_at)
             cursor = _max_stamp(cursor, settled_at)
         self._settlement_cursor[venue] = cursor
         return written
@@ -804,25 +848,25 @@ class Gateway:
                 rationale = said.strip()[:400]
         return opened_at, rationale
 
-    def _settle_paper(
+    def _settle_shadow(
         self, ticker: str, payout_yes: Decimal, holders: Iterable[tuple[str, Any]], settled_at: str
     ) -> None:
-        """Mirror the close into the paper simulator, so paper and the ledger agree.
+        """Mirror the close into the shadow book, so the score and the ledger agree.
 
-        The simulator writes its own settlement fills under the `settlement` desk id, which no
-        desk ledger folds, so the book closes in both places and the cash moves exactly once.
+        The book writes its own settlement fills under the `settlement` desk id, which no desk
+        ledger folds, so the position closes in both places and the notional cash moves once.
         """
-        desks = {desk_id for desk_id, position in holders if position.instrument.venue == "paper"}
+        desks = {desk_id for desk_id, _ in holders if self.shadow_desk(desk_id)}
         if not desks:
             return
-        broker = self.brokers.get("paper")
+        broker = self.brokers.get(SHADOW_VENUE)
         settle = getattr(broker, "settle_event", None)
         if settle is None:
             return
         try:
             settle(ticker, payout_yes, now=settled_at)
         except Exception as exc:
-            self._alert("warning", f"paper settlement of {ticker} failed: {exc}", settled_at)
+            self._alert("warning", f"shadow settlement of {ticker} failed: {exc}", settled_at)
 
     # ------------------------------------------------------------------ lifecycle
     def poll_orders(self, now: Any = None) -> list[dict[str, Any]]:
@@ -910,10 +954,23 @@ class Gateway:
         ours: dict[str, Decimal] = {}
         for desk_id, ledger in self.ledgers.items():
             manifest = self.manifests.get(desk_id)
-            if manifest is not None and venue not in manifest.venues:
+            shadow = self.shadow_desk(desk_id)
+            if venue == SHADOW_VENUE:
+                # The shadow book is reconciled against the shadow desks, and nothing else.
+                if not shadow:
+                    continue
+            elif shadow:
+                # A shadow book holds nothing a venue could confirm. Comparing the two would
+                # invent a mismatch and halt the floor over a position nobody owns.
+                continue
+            elif manifest is not None and venue not in manifest.venues:
                 continue
             for key, position in ledger.state(at).positions.items():
-                if position.instrument.venue != venue or position.quantity == 0:
+                if position.quantity == 0:
+                    continue
+                # A shadow position names the venue it would have traded on, so the book it
+                # belongs to is decided by the desk, not by the instrument.
+                if venue != SHADOW_VENUE and position.instrument.venue != venue:
                     continue
                 ours[key] = ours.get(key, ZERO) + position.quantity
 

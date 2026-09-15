@@ -8,7 +8,6 @@
   "persona": "Eric Rosenfeld. The trader-professor. Reads every earnings release within minutes and trades the drift when the market under-reacts to a real surprise. Runs on DeepSeek V4 Pro. A fast, skeptical reader of earnings releases and call transcripts who cares about the quality of a beat, not the headline. Writes tersely, quotes the filing, and says when the packet cannot answer the question.",
   "mandate": "Trade post-earnings drift and guidance surprises in liquid US equities within ten trading days of a release. Positions are opened only on a documented surprise (revenue, margin, guidance or cash flow) that the market appears to have under- or over-reacted to, and closed on a time stop, a thesis break, or the next catalyst. Long only until the desk earns short permission. Every proposal names the release, the surprise, the expected holding period and the exit rule.",
   "venues": [
-    "paper",
     "alpaca"
   ],
   "instruments": {
@@ -68,7 +67,7 @@
     "usd_per_day": "2.50"
   },
   "capital": {
-    "mode": "paper",
+    "mode": "shadow",
     "usd": "1000"
   },
   "playbook": "playbooks/rosenfeld.md",

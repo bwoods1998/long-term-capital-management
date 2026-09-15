@@ -5,6 +5,7 @@
     python3 -m ltcm status                   the health projection, as JSON
     python3 -m ltcm verify                   re-hash the whole event chain
     python3 -m ltcm desks                    the roster with mode, capital and gates
+    python3 -m ltcm report [--days 7]        results per desk, family and model profile
     python3 -m ltcm session <desk> [--trigger manual]
     python3 -m ltcm kill | unkill            the switch the risk engine reads first
     python3 -m ltcm publish --dry-run        what would be sent, and to where
@@ -21,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .analytics import ResultsLedger, markdown as render_report
 from .events import ChainBroken
 from .manifest import ManifestError
 from .service import Service, default_config
@@ -52,7 +54,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             "capital_dir": str(service.capital_dir),
             "events": str(service.log.path),
             "desks": sorted(service.manifests),
-            "paper_books": sorted(service.paper_brokers),
+            "shadow_books": sorted(service.shadow_books),
             "venues": sorted(service.brokers),
             "playbooks": str(service.playbooks_dir),
             "kill_switch": str(service.kill_switch_path),
@@ -132,6 +134,40 @@ def cmd_desks(args: argparse.Namespace) -> int:
         service.close()
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """The lab report: what the floor earned, what it cost, and which model earned it.
+
+    Reads the event log and nothing else, so it is safe to run against a live floor. `--write`
+    saves the markdown for the owner's architecture notes; it never touches git.
+    """
+    if not 1 <= args.days <= 365:
+        print(_dumps({"error": "--days must be between 1 and 365"}), file=sys.stderr)
+        return 2
+    service = _service(args)
+    try:
+        report = ResultsLedger(service.log, service.manifests).report(args.days)
+        written = None
+        if args.write:
+            directory = Path(args.write)
+            if not directory.is_absolute():
+                directory = Path(args.root) / directory
+            directory.mkdir(parents=True, exist_ok=True)
+            written = directory / f"{report['generated_at'][:10]}-lab-report.md"
+            written.write_text(render_report(report), encoding="utf-8")
+        if args.markdown:
+            print(render_report(report))
+            if written is not None:
+                print(f"written {written}", file=sys.stderr)
+        else:
+            body = dict(report)
+            if written is not None:
+                body["written"] = str(written)
+            print(_dumps(body))
+        return 0
+    finally:
+        service.close()
+
+
 def cmd_session(args: argparse.Namespace) -> int:
     service = _service(args)
     try:
@@ -177,20 +213,20 @@ def cmd_kill(args: argparse.Namespace) -> int:
 
 
 def cmd_promote(args: argparse.Namespace) -> int:
-    """Owner decision: move one desk between paper and live capital. Public, like every event."""
+    """Owner decision: move one desk between shadow and live capital. Public, like every event."""
     service = _service(args)
     try:
         manifest = service.manifests.get(args.desk_id)
         if manifest is None:
             print(_dumps({"error": f"unknown desk {args.desk_id}"}))
             return 2
-        if args.to == "live" and not [v for v in manifest.venues if v != "paper"]:
+        if args.to == "live" and not [v for v in manifest.venues if v != "shadow"]:
             print(_dumps({"error": "desk has no live venue in its manifest"}))
             return 2
         at = service.now()
         payload = {
             "desk_id": manifest.id,
-            "from": "paper" if args.to == "live" else "live",
+            "from": "shadow" if args.to == "live" else "live",
             "to": args.to,
             "score": {},
             "reason": f"owner decision: {args.reason}",
@@ -272,6 +308,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("verify", help="re-hash the event chain")
     sub.add_parser("desks", help="print the roster")
 
+    report = sub.add_parser("report", help="print the lab report for a trailing window")
+    report.add_argument("--days", type=int, default=7, help="window length in days (default 7)")
+    report.add_argument(
+        "--markdown", action="store_true", help="print the markdown report instead of JSON"
+    )
+    report.add_argument(
+        "--write",
+        default=None,
+        metavar="DIR",
+        help="also write DIR/<date>-lab-report.md (relative to --root); never commits",
+    )
+
     session = sub.add_parser("session", help="run one desk session now")
     session.add_argument("desk_id")
     session.add_argument("--trigger", default="manual")
@@ -279,9 +327,9 @@ def build_parser() -> argparse.ArgumentParser:
     kill = sub.add_parser("kill", help="engage the kill switch")
     kill.add_argument("--reason", default="manual")
     sub.add_parser("unkill", help="release the kill switch")
-    promote = sub.add_parser("promote", help="owner decision: move a desk to live or back to paper")
+    promote = sub.add_parser("promote", help="owner decision: move a desk to live or back to shadow")
     promote.add_argument("desk_id")
-    promote.add_argument("--to", choices=("live", "paper"), default="live")
+    promote.add_argument("--to", choices=("live", "shadow"), default="live")
     promote.add_argument("--reason", default="manual")
 
     publish = sub.add_parser("publish", help="push the tape and the checkpoint")
@@ -295,6 +343,7 @@ COMMANDS = {
     "status": cmd_status,
     "verify": cmd_verify,
     "desks": cmd_desks,
+    "report": cmd_report,
     "session": cmd_session,
     "kill": cmd_kill,
     "promote": cmd_promote,

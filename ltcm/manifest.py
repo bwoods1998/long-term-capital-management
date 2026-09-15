@@ -18,7 +18,14 @@ from typing import Any
 from .broker import ASSET_CLASSES, money
 
 DESK_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
-VENUES = ("paper", "alpaca", "kalshi", "coinbase", "kraken", "schwab", "tastytrade")
+#: The real venues a desk may name. There is no simulated venue here on purpose: a shadow
+#: desk names the venue it *would* trade on, and the gateway routes it to the shadow book.
+VENUES = ("alpaca", "kalshi", "coinbase", "kraken", "schwab", "tastytrade")
+#: The routing key of the scoring book. Never a manifest venue.
+SHADOW_VENUE = "shadow"
+#: Capital modes. "paper" is read as "shadow" so manifests written before the rename load.
+CAPITAL_MODES = ("shadow", "live")
+LEGACY_VENUES = ("paper",)
 TOOLS = (
     "quote",
     "bars",
@@ -119,7 +126,7 @@ class DeskManifest:
     cadence: Cadence
     tools: tuple[str, ...]
     budget_usd_per_day: Decimal
-    capital_mode: str  # "paper" | "live"
+    capital_mode: str  # "shadow" | "live"
     capital_usd: Decimal
     playbook: str  # path relative to the repository root
     memory_limit: int = 40  # memory entries carried into each session
@@ -128,6 +135,16 @@ class DeskManifest:
     @property
     def live(self) -> bool:
         return self.capital_mode == "live"
+
+    @property
+    def shadow(self) -> bool:
+        """True when this desk's orders are scored rather than sent. No money is at risk."""
+        return self.capital_mode != "live"
+
+    @property
+    def market_venue(self) -> str:
+        """The venue this desk trades on, or would trade on once it is promoted."""
+        return self.venues[0]
 
     @property
     def stream(self) -> str:
@@ -210,8 +227,14 @@ class DeskManifest:
             _require(isinstance(value, str) and 1 <= len(value.strip()) <= limit,
                      f"{key} must be 1-{limit} characters")
         venues = data.get("venues")
-        _require(isinstance(venues, list) and venues and all(v in VENUES for v in venues)
-                 and len(set(venues)) == len(venues), "venues must be a non-empty list of known venues")
+        _require(isinstance(venues, list) and venues and len(set(venues)) == len(venues),
+                 "venues must be a non-empty list of known venues")
+        _require(SHADOW_VENUE not in venues,
+                 "venues name real venues; a shadow desk is routed by its capital mode")
+        # Manifests written before the rename listed the simulator as a venue. It is not one.
+        venues = [v for v in venues if v not in LEGACY_VENUES]
+        _require(bool(venues) and all(v in VENUES for v in venues),
+                 "venues must be a non-empty list of known venues")
 
         inst = data.get("instruments")
         _require(isinstance(inst, dict), "instruments must be an object")
@@ -283,11 +306,12 @@ class DeskManifest:
         _require(usd_per_day > 0, "budget.usd_per_day must be positive")
 
         capital = data.get("capital")
-        _require(isinstance(capital, dict) and capital.get("mode") in ("paper", "live"), "capital.mode must be paper or live")
+        _require(isinstance(capital, dict) and capital.get("mode") in CAPITAL_MODES + ("paper",),
+                 "capital.mode must be shadow or live")
+        # "paper" is the old name for the same thing and loads as "shadow".
+        capital_mode = "shadow" if capital["mode"] == "paper" else capital["mode"]
         capital_usd = _pct(capital.get("usd"), "capital.usd", high="100000000")
         _require(capital_usd > 0, "capital.usd must be positive")
-        if capital["mode"] == "live":
-            _require("paper" not in venues, "live desks cannot trade on the paper venue")
 
         playbook = data.get("playbook")
         _require(isinstance(playbook, str) and playbook.startswith("playbooks/") and playbook.endswith(".md")
@@ -314,7 +338,7 @@ class DeskManifest:
             cadence=cadence,
             tools=tuple(tools),
             budget_usd_per_day=usd_per_day,
-            capital_mode=capital["mode"],
+            capital_mode=capital_mode,
             capital_usd=capital_usd,
             playbook=playbook,
             memory_limit=memory_limit,

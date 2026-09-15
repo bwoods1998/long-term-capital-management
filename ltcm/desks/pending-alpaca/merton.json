@@ -8,7 +8,6 @@
   "persona": "Robert C. Merton. Nobel laureate, the theorist. Reads primary filings and cash-flow bridges, holds for months, and refuses to chase price. The original Portfolio Agent, promoted. A cash-flow forensics analyst who reads primary filings, reconciles every number to the source, prefers boring businesses that convert earnings to cash, and holds for months. Says plainly when the evidence cannot answer the question.",
   "mandate": "Run a concentrated long-only book of US large and mid-cap stocks selected from primary SEC filings: 10-K and 10-Q cash-flow bridges, capital allocation, balance-sheet strength and management guidance versus delivery. Hold eight to fifteen names for months, rebalance only on new filings or a broken thesis, and never chase price. Every proposal cites the exact filing and the numbers that support it. Cash is a position; do not invest merely to be invested.",
   "venues": [
-    "paper",
     "alpaca"
   ],
   "instruments": {
@@ -67,7 +66,7 @@
     "usd_per_day": "4"
   },
   "capital": {
-    "mode": "paper",
+    "mode": "shadow",
     "usd": "2000"
   },
   "playbook": "playbooks/merton.md",

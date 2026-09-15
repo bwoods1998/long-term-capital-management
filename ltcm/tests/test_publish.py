@@ -322,6 +322,10 @@ class CheckpointTests(PublisherCase):
                 "capital_usd": Decimal("5000"),
                 "since_inception_pct": Decimal("-0.395"),
                 "benchmark": None,
+                "live_equity": Decimal("4980.25"),
+                "live_daily_pnl": Decimal("-19.75"),
+                "live_desks": 1,
+                "shadow_desks": 3,
             },
             desks=[
                 {
@@ -330,8 +334,8 @@ class CheckpointTests(PublisherCase):
                     "family": "earnings",
                     "generation": 1,
                     "parent_id": None,
-                    "mode": "paper",
-                    "venues": ["paper", "alpaca"],
+                    "mode": "shadow",
+                    "venues": ["alpaca"],
                     "capital_usd": Decimal("1000"),
                     "equity": Decimal("-5"),
                     "cash": Decimal("-5"),
@@ -351,17 +355,32 @@ class CheckpointTests(PublisherCase):
                 "allocations": {"earnings-01": Decimal("1000")},
             },
             budget={"spent_today_usd": Decimal("0.42"), "cap_usd": Decimal("40")},
+            infra={
+                "host": "sail",
+                "box_id": "box-9f2c1ad4e7b6",
+                "checkpoint_count": 118,
+                "spend_usd": Decimal("0.42"),
+                "uptime_seconds": 90061,
+                "region": "us-east",
+                "requests_today": 37,
+            },
         )
         base.update(overrides)
         return checkpoint_body(**base)
 
     def test_key_sets_are_exact(self):
         body = self.body()
-        self.assertEqual(sorted(body), ["budget", "committee", "desks", "floor", "published_at",
-                                        "schema_version"])
+        self.assertEqual(sorted(body), ["budget", "committee", "desks", "floor", "infra",
+                                        "published_at", "schema_version"])
         self.assertEqual(
             sorted(body["floor"]),
-            ["benchmark", "capital_usd", "cash", "daily_pnl", "equity", "since_inception_pct"],
+            ["benchmark", "capital_usd", "cash", "daily_pnl", "equity", "live_daily_pnl",
+             "live_desks", "live_equity", "shadow_desks", "since_inception_pct"],
+        )
+        self.assertEqual(
+            sorted(body["infra"]),
+            ["box_id", "checkpoint_count", "host", "region", "requests_today", "spend_usd",
+             "uptime_seconds"],
         )
         self.assertEqual(sorted(body["committee"]), ["allocations", "last_memo_at"])
         self.assertEqual(sorted(body["budget"]), ["cap_usd", "spent_today_usd"])
@@ -371,6 +390,40 @@ class CheckpointTests(PublisherCase):
              "gate", "generation", "id", "max_drawdown_pct", "mode", "name", "orders",
              "parent_id", "return_pct", "status", "updated_at", "venues"],
         )
+
+    def test_the_floor_block_separates_real_money_from_scored_books(self):
+        floor = self.body()["floor"]
+        self.assertEqual(floor["live_equity"], Decimal("4980.25"))
+        self.assertEqual(floor["live_daily_pnl"], Decimal("-19.75"))
+        self.assertEqual(floor["shadow_desks"], 3)
+        self.assertEqual(floor["live_desks"], 1)
+        # A floor block that says nothing about shadow desks still publishes: the counts are
+        # optional and the live numbers fall back to the floor's own.
+        bare = self.body(floor={
+            "equity": Decimal("10"), "cash": Decimal("10"), "daily_pnl": Decimal("0"),
+            "capital_usd": Decimal("10"), "since_inception_pct": Decimal("0"), "benchmark": None,
+        })["floor"]
+        self.assertEqual(bare["live_equity"], Decimal("10"))
+        self.assertIsNone(bare["shadow_desks"])
+
+    def test_infra_degrades_to_the_local_box(self):
+        infra = self.body(infra=None)["infra"]
+        self.assertEqual(infra["host"], "local")
+        self.assertIsNone(infra["box_id"])
+        self.assertIsNone(infra["region"])
+        self.assertIsNone(infra["checkpoint_count"])
+        self.assertIsNone(infra["spend_usd"])  # unknown is published as unknown, not as zero
+
+    def test_infra_and_shadow_counts_travel_as_the_site_types_them(self):
+        self.publisher.push_checkpoint(self.body())
+        call = [c for c in self.transport.calls if c["url"].endswith(CHECKPOINT_PATH)][0]
+        payload = call["payload"]
+        self.assertEqual(payload["infra"]["spend_usd"], "0.42")
+        self.assertEqual(payload["infra"]["uptime_seconds"], 90061)
+        self.assertEqual(payload["infra"]["box_id"], "box-9f2c1ad4e7b6")
+        self.assertEqual(payload["floor"]["live_equity"], "4980.25")
+        self.assertEqual(payload["floor"]["live_daily_pnl"], "-19.75")
+        self.assertEqual(payload["floor"]["shadow_desks"], 3)
 
     def test_unsigned_fields_are_clamped_and_stamps_are_bounded(self):
         desk = self.body()["desks"][0]

@@ -1,8 +1,8 @@
 """Venue-neutral trading contracts.
 
-Every live adapter and the paper simulator implement the `Broker` protocol. Desks never see a
-broker: they emit `OrderIntent`s, the risk engine decides, and the service routes approved intents
-to the venue named on the instrument.
+Every live adapter and the shadow book implement the `Broker` protocol. Desks never see a broker:
+they emit `OrderIntent`s, the risk engine decides, and the gateway routes approved intents -- to
+the venue named on the instrument for a live desk, and to the shadow book for a shadow one.
 
 Money and quantities are `Decimal`. Serialized forms use strings. Nothing here performs I/O.
 """
@@ -493,7 +493,11 @@ class Broker(Protocol):
 
     def capabilities(self) -> set[str]:
         """Subset of {"equity", "option", "crypto", "future", "event", "short", "fractional",
-        "limit", "gtc", "ioc", "extended_hours", "paper"}."""
+        "limit", "gtc", "ioc", "extended_hours", "shadow"}.
+
+        `"shadow"` marks a book that scores orders instead of sending them; an adapter that
+        reaches a real venue never claims it.
+        """
 
     def balance(self) -> Balance: ...
 

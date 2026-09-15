@@ -107,10 +107,10 @@ def rule_kill_switch(intent: OrderIntent, ctx: RiskContext) -> str | None:
 
 
 def rule_venue(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    # An intent always names the real venue, whether the desk is live or shadow: where the order
+    # actually goes is the gateway's decision, made from the desk's capital mode, not the model's.
     if intent.instrument.venue not in ctx.manifest.venues:
         return f"venue {intent.instrument.venue} not permitted for desk"
-    if ctx.manifest.live and intent.instrument.venue == "paper":
-        return "live desk cannot route to the paper venue"
     if ctx.venue_capabilities and intent.instrument.asset_class not in ctx.venue_capabilities:
         return f"venue does not support {intent.instrument.asset_class}"
     return None

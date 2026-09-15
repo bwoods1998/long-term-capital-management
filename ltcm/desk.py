@@ -76,6 +76,33 @@ How to work
 - Every order proposal names the catalyst, the expected holding period and the exit rule.
 - Call end_session when you are done. Unused turns cost nothing; a bad trade costs real money."""
 
+#: Appended to the header for a desk on real capital.
+LIVE_NOTE = """Your capital is real
+- Every order you propose that passes the risk engine and the critic is sent to a real venue and
+  settles in a real account. The money is the owner's. Losses are permanent and public.
+- You are on a live sleeve because a shadow desk before you earned it. The committee can take it
+  back: a mandate breach or a drawdown past your limit cuts you to zero and returns you to a
+  shadow book."""
+
+#: Appended to the header for a desk whose orders are scored rather than sent.
+SHADOW_NOTE = """Your book is a shadow book, and it is how you earn real capital
+- You are not funded. No order you propose is ever sent to a venue, and no money moves.
+- Every order you propose is still scored as though it were: it passes the same risk engine as a
+  live desk's, it fills at the real venue's quote, and it is charged the real venue's fees. Your
+  equity, your return and your drawdown are hypothetical, and they are published as hypothetical.
+- That score is the whole point. The committee's published gate reads your forward record -- days
+  live, independent decisions, cost-adjusted excess return, drawdown inside mandate, no circuit
+  breakers -- and a desk that passes it takes over a live sleeve and starts trading the owner's
+  money. A desk that stays below its family's median long enough is retired and replaced.
+- So trade the shadow book exactly as you would trade real money. Padding the record with trades
+  you could not defend buys you nothing: the gate reads the record you actually leave, and the
+  desk that takes the sleeve is the one whose hypothetical book would have been worth owning."""
+
+
+def header_for(manifest: DeskManifest) -> str:
+    """The system header for one desk: the shared rules, then what its capital actually is."""
+    return HEADER + "\n\n" + (LIVE_NOTE if manifest.live else SHADOW_NOTE)
+
 
 # --------------------------------------------------------------------------- results
 
@@ -413,7 +440,7 @@ class Desk:
         """The two input items that open a session: stable context first, then today's state."""
         stable = "\n\n".join(
             [
-                HEADER,
+                header_for(self.manifest),
                 "# Your desk\n" + self._manifest_block(),
                 "# Your playbook\n"
                 + (self.playbooks.read().strip() or "(the playbook is empty)"),
@@ -430,8 +457,10 @@ class Desk:
             f"Name: {m.name} ({m.id}, generation {m.generation})",
             f"Persona: {m.persona}",
             f"Mandate: {m.mandate}",
-            f"Capital: {m.capital_mode}, ${format(m.capital_usd, 'f')}",
-            f"Venues: {', '.join(m.venues)}",
+            f"Capital: {m.capital_mode}, ${format(m.capital_usd, 'f')}"
+            + ("" if m.live else " (notional: a scoring budget, not money)"),
+            f"Venue: {m.market_venue}"
+            + ("" if m.live else " -- the venue you would trade on; orders are scored, never sent"),
             "Instruments: "
             + ", ".join(m.instruments.asset_classes)
             + (f"; allowed symbols: {', '.join(m.instruments.allow)}" if m.instruments.allow else "")
@@ -757,5 +786,8 @@ __all__ = [
     "PlaybookStore",
     "SessionResult",
     "HEADER",
+    "LIVE_NOTE",
+    "SHADOW_NOTE",
+    "header_for",
     "unified_diff",
 ]

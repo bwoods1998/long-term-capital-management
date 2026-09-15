@@ -7,8 +7,8 @@ from ltcm.broker import Instrument
 from ltcm.events import EventLog
 from ltcm.ledger import DeskLedger, floor_totals, quote_prices
 
-AAPL = Instrument("equity", "AAPL", "paper")
-MSFT = Instrument("equity", "MSFT", "paper")
+AAPL = Instrument("equity", "AAPL", "alpaca")
+MSFT = Instrument("equity", "MSFT", "alpaca")
 DESK = "earnings-01"
 
 
@@ -34,7 +34,7 @@ class LedgerCase(unittest.TestCase):
     def fill(self, side, quantity, price, at, *, fee="0", instrument=AAPL, desk=DESK, fill_id=None):
         fill_id = fill_id or f"f-{self.log.latest_seq() + 1}"
         return self.log.append(
-            "broker:paper",
+            "broker:shadow",
             "broker.fill",
             {
                 "fill_id": fill_id,
@@ -102,7 +102,7 @@ class FoldTests(LedgerCase):
         self.allocate("1000", "2026-09-01T13:00:00.000Z")
         self.fill("buy", "2", "100", "2026-09-01T14:00:00.000Z", fill_id="dup")
         self.log.append(
-            "broker:paper",
+            "broker:shadow",
             "broker.fill",
             {
                 "fill_id": "dup",
@@ -133,7 +133,7 @@ class FoldTests(LedgerCase):
     def test_malformed_fill_is_skipped_not_absorbed(self):
         self.allocate("1000", "2026-09-01T13:00:00.000Z")
         self.log.append(
-            "broker:paper",
+            "broker:shadow",
             "broker.fill",
             {"fill_id": "bad", "desk_id": DESK, "side": "buy", "quantity": "1"},
             at="2026-09-01T14:00:00.000Z",
@@ -274,6 +274,28 @@ class FloorTests(LedgerCase):
         self.assertEqual(totals["cash"], Decimal("1000"))
         self.assertEqual(totals["net_deposits"], Decimal("1500"))
         self.assertEqual(totals["daily_pnl"], Decimal("50"))
+
+    def test_floor_totals_can_be_narrowed_to_the_live_sleeves(self):
+        """The floor's equity is real money. A scored book is counted, never added."""
+        other = DeskLedger(self.log, "kalshi-01")
+        self.allocate("1000", "2026-09-01T13:00:00.000Z")
+        self.allocate("500", "2026-09-01T13:00:00.000Z", desk="kalshi-01")
+        ledgers = {DESK: self.ledger, "kalshi-01": other}
+        live = floor_totals(ledgers, "2026-09-01T20:00:00.000Z", include={"kalshi-01"})
+        self.assertEqual(live["equity"], Decimal("500"))
+        self.assertEqual(live["net_deposits"], Decimal("500"))
+        self.assertEqual(
+            floor_totals(ledgers, "2026-09-01T20:00:00.000Z", include=set())["equity"],
+            Decimal("0"),
+        )
+
+    def test_a_shadow_mark_says_so_in_its_payload(self):
+        self.allocate("1000", "2026-09-01T13:00:00.000Z")
+        self.ledger.mark({}, "2026-09-01T20:00:00.000Z", shadow=True)
+        event = self.log.read(stream=f"ledger:{DESK}", kind="ledger.mark")[-1]
+        self.assertTrue(event.payload["shadow"])
+        self.ledger.mark({}, "2026-09-01T21:00:00.000Z")
+        self.assertNotIn("shadow", self.log.read(stream=f"ledger:{DESK}", kind="ledger.mark")[-1].payload)
 
     def test_gross_exposure_uses_marks_then_cost(self):
         self.allocate("10000", "2026-09-01T13:00:00.000Z")
