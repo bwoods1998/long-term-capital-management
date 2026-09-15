@@ -202,6 +202,12 @@ export function createGate({ store, env = {}, now = Date.now }) {
           checked_at: sail.checked_at ?? null,
           last_resume_at: sail.last_resume_at ?? null,
           last_resume_state: sail.last_resume_state ?? null,
+          // The runway the watchdog computed on its last pass: what the owner is warned by.
+          reserve_usd: sail.reserve_usd ?? null,
+          spendable_usd: sail.spendable_usd ?? null,
+          burn_usd_per_day: sail.burn_usd_per_day ?? null,
+          runway_days: sail.runway_days ?? null,
+          run_out_at: sail.run_out_at ?? null,
         },
         alerts: read(store, ALERTS_KEY, {}),
       };

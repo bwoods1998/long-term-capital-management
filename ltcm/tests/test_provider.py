@@ -303,6 +303,68 @@ class BudgetTests(ProviderCase):
         provider.close()
 
 
+class StaleReservationTests(ProviderCase):
+    """A request the venue refused, or a process died on, must not hold its reservation forever."""
+
+    def test_a_rejected_post_releases_its_reservation_at_once(self):
+        transport = FakeTransport(TransportError("provider_http_400"))
+        provider = self.provider(transport)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        self.assertEqual(provider.spent_today("earnings-01"), Decimal("0"))
+        row = provider._db.execute("SELECT status, error FROM requests").fetchone()
+        self.assertEqual((row["status"], row["error"]), ("abandoned", "provider_http_400"))
+
+    def test_a_rate_limit_keeps_the_hold_because_the_request_may_yet_be_sent(self):
+        transport = FakeTransport(TransportError("provider_http_429", retry_after=1), TransportError("provider_http_429", retry_after=1), TransportError("provider_http_429", retry_after=1), TransportError("provider_http_429", retry_after=1))
+        provider = self.provider(transport)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        self.assertGreater(provider.spent_today("earnings-01"), Decimal("0"))
+
+    def test_a_request_a_dead_process_left_prepared_is_released_after_the_poll_deadline(self):
+        transport = FakeTransport(RuntimeError("the process died mid-POST"))
+        provider = self.provider(transport, poll_timeout=900.0)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        held = provider.spent_today("earnings-01")
+        self.assertGreater(held, Decimal("0"), "an unconfirmed POST keeps its hold for now")
+        self.time[0] += 901
+        outcome = provider.reconcile_stale()
+        self.assertEqual(outcome, {"settled": 0, "released": 1})
+        self.assertEqual(provider.spent_today("earnings-01"), Decimal("0"))
+        row = provider._db.execute("SELECT status FROM requests").fetchone()
+        self.assertEqual(row["status"], "abandoned")
+        # Idempotent: a second pass finds nothing.
+        self.assertEqual(provider.reconcile_stale(), {"settled": 0, "released": 0})
+
+    def test_a_dispatched_request_the_venue_finished_is_settled_from_the_venue(self):
+        transport = FakeTransport(
+            response(status="queued", usage=None),        # the POST was accepted
+            RuntimeError("the process died while polling"),  # then the poll broke
+            response(status="completed"),                  # later, the venue has the answer
+        )
+        provider = self.provider(transport, poll_timeout=900.0)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_flex")
+        self.time[0] += 901
+        self.assertEqual(provider.reconcile_stale(), {"settled": 1, "released": 0})
+        row = provider._db.execute("SELECT status, cost_usd FROM requests").fetchone()
+        self.assertEqual(row["status"], "completed")
+        self.assertIsNotNone(row["cost_usd"])
+        self.assertEqual(provider.spent_today("earnings-01"), Decimal(row["cost_usd"]))
+
+    def test_spent_today_reconciles_at_most_once_a_minute(self):
+        transport = FakeTransport(RuntimeError("died"))
+        provider = self.provider(transport, poll_timeout=900.0)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap")
+        self.time[0] += 901
+        provider.spent_today()  # reconciles: the hold is released
+        self.assertEqual(provider.spent_today("earnings-01"), Decimal("0"))
+        self.assertEqual(provider._last_reconcile, self.time[0])
+
+
 class DispatchTests(ProviderCase):
     def test_foreground_request_settles_from_usage(self):
         transport = FakeTransport(response(model=FLASH, output=[message("done")]))
@@ -571,7 +633,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(transport("POST", "/v1/responses", {"background": False}, "idem-1")["id"], "resp_x")
         self.assertEqual(opener.request.get_header("Authorization"), "Bearer sail-key")
         self.assertEqual(opener.request.get_header("Idempotency-key"), "idem-1")
-        self.assertEqual(opener.timeout, 900)  # foreground generation is awaited inline
+        self.assertEqual(opener.timeout, 1500)  # foreground generation is awaited inline, patiently
         transport("GET", "/v2/usage/summary")
         self.assertEqual(opener.timeout, 45)
         self.assertIsNone(opener.request.get_header("Idempotency-key"))

@@ -153,5 +153,6 @@ test('what the last pass learned about Sail is readable from the status', () => 
   assert.deepEqual(gate.status().sail, {
     balance_usd: 31.06, spend_usd: null, range: null, box_status: 'running',
     checked_at: 'now', last_resume_at: 'then', last_resume_state: 'running',
+    reserve_usd: null, spendable_usd: null, burn_usd_per_day: null, runway_days: null, run_out_at: null,
   });
 });

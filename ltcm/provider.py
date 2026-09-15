@@ -111,13 +111,25 @@ RATE_CARD_ROW = re.compile(
 RATE_CARD_GROUP = re.compile(r'<tbody[^>]*\bdata-model="(?P<slug>[^"]+)"')
 
 TERMINAL = frozenset({"completed", "incomplete", "failed", "cancelled"})
+
+
+def _rejected_outright(code: str) -> bool:
+    """A provider error code that means the venue refused the request before accepting it,
+    so no response exists and nothing will be charged: an HTTP 4xx that is not a rate limit."""
+    if not isinstance(code, str) or not code.startswith("provider_http_"):
+        return False
+    try:
+        status = int(code.rsplit("_", 1)[1])
+    except ValueError:
+        return False
+    return 400 <= status < 500 and status not in (408, 425, 429)
 PENDING = frozenset({"queued", "in_progress"})
 EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 RESPONSE_ID = re.compile(r"^resp_[A-Za-z0-9_-]{1,200}$")
 RETRY_STATUSES = (429, 503, 529)
 #: How long one foreground (asap) generation may take. A high-effort turn over a long context
 #: took over ten minutes tonight and was cut off at 600; the floor's polling patience is 900.
-FOREGROUND_TIMEOUT = 900
+FOREGROUND_TIMEOUT = 1500  # a long asap turn is awaited inline, patiently; the polling patience for background windows is 900
 MAX_BODY_BYTES = 8_000_000
 PLACES = Decimal("0.00000001")
 ZERO = Decimal(0)
@@ -385,6 +397,9 @@ class Transport:
         url = route if rate_card else self.base_url + route
         request = Request(url, data=data, headers=headers, method=method)
         # asap foreground generation is awaited inline; background POSTs and every GET are short.
+        # A high-effort turn over a large context ran past ten minutes on the first live evening
+        # and the session died as provider_transport_timeout; the wait is now a generous
+        # twenty-five minutes, the same order as the background poll deadline.
         foreground = method == "POST" and not (body or {}).get("background", False)
         timeout = FOREGROUND_TIMEOUT if foreground else 45
         opener = self._opener or build_opener(_NoRedirect)
@@ -702,8 +717,60 @@ class Provider:
         return entry
 
     # ------------------------------------------------------------------ budgets
+    def reconcile_stale(self, now: float | None = None) -> dict[str, int]:
+        """Settle or release requests a dead process left behind.
+
+        A request is reserved before it is sent and the reservation is released when the
+        response settles. A process that dies mid-request, or a POST the venue rejected, leaves
+        the row `prepared` or `dispatched` with the reservation still counted against the desk
+        and the floor -- forever, which inflated today's spend and the desk fuse on the first
+        evening. Once a row is older than the poll deadline: a dispatched row with a response id
+        is read back and settled if the venue finished it; a row with no response id was never
+        accepted (a rejected POST, or a process that died before the answer) and its
+        reservation is released, the row marked `abandoned` so the ledger still shows it.
+        """
+        now_seconds = float(self.clock() if now is None else now)
+        cutoff = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now_seconds - self.poll_timeout))
+        settled = released = 0
+        with self._lock:
+            rows = [
+                dict(r)
+                for r in self._db.execute(
+                    "SELECT * FROM requests WHERE status IN ('prepared', 'dispatched') AND updated_at < ?",
+                    (cutoff,),
+                ).fetchall()
+            ]
+        for row in rows:
+            if row.get("response_id"):
+                try:
+                    payload = self.transport("GET", f"/v1/responses/{row['response_id']}")
+                except Exception:
+                    continue  # still unknown; the hold stands until the venue answers
+                status = payload.get("status") if isinstance(payload, dict) else None
+                if status in TERMINAL:
+                    try:
+                        self._settle(row, payload, status)
+                        settled += 1
+                    except Exception:
+                        continue
+                continue
+            self._abandon(row)
+            released += 1
+        self._last_reconcile = now_seconds
+        return {"settled": settled, "released": released}
+
     def spent_today(self, desk_id: str | None = None) -> Decimal:
-        """Committed USD today: settled costs plus every outstanding reservation."""
+        """Committed USD today: settled costs plus every outstanding reservation.
+
+        Reservations older than the poll deadline are reconciled first, at most once a minute,
+        so a request a dead process left behind does not count against today forever.
+        """
+        last = getattr(self, "_last_reconcile", None)
+        if last is None or float(self.clock()) - float(last) >= 60.0:
+            try:
+                self.reconcile_stale()
+            except Exception:
+                self._last_reconcile = float(self.clock())
         with self._lock:
             if desk_id is None:
                 rows = self._db.execute(
@@ -1031,6 +1098,8 @@ class Provider:
                     payload = self.transport("POST", "/v1/responses", body, row["id"])
             except ProviderError as exc:
                 self._mark_error(row["id"], exc.code)
+                if not response_id and _rejected_outright(exc.code):
+                    self._abandon(row)  # the venue refused it: nothing was accepted or charged
                 raise
             except Exception:
                 self._mark_error(row["id"], "provider_transport_unconfirmed")
@@ -1064,6 +1133,26 @@ class Provider:
                 self._mark_error(row["id"], "provider_poll_timeout")
                 raise ProviderError("provider_poll_timeout")
             self.sleep(self.poll_interval)
+
+    def _abandon(self, row: Mapping[str, Any]) -> None:
+        """Release a request's reservation and mark it abandoned; idempotent per row."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                changed = self._db.execute(
+                    "UPDATE requests SET status = ?, updated_at = ?"
+                    " WHERE id = ? AND status IN ('prepared', 'dispatched')",
+                    ("abandoned", self._now(), row["id"]),
+                ).rowcount
+                if changed:
+                    self._add_spend(row["created_at"][:10], row["desk_id"], -Decimal(row["reserved_usd"]))
+                self._db.execute("COMMIT")
+            except Exception:
+                try:
+                    self._db.execute("ROLLBACK")
+                except sqlite3.OperationalError:  # pragma: no cover
+                    pass
+                raise
 
     def _mark_error(self, request_id: str, code: str) -> None:
         with self._lock:
