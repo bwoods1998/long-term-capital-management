@@ -344,8 +344,16 @@ class DeskContext:
         return found
 
     def bars(self, instrument: Instrument, interval: str, limit: int) -> list[dict[str, Any]]:
+        """Bars without the instrument echoed on every row: the desk named it in the call, and
+        forty bars carrying nine fields of the same instrument each cost more context than the
+        prices did. Eight pairs of daily and hourly bars in one turn timed a model out."""
         rows = self._data().bars(instrument, interval, limit)
-        return [row.to_dict() if hasattr(row, "to_dict") else dict(row) for row in rows]
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+            data.pop("instrument", None)
+            out.append(data)
+        return out
 
     def news(self, query: str, limit: int) -> list[dict[str, Any]]:
         source = self.service.source("news")
@@ -443,7 +451,12 @@ class DeskContext:
             haystack = row.get("_haystack") or " ".join(
                 str(x or "") for x in (row.get("title"), row.get("yes_sub_title"), row.get("ticker"), row.get("event_ticker"))
             ).lower()
-            hits = sum(1 for pattern in patterns if pattern.search(haystack))
+            # Tickers are compound words (KXFEDDECISION), so a word may sit inside one; titles
+            # are prose, so there a word must stand alone.
+            tickers = " ".join(
+                str(x or "") for x in (row.get("ticker"), row.get("event_ticker"), row.get("series_ticker"))
+            ).lower()
+            hits = sum(1 for w, pattern in zip(words, patterns) if pattern.search(haystack) or w in tickers)
             if words and hits == 0:
                 continue
             volume = row.get("volume_24h") or ZERO

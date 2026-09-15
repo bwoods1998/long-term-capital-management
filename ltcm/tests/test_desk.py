@@ -570,5 +570,22 @@ class LessonsTests(unittest.TestCase):
         self.assertEqual(_lessons_from("- one\n* two\n3. three\nprose"), ["one", "two", "three"])
         self.assertEqual(_lessons_from("Nothing learned today, the book was flat."), [])
 
+class GuardrailCopyTests(unittest.TestCase):
+    """The words that keep the recursive loop honest are pinned, because tonight's desks copied
+    an abandoned threshold from each other's memory and called it a lesson."""
+
+    def test_the_header_forbids_tightening_the_mandate(self):
+        self.assertIn("Your playbook may not tighten your mandate", HEADER)
+        self.assertIn("a post-mortem may not write one", HEADER)
+
+    def test_the_postmortem_asks_for_evidence_from_the_desks_own_record(self):
+        import inspect
+        from ltcm import desk as desk_module
+
+        source = inspect.getsource(desk_module)
+        self.assertIn("write no new rules, and end the session", source)
+        self.assertIn("never from another desk's memory", source)
+
+
 if __name__ == "__main__":
     unittest.main()

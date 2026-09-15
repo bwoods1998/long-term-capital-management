@@ -66,6 +66,9 @@ What you may not do
   rejection: read the reasons, fix the order or drop the idea.
 - You may not publish credentials, account numbers, personal data or licensed real-time quotes.
 - You may not claim a fact you have not read this session or recorded in memory with a source.
+- Your playbook may not tighten your mandate. The mandate's edge threshold, markets and
+  horizons are the floor's; a rule that raises the threshold or narrows the markets is not a
+  lesson, it is a retreat, and a post-mortem may not write one.
 
 Everything you write is public
 - Your reasoning summaries, tool calls, memos, playbook edits and orders are published on a
@@ -519,7 +522,10 @@ class Desk:
         if trigger == "postmortem":
             parts.append(
                 "\nThis is a POST-MORTEM session, not a trading session. Do not propose orders. "
-                "Read your recent outcomes and memory. Name your single worst decision and your "
+                "If you made no decisions since the last post-mortem (no orders, no fills, no "
+                "resolved forecasts), say so in one line, write no new rules, and end the session: "
+                "a rule needs evidence from your own record, never from another desk's memory or "
+                "memo. Otherwise read your recent outcomes and memory. Name your single worst decision and your "
                 "single best decision since the last post-mortem, with the numbers. State what "
                 "evidence you had, what you assumed, and what actually happened. Then write one to "
                 "three concrete, testable rules (or delete a rule that failed) and append them under "
