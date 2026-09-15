@@ -500,9 +500,13 @@ class RunwayProvider(FakeProvider):
         return self.burn
 
     sail_burn = None
+    sail_period = None
 
     def sail_burn_usd_per_day(self):
         return self.sail_burn
+
+    def sail_spend_period_usd(self):
+        return self.sail_period
 
 
 class RunwayPolicyTests(ServiceCase):
@@ -587,6 +591,19 @@ class RunwayPolicyTests(ServiceCase):
         # $269.82 above the reserve at $4.73 plus the policy's $0.30 box line a day is 53 days,
         # not the ledger's 385.
         self.assertEqual(event.payload["runway_days"], "53")
+
+    def test_infrastructure_spend_is_sails_day_less_the_ledgers_day_summed_from_the_floors_own_days(self):
+        self.provider.sail_period = Decimal("4.73")  # Sail's last 24 hours, everything included
+        self.provider.burn = Decimal("0.40")           # the ledger's last 24 hours of model cost
+        self.tick()
+        run = self.publisher.checkpoints[-1]["run"]
+        self.assertEqual(str(run["sail_infra_spend_total_usd"]), "4.33")
+        # The next day adds its own figure; the earlier day is kept, not recomputed away.
+        self.provider.sail_period = Decimal("2.10")
+        self.tick(moment(2026, 9, 15, 13, 50))
+        run = self.publisher.checkpoints[-1]["run"]
+        self.assertEqual(str(run["sail_infra_spend_total_usd"]), "6.03")
+        self.assertEqual(sorted(self.service.state()["infra_spend_by_day"]), ["2026-09-14", "2026-09-15"])
 
     def test_an_unreadable_balance_never_stops_the_floor(self):
         self.provider.balance = None

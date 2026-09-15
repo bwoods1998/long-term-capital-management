@@ -1184,8 +1184,10 @@ class Service:
         return out
 
     def _sail_usage(self) -> dict[str, Any] | None:
-        """Sail's own spend over its summary range less the model ledger: the box, the sandboxes
-        and the image builds, which is the infrastructure figure the run clock shows."""
+        """The infrastructure spend the run clock shows: Sail's own last-day spend less the
+        model ledger's last day (the box, the sandboxes, the image builds), recorded per UTC
+        day in the state file and summed, so the total grows from the floor's own first day
+        and never counts what an earlier project spent."""
         provider = self.provider
         period = getattr(provider, "sail_spend_period_usd", None)
         trailing = getattr(provider, "spent_since", None)
@@ -1195,8 +1197,16 @@ class Service:
             total = period()
             if total is None:
                 return None
-            models = money(trailing(24.0 * 3660))
-            return {"infra_spend_usd": max(ZERO, money(total) - models)}
+            today_infra = max(ZERO, money(total) - money(trailing(24.0)))
+            day = self.now()[:10]
+            state = self.state()
+            by_day = dict(state.get("infra_spend_by_day") or {})
+            by_day[day] = str(today_infra.quantize(Decimal("0.01")))
+            for stale in sorted(by_day)[:-60]:
+                by_day.pop(stale, None)
+            if by_day != (state.get("infra_spend_by_day") or {}):
+                self._save_state(infra_spend_by_day=by_day)
+            return {"infra_spend_usd": sum((money(v) for v in by_day.values()), ZERO)}
         except Exception:
             return None
 

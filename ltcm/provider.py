@@ -835,7 +835,9 @@ class Provider:
             return self._balance[1]
         value: Decimal | None = None
         try:
-            summary = self.transport("GET", "/v2/usage/summary")
+            # The last day, not the account's default month: the burn is what the floor is
+            # spending now, not what an earlier project spent last week.
+            summary = self.transport("GET", "/v2/usage/summary?range=24h")
             balance = summary.get("balance") if isinstance(summary, dict) else None
             if (
                 isinstance(summary, dict)

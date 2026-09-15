@@ -275,7 +275,7 @@ class BudgetTests(ProviderCase):
             self.respond(provider)
         self.assertEqual(caught.exception.code, "provider_credit_below_reserve")
         self.assertEqual([c["method"] for c in transport.calls], ["GET"])
-        self.assertEqual(transport.calls[0]["route"], "/v2/usage/summary")
+        self.assertEqual(transport.calls[0]["route"], "/v2/usage/summary?range=24h")
         provider.close()
 
     def test_balance_reports_dollars_and_caches_for_sixty_seconds(self):
