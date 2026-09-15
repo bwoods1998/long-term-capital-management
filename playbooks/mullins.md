@@ -9,37 +9,42 @@ The mandate and limits in the manifest are not editable.
 2. Base rate: how often has this outcome happened in comparable periods? Write the number.
 3. Adjust for dated, specific evidence only (a released data point, a scheduled announcement,
    a published forecast with a track record). Narratives and vibes are not evidence.
-4. Write my probability and the market's yes price side by side.
-5. Fees are about seven cents per dollar of contract value at even odds. Trade only when my
-   probability differs from the market by at least eight cents on the cheaper side.
+4. Write my probability and the market's price side by side, and record it with
+   `record_forecast` every time, trade or no trade. The record is how I get better.
+5. Fees are about seven cents per dollar of contract value at even odds and less at the
+   tails. Trade when my probability beats the cheaper side's price by at least three cents and
+   at least one and a half times the fee. Size by edge: three to five cents earns a small
+   position, ten cents or more a full one, never past the limits.
 6. To bet against an outcome, buy the NO contract: set `right: "no"` on the instrument and
    quote my limit in NO dollars (NO at $0.30 is the same trade as YES at $0.70, and the floor
-   converts it for the venue). I never need to find a market whose YES leg happens to be the
-   side I dislike.
+   converts it for the venue).
 
 ## Finding markets
 
-`event_markets` searches titles by words, and it also looks up a series or market ticker
+`event_markets` searches titles by whole words and looks up a series or market ticker
 directly. Series names follow a pattern; the ones I use most:
 
 - `KXFEDDECISION-26SEP` (Fed decision at a meeting: hike, hold, cut), `KXFED-26SEP` (fed funds target level)
-- `KXCPI-26SEP` (monthly CPI print), `KXCPIYOY-26SEP` (year-over-year CPI)
-- Try the series name plus the month for jobs, unemployment, GDP and weather markets, and
-  read the market's `close_time` before pricing it.
+- `KXCPI-26SEP` (monthly CPI print), `KXCPIYOY-26SEP` (year-over-year CPI), jobs, unemployment, GDP
+- Other central banks, scheduled political and corporate events with a public resolution source.
+- Read the market's `close_time` before pricing it. Price a few markets resolving within 48
+  hours every session: fast resolutions are what my calibration record is built from.
 
 ## Session routine
 
 1. Review open positions against new information; close or hold with a reason.
-2. Scan markets resolving within fourteen days in my categories.
-3. Price at most six markets carefully rather than twenty carelessly.
-4. Propose at most three orders. Limit orders at my price or better, never market.
+2. Scan markets resolving within seven days in my categories, nearest resolution first.
+3. Price at least six markets carefully, each with a recorded forecast.
+4. Propose every order with edge, largest edge first. Limit orders at my price or better.
 5. Write one memory entry per market priced: my probability, the market price, the reasoning.
+6. Write a memo: what I priced, what I traded, what I passed and why.
 
 ## Calibration
 
-When a market resolves, record whether I was right and by how much. Every ten resolutions,
-check calibration: if my 70% calls resolve yes far less than 70% of the time, my adjustments
-are too large and the playbook should say so.
+The calibration block in my prompt scores every recorded forecast at resolution. If my 70%
+calls resolve yes far less than 70% of the time, my adjustments are too large and the playbook
+should say so; if my 30% calls resolve far more often than 30%, I am too timid on the cheap
+side. Test a rule on the record with `run_code` before I write it down.
 
 ## Rules I have learned
 
