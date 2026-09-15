@@ -178,6 +178,8 @@ class Gateway:
         self._seen_fills: set[str] = set()
         self._scan_seq = 0
         self._decisions: dict[str, bool] = {}
+        # leap: exits. `exits.ExitBook` when the floor enforces exit plans; the service sets it.
+        self.exits: Any = None
         self._load()
 
     # ------------------------------------------------------------------ log folding
@@ -378,6 +380,11 @@ class Gateway:
             return self._outcome(intent, blocked, None, [])
 
         order_row, fills = self._submit(intent, at)
+        if intent.has_exit_plan and self.exits is not None:  # leap: exits
+            try:
+                self.exits.record_for(intent, order_row, at)
+            except Exception as exc:  # a plan that cannot be written must not lose the fill
+                self._alert("warning", f"exit plan for {intent.id} not recorded: {type(exc).__name__}", at)
         return self._outcome(intent, decision, order_row, fills)
 
     # ------------------------------------------------------------------ the second pair of eyes
@@ -417,6 +424,10 @@ class Gateway:
         `risk.review`.
         """
         if self.critic is None or not self.live_desk(intent.desk_id):
+            return None
+        if intent.purpose == "exit":
+            # leap: exits. An exit reduces exposure the desk already took; the critic's
+            # question -- does the thesis justify the risk -- was answered at entry.
             return None
         try:
             memo = self.log.last(ctx.manifest.stream, "desk.memo")
@@ -488,6 +499,13 @@ class Gateway:
             "rationale": intent.rationale,
             "session_id": intent.session_id,
             "created_at": intent.created_at,
+            # leap: exits. The plan stated with the entry, and what an exit closes.
+            "target_price": text(intent.target_price),
+            "stop_price": text(intent.stop_price),
+            "time_stop_at": intent.time_stop_at,
+            "purpose": intent.purpose,
+            "exit_reason": intent.exit_reason,
+            "exit_of": intent.exit_of,
         }
         return self.log.append(stream, "desk.intent", payload, id=f"intent:{intent.id}", at=at)
 
@@ -580,6 +598,14 @@ class Gateway:
         if order.venue == SHADOW_VENUE:
             # Nothing was sent. The row says so on its face, wherever it is read.
             payload["shadow"] = True
+        # leap: exits. What the order was for, and whether the venue holds a bracket for it.
+        payload["purpose"] = order.purpose or "entry"
+        if order.purpose == "exit":
+            payload["exit_reason"] = order.exit_reason
+            payload["exit_of"] = order.exit_of
+        bracket = order._raw.get("bracket") if isinstance(order._raw, dict) else None
+        if isinstance(bracket, bool):
+            payload["bracket"] = bracket
         event_id = f"order:{order.id}:{status}:{text(order.filled_quantity)}"
         self.log.append(
             f"broker:{order.venue}", "broker.order", payload, id=event_id, at=at
@@ -827,6 +853,11 @@ class Gateway:
             id=f"outcome:{desk_id}:{ticker}:{settled_at}:{_short(instrument.key)}",
             at=settled_at,
         )
+
+    def entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
+        """When this desk first traded the instrument, and the sentence it gave. Public for the
+        positions board (leap: exits)."""
+        return self._entry_of(desk_id, key)
 
     def _entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
         """When this desk first traded the contract, and the sentence it gave for doing so."""

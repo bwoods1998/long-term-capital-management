@@ -503,6 +503,8 @@ class Desk:
         parts.append("\n# Recent outcomes\n" + _outcomes_block(
             self._safe(lambda: self.ctx.outcomes(10), [])
         ))
+        if trigger.startswith("watch:"):  # leap: watch
+            parts.append("\n# Why you were woken\n" + self._watch_block())
         if trigger == "postmortem":
             parts.append(
                 "\nThis is a POST-MORTEM session, not a trading session. Do not propose orders. "
@@ -520,6 +522,26 @@ class Desk:
                 "any orders you can justify, then call end_session with a short summary."
             )
         return "\n".join(parts)
+
+    def _watch_block(self) -> str:
+        """The night watch's own words for waking the desk (leap: watch)."""
+        try:
+            event = self.log.last(self.manifest.stream, "desk.watch")
+        except Exception:
+            event = None
+        if event is None or event.payload.get("decision") != "wake":
+            return (
+                "The night watch woke you on a trigger. Check your book and the market it "
+                "concerns, act if the playbook says so, and end the session if not."
+            )
+        detail = str(event.payload.get("detail") or "")[:300]
+        reason = str(event.payload.get("reason") or "")[:500]
+        return (
+            f"Trigger: {detail}\nThe watch's reason for waking you: {reason}\n"
+            "This is not a scheduled session. Decide quickly whether the event changes a "
+            "position you hold or opens something inside your mandate; act if it does, and "
+            "end the session if it does not."
+        )
 
     @staticmethod
     def _safe(call: Callable[[], Any], default: Any) -> Any:

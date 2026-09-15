@@ -195,6 +195,34 @@ def reduces_exposure(intent: OrderIntent, ctx: RiskContext) -> bool:
     return abs(after) <= abs(held_qty)
 
 
+def rule_exit_plan(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    """A stop sits on the losing side of the entry and a target on the winning side.
+
+    leap: exits. The entry price is the limit when there is one, else the quote's reference
+    for the side. With neither there is nothing to compare against and the plan stands as
+    written; a plan naming neither a stop nor a target is allowed -- the playbook may forbid
+    it, the engine does not. An inverted level would fire the moment the entry filled.
+    """
+    if intent.purpose != "entry":
+        return None
+    if intent.target_price is None and intent.stop_price is None:
+        return None
+    entry = intent.limit_price if intent.limit_price is not None else reference_price(intent, ctx)
+    if entry is None or entry <= 0:
+        return None
+    if intent.side == "buy":
+        if intent.stop_price is not None and intent.stop_price >= entry:
+            return f"stop price {intent.stop_price} must be below the entry {entry} for a buy"
+        if intent.target_price is not None and intent.target_price <= entry:
+            return f"target price {intent.target_price} must be above the entry {entry} for a buy"
+    else:
+        if intent.stop_price is not None and intent.stop_price <= entry:
+            return f"stop price {intent.stop_price} must be above the entry {entry} for a sell"
+        if intent.target_price is not None and intent.target_price >= entry:
+            return f"target price {intent.target_price} must be below the entry {entry} for a sell"
+    return None
+
+
 def rule_order_notional(intent: OrderIntent, ctx: RiskContext) -> str | None:
     if reduces_exposure(intent, ctx):
         return None  # a desk may always exit a position in one order
@@ -299,6 +327,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     rule_min_price,
     rule_liquidity,
     rule_limit_sanity,
+    rule_exit_plan,
     rule_order_notional,
     rule_cash,
     rule_position_limit,

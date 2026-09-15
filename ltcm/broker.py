@@ -19,6 +19,8 @@ ASSET_CLASSES = ("equity", "option", "crypto", "future", "event")
 SIDES = ("buy", "sell")
 ORDER_TYPES = ("market", "limit")
 TIME_IN_FORCE = ("day", "gtc", "ioc")
+PURPOSES = ("entry", "exit")
+EXIT_REASONS = ("target", "stop", "time_stop", "desk")
 ORDER_STATUSES = (
     "new",  # created locally, not yet sent
     "accepted",  # venue acknowledged
@@ -188,10 +190,34 @@ class OrderIntent:
     rationale: str
     created_at: str
     session_id: str | None = None
+    # leap: exits. The exit plan a desk states with its entry, and what an exit order is for.
+    target_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    time_stop_at: str | None = None
+    purpose: str = "entry"  # "entry" | "exit"
+    exit_reason: str | None = None  # target | stop | time_stop | desk, on an exit
+    exit_of: str | None = None  # the entry intent an exit closes
 
     def __post_init__(self):
         if self.side not in SIDES:
             raise ValueError("side must be buy or sell")
+        if self.purpose not in PURPOSES:
+            raise ValueError("purpose must be entry or exit")
+        if self.exit_reason is not None and self.exit_reason not in EXIT_REASONS:
+            raise ValueError("exit_reason must be target, stop, time_stop or desk")
+        if self.purpose == "exit" and not self.exit_of:
+            raise ValueError("an exit names the entry intent it closes")
+        for name in ("target_price", "stop_price"):
+            value = getattr(self, name)
+            if value is not None:
+                value = money(value)
+                if value <= 0:
+                    raise ValueError(f"{name} must be positive")
+                object.__setattr__(self, name, value)
+        if self.time_stop_at is not None and (
+            not isinstance(self.time_stop_at, str) or len(self.time_stop_at) < 20
+        ):
+            raise ValueError("time_stop_at must be an ISO-8601 UTC timestamp")
         if self.order_type not in ORDER_TYPES:
             raise ValueError("order_type must be market or limit")
         if self.time_in_force not in TIME_IN_FORCE:
@@ -227,11 +253,19 @@ class OrderIntent:
         created_at: str,
         session_id: str | None = None,
         nonce: str | None = None,
+        target_price: Any = None,
+        stop_price: Any = None,
+        time_stop_at: str | None = None,
+        purpose: str = "entry",
+        exit_reason: str | None = None,
+        exit_of: str | None = None,
     ) -> "OrderIntent":
         """Derive a stable id from the desk, session, instrument, side and nonce.
 
         Two identical proposals within one session collapse to one intent, which is what we
-        want when a model repeats itself after a transport retry.
+        want when a model repeats itself after a transport retry. An exit's identity also
+        carries what it closes and why, so the floor's one exit per plan per reason is one
+        intent however many ticks notice the same trigger.
         """
         material = "|".join(
             [
@@ -244,6 +278,7 @@ class OrderIntent:
                 format(money(limit_price), "f") if limit_price is not None else "",
                 nonce or "",
             ]
+            + ([purpose, exit_reason or "", exit_of or ""] if purpose == "exit" else [])
         )
         intent_id = "oi-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
         return cls(
@@ -258,6 +293,21 @@ class OrderIntent:
             rationale=rationale,
             created_at=created_at,
             session_id=session_id,
+            target_price=money(target_price) if target_price is not None else None,
+            stop_price=money(stop_price) if stop_price is not None else None,
+            time_stop_at=time_stop_at,
+            purpose=purpose,
+            exit_reason=exit_reason,
+            exit_of=exit_of,
+        )
+
+    @property
+    def has_exit_plan(self) -> bool:
+        """True when the desk named a target, a stop or a time stop with this entry."""
+        return self.purpose == "entry" and (
+            self.target_price is not None
+            or self.stop_price is not None
+            or self.time_stop_at is not None
         )
 
     @property
@@ -280,6 +330,12 @@ class OrderIntent:
             "rationale": self.rationale,
             "created_at": self.created_at,
             "session_id": self.session_id,
+            "target_price": text(self.target_price),
+            "stop_price": text(self.stop_price),
+            "time_stop_at": self.time_stop_at,
+            "purpose": self.purpose,
+            "exit_reason": self.exit_reason,
+            "exit_of": self.exit_of,
         }
 
     @classmethod
@@ -296,6 +352,12 @@ class OrderIntent:
             rationale=data["rationale"],
             created_at=data["created_at"],
             session_id=data.get("session_id"),
+            target_price=money(data["target_price"]) if data.get("target_price") is not None else None,
+            stop_price=money(data["stop_price"]) if data.get("stop_price") is not None else None,
+            time_stop_at=data.get("time_stop_at"),
+            purpose=data.get("purpose") or "entry",
+            exit_reason=data.get("exit_reason"),
+            exit_of=data.get("exit_of"),
         )
 
 
@@ -319,6 +381,10 @@ class Order:
     submitted_at: str | None = None
     updated_at: str | None = None
     reason: str | None = None  # rejection or cancellation reason
+    # leap: exits. What the order is for, copied from the intent so the order record says so.
+    purpose: str = "entry"
+    exit_reason: str | None = None
+    exit_of: str | None = None
     _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
@@ -354,6 +420,9 @@ class Order:
             time_in_force=intent.time_in_force,
             status="new",
             venue=venue or intent.instrument.venue,
+            purpose=intent.purpose,
+            exit_reason=intent.exit_reason,
+            exit_of=intent.exit_of,
         )
 
     def to_dict(self, *, private: bool = False) -> dict[str, Any]:

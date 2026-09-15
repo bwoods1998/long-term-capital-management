@@ -109,6 +109,39 @@ def order_configuration(intent: OrderIntent) -> dict[str, Any]:
     }
 
 
+# leap: exits. Coinbase's own failure reasons for an attached take-profit/stop-loss, from the
+# `FailureReason` enum in the Advanced Trade spec. A refusal naming one of these is the bracket's
+# fault, not the entry's, so the entry is retried bare and the floor enforces the plan itself.
+BRACKET_FAILURES = ("ATTACHED", "BRACKET", "TPSL", "TP_SL")
+
+
+def attached_bracket(intent: OrderIntent) -> dict[str, Any] | None:
+    """The `attached_order_configuration` for an entry that names both a target and a stop.
+
+    Coinbase: *"Include `attached_order_configuration` in the Create Order request body with
+    `trigger_bracket_gtc` to create a TP/SL order. Do not include size as the attached TP/SL
+    order will have the same size as the originating order."* Both legs are required
+    (`SINGLE_LEGGED_ATTACHED_ORDER_CONFIGURATION_NOT_ALLOWED`), only market and limit parents
+    are eligible, and the stop is a stop-*limit* with a hard-coded five percent cushion, so a
+    gap larger than that can leave it unfilled -- which is why the floor also keeps its own
+    stop in `ltcm/exits.py`. UNVERIFIED against a live order: the shape is from the spec.
+    """
+    if intent.purpose != "entry" or intent.target_price is None or intent.stop_price is None:
+        return None
+    return {
+        "trigger_bracket_gtc": {
+            "limit_price": text(intent.target_price),
+            "stop_trigger_price": text(intent.stop_price),
+        }
+    }
+
+
+def bracket_refused(message: str) -> bool:
+    """True when a refusal blames the attached bracket rather than the entry itself."""
+    upper = str(message or "").upper()
+    return any(token in upper for token in BRACKET_FAILURES)
+
+
 class CoinbaseBroker:
     """A `Broker` over Coinbase Advanced Trade, with a fresh JWT per request."""
 
@@ -276,18 +309,23 @@ class CoinbaseBroker:
     # ---------------------------------------------------------------- orders
     def order_body(self, intent: OrderIntent) -> dict[str, Any]:
         """The create-order request body, with the intent id as `client_order_id`."""
-        return {
+        body = {
             "client_order_id": intent.id,
             "product_id": product_id(intent.instrument),
             "side": intent.side.upper(),
             "order_configuration": order_configuration(intent),
         }
+        bracket = attached_bracket(intent)  # leap: exits
+        if bracket is not None:
+            body["attached_order_configuration"] = bracket
+        return body
 
     def submit(self, intent: OrderIntent) -> Order:
         """`POST /api/v3/brokerage/orders`. A refusal arrives as `success: false`, not a 4xx."""
         if intent.instrument.asset_class != "crypto":
             raise RejectedOrder(f"coinbase trades crypto, not {intent.instrument.asset_class}")
         body = self.order_body(intent)
+        attached = "attached_order_configuration" in body
         try:
             payload = self._call("POST", PREFIX + "/orders", body=body, what="coinbase submit")
         except TransportError as exc:
@@ -300,7 +338,27 @@ class CoinbaseBroker:
             raise UnknownOutcome("coinbase submit: unreadable response; reconcile before retrying")
         if not payload.get("success"):
             error = payload.get("error_response") or payload.get("error") or {}
-            raise RejectedOrder(f"coinbase submit: {message_of(error) or 'refused'}")
+            message = message_of(error) or "refused"
+            if attached and bracket_refused(message):
+                # leap: exits. The venue refused the bracket, not the trade: send the entry
+                # bare and let the floor hold the stop and the target itself.
+                bare = {k: v for k, v in body.items() if k != "attached_order_configuration"}
+                try:
+                    payload = self._call("POST", PREFIX + "/orders", body=bare, what="coinbase submit")
+                except TransportError as exc:
+                    return confirm_or_unknown(
+                        lambda: self.order_by_client_id(intent.id),
+                        what="coinbase submit",
+                        detail=f"no response ({type(exc).__name__})",
+                    )
+                attached = False
+                if not isinstance(payload, dict):
+                    raise UnknownOutcome("coinbase submit: unreadable response; reconcile before retrying")
+                if not payload.get("success"):
+                    error = payload.get("error_response") or payload.get("error") or {}
+                    raise RejectedOrder(f"coinbase submit: {message_of(error) or 'refused'}")
+            else:
+                raise RejectedOrder(f"coinbase submit: {message}")
         success = payload.get("success_response")
         if not isinstance(success, dict) or not success.get("order_id"):
             raise UnknownOutcome("coinbase submit: no order id in a successful response")
@@ -310,6 +368,8 @@ class CoinbaseBroker:
         order.submitted_at = iso(self.clock())
         order.updated_at = order.submitted_at
         order._raw = {"success": True}
+        if "attached_order_configuration" in body:
+            order._raw["bracket"] = attached  # the floor reads this into the order record
         return order
 
     def get_order(self, order_id: str) -> Order:

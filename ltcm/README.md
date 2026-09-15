@@ -70,6 +70,8 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `desk.postmortem` | desk | yes | `period`, `text`, `lessons[]` |
 | `desk.outcome` | desk | yes | `instrument`, `market_id`, `result`, `entry_price`, `exit_price`, `quantity`, `pnl`, `held_for_hours`, `rationale_excerpt` |
 | `desk.session_ended` | desk | yes | `session_id`, `requests`, `cost_usd`, `reason` |
+| `desk.watch` | desk | yes | `trigger`, `detail`, `decision` (`wake`/`ignore`), `reason`, `cost_usd`, `session_id?` |
+| `desk.exit_plan` | desk | yes | `intent_id`, `instrument`, `target_price?`, `stop_price?`, `time_stop_at?`, `venue_native`, `order_ids[]` |
 | `risk.decision` | risk | yes | `intent_id`, `desk_id`, `approved`, `reasons[]` |
 | `risk.review` | risk | yes | `intent_id`, `desk_id`, `verdict` (`approve` or `block`), `reason`, `model` |
 | `risk.breaker` | risk | yes | `scope`, `rule`, `detail`, `action` |
@@ -91,6 +93,25 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 
 "After fill" means the event is written immediately but marked `public: false`; the publisher
 releases it when the matching order reaches a terminal state. Nobody can trade ahead of a desk.
+
+## Exits and the night desk
+
+A desk states its exit with its entry: `propose_order` takes `target_price`, `stop_price` and
+`holding_period_hours`, the risk engine refuses a stop on the wrong side of the entry, and the
+plan is published as `desk.exit_plan` the moment the venue accepts the order (`ltcm/exits.py`).
+From then on the floor keeps it: on Coinbase the target and the stop ride on the order itself
+as an attached take-profit/stop-loss (`venue_native`), everywhere else the floor compares the
+live mark with the levels every tick and files an exposure-reducing market exit
+(`broker.order` with `purpose: exit` and `exit_reason`), and the time stop is a market exit at
+that moment on every venue. Exits skip the critic; one exit per plan per reason.
+
+Between sessions the night desk (`ltcm/watch.py`) looks, at no model cost, for a held market
+or coin moving more than a threshold, a fill, a new market in a series the desk follows, or a
+headline naming what it holds, then spends one flash-model turn deciding whether to wake the
+desk. Both verdicts are published as `desk.watch`; a wake starts a session with trigger
+`watch:<kind>`, at most once per half hour per desk, never while the desk is in session, and
+never for a live desk on a venue the floor cannot trade. The checkpoint carries every desk's
+positions with their thesis and plan, the running session, and the watch's day.
 
 ## Spend policy: a runway, not a cap
 

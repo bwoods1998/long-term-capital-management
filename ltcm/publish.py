@@ -613,6 +613,7 @@ def checkpoint_body(
     committee: Mapping[str, Any],
     budget: Mapping[str, Any],
     infra: Mapping[str, Any] | None = None,
+    watch: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact shape the site expects. Money stays `Decimal` for `jsonable` to render.
 
@@ -667,6 +668,11 @@ def checkpoint_body(
                 "status": desk.get("status"),
                 "gate": desk.get("gate"),
                 "updated_at": not_after(desk.get("updated_at"), published_at),
+                # leap: exits and watch. Optional on the wire: an older floor omits them.
+                **({"positions": [position_row(row) for row in list(desk.get("positions") or [])[:50]]}
+                   if desk.get("positions") is not None else {}),
+                **({"live_session": live_session_row(desk.get("live_session"))}
+                   if desk.get("live_session") else {}),
             }
             for desk in desks
         ],
@@ -694,4 +700,58 @@ def checkpoint_body(
             "region": infra.get("region"),
             "requests_today": counted(infra.get("requests_today")),
         },
+        # leap: watch. What the night desk did today; absent on a floor without one.
+        **({"watch": watch_row(watch)} if watch is not None else {}),
+    }
+
+
+def position_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """One entry of a desk's positions board, in the contract's shape (leap: exits)."""
+    instrument = dict(row.get("instrument") or {})
+    exits = []
+    for order in list(row.get("exit_orders") or [])[:8]:
+        exits.append(
+            {
+                "id": str(order.get("id")),
+                "kind": str(order.get("kind") or "desk"),
+                "price": None if order.get("price") is None else floor_at_zero(order.get("price")),
+            }
+        )
+    return {
+        "instrument": {
+            "symbol": instrument.get("symbol"),
+            "asset_class": instrument.get("asset_class"),
+            "venue": instrument.get("venue"),
+        },
+        "side": row.get("side"),
+        "quantity": floor_at_zero(row.get("quantity")),
+        "entry_price": floor_at_zero(row.get("entry_price")),
+        "mark_price": floor_at_zero(row.get("mark_price")),
+        "market_value": floor_at_zero(row.get("market_value")),
+        "unrealized_pnl": row.get("unrealized_pnl"),
+        "opened_at": row.get("opened_at"),
+        "thesis": str(row.get("thesis") or "")[:240],
+        "intent_id": row.get("intent_id"),
+        "session_id": row.get("session_id"),
+        "target_price": None if row.get("target_price") is None else floor_at_zero(row.get("target_price")),
+        "stop_price": None if row.get("stop_price") is None else floor_at_zero(row.get("stop_price")),
+        "time_stop_at": row.get("time_stop_at"),
+        "exit_orders": exits,
+    }
+
+
+def live_session_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "session_id": row.get("session_id"),
+        "trigger": row.get("trigger"),
+        "started_at": row.get("started_at"),
+    }
+
+
+def watch_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "triggers_today": counted(row.get("triggers_today")),
+        "wakes_today": counted(row.get("wakes_today")),
+        "last_trigger_at": row.get("last_trigger_at"),
+        "cost_today_usd": floor_at_zero(row.get("cost_today_usd")),
     }

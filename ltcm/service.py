@@ -35,6 +35,8 @@ from .broker import Instrument, OrderIntent, money, text
 from .analytics import ResultsLedger
 from .committee import Committee, capital_mode, live_desks, promoted_desks, retired_desks
 from .runway import Runway, assess as assess_runway
+from .exits import ExitBook  # leap: exits
+from .watch import NightWatch  # leap: watch
 from .events import EventLog, canonical, now_iso
 from .evolve import Evolution
 from .gateway import Gateway
@@ -91,6 +93,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "spend_policy": {},
     # How often the evolution loop tops families up with shadow variants, in seconds.
     "seed_interval_seconds": 3600,
+    # leap: exits. The floor keeps every desk's stop, target and time stop (`ltcm/exits.py`).
+    "exits": {"enabled": True, "check_seconds": 60, "retry_seconds": 300},
+    # leap: watch. The night desk that wakes a desk on a trigger (`ltcm/watch.py`).
+    "watch": {"enabled": True},
     "publish": True,
     "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
     "shadow_slippage_bps": 5,
@@ -624,6 +630,27 @@ class Service:
             },
         )
         self.publisher = publisher if publisher is not None else self._build_publisher()
+        # leap: exits. The floor holds every desk's exit plan and enforces it every tick.
+        exits_config = dict(self.config.get("exits") or {})
+        self.exits: ExitBook | None = None
+        if exits_config.get("enabled", True):
+            self.exits = ExitBook(
+                self.log,
+                self.gateway,
+                self.ledgers,
+                self.manifests,
+                quote=self.quote,
+                clock=clock,
+                check_seconds=int(exits_config.get("check_seconds", 60)),
+                retry_seconds=int(exits_config.get("retry_seconds", 300)),
+                alert=self.alert,
+            )
+            self.gateway.exits = self.exits
+        # leap: watch. The night desk.
+        watch_config = dict(self.config.get("watch") or {})
+        self.watch: NightWatch | None = (
+            NightWatch(self, watch_config) if watch_config.get("enabled", True) else None
+        )
 
     # ------------------------------------------------------------------ construction
     def env(self) -> dict[str, str]:
@@ -1460,6 +1487,8 @@ class Service:
             "settlements": [],
             "rate_card": None,
             "kill_switch": self.gateway.kill_switch_engaged(),
+            "exits": [],  # leap: exits
+            "watch": [],  # leap: watch
         }
 
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
@@ -1497,6 +1526,14 @@ class Service:
             result["orders"] = [row["order_id"] for row in self.gateway.poll_orders(at)]
         except Exception as exc:
             self.alert("warning", f"order poll failed: {exc}")
+        # leap: exits. Stops, targets and time stops are the floor's to keep, every tick,
+        # whether or not the desk is in session. The kill switch refuses every order, exits
+        # included, so nothing is filed while it is engaged.
+        if self.exits is not None and not result["kill_switch"]:
+            try:
+                result["exits"] = self.exits.tick(at)
+            except Exception as exc:
+                self.alert("warning", f"exit enforcement failed: {type(exc).__name__}: {exc}")
 
         interval = int(self.config["mark_interval_seconds"])
         last_mark = state.get("last_mark_at")
@@ -1504,6 +1541,14 @@ class Service:
             result["marked"] = self.mark_all(at)
             result["breakers"] = self.breakers(at)
             self._save_state(last_mark_at=at)
+
+        # leap: watch. The night desk looks after the marks are fresh; it costs nothing
+        # until something happens, and it is quiet when the floor has stopped for credit.
+        if self.watch is not None and not result["kill_switch"] and not stopped:
+            try:
+                result["watch"] = self.watch.tick(at, allow_shadow=not live_only)
+            except Exception as exc:
+                self.alert("warning", f"night watch failed: {type(exc).__name__}: {exc}")
 
         # Keep the event-contract index warm so a desk's first search does not wait on a sweep.
         if any("event" in m.instruments.asset_classes for m in self.manifests.values()):
@@ -1780,6 +1825,10 @@ class Service:
                         },
                     },
                     "updated_at": state.as_of,
+                    # leap: exits. What the desk holds and why, with the exit plan on each.
+                    "positions": self.desk_positions(desk_id, at),
+                    # leap: watch. The session running right now, if one is.
+                    "live_session": self.live_session(desk_id),
                 }
             )
         shadow_count = sum(1 for desk_id in self.manifests if desk_id not in live and desk_id not in retired)
@@ -1828,7 +1877,106 @@ class Service:
                 **{k: budget.get(k) for k in RUNWAY_KEYS if k in budget},
             },
             infra=self.infra(at, spend_usd=spent if spent is not None else ZERO),
+            watch=self.watch.summary(at) if self.watch is not None else None,  # leap: watch
         )
+
+    # ------------------------------------------------------------------ leap: exits
+    def opening_intent(self, desk_id: str, key: str) -> dict[str, Any] | None:
+        """The newest entry intent this desk proposed on that instrument, as published."""
+        manifest = self.manifests.get(desk_id)
+        stream = manifest.stream if manifest is not None else f"desk:{desk_id}"
+        found: dict[str, Any] | None = None
+        for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000):
+            payload = event.payload
+            if payload.get("purpose") == "exit":
+                continue
+            instrument = payload.get("instrument")
+            if not isinstance(instrument, Mapping):
+                continue
+            try:
+                if Instrument.from_dict(dict(instrument)).key != key:
+                    continue
+            except Exception:
+                continue
+            found = dict(payload)
+        return found
+
+    def desk_positions(self, desk_id: str, at: str) -> list[dict[str, Any]]:
+        """The positions board's rows for one desk: every open position with its mark, its
+        P&L, the sentence the desk gave for it and the exit plan the floor holds against it."""
+        ledger = self.ledgers.get(desk_id)
+        if ledger is None:
+            return []
+        try:
+            state = ledger.state(at)
+        except Exception:
+            return []
+        rows: list[dict[str, Any]] = []
+        for key, position in sorted(state.positions.items()):
+            quantity = money(position.quantity)
+            if quantity == 0:
+                continue
+            instrument = position.instrument
+            right = str(instrument.right or "").lower()
+            side = right if right in ("yes", "no") else ("long" if quantity > 0 else "short")
+            mark = position.mark
+            if mark is None:
+                found = self.quote(instrument)
+                if found is not None:
+                    mark = getattr(found, "mid", None) or getattr(found, "last", None)
+            size = abs(quantity)
+            entry = money(position.average_cost)
+            value = size * money(mark) * instrument.multiplier if mark is not None else size * entry * instrument.multiplier
+            pnl = position.unrealized_pnl if mark is not None else ZERO
+            if mark is not None and position.mark is None:
+                pnl = (money(mark) - entry) * quantity * instrument.multiplier
+            intent = self.opening_intent(desk_id, key) or {}
+            opened_at, _ = self.gateway.entry_of(desk_id, key)
+            plan = self.exits.plan_for_position(desk_id, key) if self.exits is not None else None
+            rationale = str(intent.get("rationale") or "").strip()
+            rows.append(
+                {
+                    "instrument": instrument.to_dict(),
+                    "side": side,
+                    "quantity": size,
+                    "entry_price": entry,
+                    "mark_price": money(mark) if mark is not None else entry,
+                    "market_value": money(value),
+                    "unrealized_pnl": money(pnl if pnl is not None else ZERO),
+                    "opened_at": opened_at or state.started_at or at,
+                    "thesis": rationale[:240],
+                    "intent_id": intent.get("intent_id"),
+                    "session_id": intent.get("session_id"),
+                    "target_price": plan.target_price if plan is not None else None,
+                    "stop_price": plan.stop_price if plan is not None else None,
+                    "time_stop_at": plan.time_stop_at if plan is not None else None,
+                    "exit_orders": self.exits.exit_orders(plan) if (plan is not None and self.exits is not None) else [],
+                }
+            )
+            if len(rows) >= 50:
+                break
+        return rows
+
+    # ------------------------------------------------------------------ leap: watch
+    def live_session(self, desk_id: str) -> dict[str, Any] | None:
+        """The session running for this desk right now: the newest start with no end, on a
+        thread that is still alive. A start with no end on a dead thread was cut short."""
+        manifest = self.manifests.get(desk_id)
+        stream = manifest.stream if manifest is not None else f"desk:{desk_id}"
+        started = self.log.last(stream, "desk.session_started")
+        if started is None:
+            return None
+        session_id = started.payload.get("session_id")
+        for event in self.log.read(stream=stream, kind="desk.session_ended", after=started.seq, limit=200):
+            if event.payload.get("session_id") == session_id:
+                return None
+        if not any(t.is_alive() and t.name.startswith(f"session-{desk_id}-") for t in self._sessions):
+            return None
+        return {
+            "session_id": session_id,
+            "trigger": started.payload.get("trigger"),
+            "started_at": started.at,
+        }
 
     # ------------------------------------------------------------------ the box
     def infra(self, at: str, *, spend_usd: Any = ZERO) -> dict[str, Any]:
@@ -1934,6 +2082,8 @@ class Service:
             },
             "spend_mode": self.spend_mode(),
             "desks": desks,
+            "exit_plans": len(self.exits.plans()) if self.exits is not None else 0,  # leap: exits
+            "watch": self.watch.summary(at) if self.watch is not None else None,  # leap: watch
             "last_mark_at": state.get("last_mark_at"),
             "last_committee_day": state.get("last_committee_day"),
             "last_evolution_day": state.get("last_evolution_day"),
