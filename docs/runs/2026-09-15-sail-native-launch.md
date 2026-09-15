@@ -99,3 +99,35 @@ recursive self-improvement. What changed:
   40 and 32 turns, five Kalshi sessions a day and six crypto sessions a day.
 - **One fuse.** A desk may not commit more than a quarter of the spendable credit in a day: a
   guard against a tool loop, not a budget.
+
+## Addendum, 20:30 UTC: the leap, phase one through three, foundations laid
+
+Built in one evening by four parallel workstreams against `docs/contracts/2026-09-15-floor-v2.md`
+and merged: 980 runtime tests, 69 gateway tests, 46 site tests.
+
+- **Feeds.** A standard-library WebSocket client; Kalshi fills, resolutions and tickers and
+  Coinbase ticker and user channels, with socket credentials minted by the gateway so no key
+  reaches the box; fills confirmed by REST before the ledger; the Kalshi API tier upgrade asked
+  once after the first fill. Three persistent connections from the box.
+- **Exits the floor keeps.** Every proposal may name a target, a stop and a holding period; the
+  risk engine refuses a stop on the wrong side; Coinbase carries the bracket on the order, the
+  floor enforces Kalshi levels and every time stop as exposure-reducing exits.
+- **The night desk.** Between sessions the floor watches held markets, coins, fills, new markets
+  and headlines, spends one flash-model turn on whether to wake the desk, and publishes both
+  verdicts.
+- **Calibration and the lab.** Every stated probability is scored at resolution (Brier,
+  reliability by decile, by desk, family, generation). Nightly the lab proposes bounded
+  experiments, breeds them as directed shadow variants, judges them on gate evidence, and folds
+  adopted changes into the family's house genome. Capital is allocated as a bandit.
+- **Sandboxes.** A lab image (python, numpy, pandas, labkit over the read-only data package) is
+  checkpointed once; each desk forks its own box on first `run_code`, keeps a toolbox its
+  children inherit, and every run is public with the code's hash. A probe fork came up in four
+  seconds and read real BTC bars.
+- **The site.** A portfolio board with every holding and the desk's reasoning inline, a run
+  clock (how long, how much, profit per Sail dollar), lineage tree, experiments and the
+  improvement curve, trade stories and calibration on the desk pages, and a one-screen explainer
+  of the three loops.
+
+Two production incidents on the way, both fixed within minutes: the runway budget event reused
+an id with different content and stalled every tick for half an hour; the WebSocket client's
+GUID had a transposed character and every real server refused the handshake.
