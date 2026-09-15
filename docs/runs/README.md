@@ -2,8 +2,8 @@
 
 Two kinds of file live in this directory.
 
-- **Run records** (`2026-09-15-ltcm-launch.md`) are written by hand at a hand-off: what was
-  running, what was verified live, what is deliberately off.
+- **Run records** (`2026-09-15-ltcm-launch.md`, `2026-09-15-sail-native-launch.md`) are written
+  by hand at a hand-off: what was running, what was verified live, what is deliberately off.
 - **Lab reports** (`<date>-lab-report.md`) are generated. They are the floor's own scoreboard:
   what each desk did, what it cost, what it earned, and which model earned it.
 
