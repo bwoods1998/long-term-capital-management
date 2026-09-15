@@ -366,6 +366,56 @@ class SandboxManager:
         return count
 
 
+#: The `run_code` tool as the model sees it. Registered in `ltcm/tools.py`; kept here so the
+#: sandbox owns its own contract. `save_as` turns a one-off analysis into a reusable tool.
+RUN_CODE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "name": "run_code",
+    "description": (
+        "Run Python in your own sandbox: a machine with numpy, pandas and `labkit` "
+        "(bars, quote, kalshi_market, kalshi_markets, kalshi_history, news) that reads the same "
+        "public data your other tools read. Use it to test a signal on real history, fit a "
+        "probability to a series, or size from measured volatility before you trade. Print what "
+        "you want to read back; output is bounded to 4000 characters and the run to two minutes. "
+        "Pass save_as to keep the code in your toolbox and import it later as "
+        "`from toolbox.<name> import ...`. Every run is published with its hash."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "description": "Python 3 source, under 40000 characters."},
+            "purpose": {"type": "string", "description": "One line: what this run is for, published."},
+            "save_as": {
+                "type": "string",
+                "description": "Optional tool name (lowercase letters, digits, underscores) to keep this code.",
+            },
+        },
+        "required": ["code", "purpose"],
+        "additionalProperties": False,
+    },
+}
+
+
+def execute_run_code(manager: "SandboxManager | None", desk_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+    """The tool's executor: validates, runs, and returns the run as a plain dict for the model."""
+    code = arguments.get("code")
+    purpose = str(arguments.get("purpose") or "")[:200]
+    save_as = arguments.get("save_as")
+    if save_as is not None and not isinstance(save_as, str):
+        save_as = None
+    if manager is None:
+        run = CodeRun(desk_id, sha256_text(str(code or "")), "no sandbox is available on this floor", 3, Decimal("0"), None, purpose)
+    else:
+        run = manager.run(desk_id, code if isinstance(code, str) else "", purpose=purpose, save_as=save_as or None)
+    return {
+        "exit_code": run.exit_code,
+        "output": run.stdout,
+        "seconds": str(run.seconds),
+        "code_sha256": run.code_sha256,
+        **({"saved_as": run.saved_as} if run.saved_as else {}),
+    }
+
+
 class LabImage:
     """Provision the lab image once and checkpoint it. The checkpoint id is the image."""
 

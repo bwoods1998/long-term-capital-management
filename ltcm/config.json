@@ -63,5 +63,11 @@
     "fallback_cap_usd": "40",
     "infra_usd_per_day": "0.30"
   },
-  "seed_interval_seconds": 3600
+  "seed_interval_seconds": 3600,
+  "sandbox": {
+    "enabled": true,
+    "image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
+    "daily_seconds": 1800,
+    "timeout_seconds": 120
+  }
 }
