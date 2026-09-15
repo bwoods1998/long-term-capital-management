@@ -670,10 +670,10 @@ class Provider:
             "input": input_items,
             "reasoning": {"effort": reasoning_effort, "generate_summary": "detailed"},
             "max_output_tokens": max_output_tokens,
-            # Every window is a background response, polled to completion: a high-effort turn
-            # with sixteen thousand output tokens can run past any single HTTP timeout, and the
-            # first evening lost a session that way. asap still answers as fast as Sail can.
-            "background": True,
+            # asap is awaited inline (Sail refuses a background request in the asap window:
+            # "unsupported_asap_request", verified 2026-09-15); the other windows are background
+            # responses polled to completion. FOREGROUND_TIMEOUT keeps a long asap turn alive.
+            "background": window != "asap",
             "metadata": {"completion_window": window},
         }
         if tools:

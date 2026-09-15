@@ -204,7 +204,7 @@ class BodyTests(ProviderCase):
         self.assertEqual(body["metadata"], {"completion_window": "flex"})
         self.assertEqual(body["prompt_cache_key"], "earnings-01")
         asap = provider.build_body("flash_asap", [{"role": "user", "content": "hi"}])
-        self.assertIs(asap["background"], True)  # asap too: polled, never held on one HTTP call
+        self.assertIs(asap["background"], False)  # asap is inline: Sail refuses background asap
         self.assertEqual(asap["metadata"], {"completion_window": "asap"})
         provider.close()
 
@@ -317,7 +317,7 @@ class DispatchTests(ProviderCase):
         post = transport.posts[0]
         self.assertEqual(post["route"], "/v1/responses")
         self.assertEqual(post["key"], result.request_id)
-        self.assertIs(post["body"]["background"], True)
+        self.assertIs(post["body"]["background"], False)  # a foreground asap turn
         provider.close()
 
     def test_request_key_dedupe_never_pays_twice(self):
