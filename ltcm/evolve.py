@@ -74,7 +74,7 @@ SESSION_SHIFTS = (-45, -20, 20, 45)
 #: would fail its first request, not its validation.
 MODEL_PROFILES = tuple(
     profile
-    for profile in ("pro_flex", "kimi_flex", "glm_flex", "oss_asap", "flash_flex")
+    for profile in ("pro_flex", "k3", "kimi_flex", "glm_flex", "oss_asap", "flash_flex")
     if profile in PROFILES
 )
 #: One child in three changes model. Any more and a family has no control group left; any fewer
@@ -355,6 +355,21 @@ class Evolution:
                 and states[m.id].decisions >= min_decisions
                 and scores[m.id] < median - margin
             ]
+            # A dud: mature, shadow, and never decided anything. It can neither win nor lose
+            # the race, so the score rule would keep it forever; it goes first, as "no decisions".
+            duds = [
+                m
+                for m in mature
+                if capital_mode(m, modes) != "live" and states[m.id].decisions == 0
+            ]
+            if duds and not candidates:
+                worst = min(duds, key=lambda m: m.id)
+                best = max(variants, key=lambda m: (self.score(m.id, at), m.id))
+                actions.append(self.retire(worst, at, median=median, reason="no decisions"))
+                spawned = self.spawn(worst, best, at)
+                if spawned is not None:
+                    actions.append(spawned)
+                continue
             if not candidates:
                 continue
             worst = min(candidates, key=lambda m: (scores[m.id], m.id))

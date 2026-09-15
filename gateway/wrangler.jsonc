@@ -25,9 +25,11 @@
   "vars": {
     // Hard caps, in US dollars. A cap is only ever lowered by editing this file and redeploying,
     // which is a change the owner makes, not a change the VM can make.
-    "MAX_ORDER_USD": "50",
-    "MAX_DAY_USD": "400",
-    "MAX_DAY_ORDERS": "60",
+    // Sized so a desk's own limits bind first: Hilibrand may put half its sleeve into one
+    // order, Mullins fifteen percent, and a day holds an entry, an exit and a re-entry apiece.
+    "MAX_ORDER_USD": "250",
+    "MAX_DAY_USD": "1500",
+    "MAX_DAY_ORDERS": "100",
     // The calendar the daily counters roll on: the floor's own trading day.
     "CAP_TIMEZONE": "America/New_York",
 

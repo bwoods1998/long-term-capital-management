@@ -242,6 +242,20 @@ class SelectionTests(EvolveCase):
         self.assertEqual(parent["generation"], 1)
         self.assertEqual(parent["capital"]["mode"], "shadow")
 
+    def test_a_mature_variant_that_never_decided_is_retired_as_a_dud(self):
+        # earnings-01 traded; earnings-02 sat for a month and never proposed a thing.
+        self.run_variant("earnings-01", exit_price="105")
+        self.log.append(
+            "ledger:earnings-02", "ledger.mark",
+            {"equity": "1000", "cash": "1000", "positions": [], "daily_pnl": "0", "as_of": "2026-09-30T20:00:00.000Z"},
+            at="2026-09-30T20:00:00.000Z",
+        )
+        actions = self.evolution().select("2026-09-30T20:00:00.000Z")
+        retired = [a for a in actions if a["action"] == "retired"]
+        self.assertEqual([a["desk_id"] for a in retired], ["earnings-02"])
+        self.assertEqual(retired[0]["reason"], "no decisions")
+        self.assertEqual([a["action"] for a in actions if a["action"] == "spawned"], ["spawned"])
+
     def test_retirement_needs_enough_decisions(self):
         self.run_variant("earnings-01", exit_price="130")
         self.run_variant("earnings-02", exit_price="90", decisions=4)

@@ -102,5 +102,30 @@ class ManifestTests(unittest.TestCase):
                 load_manifest(dup)
 
 
+
+class FamilyToolTests(unittest.TestCase):
+    """A bred desk carries every tool its founder carries, along the parent chain."""
+
+    def test_children_inherit_tools_given_to_the_founder_later(self):
+        import copy
+        from ltcm.manifest import DeskManifest, inherit_family_tools
+
+        founder = copy.deepcopy(SAMPLE)
+        founder["id"] = "mullins"
+        founder["tools"] = list(SAMPLE["tools"]) + ["record_forecast", "run_code"]
+        child = copy.deepcopy(SAMPLE)
+        child.update({"id": "mullins-2", "parent_id": "mullins", "generation": 2})
+        grandchild = copy.deepcopy(SAMPLE)
+        grandchild.update({"id": "mullins-2-3", "parent_id": "mullins-2", "generation": 3})
+        other = copy.deepcopy(SAMPLE)
+        other.update({"id": "hilibrand", "family": "crypto"})
+        loaded = inherit_family_tools([DeskManifest.from_dict(d) for d in (founder, child, grandchild, other)])
+        by_id = {m.id: m for m in loaded}
+        for desk_id in ("mullins-2", "mullins-2-3"):
+            self.assertIn("record_forecast", by_id[desk_id].tools, desk_id)
+            self.assertIn("run_code", by_id[desk_id].tools, desk_id)
+        self.assertNotIn("run_code", by_id["hilibrand"].tools, "another family inherits nothing")
+        self.assertEqual(len(by_id["mullins-2"].tools), len(set(by_id["mullins-2"].tools)))
+
 if __name__ == "__main__":
     unittest.main()

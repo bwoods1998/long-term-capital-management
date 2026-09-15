@@ -78,6 +78,13 @@ How to work
 - Say plainly when the data cannot answer the question, and end the session rather than trade to
   look busy.
 - Every order proposal names the catalyst, the expected holding period and the exit rule.
+- Leave a memo at the end of every session, trade or no trade: what you looked at, your
+  number, why you acted or passed. It is your public record and your post-mortem's raw
+  material; a session without a memo is a session nobody can learn from.
+- When you price an event contract, record the probability with record_forecast whether or
+  not you trade it; your calibration is scored at resolution and read back to you.
+- When you have run_code, test a rule on real history before you trust it, and save what
+  works in your toolbox; your children inherit it.
 - Call end_session when you are done. Unused turns cost nothing; a bad trade costs real money."""
 
 #: Appended to the header for a desk on real capital.
@@ -574,6 +581,7 @@ class Desk:
         requests = 0
         turns = 0
         cost = ZERO
+        nudged = False
         reason = "max_turns"
 
         for turn in range(max(1, self.manifest.model.max_turns)):
@@ -633,6 +641,22 @@ class Desk:
 
             calls = response.function_calls
             if not calls:
+                # A reply with no tool call is usually a model that forgot the contract, not
+                # a model that is done: say so once, then let it try again. A second such reply
+                # ends the session and is recorded as what it is.
+                if not nudged:
+                    nudged = True
+                    conversation.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "You replied without calling a tool. Every turn must call a tool: "
+                                "research with your tools, record what you concluded with memo, "
+                                "and finish with end_session."
+                            ),
+                        }
+                    )
+                    continue
                 reason = "no_tool_calls"
                 break
 

@@ -367,4 +367,34 @@ def load_all(directory: str | Path) -> list[DeskManifest]:
     ids = [m.id for m in manifests]
     if len(ids) != len(set(ids)):
         raise ManifestError("duplicate desk ids")
-    return manifests
+    return inherit_family_tools(manifests)
+
+
+def inherit_family_tools(manifests: list[DeskManifest]) -> list[DeskManifest]:
+    """A bred desk carries every tool its founder carries.
+
+    Children copy their parent's tools at birth, so a tool given to the live desk afterwards
+    (a forecast record, a sandbox) would never reach the variants that are supposed to be
+    testing the same mandate. The union is taken at load, along the parent chain to the
+    founder, and only for tools the runtime knows; nothing is ever taken away from a child.
+    """
+    by_id = {m.id: m for m in manifests}
+    out: list[DeskManifest] = []
+    for manifest in manifests:
+        tools = list(manifest.tools)
+        seen = {manifest.id}
+        parent_id = manifest.parent_id
+        while parent_id and parent_id in by_id and parent_id not in seen:
+            seen.add(parent_id)
+            parent = by_id[parent_id]
+            if parent.family == manifest.family:
+                for tool in parent.tools:
+                    if tool in TOOLS and tool not in tools:
+                        tools.append(tool)
+            parent_id = parent.parent_id
+        if tools != list(manifest.tools):
+            data = manifest.to_dict()
+            data["tools"] = tools
+            manifest = DeskManifest.from_dict(data)
+        out.append(manifest)
+    return out

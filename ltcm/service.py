@@ -413,12 +413,16 @@ class DeskContext:
             seen = {r.get("ticker") for r in direct}
             index = direct + [r for r in index if r.get("ticker") not in seen]
         words = [w for w in re.split(r"[^a-z0-9]+", (query or "").lower()) if len(w) > 1]
-        scored: list[tuple[int, Decimal, dict[str, Any]]] = []
+        # Whole words, and every word: "Fed decision" must not surface a fight that ends in a
+        # decision ahead of the Fed, however much volume the fight has. A market that carries
+        # every query word outranks one that carries some, and volume only breaks ties.
+        patterns = [re.compile(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])") for w in words]
+        scored: list[tuple[int, int, Decimal, dict[str, Any]]] = []
         for row in index:
             haystack = row.get("_haystack") or " ".join(
                 str(x or "") for x in (row.get("title"), row.get("yes_sub_title"), row.get("ticker"), row.get("event_ticker"))
             ).lower()
-            hits = sum(1 for w in words if w in haystack)
+            hits = sum(1 for pattern in patterns if pattern.search(haystack))
             if words and hits == 0:
                 continue
             volume = row.get("volume_24h") or ZERO
@@ -426,9 +430,9 @@ class DeskContext:
                 volume = money(volume)
             except (TypeError, ValueError):
                 volume = ZERO
-            scored.append((hits, volume, row))
-        scored.sort(key=lambda item: (-item[0], -item[1]))
-        return [{k: v for k, v in row.items() if not k.startswith("_")} for _, _, row in scored[:40]]
+            scored.append((1 if hits == len(words) else 0, hits, volume, row))
+        scored.sort(key=lambda item: (-item[0], -item[1], -item[2]))
+        return [{k: v for k, v in row.items() if not k.startswith("_")} for _, _, _, row in scored[:40]]
 
     # -- the desk's own book ----------------------------------------------
     def positions(self) -> list[Any]:

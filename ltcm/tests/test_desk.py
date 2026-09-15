@@ -267,13 +267,20 @@ class LoopTests(DeskCase):
         self.assertEqual([t["name"] for t in first["tools"]][-1], "end_session")
 
     def test_a_session_stops_when_the_model_stops_calling_tools(self):
-        provider = FakeProvider(provider_response(text="I have nothing to add."))
+        # One tool-less reply earns a reminder and a second try; a second one ends the session.
+        provider = FakeProvider(
+            provider_response(text="I have nothing to add."),
+            provider_response(text="Still nothing."),
+        )
         result = self.desk(provider).run_session("market_open")
         self.assertEqual(result.reason, "no_tool_calls")
-        self.assertEqual(result.turns, 1)
+        self.assertEqual(result.turns, 2)
+        nudge = provider.calls[1]["items"][-1]
+        self.assertEqual(nudge["role"], "user")
+        self.assertIn("without calling a tool", nudge["content"])
         self.assertEqual(
             [e.kind for e in self.events()],
-            ["desk.session_started", "desk.thought", "desk.session_ended"],
+            ["desk.session_started", "desk.thought", "desk.thought", "desk.session_ended"],
         )
 
     def test_an_incomplete_response_ends_the_session_after_publishing_what_came_back(self):
