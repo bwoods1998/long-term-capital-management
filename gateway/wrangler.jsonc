@@ -35,7 +35,9 @@
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",
-    "CHECKPOINT_STALE_SECONDS": "900",
+    // A single inline model turn may legitimately take up to 25 minutes (FOREGROUND_TIMEOUT);
+    // the watchdog must not restart a box that is merely thinking.
+    "CHECKPOINT_STALE_SECONDS": "1800",
     "RESTART_COOLDOWN_SECONDS": "1800",
     "RESTART_COMMAND": "/workspace/restart.sh",
     // Set to the Sailbox id once the box exists. Empty means the watchdog only reports.
