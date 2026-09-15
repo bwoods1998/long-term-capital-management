@@ -499,6 +499,11 @@ class RunwayProvider(FakeProvider):
     def spent_since(self, hours=24.0):
         return self.burn
 
+    sail_burn = None
+
+    def sail_burn_usd_per_day(self):
+        return self.sail_burn
+
 
 class RunwayPolicyTests(ServiceCase):
     """No daily cap: the credit above the reserve is the limit, and the floor's posture toward
@@ -574,6 +579,13 @@ class RunwayPolicyTests(ServiceCase):
         self.assertEqual(self.provider.floor_cap, Decimal("2.00"))
         throttled = [e for e in self.service.log.read(kind="ops.alert") if e.payload["text"].startswith("floor throttled")]
         self.assertEqual(len(throttled), 1)
+
+    def test_sails_own_burn_wins_when_it_is_larger_than_the_ledgers(self):
+        self.provider.sail_burn = Decimal("4.73")  # the box, sandboxes and image builds too
+        self.tick()
+        event = self.service.log.last("ops", "ops.budget")
+        # $269.82 above the reserve at $4.73 a day is 57 days, not the ledger's 385.
+        self.assertEqual(event.payload["runway_days"], "57")
 
     def test_an_unreadable_balance_never_stops_the_floor(self):
         self.provider.balance = None

@@ -848,5 +848,15 @@ class _Opener:
         return self.result
 
 
+
+class SailBurnTests(unittest.TestCase):
+    def test_the_summarys_own_spend_becomes_a_per_day_burn(self):
+        from ltcm.provider import _range_days
+
+        self.assertEqual(_range_days("24h"), Decimal(1))
+        self.assertEqual(_range_days("6h"), Decimal("0.25"))
+        self.assertEqual(_range_days("7d"), Decimal(7))
+        self.assertEqual(_range_days("nonsense"), Decimal(1))
+
 if __name__ == "__main__":
     unittest.main()

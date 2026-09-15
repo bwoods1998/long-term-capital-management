@@ -162,6 +162,17 @@ CREATE TABLE IF NOT EXISTS budget_days (
 """
 
 
+def _range_days(value: Any) -> Decimal:
+    """Days in a usage-summary range such as `24h`, `6h`, `7d`, `30d`; a day when unreadable."""
+    text_value = str(value or "").strip().lower()
+    match = re.fullmatch(r"(\d+)([hd])", text_value)
+    if not match:
+        return Decimal(1)
+    number = Decimal(match.group(1))
+    days = number / Decimal(24) if match.group(2) == "h" else number
+    return days if days > 0 else Decimal(1)
+
+
 def _parse_rate_card(page: str) -> tuple[dict[tuple[str, str], tuple[str, str, str]], dict[tuple[str, str], tuple[str, str, str]]]:
     """Every pricing row on the card, keyed two ways: by folded display name and window, and by
     the model slug of the `data-model` group the row sits in and window. A row outside any
@@ -835,10 +846,29 @@ class Provider:
                 cents = Decimal(str(balance))
                 if cents.is_finite():
                     value = (cents / Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-        except (ProviderError, ValueError, TypeError, AttributeError, KeyError):
+            # Sail's own spend for the summary's range, in fractional cents, is the one burn
+            # figure that includes the box, the sandboxes and the image builds. Kept per day.
+            spend = summary.get("period_spend") if isinstance(summary, dict) else None
+            if type(spend) in (int, float) and Decimal(str(spend)).is_finite():
+                days = _range_days(summary.get("range"))
+                self._sail_burn = (Decimal(str(spend)) / Decimal(100) / days).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+                self._sail_spend_period = (Decimal(str(spend)) / Decimal(100)).quantize(
+                    Decimal("0.01"), rounding=ROUND_DOWN
+                )
+        except (ProviderError, ValueError, TypeError, AttributeError, KeyError, ArithmeticError):
             value = None
         self._balance = (now, value)
         return value
+
+    def sail_burn_usd_per_day(self) -> Decimal | None:
+        """Sail's own spend per day for the summary's range, or None before the first read."""
+        return getattr(self, "_sail_burn", None)
+
+    def sail_spend_period_usd(self) -> Decimal | None:
+        """Sail's own spend over the summary's whole range, or None before the first read."""
+        return getattr(self, "_sail_spend_period", None)
 
     # ------------------------------------------------------------------ rate card
     def rate_card_check(self) -> dict[str, Any]:

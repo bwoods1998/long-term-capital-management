@@ -816,6 +816,7 @@ class Service:
             uptime=lambda: int(time.monotonic() - self._started_monotonic),
             models_used=self._models_used,
             infra_usd_per_day=(self.config.get("spend_policy") or {}).get("infra_usd_per_day", "0.30"),
+            sail_usage=self._sail_usage,
             mark_interval_seconds=int(self.config.get("mark_interval_seconds", 300)),
         )
         # leap: exits. The floor holds every desk's exit plan and enforces it every tick.
@@ -1181,6 +1182,23 @@ class Service:
         except Exception:
             return {}
         return out
+
+    def _sail_usage(self) -> dict[str, Any] | None:
+        """Sail's own spend over its summary range less the model ledger: the box, the sandboxes
+        and the image builds, which is the infrastructure figure the run clock shows."""
+        provider = self.provider
+        period = getattr(provider, "sail_spend_period_usd", None)
+        trailing = getattr(provider, "spent_since", None)
+        if not callable(period) or not callable(trailing):
+            return None
+        try:
+            total = period()
+            if total is None:
+                return None
+            models = money(trailing(24.0 * 3660))
+            return {"infra_spend_usd": max(ZERO, money(total) - models)}
+        except Exception:
+            return None
 
     def _live_pnl(self, at: str) -> Decimal:
         """Profit on the live sleeves since inception: equity less what was deposited."""
@@ -1765,6 +1783,16 @@ class Service:
                     burn = money(trailing(24.0))
                 except Exception:
                     burn = ZERO
+            # Sail's own figure counts what the ledger cannot see (the box, sandboxes, image
+            # builds); the runway divides by the larger of the two views of the burn.
+            sail_burn = getattr(provider, "sail_burn_usd_per_day", None)
+            if callable(sail_burn):
+                try:
+                    reported = sail_burn()
+                    if reported is not None and money(reported) > burn:
+                        burn = money(reported)
+                except Exception:
+                    pass
             try:
                 spent = money(provider.spent_today())
             except Exception:
