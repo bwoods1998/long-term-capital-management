@@ -1,0 +1,531 @@
+"""Streaming the floor to the public site.
+
+Two endpoints, one rule: nothing leaves the box that the publication policy has not cleared.
+
+* `POST {site}/api/capital/events` receives the event tape in batches of at most 100, in sequence
+  order, each event already stripped of private (underscore-prefixed) payload keys by
+  `Event.to_public()`. Public events go immediately. Deferred events -- order intents and orders --
+  are *held* until the gateway says their order is terminal, so nobody can trade ahead of a desk.
+  Private kinds (the raw provider records) are never sent at all.
+* `POST {site}/api/capital/checkpoint` receives the leaderboard projection: the floor, each desk
+  and the committee, with every money field as a decimal string.
+
+The site validates hard, and it is right to: a desk is a language model, and a model writing a
+memo is an untrusted author of strings. `sanitize_for_site` therefore runs before anything is
+sent -- angle brackets neutered, control characters removed, credential-shaped text redacted,
+links outside the allowlist dropped, every string truncated -- so a single bad sentence cannot
+get a whole batch rejected. Events whose *shape* is wrong (a malformed timestamp, a stream that
+disagrees with its kind) are skipped with an `ops.alert` rather than retried forever, and so is
+any single event the site answers 400 to.
+
+Progress is a small JSON file: the sequence number scanned through, plus the ids of deferred events
+passed over. A crash replays at most one batch, and the site's own idempotency on event id makes a
+replay a no-op.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Callable, Iterable, Mapping, Sequence
+
+from .events import KINDS, Event, EventLog, canonical, now_iso, public_view
+
+SCHEMA_VERSION = 1
+EVENTS_PATH = "/api/capital/events"
+CHECKPOINT_PATH = "/api/capital/checkpoint"
+RETRY_STATUSES = (408, 425, 429, 500, 502, 503, 504, 529)
+MAX_BATCH = 100
+
+# ---------------------------------------------------------------- the site's shape contract
+AT_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+ID_PATTERN = re.compile(r"^[A-Za-z0-9:_.\-]{1,200}$")
+SUFFIX_PATTERN = re.compile(r"^[a-z0-9-]{1,40}$")
+#: kind prefix -> the stream it must live on. A trailing colon means "prefix plus a suffix".
+STREAM_FOR: dict[str, str] = {
+    "desk": "desk:",
+    "ledger": "ledger:",
+    "broker": "broker:",
+    "risk": "risk",
+    "committee": "committee",
+    "evolution": "evolution",
+    "lab": "lab",
+    "ops": "ops",
+}
+
+MAX_STRING = 8000
+#: Tab, newline and carriage return survive; every other C0/C1 control character does not.
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+SECRET = re.compile(r"\bsk-\S*|\bAPCA-\S*|\bBearer[ :]\s*\S*")
+URL = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s<>\"\')]+")
+ALLOWED_HOSTS = frozenset(
+    {
+        "sec.gov",
+        "www.sec.gov",
+        "efts.sec.gov",
+        "blakewoods.us",
+        "github.com",
+        "kalshi.com",
+        "finance.yahoo.com",
+    }
+)
+REDACTED = "[redacted]"
+DROPPED_LINK = "[link removed]"
+
+
+class PublishError(RuntimeError):
+    """The site refused a batch, or the transport failed after every retry."""
+
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+def jsonable(value: Any) -> Any:
+    """Decimals become strings; everything else is left as canonical JSON already allows."""
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, Mapping):
+        return {str(k): jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    return value
+
+
+def _host_allowed(url: str) -> bool:
+    if not url.lower().startswith("https://"):
+        return False
+    rest = url[len("https://") :]
+    host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    host = host.split("@")[-1].split(":")[0].lower()
+    return host in ALLOWED_HOSTS
+
+
+def sanitize_string(value: str) -> str:
+    """Make one model-written string safe to hand the site, without changing what it says."""
+    cleaned = CONTROL.sub("", value)
+    cleaned = SECRET.sub(REDACTED, cleaned)
+    cleaned = URL.sub(lambda m: m.group(0) if _host_allowed(m.group(0)) else DROPPED_LINK, cleaned)
+    cleaned = cleaned.replace("<", "\u2039")
+    if len(cleaned) > MAX_STRING:
+        cleaned = cleaned[: MAX_STRING - 1] + "\u2026"
+    return cleaned
+
+
+def sanitize_for_site(payload: Any) -> Any:
+    """Recursively sanitize a payload: private keys gone, strings safe, lengths bounded.
+
+    Applied to every event before it is sent. One desk writing an angle bracket, a stray control
+    character or something that looks like an API key must not cost the whole batch.
+    """
+    if isinstance(payload, Mapping):
+        return {
+            str(key): sanitize_for_site(value)
+            for key, value in payload.items()
+            if not (isinstance(key, str) and key.startswith("_"))
+        }
+    if isinstance(payload, (list, tuple)):
+        return [sanitize_for_site(item) for item in payload]
+    if isinstance(payload, str):
+        return sanitize_string(payload)
+    if isinstance(payload, Decimal):
+        return format(payload, "f")
+    return payload
+
+
+def shape_problem(event: Event) -> str | None:
+    """Why the site would refuse this event's shape, or None when it would accept it.
+
+    Checked here rather than discovered as a 400: a malformed event is a bug in this box, and it
+    should be named in an alert instead of blocking the tape behind an endless retry.
+    """
+    kind = event.kind
+    if KINDS.get(kind) == "private":
+        return f"{kind} is never published"
+    if not ID_PATTERN.match(event.id or ""):
+        return f"event id {event.id!r} is not publishable"
+    if not DIGEST_PATTERN.match(event.digest or ""):
+        return "digest is not 64 lowercase hex characters"
+    if not AT_PATTERN.match(event.at or ""):
+        return f"timestamp {event.at!r} is not YYYY-MM-DDTHH:MM:SS.mmmZ"
+    prefix = kind.split(".", 1)[0]
+    expected = STREAM_FOR.get(prefix)
+    if expected is None:
+        return f"no stream is defined for {kind}"
+    if expected.endswith(":"):
+        if not event.stream.startswith(expected):
+            return f"{kind} belongs on {expected}<id>, not {event.stream!r}"
+        if not SUFFIX_PATTERN.match(event.stream[len(expected) :]):
+            return f"stream suffix {event.stream[len(expected):]!r} is not lowercase [a-z0-9-]"
+    elif event.stream != expected:
+        return f"{kind} belongs on the {expected!r} stream, not {event.stream!r}"
+    return None
+
+
+def wire_event(event: Event) -> dict[str, Any]:
+    """Exactly the keys the site accepts, with the payload sanitized."""
+    return {
+        "seq": event.seq,
+        "id": event.id,
+        "stream": event.stream,
+        "kind": event.kind,
+        "at": event.at,
+        "digest": event.digest,
+        "payload": sanitize_for_site(public_view(event.payload)),
+    }
+
+
+def _retry_after(headers: Mapping[str, str] | None, attempt: int) -> float:
+    """Honour the server's backoff hint, else exponential with a one-second floor."""
+    if headers:
+        for key in ("retry-after", "Retry-After"):
+            raw = headers.get(key)
+            if raw:
+                try:
+                    return max(0.0, min(60.0, float(str(raw).strip())))
+                except ValueError:
+                    break
+    return min(30.0, float(2**attempt))
+
+
+class Publisher:
+    """Batches public events and the leaderboard checkpoint to the site API."""
+
+    def __init__(
+        self,
+        log: EventLog,
+        site_url: str,
+        token_source: Callable[[], str] | str | None,
+        transport: Any,
+        clock: Callable[[], float] = time.time,
+        state_path: str | Path = "publish-state.json",
+        *,
+        batch_size: int = MAX_BATCH,
+        max_attempts: int = 4,
+        sleeper: Callable[[float], None] = time.sleep,
+        timeout: float = 20.0,
+    ):
+        self.log = log
+        self.site_url = site_url.rstrip("/")
+        self.token_source = token_source
+        self.transport = transport
+        self.clock = clock
+        self.state_path = Path(state_path)
+        self.batch_size = max(1, min(int(batch_size), MAX_BATCH))
+        self.max_attempts = max(1, int(max_attempts))
+        self.sleeper = sleeper
+        self.timeout = float(timeout)
+
+    # ------------------------------------------------------------------ state
+    def state(self) -> dict[str, Any]:
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        held = data.get("held")
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "last_seq": int(data.get("last_seq") or 0),
+            "held": [h for h in held if isinstance(h, str)] if isinstance(held, list) else [],
+            "sent": int(data.get("sent") or 0),
+            "updated_at": data.get("updated_at"),
+        }
+
+    def _save(self, state: Mapping[str, Any]) -> None:
+        body = dict(state)
+        body["schema_version"] = SCHEMA_VERSION
+        body["updated_at"] = now_iso(self.clock)
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.state_path.with_name(self.state_path.name + f".tmp-{os.getpid()}")
+        tmp.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(self.state_path)
+
+    # ------------------------------------------------------------------ transport
+    def token(self) -> str:
+        source = self.token_source
+        if callable(source):
+            source = source()
+        if not source:
+            raise PublishError("no publish token available")
+        return str(source)
+
+    def post(self, path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """One POST with retries. Never logs or returns the bearer token."""
+        url = f"{self.site_url}{path}"
+        body = canonical(jsonable(payload)).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.token()}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        last: str = "not attempted"
+        for attempt in range(self.max_attempts):
+            try:
+                status, response_headers, raw = self.transport.request(
+                    "POST", url, headers=headers, body=body, timeout=self.timeout
+                )
+            except Exception as exc:
+                last = f"transport error: {exc}"
+                if attempt + 1 >= self.max_attempts:
+                    raise PublishError(f"{path}: {last}") from exc
+                self.sleeper(_retry_after(None, attempt))
+                continue
+            if 200 <= int(status) < 300:
+                try:
+                    return json.loads(raw.decode("utf-8")) if raw else {}
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return {}
+            last = f"HTTP {status}"
+            if int(status) in RETRY_STATUSES and attempt + 1 < self.max_attempts:
+                self.sleeper(_retry_after(response_headers, attempt))
+                continue
+            raise PublishError(f"{path}: {last}", status=int(status))
+        raise PublishError(f"{path}: {last}")
+
+    # ------------------------------------------------------------------ events
+    @staticmethod
+    def sendable(event: Event, released: set[str]) -> str:
+        """"send", "hold" or "skip" for one event under the publication policy."""
+        if KINDS.get(event.kind) == "private":
+            return "skip"
+        if event.public:
+            return "send"
+        return "send" if event.id in released else "hold"
+
+    def push_events(self, released_ids: Iterable[str] = ()) -> dict[str, Any]:
+        """Send everything cleared for publication. Returns a summary of what moved."""
+        released = {i for i in released_ids if isinstance(i, str)}
+        state = self.state()
+        last_seq: int = state["last_seq"]
+        total_sent: int = state["sent"]
+
+        # Deferred events passed over on an earlier call: send the ones now cleared.
+        to_send: list[Event] = []
+        held: list[tuple[int, str]] = []
+        for event_id in state["held"]:
+            event = self.log.get(event_id)
+            if event is None:  # never happens to an append-only log, but do not crash on it
+                continue
+            if event.public or event_id in released:
+                to_send.append(event)
+            else:
+                held.append((event.seq, event_id))
+
+        # Everything appended since the last scan.
+        scanned = last_seq
+        while True:
+            batch = self.log.read(after=scanned, limit=2000)
+            if not batch:
+                break
+            for event in batch:
+                scanned = event.seq
+                verdict = self.sendable(event, released)
+                if verdict == "send":
+                    to_send.append(event)
+                elif verdict == "hold":
+                    held.append((event.seq, event.id))
+            if len(batch) < 2000:
+                break
+
+        # Anything the site would refuse on shape is named in an alert and passed over, not
+        # retried until the end of time.
+        skipped = 0
+        publishable: list[Event] = []
+        seen_ids: set[str] = set()
+        for event in sorted(to_send, key=lambda e: e.seq):
+            problem = shape_problem(event)
+            if problem is not None:
+                self.alert(f"event {event.id} not published: {problem}")
+                skipped += 1
+                continue
+            if event.id in seen_ids:  # duplicate ids in one batch are a 400
+                continue
+            seen_ids.add(event.id)
+            publishable.append(event)
+
+        held.sort()
+        sent = batches = 0
+
+        def commit(mark: int) -> None:
+            """Everything at or below `mark` is accounted for: sent, held or skipped."""
+            nonlocal last_seq
+            last_seq = max(last_seq, mark)
+            self._save(
+                {
+                    "last_seq": last_seq,
+                    "held": [i for seq, i in held if seq <= last_seq],
+                    "sent": total_sent,
+                }
+            )
+
+        for start in range(0, len(publishable), self.batch_size):
+            chunk = publishable[start : start + self.batch_size]
+            delivered, dropped = self.send_batch(chunk)
+            sent += delivered
+            skipped += dropped
+            batches += 1
+            total_sent += delivered
+            commit(chunk[-1].seq)
+
+        if scanned > last_seq or [i for _, i in held] != state["held"]:
+            commit(scanned)
+
+        return {
+            "sent": sent,
+            "skipped": skipped,
+            "batches": batches,
+            "last_seq": last_seq,
+            "held": len([1 for seq, _ in held if seq <= last_seq]),
+        }
+
+    def send_batch(self, chunk: Sequence[Event]) -> tuple[int, int]:
+        """Post one batch. Returns (delivered, dropped).
+
+        A 400 means the site refused something in this batch. The batch is halved until the
+        offending event is alone, then that one event is alerted and dropped: the tape keeps
+        moving. A 409 means the site already holds that id with a different digest, which no
+        amount of resending can fix, so the batch is alerted and passed over.
+        """
+        if not chunk:
+            return 0, 0
+        try:
+            self.post(
+                EVENTS_PATH,
+                {"schema_version": SCHEMA_VERSION, "events": [wire_event(e) for e in chunk]},
+            )
+            return len(chunk), 0
+        except PublishError as exc:
+            if exc.status == 409:
+                self.alert(
+                    f"site already holds a different version of {len(chunk)} event(s) "
+                    f"from {chunk[0].id}: {exc}",
+                    level="critical",
+                )
+                return 0, len(chunk)
+            if exc.status != 400:
+                raise
+            if len(chunk) == 1:
+                self.alert(f"site refused event {chunk[0].id}: {exc}", level="warning")
+                return 0, 1
+        middle = len(chunk) // 2
+        first = self.send_batch(chunk[:middle])
+        second = self.send_batch(chunk[middle:])
+        return first[0] + second[0], first[1] + second[1]
+
+    def alert(self, message: str, *, level: str = "warning") -> None:
+        """Say so in the log. Publication problems are operational events, not silent losses."""
+        at = now_iso(self.clock)
+        try:
+            self.log.append(
+                "ops",
+                "ops.alert",
+                {"level": level, "text": message[:2000]},
+                id=f"alert:publish:{at}:{abs(hash(message)) % 10**9}",
+                at=at,
+            )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ checkpoint
+    def push_checkpoint(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        """Send the leaderboard projection. `body` carries floor, desks, committee and budget."""
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "published_at": body.get("published_at") or now_iso(self.clock),
+            **{k: v for k, v in body.items() if k not in ("schema_version", "published_at")},
+        }
+        return self.post(CHECKPOINT_PATH, payload)
+
+
+def unsigned(value: Any) -> Any:
+    """The site refuses a negative where only a magnitude makes sense. Clamp, do not lie:
+    a desk cannot hold less than nothing, and a drawdown is reported as its own depth."""
+    if value is None:
+        return None
+    number = value if isinstance(value, Decimal) else Decimal(str(value))
+    return abs(number) if number < 0 else number
+
+
+def floor_at_zero(value: Any) -> Any:
+    """A balance the site treats as unsigned: a negative one is published as zero, and the real
+    number stays in the ledger and the health file where an operator will see it."""
+    if value is None:
+        return None
+    number = value if isinstance(value, Decimal) else Decimal(str(value))
+    return number if number > 0 else Decimal(0)
+
+
+def not_after(stamp: Any, limit: str) -> Any:
+    """No row may claim to be newer than the checkpoint that carries it."""
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    return stamp if stamp <= limit else limit
+
+
+def checkpoint_body(
+    *,
+    published_at: str,
+    floor: Mapping[str, Any],
+    desks: Sequence[Mapping[str, Any]],
+    committee: Mapping[str, Any],
+    budget: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The exact shape the site expects. Money stays `Decimal` for `jsonable` to render.
+
+    The desks array replaces the published roster wholesale, so it always carries every desk,
+    retired ones included, rather than a delta.
+    """
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "published_at": published_at,
+        "floor": {
+            "equity": floor_at_zero(floor.get("equity")),
+            "cash": floor_at_zero(floor.get("cash")),
+            "daily_pnl": floor.get("daily_pnl"),
+            "capital_usd": floor_at_zero(floor.get("capital_usd")),
+            "since_inception_pct": floor.get("since_inception_pct"),
+            "benchmark": floor.get("benchmark"),
+        },
+        "desks": [
+            {
+                "id": desk.get("id"),
+                "name": desk.get("name"),
+                "family": desk.get("family"),
+                "generation": desk.get("generation"),
+                "parent_id": desk.get("parent_id"),
+                "mode": desk.get("mode"),
+                "venues": list(desk.get("venues") or []),
+                "capital_usd": floor_at_zero(desk.get("capital_usd")),
+                "equity": floor_at_zero(desk.get("equity")),
+                "cash": floor_at_zero(desk.get("cash")),
+                "daily_pnl": desk.get("daily_pnl"),
+                "return_pct": desk.get("return_pct"),
+                "max_drawdown_pct": unsigned(desk.get("max_drawdown_pct")),
+                "days_live": desk.get("days_live"),
+                "orders": desk.get("orders"),
+                "cost_usd": floor_at_zero(desk.get("cost_usd")),
+                "status": desk.get("status"),
+                "gate": desk.get("gate"),
+                "updated_at": not_after(desk.get("updated_at"), published_at),
+            }
+            for desk in desks
+        ],
+        "committee": {
+            "last_memo_at": not_after(committee.get("last_memo_at"), published_at),
+            "allocations": {
+                str(k): floor_at_zero(v)
+                for k, v in sorted((committee.get("allocations") or {}).items())
+            },
+        },
+        "budget": {
+            "spent_today_usd": floor_at_zero(budget.get("spent_today_usd")),
+            "cap_usd": floor_at_zero(budget.get("cap_usd")),
+        },
+    }

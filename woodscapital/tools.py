@@ -1,0 +1,685 @@
+"""The desk tool surface: JSON schemas for the Responses API and a safe executor.
+
+A desk never touches a broker, a data source or the filesystem directly. It calls named tools,
+and the service supplies a `ToolContext` that implements them against the real world. Tests
+supply a fake context, so nothing here performs I/O of its own.
+
+Three rules shape this module:
+
+- **Nothing raises.** `execute` always returns a JSON string, because the string goes straight
+  back to the model as a `function_call_output`. A tool that fails returns `{"error": ...}` and
+  the desk keeps its turn.
+- **Identity is derived.** `propose_order` builds an `OrderIntent` from a per-session nonce
+  counter, so replaying a session after a crash produces the same intent ids and the same order
+  is never proposed twice.
+- **The event log sees a redaction.** `public_arguments` and `summarize_result` produce the short,
+  publishable forms the desk writes to `desk.tool_call` and `desk.tool_result`; the full argument
+  object and the full result only ever exist inside the model conversation.
+
+Standard library only.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Any, Protocol, runtime_checkable
+
+from .broker import ASSET_CLASSES, Balance, Instrument, OrderIntent, Position, Quote
+from .manifest import TOOLS, DeskManifest
+
+MAX_RESULT_CHARS = 120_000
+SUMMARY_CHARS = 600
+PUBLIC_STRING_CHARS = 400
+OPTION_MULTIPLIER = Decimal("100")
+
+
+class ToolError(ValueError):
+    """A tool call that cannot be executed as written. Reported to the model, never raised out."""
+
+
+# --------------------------------------------------------------------------- the context
+
+
+@runtime_checkable
+class ToolContext(Protocol):
+    """Everything a desk can reach. The service implements it; tests fake it.
+
+    Implementations raise `ToolError` (or any exception) to report failure; `execute` collapses
+    every failure to a JSON error object. Implementations are responsible for their own event
+    emission for the actions that have their own event kinds (`desk.memo`, `desk.intent`,
+    `risk.decision`, `broker.order`).
+    """
+
+    def quote(self, instrument: Instrument) -> Quote: ...
+
+    def bars(self, instrument: Instrument, interval: str, limit: int) -> list[dict[str, Any]]: ...
+
+    def news(self, query: str, limit: int) -> list[dict[str, Any]]: ...
+
+    def filing(self, symbol: str, form: str, index: int) -> dict[str, Any]:
+        """A text excerpt of one filing with its `sha256` and `url`, never the whole document."""
+
+    def facts(self, symbol: str) -> dict[str, Any]: ...
+
+    def calendar(self, days: int) -> list[dict[str, Any]]: ...
+
+    def chain(self, symbol: str, expiry: str) -> list[dict[str, Any]]: ...
+
+    def event_markets(self, query: str) -> list[dict[str, Any]]: ...
+
+    def positions(self) -> list[Position]: ...
+
+    def balance(self) -> Balance: ...
+
+    def outcomes(self, limit: int) -> list[dict[str, Any]]: ...
+
+    def memory_read(self, query: str, limit: int) -> list[dict[str, Any]]: ...
+
+    def memory_write(self, entry: dict[str, Any]) -> dict[str, Any]: ...
+
+    def memo(self, title: str, text: str) -> dict[str, Any]: ...
+
+    def propose_order(self, intent: OrderIntent) -> dict[str, Any]:
+        """Run the risk engine and, when approved, route the order. Returns the `Decision` dict
+        and, on approval, the `Order` dict."""
+
+    def cancel_order(self, order_id: str) -> dict[str, Any]: ...
+
+    def playbook_read(self) -> str: ...
+
+    def playbook_write(self, text: str, reason: str) -> dict[str, Any]: ...
+
+    def end_session(self, summary: str) -> dict[str, Any]: ...
+
+
+@dataclass
+class ToolSession:
+    """Per-session mutable state: the nonce counter and what the session has done so far.
+
+    The nonce counter is a plain integer advanced once per `propose_order`. Replaying a session
+    (same `session_id`, same model output) advances it identically, so the derived intent ids
+    repeat and the same order is never created twice.
+    """
+
+    session_id: str
+    desk_id: str
+    now: str = ""  # the desk stamps each turn so derived ids do not depend on wall-clock reads
+    nonce: int = 0
+    ended: bool = False
+    end_summary: str | None = None
+    intents: list[dict[str, Any]] = field(default_factory=list)
+    calls: int = 0
+
+    def next_nonce(self) -> str:
+        value = self.nonce
+        self.nonce += 1
+        return str(value)
+
+
+# --------------------------------------------------------------------------- JSON helpers
+
+
+def to_jsonable(value: Any) -> Any:
+    """Plain JSON for the model: Decimals become strings, contracts use their `to_dict`."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, float):
+        return format(Decimal(repr(value)), "f")
+    if isinstance(value, dict):
+        return {str(k): to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [to_jsonable(v) for v in value]
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        return to_jsonable(to_dict())
+    return str(value)
+
+
+def dumps(value: Any) -> str:
+    """Serialize a tool result, capped so one tool can never blow the request body budget."""
+    text = json.dumps(to_jsonable(value), ensure_ascii=False, sort_keys=True, allow_nan=False)
+    if len(text) > MAX_RESULT_CHARS:
+        text = json.dumps(
+            {
+                "truncated": True,
+                "chars": len(text),
+                "excerpt": text[: MAX_RESULT_CHARS - 200],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    return text
+
+
+def error_json(message: str) -> str:
+    return json.dumps({"error": str(message)[:1000]}, ensure_ascii=False, sort_keys=True)
+
+
+# --------------------------------------------------------------------------- schemas
+
+_INSTRUMENT = {
+    "type": "object",
+    "description": "The contract to act on. `venue` is filled in by the desk when omitted.",
+    "properties": {
+        "asset_class": {"type": "string", "enum": list(ASSET_CLASSES)},
+        "symbol": {"type": "string", "description": "Ticker or pair, e.g. AAPL or BTC-USD."},
+        "venue": {"type": "string", "description": "Optional; the desk's venue is used by default."},
+        "expiry": {"type": "string", "description": "YYYY-MM-DD, options and futures only."},
+        "strike": {"type": "string", "description": "Decimal string, options only."},
+        "right": {"type": "string", "enum": ["call", "put"]},
+        "market_id": {"type": "string", "description": "Event-contract ticker, event markets only."},
+    },
+    "required": ["asset_class", "symbol"],
+    "additionalProperties": False,
+}
+
+
+def _schema(name: str, description: str, properties: dict[str, Any], required: list[str]):
+    return {
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        },
+    }
+
+
+TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+    "quote": _schema(
+        "quote",
+        "Current bid, ask and last for one instrument. Quotes may be delayed; the response says so.",
+        {"instrument": _INSTRUMENT},
+        ["instrument"],
+    ),
+    "bars": _schema(
+        "bars",
+        "Historical OHLCV bars for one instrument, most recent last.",
+        {
+            "instrument": _INSTRUMENT,
+            "interval": {"type": "string", "enum": ["1m", "5m", "15m", "1h", "1d", "1wk"]},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+        },
+        ["instrument", "interval", "limit"],
+    ),
+    "news": _schema(
+        "news",
+        "Recent headlines and summaries matching a query. Returns titles, sources, URLs and times.",
+        {
+            "query": {"type": "string", "description": "Company, ticker or topic."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+        ["query", "limit"],
+    ),
+    "filing": _schema(
+        "filing",
+        "An excerpt of one SEC filing with its sha256 and source URL. Index 0 is the most recent.",
+        {
+            "symbol": {"type": "string"},
+            "form": {"type": "string", "description": "e.g. 8-K, 10-Q, 10-K."},
+            "index": {"type": "integer", "minimum": 0, "maximum": 40},
+        },
+        ["symbol", "form", "index"],
+    ),
+    "facts": _schema(
+        "facts",
+        "Reported fundamentals for one symbol: revenue, margins, guidance and reporting dates.",
+        {"symbol": {"type": "string"}},
+        ["symbol"],
+    ),
+    "calendar": _schema(
+        "calendar",
+        "Scheduled catalysts within the next N days: earnings dates, splits, macro releases.",
+        {"days": {"type": "integer", "minimum": 1, "maximum": 90}},
+        ["days"],
+    ),
+    "chain": _schema(
+        "chain",
+        "The option chain for one symbol and expiry.",
+        {"symbol": {"type": "string"}, "expiry": {"type": "string", "description": "YYYY-MM-DD."}},
+        ["symbol", "expiry"],
+    ),
+    "event_markets": _schema(
+        "event_markets",
+        "Event contracts matching a query, with their market ids and current prices.",
+        {"query": {"type": "string"}},
+        ["query"],
+    ),
+    "positions": _schema(
+        "positions",
+        "Every open position on this desk with quantity, average cost, mark and unrealized P&L.",
+        {},
+        [],
+    ),
+    "outcomes": _schema(
+        "outcomes",
+        "Closed trades for this desk, most recent first, with their realized result and rationale.",
+        {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+        ["limit"],
+    ),
+    "memory_read": _schema(
+        "memory_read",
+        "Search the desk's own notes. An empty query returns the most recent entries.",
+        {
+            "query": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+        ["query", "limit"],
+    ),
+    "memory_write": _schema(
+        "memory_write",
+        "Record one durable note for future sessions. Keep it to a single verifiable claim.",
+        {
+            "text": {"type": "string", "description": "The note, 1-4000 characters."},
+            "symbol": {"type": "string", "description": "Optional subject ticker."},
+            "kind": {
+                "type": "string",
+                "enum": ["fact", "thesis", "lesson", "question", "review"],
+            },
+            "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
+        },
+        ["text", "kind"],
+    ),
+    "memo": _schema(
+        "memo",
+        "Publish a short note to the public site explaining what you did and why.",
+        {
+            "title": {"type": "string", "description": "1-120 characters."},
+            "text": {"type": "string", "description": "Markdown, 1-20000 characters."},
+        },
+        ["title", "text"],
+    ),
+    "propose_order": _schema(
+        "propose_order",
+        "Propose one order. The deterministic risk engine decides; a rejection lists every rule "
+        "that failed. Give the rationale you want published, including the exit rule.",
+        {
+            "instrument": _INSTRUMENT,
+            "side": {"type": "string", "enum": ["buy", "sell"]},
+            "quantity": {"type": "string", "description": "Decimal string, positive."},
+            "order_type": {"type": "string", "enum": ["market", "limit"]},
+            "limit_price": {"type": "string", "description": "Decimal string; limit orders only."},
+            "time_in_force": {"type": "string", "enum": ["day", "gtc", "ioc"]},
+            "rationale": {"type": "string", "description": "1-2000 characters, published."},
+        },
+        ["instrument", "side", "quantity", "order_type", "rationale"],
+    ),
+    "cancel_order": _schema(
+        "cancel_order",
+        "Cancel one working order by its order id.",
+        {"order_id": {"type": "string"}},
+        ["order_id"],
+    ),
+    "playbook_read": _schema(
+        "playbook_read",
+        "Read your current playbook. The mandate and the limits are not in it and cannot change.",
+        {},
+        [],
+    ),
+    "playbook_write": _schema(
+        "playbook_write",
+        "Replace your playbook with a new full text. The edit is versioned and published with a "
+        "diff, so say why you are making it.",
+        {
+            "text": {"type": "string", "description": "The complete new playbook, under 20000 characters."},
+            "reason": {"type": "string", "description": "1-500 characters, published with the diff."},
+        },
+        ["text", "reason"],
+    ),
+    "end_session": _schema(
+        "end_session",
+        "Finish this session. Call it when you have nothing further to do; give a one-paragraph "
+        "summary of what you did and what you are waiting for.",
+        {"summary": {"type": "string", "description": "1-2000 characters."}},
+        ["summary"],
+    ),
+}
+
+_MISSING = tuple(name for name in TOOLS if name not in TOOL_SCHEMAS)
+if _MISSING:  # pragma: no cover - a manifest tool without a schema is a programming error
+    raise RuntimeError(f"tool schemas missing for {_MISSING}")
+
+
+def schemas_for(manifest: DeskManifest) -> list[dict[str, Any]]:
+    """The tool list for one desk: its manifest tools plus `end_session`, in a stable order."""
+    names = [name for name in TOOLS if name in manifest.tools]
+    names.append("end_session")
+    return [dict(TOOL_SCHEMAS[name]) for name in names]
+
+
+def allowed_tools(manifest: DeskManifest) -> frozenset[str]:
+    return frozenset(manifest.tools) | {"end_session"}
+
+
+# --------------------------------------------------------------------------- argument coercion
+
+
+def _text(arguments: dict[str, Any], key: str, *, limit: int, required: bool = True) -> str:
+    value = arguments.get(key)
+    if not required and (value is None or (isinstance(value, str) and not value.strip())):
+        return ""
+    if not isinstance(value, str) or not value.strip():
+        raise ToolError(f"{key} must be a non-empty string")
+    if len(value) > limit:
+        raise ToolError(f"{key} must be at most {limit} characters")
+    return value
+
+
+def _count(arguments: dict[str, Any], key: str, *, low: int, high: int, default: int | None = None):
+    value = arguments.get(key, default)
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        value = int(value.strip())
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ToolError(f"{key} must be an integer between {low} and {high}")
+    return max(low, min(high, value))
+
+
+def instrument_from(arguments: Any, manifest: DeskManifest) -> Instrument:
+    """Build an `Instrument` from model-supplied fields, filling the venue from the manifest.
+
+    A live desk routes to its first non-paper venue; a paper desk routes to `paper`. A venue the
+    model names is honoured only when the manifest permits it, so a model cannot route itself
+    onto a venue the desk does not hold.
+    """
+    if not isinstance(arguments, dict):
+        raise ToolError("instrument must be an object")
+    data = {k: v for k, v in arguments.items() if v is not None}
+    venue = data.get("venue")
+    if not isinstance(venue, str) or venue not in manifest.venues:
+        venue = default_venue(manifest)
+    data["venue"] = venue
+    if "strike" in data:
+        data["strike"] = str(data["strike"])
+    if data.get("asset_class") == "option" and "multiplier" not in data:
+        data["multiplier"] = format(OPTION_MULTIPLIER, "f")
+    try:
+        return Instrument.from_dict(data)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ToolError(f"invalid instrument: {exc}") from None
+
+
+def default_venue(manifest: DeskManifest) -> str:
+    """Where a desk's orders go when the model does not say: its first real venue, or paper."""
+    if manifest.live:
+        for venue in manifest.venues:
+            if venue != "paper":
+                return venue
+    return "paper"
+
+
+# --------------------------------------------------------------------------- execution
+
+
+def execute(
+    name: str,
+    arguments: dict[str, Any],
+    ctx: ToolContext,
+    manifest: DeskManifest,
+    session: ToolSession,
+) -> str:
+    """Run one tool call and return the JSON string to hand back to the model.
+
+    Never raises: an unknown tool, a bad argument or a failing context all become
+    `{"error": ...}` so the desk can keep its turn and correct itself.
+    """
+    session.calls += 1
+    if not isinstance(arguments, dict):
+        return error_json("arguments must be a JSON object")
+    if name not in allowed_tools(manifest):
+        known = ", ".join(sorted(allowed_tools(manifest)))
+        return error_json(f"unknown tool {name!r}; this desk has: {known}")
+    try:
+        return dumps(_dispatch(name, arguments, ctx, manifest, session))
+    except ToolError as exc:
+        return error_json(str(exc))
+    except NotImplementedError:
+        return error_json(f"tool {name} is not available on this desk right now")
+    except Exception as exc:  # the model gets a category, never a traceback or a provider body
+        return error_json(f"{name} failed: {exc.__class__.__name__}")
+
+
+def _dispatch(
+    name: str,
+    arguments: dict[str, Any],
+    ctx: ToolContext,
+    manifest: DeskManifest,
+    session: ToolSession,
+) -> Any:
+    if name == "quote":
+        return ctx.quote(instrument_from(arguments.get("instrument"), manifest))
+    if name == "bars":
+        interval = _text(arguments, "interval", limit=8)
+        return ctx.bars(
+            instrument_from(arguments.get("instrument"), manifest),
+            interval,
+            _count(arguments, "limit", low=1, high=500, default=60),
+        )
+    if name == "news":
+        return ctx.news(
+            _text(arguments, "query", limit=200), _count(arguments, "limit", low=1, high=50, default=10)
+        )
+    if name == "filing":
+        return ctx.filing(
+            _text(arguments, "symbol", limit=40),
+            _text(arguments, "form", limit=20),
+            _count(arguments, "index", low=0, high=40, default=0),
+        )
+    if name == "facts":
+        return ctx.facts(_text(arguments, "symbol", limit=40))
+    if name == "calendar":
+        return ctx.calendar(_count(arguments, "days", low=1, high=90, default=7))
+    if name == "chain":
+        return ctx.chain(_text(arguments, "symbol", limit=40), _text(arguments, "expiry", limit=10))
+    if name == "event_markets":
+        return ctx.event_markets(_text(arguments, "query", limit=200))
+    if name == "positions":
+        return ctx.positions()
+    if name == "outcomes":
+        return ctx.outcomes(_count(arguments, "limit", low=1, high=100, default=20))
+    if name == "memory_read":
+        return ctx.memory_read(
+            _text(arguments, "query", limit=200, required=False),
+            _count(arguments, "limit", low=1, high=100, default=20),
+        )
+    if name == "memory_write":
+        return ctx.memory_write(_memory_entry(arguments, manifest, session))
+    if name == "memo":
+        return ctx.memo(_text(arguments, "title", limit=120), _text(arguments, "text", limit=20000))
+    if name == "propose_order":
+        return _propose(arguments, ctx, manifest, session)
+    if name == "cancel_order":
+        return ctx.cancel_order(_text(arguments, "order_id", limit=120))
+    if name == "playbook_read":
+        return {"text": ctx.playbook_read()}
+    if name == "playbook_write":
+        return ctx.playbook_write(
+            _text(arguments, "text", limit=20_000), _text(arguments, "reason", limit=500)
+        )
+    if name == "end_session":
+        summary = _text(arguments, "summary", limit=2000)
+        session.ended = True
+        session.end_summary = summary
+        result = ctx.end_session(summary)
+        return result if isinstance(result, dict) else {"ended": True, "summary": summary}
+    raise ToolError(f"unknown tool {name!r}")  # pragma: no cover - guarded by allowed_tools
+
+
+def _memory_entry(
+    arguments: dict[str, Any], manifest: DeskManifest, session: ToolSession
+) -> dict[str, Any]:
+    entry = arguments.get("entry") if isinstance(arguments.get("entry"), dict) else arguments
+    tags = entry.get("tags") or []
+    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+        raise ToolError("tags must be a list of strings")
+    return {
+        "desk_id": manifest.id,
+        "symbol": entry.get("symbol") if isinstance(entry.get("symbol"), str) else None,
+        "kind": _text(entry, "kind", limit=30),
+        "text": _text(entry, "text", limit=4000),
+        "tags": [t[:30] for t in tags[:12]],
+        "session_id": session.session_id,
+    }
+
+
+def _propose(
+    arguments: dict[str, Any],
+    ctx: ToolContext,
+    manifest: DeskManifest,
+    session: ToolSession,
+) -> dict[str, Any]:
+    instrument = instrument_from(arguments.get("instrument"), manifest)
+    side = arguments.get("side")
+    if side not in ("buy", "sell"):
+        raise ToolError("side must be buy or sell")
+    order_type = arguments.get("order_type", "market")
+    if order_type not in ("market", "limit"):
+        raise ToolError("order_type must be market or limit")
+    limit_price = arguments.get("limit_price")
+    if order_type == "market":
+        limit_price = None
+    elif limit_price is None:
+        raise ToolError("a limit order needs a limit_price")
+    try:
+        intent = OrderIntent.new(
+            desk_id=manifest.id,
+            instrument=instrument,
+            side=side,
+            quantity=arguments.get("quantity"),
+            order_type=order_type,
+            limit_price=limit_price,
+            time_in_force=arguments.get("time_in_force") or "day",
+            rationale=_text(arguments, "rationale", limit=2000),
+            created_at=session.now,
+            session_id=session.session_id,
+            nonce=session.next_nonce(),
+        )
+    except ToolError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ToolError(f"invalid order: {exc}") from None
+    result = ctx.propose_order(intent)
+    if not isinstance(result, dict):
+        raise ToolError("the risk engine returned no decision")
+    decision = result.get("decision") if isinstance(result.get("decision"), dict) else result
+    approved = bool(decision.get("approved"))
+    reasons = decision.get("reasons") or []
+    session.intents.append(
+        {
+            "intent_id": intent.id,
+            "approved": approved,
+            "reasons": [str(r) for r in reasons] if isinstance(reasons, list) else [],
+        }
+    )
+    out = {"intent_id": intent.id, "approved": approved, **result}
+    if not approved:
+        # Verbatim, so the model learns the exact rule it broke rather than a paraphrase.
+        out["reasons"] = [str(r) for r in reasons] if isinstance(reasons, list) else [str(reasons)]
+    return out
+
+
+# --------------------------------------------------------------------------- publication
+
+
+def _clip(value: Any, limit: int = PUBLIC_STRING_CHARS) -> Any:
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "…"
+    if isinstance(value, dict):
+        return {k: _clip(v, limit) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clip(v, limit) for v in value[:20]]
+    return value
+
+
+def public_arguments(name: str, arguments: Any) -> dict[str, Any]:
+    """The argument form that goes into `desk.tool_call`. Long bodies are summarized, not echoed.
+
+    Everything a desk writes is public, so nothing here is secret; this only keeps one tool call
+    from pushing twenty thousand characters of playbook into the event stream, which the diff on
+    `desk.playbook_updated` already carries.
+    """
+    if not isinstance(arguments, dict):
+        return {"_invalid": True}
+    if name == "playbook_write":
+        text = arguments.get("text")
+        return {
+            "reason": _clip(arguments.get("reason")),
+            "chars": len(text) if isinstance(text, str) else 0,
+        }
+    if name == "memo":
+        return {"title": _clip(arguments.get("title")), "chars": len(arguments.get("text") or "")}
+    return {str(k): _clip(to_jsonable(v)) for k, v in arguments.items()}
+
+
+def document_sha256(result: Any) -> str | None:
+    """The `sha256` a filing tool returned, so `desk.tool_result` can cite the exact document."""
+    data = _as_object(result)
+    if isinstance(data, dict):
+        value = data.get("sha256") or data.get("document_sha256")
+        if isinstance(value, str) and 16 <= len(value) <= 128:
+            return value
+    return None
+
+
+def _as_object(result: Any) -> Any:
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except ValueError:
+            return result
+    return result
+
+
+def summarize_result(name: str, result: Any) -> str:
+    """A human sentence for `desk.tool_result`, at most 600 characters. Never raises."""
+    try:
+        return _summarize(name, _as_object(result))[:SUMMARY_CHARS]
+    except Exception:  # pragma: no cover - a summary must never break a session
+        return f"{name}: result could not be summarized"
+
+
+def _summarize(name: str, data: Any) -> str:
+    if isinstance(data, dict) and isinstance(data.get("error"), str):
+        return f"{name} error: {data['error']}"
+    if isinstance(data, list):
+        head = ""
+        if data and isinstance(data[0], dict):
+            for key in ("title", "symbol", "headline", "name", "ticker", "date", "at"):
+                if isinstance(data[0].get(key), str):
+                    head = f"; first: {data[0][key]}"
+                    break
+        return f"{name}: {len(data)} item{'s' if len(data) != 1 else ''}{head}"
+    if not isinstance(data, dict):
+        return f"{name}: {str(data)}"
+    if name == "quote":
+        inst = data.get("instrument") or {}
+        symbol = inst.get("symbol", "?") if isinstance(inst, dict) else "?"
+        stamp = " (delayed)" if data.get("delayed") else ""
+        return f"quote {symbol}: bid {data.get('bid')} ask {data.get('ask')} last {data.get('last')}{stamp}"
+    if name == "filing":
+        return (
+            f"filing {data.get('form', '?')} {data.get('symbol', '')} "
+            f"sha256 {str(data.get('sha256', ''))[:16]} {data.get('url', '')}".strip()
+        )
+    if name == "propose_order":
+        verdict = "approved" if data.get("approved") else "rejected"
+        reasons = data.get("reasons") or []
+        tail = f": {'; '.join(str(r) for r in reasons)}" if reasons else ""
+        return f"propose_order {data.get('intent_id', '')} {verdict}{tail}"
+    if name == "playbook_write":
+        return f"playbook updated to version {data.get('version', '?')}"
+    if name == "memory_write":
+        return f"memory entry {data.get('id', 'written')} stored"
+    if name == "memo":
+        return f"memo published: {data.get('title', '')}"
+    if name == "playbook_read":
+        return f"playbook read ({len(str(data.get('text', '')))} characters)"
+    if name == "end_session":
+        return "session ended by the desk"
+    keys = ", ".join(sorted(str(k) for k in data)[:12])
+    return f"{name}: {{{keys}}}"

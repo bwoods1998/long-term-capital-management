@@ -7,3 +7,4 @@ __pycache__/
 *.sqlite*
 .wrangler/
 node_modules/
+playbooks/history/

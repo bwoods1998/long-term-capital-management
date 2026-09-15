@@ -1,0 +1,479 @@
+"""Coinbase Advanced Trade: spot crypto on `api.coinbase.com`.
+
+Auth is a short-lived CDP JWT in `Authorization: Bearer`
+(https://docs.cdp.coinbase.com/api-reference/v2/authentication). The header carries
+`alg` (`ES256` for an ECDSA PEM key, `EdDSA` for an Ed25519 secret), `typ`, `kid` = the key id
+and a random `nonce`; the payload carries `sub` = the key id, `iss` = `"cdp"`, `nbf` = now,
+`exp` = now + 120 and `uri` = `"METHOD api.coinbase.com/path"`. A fresh token is minted per
+request because the `uri` claim binds it to that one method and path.
+
+Endpoints:
+
+    GET  /api/v3/brokerage/accounts                 .../rest-api/accounts/list-accounts
+    POST /api/v3/brokerage/orders                   .../rest-api/orders/create-order
+    GET  /api/v3/brokerage/orders/historical/{id}   .../rest-api/orders/get-order
+    GET  /api/v3/brokerage/orders/historical/batch  .../rest-api/orders/list-orders
+    GET  /api/v3/brokerage/orders/historical/fills  .../rest-api/orders/list-fills
+    POST /api/v3/brokerage/orders/batch_cancel      .../rest-api/orders/cancel-order
+
+    all under https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/
+
+Order configuration is the one place the venue's vocabulary really differs:
+a market order is `market_market_ioc` with a `base_size` (or `quote_size` to spend a dollar
+amount), and a resting limit is `limit_limit_gtc` with `base_size` and `limit_price`. Coinbase
+has no day order and no immediate-or-cancel *limit* in this adapter, so `capabilities()` does not
+claim them.
+
+The create-order response carries **no top-level `order_id`**: it is
+`success_response.order_id`, and `success: false` means the order was refused, with the reason in
+`error_response`.
+"""
+
+from __future__ import annotations
+
+import urllib.parse
+from decimal import Decimal
+from typing import Any
+
+from ..broker import (
+    Balance,
+    Fill,
+    Instrument,
+    Order,
+    OrderIntent,
+    Position,
+    Quote,
+    RejectedOrder,
+    UnknownOutcome,
+    money,
+    text,
+)
+from ..data import TransportError, iso
+from ..data.coinbase import HOST, PREFIX, CoinbaseMarketData, product_id
+from . import (
+    CoinbaseCredentials,
+    VenueClient,
+    confirm_or_unknown,
+    dec,
+    jws,
+    message_of,
+    new_nonce,
+    require_ok,
+)
+
+VENUE = "coinbase"
+API_HOST = "api.coinbase.com"
+JWT_LIFETIME = 120
+
+CAPABILITIES = {"crypto", "limit", "gtc", "fractional"}
+
+#: Coinbase's ten order states mapped onto this runtime's vocabulary.
+STATUS_MAP: dict[str, str] = {
+    "PENDING": "accepted",
+    "QUEUED": "accepted",
+    "OPEN": "accepted",
+    "EDIT_QUEUED": "accepted",
+    "CANCEL_QUEUED": "accepted",
+    "FILLED": "filled",
+    "CANCELLED": "cancelled",
+    "EXPIRED": "expired",
+    "FAILED": "rejected",
+    "UNKNOWN_ORDER_STATUS": "unknown",
+}
+
+
+def order_configuration(intent: OrderIntent) -> dict[str, Any]:
+    """The `order_configuration` object for one intent.
+
+    Market orders become `market_market_ioc` with a `base_size`: the desk's quantity is always a
+    quantity of the base asset, never a dollar amount, so `quote_size` is deliberately not used.
+    Limit orders become `limit_limit_gtc`; Coinbase has no `day` order, so a day limit would
+    silently outlive its session and is refused instead.
+    """
+    size = text(intent.quantity)
+    if intent.order_type == "market":
+        if intent.time_in_force not in ("ioc", "day", "gtc"):
+            raise RejectedOrder(f"coinbase: unsupported time in force {intent.time_in_force!r}")
+        return {"market_market_ioc": {"base_size": size}}
+    if intent.time_in_force != "gtc":
+        raise RejectedOrder(
+            "coinbase limit orders are good-till-cancelled only; "
+            f"{intent.time_in_force!r} would not expire when this desk expects"
+        )
+    return {
+        "limit_limit_gtc": {
+            "base_size": size,
+            "limit_price": text(intent.limit_price),
+            "post_only": False,
+        }
+    }
+
+
+class CoinbaseBroker:
+    """A `Broker` over Coinbase Advanced Trade, with a fresh JWT per request."""
+
+    def __init__(
+        self,
+        credentials: CoinbaseCredentials,
+        *,
+        transport: Any = None,
+        client: Any = None,
+        market_data: Any = None,
+        clock: Any = None,
+        nonce: Any = new_nonce,
+        venue: str = VENUE,
+        host: str = HOST,
+        timeout: float = 20.0,
+    ):
+        self.credentials = credentials
+        self.venue = venue
+        self.host = host.rstrip("/")
+        self.api_host = urllib.parse.urlsplit(self.host).netloc or API_HOST
+        self.client = client or VenueClient(transport, timeout=timeout)
+        if clock is None:
+            import time as _time
+
+            clock = _time.time
+        self.clock = clock
+        self.nonce = nonce
+        self.market_data = market_data or CoinbaseMarketData(
+            getattr(self.client, "transport", None), host=self.host, clock=clock
+        )
+
+    # ------------------------------------------------------------------- jwt
+    def token(self, method: str, path: str) -> str:
+        """One CDP JWT bound to `"METHOD host/path"`, valid for 120 seconds."""
+        now = int(float(self.clock()))
+        key_id = self.credentials.key_id
+        header = {
+            "alg": self.credentials.signer.algorithm,
+            "typ": "JWT",
+            "kid": key_id,
+            "nonce": self.nonce() if callable(self.nonce) else str(self.nonce),
+        }
+        payload = {
+            "sub": key_id,
+            "iss": "cdp",
+            "nbf": now,
+            "exp": now + JWT_LIFETIME,
+            "uri": f"{method.upper()} {self.api_host}{path}",
+        }
+        return jws(header, payload, self.credentials.signer)
+
+    def _call(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: "dict[str, Any] | None" = None,
+        body: Any = None,
+        what: str,
+        ok: tuple[int, ...] = (200, 201, 204),
+    ) -> Any:
+        """One authenticated request. The JWT `uri` claim covers the path without its query."""
+        url = self.host + path
+        if params:
+            pairs = [(k, v) for k, v in params.items() if v is not None and v != ""]
+            if pairs:
+                url += "?" + urllib.parse.urlencode(pairs, doseq=True)
+        headers = {"Authorization": "Bearer " + self.token(method, path)}
+        status, payload = self.client.request(method, url, headers=headers, body=body, what=what)
+        return require_ok(status, payload, what=what, ok=ok)
+
+    def capabilities(self) -> set[str]:
+        return set(CAPABILITIES)
+
+    # --------------------------------------------------------------- account
+    def accounts(self) -> list[dict[str, Any]]:
+        """`GET /api/v3/brokerage/accounts`, following the cursor to the end."""
+        rows: list[dict[str, Any]] = []
+        cursor: "str | None" = None
+        for _ in range(20):  # 20 pages of 250 is far more than this floor will ever hold
+            payload = self._call(
+                "GET",
+                PREFIX + "/accounts",
+                params={"limit": 250, "cursor": cursor},
+                what="coinbase accounts",
+                ok=(200,),
+            )
+            page = payload.get("accounts") if isinstance(payload, dict) else None
+            if not isinstance(page, list):
+                break
+            rows.extend(row for row in page if isinstance(row, dict))
+            if not payload.get("has_next"):
+                break
+            cursor = payload.get("cursor") or None
+            if not cursor:
+                break
+        return rows
+
+    def balance(self) -> Balance:
+        """Cash is the available USD balance; equity adds every crypto holding at its mark."""
+        cash = money(0)
+        positions = self.positions()
+        for row in self.accounts():
+            available = row.get("available_balance") or {}
+            currency = str(available.get("currency") or row.get("currency") or "")
+            if currency.upper() == "USD":
+                cash += dec(available.get("value"), "0")
+        equity = cash
+        for position in positions:
+            value = position.market_value
+            if value is not None:
+                equity += value
+        return Balance(
+            venue=self.venue,
+            cash=cash,
+            equity=equity,
+            buying_power=cash,
+            as_of=iso(self.clock()),
+        )
+
+    def positions(self) -> list[Position]:
+        """Non-USD balances as positions.
+
+        Advanced Trade accounts report a balance, not a cost basis, so `average_cost` is set to
+        the current mark and the unrealized P&L on these objects reads zero. The floor's own
+        ledger, which has every fill, is the source of truth for cost and profit.
+        """
+        out: list[Position] = []
+        for row in self.accounts():
+            available = row.get("available_balance") or {}
+            currency = str(available.get("currency") or row.get("currency") or "").upper()
+            quantity = dec(available.get("value"))
+            hold = dec((row.get("hold") or {}).get("value"), "0") or money(0)
+            if not currency or currency == "USD" or quantity is None:
+                continue
+            total = quantity + hold
+            if total <= 0:
+                continue
+            instrument = Instrument(
+                "crypto", f"{currency}-USD", self.venue, market_id=f"{currency}-USD"
+            )
+            mark = self._mark(instrument)
+            out.append(
+                Position(
+                    instrument=instrument,
+                    quantity=total,
+                    average_cost=mark if mark is not None else money(0),
+                    mark=mark,
+                    as_of=iso(self.clock()),
+                )
+            )
+        return out
+
+    def _mark(self, instrument: Instrument) -> "Decimal | None":
+        try:
+            quote = self.market_data.quote(instrument)
+        except Exception:
+            return None
+        return quote.mid if quote.mid is not None else quote.last
+
+    def quote(self, instrument: Instrument) -> Quote:
+        """Public market data; the product book needs no credential."""
+        return self.market_data.quote(instrument)
+
+    # ---------------------------------------------------------------- orders
+    def order_body(self, intent: OrderIntent) -> dict[str, Any]:
+        """The create-order request body, with the intent id as `client_order_id`."""
+        return {
+            "client_order_id": intent.id,
+            "product_id": product_id(intent.instrument),
+            "side": intent.side.upper(),
+            "order_configuration": order_configuration(intent),
+        }
+
+    def submit(self, intent: OrderIntent) -> Order:
+        """`POST /api/v3/brokerage/orders`. A refusal arrives as `success: false`, not a 4xx."""
+        if intent.instrument.asset_class != "crypto":
+            raise RejectedOrder(f"coinbase trades crypto, not {intent.instrument.asset_class}")
+        body = self.order_body(intent)
+        try:
+            payload = self._call("POST", PREFIX + "/orders", body=body, what="coinbase submit")
+        except TransportError as exc:
+            return confirm_or_unknown(
+                lambda: self.order_by_client_id(intent.id),
+                what="coinbase submit",
+                detail=f"no response ({type(exc).__name__})",
+            )
+        if not isinstance(payload, dict):
+            raise UnknownOutcome("coinbase submit: unreadable response; reconcile before retrying")
+        if not payload.get("success"):
+            error = payload.get("error_response") or payload.get("error") or {}
+            raise RejectedOrder(f"coinbase submit: {message_of(error) or 'refused'}")
+        success = payload.get("success_response")
+        if not isinstance(success, dict) or not success.get("order_id"):
+            raise UnknownOutcome("coinbase submit: no order id in a successful response")
+        order = Order.from_intent(intent, venue=self.venue)
+        order.status = "accepted"
+        order.broker_order_id = str(success["order_id"])
+        order.submitted_at = iso(self.clock())
+        order.updated_at = order.submitted_at
+        order._raw = {"success": True}
+        return order
+
+    def get_order(self, order_id: str) -> Order:
+        if isinstance(order_id, str) and order_id.startswith("ord-"):
+            found = self.order_by_client_id("oi-" + order_id[4:])
+            if found is None:
+                raise RejectedOrder(f"coinbase: no order for {order_id}")
+            return found
+        payload = self._call(
+            "GET",
+            f"{PREFIX}/orders/historical/{urllib.parse.quote(str(order_id))}",
+            what="coinbase order",
+            ok=(200,),
+        )
+        row = payload.get("order") if isinstance(payload, dict) else None
+        if not isinstance(row, dict):
+            raise RejectedOrder(f"coinbase: no order for {order_id}")
+        return self.parse_order(row)
+
+    def list_orders(self, *, order_status: "str | None" = None, limit: int = 100) -> list[Order]:
+        """`GET /api/v3/brokerage/orders/historical/batch`."""
+        payload = self._call(
+            "GET",
+            PREFIX + "/orders/historical/batch",
+            params={"order_status": order_status, "limit": max(1, min(int(limit), 1000))},
+            what="coinbase orders",
+            ok=(200,),
+        )
+        rows = payload.get("orders") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return []
+        return [self.parse_order(row) for row in rows if isinstance(row, dict)]
+
+    def open_orders(self) -> list[Order]:
+        return self.list_orders(order_status="OPEN")
+
+    def order_by_client_id(self, client_order_id: str) -> "Order | None":
+        """Coinbase has no lookup by client order id, so recent orders are scanned locally."""
+        for status in ("OPEN", None):
+            for order in self.list_orders(order_status=status, limit=250):
+                if order.intent_id == client_order_id:
+                    return order
+        return None
+
+    def cancel(self, order_id: str) -> Order:
+        """`POST /api/v3/brokerage/orders/batch_cancel` with a single id."""
+        order = self.get_order(order_id)
+        if order.terminal:
+            return order
+        venue_id = order.broker_order_id or order_id
+        payload = self._call(
+            "POST",
+            PREFIX + "/orders/batch_cancel",
+            body={"order_ids": [str(venue_id)]},
+            what="coinbase cancel",
+        )
+        results = payload.get("results") if isinstance(payload, dict) else None
+        first = results[0] if isinstance(results, list) and results else {}
+        if isinstance(first, dict) and not first.get("success"):
+            reason = str(first.get("failure_reason") or "")
+            if reason not in ("ORDER_IS_FULLY_FILLED", "UNKNOWN_CANCEL_ORDER", "DUPLICATE_CANCEL_REQUEST"):
+                raise RejectedOrder(f"coinbase cancel: {reason or 'refused'}")
+        order.status = "cancelled"
+        order.reason = "cancelled by request"
+        order.updated_at = iso(self.clock())
+        return order
+
+    # ----------------------------------------------------------------- fills
+    def fills(self, since: "str | None" = None) -> list[Fill]:
+        """`GET /api/v3/brokerage/orders/historical/fills`, oldest first."""
+        params: dict[str, Any] = {"limit": 250}
+        if since:
+            params["start_sequence_timestamp"] = iso(since)
+        payload = self._call(
+            "GET",
+            PREFIX + "/orders/historical/fills",
+            params=params,
+            what="coinbase fills",
+            ok=(200,),
+        )
+        rows = payload.get("fills") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return []
+        out: list[Fill] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            size = dec(row.get("size"))
+            price = dec(row.get("price"))
+            pid = str(row.get("product_id") or "")
+            if size is None or price is None or size <= 0 or not pid:
+                continue
+            out.append(
+                Fill(
+                    id=str(row.get("trade_id") or row.get("entry_id") or ""),
+                    order_id=str(row.get("order_id") or ""),
+                    desk_id="",
+                    instrument=Instrument("crypto", pid, self.venue, market_id=pid),
+                    side=str(row.get("side") or "BUY").lower(),
+                    quantity=size,
+                    price=price,
+                    fee=abs(dec(row.get("commission"), "0") or money(0)),
+                    at=iso(row.get("trade_time") or row.get("sequence_timestamp") or 0),
+                )
+            )
+        out.sort(key=lambda fill: fill.at)
+        return out
+
+    # --------------------------------------------------------------- parsing
+    def parse_order(self, row: dict[str, Any]) -> Order:
+        pid = str(row.get("product_id") or "")
+        instrument = Instrument("crypto", pid or "UNKNOWN-USD", self.venue, market_id=pid or None)
+        client_order_id = str(row.get("client_order_id") or "")
+        configuration = row.get("order_configuration") or {}
+        limit_price = None
+        size = None
+        if isinstance(configuration, dict):
+            for name, leg in configuration.items():
+                if not isinstance(leg, dict):
+                    continue
+                limit_price = dec(leg.get("limit_price")) or limit_price
+                size = dec(leg.get("base_size")) or size
+        filled = dec(row.get("filled_size"), "0") or money(0)
+        order = Order(
+            id="ord-" + client_order_id[3:] if client_order_id.startswith("oi-") else
+               ("ord-" + client_order_id if client_order_id else "ord-" + str(row.get("order_id") or "")),
+            intent_id=client_order_id,
+            desk_id="",
+            instrument=instrument,
+            side=str(row.get("side") or "BUY").lower(),
+            quantity=size if size is not None else filled,
+            order_type="limit" if str(row.get("order_type") or "") == "LIMIT" else "market",
+            limit_price=limit_price,
+            time_in_force="gtc",
+            status=STATUS_MAP.get(str(row.get("status") or ""), "unknown"),
+            venue=self.venue,
+            broker_order_id=str(row.get("order_id") or "") or None,
+            filled_quantity=filled,
+            average_price=dec(row.get("average_filled_price")),
+            fees=dec(row.get("total_fees"), "0") or money(0),
+            submitted_at=_stamp(row.get("created_time")),
+            updated_at=_stamp(row.get("last_update_time") or row.get("created_time")),
+            reason=str(row.get("reject_reason") or row.get("cancel_message") or "") or None,
+        )
+        order._raw = {"status": row.get("status")}
+        return order
+
+
+def _stamp(value: Any) -> "str | None":
+    if not value:
+        return None
+    try:
+        return iso(value)
+    except Exception:
+        return None
+
+
+__all__ = [
+    "CoinbaseBroker",
+    "CoinbaseCredentials",
+    "order_configuration",
+    "STATUS_MAP",
+    "CAPABILITIES",
+    "HOST",
+    "PREFIX",
+    "JWT_LIFETIME",
+]
