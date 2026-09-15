@@ -326,12 +326,54 @@ class Lab:
         return out
 
     # ------------------------------------------------------------------ proposing
-    def run(self, now: Any = None) -> list[dict[str, Any]]:
-        """One night's work: judge what is due, then propose what is new."""
-        at = iso_time(now) if now is not None else self.now()
-        return self.evaluate(at) + self.propose(at)
+    def run(self, now: Any = None, *, budget_seconds: float | None = None) -> list[dict[str, Any]]:
+        """One night's work: judge what is due, then propose what is new.
 
-    def propose(self, now: Any = None) -> list[dict[str, Any]]:
+        `budget_seconds` bounds how long proposing may hold the caller: each family costs a
+        model call and every accepted experiment a playbook rewrite, and the floor's tick must
+        keep marking and publishing meanwhile. A run cut short is finished by the next call;
+        `pending_families` says whether anything is left.
+        """
+        at = iso_time(now) if now is not None else self.now()
+        return self.evaluate(at) + self.propose(at, budget_seconds=budget_seconds)
+
+    def proposed_on_for(self, day: str, family: str) -> int:
+        return sum(
+            1 for e in self.experiments().values()
+            if str(e.get("proposed_at", ""))[:10] == day and e.get("family") == family
+        )
+
+    def pending_families(self, now: Any = None) -> list[str]:
+        """Families with a live desk that have not been asked for experiments today and have
+        room to run one. Empty means the night's proposing is done."""
+        at = iso_time(now) if now is not None else self.now()
+        day = at[:10]
+        modes = promoted_desks(self.log)
+        per_day = int(self.config["max_experiments_per_day"])
+        max_running = int(self.config["max_running_per_family"])
+        if self.proposed_on(day) >= per_day:
+            return []
+        out = []
+        for family, variants in sorted(self.evolution.families().items()):
+            if not any(capital_mode(m, modes) == "live" for m in variants):
+                continue
+            if len(self.running(family)) >= max_running:
+                continue
+            if self.proposed_on_for(day, family) > 0 or family in self._asked_on(day):
+                continue
+            out.append(family)
+        return out
+
+    def _asked_on(self, day: str) -> set[str]:
+        """Families the lab asked today whose every proposal was refused or empty, from the
+        `lab.asked` marker the run writes, so a family is asked once a night at most."""
+        asked: set[str] = set()
+        for event in self.log.read(stream="lab", kind="lab.asked", limit=2000):
+            if str(event.at)[:10] == day and isinstance(event.payload.get("family"), str):
+                asked.add(event.payload["family"])
+        return asked
+
+    def propose(self, now: Any = None, *, budget_seconds: float | None = None) -> list[dict[str, Any]]:
         at = iso_time(now) if now is not None else self.now()
         day = at[:10]
         actions: list[dict[str, Any]] = []
@@ -339,6 +381,9 @@ class Lab:
         per_family = int(self.config["max_experiments_per_family"])
         per_day = int(self.config["max_experiments_per_day"])
         max_running = int(self.config["max_running_per_family"])
+        started = time.monotonic()
+        asked_today = self._asked_on(day)
+        asked_now = 0
         for family, variants in sorted(self.evolution.families().items()):
             live = [m for m in variants if capital_mode(m, modes) == "live"]
             if not live:
@@ -348,6 +393,15 @@ class Lab:
                 break
             if len(self.running(family)) >= max_running:
                 continue
+            if self.proposed_on_for(day, family) > 0 or family in asked_today:
+                continue  # asked already tonight; a second ask is a second bill for the same answer
+            if budget_seconds is not None and asked_now and time.monotonic() - started > budget_seconds:
+                break  # the tick has waited long enough; the next tick takes the next family
+            asked_now += 1
+            self.log.append(
+                "lab", "lab.asked", {"family": family, "as_of": at},
+                id=f"lab-asked:{family}:{day}", at=at, public=False,
+            )
             best = max(variants, key=lambda m: (self.evolution.score(m.id, at), -int(m.generation), m.id))
             for proposal in self._ask(family, parent, at)[:per_family]:
                 if self.proposed_on(day) >= per_day:

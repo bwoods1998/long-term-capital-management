@@ -667,7 +667,10 @@ class Provider:
             "input": input_items,
             "reasoning": {"effort": reasoning_effort, "generate_summary": "detailed"},
             "max_output_tokens": max_output_tokens,
-            "background": window != "asap",
+            # Every window is a background response, polled to completion: a high-effort turn
+            # with sixteen thousand output tokens can run past any single HTTP timeout, and the
+            # first evening lost a session that way. asap still answers as fast as Sail can.
+            "background": True,
             "metadata": {"completion_window": window},
         }
         if tools:

@@ -1590,6 +1590,28 @@ class LeapSandboxAndRunClockTests(ServiceCase):
         self.assertEqual(desk["next_session_at"], "2026-09-14T19:30:00.000Z")  # 15:30 New York, after the 09:45 ran
 
 
+class LabSlotTests(ServiceCase):
+    """The lab's night is spread over ticks and finished before the day is marked done."""
+
+    def test_the_lab_slot_stays_due_until_every_family_has_been_asked(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.write_manifest("crypto-01", family="crypto", venues=["kalshi"],
+                            instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+                            capital={"mode": "live", "usd": "500"})
+        self.service.close()
+        self.service = self.build(lab_budget_seconds=0, live_venues=["alpaca", "kalshi"])
+        self.fund()
+        self.tick(moment(2026, 9, 16, 0, 5))  # 20:05 New York on the 15th: the lab's slot
+        asked = lambda: sorted(e.payload["family"] for e in self.service.log.read(kind="lab.asked"))  # noqa: E731
+        self.assertEqual(asked(), ["crypto"])
+        self.assertIsNone(self.service.state().get("last_lab_day"))
+        self.tick(moment(2026, 9, 16, 0, 6))
+        self.assertEqual(asked(), ["crypto", "earnings"])
+        self.assertEqual(self.service.state().get("last_lab_day"), "2026-09-15")
+        self.tick(moment(2026, 9, 16, 0, 7))
+        self.assertEqual(asked(), ["crypto", "earnings"], "done for the night")
+
+
 class MemoryScopeTests(ServiceCase):
     def test_a_desk_reads_only_its_own_memory(self):
         self.write_manifest("earnings-02")

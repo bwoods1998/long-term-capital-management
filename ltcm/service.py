@@ -113,6 +113,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # leap: lab -- the research lab's nightly slot (local time) and its bounds (`ltcm.lab`),
     # and how often forecasts are checked against the venue for resolution, in seconds.
     "lab_time": "20:00",
+    "lab_budget_seconds": 120,
     "lab": {},
     "calibration_interval_seconds": 600,
     "publish": True,
@@ -2088,13 +2089,22 @@ class Service:
         if not stopped:
             self._calibration_tick(at, state)
         if not stopped and self._due(local, self.config["lab_time"], state.get("last_lab_day"), day):
+            # A family per tick, at most: each ask is a model call and each accepted experiment
+            # a playbook rewrite, and the tick must keep marking and publishing in between. The
+            # night is done when no family is left to ask; until then the slot stays due.
+            budget = float(self.config.get("lab_budget_seconds", 120))
             try:
-                experiments = list(self.lab.run(at))
+                experiments = list(self.lab.run(at, budget_seconds=budget))
             except Exception as exc:
                 self.alert("warning", f"lab run failed: {type(exc).__name__}: {exc}")
                 experiments = []
             self.reload_manifests()
-            self._save_state(last_lab_day=day)
+            try:
+                pending = self.lab.pending_families(at)
+            except Exception:
+                pending = []
+            if not pending:
+                self._save_state(last_lab_day=day)
             result["experiments"] = experiments
         if stopped:
             pass  # the memo and the evolution loop both ask the model; they wait for credit

@@ -299,6 +299,39 @@ class ProposalTests(LabCase):
         )
 
 
+class BudgetTests(LabCase):
+    """A night's proposing is bounded per call and never asks a family twice in one night."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_manifest("crypto-01", family="crypto", capital={"mode": "live", "usd": "500"})
+        self.allocate({"earnings-01": "1000", "crypto-01": "500"}, "2026-09-01T13:00:00.000Z")
+
+    def test_a_zero_budget_asks_one_family_per_call_and_the_rest_stays_pending(self):
+        self.provider.replies = [reply({"hypothesis": "h1", "change": {"memory_limit": 20}}) for _ in range(4)]
+        lab = self.lab()
+        self.assertEqual(lab.pending_families(NIGHT), ["crypto", "earnings"])
+        first = lab.propose(NIGHT, budget_seconds=0)
+        self.assertEqual([a["family"] for a in first], ["crypto"])
+        self.assertEqual(lab.pending_families(NIGHT), ["earnings"])
+        second = lab.propose(NIGHT, budget_seconds=0)
+        self.assertEqual([a["family"] for a in second], ["earnings"])
+        self.assertEqual(lab.pending_families(NIGHT), [])
+        self.assertEqual(lab.propose(NIGHT, budget_seconds=0), [], "nothing left to ask tonight")
+
+    def test_a_family_whose_proposals_were_refused_is_not_asked_again_tonight(self):
+        self.provider.replies = [reply({"hypothesis": "bad", "change": {"model.profile": "not-priced"}})] * 4
+        lab = self.lab()
+        actions = lab.propose(NIGHT)
+        self.assertEqual({a["status"] for a in actions}, {"withdrawn"})
+        asks = len([c for c in self.provider.calls if c["desk_id"] == "lab"])
+        self.assertEqual(lab.pending_families(NIGHT), [])
+        lab.propose(NIGHT)
+        self.assertEqual(len([c for c in self.provider.calls if c["desk_id"] == "lab"]), asks, "one ask per family per night")
+        # The marker that remembers the ask never reaches the public tape.
+        self.assertTrue(all(not e.public for e in self.log.read(kind="lab.asked")))
+
+
 class VerdictTests(LabCase):
     def start(self, change=None):
         self.provider.replies = [reply({"hypothesis": "h", "change": change or {"memory_limit": 20}})]
