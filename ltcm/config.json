@@ -99,7 +99,7 @@
       ]
     }
   },
-  "calibration_interval_seconds": 3600,
+  "calibration_interval_seconds": 600,
   "committee": {
     "bandit_enabled": true,
     "bandit_prior_sd_pct": "5",

@@ -517,5 +517,58 @@ class MemoryTests(DeskCase):
         store.close()
 
 
+
+class LessonsTests(unittest.TestCase):
+    """The lessons a post-mortem states reach the log however the model laid them out."""
+
+    def test_inline_enumerations_are_split_into_lessons(self):
+        from ltcm.desk import _lessons_from
+
+        prose = (
+            "Post-mortem (no orders this session): Worst decision \u2014 on KXFEDDECISION-26SEP I set a "
+            "92\u201393% estimate. Rules changed: added three to the playbook \u2014 (1) consolidate "
+            "no-setup notes to one per symbol per session, (2) sub-8c event-contract edges are "
+            "record-only no-trades, (3) shrink extreme tail estimates at least halfway toward the "
+            "market before acting. Waiting on the FOMC resolution to re-check rule 2."
+        )
+        lessons = _lessons_from(prose)
+        self.assertEqual(len(lessons), 3)
+        self.assertTrue(lessons[0].startswith("consolidate no-setup notes"))
+        self.assertTrue(lessons[1].startswith("sub-8c event-contract edges"))
+        self.assertTrue(lessons[2].startswith("shrink extreme tail estimates"))
+        self.assertNotIn("Waiting on the FOMC", lessons[2])
+
+    def test_a_semicolon_list_ends_before_the_calibration_sentence(self):
+        from ltcm.desk import _lessons_from
+
+        prose = (
+            "Rules changed: appended three \u2014 (1) scheduled catalysts override intraday "
+            "mean-reversion extremes, (2) pre-commit mechanical post-release triggers before the "
+            "catalyst, (3) pair every probability forecast with the live market price. Calibration "
+            "unscoreable until FOMC resolves 2026-09-16; I was ~3-4c above the market on H25 (0.92 vs 0.89)."
+        )
+        lessons = _lessons_from(prose)
+        self.assertEqual(len(lessons), 3)
+        self.assertTrue(lessons[2].startswith("pair every probability forecast"))
+        self.assertNotIn("Calibration", lessons[2])
+
+    def test_a_single_rule_sentence_counts_when_nothing_is_enumerated(self):
+        from ltcm.desk import _lessons_from
+
+        prose = (
+            "Rule changed: added playbook rule 6 (pre-catalyst sessions must close with a written "
+            "mechanical plan, or an explicit stay-flat line; prose is not a plan), with one matching "
+            "lesson memory entry. Rules 1-5 were already in place and none failed."
+        )
+        lessons = _lessons_from(prose)
+        self.assertEqual(len(lessons), 1)
+        self.assertTrue(lessons[0].startswith("added playbook rule 6"))
+
+    def test_bullets_and_numbered_lines_still_read_as_before(self):
+        from ltcm.desk import _lessons_from
+
+        self.assertEqual(_lessons_from("- one\n* two\n3. three\nprose"), ["one", "two", "three"])
+        self.assertEqual(_lessons_from("Nothing learned today, the book was flat."), [])
+
 if __name__ == "__main__":
     unittest.main()
