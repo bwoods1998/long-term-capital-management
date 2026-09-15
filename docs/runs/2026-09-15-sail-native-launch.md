@@ -154,3 +154,25 @@ decisions produces no outcomes, and the loop selects on outcomes. Changes, all l
   live playbooks rather than overwriting the desks' own rewrites.
 - **Every desk** in the asap window; children inherit the founder's tools; duds are retired;
   Kimi K3 in the gene pool; gateway caps sized so the desks' own limits bind first.
+
+## Addendum, 23:35 UTC: four reviewers on the live run
+
+Four parallel reviews of the evening's sessions, the loop machinery, the plumbing and the
+public output, each fixing what it found. The three that mattered most:
+
+- **No forecast could ever have been scored.** Kalshi reports a settled market as
+  `finalized`; the resolver waited for `settled`. Calibration, the post-mortem's calibration
+  block and the lab's evidence would have stayed empty forever.
+- **Every desk read one shared memory pool.** Children copied their parent's and each other's
+  notes, six of them wrote the same three rules into their playbooks, and the abandoned
+  eight-cent threshold re-entered the crypto and range families as a "learned rule". Memory is
+  per desk now; the contaminated rule sections and thirteen copied lessons were removed by hand.
+- **The box could not reach the Sailbox API**, so every `run_code` failed in forty
+  milliseconds; the host is on the allowlist now and a run from the box takes four seconds.
+
+Also fixed: sessions no longer die on a long turn (every request is dispatched in the
+background and polled), the lab spreads its night over ticks instead of blocking the loop
+past the watchdog's threshold, post-mortems run only after a trading session, lessons written
+as prose are parsed, incomplete playbook rewrites fall back to the parent's, bars are five
+times smaller on the wire, search matches inside tickers, idle lines carry the next session,
+end reasons read as words, and bred desks outside the partner table render by name.
