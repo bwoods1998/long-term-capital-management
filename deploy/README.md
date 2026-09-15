@@ -175,6 +175,24 @@ The floor's own credentials are **files on the box**, not Sail secrets: every ve
 signed by the adapter that builds it, so there is no HTTP policy and Sail is never handed a key to
 inject.
 
+## The lab image and the desks' sandboxes
+
+A desk that writes code runs it on its own Sailbox, never on the floor box. The **lab image** is
+one box provisioned once with python3, numpy, pandas, the floor's read-only market-data package
+and `labkit`, then checkpointed; each desk's sandbox is a fork of that checkpoint, created on
+its first `run_code`, woken for a run and asleep otherwise (asleep is free). A sandbox has a
+data-only egress allowlist and carries no venue key, no gateway token and no Sail key.
+
+```sh
+python3 scripts/lab_image.py build       # provision, check, checkpoint, record (a few minutes)
+python3 scripts/lab_image.py status      # the recorded checkpoint
+python3 scripts/lab_image.py sandboxes   # every desk's sandbox and its sleep state
+python3 scripts/lab_image.py sleep       # put them all to sleep now
+```
+
+The checkpoint id goes in `ltcm/config.json` under `sandbox.image_checkpoint`, which is how the
+floor box learns it; rebuild the image when the data package changes and update the id.
+
 ## Going live
 
 Every desk starts **shadow**: it runs full sessions and its proposals are scored against real
