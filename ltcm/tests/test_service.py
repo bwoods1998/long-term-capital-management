@@ -467,16 +467,24 @@ class RunwayPolicyTests(ServiceCase):
         self.assertEqual(self.provider.desk_fuse, Decimal("67.45"))
         event = self.service.log.last("ops", "ops.budget")
         self.assertEqual(event.payload["mode"], "open")
-        self.assertEqual(event.payload["balance_usd"], "279.82")
-        self.assertEqual(event.payload["runway_days"], "385.4")
+        self.assertEqual(event.payload["balance_usd"], "279")  # the tape speaks in dollars
+        self.assertEqual(event.payload["runway_days"], "385")
         self.assertEqual(event.payload["spent_usd"], "0.03")
         checkpoint = self.publisher.checkpoints[-1]
         self.assertEqual(checkpoint["budget"]["mode"], "open")
-        self.assertEqual(str(checkpoint["budget"]["balance_usd"]), "279.82")
+        self.assertEqual(str(checkpoint["budget"]["balance_usd"]), "279.82")  # exact, here
         self.assertEqual(str(checkpoint["budget"]["cap_usd"]), "269.82")
-        # A steady picture is one public event, not one per tick.
+        # A steady picture is one public event, not one per tick, and a balance that moves by
+        # cents between ticks is the same picture: the tick must never fail on its own event.
+        self.provider.balance = Decimal("279.61")
         self.tick(moment(2026, 9, 14, 13, 51))
+        self.tick(moment(2026, 9, 14, 13, 52))
         self.assertEqual(len(self.service.log.read(kind="ops.budget")), 1)
+        self.assertEqual([e for e in self.service.log.read(kind="ops.alert") if "tick failed" in e.payload["text"]], [])
+        # A dollar of balance, or a cent of spend, is a new picture.
+        self.provider.balance = Decimal("270.10")
+        self.tick(moment(2026, 9, 14, 13, 53))
+        self.assertEqual(len(self.service.log.read(kind="ops.budget")), 2)
 
     def test_at_the_reserve_the_floor_stops_says_so_once_and_resumes_when_credit_arrives(self):
         self.provider.balance = Decimal("9.50")

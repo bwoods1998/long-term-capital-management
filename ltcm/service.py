@@ -1302,19 +1302,27 @@ class Service:
                 provider.floor_cap = runway.cap_usd
             if hasattr(provider, "desk_fuse"):
                 provider.desk_fuse = runway.desk_fuse_usd
-        payload = {"scope": "floor", "spent_usd": text(spent), **runway.to_payload()}
-        # One public event per change of picture: the mode, the cap and the runway to the
-        # dollar and the day, not one event per cent the balance moves.
-        coarse = {
+        # One public event per change of picture, and the picture *is* the payload: the mode,
+        # today's spend to the cent, and the balance, the cap and the runway to the dollar and
+        # the day. An id derived from less than the payload would be reused with different
+        # content the moment the balance moved a cent, and the log rightly refuses that.
+        exact = runway.to_payload()
+        payload = {
+            "scope": "floor",
+            "spent_usd": text(spent),
             "mode": runway.mode,
-            "cap": str(int(runway.cap_usd)),
-            "balance": None if runway.balance_usd is None else str(int(runway.balance_usd)),
-            "runway": None if runway.runway_days is None else str(int(runway.runway_days)),
+            "cap_usd": str(int(runway.cap_usd)),
+            "balance_usd": None if runway.balance_usd is None else str(int(runway.balance_usd)),
+            "runway_days": None if runway.runway_days is None else str(int(runway.runway_days)),
+            "reserve_usd": exact["reserve_usd"],
         }
-        digest = hashlib.sha256(canonical(coarse).encode("utf-8")).hexdigest()[:12]
-        self.log.append(
-            "ops", "ops.budget", payload, id=f"budget:floor:{at[:10]}:{digest}", at=at
-        )
+        digest = hashlib.sha256(canonical(payload).encode("utf-8")).hexdigest()[:12]
+        try:
+            self.log.append(
+                "ops", "ops.budget", payload, id=f"budget:floor:{at[:10]}:{digest}", at=at
+            )
+        except Exception as exc:  # the budget is applied above; a refused event must not stop the tick
+            self.alert("warning", f"budget event not written: {type(exc).__name__}")
         self._note_spend_mode(runway, at)
         self._runway = runway
         self._budget = {
