@@ -53,7 +53,7 @@ class VocabularyTests(unittest.TestCase):
     def test_every_key_in_the_vocabulary_normalizes(self):
         change = validate_change(
             {
-                "model.profile": "kimi_flex",
+                "model.profile": "kimi_asap",
                 "model.reasoning_effort": "high",
                 "cadence.sessions": ["10:00", "09:45", "10:00"],
                 "memory_limit": 60,
@@ -115,10 +115,10 @@ class VocabularyTests(unittest.TestCase):
     def test_apply_change_is_the_vocabulary_made_concrete(self):
         data, note = apply_change(
             self.parent.to_dict(),
-            {"model.profile": "kimi_flex", "limits": {"max_orders_per_day": 5, "max_position_pct": "0.2"},
+            {"model.profile": "kimi_asap", "limits": {"max_orders_per_day": 5, "max_position_pct": "0.2"},
              "tools_add": ["memo_read"], "playbook_note": "House view."},
         )
-        self.assertEqual(data["model"]["profile"], "kimi_flex")
+        self.assertEqual(data["model"]["profile"], "kimi_asap")
         self.assertEqual(data["limits"]["max_orders_per_day"], 5)
         self.assertEqual(data["limits"]["max_position_pct"], "0.2")
         self.assertIn("memo_read", data["tools"])

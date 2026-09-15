@@ -61,6 +61,6 @@ export default {
 
   async fetch(request, env) {
     if (!env.GATE) return fail('Gateway setup is incomplete.', 503);
-    return route(request, env, { gate: gateOf(env) });
+    return route(request, env, { gate: gateOf(env), mailer: mailerFor(env) });
   },
 };

@@ -17,6 +17,7 @@
 // the same router works against both.
 
 import { json, fail, authorized, readBody } from './http.mjs';
+import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import { createsOrder, notional, REFERENCE_HEADER } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as coinbase from './coinbase.mjs';
@@ -35,7 +36,7 @@ export function parseRoute(pathname) {
   return { venue: match[1], path };
 }
 
-export async function route(request, env, { gate, fetcher = fetch, now = Date.now, nonce } = {}) {
+export async function route(request, env, { gate, fetcher = fetch, now = Date.now, nonce, mailer = null } = {}) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -51,6 +52,33 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     await gate.setKill(path === '/v1/kill');
     return json(await gate.status());
+  }
+
+  if (path === '/v1/notify') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    const body = await readBody(request, 32 * 1024);
+    if (body.error) return fail(body.error, 413);
+    let facts;
+    try {
+      facts = JSON.parse(body.text || '');
+    } catch {
+      return fail('The notice must be a JSON object.', 400);
+    }
+    if (!facts || typeof facts !== 'object' || Array.isArray(facts) || !NOTICE_KINDS.includes(facts.kind)) {
+      return fail('The notice needs a known kind.', 400);
+    }
+    const message = composeNotice(facts);
+    if (!message) return fail('The notice could not be composed.', 400);
+    const cap = Number(env.NOTIFY_MAX_PER_DAY || 40);
+    if (gate.noticesToday(now()) >= cap) return fail('The day\'s notice cap is reached.', 429, { 'Retry-After': '3600' });
+    if (!mailer) return json({ sent: false, reason: 'no mail binding', subject: message.subject });
+    try {
+      await mailer({ from: env.ALERT_FROM || FROM, to: env.ALERT_TO || TO, ...message, at: now() });
+    } catch (error) {
+      return fail(`The mail could not be sent: ${error?.name || 'send_failed'}.`, 502);
+    }
+    const count = gate.recordNotice(now());
+    return json({ sent: true, subject: message.subject, notices_today: count });
   }
 
   if (path === '/v1/kalshi/ws-auth' || path === '/v1/coinbase/ws-jwt') {

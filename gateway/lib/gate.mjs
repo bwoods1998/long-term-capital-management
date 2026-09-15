@@ -18,6 +18,7 @@ export const KILL_KEY = 'kill';
 export const WATCHDOG_KEY = 'watchdog';
 export const SAIL_KEY = 'sail';
 export const ALERTS_KEY = 'alerts';
+const NOTICES_KEY = 'notices';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -138,6 +139,18 @@ export function createGate({ store, env = {}, now = Date.now }) {
     },
 
     alerts: () => read(store, ALERTS_KEY, {}),
+
+    /** Trade notices sent today (the floor's day), so a bug cannot mail a thousand times. */
+    noticesToday(at = now()) {
+      const row = read(store, NOTICES_KEY, {});
+      return row.day === tradingDay(at, limits.timezone) ? Number(row.count) || 0 : 0;
+    },
+
+    recordNotice(at = now()) {
+      const count = this.noticesToday(at) + 1;
+      write(store, NOTICES_KEY, { day: tradingDay(at, limits.timezone), count });
+      return count;
+    },
 
     /** True when this kind of alert has not been sent inside `everyMs`. */
     alertDue(kind, at = now(), everyMs) {

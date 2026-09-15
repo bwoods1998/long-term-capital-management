@@ -102,6 +102,67 @@ export function compose(kind, facts = {}) {
   return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
 }
 
+export const NOTICE_KINDS = ['trade', 'settled', 'test'];
+const clip = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
+const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
+
+/**
+ * `{ subject, text }` for a trade notice posted by the floor, or null for a kind this does not
+ * know. The floor sends the facts; the words are composed here so every line is tested.
+ */
+export function composeNotice(facts = {}) {
+  const lines = [];
+  let subject;
+  const desk = clip(facts.desk_name, 60) || 'A desk';
+  switch (facts.kind) {
+    case 'trade': {
+      const verb = facts.purpose === 'exit' ? 'closed' : (String(facts.side).toLowerCase().startsWith('s') || facts.side === 'ask' ? 'sold' : 'bought');
+      const what = `${clip(facts.quantity, 24)} ${clip(facts.instrument, 60)}`;
+      subject = `LTCM: ${desk} ${verb} ${what} at ${price(facts.price)}`;
+      lines.push(
+        `${desk} ${verb} ${what} at ${price(facts.price)} on ${clip(facts.venue, 20) || 'the venue'}${facts.fee ? `, fee $${clip(facts.fee, 20)}` : ''}.`,
+        facts.purpose === 'exit' ? `Exit reason: ${clip(facts.exit_reason, 40) || 'the desk'}.` : null,
+        '',
+        'Why, in the desk\'s words:',
+        clip(facts.rationale, 1500) || '(no rationale filed)',
+        '',
+        `Risk engine: ${clip(facts.engine, 400) || 'no record'}.`,
+        `Critic: ${clip(facts.critic, 400) || 'no review'}.`,
+        (facts.target_price || facts.stop_price || facts.time_stop_at)
+          ? `Exit plan: target ${price(facts.target_price)}, stop ${price(facts.stop_price)}, out by ${clip(facts.time_stop_at, 30) || 'no time stop'}.`
+          : 'Exit plan: none filed.',
+        '',
+        `Trade story: ${clip(facts.story_url, 300) || FLOOR}`,
+      );
+      break;
+    }
+    case 'settled': {
+      const pnl = Number(facts.pnl);
+      const signed = Number.isFinite(pnl) ? `${pnl < 0 ? '-' : '+'}$${Math.abs(pnl).toFixed(2)}` : clip(facts.pnl, 20);
+      subject = `LTCM: ${desk}'s ${clip(facts.instrument, 60)} settled ${signed}`;
+      lines.push(
+        `${desk}'s position in ${clip(facts.instrument, 60)} settled ${clip(facts.result, 40) || 'unknown'}: ${signed} on ${clip(facts.quantity, 24)} held ${clip(facts.held_for_hours, 16)} h (entry ${price(facts.entry_price)}, exit ${price(facts.exit_price)}).`,
+        '',
+        'What the desk said going in:',
+        clip(facts.rationale, 1500) || '(no rationale filed)',
+        '',
+        `Desk page: ${clip(facts.story_url, 300) || FLOOR}`,
+      );
+      break;
+    }
+    case 'test':
+      subject = 'LTCM: trade notices are switched on';
+      lines.push(
+        'This is the notice you will get when a desk completes a trade on real money: what it did, why in its own words, the risk engine and critic verdicts, and the exit plan. A second kind arrives when a position settles, with the profit or loss.',
+      );
+      break;
+    default:
+      return null;
+  }
+  lines.push('', FLOOR, CONSOLE);
+  return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
+}
+
 const ASCII = /^[\x20-\x7e]*$/;
 
 /** RFC 2047 encoding, used only when a header actually needs it. */

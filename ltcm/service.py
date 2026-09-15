@@ -36,6 +36,7 @@ from .analytics import ResultsLedger
 from .committee import Committee, capital_mode, live_desks, promoted_desks, retired_desks
 from .runway import Runway, assess as assess_runway
 from .runclock import RunClock  # leap: run clock
+from .notify import TradeNotifier  # trade notices
 from .sandbox import SandboxManager  # leap: sandbox
 from .exits import ExitBook  # leap: exits
 from .watch import NightWatch  # leap: watch
@@ -104,6 +105,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "exits": {"enabled": True, "check_seconds": 60, "retry_seconds": 300},
     # leap: watch. The night desk that wakes a desk on a trigger (`ltcm/watch.py`).
     "watch": {"enabled": True},
+    # Trade notices: an email per live fill and per settled position, through the gateway.
+    "notify": {"enabled": True},
     # leap: sandbox. One forked Sailbox per desk for the code it writes (`ltcm/sandbox.py`);
     # `image_checkpoint` is the lab image built by `scripts/lab_image.py`.
     "sandbox": {"enabled": True, "image_checkpoint": None, "daily_seconds": 1800, "timeout_seconds": 120},
@@ -747,6 +750,17 @@ class Service:
         self.publisher = publisher if publisher is not None else self._build_publisher()
         self.feeds = self._build_feeds()  # leap: feeds
         self.sandboxes = self._build_sandboxes()  # leap: sandbox
+        notify = dict(self.config.get("notify") or {})
+        self.notifier = TradeNotifier(
+            self.log,
+            self.manifests,
+            gateway_url=self.config.get("gateway_url"),
+            token=self.secret(self.config.get("gateway_token_env") or "GATEWAY_TOKEN"),
+            state=self.state,
+            save_state=self._save_state,
+            alert=self.alert,
+            enabled=bool(notify.get("enabled", True)),
+        )
         self._started_monotonic = time.monotonic()
         # leap: run clock. How long, how much, how profitable; folded from the floor's own records.
         self.runclock = RunClock(
@@ -1944,6 +1958,11 @@ class Service:
         # Settlements are swept before the schedule so a market that resolved since the last
         # tick wakes its desk on this tick rather than the next one.
         result["settlements"] = self.sweep_settlements(at)
+        try:
+            result["notices"] = self.notifier.tick(at)
+        except Exception as exc:  # a notice is a courtesy; the tick is the job
+            self.alert("warning", f"trade notices failed: {type(exc).__name__}")
+            result["notices"] = []
         # A desk that has never been funded, or a roster change, gets an allocation right away, before any
         # session starts, so a desk never sees an unfunded book;
         # the weekly resize by track record still only happens on the committee's day.

@@ -301,3 +301,45 @@ test('only the documented routes and methods exist', async () => {
   assert.equal((await call(ask('PUT', '/v1/kalshi/portfolio/balance'))).response.status, 405);
   assert.equal((await call(ask('POST', '/v1/health'))).response.status, 405);
 });
+
+test('a trade notice is composed from the floor\'s facts, mailed once, and counted against the day', async () => {
+  const sent = [];
+  const mailer = async message => void sent.push(message);
+  const gate = gateFor();
+  const facts = {
+    kind: 'trade', desk_name: 'Mullins', instrument: 'KXFED-26SEP-T3.75', venue: 'kalshi', side: 'buy', quantity: '20',
+    price: '0.56', fee: '0.14', purpose: 'entry', rationale: 'Hot CPI put a hike at 93%; the market asked 89%.',
+    engine: 'approved', critic: 'approve: sized inside the mandate', target_price: '0.95', stop_price: '0.40',
+    time_stop_at: '2026-09-17T18:00:00.000Z', story_url: 'https://blakewoods.us/capital/desk/?id=mullins#story-oi-1',
+  };
+  const request = ask('POST', '/v1/notify', { body: facts });
+  const response = await route(request, env(), { gate, now: () => NOW, mailer });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.sent, true);
+  assert.equal(body.notices_today, 1);
+  assert.equal(sent[0].subject, 'LTCM: Mullins bought 20 KXFED-26SEP-T3.75 at $0.56');
+  assert.match(sent[0].text, /Why, in the desk's words:\nHot CPI put a hike at 93%/);
+  assert.match(sent[0].text, /Risk engine: approved\./);
+  assert.match(sent[0].text, /Exit plan: target \$0\.95, stop \$0\.40, out by 2026-09-17T18:00:00\.000Z\./);
+  assert.match(sent[0].text, /story-oi-1/);
+
+  const settled = await route(ask('POST', '/v1/notify', { body: { kind: 'settled', desk_name: 'Mullins', instrument: 'KXFED-26SEP-T3.75', result: 'yes', quantity: '20', held_for_hours: '26', entry_price: '0.56', exit_price: '1.00', pnl: '8.66', rationale: 'Hike at 93%.' } }), env(), { gate, now: () => NOW, mailer });
+  assert.equal(settled.status, 200);
+  assert.equal(sent[1].subject, "LTCM: Mullins's KXFED-26SEP-T3.75 settled +$8.66");
+
+  // Bad bodies are refused, not mailed; without a mail binding the answer says so.
+  assert.equal((await route(ask('POST', '/v1/notify', { body: { kind: 'panic' } }), env(), { gate, now: () => NOW, mailer })).status, 400);
+  assert.equal((await route(ask('GET', '/v1/notify'), env(), { gate, now: () => NOW, mailer })).status, 405);
+  const unbound = await (await route(ask('POST', '/v1/notify', { body: { kind: 'test' } }), env(), { gate, now: () => NOW })).json();
+  assert.equal(unbound.sent, false);
+  assert.equal(sent.length, 2);
+
+  // The day's cap holds: two more notices at a cap of four, then 429.
+  const capped = env({ NOTIFY_MAX_PER_DAY: '4' });
+  for (let i = 0; i < 2; i += 1) assert.equal((await route(ask('POST', '/v1/notify', { body: { kind: 'test' } }), capped, { gate, now: () => NOW, mailer })).status, 200);
+  const over = await route(ask('POST', '/v1/notify', { body: { kind: 'test' } }), capped, { gate, now: () => NOW, mailer });
+  assert.equal(over.status, 429);
+  assert.equal(over.headers.get('Retry-After'), '3600');
+  assert.equal(sent.length, 4);
+});
