@@ -584,8 +584,9 @@ class RunwayPolicyTests(ServiceCase):
         self.provider.sail_burn = Decimal("4.73")  # the box, sandboxes and image builds too
         self.tick()
         event = self.service.log.last("ops", "ops.budget")
-        # $269.82 above the reserve at $4.73 a day is 57 days, not the ledger's 385.
-        self.assertEqual(event.payload["runway_days"], "57")
+        # $269.82 above the reserve at $4.73 plus the policy's $0.30 box line a day is 53 days,
+        # not the ledger's 385.
+        self.assertEqual(event.payload["runway_days"], "53")
 
     def test_an_unreadable_balance_never_stops_the_floor(self):
         self.provider.balance = None
