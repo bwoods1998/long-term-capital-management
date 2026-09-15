@@ -278,6 +278,36 @@ class AllocationTests(CommitteeCase):
         self.assertEqual(targets["earnings-02"], Decimal("200.00"))
         self.assertLessEqual(sum(targets.values()), Decimal("1000"))
 
+    def test_one_venues_sleeves_never_add_up_to_more_than_the_venue_holds(self):
+        # Two live desks share one Alpaca account of $1,500 while the floor counts $5,000.
+        self.add(live_manifest("earnings-01"))
+        self.add(live_manifest("earnings-02"))
+        self.allocate_event({"earnings-01": "1000", "earnings-02": "1000"}, "2026-09-01T13:00:00.000Z")
+        for desk in ("earnings-01", "earnings-02"):
+            self.fill(desk, "buy", "10", "100", "2026-09-01T14:00:00.000Z", instrument=ALPACA_AAPL)
+            self.ledgers[desk].mark({ALPACA_AAPL.key: Decimal("110")}, "2026-09-09T20:00:00.000Z")
+        committee = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False},
+            venue_equity=lambda: {"alpaca": "1500"},
+        )
+        targets = committee.allocate("2026-09-09T20:00:00.000Z")
+        self.assertLessEqual(targets["earnings-01"] + targets["earnings-02"], Decimal("1500"))
+        self.assertEqual(targets["earnings-01"], targets["earnings-02"])
+        event = self.log.last("committee", "committee.allocation")
+        self.assertIn("scaled to alpaca's 1500.00 of equity", event.payload["reasons"]["earnings-01"])
+        # A venue that cannot be read caps nothing: the allocation is the plain one.
+        plain = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False},
+        ).allocate("2026-09-09T20:05:00.000Z")
+        broken = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False},
+            venue_equity=lambda: (_ for _ in ()).throw(RuntimeError("down")),
+        ).allocate("2026-09-09T20:10:00.000Z")
+        self.assertEqual(broken, plain)
+
     def test_a_bankrupt_desk_goes_to_zero(self):
         self.add(manifest())
         self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")

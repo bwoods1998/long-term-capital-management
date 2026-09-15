@@ -158,6 +158,7 @@ class Committee:
         provider: Any = None,
         clock: Callable[[], float] = time.time,
         config: Mapping[str, Any] | None = None,
+        venue_equity: Callable[[], Mapping[str, Any]] | None = None,
     ):
         self.log = log
         self.manifests = _as_manifests(manifests)
@@ -165,6 +166,9 @@ class Committee:
         self.provider = provider
         self.clock = clock
         self.config = {**DEFAULT_CONFIG, **dict(config or {})}
+        #: The venues' own equity, read live by the service: a live sleeve can only be as big as
+        #: the account it trades from, however the floor's capital is counted.
+        self.venue_equity = venue_equity
         #: `benchmark(start_iso, end_iso) -> Decimal` in percentage points; flat when absent.
         self.benchmark: Callable[[str, str], Decimal] | None = self.config.get("benchmark")
 
@@ -438,6 +442,27 @@ class Committee:
             reasons = {
                 k: f"{v}; scaled to the floor's {text(cap)} of capital" for k, v in reasons.items()
             }
+
+        # And no venue's live sleeves may add up to more than that venue actually holds: three
+        # desks sharing one Kalshi account cannot each be told they have the whole account.
+        equity_by_venue: dict[str, Decimal] = {}
+        if self.venue_equity is not None:
+            try:
+                for venue, amount in dict(self.venue_equity() or {}).items():
+                    equity_by_venue[str(venue)] = money(amount)
+            except Exception:
+                equity_by_venue = {}
+        for venue, held in equity_by_venue.items():
+            sleeves = [
+                desk_id for desk_id in funded
+                if desk_id in active and active[desk_id].market_venue == venue and targets.get(desk_id, ZERO) > ZERO
+            ]
+            total_on_venue = sum((targets[d] for d in sleeves), ZERO)
+            if held > ZERO and total_on_venue > held:
+                factor = held / total_on_venue
+                for desk_id in sleeves:
+                    targets[desk_id] = _quantize(targets[desk_id] * factor)
+                    reasons[desk_id] = f"{reasons.get(desk_id, '')}; scaled to {venue}'s {text(_quantize(held))} of equity".lstrip("; ")
 
         self._publish_gates(active, at)
         if previous != targets:

@@ -715,6 +715,7 @@ class Service:
             self.ledgers,
             provider=self.provider,
             clock=clock,
+            venue_equity=self._venue_equity,
             config={
                 **(self.config.get("committee") or {}),
                 "floor_capital_usd": self.config["floor_capital_usd"],
@@ -1111,6 +1112,16 @@ class Service:
         except Exception as exc:
             self.alert("warning", f"sandboxes unavailable: {type(exc).__name__}")
             return None
+
+    def _venue_equity(self) -> dict[str, Decimal]:
+        """Each live venue's equity as the venue reports it, for the committee's sleeve caps."""
+        out: dict[str, Decimal] = {}
+        try:
+            for row in self.venue_balances():
+                out[str(row.get("venue"))] = money(row.get("equity"))
+        except Exception:
+            return {}
+        return out
 
     def _live_pnl(self, at: str) -> Decimal:
         """Profit on the live sleeves since inception: equity less what was deposited."""
