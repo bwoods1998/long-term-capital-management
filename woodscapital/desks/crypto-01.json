@@ -7,10 +7,18 @@
   "name": "Crypto",
   "persona": "A patient, rules-driven trader of the two largest crypto assets who distrusts narratives, sizes small, and treats every position as a hypothesis with a dated exit. Keeps a written record of what the market did versus what the desk expected.",
   "mandate": "Trade spot BTC-USD and ETH-USD on Coinbase, 24/7. Positions are opened on documented setups only: multi-day trend continuation confirmed by daily bars, mean reversion after an extreme one-day move, or a scheduled macro catalyst with a stated expected reaction. Every proposal names the setup, the invalidation price and the time stop. Never more than two open positions. Fees are 25 basis points per side, so the expected move must exceed one percent. No leverage, no shorting, no altcoins.",
-  "venues": ["paper", "coinbase"],
+  "venues": [
+    "paper",
+    "coinbase"
+  ],
   "instruments": {
-    "asset_classes": ["crypto"],
-    "allow": ["BTC-USD", "ETH-USD"],
+    "asset_classes": [
+      "crypto"
+    ],
+    "allow": [
+      "BTC-USD",
+      "ETH-USD"
+    ],
     "deny": [],
     "min_price": "0",
     "min_adv_usd": "0",
@@ -24,12 +32,49 @@
     "max_orders_per_day": 8,
     "max_limit_deviation_pct": "0.03"
   },
-  "model": {"profile": "pro_flex", "reasoning_effort": "medium", "max_output_tokens": 8192, "max_turns": 20},
-  "cadence": {"sessions": ["00:30", "06:30", "12:30", "18:30"], "timezone": "UTC", "triggers": [], "weekdays_only": false},
-  "tools": ["quote", "bars", "news", "calendar", "positions", "outcomes", "memory_read", "memory_write", "memo", "propose_order", "cancel_order", "playbook_read", "playbook_write"],
-  "budget": {"usd_per_day": "2.50"},
-  "capital": {"mode": "paper", "usd": "450"},
+  "model": {
+    "profile": "pro_flex",
+    "reasoning_effort": "medium",
+    "max_output_tokens": 8192,
+    "max_turns": 20
+  },
+  "cadence": {
+    "sessions": [
+      "00:30",
+      "06:30",
+      "12:30",
+      "18:30"
+    ],
+    "timezone": "UTC",
+    "triggers": [],
+    "weekdays_only": false
+  },
+  "tools": [
+    "quote",
+    "bars",
+    "news",
+    "calendar",
+    "positions",
+    "outcomes",
+    "memory_read",
+    "memory_write",
+    "memo",
+    "propose_order",
+    "cancel_order",
+    "playbook_read",
+    "playbook_write"
+  ],
+  "budget": {
+    "usd_per_day": "2.50"
+  },
+  "capital": {
+    "mode": "paper",
+    "usd": "200"
+  },
   "playbook": "playbooks/crypto-01.md",
   "memory_limit": 40,
-  "tags": ["crypto", "systematic"]
+  "tags": [
+    "crypto",
+    "systematic"
+  ]
 }

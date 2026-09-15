@@ -1100,6 +1100,15 @@ class Service:
             result["breakers"] = self.breakers(at)
             self._save_state(last_mark_at=at)
 
+        # Keep the event-contract index warm so a desk's first search does not wait on a sweep.
+        if any("event" in m.instruments.asset_classes for m in self.manifests.values()):
+            source = self.source("event")
+            if source is not None:
+                try:
+                    self.event_index(source)
+                except Exception as exc:
+                    self.alert("warning", f"event index warm-up failed: {type(exc).__name__}")
+
         day = local.date().isoformat()
         # A desk that has never been funded, or a roster change, gets an allocation right away;
         # the weekly resize by track record still only happens on the committee's day.

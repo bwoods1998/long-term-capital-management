@@ -29,7 +29,7 @@ import json
 import os
 import re
 import time
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -86,15 +86,43 @@ class PublishError(RuntimeError):
         self.status = status
 
 
-def jsonable(value: Any) -> Any:
-    """Decimals become strings; everything else is left as canonical JSON already allows."""
+PCT_PLACES = Decimal("0.000001")  # the site accepts at most six fraction digits on a percent
+MONEY_PLACES = Decimal("0.00000001")  # and eight on money
+
+
+def jsonable(value: Any, *, key: str = "") -> Any:
+    """Decimals become strings quantized to what the site accepts; the rest is plain JSON."""
     if isinstance(value, Decimal):
+        places = PCT_PLACES if key.endswith("_pct") else MONEY_PLACES
+        if value.is_finite() and value.as_tuple().exponent < places.as_tuple().exponent:
+            try:  # only trim what the site would refuse; never pad a short number
+                value = value.quantize(places, rounding=ROUND_HALF_EVEN)
+            except InvalidOperation:
+                pass
         return format(value, "f")
     if isinstance(value, Mapping):
-        return {str(k): jsonable(v) for k, v in value.items()}
+        return {str(k): jsonable(v, key=str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [jsonable(v) for v in value]
+        return [jsonable(v, key=key) for v in value]
+    if isinstance(value, str) and key.endswith("_pct") and _looks_decimal(value):
+        return jsonable(Decimal(value), key=key)
+    if isinstance(value, str) and key in MONEY_KEYS and _looks_decimal(value):
+        return jsonable(Decimal(value), key=key)
     return value
+
+
+MONEY_KEYS = frozenset(
+    {"equity", "cash", "daily_pnl", "capital_usd", "cost_usd", "spent_today_usd", "cap_usd",
+     "trailing_realized_usd", "base_usd", "ceiling_usd"}
+)
+
+
+def _looks_decimal(value: str) -> bool:
+    text_value = value.strip()
+    if not text_value or len(text_value) > 60:
+        return False
+    body = text_value[1:] if text_value[0] in "+-" else text_value
+    return body.replace(".", "", 1).isdigit()
 
 
 def _host_allowed(url: str) -> bool:
