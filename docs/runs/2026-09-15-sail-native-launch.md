@@ -552,7 +552,7 @@ are rewarded and punished. Shipped, in order:
   permitted": the Coinbase fill's instrument carries `market_id` (the product id) and the
   intent's did not, so the position sat under a different key. `tools.instrument_from` now
   sets `market_id` for crypto. The Coinbase universe drops stablecoins (USDT-USD had a z-score).
-- **The NO side, again** (e72b4ec, 09:30 UTC). The first hourly reconciliation showed four
+- **The NO side, again** (e72b4ec, 09:05 UTC). The first hourly reconciliation showed four
   weather markets where the ledger held the opposite of the venue (DEN: ledger +20 YES-scale,
   venue 40 NO). Kalshi writes a fill's `action` on the YES book: a fill of the floor's resting
   NO bid comes back as `side: no, action: sell, book_side: ask`, and the parser trusted
@@ -562,7 +562,7 @@ are rewarded and punished. Shipped, in order:
   fills a ledger folds (the desk-less originals already had attributed copies with the
   intent's side). Settlement fills written against the wrong positions before the repair are
   not undone; `settle_finalized_markets` closes what remains in finalized markets.
-- **Repair result** (09:50 UTC): after the third pass of `repair_no_fills.py` (the first two
+- **Repair result** (09:14 UTC): after the third pass of `repair_no_fills.py` (the first two
   passes reused fill ids, which the ledger folds once each; their copies stay on the tape as
   noise) Haghani's ledger matches Kalshi exactly: DEN 40 NO, LAX 77.5 22 NO, MIA 21 NO, CHI
   17 NO, NY 38 NO, AUS 23 NO, LAX 73.5 333 YES. Scholes's ledger shows residual NO positions in
