@@ -22,17 +22,21 @@ notional_usd.
 import math
 from datetime import datetime, timezone
 
+# Set from a 14-day study of 14,000 settled Kalshi markets (Sept 2-16, 2026): below 5 cents
+# the maker's fills are adverse and the edge vanishes; with a 10,000-contract daily volume floor
+# and 24 hours to close, maker NO bids returned +3.6% per dollar [+0.9, +5.9] with a trade-based
+# fill model, though a walk-forward test was mixed. Learning size until live fills confirm it.
 DEFAULTS = {
-    "yes_min": 0.02,
+    "yes_min": 0.05,
     "yes_max": 0.10,
     "min_hours": 1.0,
-    "max_hours": 36.0,
-    "min_volume_24h": 1000,
+    "max_hours": 24.0,
+    "min_volume_24h": 10000,
     "max_new": 3,
     "max_open_per_series": 2,
     "requote_seconds": 1800,
     "maker": True,
-    "no_max": 0.98,
+    "no_max": 0.96,
     "exclude_prefixes": ["KXMVE"],
     "pages": 8,
     "notional_usd": None,

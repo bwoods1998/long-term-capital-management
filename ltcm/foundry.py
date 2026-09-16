@@ -927,7 +927,10 @@ class Foundry:
         cadence = self.cadence_of(family, subject, live)
         for candidate in baselines + variants:
             candidate["cadence_seconds"] = cadence
-        end = math.floor(_epoch(at) / 3600.0) * 3600.0
+        # The window ends `window_end_lag_hours` back: Kalshi lists a market as settled only once
+        # it settles, so a window ending now sees a board thinned by the settlements still to come
+        # (the engine refuses to peek past them).
+        end = math.floor(_epoch(at) / 3600.0) * 3600.0 - float(cfg.get("window_end_lag_hours", 0)) * 3600.0
         window = {
             "start": _iso(end - float(cfg["window_days"]) * 86400.0),
             "end": _iso(end),

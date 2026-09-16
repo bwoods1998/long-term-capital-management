@@ -641,7 +641,7 @@ class StarterTests(unittest.TestCase):
         board = [
             {"ticker": "KXFEDMENTION-26SEP16-TARIFF", "title": "Powell says tariff", "status": "active", "close_time": "2026-09-16T20:00:00Z", "yes_bid": "0.04", "yes_ask": "0.06", "volume_24h": "25000"},
             {"ticker": "KXFEDMENTION-26SEP16-RECESSION", "title": "Powell says recession", "status": "active", "close_time": "2026-09-16T20:00:00Z", "yes_bid": "0.03", "yes_ask": "0.05", "volume_24h": "20000"},
-            {"ticker": "KXRAIN-26SEP16-PVD", "title": "Rain in Providence", "status": "active", "close_time": "2026-09-17T04:00:00Z", "yes_bid": "0.07", "yes_ask": "0.08", "volume_24h": "9000"},
+            {"ticker": "KXRAIN-26SEP16-PVD", "title": "Rain in Providence", "status": "active", "close_time": "2026-09-17T04:00:00Z", "yes_bid": "0.07", "yes_ask": "0.08", "volume_24h": "19000"},
             {"ticker": "KXMLBGAME-26SEP16NYYBOS-NYY", "title": "Yankees", "status": "active", "close_time": "2026-09-17T02:00:00Z", "yes_bid": "0.55", "yes_ask": "0.57", "volume_24h": "90000"},
             {"ticker": "KXTHIN-26SEP16-X", "title": "thin", "status": "active", "close_time": "2026-09-16T20:00:00Z", "yes_bid": "0.02", "yes_ask": "0.05", "volume_24h": "10"},
         ]

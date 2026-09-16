@@ -84,6 +84,7 @@
     "backtest_timeout_seconds": 900,
     "sandbox_daily_seconds": 43200,
     "window_days": 5,
+    "window_end_lag_hours": 72,
     "step_minutes": 15,
     "family_step_minutes": {
       "ranges": 5
