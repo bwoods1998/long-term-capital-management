@@ -216,44 +216,57 @@ class TradeNotifier:
 
     # ------------------------------------------------------------------ the tick
     def tick(self, at: str) -> list[str]:
-        """Send what is new since the last tick. Returns the ids notified this tick."""
+        """Send what is new since the last tick. Returns the ids notified this tick.
+
+        A cursor on the log (`notify_seq`) marks what is handled, so a tick reads only the events
+        written since the last one. Until Sept 16, 2026 it re-read the day's fills and outcomes
+        every tick and remembered 500 handled ids trimmed in alphabetical order, which dropped the
+        venue fills behind the shadow ones: each tick re-folded a day of real fills at five log
+        reads apiece and held the floor's tick for three minutes. Shadow fills and shadow
+        outcomes are passed over before any folding."""
         if not self.enabled:
             return []
         state = dict(self.state())
+        latest = int(self.log.latest_seq())
+        cursor = state.get("notify_seq")
+        if cursor is None:
+            # The first run, or a state written before the cursor: mail nothing old.
+            self.save_state(notify_seq=latest, notify_floor=state.get("notify_floor") or at)
+            return []
+        cursor = int(cursor)
         sent: list[str] = []
-        done = set(state.get("notified") or [])
-        floor = state.get("notify_floor")
-
-        def news(event: Any) -> bool:
-            if event.id in done or floor is None or event.at < floor:
-                return False  # seen, or before the floor: the first run mails nothing old
-            if _age_seconds(event.at, at) > MAX_AGE_SECONDS:
-                done.add(event.id)  # too old to be news; give up quietly
-                return False
-            return True
-
-        # The fills of one order in one tick are one notice: a resting quote fills in pieces,
-        # and a 333-contract order filled in six on Sept 16, 2026 would have been six emails.
-        pending: list[tuple[list[str], list[Any], Callable[[list[Any]], dict[str, Any] | None]]] = []
+        pending: list[tuple[list[Any], Callable[[list[Any]], dict[str, Any] | None]]] = []
         by_order: dict[str, list[Any]] = {}
-        for event in self.log.read(kind="broker.fill", limit=2000, newest=True):
-            if news(event):
-                by_order.setdefault(str(event.payload.get("order_id") or event.id), []).append(event)
+        highest = cursor
+        for kind in ("broker.fill", "desk.outcome"):
+            after = cursor
+            while True:
+                batch = self.log.read(kind=kind, after=after, limit=2000)
+                for event in batch:
+                    after = event.seq
+                    if _age_seconds(event.at, at) > MAX_AGE_SECONDS:
+                        continue  # too old to be news
+                    if kind == "broker.fill":
+                        if event.payload.get("shadow"):
+                            continue  # a score, not money
+                        by_order.setdefault(str(event.payload.get("order_id") or event.id), []).append(event)
+                    else:
+                        if event.payload.get("real_money") is False:
+                            continue
+                        pending.append(([event], lambda events: self.settlement(events[0])))
+                if len(batch) < 2000:
+                    break
         for events in by_order.values():
-            pending.append(([e.id for e in events], events, self.story_group))
-        for event in self.log.read(kind="desk.outcome", limit=2000, newest=True):
-            if news(event):
-                pending.append(([event.id], [event], lambda events: self.settlement(events[0])))
-        pending.sort(key=lambda item: item[1][0].at)
-        for event_ids, events, fold in pending:
+            pending.append((events, self.story_group))
+        pending.sort(key=lambda item: item[0][0].seq)
+        failed_at: int | None = None
+        for events, fold in pending:
             try:
                 facts = fold(events)
             except Exception as exc:
                 self.alert("warning", f"trade notice could not be folded: {type(exc).__name__}")
-                done.update(event_ids)
                 continue
             if facts is None:
-                done.update(event_ids)
                 continue
             try:
                 answer = self.poster(f"{self.gateway_url}/v1/notify", self.token, facts)
@@ -262,18 +275,20 @@ class TradeNotifier:
                     self.alert("warning", "trade notice held: the gateway's daily notice cap is reached")
                 else:
                     self.alert("warning", f"trade notice refused: http {exc.code}")
+                failed_at = events[0].seq
                 break
             except Exception as exc:
                 self.alert("warning", f"trade notice not sent: {type(exc).__name__}")
+                failed_at = events[0].seq
                 break
             if isinstance(answer, Mapping) and answer.get("sent") is False:
                 self.alert("warning", "trade notice not sent: the gateway has no mail binding")
-            done.update(event_ids)
-            sent.extend(event_ids)
-        if floor is None:
-            state["notify_floor"] = at
-        state["notified"] = sorted(done)[-500:]
-        self.save_state(notified=state["notified"], notify_floor=state.get("notify_floor", at))
+            sent.extend(e.id for e in events)
+        # Everything up to the log's end is handled, unless a notice failed: then the cursor stops
+        # just before it, and the next tick tries it again (the ones before it are not re-sent,
+        # because the cursor only ever covers what was folded or sent).
+        highest = latest if failed_at is None else max(cursor, failed_at - 1)
+        self.save_state(notify_seq=highest, notify_floor=state.get("notify_floor") or at)
         return sent
 
 
