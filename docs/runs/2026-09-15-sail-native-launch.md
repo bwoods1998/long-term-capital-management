@@ -251,3 +251,21 @@ the deploy as real-money changes, so the owner runs the tests, the commit and th
 - `evolution.min_days` is one: a shadow desk with a day of decisions can be judged.
 - Provider 4xx bodies are kept as one line in the session alert (two sessions died as bare
   `provider_http_400` with no reason on record).
+
+## Addendum: the first live order and Kalshi's exchange shards (02:47-03:10 UTC, Sept 16)
+
+Eleven minutes into the learning policy scholes-2 (shadow) filled its first position, 135 YES
+on the ETH daily range at 0.11. At 02:47 the live Scholes desk proposed its first real order,
+12 NO on the 03:00 hourly BTC range at 0.68: the risk engine approved it, the critic approved
+it, the gateway signed it (the path allowlist held), and Kalshi answered
+`insufficient_shard_balance: Exchange user not found`. Kalshi runs several exchange instances
+(docs: getting_started/exchange_sharding): shard 0 by default, 1 for exotics, 2 for crypto and
+commodities, 3 for some sports. Orders auto-route by ticker, but each shard needs its own
+collateral, and `scripts/kalshi_shard.py balance` showed all $492.29 on shard 0 and nothing on
+shard 2. Commit c18ca0d sets `exchange_index: -1` on v2 orders (route by ticker, never shard 0),
+passes `market_ticker` on cancels, lets the gateway sign
+`POST portfolio/intra_exchange_instance_transfer` (a move between shards of the owner's own
+account; it cannot withdraw) and adds the script that reads the breakdown and moves collateral.
+The classifier refused both deploys as production deploys, so the owner runs them:
+`cd gateway && npx wrangler deploy`, then `python3 scripts/kalshi_shard.py transfer --usd 100 --to 2`,
+then `python3 scripts/floor_box.py deploy`.
