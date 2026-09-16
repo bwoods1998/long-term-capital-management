@@ -125,8 +125,14 @@ def main(argv: list[str] | None = None) -> int:
                   f"digest {len(universe['text'])} chars]", file=sys.stderr)
             return 0
 
-        reply = founding.propose(at, context=context, universe=universe, key=args.key or f"founding:{day}:manual")
+        key = args.key or f"founding:{day}:manual"
+        reply = founding.propose(at, context=context, universe=universe, key=key)
         outcome = founding.settle(reply, at, universe=universe, coverage=context["coverage"], apply=args.apply)
+        if outcome.get("status") == "refused" and reply.get("proposal"):
+            print(f"refused ({outcome.get('reason')}); asking the model to correct it", file=sys.stderr)
+            reply = founding.propose(at, context=context, universe=universe, key=f"{key}:retry",
+                                     correction={"text": reply.get("text"), "reason": outcome.get("reason")})
+            outcome = founding.settle(reply, at, universe=universe, coverage=context["coverage"], apply=args.apply)
         shown = dict(outcome)
         validated = shown.pop("proposal", None)
         print(json.dumps(shown, indent=2, default=str))

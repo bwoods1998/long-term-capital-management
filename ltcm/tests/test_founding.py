@@ -544,6 +544,25 @@ class ProposeTests(FoundingCase):
         self.assertEqual(self.log.read(kind=FOUNDED_KIND), [])
         self.assertFalse((self.desks / "leahy.json").exists())
 
+    def test_a_refused_proposal_gets_one_correction_with_the_reason(self):
+        good = proposal()
+        bad = proposal(id="meriwether")
+        replies = [bad, good]
+
+        def respond(profile, items, **kwargs):
+            self.provider.calls.append({"profile": profile, "items": items, **kwargs})
+            body = json.dumps(replies.pop(0))
+            return SimpleNamespace(output_text=body, cost_usd=Decimal("0.20"), incomplete=False)
+
+        self.provider.respond = respond
+        outcome = self.founding.run(NIGHT)
+        self.assertEqual(outcome["status"], "founded")
+        self.assertEqual(len(self.provider.calls), 2)
+        retry = self.provider.calls[1]
+        self.assertTrue(retry["request_key"].endswith(":retry"))
+        self.assertIn("meriwether is already taken", retry["items"][-1]["content"])
+        self.assertEqual(retry["items"][-2]["role"], "assistant")
+
     def test_the_step_never_blocks_on_the_model(self):
         first = self.founding.step(NIGHT, day="2026-09-16")
         self.assertEqual(first, {"status": "pending"})

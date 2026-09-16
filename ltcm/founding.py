@@ -758,21 +758,31 @@ class Founding:
         context: Mapping[str, Any] | None = None,
         universe: Mapping[str, Any] | None = None,
         key: str | None = None,
+        correction: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """One model call. Returns `{"proposal", "decline", "incomplete", "text"}`; raises what the
-        provider raises. Blocking: the service reaches it through `step()`'s worker, never the tick."""
+        provider raises. Blocking: the service reaches it through `step()`'s worker, never the tick.
+        `correction` ({"text", "reason"}) hands the model its refused reply and the floor's reason,
+        so a proposal that broke one rule is fixed rather than lost for the night."""
         at = iso_time(now) if now is not None else self.now()
         if self.provider is None:
             raise FoundingError("no model provider")
         context = context if context is not None else self.prepare(at)
         universe = universe if universe is not None else self.universe(at, coverage=context.get("coverage"))
         day = at[:10]
+        items = [
+            {"role": "system", "content": str(context.get("instructions") or self.instructions())},
+            {"role": "user", "content": self.packet(at, context, universe)},
+        ]
+        if correction:
+            items.append({"role": "assistant", "content": str(correction.get("text") or "")[:60_000]})
+            items.append({"role": "user", "content": (
+                f"The floor refused that proposal: {correction.get('reason')}. Fix exactly that, keep "
+                "everything else that was valid, and reply with the corrected JSON only."
+            )})
         response = self.provider.respond(
             str(self.config["profile"]),
-            [
-                {"role": "system", "content": str(context.get("instructions") or self.instructions())},
-                {"role": "user", "content": self.packet(at, context, universe)},
-            ],
+            items,
             tools=None,
             desk_id=BUDGET_KEY,
             session_id=f"founding-{day}",
@@ -1194,7 +1204,19 @@ class Founding:
         if job["thread"].is_alive():
             return {"status": "pending"}
         self._job = None
-        return self._finish(job, at)
+        outcome = self._finish(job, at)
+        reply = job.get("reply") or {}
+        if outcome.get("status") == "refused" and not job.get("correction") and reply.get("proposal"):
+            # One correction per night: the reason goes back to the model with its own reply.
+            retry = {
+                "day": day, "at": at, "key": f"{job['key']}:retry", "context": job["context"],
+                "universe": job.get("universe"), "correction": {"text": reply.get("text"), "reason": outcome.get("reason")},
+            }
+            retry["thread"] = threading.Thread(target=self._work, args=(retry,), name="founding-retry", daemon=True)
+            self._job = retry
+            retry["thread"].start()
+            return {"status": "pending"}
+        return outcome
 
     def wait(self, timeout: float | None = None) -> None:
         job = self._job
@@ -1213,11 +1235,11 @@ class Founding:
     def _work(self, job: dict[str, Any]) -> None:
         try:
             context = job["context"]
-            universe = self.universe(job["at"], coverage=context["coverage"])
+            universe = job.get("universe") or self.universe(job["at"], coverage=context["coverage"])
             job["universe"] = universe
             if not universe.get("text"):
                 return
-            job["reply"] = self.propose(job["at"], context=context, universe=universe, key=job["key"])
+            job["reply"] = self.propose(job["at"], context=context, universe=universe, key=job["key"], correction=job.get("correction"))
         except Exception as exc:
             job["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
 
