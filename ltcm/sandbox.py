@@ -305,6 +305,8 @@ class SandboxManager:
         #: desk id prefix -> {daily_seconds, max_timeout}: the Foundry's backtest sandboxes run for
         #: minutes at a time all day, which a desk's fuse (and the ten-minute run cap) would stop.
         self._prefix_limits: dict[str, dict[str, int]] = {}
+        #: desk id -> the lock one run holds from its uploads to the end of its program.
+        self._run_locks: dict[str, threading.Lock] = {}
 
     # ------------------------------------------------------------------ state
     def state(self) -> dict[str, Any]:
@@ -442,6 +444,23 @@ class SandboxManager:
             return CodeRun(desk_id, digest, f"code is over {MAX_CODE_CHARS} characters", 2, zero, None, purpose)
         if not self.available():
             return CodeRun(desk_id, digest, "no sandbox is available on this floor", 3, zero, None, purpose)
+        # One run per sandbox at a time. Every run uploads the same `/lab/run/main.py` and the
+        # desk's toolbox before it executes; until Sept 16, 2026 two runs on one desk (a strategy
+        # tick and a dry run from `Strategies.install` on the Foundry's thread, or a session's
+        # run_code) could overwrite each other's program between upload and exec, so one ran the
+        # other's code and its result was read as its own.
+        with self._run_lock(desk_id):
+            return self._run_locked(desk_id, code, digest, purpose=purpose, save_as=save_as, timeout=timeout)
+
+    def _run_lock(self, desk_id: str) -> threading.Lock:
+        with self._lock:
+            locks = getattr(self, "_run_locks", None)
+            if locks is None:
+                locks = self._run_locks = {}
+            return locks.setdefault(str(desk_id), threading.Lock())
+
+    def _run_locked(self, desk_id: str, code: str, digest: str, *, purpose: str, save_as: str | None, timeout: int) -> CodeRun:
+        zero = Decimal("0")
         daily, longest = self.limits_for(desk_id)
         remaining = daily - self.seconds_today(desk_id)
         if remaining <= 0:

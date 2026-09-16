@@ -31,6 +31,8 @@ from ltcm.tests.test_strategies import FakeService, Run, manifest
 
 NOW = "2026-09-16T14:20:00.000Z"
 SOURCE = (STARTERS_DIR / "kalshi_favorites.py").read_text(encoding="utf-8")
+#: The house starter's frozen settings, which every candidate of it carries.
+FROZEN_HOUSE = {"max_new": 3, "max_open_per_series": 2, "no_max": 0.98, "notional_usd": None, "pages": 8}
 GOOD_CODE = 'DEFAULTS = {"yes_max": 0.1}\n\n\ndef decide(kit, params):\n    return []\n'
 
 
@@ -64,6 +66,17 @@ def spec_of(code):
     """The spec a runner program carries, read back without running it."""
     found = re.search(r"^SPEC = json\.loads\((.*)\)$", code, re.M)
     return json.loads(ast.literal_eval(found.group(1)))
+
+
+def marker_of(code):
+    """The run's own result marker, as the runner program prints it."""
+    return ast.literal_eval(re.search(r"^MARKER = (.*)$", code, re.M).group(1))
+
+
+def as_runner(text, code):
+    """A scripted engine answer as the runner prints it: result lines under the run's marker."""
+    marker = marker_of(code)
+    return "\n".join(marker + line[len("BACKTEST-RESULT "):] if line.startswith("BACKTEST-RESULT ") else line for line in str(text).split("\n"))
 
 
 class Log:
@@ -120,7 +133,7 @@ class Manager:
                 self.backtests.append((desk_id, purpose, timeout))
             if self.delay:
                 time.sleep(self.delay)
-            return Run(self.script(spec))
+            return Run(as_runner(self.script(spec), code))
         finally:
             with self._lock:
                 self.active.discard(desk_id)
@@ -134,8 +147,8 @@ class Records(Strategies):
         self.records = {}
         self.record_calls = []
 
-    def record(self, desk_id, name, since=None):
-        self.record_calls.append((desk_id, name, since))
+    def record(self, desk_id, name, since=None, **options):
+        self.record_calls.append((desk_id, name, since, *sorted(options.items())))
         return dict(self.records.get((desk_id, name), {}))
 
 
@@ -371,20 +384,27 @@ class BacktestTests(FoundryCase):
         self.assertIn("lower bound", noisy["verdict"])
         failed_baseline = {**baseline, "error": "exit 5: sandbox error"}
         self.assertEqual(foundry.select([failed_baseline, good, better])[0], [], "no measured baseline, no winner")
-        self.assertIn("no baseline", good["verdict"])
+        self.assertIn("not measured", good["verdict"])
         strict = self.foundry(min_ci_lower=0.35)
         self.assertEqual([c["id"] for c in strict.select([baseline, good, better])[0]], [], "the bound is configurable")
 
     def test_the_runner_compiles_and_the_result_line_is_the_last_marker(self):
-        code = runner_code({"strategy": "kalshi_favorites", "code": SOURCE, "params": {"yes_max": 0.12}}, fraction=0.66)
+        code = runner_code({"strategy": "kalshi_favorites", "code": SOURCE, "params": {"yes_max": 0.12}}, fraction=0.66, token="t0k3n", min_interval=1.2)
         compile(code, "main.py", "exec")
         self.assertEqual(spec_of(code)["params"], {"yes_max": 0.12})
-        self.assertIn("backtest.main([\"--spec\", path])", code)
+        self.assertIn("engine.run_backtest(SPEC, history=history)", code, "the report is the engine's return value, not its printout")
+        self.assertIn("min_interval=MIN_INTERVAL", code)
+        self.assertIn("MIN_INTERVAL = 1.2", code)
+        self.assertEqual(marker_of(code), "BACKTEST-RESULT t0k3n ")
         self.assertIn("def split_evidence(", code, "the split ships with the runner")
         self.assertLess(len(code), 40_000)
-        self.assertIsNone(parse_result("no marker"))
-        self.assertIsNone(parse_result("BACKTEST-RESULT {broken"))
-        self.assertEqual(parse_result('BACKTEST-RESULT {"trades": 1}\nBACKTEST-RESULT {"trades": 2}\n'), {"trades": 2})
+        self.assertIsNone(parse_result("no marker", "t0k3n"))
+        self.assertIsNone(parse_result("BACKTEST-RESULT t0k3n {broken", "t0k3n"))
+        self.assertEqual(parse_result('BACKTEST-RESULT t0k3n {"trades": 1}\nBACKTEST-RESULT t0k3n {"trades": 2}\n', "t0k3n"), {"trades": 2})
+        self.assertEqual(parse_result('BACKTEST-RESULT t0k3n {"trades": 1}\nBACKTEST-RESULT {"trades": 99}\n', "t0k3n"), {"trades": 1}, "a line without the run's token is never read")
+        self.assertIsNone(parse_result('x BACKTEST-RESULT t0k3n {"trades": 3}', "t0k3n"), "only at the start of a line")
+        self.assertEqual(self.foundry().min_interval(), 0.6, "four sandboxes share the floor's 0.15 s")
+        self.assertEqual(self.foundry(sandboxes=8).min_interval(), 1.2)
         split = split_evidence(pnls(0.0, 0.2), 100.0, 0.66)
         self.assertEqual((split["in_sample"]["trades"], split["out_of_sample"]["trades"]), (66, 34))
         self.assertAlmostEqual(split["out_of_sample"]["return_on_notional"], 0.2, places=6)
@@ -485,13 +505,17 @@ class FastTrackTests(FoundryCase):
         deployment = foundry.state()["deployments"][fid]
         self.clock[0] += 3600
         key = ("mullins-4", "kalshi_favorites")
-        self.strategies.records[key] = {"settled": 4, "settled_pnl_usd": "2"}
+        self.strategies.records[key] = {"settled": 4, "fills": 4, "settled_pnl_usd": "2"}
         self.assertEqual(foundry.fast_track(self.manifests, []), [], "four settlements are not five")
-        self.assertIn(("mullins-4", "kalshi_favorites", deployment["deployed_at"]), self.strategies.record_calls, "the record since deployment")
-        self.strategies.records[key] = {"settled": 5, "settled_pnl_usd": "-0.01"}
+        self.assertIn(("mullins-4", "kalshi_favorites", deployment["deployed_at"], ("opened_since", True)), self.strategies.record_calls, "positions opened since deployment")
+        self.strategies.records[key] = {"settled": 5, "fills": 5, "settled_pnl_usd": "-0.01"}
         self.assertEqual(foundry.fast_track(self.manifests, []), [], "a losing forward record never goes live")
+        self.strategies.records[key] = {"settled": 5, "fills": 5, "settled_pnl_usd": "0.40", "fees_usd": "0.41"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "nor one that loses after fees")
+        self.strategies.records[key] = {"settled": 5, "fills": 0, "settled_pnl_usd": "0.40"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "nor settlements without fills of its own")
         without_live = {k: v for k, v in self.manifests.items() if k != "mullins"}
-        self.strategies.records[key] = {"settled": 5, "settled_pnl_usd": "0.40"}
+        self.strategies.records[key] = {"settled": 5, "fills": 5, "settled_pnl_usd": "0.40", "fees_usd": "0.10"}
         self.assertEqual(foundry.fast_track(without_live, []), [], "no live desk, no adoption")
         # A candidate whose backtest bound is not above zero trades in shadow but never goes live.
         state = foundry.state()
@@ -520,7 +544,7 @@ class FastTrackTests(FoundryCase):
     def test_a_setting_changed_under_the_candidate_is_superseded(self):
         foundry, fid = self.deploy_settings()
         self.strategies.store.update("mullins-4", "kalshi_favorites", params={"yes_max": 0.2}, promoted_at="2026-09-16T15:00:00.000Z")
-        self.strategies.records[("mullins-4", "kalshi_favorites")] = {"settled": 9, "settled_pnl_usd": "3"}
+        self.strategies.records[("mullins-4", "kalshi_favorites")] = {"settled": 9, "fills": 9, "settled_pnl_usd": "3"}
         self.assertEqual(foundry.fast_track(self.manifests, []), [])
         self.assertEqual(foundry.state()["deployments"][fid]["status"], "superseded")
         self.assertEqual(self.row("mullins")["params"], {})
@@ -532,12 +556,12 @@ class FastTrackTests(FoundryCase):
         foundry = self.foundry(provider)
         fid = foundry.cycle(NOW)["winner"]
         self.clock[0] += 7200
-        self.strategies.records[("mullins-4", "kalshi_favorites_f1")] = {"settled": 6, "settled_pnl_usd": "1.20"}
+        self.strategies.records[("mullins-4", "kalshi_favorites_f1")] = {"settled": 6, "fills": 6, "settled_pnl_usd": "1.20"}
         adopted = foundry.fast_track(self.manifests, [])
         self.assertEqual([a["kind"] for a in adopted], ["code"])
         row = self.row("mullins", "kalshi_favorites_f1")
         self.assertTrue(row["enabled"])
-        self.assertEqual(row["params"], {"yes_max": 0.08})
+        self.assertEqual(row["params"], {"yes_max": 0.08, **FROZEN_HOUSE}, "the candidate's settings, the parent's sizes and guards")
         self.assertEqual((row["foundry_id"], row["promoted_from"]), (fid, "mullins-4"))
         self.assertEqual(self.manager.files["mullins"]["kalshi_favorites_f1.py"], GOOD_CODE)
         self.assertFalse(self.row("mullins")["enabled"], "the parent strategy is paused, never doubled")
@@ -561,12 +585,13 @@ class FastTrackTests(FoundryCase):
         self.assertEqual((row["params"], row["cadence_seconds"], row["foundry_code"]), (deployment["params"], 600, True))
         self.assertEqual(self.manager.files["mullins-4"]["kalshi_favorites_f1.py"], live_code)
         self.clock[0] += 7200
-        self.strategies.records[("mullins-4", "kalshi_favorites_f1")] = {"settled": 5, "settled_pnl_usd": "0"}
+        self.strategies.records[("mullins-4", "kalshi_favorites_f1")] = {"settled": 5, "fills": 5, "settled_pnl_usd": "0"}
         self.assertEqual(len(foundry.fast_track(self.manifests, [])), 1)
         live_row = self.row("mullins", "kalshi_favorites_f1")
         self.assertTrue(live_row["enabled"])
         self.assertEqual(live_row["params"], deployment["params"])
         self.assertTrue(self.row("mullins")["enabled"], "nothing else on the live desk is paused")
+        self.assertEqual(self.manager.files["mullins"]["kalshi_favorites_f1.py"], live_code)
 
     def test_a_full_live_desk_makes_room_by_setting_aside_the_candidate_it_replaces(self):
         from ltcm.strategies import _sha
@@ -584,7 +609,7 @@ class FastTrackTests(FoundryCase):
             "desk_id": "mullins-4", "deployed_at": "2026-09-16T10:00:00.000Z", "status": "shadow", "params": {"yes_max": 0.07},
             "code_sha256": _sha(new_code), "cadence_seconds": 900, "trades": 120, "oos_trades": 40, "oos_return": 0.2, "oos_ci_lower": 0.05,
         })
-        self.strategies.records[("mullins-4", "kalshi_favorites_f9")] = {"settled": 8, "settled_pnl_usd": "2.5"}
+        self.strategies.records[("mullins-4", "kalshi_favorites_f9")] = {"settled": 8, "fills": 8, "settled_pnl_usd": "2.5"}
         self.manager.refuse = {"kalshi_favorites_f9"}
         problems = []
         self.assertEqual(foundry.fast_track(self.manifests, problems), [])
@@ -597,7 +622,7 @@ class FastTrackTests(FoundryCase):
         self.assertEqual([a["id"] for a in adopted], ["fdy-9-abc"])
         rows = self.strategies.store.for_desk("mullins")
         self.assertEqual(sorted(rows), ["kalshi_extra", "kalshi_favorites", "kalshi_favorites_f9"])
-        self.assertEqual(rows["kalshi_favorites_f9"]["params"], {"yes_max": 0.07})
+        self.assertEqual(rows["kalshi_favorites_f9"]["params"], {"yes_max": 0.07}, "GOOD_CODE, the parent's code, has no frozen settings")
         self.assertFalse(rows["kalshi_favorites"]["enabled"], "the paused house starter stays paused, and stays")
         self.assertTrue(rows["kalshi_extra"]["enabled"])
         self.assertNotIn("kalshi_favorites_f1.py", self.manager.files["mullins"])
@@ -618,6 +643,312 @@ class FastTrackTests(FoundryCase):
         finally:
             foundry._running.release()
         self.assertEqual(foundry.summary()["failed"], summary["failed"])
+
+
+# --------------------------------------------------------------------------- review of Sept 16, 2026
+def tape_position(log, desk, name, n, opened, settled, held, pnl="0.10", fee="0"):
+    """One position on the tape the way the gateway writes it: intent, order and fill when it
+    opened, and the outcome (dated when it settled, with how long it was held)."""
+    from ltcm.broker import Instrument
+
+    leg = Instrument(asset_class="event", symbol=f"KXF-{desk}-{n}", venue="kalshi", right="no", market_id=f"KXF-{desk}-{n}")
+    log.events += [
+        SimpleNamespace(stream=f"desk:{desk}", kind="desk.intent", id=None, at=opened, payload={"intent_id": f"i-{desk}-{n}", "session_id": f"{desk}:20260916-1200:strategy:{name}"}),
+        SimpleNamespace(stream="broker:shadow", kind="broker.order", id=None, at=opened, payload={"order_id": f"o-{desk}-{n}", "intent_id": f"i-{desk}-{n}"}),
+        SimpleNamespace(stream="broker:shadow", kind="broker.fill", id=None, at=opened, payload={"order_id": f"o-{desk}-{n}", "quantity": "10", "price": "0.90", "fee": fee, "instrument": leg.to_dict()}),
+        SimpleNamespace(stream=f"desk:{desk}", kind="desk.outcome", id=None, at=settled, payload={"pnl": pnl, "rationale_excerpt": f"[strategy {name}] NO bid", "instrument": leg.key, "held_for_hours": held}),
+    ]
+
+
+FAKE_ENGINE = """
+import contextlib, sys
+
+def run_backtest(spec, history=None):
+    namespace = {"__name__": "backtest_" + spec["strategy"]}
+    with contextlib.redirect_stdout(sys.stderr):
+        exec(compile(spec["code"], "strategy", "exec"), namespace)
+        try:
+            namespace["decide"](object(), {})
+        except Exception:
+            pass
+    pnls = [0.01 * ((i % 3) - 1) for i in range(90)]
+    return {"strategy": spec["strategy"], "trades": 90, "notional_usd": 90.0, "pnl_usd": sum(pnls), "trade_pnls": pnls, "errors": 0}
+"""
+
+
+class ReviewTests(FoundryCase):
+    """The adversarial review of the Foundry (Sept 16, 2026), one test per defect it found."""
+
+    def test_the_forward_record_ignores_positions_the_old_settings_opened(self):
+        self.manager.script = settings_winner
+        foundry = self.foundry()
+        summary = foundry.cycle(NOW)
+        deployment = foundry.state()["deployments"][summary["winner"]]
+        self.assertEqual((deployment["desk_id"], deployment["deployed_at"]), ("mullins-4", NOW))
+        self.strategies.record = Strategies.record.__get__(self.strategies)  # the real record over the tape
+        for n in range(5):  # opened by the old settings at noon, settled after the deployment
+            tape_position(self.log, "mullins-4", "kalshi_favorites", n, "2026-09-16T12:00:00.000Z", "2026-09-16T15:00:00.000Z", "3.0")
+        self.clock[0] += 3600
+        self.assertEqual(self.strategies.record("mullins-4", "kalshi_favorites", since=NOW)["settled"], 5, "dated by settlement")
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "none of them came from the new settings")
+        self.assertEqual(self.row("mullins")["params"], {}, "the live desk keeps its settings")
+        for n in range(5, 10):  # the new settings' own positions
+            tape_position(self.log, "mullins-4", "kalshi_favorites", n, "2026-09-16T14:30:00.000Z", "2026-09-16T15:10:00.000Z", "0.7")
+        adopted = foundry.fast_track(self.manifests, [])
+        self.assertEqual([a["id"] for a in adopted], [summary["winner"]])
+        self.assertEqual(self.row("mullins")["params"], deployment["params"])
+
+    def test_settings_go_only_where_the_backtested_code_runs_and_live_code_must_still_match(self):
+        self.manager.script = settings_winner
+        for desk_id in ("mullins-2", "mullins-3", "mullins-4"):
+            self.manager.files[desk_id]["kalshi_favorites.py"] = SOURCE + "\n# the desk's own edit\n"
+        problems = []
+        foundry = self.foundry()
+        summary = foundry.cycle(NOW)
+        self.assertIsNone(summary["deployed_to"], "no shadow desk runs the code the settings were backtested with")
+        self.assertIn("no shadow desk", " ".join(summary["problems"]))
+        for desk_id in ("mullins-2", "mullins-3", "mullins-4"):
+            self.manager.files[desk_id]["kalshi_favorites.py"] = SOURCE
+        self.clock[0] += 1800
+        summary = foundry.cycle()
+        fid = summary["winner"]
+        self.assertEqual(summary["deployed_to"], "mullins-4")
+        self.manager.files["mullins"]["kalshi_favorites.py"] = SOURCE + "\n# the live desk rewrote it\n"
+        self.strategies.records[("mullins-4", "kalshi_favorites")] = {"settled": 9, "fills": 9, "settled_pnl_usd": "3"}
+        self.clock[0] += 3600
+        self.assertEqual(foundry.fast_track(self.manifests, problems), [])
+        self.assertEqual(foundry.state()["deployments"][fid]["status"], "superseded")
+        self.assertEqual(self.row("mullins")["params"], {})
+
+    def test_model_code_that_could_reach_the_interpreter_is_refused(self):
+        foundry = self.foundry()
+        body = "\n\ndef decide(kit, params):\n    return []\n"
+        escapes = {
+            "import atexit": "import atexit" + body,
+            "import sys": "import sys" + body,
+            "from ltcm": "from ltcm import backtest" + body,
+            "importlib": "import importlib" + body,
+            "a re-exported sys": "import statistics\n\ndef decide(kit, params):\n    statistics.sys.stdout.write('x')\n    return []\n",
+            "the simulator": "def decide(kit, params):\n    kit._sim.closed.append({})\n    return []\n",
+            "a dunder": "def decide(kit, params):\n    return kit.bars.__self__\n",
+            "patching a module": "import json\n\ndef decide(kit, params):\n    json.dumps = str\n    return []\n",
+            "patching a class": "import random\nR = random.Random\n\ndef decide(kit, params):\n    R.choices = None\n    return []\n",
+            "a computed getattr": "def decide(kit, params):\n    return getattr(kit, '_' + 'sim')\n",
+            "getattr as a value": "import functools\n\ndef decide(kit, params):\n    return functools.reduce(getattr, ['_sim'], kit)\n",
+            "format lookups": "def decide(kit, params):\n    return '{0._sim}'.format(kit)\n",
+            "frames": "def decide(kit, params):\n    g = (x for x in [1])\n    return g.gi_frame.f_back\n",
+            "a finalizer": "class Late:\n    def __del__(self):\n        print('BACKTEST-RESULT {}')\n" + body,
+            "update_wrapper": "import functools\n\ndef decide(kit, params):\n    functools.update_wrapper(kit, kit)\n    return []\n",
+            "a match on a private attribute": "def decide(kit, params):\n    match kit:\n        case object(_sim=s):\n            return s\n    return []\n",
+            "eval": "def decide(kit, params):\n    return eval('1')\n",
+            "a metaclass": "class X(metaclass=type):\n    pass\n" + body,
+            "typing internals": "from typing import get_type_hints" + body,
+        }
+        for label, code in escapes.items():
+            with self.subTest(label):
+                with self.assertRaises(ValueError):
+                    foundry.validate_code({"code": code, "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900)
+        for path in sorted(p for p in STARTERS_DIR.glob("*.py") if p.name != "__init__.py"):
+            with self.subTest(path.name):
+                foundry.validate_code({"code": path.read_text(encoding="utf-8"), "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900)
+        fine = "import math\nfrom collections import defaultdict\n\ndef decide(kit, params):\n    rows = defaultdict(list)\n    rows['a'].append(math.sqrt(4))\n    return [] if getattr(kit, 'context', None) is None else []\n"
+        foundry.validate_code({"code": fine, "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900)
+
+    def test_nothing_a_strategy_prints_passes_for_the_runners_result(self):
+        """Even code that slips past the checker: the report is the engine's return value, a
+        SystemExit is a failed run, exit handlers never run, and only this run's token is read."""
+        import os
+        import subprocess
+        import sys
+
+        forged = json.dumps({"strategy": "x", "trades": 120, "notional_usd": 120.0, "errors": 0, "trade_pnls": [0.5] * 120})
+        strategies = {
+            "atexit": (
+                "import atexit, sys\n"
+                f"atexit.register(lambda: sys.__stdout__.write('BACKTEST-RESULT {forged}\\n'))\n"
+                "def decide(kit, params):\n"
+                f"    sys.__stdout__.write('BACKTEST-RESULT {forged}\\n')\n"
+                f"    print('BACKTEST-RESULT {forged}')\n"
+                "    return []\n"
+            ),
+            "exit": (
+                "def decide(kit, params):\n"
+                f"    print('BACKTEST-RESULT {forged}')\n"
+                "    raise SystemExit(0)\n"
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            package = Path(temp) / "ltcm"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "backtest.py").write_text(FAKE_ENGINE, encoding="utf-8")
+            (package / "history.py").write_text("class History:\n    def __init__(self, **kwargs):\n        self.kwargs = kwargs\n", encoding="utf-8")
+            env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": temp, "PYTHONDONTWRITEBYTECODE": "1"}
+            for label, code in strategies.items():
+                with self.subTest(label):
+                    token = "a1b2c3"
+                    program = runner_code({"strategy": "kalshi_favorites_f7", "code": code, "params": {}}, token=token)
+                    done = subprocess.run([sys.executable, "-c", program], cwd=temp, env=env, capture_output=True, text=True, timeout=60)
+                    self.assertEqual(done.returncode, 0, done.stderr[-500:])
+                    self.assertEqual([line for line in done.stdout.splitlines() if line.startswith("BACKTEST-RESULT a1b2c3 ")][-1:], done.stdout.splitlines()[-1:], "the run's line is the last")
+                    report = parse_result(done.stdout, token)
+                    self.assertIsNotNone(report)
+                    self.assertNotEqual(report.get("trades"), 120, "the forged line is never read")
+                    if label == "atexit":
+                        self.assertEqual((report["trades"], report["errors"]), (90, 0), "the engine's own report")
+                        self.assertNotIn(forged, done.stdout.splitlines()[-1])
+                    else:
+                        self.assertEqual(report["errors"], 1)
+                        self.assertIn("SystemExit", report["unsupported"])
+
+    def test_two_mutations_of_one_parent_never_trade_live_together(self):
+        provider = Provider()
+        winners = {"kalshi_favorites_f1", "kalshi_favorites_f2"}
+        self.manager.script = lambda spec: result_line(pnls(0.0, 0.4)) if spec["strategy"] in winners else result_line(pnls(0.05, 0.05))
+        foundry = self.foundry(provider)
+        provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_favorites_f1_2")}
+        first = foundry.cycle(NOW)
+        self.clock[0] += 1800
+        provider.replies = {0: reply("kalshi_favorites_f2", code=GOOD_CODE.replace("0.1", "0.12")), 1: reply("kalshi_favorites_f2_2")}
+        second = foundry.cycle()
+        self.assertEqual((first["strategy"], second["strategy"]), ("kalshi_favorites", "kalshi_favorites"))
+        self.assertEqual({first["deployed_to"], second["deployed_to"]}, {"mullins-4", "mullins-3"})
+        self.clock[0] += 7200
+        self.strategies.records[(first["deployed_to"], "kalshi_favorites_f1")] = {"settled": 6, "fills": 6, "settled_pnl_usd": "1.0"}
+        self.strategies.records[(second["deployed_to"], "kalshi_favorites_f2")] = {"settled": 6, "fills": 6, "settled_pnl_usd": "1.0"}
+        adopted = foundry.fast_track(self.manifests, [])
+        self.assertEqual(len(adopted), 1, "the second was measured against a parent the live desk no longer runs")
+        live = self.strategies.store.for_desk("mullins")
+        enabled = sorted(name for name, row in live.items() if row.get("enabled", True))
+        self.assertEqual(enabled, [adopted[0]["strategy"]])
+        other = second["winner"] if adopted[0]["id"] == first["winner"] else first["winner"]
+        self.assertEqual(foundry.state()["deployments"][other]["status"], "superseded")
+        self.assertEqual(foundry.subjects("kalshi", self.manifests), [adopted[0]["strategy"]], "the paused parent is not mutated again")
+        # And a stray enabled line on the live desk is paused when a mutation joins it.
+        from ltcm.strategies import _sha
+
+        self.manager.files["mullins"]["kalshi_favorites_f0.py"] = GOOD_CODE
+        self.strategies.store.update("mullins", "kalshi_favorites_f0", params={}, cadence_seconds=900, enabled=True, foundry_code=True, code_sha256=_sha(GOOD_CODE))
+        new_code = GOOD_CODE + "# sharper\n"
+        self.manager.files["mullins-2"]["kalshi_favorites_f9.py"] = new_code
+        self.strategies.store.update("mullins-2", "kalshi_favorites_f9", params={}, cadence_seconds=900, enabled=True, foundry_code=True, foundry_id="fdy-9-abc")
+        foundry._add_deployment({
+            "id": "fdy-9-abc", "family": "kalshi", "subject": adopted[0]["strategy"], "strategy": "kalshi_favorites_f9", "kind": "code",
+            "desk_id": "mullins-2", "deployed_at": "2026-09-16T10:00:00.000Z", "status": "shadow", "params": {},
+            "code_sha256": _sha(new_code), "cadence_seconds": 900, "trades": 120, "oos_trades": 40, "oos_return": 0.2, "oos_ci_lower": 0.05,
+        })
+        self.strategies.records[("mullins-2", "kalshi_favorites_f9")] = {"settled": 8, "fills": 8, "settled_pnl_usd": "2.5"}
+        self.strategies.store.remove("mullins", "kalshi_favorites")
+        self.assertEqual([a["id"] for a in foundry.fast_track(self.manifests, [])], ["fdy-9-abc"])
+        live = self.strategies.store.for_desk("mullins")
+        self.assertEqual(sorted(name for name, row in live.items() if row.get("enabled", True)), ["kalshi_favorites_f9"])
+
+    def test_a_live_baseline_that_is_not_measured_sets_no_bar_and_pays_no_model(self):
+        provider = Provider()
+        provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_favorites_f1_2")}
+
+        def script(spec):
+            params = spec["params"]
+            if spec["strategy"] == "kalshi_favorites" and params == {}:
+                return "timeout: the run was killed at 900 s\n"  # the live baseline
+            if params == {"yes_max": 0.05}:
+                return result_line(pnls(0.0, 0.0))  # the shadow baseline
+            return result_line(pnls(0.0, 0.12))  # every candidate beats the shadow's bar
+
+        self.manager.script = script
+        summary = self.foundry(provider).cycle(NOW)
+        self.assertEqual((summary["qualified"], summary["winner"], summary["deployed_to"]), (0, None, None))
+        self.assertEqual(provider.calls, [], "no model is paid when nothing could qualify")
+        self.assertIn("not measured", summary["code"]["skipped"])
+        verdicts = [c.get("verdict") for c in summary["candidates_detail"] if c["kind"] != "baseline"]
+        self.assertTrue(verdicts and all("not measured" in str(v) for v in verdicts), verdicts)
+        self.assertEqual(self.log.kinds("lab.hypothesis")[0].payload["winner"], "no winner")
+
+        provider = Provider()
+        provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_favorites_f1_2")}
+        self.manager.script = lambda spec: "the desk's sandbox time for today is used up"
+        self.clock[0] += 3600
+        summary = self.foundry(provider).cycle()
+        self.assertEqual(provider.calls, [], "every run failing pays no model either")
+        self.assertEqual(summary["model_cost_usd"], "0")
+
+    def test_engine_errors_disqualify_a_candidate_and_leave_a_baseline_unmeasured(self):
+        def script(spec):
+            if spec["strategy"] == "kalshi_favorites" and spec["params"].get("maker") is False:
+                return result_line(pnls(0.0, 0.3), errors=4, notes=["candle load failed (HistoryError); those markets have no prices"])
+            return result_line(pnls(0.05, 0.05))
+
+        self.manager.script = script
+        summary = self.foundry().cycle(NOW)
+        self.assertEqual(summary["qualified"], 0)
+        errored = [c for c in summary["candidates_detail"] if (c.get("report") or {}).get("errors")]
+        self.assertTrue(errored)
+        self.assertTrue(all("engine errors" in str(c["verdict"]) for c in errored))
+        self.manager.script = lambda spec: result_line(pnls(0.05, 0.05), errors=1) if spec["params"] == {} else result_line(pnls(0.0, 0.3))
+        self.clock[0] += 3600
+        summary = self.foundry().cycle()
+        self.assertEqual(summary["qualified"], 0, "a baseline that saw fewer markets sets no bar")
+        self.assertIn("not measured", summary["code"]["skipped"] or "")
+
+    def test_frozen_settings_bind_the_code_a_model_writes(self):
+        provider = Provider()
+        loose = (
+            "DEFAULTS = {'yes_max': 0.1, 'no_max': 0.999, 'max_new': 40, 'max_open_per_series': 50, 'pages': 50}\n\n"
+            "def decide(kit, params):\n    p = {**DEFAULTS, **params}\n    return []\n"
+        )
+        provider.replies = {0: reply("kalshi_favorites_f1", code=loose, params={"no_max": 0.9999}), 1: reply("kalshi_favorites_f1_2")}
+        self.manager.script = lambda spec: result_line(pnls(0.0, 0.4)) if spec["strategy"].startswith("kalshi_favorites_f1") else result_line(pnls(0.05, 0.05))
+        foundry = self.foundry(provider)
+        summary = foundry.cycle(NOW)
+        self.assertIn("frozen", summary["code"]["rejected"][0])
+        self.assertNotIn("kalshi_favorites_f1", {spec["strategy"] for spec in self.manager.specs})
+        self.assertEqual(summary["winner"] and foundry.state()["deployments"][summary["winner"]]["strategy"], "kalshi_favorites_f1_2")
+        dealt = self.row(summary["deployed_to"], "kalshi_favorites_f1_2")["params"]
+        self.assertEqual({k: dealt[k] for k in FROZEN_HOUSE}, FROZEN_HOUSE, "the shadow runs the parent's sizes and guards")
+        for code, reason in (
+            ("DEFAULTS = dict(yes_max=0.1, max_new=40)\n\ndef decide(kit, params):\n    return []\n", "literal"),
+            ("DEFAULTS = {'yes_max': 0.1, 'notional_usd': 50}\n\ndef decide(kit, params):\n    return []\n", "frozen"),
+        ):
+            with self.assertRaises(ValueError) as caught:
+                foundry.validate_code({"code": code, "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900, source=SOURCE)
+            self.assertIn(reason, str(caught.exception))
+        keep = "DEFAULTS = {'yes_max': 0.2, 'max_new': 3, 'no_max': 0.98}\n\ndef decide(kit, params):\n    return []\n"
+        foundry.validate_code({"code": keep, "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900, source=SOURCE)
+
+    def test_an_adoption_never_reverts_the_live_desks_newer_code(self):
+        from ltcm.strategies import _sha
+
+        v1 = 'DEFAULTS = {"yes_max": 0.1, "maker": True}\n\ndef decide(kit, params):\n    return []\n'
+        self.manager.files["mullins"]["desk_edge.py"] = v1
+        self.strategies.store.update("mullins", "desk_edge", params={}, cadence_seconds=600, enabled=True, code_sha256=_sha(v1))
+        foundry = self.foundry()
+        foundry._save(subject_index={"kalshi": 1})
+        self.manager.script = lambda spec: result_line(pnls(0.0, 0.3)) if spec["strategy"] == "desk_edge" and spec["params"].get("yes_max", 0.1) > 0.11 else result_line(pnls(0.05, 0.05))
+        summary = foundry.cycle(NOW)
+        self.assertEqual((summary["strategy"], foundry.state()["deployments"][summary["winner"]]["kind"]), ("desk_edge", "code"))
+        v2 = v1.replace("return []", "return []  # v2: the desk's fix for a loss")
+        self.manager.files["mullins"]["desk_edge.py"] = v2
+        self.strategies.store.update("mullins", "desk_edge", code_sha256=_sha(v2))
+        self.clock[0] += 30 * 3600
+        self.strategies.records[(summary["deployed_to"], "desk_edge")] = {"settled": 5, "fills": 5, "settled_pnl_usd": "0"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [])
+        self.assertEqual(self.manager.files["mullins"]["desk_edge.py"], v2, "the desk's own newer version stays")
+        self.assertEqual(foundry.state()["deployments"][summary["winner"]]["status"], "superseded")
+
+    def test_published_runs_stay_under_the_size_limit_in_bytes(self):
+        from ltcm.events import canonical
+
+        provider = Provider()
+        provider.replies = {0: reply("kalshi_favorites_f1", params={"exclude_prefixes": ["<" * 790]}, hypothesis="\U0001d54f" * 300), 1: reply("kalshi_favorites_f1_2")}
+        self.manager.script = lambda spec: result_line(pnls(0.0, 0.4)) if spec["strategy"] == "kalshi_favorites_f1" else result_line(pnls(0.05, 0.05))
+        summary = self.foundry(provider).cycle(NOW)
+        self.assertEqual(summary["deployed_to"], "mullins-4")
+        published = [e for e in self.log.events if e.kind in ("desk.code_run", "lab.hypothesis")]
+        self.assertTrue(any(e.kind == "desk.code_run" and e.stream == "desk:mullins-4" for e in published))
+        for event in published:
+            text = canonical(event.payload)
+            self.assertLess(len(text.encode("utf-8")), 3300, event.kind)
+            self.assertNotIn("<", text)
 
 
 # --------------------------------------------------------------------------- the service and the sandboxes

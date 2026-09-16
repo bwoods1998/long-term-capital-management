@@ -246,6 +246,49 @@ class RunTests(SandboxCase):
         self.assertEqual((self.root / "sandboxes.json").stat().st_mode & 0o777, 0o600)
 
 
+class SameDeskRunTests(SandboxCase):
+    def test_two_runs_on_one_desk_never_swap_programs(self):
+        """A strategy tick and a Foundry dry run on one desk at once: each executes its own
+        `/lab/run/main.py`. Until Sept 16, 2026 the second upload could land between the first
+        run's upload and its exec, so the first ran the second's program."""
+        import threading
+        import time as _time
+
+        client = self.client
+        files = {}
+        lock = threading.Lock()
+        base_upload = client.upload
+
+        def upload(box, path, content, **kwargs):
+            base_upload(box, path, content, **kwargs)
+            with lock:
+                files[(box, path)] = content.decode("utf-8")
+            if path.endswith("/run/main.py"):
+                _time.sleep(0.05)  # the next run's upload lands here without a lock
+            return {}
+
+        def execute(box, command, *, timeout=600, **kwargs):
+            client.calls.append(("exec", box, command, timeout))
+            _time.sleep(0.02)
+            with lock:
+                return Exec(files.get((box, "/lab/run/main.py"), ""))
+
+        client.upload, client.exec = upload, execute
+        manager = self.manager()
+        manager.run("mullins", "print('warm')")  # the box exists before the race
+        results = {}
+
+        def run(label):
+            results[label] = manager.run("mullins", f"print('{label}')", purpose=label).stdout
+
+        threads = [threading.Thread(target=run, args=(label,)) for label in ("strategy", "dry-run", "session")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        self.assertEqual(results, {label: f"print('{label}')" for label in ("strategy", "dry-run", "session")})
+
+
 class PolicyTests(unittest.TestCase):
     def test_a_sandbox_can_reach_data_and_never_money_or_credit(self):
         for host in SANDBOX_HOSTS:

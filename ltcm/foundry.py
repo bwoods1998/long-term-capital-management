@@ -33,14 +33,17 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib
 import inspect
 import json
 import math
 import queue
 import random
 import re
+import secrets
 import threading
 import time
+import types
 from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -111,11 +114,156 @@ RESULT_LINE_CHARS = 3600
 FOUNDRY_NAME = re.compile(r"_f\d+(?:_\d+)?$")
 STRATEGY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 PAYLOAD_BYTES = 3000
+#: A `desk.code_run` the Foundry writes stays under this many bytes as JSON (the site takes 4 KB).
+CODE_RUN_BYTES = 3200
 DIRECTIONS = (
     "the pricing or selection model: which markets it trades and what it believes they are worth",
     "entries and exits: the price it pays, when it steps back, and what it declines to trade",
     "a filter that removes the kind of trade that loses out of sample",
 )
+
+
+# --------------------------------------------------------------------------- model code
+#: What a model-written strategy may import. The backtest engine runs `decide` in its own Python
+#: process, so code that could reach the interpreter (sys, atexit, gc, the engine's modules, a
+#: module's attributes) could write its own result. Everything a strategy reads comes through `kit`.
+SAFE_MODULES = frozenset({
+    "__future__", "bisect", "collections", "datetime", "decimal", "fractions", "functools", "heapq",
+    "itertools", "json", "math", "random", "re", "statistics", "time", "typing", "zoneinfo",
+})
+SAFE_TYPING = frozenset({
+    "Any", "Callable", "DefaultDict", "Dict", "FrozenSet", "Iterable", "Iterator", "List", "Mapping",
+    "MutableMapping", "Optional", "Sequence", "Set", "Tuple", "Union",
+})
+#: Names a strategy may not use at all: evaluation, files, the interpreter's namespaces, and
+#: library helpers that set attributes or evaluate annotations on the caller's behalf.
+BANNED_NAMES = frozenset({
+    "__import__", "breakpoint", "compile", "delattr", "eval", "exec", "exit", "globals", "help", "input",
+    "locals", "memoryview", "open", "quit", "setattr", "vars",
+    "get_type_hints", "singledispatch", "singledispatchmethod", "total_ordering", "update_wrapper", "wraps",
+})
+#: Attributes a strategy may not read: frames and code, dynamic lookups, and the modules a safe
+#: module happens to import (statistics.sys, typing.types, fractions.operator, ...).
+BANNED_ATTRIBUTES = frozenset({
+    "ag_await", "ag_code", "ag_frame", "co_code", "co_consts", "cr_await", "cr_code", "cr_frame", "cr_origin",
+    "f_back", "f_builtins", "f_code", "f_globals", "f_locals", "f_trace", "gi_code", "gi_frame", "gi_suspended",
+    "gi_yieldfrom", "tb_frame", "tb_next",
+    "format", "format_map", "attrgetter", "methodcaller",
+    "get_type_hints", "singledispatch", "singledispatchmethod", "total_ordering", "update_wrapper", "wraps",
+    "asyncio", "atexit", "builtins", "codecs", "concurrent", "copyreg", "ctypes", "enum", "environ",
+    "gc", "importlib", "inspect", "io", "labkit", "ltcm", "marshal", "modules", "multiprocessing", "nt", "numbers",
+    "operator", "os", "pathlib", "pickle", "popen", "posix", "runpy", "shutil", "signal", "socket", "stderr", "stdin",
+    "stdout", "string", "subprocess", "sys", "system", "tempfile", "threading", "traceback", "types", "typing",
+    "warnings", "weakref",
+})
+_REEXPORTED: frozenset[str] | None = None
+
+
+def _reexported_modules() -> frozenset[str]:
+    """Attribute names under which a safe module exposes a module that is not safe."""
+    global _REEXPORTED
+    if _REEXPORTED is not None:
+        return _REEXPORTED
+    found: set[str] = set()
+    seen: set[int] = set()
+
+    def scan(module: Any, depth: int) -> None:
+        if id(module) in seen or depth > 3:
+            return
+        seen.add(id(module))
+        for attr in dir(module):
+            if attr.startswith("_"):
+                continue
+            try:
+                value = getattr(module, attr)
+            except Exception:
+                continue
+            if isinstance(value, types.ModuleType):
+                if value.__name__.split(".")[0] in SAFE_MODULES:
+                    scan(value, depth + 1)
+                elif attr != "copy":  # dict.copy() is everywhere; the copy module is harmless
+                    found.add(attr)
+
+    for name in sorted(SAFE_MODULES - {"__future__"}):
+        try:
+            scan(importlib.import_module(name), 0)
+        except Exception:
+            continue
+    _REEXPORTED = frozenset(found)
+    return _REEXPORTED
+
+
+def check_strategy_code(code: str) -> None:
+    """Refuse model-written strategy code that could reach outside `decide(kit, params)`.
+
+    The backtest runs a candidate inside the engine's own process, and a candidate that reached
+    the interpreter could print its own result or rewrite the engine's (Sept 16, 2026: a
+    candidate that registered an `atexit` handler printed a result line that qualified). So a
+    candidate imports only `SAFE_MODULES`; never reads or writes an attribute that starts with an
+    underscore (`__name__` read aside), a frame, or a module a safe module re-exports; never
+    assigns or deletes an attribute at all (a module's function or a shared class's method would
+    change for the engine too); calls `getattr` only with a plain literal name; and never uses
+    `BANNED_NAMES` (evaluation, files, namespaces, `str.format` field lookups). Raises LabError
+    with the first reason."""
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError) as exc:
+        raise LabError(f"the code does not compile: {str(exc)[:120]}") from None
+    banned_attributes = BANNED_ATTRIBUTES | _reexported_modules()
+    literal_getattr: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr"):
+            name = node.args[1] if len(node.args) >= 2 else None
+            if (
+                isinstance(name, ast.Constant) and isinstance(name.value, str) and not name.value.startswith("_")
+                and name.value not in banned_attributes and len(node.args) <= 3 and not node.keywords
+            ):
+                literal_getattr.add(id(node.func))
+
+    def refuse(node: Any, text: str) -> None:
+        raise LabError(f"line {getattr(node, 'lineno', '?')}: {text}")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root not in SAFE_MODULES or root in ("typing", "__future__"):
+                    refuse(node, f"import {alias.name} is not allowed; a strategy imports only {', '.join(sorted(SAFE_MODULES - {'__future__'}))}")
+        elif isinstance(node, ast.ImportFrom):
+            module = str(node.module or "")
+            if node.level or module.split(".")[0] not in SAFE_MODULES:
+                refuse(node, f"from {'.' * node.level}{module} import is not allowed")
+            for alias in node.names:
+                if alias.name == "*" or alias.name.startswith("_") or alias.name in banned_attributes:
+                    refuse(node, f"from {module} import {alias.name} is not allowed")
+                if module == "typing" and alias.name not in SAFE_TYPING:
+                    refuse(node, f"from typing import {alias.name} is not allowed")
+                if module == "__future__" and alias.name != "annotations":
+                    refuse(node, f"from __future__ import {alias.name} is not allowed")
+        elif isinstance(node, ast.Attribute):
+            if not isinstance(node.ctx, ast.Load):
+                refuse(node, f"assigning or deleting an attribute (.{node.attr}) is not allowed; keep state in dicts")
+            if (node.attr.startswith("_") and node.attr != "__name__") or node.attr in banned_attributes:
+                refuse(node, f".{node.attr} is not allowed")
+        elif isinstance(node, ast.Name):
+            if node.id.startswith("__") and node.id != "__name__":
+                refuse(node, f"{node.id} is not allowed")
+            if node.id in BANNED_NAMES:
+                refuse(node, f"{node.id} is not allowed")
+            if node.id == "getattr" and id(node) not in literal_getattr:
+                refuse(node, "getattr takes a literal attribute name here")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name.startswith("__"):
+                refuse(node, f"defining {node.name} is not allowed")
+            if isinstance(node, ast.ClassDef) and node.keywords:
+                refuse(node, "class keywords (a metaclass) are not allowed")
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            if any(name.startswith("__") for name in node.names):
+                refuse(node, "a dunder global is not allowed")
+        elif isinstance(node, ast.MatchClass):
+            for attr in node.kwd_attrs:
+                if attr.startswith("_") or attr in banned_attributes:
+                    refuse(node, f"matching on .{attr} is not allowed")
 
 
 # --------------------------------------------------------------------------- evidence
@@ -158,17 +306,24 @@ def split_evidence(trade_pnls, notional_usd, fraction=0.66):
     return {"in_sample": part(pnls[:cut]), "out_of_sample": part(pnls[cut:])}
 
 
-#: Uploaded as the sandbox's `main.py` for one backtest: write the spec, run the engine's main,
-#: and print one compact result line (the engine's report with its split, sized to the sandbox's
-#: bounded output). A failure of any kind is a report with `unsupported`, never a bare traceback.
-RUNNER = r'''
-import contextlib, io, json, math, sys, traceback
+#: Uploaded as the sandbox's `main.py` for one backtest: call the engine's `run_backtest` with a
+#: History paced for the sandboxes running side by side, and print one compact result line (the
+#: report with its split, sized to the sandbox's bounded output) under this run's own marker.
+#:
+#: The strategy runs inside this process, so nothing it prints may pass for the result: the
+#: report is the engine's return value, never text read back from the run's output; everything
+#: printed during the run goes to a buffer that is thrown away; a strategy's `SystemExit` is a
+#: failed run; the marker carries a secret made for this run alone; and the process ends with
+#: `os._exit` right after the line, so no exit handler or finalizer writes after it.
+RUNNER = r"""
+import contextlib, gc, io, json, math, os, sys, traceback
 sys.path.insert(0, "/lab")
 sys.path.insert(0, "/lab/floor")
 SPEC = json.loads(%(spec)s)
 FRACTION = %(fraction)r
 LIMIT = %(limit)d
-MARKER = "BACKTEST-RESULT "
+MARKER = %(marker)r
+MIN_INTERVAL = %(min_interval)r
 
 %(split_source)s
 
@@ -197,61 +352,85 @@ def compact(report, split):
         line = json.dumps(keep, separators=(",", ":"), default=str)
     return line
 
-report, failure, text = None, None, ""
-path = "/lab/run/foundry-spec.json"
+def cache_dir(engine):
+    finder = getattr(engine, "_default_cache_dir", None)
+    if callable(finder):
+        try:
+            return finder()
+        except Exception:
+            pass
+    if os.environ.get("LTCM_HISTORY_CACHE"):
+        return os.environ["LTCM_HISTORY_CACHE"]
+    return "/lab/cache/history" if os.path.isdir("/lab/cache") else None
+
+report, failure, engine = None, None, None
+buffer = io.StringIO()
 try:
-    with open(path, "w") as handle:
-        json.dump(SPEC, handle)
-    buffer = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+        try:
+            from ltcm import backtest as engine
+            history = None
             try:
-                from ltcm import backtest
-                backtest.main(["--spec", path])
-            except SystemExit:
-                pass
-    finally:
-        text = buffer.getvalue()
-except Exception:
-    failure = traceback.format_exc()[-400:]
-marker = text.rfind(MARKER)
-if marker >= 0:
-    try:
-        report = json.loads(text[marker + len(MARKER):].split("\n", 1)[0])
-    except ValueError:
-        failure = failure or "the engine's result line did not parse"
+                from ltcm.history import History
+                history = History(cache_dir=cache_dir(engine), min_interval=MIN_INTERVAL)
+            except Exception:
+                history = None
+            report = engine.run_backtest(SPEC, history=history)
+        except BaseException:
+            report, failure = None, traceback.format_exc()[-400:]
+        try:
+            gc.collect()  # a strategy's leftovers finish while their output still goes to the buffer
+        except BaseException:
+            pass
+        gc.disable()
+except BaseException:
+    failure = failure or traceback.format_exc()[-400:]
 if not isinstance(report, dict):
     report = {"strategy": SPEC.get("strategy"), "trades": 0, "errors": 1, "trade_pnls": [],
-              "unsupported": "engine failed: " + str(failure or ("no result line; " + text[-300:]))}
+              "unsupported": "engine failed: " + str(failure or ("no report; " + buffer.getvalue()[-300:]))}
 split = None
 try:
-    from ltcm import backtest as engine
     split = engine.split_report(report, FRACTION)
 except Exception:
     split = None
 if not isinstance(split, dict) or not isinstance(split.get("out_of_sample"), dict):
     split = split_evidence(report.get("trade_pnls") or [], report.get("notional_usd"), FRACTION)
-print(MARKER + compact(report, split))
-'''
+try:
+    line = MARKER + compact(report, split)
+except Exception:
+    line = MARKER + json.dumps({"strategy": SPEC.get("strategy"), "trades": 0, "errors": 1, "unsupported": "the report did not serialize"})
+sys.__stdout__.write(line + "\n")
+sys.__stdout__.flush()
+os._exit(0)
+"""
 
 
-def runner_code(spec: Mapping[str, Any], *, fraction: float = 0.66) -> str:
-    """The sandbox program for one backtest of `spec`."""
+def run_marker(token: str) -> str:
+    """The result marker for one run: `BACKTEST-RESULT <token> ` (the bare prefix without one)."""
+    return f"{RESULT_MARKER}{token} " if token else RESULT_MARKER
+
+
+def runner_code(spec: Mapping[str, Any], *, fraction: float = 0.66, token: str = "", min_interval: float = 0.15) -> str:
+    """The sandbox program for one backtest of `spec`, printing under `token`'s marker."""
     return RUNNER % {
         "spec": json.dumps(json.dumps(dict(spec), default=str)),
         "fraction": float(fraction),
         "limit": RESULT_LINE_CHARS,
+        "marker": run_marker(token),
+        "min_interval": float(min_interval),
         "split_source": inspect.getsource(split_evidence),
     }
 
 
-def parse_result(stdout: str | None) -> dict[str, Any] | None:
-    """The report on the last `BACKTEST-RESULT` line, or None."""
+def parse_result(stdout: str | None, token: str = "") -> dict[str, Any] | None:
+    """The report on the last line carrying this run's marker, or None. A line without the
+    run's token (anything a strategy could print) is never read."""
     text = str(stdout or "")
-    marker = text.rfind(RESULT_MARKER)
-    if marker < 0:
+    marker = run_marker(token)
+    found = text.rfind(marker)
+    if found < 0 or (found > 0 and text[found - 1] != "\n"):
         return None
-    line = text[marker + len(RESULT_MARKER):].split("\n", 1)[0].strip()
+    line = text[found + len(marker):].split("\n", 1)[0].strip()
     try:
         data = json.loads(line)
     except ValueError:
@@ -274,6 +453,25 @@ def literal_defaults(code: str | None) -> dict[str, Any]:
                 return {}
             return dict(value) if isinstance(value, dict) else {}
     return {}
+
+
+def _defines_defaults(code: str | None) -> bool:
+    """Whether a module assigns `DEFAULTS` at its top level (literal or not)."""
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError):
+        return False
+    return any(
+        isinstance(node, (ast.Assign, ast.AnnAssign))
+        and any(isinstance(t, ast.Name) and t.id == "DEFAULTS" for t in (node.targets if isinstance(node, ast.Assign) else [node.target]))
+        for node in tree.body
+    )
+
+
+def pinned_frozen(code: str | None, params: Mapping[str, Any] | None, frozen: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    """The frozen settings a strategy runs with: its row's params over its code's `DEFAULTS`."""
+    effective = {**literal_defaults(code), **dict(params or {})}
+    return {key: effective[key] for key in frozen if key in effective}
 
 
 def base_name(name: str) -> str:
@@ -409,6 +607,18 @@ def _clean(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_clean(v) for v in value]
     return value
+
+
+def _clip_bytes(text: str, limit: int) -> str:
+    """`text` cut to at most `limit` bytes of UTF-8, on a character boundary."""
+    data = str(text or "").encode("utf-8")
+    if len(data) <= limit:
+        return str(text or "")
+    return data[: max(0, limit)].decode("utf-8", "ignore")
+
+
+def _json_bytes(payload: Any) -> int:
+    return len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8"))
 
 
 def _fmt(value: Any, spec: str = "+.3f") -> str:
@@ -582,14 +792,17 @@ class Foundry:
         return sorted((m for m in manifests.values() if m.family == family and not m.live), key=lambda m: m.id)
 
     def subjects(self, family: str, manifests: Mapping[str, Any]) -> list[str]:
-        """The family's house starter, then every other strategy its live desk runs."""
+        """The family's house starter, then every other strategy its live desk runs. A strategy
+        the live desk has paused (a house starter a mutation replaced) is not mutated again:
+        its descendants are, so two mutations of one parent never compete for the live desk."""
         names: list[str] = []
         house = STARTERS.get(family)
-        if house and house not in UNBACKTESTABLE_STRATEGIES:
-            names.append(house)
         live = self.live_desk(family, manifests)
+        rows = self.store().for_desk(live.id) if live is not None else {}
+        if house and house not in UNBACKTESTABLE_STRATEGIES and (rows.get(house) or {}).get("enabled", True):
+            names.append(house)
         if live is not None:
-            for name, row in sorted(self.store().for_desk(live.id).items()):
+            for name, row in sorted(rows.items()):
                 if row.get("enabled", True) and name not in names and base_name(name) not in UNBACKTESTABLE_STRATEGIES:
                     names.append(name)
         return names
@@ -640,9 +853,9 @@ class Foundry:
             return family, names[index], (start + offset + 1) % len(families), subject_index
         return None
 
-    def _record(self, desk_id: str, name: str, since: str | None) -> dict[str, Any]:
+    def _record(self, desk_id: str, name: str, since: str | None, **options: Any) -> dict[str, Any]:
         try:
-            return dict(self.strategies.record(desk_id, name, since=since) or {})
+            return dict(self.strategies.record(desk_id, name, since=since, **options) or {})
         except Exception:
             return {}
 
@@ -733,11 +946,19 @@ class Foundry:
             variant_futures = [pool.submit(self._backtest, c, window, ids) for c in variants]
             wait_futures(base_futures)
             unsupported = [c for c in baselines if (c.get("report") or {}).get("unsupported")]
+            unmeasured = [c for c in baselines if not self.measured(c)]
             if baselines and len(unsupported) == len(baselines):
                 for future in variant_futures:
                     future.cancel()
                 reason = str((unsupported[0].get("report") or {}).get("unsupported"))[:200]
                 asked["skipped"] = f"the engine cannot backtest {subject}: {reason}"
+            elif unmeasured:
+                # Nothing can qualify without every baseline (`select`), so no model is paid and
+                # no sandbox starts another run for this cycle.
+                for future in variant_futures:
+                    future.cancel()
+                first = unmeasured[0]
+                asked["skipped"] = f"baseline {first.get('label')} was not measured: {str(first.get('error') or 'no report')[:160]}"
             else:
                 code, asked = self.code_candidates(cycle, family, subject, source, parent, live, baselines, records, window, problems)
                 for candidate in code:
@@ -753,7 +974,7 @@ class Foundry:
         winner = qualified[0] if qualified else None
         deployment = None
         if winner is not None:
-            deployment = self.deploy(winner, family, subject, shadows, problems)
+            deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
         summary.update(
             {
                 "candidates": len(variants) + len(code),
@@ -878,9 +1099,13 @@ class Foundry:
             "deploys the out-of-sample winner to a shadow desk and moves it to real money when its forward record holds.\n"
             "Write ONE mutation of the strategy below that you expect to earn more per dollar out of sample. Change how it "
             "trades (pricing, selection, entries, exits, market filters), not only its settings; keep what already works.\n"
-            "Rules: a Python module defining decide(kit, params); standard library only; no files, processes, sockets or "
-            "network (the kit is the only door to data; subprocess, os.system, socket, urllib, requests, open( and __import__ "
-            f"are refused); at most {int(cfg['code_chars'])} characters. It runs under the strategy name `{name}`: where it "
+            "Rules: a Python module defining decide(kit, params); no files, processes, sockets or network (the kit is the "
+            f"only door to data); at most {int(cfg['code_chars'])} characters. Imports: only "
+            f"{', '.join(sorted(SAFE_MODULES - {'__future__'}))} (from typing: {', '.join(sorted(SAFE_TYPING))}). "
+            "Refused: any attribute that starts with an underscore (type(x).__name__ aside), assigning or deleting any "
+            "attribute (keep state in dicts and lists), getattr with a computed name, str.format and format_map (use "
+            "f-strings), eval, exec, compile, open, globals, vars, setattr, and dunder methods. "
+            f"It runs under the strategy name `{name}`: where it "
             f"recognises its own resting orders by kit.context['open_orders'][i]['strategy'], compare with '{name}'. Size from "
             "params.get('notional_usd') or kit.context['learning_usd']; the floor caps size in any case. The backtest replays "
             "kit.kalshi_markets, kit.kalshi_series, kit.kalshi_market, kit.bars, kit.quote and kit.products from history at "
@@ -894,7 +1119,9 @@ class Foundry:
             f"{cfg['min_ci_lower']}. Fitting the in-sample period does not help.\n"
             f"Reply with JSON only: {{\"name\": \"{name}\", \"code\": \"<the whole module>\", \"params\": {{...}}, "
             "\"hypothesis\": \"one sentence: what you changed and why it should earn more out of sample\"}. params holds "
-            "overrides of the module's DEFAULTS as plain strings, numbers, booleans or lists (no null, no nested objects)."
+            "overrides of the module's DEFAULTS as plain strings, numbers, booleans or lists (no null, no nested objects). "
+            f"Keep DEFAULTS a literal dict, and keep the values of {', '.join(str(k) for k in (cfg.get('frozen_params') or []))} "
+            "exactly as the source has them (or leave them out): they are the floor's and a change is refused."
         )
 
     def packet(
@@ -1004,7 +1231,7 @@ class Foundry:
                 continue
             cost += _dec(getattr(response, "cost_usd", None)) or Decimal(0)
             try:
-                spec, hypothesis = self.validate_code(parse_reply(getattr(response, "output_text", "") or ""), name, parent, cadence)
+                spec, hypothesis = self.validate_code(parse_reply(getattr(response, "output_text", "") or ""), name, parent, cadence, source=source)
             except LabError as exc:
                 asked["rejected"].append(f"{name}: {str(exc)[:160]}")
                 continue
@@ -1015,8 +1242,14 @@ class Foundry:
         asked["cost_usd"] = format(cost, "f")
         return out, asked
 
-    def validate_code(self, data: Any, name: str, parent: Any, cadence: int) -> tuple[dict[str, Any], str]:
-        """The lab's own strategy validation, and a compile, before a single backtest."""
+    def validate_code(self, data: Any, name: str, parent: Any, cadence: int, *, source: str | None = None) -> tuple[dict[str, Any], str]:
+        """The lab's own strategy validation, a compile, `check_strategy_code`, and the frozen
+        settings, before a single backtest.
+
+        A candidate's `DEFAULTS` may not move a frozen setting away from `source`'s (the code it
+        mutates): until Sept 16, 2026 the freeze filtered only the params a model sent, and a
+        mutation that wrote `max_new: 40` and `no_max: 0.999` into its own defaults carried them
+        onto the live desk."""
         if not isinstance(data, Mapping):
             raise LabError("the reply is not a JSON object")
         hypothesis = str(data.get("hypothesis") or "").strip()
@@ -1033,9 +1266,28 @@ class Foundry:
             compile(spec["code"], f"{name}.py", "exec")
         except (SyntaxError, ValueError) as exc:
             raise LabError(f"the code does not compile: {str(exc)[:120]}") from None
+        check_strategy_code(spec["code"])
+        if source is not None:
+            parent_defaults = literal_defaults(source)
+            if _defines_defaults(source) and parent_defaults and not literal_defaults(spec["code"]):
+                raise LabError("DEFAULTS must stay a literal dict, as in the code it mutates")
+            mine = literal_defaults(spec["code"])
+            for key in sorted(frozen):
+                if key in mine and (key not in parent_defaults or mine[key] != parent_defaults[key]):
+                    was = parent_defaults.get(key, "absent")
+                    raise LabError(f"DEFAULTS[{key!r}] is frozen: {was!r} in the code it mutates, {mine[key]!r} here")
         return spec, hypothesis[:300]
 
     # ------------------------------------------------------------------ backtests
+    def min_interval(self) -> float:
+        """Seconds between one sandbox's requests to a venue. The sandboxes run side by side
+        with caches of their own, so the floor's 0.15 s (under seven a second) is shared among
+        them: eight sandboxes at 0.15 s each asked Kalshi for 53 a second on a cold cache."""
+        configured = _float(self.config.get("history_min_interval"))
+        if configured is not None and configured > 0:
+            return configured
+        return round(0.15 * max(1, int(self.config["sandboxes"])), 3)
+
     def spec_for(self, candidate: Mapping[str, Any], window: Mapping[str, Any]) -> dict[str, Any]:
         cfg = self.config
         return {
@@ -1056,18 +1308,25 @@ class Foundry:
         desk = ids.get()
         try:
             manager = self.sandboxes()
-            code = runner_code(self.spec_for(candidate, window), fraction=float(self.config["split_fraction"]))
+            token = secrets.token_hex(16)
+            code = runner_code(self.spec_for(candidate, window), fraction=float(self.config["split_fraction"]), token=token, min_interval=self.min_interval())
             run = manager.run(desk, code, purpose=f"foundry backtest {candidate['id']} ({candidate['strategy']})", timeout=int(self.config["backtest_timeout_seconds"]))
             candidate["sandbox"] = desk
             candidate["seconds"] = _float(getattr(run, "seconds", 0)) or 0.0
-            report = parse_result(getattr(run, "stdout", ""))
+            report = parse_result(getattr(run, "stdout", ""), token)
             if report is None:
                 candidate["error"] = f"exit {getattr(run, 'exit_code', '?')}: no result line ({str(getattr(run, 'stdout', ''))[-160:]})"
                 return candidate
             candidate["report"] = report
             candidate["evidence"] = self.evidence(report)
+            errors = _int(report.get("errors"))
             if report.get("unsupported"):
                 candidate["error"] = f"unsupported: {str(report['unsupported'])[:200]}"
+            elif errors is None or errors > 0:
+                # A failed history request leaves markets unpriced, so the run did not see the
+                # data its rivals saw; a strategy that raised did not run the whole window.
+                notes = "; ".join(str(n)[:120] for n in (report.get("notes") or [])[:2])
+                candidate["error"] = f"{'unknown' if errors is None else errors} engine errors" + (f": {notes}" if notes else "")
         except Exception as exc:
             candidate["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
         finally:
@@ -1098,27 +1357,43 @@ class Foundry:
         """The candidates that qualify on out-of-sample evidence, best first, and the baseline
         return they had to beat. In-sample numbers are never read here."""
         references = []
-        measured = False
-        for candidate in candidates:
-            if candidate["kind"] != "baseline" or not candidate.get("evidence") or candidate.get("error"):
+        baselines = [c for c in candidates if c["kind"] == "baseline"]
+        unmeasured = [c for c in baselines if not self.measured(c)]
+        for candidate in baselines:
+            if not self.measured(candidate):
                 continue
-            measured = True
             oos = candidate["evidence"]["out_of_sample"]
             if oos["trades"] > 0 and oos["return_on_notional"] is not None:
                 references.append(oos["return_on_notional"])
-        # A baseline that did not trade in the window sets the bar at zero; a baseline that could
-        # not be measured at all sets no bar, and nothing qualifies against it.
+        # A baseline that did not trade in the window sets the bar at zero. Every baseline must be
+        # measured: until Sept 16, 2026 a live baseline that timed out left the bar at the shadow's,
+        # and settings that earned less than the live desk's own qualified.
         reference = max(references) if references else 0.0
+        if not baselines:
+            missing = "no baseline was measured to beat"
+        elif unmeasured:
+            missing = f"no bar: baseline {unmeasured[0].get('label')} was not measured ({str(unmeasured[0].get('error') or 'no report')[:120]})"
+        else:
+            missing = None
         qualified = []
         for candidate in candidates:
             if candidate["kind"] == "baseline":
                 continue
-            ok, verdict = self.qualifies(candidate, reference) if measured else (False, "no baseline was measured to beat")
+            ok, verdict = self.qualifies(candidate, reference) if missing is None else (False, missing)
             candidate["verdict"] = verdict
             if ok:
                 qualified.append(candidate)
         qualified.sort(key=lambda c: (-c["evidence"]["out_of_sample"]["return_on_notional"], -c["evidence"]["out_of_sample"]["ci95_mean_pnl"][0], c["id"]))
         return qualified, reference
+
+    @staticmethod
+    def measured(candidate: Mapping[str, Any]) -> bool:
+        """A run that finished with evidence, no error and no engine errors."""
+        report = candidate.get("report")
+        return bool(
+            isinstance(report, Mapping) and candidate.get("evidence") and not candidate.get("error")
+            and not report.get("unsupported") and _int(report.get("errors")) == 0
+        )
 
     def qualifies(self, candidate: Mapping[str, Any], reference: float) -> tuple[bool, str]:
         cfg = self.config
@@ -1127,6 +1402,8 @@ class Foundry:
         evidence = candidate.get("evidence")
         if not evidence:
             return False, "no backtest evidence"
+        if _int((candidate.get("report") or {}).get("errors")) != 0:
+            return False, f"{(candidate.get('report') or {}).get('errors')} engine errors"
         oos = evidence["out_of_sample"]
         if int(evidence["trades"]) < int(cfg["min_trades"]):
             return False, f"{evidence['trades']} trades, {cfg['min_trades']} needed"
@@ -1141,10 +1418,25 @@ class Foundry:
         return True, "qualified"
 
     # ------------------------------------------------------------------ shadow deployment
+    def _code_sha(self, manager: Any, desk_id: str, name: str, row: Mapping[str, Any] | None) -> str | None:
+        """The hash of the code a desk runs under `name`: its toolbox file when it can be read
+        (a desk may edit the file without redeploying), else its strategy row's."""
+        files = None
+        if manager is not None and hasattr(manager, "toolbox_files"):
+            try:
+                files = manager.toolbox_files(desk_id)
+            except Exception:
+                files = None
+        if isinstance(files, Mapping) and isinstance(files.get(f"{name}.py"), str):
+            return _sha(files[f"{name}.py"])
+        return (row or {}).get("code_sha256")
+
     def target_desk(self, winner: Mapping[str, Any], shadows: list[Any], at: str) -> Any:
         """The family's worst-performing shadow desk that can take the winner: lowest settled
-        strategy P&L, then lowest equity. A desk still proving an earlier candidate is spared."""
+        strategy P&L, then lowest equity. A desk still proving an earlier candidate is spared.
+        Settings go only to a desk that runs exactly the code they were backtested with."""
         store = self.store()
+        manager = self.sandboxes()
         deployments = dict(self.state().get("deployments") or {})
         protect = float(self.config["protect_hours"]) * 3600.0
         now = _epoch(at)
@@ -1156,10 +1448,14 @@ class Foundry:
         pool = [m for m in shadows if not m.live and m.id not in protected]
         name = winner["strategy"]
         if winner["kind"] == "params":
-            pool = [m for m in pool if name in rows[m.id] and rows[m.id][name].get("enabled", True)]
             sha = _sha(winner.get("code"))
-            same = [m for m in pool if rows[m.id][name].get("code_sha256") == sha]
-            pool = same or pool
+            # Until Sept 16, 2026 a desk running other code under the same name was taken when
+            # none ran the backtested code, and its forward record then spoke for code never tested.
+            pool = [
+                m for m in pool
+                if name in rows[m.id] and rows[m.id][name].get("enabled", True)
+                and self._code_sha(manager, m.id, name, rows[m.id][name]) == sha
+            ]
         else:
             limit = int(dict(getattr(self.strategies, "config", {}) or {}).get("max_per_desk", 3))
             pool = [
@@ -1182,8 +1478,9 @@ class Foundry:
 
         return min(pool, key=score)
 
-    def deploy(self, winner: dict[str, Any], family: str, subject: str, shadows: list[Any], problems: list[str]) -> dict[str, Any] | None:
-        """Put the winner on a shadow desk now. Never a live desk."""
+    def deploy(self, winner: dict[str, Any], family: str, subject: str, shadows: list[Any], problems: list[str], *, source: str | None = None) -> dict[str, Any] | None:
+        """Put the winner on a shadow desk now. Never a live desk. `source` is the code of the
+        strategy the winner was measured against (the subject's)."""
         at = self.now()
         desk = self.target_desk(winner, shadows, at)
         if desk is None and winner["kind"] == "params":
@@ -1201,6 +1498,7 @@ class Foundry:
         manager = self.sandboxes()
         frozen = [str(k) for k in (self.config.get("frozen_params") or [])]
         fid, name = winner["id"], winner["strategy"]
+        source = winner.get("code") if source is None else source
         oos = winner["evidence"]["out_of_sample"]
         note = f"foundry {fid}: out-of-sample {oos['trades']} positions, {_fmt(oos['return_on_notional'])} per $"
         try:
@@ -1208,9 +1506,12 @@ class Foundry:
                 own = dict((store.for_desk(desk.id).get(name) or {}).get("params") or {})
                 params = {**{k: v for k, v in winner["params"].items() if k not in frozen}, **{k: own[k] for k in frozen if k in own}}
                 store.update(desk.id, name, params=params, promoted_at=at, note=note[:200], foundry_id=fid)
-                code_sha = (store.for_desk(desk.id).get(name) or {}).get("code_sha256") or _sha(winner.get("code"))
+                code_sha = _sha(winner.get("code"))
             else:
-                params = dict(winner["params"])
+                # Size, counts and price guards are the parent's (its row over its code's
+                # DEFAULTS), whatever the candidate's own defaults say.
+                parent_row = store.for_desk(desk.id).get(subject) or {}
+                params = {**{k: v for k, v in dict(winner["params"]).items() if k not in frozen}, **pinned_frozen(source, parent_row.get("params"), frozen)}
                 existed = name in store.for_desk(desk.id)
                 for other, row in list(store.for_desk(desk.id).items()):
                     if row.get("foundry_code") and other != name:
@@ -1243,6 +1544,8 @@ class Foundry:
             "status": "shadow",
             "params": params,
             "code_sha256": code_sha,
+            # The parent's code when it was measured: a live desk that changed it since has moved on.
+            "subject_sha256": _sha(source) if source else None,
             "cadence_seconds": int(winner.get("cadence_seconds") or 0) or None,
             "trades": winner["evidence"]["trades"],
             "oos_trades": oos["trades"],
@@ -1259,7 +1562,7 @@ class Foundry:
         ]
         if winner.get("hypothesis"):
             lines.append(f"hypothesis: {winner['hypothesis']}")
-        lines.append(f"live after {self.config['min_forward_settled']} settled positions here at P&L >= 0")
+        lines.append(f"live after {self.config['min_forward_settled']} positions opened and settled here at P&L after fees >= 0")
         self.publish_desk(desk, name, f"foundry-{fid}-shadow", at, f"foundry {fid}: {name} on shadow desk {desk.id}", lines, code_sha, winner.get("seconds"))
         return record
 
@@ -1274,11 +1577,18 @@ class Foundry:
 
     # ------------------------------------------------------------------ fast-track to live
     def fast_track(self, manifests: Mapping[str, Any], problems: list[str]) -> list[dict[str, Any]]:
-        """Move every deployed candidate that has earned it onto its family's live desk."""
+        """Move every deployed candidate that has earned it onto its family's live desk.
+
+        The forward record counts only positions the candidate opened after it was deployed
+        (`Strategies.record(opened_since=True)`), needs as many of its own fills as settlements,
+        and is judged after fees. Until Sept 16, 2026 it counted settlements dated after the
+        deployment, and the old settings' positions settling that afternoon put new settings,
+        taker orders among them, on a live desk."""
         cfg = self.config
         store = self.store()
         manager = self.sandboxes()
         frozen = [str(k) for k in (cfg.get("frozen_params") or [])]
+        need = int(cfg["min_forward_settled"])
         adopted: list[dict[str, Any]] = []
         if self.halted is not None:
             try:
@@ -1302,15 +1612,22 @@ class Foundry:
             if dep.get("kind") == "params" and dict(row.get("params") or {}) != dict(dep.get("params") or {}):
                 self._deployment(fid, status="superseded", ended_at=at)
                 continue
+            if dep.get("code_sha256") and self._code_sha(manager, desk.id, name, row) != dep.get("code_sha256"):
+                self._deployment(fid, status="superseded", ended_at=at, reason="the shadow desk's code changed under the candidate")
+                continue
             lower = _float(dep.get("oos_ci_lower"))
             if lower is None or lower <= 0 or int(dep.get("oos_trades") or 0) < int(cfg["min_oos_trades"]):
                 continue  # a candidate may trade in shadow, but only a confident backtest goes live
-            record = self._record(desk.id, name, dep.get("deployed_at"))
+            record = self._record(desk.id, name, dep.get("deployed_at"), opened_since=True)
             settled = int(record.get("settled") or 0)
+            fills = int(record.get("fills") or 0)
             pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
-            if settled < int(cfg["min_forward_settled"]) or pnl < 0:
+            fees = _dec(record.get("fees_usd")) or Decimal(0)
+            net = pnl - fees
+            if settled < need or fills < need or net < 0:
                 if _epoch(at) - _epoch(dep.get("deployed_at")) > float(cfg["forward_max_hours"]) * 3600.0:
-                    self._deployment(fid, status="expired", ended_at=at, forward={"settled": settled, "pnl_usd": format(pnl, "f")})
+                    forward = {"settled": settled, "fills": fills, "pnl_usd": format(pnl, "f"), "fees_usd": format(fees, "f")}
+                    self._deployment(fid, status="expired", ended_at=at, forward=forward)
                 continue
             live = self.live_desk(str(dep.get("family")), manifests)
             if live is None or not live.live:
@@ -1331,14 +1648,23 @@ class Foundry:
         fid = str(dep["id"])
         live_rows = store.for_desk(live.id)
         subject = str(dep.get("subject") or name)
-        settled, pnl = record.get("settled"), record.get("settled_pnl_usd")
-        note = f"foundry {fid} from {desk.id}: {settled} settled at {pnl} since {str(dep.get('deployed_at'))[:16]}"
+        settled, pnl, fees = record.get("settled"), record.get("settled_pnl_usd"), record.get("fees_usd") or "0"
+        note = f"foundry {fid} from {desk.id}: {settled} settled at {pnl} less {fees} fees since {str(dep.get('deployed_at'))[:16]}"
+
+        def supersede(reason: str) -> None:
+            self._deployment(fid, status="superseded", ended_at=at, reason=reason[:200])
+
         if dep.get("kind") == "params":
             own = live_rows.get(name)
             if not own or not own.get("enabled", True):
                 # The live desk does not run this strategy: the settings have nowhere to go.
                 self._deployment(fid, status="unadoptable", ended_at=at)
                 return None
+            if dep.get("code_sha256") and self._code_sha(manager, live.id, name, own) != dep.get("code_sha256"):
+                supersede(f"{live.id} no longer runs the {name} code the settings were backtested with")
+                return None
+            # The same code (checked above), so its defaults are the ones backtested; the desk's own
+            # frozen values stay.
             mine = dict(own.get("params") or {})
             params = {**{k: v for k, v in dict(dep.get("params") or {}).items() if k not in frozen}, **{k: mine[k] for k in frozen if k in mine}}
             store.update(live.id, name, params=params, promoted_at=at, promoted_from=desk.id, foundry_id=fid, note=note[:200])
@@ -1346,11 +1672,26 @@ class Foundry:
         else:
             code = (manager.toolbox_files(desk.id) if manager is not None and hasattr(manager, "toolbox_files") else {}).get(f"{name}.py")
             if code is None or _sha(code) != dep.get("code_sha256"):
-                self._deployment(fid, status="superseded", ended_at=at)
+                supersede("the shadow desk's copy of the candidate changed")
                 return None
             parent = live_rows.get(subject)
-            mine = dict((parent or {}).get("params") or {})
-            params = {**{k: v for k, v in dict(dep.get("params") or {}).items() if k not in frozen}, **{k: mine[k] for k in frozen if k in mine}}
+            if subject != name and parent is not None and not parent.get("enabled", True):
+                # Another candidate already replaced the code this one was measured against; two
+                # mutations of one parent never trade live side by side.
+                supersede(f"{subject} is paused on {live.id}: a later candidate replaced it")
+                return None
+            if subject != name and parent is not None and dep.get("subject_sha256") and self._code_sha(manager, live.id, subject, parent) != dep.get("subject_sha256"):
+                supersede(f"{live.id} changed {subject} since the candidate was measured against it")
+                return None
+            if name in live_rows and self._code_sha(manager, live.id, name, live_rows[name]) != dep.get("code_sha256"):
+                # Settings carried with a snapshot of the live desk's own code: the desk has
+                # written a newer version since, and the snapshot must never overwrite it.
+                supersede(f"{live.id} changed {name} since the snapshot was taken")
+                return None
+            params = {
+                **{k: v for k, v in dict(dep.get("params") or {}).items() if k not in frozen},
+                **pinned_frozen(self.source_of(subject, live), (parent or {}).get("params"), frozen),
+            }
             for other, row in list(live_rows.items()):
                 if row.get("foundry_code") and not row.get("enabled", True) and other not in (name, subject):
                     store.remove(live.id, other)
@@ -1380,37 +1721,52 @@ class Foundry:
                 parent = None
             marks = {"foundry_code": True} if name not in current else {}
             store.update(live.id, name, foundry_id=fid, promoted_at=at, promoted_from=desk.id, note=note[:200], **marks)
-            if parent is not None and subject != name:
-                # The mutation replaces the code it came from; running both would double the exposure.
-                store.update(live.id, subject, enabled=False, note=f"replaced by foundry {fid} ({name})"[:200])
+            if name not in current:
+                # The mutation replaces the code it came from and anything else of its line on the
+                # live desk; running both would double the exposure on the same markets.
+                lineage = {base_name(name), base_name(subject)}
+                for other, row in sorted(store.for_desk(live.id).items()):
+                    if other == name or not row.get("enabled", True):
+                        continue
+                    if other == subject or base_name(other) in lineage:
+                        store.update(live.id, other, enabled=False, note=f"replaced by foundry {fid} ({name})"[:200])
+                        if row.get("foundry_id") and row.get("foundry_id") != fid:
+                            self._deployment(row.get("foundry_id"), status="retired", ended_at=at)
             code_sha = _sha(code)
-        self._deployment(fid, status="live", live_desk_id=live.id, promoted_at=at, forward={"settled": settled, "pnl_usd": pnl})
+        self._deployment(fid, status="live", live_desk_id=live.id, promoted_at=at, forward={"settled": settled, "pnl_usd": pnl, "fees_usd": fees})
         lines = [
             f"foundry {fid}: {name} adopted by live desk {live.id} from shadow desk {desk.id}",
             f"backtest out of sample: {dep.get('oos_trades')} positions, return {_fmt(dep.get('oos_return'))} per $, 95% lower bound {_fmt(dep.get('oos_ci_lower'), '+.4f')}",
-            f"forward on {desk.id} since {dep.get('deployed_at')}: {settled} settled, P&L {pnl}",
+            f"forward on {desk.id} since {dep.get('deployed_at')}: {settled} positions opened and settled, P&L {pnl}, fees {fees}",
             f"params: {json.dumps(params, sort_keys=True)[:800]}",
             "sizes, limits and capital unchanged; evidence resets at this promotion",
         ]
         if dep.get("kind") == "code" and subject != name:
             lines.append(f"{subject} paused on {live.id}")
         self.publish_desk(live, name, f"foundry-{fid}-live", at, f"foundry {fid}: {name} takes live desk {live.id}", lines, code_sha, 0)
-        self.alert("info", f"foundry: {live.id}/{name} adopts {fid} from {desk.id} ({settled} settled at {pnl}; backtest out-of-sample {_fmt(dep.get('oos_return'))} per $)")
+        self.alert("info", f"foundry: {live.id}/{name} adopts {fid} from {desk.id} ({settled} settled at {pnl} less {fees} fees; backtest out-of-sample {_fmt(dep.get('oos_return'))} per $)")
         return {"id": fid, "live_desk_id": live.id, "from": desk.id, "strategy": name, "kind": dep.get("kind")}
 
     # ------------------------------------------------------------------ publication
     def publish_desk(self, manifest: Any, name: str, suffix: str, at: str, purpose: str, lines: list[str], code_sha: str | None, seconds: Any) -> None:
         stamp = at[:16].replace("-", "").replace(":", "").replace("T", "-")
+        # Bounded in bytes, not characters: `_clean` turns "<" into a three-byte character and a
+        # model's params or hypothesis can carry four-byte ones (a 4,146-byte event, Sept 16, 2026).
+        text = _clean("\n".join(_clip_bytes(str(line), 900) for line in lines))
         payload = {
             "session_id": f"{manifest.id}:{stamp}:strategy:{name}",
             "code_sha256": str(code_sha or "")[:64] or "0" * 64,
             "language": "python",
-            "stdout": _clean("\n".join(lines))[:2400],
+            "stdout": _clip_bytes(text, 2400),
             "exit_code": 0,
             "seconds": f"{_float(seconds) or 0.0:.1f}",
             "sandbox": None,
-            "purpose": _clean(purpose)[:200],
+            "purpose": _clip_bytes(_clean(purpose), 200),
         }
+        budget = 2400
+        while _json_bytes(payload) > CODE_RUN_BYTES and budget > 200:
+            budget -= 400
+            payload["stdout"] = _clip_bytes(text, budget)
         try:
             self.log.append(manifest.stream, "desk.code_run", payload, id=f"{suffix}:{at}"[:200], at=at)
         except Exception as exc:
@@ -1474,16 +1830,17 @@ class Foundry:
             "top": rows,
         }
         payload = _clean(payload)
-        while len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > PAYLOAD_BYTES:
+        while _json_bytes(payload) > PAYLOAD_BYTES:
             if payload["top"]:
                 payload["top"] = payload["top"][:-1]
             elif payload["code_rejected"]:
                 payload["code_rejected"] = payload["code_rejected"][:-1]
             else:
-                payload["text"] = payload["text"][:400]
-                payload["test_plan"] = payload["test_plan"][:400]
-                payload["hypothesis"] = (payload.get("hypothesis") or "")[:200] or None
-                payload["code_skipped"] = (payload.get("code_skipped") or "")[:120] or None
+                payload["text"] = _clip_bytes(payload["text"], 400)
+                payload["test_plan"] = _clip_bytes(payload["test_plan"], 400)
+                payload["hypothesis"] = _clip_bytes(payload.get("hypothesis") or "", 200) or None
+                payload["code_skipped"] = _clip_bytes(payload.get("code_skipped") or "", 120) or None
+                payload["strategy"] = _clip_bytes(str(payload.get("strategy") or ""), 60)
                 break
         at = str(summary.get("at") or self.now())
         try:
@@ -1495,6 +1852,8 @@ class Foundry:
 __all__ = [
     "DEFAULTS",
     "Foundry",
+    "check_strategy_code",
+    "pinned_frozen",
     "categorical_pool",
     "jitter_variants",
     "literal_defaults",

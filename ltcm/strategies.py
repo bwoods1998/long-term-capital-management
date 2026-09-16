@@ -125,7 +125,9 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower;
 #: a day's temperature forecast moves a few times a day.
 #: leap: promotion -- how the family's record moves settings onto the live desk.
-PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "min_margin": "0.01", "jitter": 0.25}
+#: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
+#: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
+PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "min_margin": "0.01", "jitter": 0.25, "foundry_hold_hours": 72}
 STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300}
 
 
@@ -633,17 +635,26 @@ class Strategies:
             self._index_cache = (now, orders_by_intent, fills_by_order)
         return orders_by_intent, fills_by_order
 
-    def record(self, desk_id: str, name: str, since: str | None = None) -> dict[str, Any]:
+    def record(self, desk_id: str, name: str, since: str | None = None, *, opened_since: bool = False) -> dict[str, Any]:
         """What the strategy's orders did: fills, fees and the settled P&L of the positions it
         opened, read from the desk's own tape (the `[strategy <name>]` prefix on its rationales).
         `since` limits the record to events at or after that instant, so a setting promoted at
-        noon is judged on the trades it made after noon."""
+        noon is judged on the trades it made after noon.
+
+        A settlement is dated when it settles, so a position opened before `since` still counts
+        after it. With `opened_since` (the Foundry's forward record, leap: foundry) a settlement
+        counts only when its position opened at or after `since` by its `held_for_hours`, taken
+        against it for the rounding, and the strategy filled that instrument since then; one
+        whose opening is unknown is left out. Until Sept 16, 2026 the Foundry read the plain
+        record, and a live desk could adopt settings on the settlements of positions the old
+        settings had opened."""
         log = getattr(self.service, "log", None)
         reader = getattr(log, "read", None)
         if not callable(reader):
             return {}
         stream = f"desk:{desk_id}"
         prefix = f"[strategy {name}]"
+        start = _epoch(since) if since else 0.0
 
         def fresh(event: Any) -> bool:
             at = getattr(event, "at", None)
@@ -662,9 +673,23 @@ class Strategies:
             orders_by_intent, fills_by_order = self._broker_index(reader)
             orders = set().union(*(orders_by_intent.get(i, set()) for i in intents)) if intents else set()
             fills = [e for order in orders for e in fills_by_order.get(order, ()) if fresh(e)]
+            filled = {_instrument_key(f.payload.get("instrument")) for f in fills} - {None} if opened_since else set()
+
+            def opened_after(event: Any) -> bool:
+                if not opened_since or not since:
+                    return True
+                held = _dec(event.payload.get("held_for_hours"))
+                at = _epoch(getattr(event, "at", None))
+                if held is None or held < 0 or not at or not start:
+                    return False
+                # `held_for_hours` is rounded to a tenth of an hour: the earliest it can have opened.
+                if at - float(held) * 3600.0 - 180.0 < start:
+                    return False
+                return str(event.payload.get("instrument") or "") in filled
+
             outcomes = [
                 e for e in reader(stream=stream, kind="desk.outcome", limit=10_000, newest=True)
-                if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e)
+                if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e) and opened_after(e)
             ]
         except Exception:
             return {}
@@ -900,6 +925,11 @@ class Strategies:
                     continue
                 live_record = self.record(live.id, name, since=row.get("promoted_at") or row.get("deployed_at"))
                 live_score = _return_on_notional(live_record) if int(live_record.get("settled") or 0) >= min_settled else None
+                if live_score is None and row.get("foundry_id"):
+                    # leap: foundry -- settings the Foundry moved here cleared a backtest and a
+                    # forward record; they are replaced on the live desk's own evidence, not before.
+                    # Until Sept 16, 2026 the reset evidence let any shadow take them within the hour.
+                    continue
                 shadows = [m for m in manifests.values() if not m.live and m.family == live.family and m.id != live.id]
                 scored: list[tuple[Decimal, str, dict[str, Any], dict[str, Any]]] = []
                 for shadow in shadows:
@@ -923,7 +953,7 @@ class Strategies:
                 if params == _plain_params(row.get("params")):
                     continue
                 note = f"promoted from {winner}: {wrecord.get('settled')} settled, {best_score:+.3f} per $ vs live {'n/a' if live_score is None else f'{live_score:+.3f}'}"
-                self.store.update(live.id, name, params=params, promoted_at=at, promoted_from=winner, note=note[:200])
+                self.store.update(live.id, name, params=params, promoted_at=at, promoted_from=winner, note=note[:200], foundry_id=None)
                 run = {
                     "intents": [], "notes": note, "code_sha256": row.get("code_sha256"),
                     "log": [f"live {live.id}: {live_record.get('settled', 0)} settled since {row.get('promoted_at') or row.get('deployed_at')}",
@@ -932,9 +962,13 @@ class Strategies:
                 }
                 self._publish_run(live, name, run, at, f"strategy {name} promoted: {winner}'s settings take the live desk", always=True)
                 self.service.alert("info", f"promotion: {live.id}/{name} adopts {winner}'s settings ({note})")
+                hold = float(policy.get("foundry_hold_hours", 72)) * 3600.0
                 for shadow in shadows:
-                    if shadow.id == winner or not self.store.for_desk(shadow.id).get(name):
+                    srow = self.store.for_desk(shadow.id).get(name)
+                    if shadow.id == winner or not srow:
                         continue  # the winner stays as the control
+                    if srow.get("foundry_id") and _epoch(at) - _epoch(srow.get("promoted_at")) < hold:
+                        continue  # a Foundry candidate still earning its forward record keeps its settings
                     dealt = _jitter_params(params, f"{shadow.id}:{name}:{at}", jitter)
                     self.store.update(shadow.id, name, params=dealt, promoted_at=at, note=f"dealt around {winner} at {at[:16]}")
                 promoted.append({"desk_id": live.id, "strategy": name, "from": winner, "params": params, "score": str(best_score)})
@@ -1151,6 +1185,20 @@ def _jitter_params(params: Mapping[str, Any], seed: str, jitter: float) -> dict[
         else:
             out[key] = round(value * factor, 6)
     return out
+
+
+def _instrument_key(instrument: Any) -> str | None:
+    """The `Instrument.key` of a logged instrument dict (a fill's), or None."""
+    if isinstance(instrument, str):
+        return instrument or None
+    if not isinstance(instrument, Mapping):
+        return None
+    try:
+        from .broker import Instrument
+
+        return Instrument.from_dict(dict(instrument)).key
+    except Exception:
+        return None
 
 
 def _strategy_of(session_id: str) -> str | None:

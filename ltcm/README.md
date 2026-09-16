@@ -427,18 +427,30 @@ then what the live desk runs):
 1. **Candidates.** Baselines are the live settings and the best shadow's. `param_candidates` (10) jitter
    the best-known settings 10-50%, seeded by the cycle, every other one flipping a `STARTER_VARIANTS`
    choice. `code_candidates` (2) come from `profile` (K3, high, 16,000 tokens, $25 a day on desk
-   `foundry`) and must pass the lab's `validate_change` and compile. `frozen_params` never move.
+   `foundry`) and must pass the lab's `validate_change`, compile, and `check_strategy_code` (imports from
+   `SAFE_MODULES` only; no underscore attributes, attribute assignment, computed `getattr`, `str.format`,
+   frames or re-exported modules: a candidate runs inside the engine's process). `frozen_params` never
+   move, in params or in a candidate's own `DEFAULTS`; deployments and adoptions pin the parent's values.
 2. **Backtests side by side**, one per sandbox `foundry-0..7` (own fuse, 900 s cap via
-   `SandboxManager.set_limits`): the runner runs `ltcm.backtest.main` on the spec and prints one compact
-   `BACKTEST-RESULT` line with its split. `window_days` (5) to the last whole hour, `step_minutes` 15 (5 ranges).
+   `SandboxManager.set_limits`): the runner calls `ltcm.backtest.run_backtest` with a History paced at
+   0.15 s times the sandbox count (`history_min_interval`), and prints one compact line under
+   `BACKTEST-RESULT <token>`, a secret per run, then `os._exit`s; what a strategy prints is never read.
+   `window_days` (5) to the last whole hour, `step_minutes` 15 (5 ranges). A run with engine `errors` is
+   not evidence.
 3. **Selection on the out-of-sample third only**: >= 25 positions, >= 60 trades, return on notional above
-   the best measured baseline by `margin` (0.01), 95% lower bound on mean P&L above 0.
+   the best baseline by `margin` (0.01), 95% lower bound on mean P&L above 0. Every baseline must be
+   measured, or nothing qualifies and no model is asked.
 4. **Shadow at once**: the worst shadow desk (settled P&L, then equity; one still proving a candidate for
-   `protect_hours` is spared) gets the params (`promoted_at`, `foundry_id`) or the code
-   (`Strategies.install`). Never a live desk.
-5. **Live**: a positive backtest bound and `min_forward_settled` (5) settlements at P&L >= 0 since
-   deployment, and the live desk adopts it (params as `Strategies.promote` does; code installed, its
-   parent paused). Never under the kill switch; sizes, limits, capital unchanged; unproven in 72 h, expired.
+   `protect_hours` is spared) gets the params (`promoted_at`, `foundry_id`; only a desk running the
+   backtested code) or the code (`Strategies.install`). Never a live desk.
+5. **Live**: a positive backtest bound and `min_forward_settled` (5) positions opened since deployment
+   and settled (`Strategies.record(opened_since=True)`), as many fills, P&L after fees >= 0, and the live
+   desk adopts it (params as `Strategies.promote` does; code installed, its parent and anything else of
+   its line paused). Superseded instead when the live desk's code is not what was measured (its own
+   strategy, the parent, a snapshot's file) or the parent is already paused. Never under the kill
+   switch; sizes, limits, capital unchanged; unproven in 72 h, expired. `Strategies.promote` leaves a
+   Foundry adoption until the live desk has its own record and does not re-deal a Foundry trial for
+   `promotion.foundry_hold_hours` (72).
 Tape: a `lab.hypothesis` per cycle (`foundry-<n>`), a `desk.code_run` per deployment or adoption, an
 `ops.alert` per adoption. `health.json` carries `last_foundry`.
 
