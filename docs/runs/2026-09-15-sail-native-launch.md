@@ -528,3 +528,9 @@ are rewarded and punished. Shipped, in order:
   the sleeve had shrunk (learning size for shadows is $10 now). The live Scholes lost the
   07:00 hour on both maker legs after winning the 06:00 hour. The promotion loop and the
   evening retirement will sort the variants; nothing in real money exceeded a limit.
+- **Two more corrections** (9df1594, 6c077cb, 08:05 UTC): strategy records read orders and
+  fills from every `broker:<venue>` stream (they had read `broker:<desk>`, which holds nothing,
+  so every record showed zero fills and no variant had a return on notional for the promotion
+  loop to compare); the fitness factor follows net P&L per Sail dollar, open book included
+  (Scholes had earned triple compute on ten settled winners while its book was down more).
+  Both repositories are pushed to GitHub.
