@@ -59,6 +59,10 @@ DEFAULTS: dict[str, Any] = {
     "run_timeout_seconds": 90,
     "idle_publish_seconds": 3600,
     "starters": True,
+    # A live strategy's orders stay at learning size until this many of its positions have
+    # settled with a positive P&L after fees; then it may size to this multiple of learning size.
+    "earned_settled": 20,
+    "earned_multiple": 3,
 }
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 #: Family -> starter module name. A desk of the family with no strategy of its own gets the
@@ -645,6 +649,24 @@ class Strategies:
             result["error"] = f"exit {run.exit_code}"
         return result
 
+    def size_cap(self, manifest: DeskManifest, name: str) -> Decimal:
+        """How much one of the strategy's orders may commit on a live desk.
+
+        Learning size until the strategy has earned more: `earned_settled` settled positions
+        and a positive settled P&L after fees lift the cap to `earned_multiple` times learning
+        size, and the desk's own limits still bind above that. A strategy that loses money goes
+        back to learning size on the next run. This is the floor's capital following the
+        strategies that earn it, one step at a time."""
+        learning = self.learning_usd(manifest)
+        if not manifest.live:
+            return learning
+        record = self.record(manifest.id, name)
+        settled = int(record.get("settled") or 0)
+        pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
+        if settled >= int(self.config.get("earned_settled", 20)) and pnl > 0:
+            return learning * Decimal(str(self.config.get("earned_multiple", 3)))
+        return learning
+
     def _cancel(self, manifest: DeskManifest, name: str, order_ids: list[str], at: str) -> int:
         """Cancel the desk's own resting orders a strategy asked to replace. A strategy may only
         cancel orders it placed itself, so two strategies on one desk never fight."""
@@ -674,7 +696,7 @@ class Strategies:
             except Exception:
                 pass
         session = tools_module.ToolSession(session_id=session_id, desk_id=manifest.id, now=at)
-        cap = self.learning_usd(manifest)
+        cap = self.size_cap(manifest, name)
         out: list[dict[str, Any]] = []
         for raw in intents[: int(self.config["max_intents_per_run"])]:
             args = dict(raw)

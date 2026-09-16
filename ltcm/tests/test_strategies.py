@@ -316,6 +316,18 @@ class CancelAndRecordTests(StrategyCase):
         self.assertIn("1 cancelled", self.strategies.report(self.manifest, "edge")["last_notes"])
         self.assertEqual(out[0]["approved"], 0)
 
+    def test_a_live_strategy_sizes_up_only_after_it_has_earned_it(self):
+        live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
+        self.manager.files["scholes"] = {"edge.py": "def decide(kit, params):\n    return []\n"}
+        self.strategies.deploy(live, "edge", 600, {})
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"))
+        wins = [("desk:scholes", "desk.outcome", {"pnl": "0.50", "rationale_excerpt": "[strategy edge] x"}) for _ in range(20)]
+        self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})] + wins
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("30"), "twenty settled winners: three times learning size")
+        self.log_events.append(("desk:scholes", "desk.outcome", {"pnl": "-40", "rationale_excerpt": "[strategy edge] y"}))
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "a losing record goes back to learning size")
+        self.assertEqual(self.strategies.size_cap(self.manifest, "edge"), Decimal("15"), "a shadow desk keeps its learning size")
+
     def test_the_record_attributes_fills_and_settlements_to_the_strategy(self):
         self.strategies.deploy(self.manifest, "edge", 600, {})
         self.log_events += [
