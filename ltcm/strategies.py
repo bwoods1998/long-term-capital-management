@@ -203,6 +203,32 @@ class Kit:
                 continue
         out.sort(key=lambda r: -r["volume_usd"])
         return out[: int(limit)]
+    def futures(self, root=None):
+        """Coinbase's listed futures (oil, gold, equity baskets, BTC/ETH/SOL perpetual-style):
+        symbol, root, expiry, price and dollar volume, nearest expiry first. Read-only prices, a
+        reference for Kalshi's commodity markets."""
+        src = self._crypto_source()
+        lister = getattr(src, "products", None)
+        if not callable(lister):
+            return []
+        try:
+            rows = lister(product_type="FUTURE", limit=None)
+        except Exception:
+            return []
+        out = []
+        for row in rows:
+            try:
+                unit = str(row.get("contract_root_unit") or "")
+                if root and unit.upper() != str(root).upper():
+                    continue
+                price = float(row.get("price") or 0)
+                if price <= 0 or row.get("trading_disabled"):
+                    continue
+                out.append({"symbol": str(row.get("product_id")), "root": unit, "expiry": str(row.get("contract_expiry") or ""), "price": price, "volume_usd": float(row.get("volume_24h") or 0) * price})
+            except (TypeError, ValueError):
+                continue
+        out.sort(key=lambda r: (r["expiry"] or "9999", -r["volume_usd"]))
+        return out
     def kalshi_market(self, ticker):
         src = self._event_source()
         return src.market(ticker) if src is not None else None

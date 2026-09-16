@@ -69,6 +69,18 @@ MAX_CANDLES = 350
 ADV_BARS = 20
 
 
+def _future_fields(details: Any) -> dict[str, Any]:
+    """A futures product's root, expiry and contract size; nothing for a spot product."""
+    if not isinstance(details, dict):
+        return {}
+    return {
+        "contract_root_unit": details.get("contract_root_unit"),
+        "contract_expiry": details.get("contract_expiry"),
+        "contract_size": decimal_or_none(details.get("contract_size")),
+        "contract_expiry_type": details.get("contract_expiry_type"),
+    }
+
+
 def product_id(instrument: "Instrument | str") -> str:
     """`BTC-USD` from an instrument. Accepts `BTC/USD` and `BTCUSD` spellings too."""
     raw = instrument if isinstance(instrument, str) else (
@@ -78,7 +90,9 @@ def product_id(instrument: "Instrument | str") -> str:
     if "-" not in text_value and text_value.endswith("USD") and len(text_value) > 3:
         text_value = text_value[:-3] + "-USD"
     parts = text_value.split("-")
-    if len(parts) != 2 or not all(1 <= len(part) <= 12 and part.isalnum() for part in parts):
+    # A futures contract is `ROOT-DDMONYY-CDE` (BIP-20DEC30-CDE, NOL-21SEP26-CDE).
+    shaped = len(parts) == 2 or (len(parts) == 3 and parts[2] == "CDE")
+    if not shaped or not all(1 <= len(part) <= 12 and part.isalnum() for part in parts):
         raise DataError(f"coinbase: not a product id: {raw!r}")
     return text_value
 
@@ -169,6 +183,7 @@ class CoinbaseMarketData:
             "trading_disabled": bool(row.get("trading_disabled")),
             "best_bid": decimal_or_none(row.get("best_bid_price") or row.get("best_bid")),
             "best_ask": decimal_or_none(row.get("best_ask_price") or row.get("best_ask")),
+            **_future_fields(row.get("future_product_details")),
         }
 
     # ------------------------------------------------------------ product book

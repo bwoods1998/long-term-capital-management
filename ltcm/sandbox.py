@@ -165,7 +165,17 @@ def sha256_text(text: str) -> str:
 
 #: Floor modules uploaded with every run because the lab image predates them. Data readers
 #: only; nothing here can trade.
-FLOOR_EXTRAS = ("ltcm/data/weather.py",)
+#: The floor modules a strategy's kit imports, shipped to the sandbox so it runs the floor's code
+#: and not the lab image's. Until Sept 16, 2026 only the weather source rode along: a probe run
+#: in scholes-4 found /lab/floor/ltcm/data/kalshi.py predating the strike fields, so every
+#: strategy read Kalshi through a stale parser. The set is closed under imports (stdlib only).
+FLOOR_EXTRAS = (
+    "ltcm/broker.py",
+    "ltcm/data/__init__.py",
+    "ltcm/data/kalshi.py",
+    "ltcm/data/coinbase.py",
+    "ltcm/data/weather.py",
+)
 
 
 def floor_extras() -> dict[str, str]:
@@ -406,8 +416,16 @@ class SandboxManager:
             # labkit rides along on every run, so a fix reaches every sandbox without a new image,
             # and so do floor modules the image predates (the weather source).
             self.client.upload(box, f"{REMOTE_ROOT}/labkit.py", LABKIT.encode("utf-8"), mode=0o644)
-            for relative, body in floor_extras().items():
-                self.client.upload(box, f"{REMOTE_ROOT}/floor/{relative}", body.encode("utf-8"), mode=0o644)
+            extras = floor_extras()
+            digest = sha256_text("\n".join(f"{k}:{sha256_text(v)}" for k, v in sorted(extras.items())))
+            sent = getattr(self, "_extras_sent", None)
+            if sent is None:
+                sent = self._extras_sent = {}
+            if sent.get(box) != digest:
+                # Once per sandbox per change (and once after a restart), not on every run.
+                for relative, body in extras.items():
+                    self.client.upload(box, f"{REMOTE_ROOT}/floor/{relative}", body.encode("utf-8"), mode=0o644)
+                sent[box] = digest
             for name, body in toolbox.files().items():
                 self.client.upload(box, f"{REMOTE_TOOLBOX}/{name}", body.encode("utf-8"), mode=0o644)
             self.client.upload(box, f"{REMOTE_TOOLBOX}/__init__.py", b"", mode=0o644)

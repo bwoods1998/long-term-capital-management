@@ -70,6 +70,7 @@ class ProductIdTests(unittest.TestCase):
         self.assertEqual(product_id("ethusd"), "ETH-USD")
         self.assertEqual(product_id(BTC), "BTC-USD")
         self.assertEqual(product_id(Instrument("crypto", "SOL-USD", "coinbase")), "SOL-USD")
+        self.assertEqual(product_id("NOL-21SEP26-CDE"), "NOL-21SEP26-CDE", "a Coinbase futures contract")
 
     def test_refuses_anything_that_is_not_a_pair(self):
         for bad in ("", "BTC-USD-PERP", "../accounts", "BTC USD"):

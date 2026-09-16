@@ -28,6 +28,11 @@ CRYPTO_SERIES = {
     "KXSOLD": "SOL-USD", "KXSOLE": "SOL-USD", "KXXRP": "XRP-USD", "KXXRPD": "XRP-USD",
     "KXDOGE": "DOGE-USD", "KXDOGED": "DOGE-USD", "KXHYPE": "HYPE-USD", "KXHYPED": "HYPE-USD",
     "KXSHIBA": "SHIB-USD", "KXSHIBAD": "SHIB-USD",
+    # Not here on purpose: Kalshi's WTI and gold. Checked Sept 16, 2026: Kalshi's WTI implied
+    # about $97.50 while Coinbase's nearest nano crude traded $102.45 (its October contract
+    # matched at $97.57), and gold showed a similar gap; a reference with the wrong basis
+    # manufactures edges. A symbol "future:<ROOT>" resolves through kit.futures() for a desk
+    # that has checked which contract its market settles on.
 }
 
 DEFAULTS = {
@@ -151,6 +156,15 @@ def decide(kit, params):
         symbol = symbols.get(series)
         if not symbol:
             continue
+        if str(symbol).startswith("future:"):
+            listed = []
+            try:
+                listed = kit.futures(str(symbol).split(":", 1)[1])
+            except Exception:
+                listed = []
+            if not listed:
+                continue
+            symbol = listed[0]["symbol"]
         if symbol not in spots:
             quote = kit.quote(symbol) or {}
             spot = _num(quote.get("last")) or _num(quote.get("bid"))

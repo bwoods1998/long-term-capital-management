@@ -140,6 +140,12 @@ class RunTests(SandboxCase):
         self.assertIn("/lab/run/main.py", paths)
         self.assertIn("/lab/labkit.py", paths, "labkit rides along on every run, so a fix needs no new image")
         self.assertIn("/lab/floor/ltcm/data/weather.py", paths, "the weather source predates the image")
+        for module in ("broker.py", "data/__init__.py", "data/kalshi.py", "data/coinbase.py"):
+            self.assertIn(f"/lab/floor/ltcm/{module}", paths, "the kit's whole data layer is the floor's, not the image's")
+        before = len([c for c in self.client.calls if c[0] == "upload" and c[2].startswith("/lab/floor/")])
+        manager.run("mullins", "print(1)", purpose="again", timeout=40)
+        after = len([c for c in self.client.calls if c[0] == "upload" and c[2].startswith("/lab/floor/")])
+        self.assertEqual(after, before, "unchanged floor modules are not uploaded again")
         self.assertIn(("egress", "sb_lab-mullins", tuple(SANDBOX_HOSTS)), self.client.calls)
         run = [c for c in self.client.calls if c[0] == "exec"][-1]
         self.assertIn("timeout 40 python3 /lab/run/main.py", run[2][2])
