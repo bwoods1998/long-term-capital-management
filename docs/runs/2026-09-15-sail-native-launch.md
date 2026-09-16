@@ -638,3 +638,8 @@ breaker, and settings that leave the last twenty minutes alone.
   now hands the hub the taker's side. Verified the fill path on a copy of hilibrand-2's book:
   a synthetic print under its SOL bid filled it partially. Its live bids rest 0.4 to 0.6
   percent under the market, so real fills wait for a dip.
+- **Taker model verified live** (13:01 UTC): `health.json` carries `taker_model`
+  (`prints_drained`, `shadow_fills`); 2,721 prints were drained to the shadow books in the
+  first minutes after the restart, with no fill yet because the resting bids sit under the
+  market and it has not dipped to them. The first shadow maker fills will come with the
+  first dip; the promotion loop needs twelve settlements per variant after that.
