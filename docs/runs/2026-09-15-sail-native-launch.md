@@ -372,3 +372,31 @@ positive P&L after fees, then may size to three times learning size, and fall ba
 record (97cadee), which is the floor's capital following the strategies that earn it; and the
 fills of one order in one tick are one trade notice, since a 333-contract order that filled in
 six pieces would have been six emails against a cap of forty a day.
+
+## Addendum: the live book was wrong (05:37-05:50 UTC, Sept 16)
+
+The owner's trade email said a desk "sold 13.00 KXBTC-26SEP1602-B75750 at $0.7500" with no
+rationale, no engine record and no critic. Two defects behind one email. First, Kalshi's swept
+fills carry Kalshi's order id and no desk, and the gateway recorded them as they came: no desk
+ledger ever applied them. Kalshi held seven live positions while the floor's live desks showed
+flat books, cash untouched, no exit plan able to act, no settlement scored, no live P&L. Every
+live fill since 04:47 was unbooked; the 05:00 losses on the live desk were never recorded.
+Second, the v2 book is the YES book: a NO order rests on the ask, and its fill with `book_side:
+"ask"` is a buy of NO; read without the leg, every NO buy was recorded as a sell (hence "sold").
+Commit 2119567 keeps the venue's id for every order the gateway records and attributes each
+swept fill to the floor's order, desk and intent; the side mapping reads the leg. Commit 9508900
+adds `scripts/attribute_fills.py`, which appended corrected copies of the 34 unattributed live
+fills (side from the intent) so the ledgers refold; applied 05:45 UTC, loop restarted 05:45:29.
+Health had reported `reconciliation_mismatch: false` throughout, which means the reconciliation
+did not compare what it should have; that is the next thing to check.
+
+The refolded ledgers matched the venue position for position within two minutes (Scholes six
+positions, Haghani three). They also exposed the rest: the venue reports one signed YES quantity
+per market and the ledger holds a leg, so reconciliation by instrument key never compared the
+two; the floor's 2% daily-loss breaker had no exposure-reducing exemption and no shadow
+exemption, so it refused three time-stop exits and froze every shadow explorer over a live loss
+of $26; the shadow book charged resting fills the taker fee Kalshi does not charge makers; and
+markets only shadow desks held never settled, because `poll_settlements` reads the account's own
+settlements feed. All four fixed in the commit after 9508900: YES-scale reconciliation, exits and
+shadows past the floor breaker, maker fills free, and `settle_finalized_markets`, which reads the
+market itself once it is past its close.
