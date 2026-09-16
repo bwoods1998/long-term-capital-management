@@ -236,7 +236,7 @@ class CalibrationLedger:
     # ------------------------------------------------------------------ readers
     def forecasts(self) -> list[Forecast]:
         out: list[Forecast] = []
-        for event in self.log.read(kind=FORECAST_KIND, limit=10_000):
+        for event in self.log.read(kind=FORECAST_KIND, limit=10_000, newest=True):
             p = event.payload
             desk_id = _stream_desk(event.stream)
             if desk_id is None:
@@ -281,7 +281,7 @@ class CalibrationLedger:
             if current is None or resolution.settled_at < current.settled_at:
                 found[resolution.key] = resolution
 
-        for event in self.log.read(kind=RESOLUTION_KIND, limit=10_000):
+        for event in self.log.read(kind=RESOLUTION_KIND, limit=10_000, newest=True):
             p = event.payload
             if p.get("result") in ("yes", "no"):
                 keep(
@@ -293,7 +293,7 @@ class CalibrationLedger:
                         source=str(p.get("source") or "recorded"),
                     )
                 )
-        for event in self.log.read(kind="desk.outcome", limit=10_000):
+        for event in self.log.read(kind="desk.outcome", limit=10_000, newest=True):
             p = event.payload
             result = str(p.get("result") or "").strip().lower()
             market = str(p.get("market_id") or "").strip().upper()
@@ -307,7 +307,7 @@ class CalibrationLedger:
                         source="outcome",
                     )
                 )
-        for event in self.log.read(kind="broker.fill", limit=10_000):
+        for event in self.log.read(kind="broker.fill", limit=10_000, newest=True):
             p = event.payload
             if not p.get("settlement"):
                 continue

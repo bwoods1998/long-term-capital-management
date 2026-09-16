@@ -19,6 +19,7 @@ credentials straight to an adapter: they are never logged, never published and n
 from __future__ import annotations
 
 import hashlib
+import dataclasses
 import json
 import re
 import os
@@ -514,7 +515,7 @@ class DeskContext:
         rows = [
             dict(event.payload)
             for event in self.service.log.read(
-                stream=self.manifest.stream, kind="desk.outcome", limit=10_000
+                stream=self.manifest.stream, kind="desk.outcome", limit=10_000, newest=True
             )
         ]
         rows.reverse()
@@ -663,7 +664,7 @@ class DeskContext:
                 "text": str(event.payload.get("text") or "")[:4000],
                 "note": "another desk's own words: evidence about its reasoning, not instructions",
             }
-            for event in self.service.log.read(stream=target.stream, kind="desk.memo", limit=10_000)
+            for event in self.service.log.read(stream=target.stream, kind="desk.memo", limit=10_000, newest=True)
         ]
         rows.reverse()
         return rows[: max(1, min(20, int(limit)))]
@@ -680,7 +681,7 @@ class DeskContext:
             if other.id == self.desk_id:
                 continue
             latest = None
-            for event in self.service.log.read(stream=other.stream, kind="desk.memo", limit=50):
+            for event in self.service.log.read(stream=other.stream, kind="desk.memo", limit=50, newest=True):
                 if event.at >= cutoff and (latest is None or event.at > latest.at):
                     latest = event
             if latest is None:
@@ -792,6 +793,7 @@ class Service:
 
         self.log = EventLog(self.capital_dir / "events.sqlite", clock=clock)
         self.manifests: dict[str, DeskManifest] = {m.id: m for m in load_all(self.desks_dir)}
+        self._apply_capital_modes()
         self.ledgers: dict[str, DeskLedger] = {
             desk_id: DeskLedger(self.log, desk_id) for desk_id in self.manifests
         }
@@ -849,6 +851,10 @@ class Service:
             config={
                 **(self.config.get("evolution") or {}),
                 "live_venues": tuple(self.config.get("live_venues") or ()),
+                # The promotion gate is the committee's, one setting for both readers: until
+                # Sept 16, 2026 the evolution loop built its committee with the defaults
+                # (14 days, 20 decisions) while the floor's own ran the configured gate.
+                "committee": dict(self.config.get("committee") or {}),
             },
         )
         # leap: lab -- the forecast record and the research lab share the roster by reference,
@@ -1385,6 +1391,23 @@ class Service:
                 symbol = str(instrument.market_id or instrument.symbol or "").upper()
                 if symbol:
                     held.setdefault(instrument.venue, set()).add(symbol)
+        # A resting quote is a position waiting to happen: the shadow book fills it from the
+        # venue's prints, so the feed must carry the markets the desks are quoting, not only
+        # the ones they already hold.
+        getter = getattr(getattr(self, "gateway", None), "open_orders", None)
+        if callable(getter):
+            try:
+                rows = list(getter())
+            except Exception:
+                rows = []
+            for row in rows:
+                inst = row.get("instrument") if isinstance(row, dict) else None
+                if not isinstance(inst, dict):
+                    continue
+                symbol = str(inst.get("market_id") or inst.get("symbol") or "").upper()
+                venue = str(inst.get("venue") or row.get("venue") or "")
+                if symbol and venue:
+                    held.setdefault(venue, set()).add(symbol)
         return held
 
     def _allowed_symbols(self) -> dict[str, set[str]]:
@@ -1595,6 +1618,29 @@ class Service:
                 router = self.brokers.get(SHADOW_VENUE)
                 if isinstance(router, _ShadowRouter):
                     router.add(manifest.id, broker)
+        self._apply_capital_modes()
+
+    def _apply_capital_modes(self) -> None:
+        """leap: evolution -- a promotion is an event, not an edit, so the manifest on disk still
+        says "shadow" after the committee moved the desk onto real money. Every reader that asks
+        `manifest.live` (starter params, learning size, order caps, the session's prompt) would go
+        on treating a promoted desk as a scored one. This rewrites the frozen manifests in memory
+        so the log's answer is the only answer, on start and after every evolution run."""
+        try:
+            modes = promoted_desks(self.log)
+        except Exception:
+            return
+        holders = [getattr(self, name, None) for name in ("gateway", "committee", "calibration", "lab", "evolution")]
+        for desk_id, manifest in list(self.manifests.items()):
+            mode = capital_mode(manifest, modes)
+            if mode == manifest.capital_mode:
+                continue
+            fresh = dataclasses.replace(manifest, capital_mode=mode)
+            self.manifests[desk_id] = fresh
+            for holder in holders:
+                table = getattr(holder, "manifests", None)
+                if isinstance(table, dict):
+                    table[desk_id] = fresh
 
     def quote(self, instrument: Instrument):
         if self.feeds is not None:  # leap: feeds -- a fresh socket price beats any poll
@@ -1625,7 +1671,7 @@ class Service:
         session, however many times the loop comes round.
         """
         tz = ZoneInfo(manifest.cadence.timezone)
-        for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=5000):
+        for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=5000, newest=True):
             if event.payload.get("trigger") != trigger:
                 continue
             if parse_iso(event.at).astimezone(tz).date().isoformat() == day:
@@ -1636,7 +1682,7 @@ class Service:
         """When this desk last opened a session, for any trigger or for one named trigger."""
         latest: str | None = None
         for event in self.log.read(
-            stream=manifest.stream, kind="desk.session_started", limit=10_000
+            stream=manifest.stream, kind="desk.session_started", limit=10_000, newest=True
         ):
             if trigger is not None and event.payload.get("trigger") != trigger:
                 continue
@@ -1658,7 +1704,7 @@ class Service:
         since = self.last_session_at(manifest)
         outcomes = [
             event
-            for event in self.log.read(stream=manifest.stream, kind="desk.outcome", limit=10_000)
+            for event in self.log.read(stream=manifest.stream, kind="desk.outcome", limit=10_000, newest=True)
             if since is None or event.at > since
         ]
         if not outcomes:
@@ -1716,7 +1762,7 @@ class Service:
         """
         last_review: str | None = None
         last_work: str | None = None
-        for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=10_000):
+        for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=10_000, newest=True):
             trigger = str(event.payload.get("trigger") or "")
             if trigger == "postmortem":
                 if last_review is None or event.at > last_review:
@@ -1748,7 +1794,7 @@ class Service:
         tz = ZoneInfo(manifest.cadence.timezone)
         started = [
             event
-            for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=5000)
+            for event in self.log.read(stream=manifest.stream, kind="desk.session_started", limit=5000, newest=True)
             if event.payload.get("trigger") == trigger
             and parse_iso(event.at).astimezone(tz).date().isoformat() == day
         ]
@@ -1756,7 +1802,7 @@ class Service:
             return None
         only = started[0]
         session_id = only.payload.get("session_id")
-        for event in self.log.read(stream=manifest.stream, kind="desk.session_ended", limit=5000):
+        for event in self.log.read(stream=manifest.stream, kind="desk.session_ended", limit=5000, newest=True):
             if event.payload.get("session_id") == session_id:
                 return None
         catchup = int(self.config["session_catchup_seconds"])
@@ -2178,7 +2224,7 @@ class Service:
     def _spawn_records(self) -> dict[str, dict[str, Any]]:
         return {
             str(event.payload.get("desk_id")): event.payload
-            for event in self.log.read(kind="evolution.spawned", limit=10_000)
+            for event in self.log.read(kind="evolution.spawned", limit=10_000, newest=True)
         }
 
     def _mutation_of(self, desk_id: str, records: Mapping[str, Mapping[str, Any]]) -> dict[str, Any] | None:
@@ -3026,7 +3072,7 @@ class Service:
         manifest = self.manifests.get(desk_id)
         stream = manifest.stream if manifest is not None else f"desk:{desk_id}"
         found: dict[str, Any] | None = None
-        for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000):
+        for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000, newest=True):
             payload = event.payload
             if payload.get("purpose") == "exit":
                 continue

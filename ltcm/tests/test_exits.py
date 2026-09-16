@@ -518,5 +518,19 @@ class BoardTests(ServiceCase):
         self.assertEqual(exits[-1].payload["exit_of"], intent.id)
 
 
+
+class EventTimeStopTests(unittest.TestCase):
+    def test_an_event_contract_is_never_time_stopped(self):
+        """It settles; selling it into the spread minutes before the venue pays in full is a loss
+        the desk never asked for. The stop and the target still apply."""
+        contract = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="yes")
+        plan = ExitPlan.from_intent(entry(instrument=contract, target_price="0.90", stop_price="0.20"))
+        self.assertIsNone(plan.due(Decimal("0.50"), LATER))
+        self.assertIsNone(plan.due(None, LATER))
+        self.assertEqual(plan.due(Decimal("0.19"), LATER), "stop")
+        self.assertEqual(plan.due(Decimal("0.95"), NOW), "target")
+        self.assertEqual(ExitPlan.from_intent(entry()).due(Decimal("100"), LATER), "time_stop", "spot still is")
+
+
 if __name__ == "__main__":
     unittest.main()

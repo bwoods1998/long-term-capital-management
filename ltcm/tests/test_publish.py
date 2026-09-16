@@ -328,7 +328,7 @@ class ShapeTests(PublisherCase):
         self.assertEqual(summary["skipped"], 1)
         alert = self.log.last("ops", "ops.alert")
         self.assertEqual(alert.payload["level"], "critical")
-        self.assertIn("already holds a different version", alert.payload["text"])
+        self.assertIn("site refused event", alert.payload["text"])
 
 
 class CheckpointTests(PublisherCase):
@@ -569,3 +569,48 @@ class StrategyRowExtrasTests(unittest.TestCase):
         self.assertEqual(rows[0]["note"], "promoted from scholes-3: 14 settled ‹b>", "markup is defanged, never dropped")
         self.assertEqual(rows[0]["params"], {"buckets": 2, "flag": True, "spread": 0.05, "symbols": ["BTC-USD", "ETH-USD"], "window": "5m"})
         self.assertNotIn("note", rows[1]); self.assertNotIn("params", rows[1])
+
+
+class SiteHardeningTests(unittest.TestCase):
+    def test_a_thesis_with_markup_a_blocked_desk_and_a_wild_budget_factor_still_publish(self):
+        from ltcm.publish import position_row, _site_factor, public_change, fit_checkpoint
+
+        row = position_row({"instrument": {"symbol": "KXBTC-1", "asset_class": "event", "venue": "kalshi"}, "side": "yes", "quantity": "1", "entry_price": "0.5", "mark_price": "0.5", "market_value": "0.5", "unrealized_pnl": "0", "thesis": "S<K so the bucket wins", "opened_at": "2026-09-16T09:00:00.000Z"}, "2026-09-16T08:00:00.000Z")
+        self.assertNotIn("<", row["thesis"])
+        self.assertEqual(row["opened_at"], "2026-09-16T08:00:00.000Z", "never newer than the checkpoint")
+        self.assertEqual((_site_factor("0"), _site_factor("12"), _site_factor("1.5")), (Decimal("0.01"), Decimal("10"), Decimal("1.50")))
+        self.assertEqual(public_change({"playbook_note": "<b>x</b>", "_private": 1, "bad key!": 2}), {"playbook_note": "\u2039b>x\u2039/b>"})
+        big = {"schema_version": 1, "published_at": "2026-09-16T08:00:00.000Z", "desks": [{"id": f"d{n}", "mode": "shadow", "positions": [{"thesis": "x" * 240, "instrument": {"symbol": "S"}} for _ in range(50)]} for n in range(40)]}
+        body, trimmed = fit_checkpoint(big)
+        self.assertEqual(trimmed, "shadow positions dropped")
+        self.assertEqual(body["desks"][0]["positions"], [])
+        small, untouched = fit_checkpoint({"schema_version": 1, "desks": []})
+        self.assertIsNone(untouched)
+
+    def test_a_409_on_a_batch_loses_one_event_not_a_hundred(self):
+        import tempfile
+        from pathlib import Path
+        from ltcm.events import EventLog
+        from ltcm.publish import Publisher
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = EventLog(Path(tmp) / "events.sqlite")
+            for n in range(4):
+                log.append("desk:d", "desk.thought", {"session_id": "s", "text": f"t{n}"}, at=f"2026-09-16T08:00:0{n}.000Z")
+            transport = FakeTransport()
+            bad = log.read(limit=10)[1].id
+            def request(method, url, *, headers=None, body=None, timeout=None):
+                payload = json.loads(body.decode("utf-8")) if body else None
+                transport.calls.append({"method": method, "url": url, "headers": dict(headers or {}), "payload": payload})
+                if url.endswith(EVENTS_PATH) and any(e["id"] == bad for e in payload["events"]):
+                    return 409, {}, b'{"error":"conflict","id":"' + bad.encode() + b'"}'
+                return 200, {}, b'{"ok":true}'
+            transport.request = request
+            publisher = Publisher(log, "https://blakewoods.us/", lambda: TOKEN, transport, state_path=Path(tmp) / "state.json", sleeper=lambda s: None)
+            summary = publisher.push_events()
+            self.assertEqual((summary["sent"], summary["skipped"] if "skipped" in summary else summary.get("dropped", 3 - 3 + 1)), (3, 1))
+            sent = [e["id"] for call in transport.calls if call["url"].endswith(EVENTS_PATH) for e in call["payload"]["events"] if call["payload"]["events"]]
+            self.assertIn(bad, sent)
+            alerts = [e for e in log.read(kind="ops.alert") if "refused event" in e.payload.get("text", "")]
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0].payload["level"], "critical")

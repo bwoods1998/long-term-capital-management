@@ -342,6 +342,37 @@ under `stop_gb` files an error and posts a `disk_low` notice the gateway mails. 
 on Sept 16, 2026 it had filled a 32 GiB disk because the event-index sweep put the raw clock
 in every listing URL.
 
+### The loop closes on itself
+
+The audit of Sept 16, 2026 found the places where the self-improvement loop still needed a
+person, and closed them:
+
+* **A promotion is live everywhere.** `Service._apply_capital_modes` (on start and after
+  every `reload_manifests`) rewrites a promoted desk's frozen manifest in memory to
+  `capital_mode "live"`, so starter params, learning size, order caps and the session prompt
+  all see the desk the way the gateway already did. Before, `manifest.live` stayed False
+  after a promotion and shadow settings controlled real money until a restart.
+* **A bred child trades from its first tick.** `Strategies.tick` bootstraps every desk it
+  has not seen (`_bootstrapped_ids`), not just the roster at start.
+* **A spot position is scored when it is sold.** `Gateway._score_reduction` writes
+  `desk.outcome` (result `sold`, entry at the ledger's average cost, exit at the fill, the
+  fee taken) for a sell that reduces a non-event position, so crypto strategies earn the
+  settled record that sizes them up and promotes them. Settlement remains the event path.
+* **The recent tape, not the first ten thousand rows.** `EventLog.read(newest=True)` returns
+  the last `limit` events, oldest first; every state-folding read uses it (promotions,
+  retirements, breakers, reconciliations, spend, fills, intents, experiments, records).
+* **The evolution loop judges with the committee's gates** (`config.json` `committee` is
+  passed to `Evolution`), an event contract is never time-stopped (it settles), the feeds
+  follow the markets the desks are quoting as well as the ones they hold, the quoting
+  starter does not re-quote a leg that filled, and an outcome's sentence comes from an
+  accepted intent, never a refused one. Kalshi orders carry no `reduce_only`, and a `day`
+  time-in-force maps to GTC (the floor's exits bound a resting order).
+
+What still needs a person: code and deploys, credentials and venue deposits, Sail credit,
+the founder manifests, families and venues, the starter universes (the ranges series and
+the weather cities), and the learning sizes and caps in `config.json`. Everything between
+a print and a promotion runs without one.
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:

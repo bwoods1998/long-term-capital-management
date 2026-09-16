@@ -128,7 +128,7 @@ class RunClock:
 
     def _events(self, kind: str, limit: int) -> list[Any]:
         try:
-            return list(self.log.read(kind=kind, limit=limit))
+            return list(self.log.read(kind=kind, limit=limit, newest=True))
         except Exception:
             return []
 

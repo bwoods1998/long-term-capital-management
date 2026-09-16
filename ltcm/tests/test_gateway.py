@@ -775,6 +775,70 @@ class CriticScopeTests(unittest.TestCase):
         self.assertEqual(self.log.read(kind="risk.review"), [])
 
 
+
+class SpotOutcomeTests(GatewayCase):
+    """A crypto position leaves the ledger by a sell; that sell is where it is scored."""
+
+    BTC = Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD")
+
+    def fill(self, side, quantity, price, at, tag):
+        return Fill(
+            id=tag, order_id="ord-" + tag, desk_id=DESK, instrument=self.BTC, side=side,
+            quantity=Decimal(quantity), price=Decimal(price), fee=Decimal("0.10"), at=at,
+        )
+
+    def outcomes(self):
+        return [e.payload for e in self.log.read(kind="desk.outcome", limit=100)]
+
+    def test_a_reducing_sell_writes_an_outcome_at_the_ledgers_average_cost(self):
+        self.broker._fills = [
+            self.fill("buy", "0.010", "60000", "2026-09-14T13:00:00.000Z", "f1"),
+            self.fill("buy", "0.010", "62000", "2026-09-14T13:30:00.000Z", "f2"),
+        ]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.outcomes(), [], "buys open; nothing to score yet")
+        self.broker._fills.append(self.fill("sell", "0.015", "63000", "2026-09-15T13:00:00.000Z", "f3"))
+        self.gateway.ingest_fills("shadow")
+        outcomes = self.outcomes()
+        self.assertEqual(len(outcomes), 1)
+        out = outcomes[0]
+        self.assertEqual(out["market_id"], "BTC-USD")
+        self.assertEqual(out["result"], "sold")
+        self.assertEqual(Decimal(out["entry_price"]), Decimal("61000"))
+        self.assertEqual(Decimal(out["exit_price"]), Decimal("63000"))
+        self.assertEqual(Decimal(out["quantity"]), Decimal("0.015"))
+        self.assertEqual(Decimal(out["pnl"]), Decimal("2000") * Decimal("0.015") - Decimal("0.10"))
+        self.assertEqual(out["held_for_hours"], "24.0")
+        # Idempotent on the fill: polling again scores nothing twice.
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(len(self.outcomes()), 1)
+
+    def test_a_sell_with_nothing_held_scores_nothing(self):
+        self.broker._fills = [self.fill("sell", "0.010", "63000", "2026-09-15T13:00:00.000Z", "f9")]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.outcomes(), [])
+
+    def test_a_refused_intent_never_lends_its_sentence(self):
+        for intent_id, said, approved in (("oi-ok", "momentum after the halving, out in a day", True), ("oi-no", "YOLO", False)):
+            self.log.append(
+                "desk:" + DESK, "desk.intent",
+                {"intent_id": intent_id, "desk_id": DESK, "instrument": self.BTC.to_dict(), "side": "buy", "quantity": "0.01",
+                 "order_type": "limit", "limit_price": "60000", "time_in_force": "gtc", "rationale": said, "session_id": "s1",
+                 "created_at": "2026-09-14T12:30:00.000Z"},
+                id="intent:" + intent_id, at="2026-09-14T12:30:00.000Z",
+            )
+            self.log.append(
+                "risk", "risk.decision", {"intent_id": intent_id, "desk_id": DESK, "approved": approved, "reasons": []},
+                id="decision:" + intent_id, at="2026-09-14T12:31:00.000Z",
+            )
+        self.broker._fills = [
+            self.fill("buy", "0.010", "60000", "2026-09-14T13:00:00.000Z", "g1"),
+            self.fill("sell", "0.010", "61000", "2026-09-14T15:00:00.000Z", "g2"),
+        ]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.outcomes()[0]["rationale_excerpt"], "momentum after the halving, out in a day")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
 
@@ -1054,3 +1118,28 @@ class PolledOrderKeepsItsDeskTests(unittest.TestCase):
         gateway._absorb_order_event(Row({"order_id": "ord-1", "desk_id": "", "intent_id": None, "status": "accepted", "filled_quantity": "0", "venue": "coinbase"}, 2))
         row = gateway._orders["ord-1"]
         self.assertEqual((row["desk_id"], row["intent_id"], row["purpose"]), ("hilibrand", "oi-1", "entry"))
+
+
+class UnreadableAnswerTests(unittest.TestCase):
+    def test_an_unexpected_exception_after_the_request_blocks_the_desk_like_an_unknown_outcome(self):
+        from ltcm.gateway import Gateway
+        from ltcm.broker import OrderIntent, Instrument
+
+        class Broker:
+            venue = "kalshi"
+            def submit(self, intent):
+                raise ValueError("2xx with a body that is not JSON")
+
+        seen = {}
+        gateway = Gateway.__new__(Gateway)
+        gateway._orders, gateway._intent_orders, gateway._venue_orders, gateway.blocked_desks, gateway._seen_fills = {}, {}, {}, {}, set()
+        gateway._record_order = lambda order, status, at, reason=None: seen.update({"status": status, "reason": reason}) or {"order_id": order.id, "status": status}
+        gateway._alert = lambda level, text, at: seen.update({"alert": (level, text)})
+        gateway.brokers = {"kalshi": Broker()}
+        gateway.route = lambda desk_id, venue: "kalshi"
+        intent = OrderIntent.new(desk_id="scholes", instrument=Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="no"), side="buy", quantity=Decimal("1"), order_type="limit", limit_price=Decimal("0.5"), rationale="x", created_at="2026-09-16T08:00:00.000Z")
+        row, fills = gateway._submit(intent, "2026-09-16T08:00:00.000Z")
+        self.assertEqual((row["status"], fills), ("unknown", []))
+        self.assertEqual(gateway.blocked_desks.get("scholes"), row["order_id"])
+        self.assertEqual(seen["alert"][0], "critical")
+        self.assertIn("ValueError", seen["reason"])

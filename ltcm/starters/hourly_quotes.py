@@ -94,6 +94,15 @@ def decide(kit, params):
     now = _when(ctx.get("now")) or datetime.now(timezone.utc)
     notional = _num(p.get("notional_usd")) or _num(ctx.get("learning_usd"), 10.0)
     resting = [o for o in (ctx.get("open_orders") or []) if o.get("strategy") == "hourly_quotes"]
+    # A leg that filled is a position: quoting it again would add to it every run until the
+    # desk's caps bind, one bucket bought many times over.
+    held = set()
+    for pos in ctx.get("positions") or []:
+        try:
+            if str(pos.get("asset_class") or "") == "event" and float(pos.get("quantity") or 0) != 0:
+                held.add((str(pos.get("market_id") or pos.get("symbol") or ""), str(pos.get("right") or "yes").lower()))
+        except (TypeError, ValueError):
+            continue
     cancels = []
     intents = []
     fair_by_market = {}
@@ -166,7 +175,7 @@ def decide(kit, params):
         if minutes < float(p["min_minutes"]):
             continue
         for leg in ("yes", "no"):
-            if (ticker, leg) in quoted:
+            if (ticker, leg) in quoted or (ticker, leg) in held:
                 continue
             price = target_price(info, leg)
             if price < 0.02:

@@ -144,7 +144,9 @@ class ExitPlan:
                     return "stop"
                 if self.target_price is not None and mark <= self.target_price:
                     return "target"
-        if self.time_stop_at is not None:
+        if self.time_stop_at is not None and self.instrument.asset_class != "event":
+            # An event contract is paid at settlement; a time stop would sell it into the spread
+            # minutes before the venue pays it in full. Stops and targets still apply.
             try:
                 if _seconds_between(self.time_stop_at, at) >= 0:
                     return "time_stop"

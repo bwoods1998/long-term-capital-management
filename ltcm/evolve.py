@@ -604,7 +604,7 @@ class Evolution:
 
     def postmortems(self, desk_id: str, limit: int = 6) -> list[str]:
         out: list[str] = []
-        for event in self.log.read(stream=f"desk:{desk_id}", kind="desk.postmortem", limit=1000):
+        for event in self.log.read(stream=f"desk:{desk_id}", kind="desk.postmortem", limit=1000, newest=True):
             body = event.payload.get("text")
             if isinstance(body, str):
                 out.append(body)

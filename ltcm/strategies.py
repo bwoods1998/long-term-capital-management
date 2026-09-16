@@ -225,7 +225,13 @@ class Kit:
         out = []
         for row in rows:
             try:
-                out.append(src.parse_market(row))
+                # `markets()` already normalizes each row to dollars; parsing a parsed row
+                # divides every price by a hundred again (a $0.41 ask became $0.0041 until
+                # Sept 16, 2026). Only a raw row (integer cents) is parsed here.
+                if type(row.get("yes_bid")).__name__ == "Decimal" or type(row.get("last_price")).__name__ == "Decimal":
+                    out.append(row)
+                else:
+                    out.append(src.parse_market(row))
             except Exception:
                 continue
         return out
@@ -340,6 +346,7 @@ class Strategies:
         self.store = StrategyStore(path)
         self.clock = clock
         self._bootstrapped = False
+        self._bootstrapped_ids: set[str] = set()
 
     # ------------------------------------------------------------------ helpers
     def sandboxes(self) -> Any:
@@ -403,7 +410,7 @@ class Strategies:
         reader = getattr(getattr(self.service, "log", None), "read", None)
         if callable(reader):
             try:
-                for event in reader(stream=manifest.stream, kind="desk.intent", limit=10_000):
+                for event in reader(stream=manifest.stream, kind="desk.intent", limit=10_000, newest=True):
                     sessions[str(event.payload.get("intent_id"))] = str(event.payload.get("session_id") or "")
             except Exception:
                 sessions = {}
@@ -557,7 +564,7 @@ class Strategies:
         try:
             intents = {
                 e.payload.get("intent_id")
-                for e in reader(stream=stream, kind="desk.intent", limit=10_000)
+                for e in reader(stream=stream, kind="desk.intent", limit=10_000, newest=True)
                 if _strategy_of(str(e.payload.get("session_id") or "")) == name and fresh(e)
             }
             # Orders and fills live in `broker:<venue>` streams (kalshi, coinbase, shadow), never
@@ -566,12 +573,12 @@ class Strategies:
             # no variant ever had a return on notional and the promotion loop had nothing to compare.
             orders = {
                 e.payload.get("order_id")
-                for e in reader(kind="broker.order", limit=20_000)
+                for e in reader(kind="broker.order", limit=20_000, newest=True)
                 if e.payload.get("intent_id") in intents
             }
-            fills = [e for e in reader(kind="broker.fill", limit=20_000) if e.payload.get("order_id") in orders and fresh(e)]
+            fills = [e for e in reader(kind="broker.fill", limit=20_000, newest=True) if e.payload.get("order_id") in orders and fresh(e)]
             outcomes = [
-                e for e in reader(stream=stream, kind="desk.outcome", limit=10_000)
+                e for e in reader(stream=stream, kind="desk.outcome", limit=10_000, newest=True)
                 if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e)
             ]
         except Exception:
@@ -703,10 +710,15 @@ class Strategies:
         """Run the strategies that are due, a bounded number per tick. Never raises."""
         if not self.enabled():
             return []
-        if not self._bootstrapped:
+        # Every desk is dealt its starters once, the ones bred tonight included: until Sept 16,
+        # 2026 this ran once per process, so a child spawned by the evolution loop had no strategy
+        # until the next restart and its whole first day was a blank record.
+        fresh = {desk_id: m for desk_id, m in manifests.items() if desk_id not in self._bootstrapped_ids}
+        if fresh:
             self._bootstrapped = True
+            self._bootstrapped_ids.update(fresh)
             try:
-                self.bootstrap(manifests)
+                self.bootstrap(fresh)
             except Exception as exc:
                 self.service.alert("warning", f"strategy starters failed: {type(exc).__name__}")
         out: list[dict[str, Any]] = []

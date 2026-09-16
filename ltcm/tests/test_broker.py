@@ -134,3 +134,14 @@ class CryptoKeyTests(unittest.TestCase):
         self.assertEqual(Instrument("crypto", "BTC-USD", "coinbase").key, "crypto:BTC-USD:coinbase")
         event = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="no")
         self.assertEqual(event.key, "event:KXBTC-1:kalshi:no:KXBTC-1", "event keys keep the market id: their positions were always keyed with it")
+
+
+class EventLegKeyTests(unittest.TestCase):
+    def test_an_event_contract_without_a_leg_keys_as_the_yes_leg(self):
+        from ltcm.broker import Instrument
+
+        bare = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1")
+        yes = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="yes")
+        no = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="no")
+        self.assertEqual(bare.key, yes.key, "a desk that omits the leg means YES, as the fill will say")
+        self.assertNotEqual(yes.key, no.key)

@@ -105,8 +105,12 @@ class Instrument:
             parts.append(self.expiry)
         if self.strike is not None:
             parts.append(format(self.strike, "f"))
-        if self.right:
-            parts.append(self.right)
+        # An event contract without a stated leg is the YES leg: a fill always names its leg, an
+        # intent may omit it, and the two must key the same position or the desk's exits are
+        # refused as shorts and its stops are dropped as moot (Sept 16, 2026).
+        right = self.right or ("yes" if self.asset_class == "event" else None)
+        if right:
+            parts.append(right)
         # A crypto product's market id is its symbol again (Coinbase names products by id); it
         # adds nothing to the key, and a fill that carried it against an intent that did not had
         # split one position in two (Sept 16, 2026). Event contracts keep it: their positions

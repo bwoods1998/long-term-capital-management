@@ -292,7 +292,7 @@ class CancelAndRecordTests(StrategyCase):
             def __init__(self, payload):
                 self.payload = payload
 
-        def read(stream=None, kind=None, limit=None):
+        def read(stream=None, kind=None, limit=None, newest=False):
             return [Event(p) for s, k, p in self.log_events if (stream is None or s == stream) and k == kind]
 
         self.service.log.read = read
@@ -556,6 +556,34 @@ class StarterTests(unittest.TestCase):
         self.assertAlmostEqual(float(intent["quantity"]) * float(intent["limit_price"]), 15.0, delta=0.1)
 
 
+
+class LateDeskBootstrapTests(StrategyCase):
+    def test_a_desk_that_appears_after_the_first_tick_still_gets_its_starters(self):
+        """The evolution loop breeds a child at night; the child trades from its first tick, not
+        from the next restart."""
+        self.strategies.config["starters"] = True
+        self.strategies.tick(self.service.manifests, NOW)
+        self.assertIn("hourly_ranges", self.strategies.store.for_desk(self.manifest.id))
+        child = manifest(id="scholes-9", family="ranges", parent_id="scholes", capital={"mode": "shadow", "usd": "150"})
+        self.service.manifests[child.id] = child
+        self.strategies.tick(self.service.manifests, NOW)
+        self.assertIn("hourly_ranges", self.strategies.store.for_desk("scholes-9"))
+        self.assertIn("hourly_quotes", self.strategies.store.for_desk("scholes-9"))
+        deployed_twice = self.strategies.store.for_desk(self.manifest.id)["hourly_ranges"].get("deployed_at")
+        self.strategies.tick(self.service.manifests, NOW)
+        self.assertEqual(self.strategies.store.for_desk(self.manifest.id)["hourly_ranges"].get("deployed_at"), deployed_twice, "never twice")
+
+
+class HeldLegQuoteTests(unittest.TestCase):
+    def test_a_filled_leg_is_a_position_and_is_not_quoted_again(self):
+        kit = FakeKit()
+        kit.context["positions"] = [
+            {"asset_class": "event", "market_id": "KXBTC-26SEP1600-B75950", "symbol": "KXBTC-26SEP1600-B75950", "right": "yes", "quantity": "40"}
+        ]
+        out = load_starter("hourly_quotes").decide(kit, {"buckets": 1, "spread": 0.04})
+        self.assertEqual([i["instrument"]["right"] for i in out["intents"]], ["no"], "the YES leg filled; only NO is still quoted")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -569,7 +597,7 @@ class PromotionTests(StrategyCase):
             def __init__(self, payload, at=None):
                 self.payload, self.at = payload, at
 
-        def read(stream=None, kind=None, limit=None):
+        def read(stream=None, kind=None, limit=None, newest=False):
             return [Event(p, *rest) for s, k, p, *rest in self.log_events if (stream is None or s == stream) and k == kind]
 
         self.service.log.read = read

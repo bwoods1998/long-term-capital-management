@@ -416,13 +416,13 @@ class V2DefaultTests(unittest.TestCase):
         self.assertEqual(str(order.filled_quantity), "10.00")
         self.assertEqual(order.broker_order_id, "k1")
 
-    def test_a_market_sell_crosses_the_bid_and_reduces_only(self):
+    def test_a_market_sell_crosses_the_bid_without_reduce_only(self):
         client, transport, _ = self.make_v2({("POST", BASE + ORDERS_PATH_V2): {"order_id": "k2", "remaining_count": "10.00", "fill_count": "0.00"}})
         order = client.submit(intent(side="sell", order_type="market", quantity="10"))
         body = transport.last["body"]
         self.assertEqual(body["side"], "ask")
         self.assertEqual(body["price"], "0.4100")
-        self.assertTrue(body["reduce_only"])
+        self.assertNotIn("reduce_only", body)
         self.assertEqual(order.status, "accepted")
 
     def test_buying_no_at_forty_cents_is_an_ask_at_sixty(self):
@@ -438,7 +438,7 @@ class V2DefaultTests(unittest.TestCase):
         self.assertNotIn("no_price", body)
         self.assertNotIn("reduce_only", body)
 
-    def test_selling_no_is_a_bid_at_the_complement_and_reduces_only(self):
+    def test_selling_no_is_a_bid_at_the_complement_without_reduce_only(self):
         client, transport, _ = self.make_v2(
             {("POST", BASE + ORDERS_PATH_V2): {"order_id": "n2", "remaining_count": "10.00"}}
         )
@@ -448,7 +448,7 @@ class V2DefaultTests(unittest.TestCase):
         body = transport.last["body"]
         self.assertEqual(body["side"], "bid")
         self.assertEqual(body["price"], "0.7000")
-        self.assertTrue(body["reduce_only"])
+        self.assertNotIn("reduce_only", body)
 
     def test_a_market_buy_of_no_crosses_the_yes_bid_and_is_never_complemented_twice(self):
         """The reference is read on the YES leg, so it is already the wire's scale.

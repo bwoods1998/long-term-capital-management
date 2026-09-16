@@ -651,3 +651,21 @@ breaker, and settings that leave the last twenty minutes alone.
   (venue print -> hub -> shadow book -> gateway -> tape -> ledger and strategy record) is
   live; a check that looked for `"shadow": true` with a space had missed them, since the log
   stores compact JSON.
+- **Deep audit, the loop closed** (15:50 UTC): a bug hunt across publishing, the money path
+  and the self-improvement loop. Publishing: every site-facing string and stamp is
+  sanitized and clamped, an oversized checkpoint is trimmed under 240 KB before it is sent,
+  a 409 is handled like a 400, a lab change the site would refuse is withheld with a note.
+  Money path: an unreadable answer from a venue blocks the desk instead of assuming the
+  order died; the reconcile pass unblocks only when the venue says the order does not
+  exist; resting buys count against a desk's cash; shadow settlements are recorded under
+  the shadow venue; `reduce_only` is gone from Kalshi orders (the venue nets YES and NO,
+  the ledger holds each leg, and it refused NO sells). The loop: a promoted desk had kept
+  `manifest.live` False, so shadow settings would have run real money until a restart
+  (fixed in memory on start and every reload); a child bred at night had no strategies
+  until a restart (bootstrap per new desk); the runner kit parsed Kalshi prices twice (a
+  $0.41 ask read $0.0041); no crypto position ever wrote a `desk.outcome`, so no crypto
+  strategy could size up or promote (a reducing sell now scores it); every state fold read
+  the oldest ten thousand events (`newest=True`); the evolution loop judged with default
+  gates; event contracts were time-stopped into the spread before settlement; the quoting
+  starter re-bought a leg that filled. 1,120 runtime tests and 55 site tests pass.
+

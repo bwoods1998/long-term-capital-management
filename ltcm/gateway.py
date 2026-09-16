@@ -341,10 +341,22 @@ class Gateway:
         state = ledger.state(at)
         # Only live sleeves are the floor's money, so only they can trip the floor's loss limit.
         floor = floor_totals(self.ledgers, at, include=self.live_ids())
+        # Cash already committed to the desk's resting buys is not free to spend again: ten
+        # resting bids that each pass the cash rule alone can fill together (audit, Sept 16).
+        committed = ZERO
+        for row in self._orders.values():
+            if row.get("desk_id") != intent.desk_id or row.get("status") in TERMINAL_STATUSES or row.get("side") != "buy":
+                continue
+            try:
+                remaining = money(row.get("quantity") or 0) - money(row.get("filled_quantity") or 0)
+                price = money(row.get("limit_price") or 0)
+                committed += max(ZERO, remaining) * price * money((row.get("instrument") or {}).get("multiplier") or 1)
+            except Exception:
+                continue
         return RiskContext(
             manifest=manifest,
             desk_equity=state.equity,
-            desk_cash=state.cash,
+            desk_cash=state.cash - committed,
             positions=state.positions,
             quote=self._quote(intent.instrument, intent.desk_id),
             now=at,
@@ -584,10 +596,26 @@ class Gateway:
                 at,
             )
             return row, []
+        except Exception as exc:
+            # Anything else after the request went out (a 2xx with a body the adapter could
+            # not read, a parse error) is an unknown outcome too: the venue may hold the order.
+            # Record it, block the desk, say so. Never let it vanish into a traceback.
+            order = Order.from_intent(intent, venue=venue)
+            order.status = "unknown"
+            row = self._record_order(order, status="unknown", at=at, reason=f"{type(exc).__name__}: {exc}"[:300])
+            self.blocked_desks[intent.desk_id] = order.id
+            self._alert(
+                "critical",
+                f"unreadable answer for order {order.id} on {venue}: {type(exc).__name__}; desk {intent.desk_id} blocked",
+                at,
+            )
+            return row, []
 
         row = self._record_order(order, status=order.status, at=at)
-        fills = self.ingest_fills(venue)
+        # Refresh first, then sweep fills: an order that executed inline (an IOC, a marketable
+        # limit) shows its fill only once the venue has recorded it.
         row = self._refresh(order.id, venue, at) or row
+        fills = self.ingest_fills(venue)
         return row, [f for f in fills if f.get("order_id") == order.id]
 
     def _refresh(self, order_id: str, venue: str, at: str) -> dict[str, Any] | None:
@@ -685,9 +713,66 @@ class Gateway:
                 cursor = fill.at
             if fill.id in self._seen_fills:
                 continue
-            written.append(self._record_fill(venue, fill, self._attribution(fill)))
+            extra = self._attribution(fill)
+            before = self._position_before(fill, extra)
+            payload = self._record_fill(venue, fill, extra)
+            written.append(payload)
+            self._score_reduction(payload, before)
         self._fill_cursor[venue] = cursor
         return written
+
+    def _position_before(self, fill: Fill, extra: "Mapping[str, Any] | None") -> Any:
+        """The desk's position in the fill's instrument before this fill is folded, for a
+        non-event contract; None when there is nothing to score."""
+        if fill.instrument.asset_class == "event":
+            return None
+        desk_id = fill.desk_id or str((extra or {}).get("desk_id") or "")
+        ledger = self.ledgers.get(desk_id)
+        if ledger is None:
+            return None
+        try:
+            return ledger.state(self.now()).positions.get(fill.instrument.key)
+        except Exception:
+            return None
+
+    def _score_reduction(self, payload: Mapping[str, Any], before: Any) -> Event | None:
+        """leap: exits -- a spot position leaves the ledger by a sell, never by a settlement, so
+        the sell is where its result is scored: entry at the ledger's average cost, exit at the
+        fill. Until Sept 16, 2026 only event contracts wrote `desk.outcome`, so no crypto
+        strategy ever had a settled record and none could earn a bigger size or a promotion."""
+        try:
+            if before is None or payload.get("side") != "sell" or money(before.quantity) <= 0:
+                return None
+            desk_id = str(payload.get("desk_id") or "")
+            quantity = min(money(payload.get("quantity") or 0), money(before.quantity))
+            price = money(payload.get("price") or 0)
+            fee = money(payload.get("fee") or 0)
+            if not desk_id or quantity <= 0:
+                return None
+            instrument = before.instrument
+            entry = money(before.average_cost)
+            pnl = (price - entry) * quantity * instrument.multiplier - fee
+            at = _stamp(payload.get("at"), self.now())
+            opened_at, rationale = self._entry_of(desk_id, instrument.key)
+            manifest = self.manifests.get(desk_id)
+            stream = manifest.stream if manifest else f"desk:{desk_id}"
+            body = {
+                "instrument": instrument.key,
+                "market_id": instrument.market_id or instrument.symbol,
+                "result": "sold",
+                "entry_price": text(entry),
+                "exit_price": text(price),
+                "quantity": text(quantity),
+                "pnl": text(pnl),
+                "held_for_hours": _hours_between(opened_at, at),
+                "rationale_excerpt": rationale,
+                "fill_id": str(payload.get("fill_id") or ""),
+            }
+            return self.log.append(
+                stream, "desk.outcome", body, id=f"outcome:{desk_id}:{_short(str(payload.get('fill_id') or at))}", at=at
+            )
+        except Exception:
+            return None
 
     def _attribution(self, fill: Fill) -> dict[str, Any] | None:
         """The desk, intent and floor order id a venue fill belongs to, from the venue's order
@@ -942,7 +1027,9 @@ class Gateway:
             fee=ZERO,
             at=settled_at,
         )
-        payload = self._record_fill(venue, fill, {"settlement": True, "result": result})
+        # A shadow desk's settlement is a shadow fill: it never goes to the tape as the venue's.
+        record_venue = venue if self.live_desk(desk_id) else SHADOW_VENUE
+        payload = self._record_fill(record_venue, fill, {"settlement": True, "result": result})
         self._record_outcome(
             desk_id,
             position,
@@ -1000,7 +1087,7 @@ class Gateway:
     def _entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
         """When this desk first traded the contract, and the sentence it gave for doing so."""
         opened_at: str | None = None
-        for event in self.log.read(kind="broker.fill", limit=10_000):
+        for event in self.log.read(kind="broker.fill", limit=10_000, newest=True):
             payload = event.payload
             if payload.get("desk_id") != desk_id or _key_of(payload.get("instrument")) != key:
                 continue
@@ -1009,9 +1096,12 @@ class Gateway:
         rationale = ""
         manifest = self.manifests.get(desk_id)
         stream = manifest.stream if manifest else f"desk:{desk_id}"
-        for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000):
+        self._load()
+        for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000, newest=True):
             if _key_of(event.payload.get("instrument")) != key:
                 continue
+            if self._decisions.get(event.payload.get("intent_id")) is False:
+                continue  # refused by the engine or the critic: it never opened anything
             said = event.payload.get("rationale")
             if isinstance(said, str) and said.strip():
                 rationale = said.strip()[:400]
@@ -1048,8 +1138,6 @@ class Gateway:
             for row in self._orders.values()
             if row.get("status") not in TERMINAL_STATUSES and row.get("venue")
         }
-        for venue in sorted(v for v in venues if v):
-            self.ingest_fills(venue)
         for order_id, row in sorted(self._orders.items()):
             if row.get("status") in TERMINAL_STATUSES or row.get("status") == "unknown":
                 continue
@@ -1060,6 +1148,12 @@ class Gateway:
             fresh = self._refresh(order_id, venue, at)
             if fresh is not None and (fresh.get("status"), fresh.get("filled_quantity")) != before:
                 changed.append(fresh)
+        # The fill sweep runs after the refresh, for every venue that had a resting order when
+        # the poll began: a fill that lands between the two would otherwise wait for the next
+        # order on that venue, and a quoting strategy would re-bid against a position it
+        # already holds (Sept 16, 2026 audit).
+        for venue in sorted(v for v in venues if v):
+            self.ingest_fills(venue)
         return changed
 
     def cancel(self, desk_id: str, order_id: str, now: Any = None) -> dict[str, Any]:
@@ -1102,17 +1196,23 @@ class Gateway:
             row = self._orders.get(order_id) or {}
             if row.get("venue") != venue:
                 continue
-            fresh = self._refresh(order_id, venue, at)
-            if fresh is None or fresh.get("status") == "unknown":
-                # The venue still cannot say. Treat the order as never placed and unblock only
-                # once the position comparison below agrees.
+            try:
+                broker.get_order(order_id)
+            except (RejectedOrder, LookupError) as exc:
+                # The venue answered and has no such order: it was never placed.
                 self._record_order(
                     self._order_from_row(row),
                     status="rejected",
                     at=at,
-                    reason="unresolved after reconciliation; venue has no such order",
+                    reason=f"unresolved after reconciliation; venue has no such order ({exc})"[:300],
                 )
-            self.blocked_desks.pop(desk_id, None)
+                self.blocked_desks.pop(desk_id, None)
+                continue
+            except Exception:
+                continue  # the venue did not answer: the desk stays blocked until it does
+            fresh = self._refresh(order_id, venue, at)
+            if fresh is not None and fresh.get("status") not in ("unknown", None):
+                self.blocked_desks.pop(desk_id, None)  # resolved to a real status
         self.ingest_fills(venue)
 
         try:
@@ -1217,7 +1317,7 @@ class Gateway:
         """
         self._load()
         released: dict[str, int] = {}
-        for event in self.log.read(kind="desk.intent", limit=10_000):
+        for event in self.log.read(kind="desk.intent", limit=10_000, newest=True):
             if event.public:
                 continue
             intent_id = event.payload.get("intent_id")
@@ -1228,7 +1328,7 @@ class Gateway:
                 continue
             if (self._orders.get(order_id) or {}).get("status") in TERMINAL_STATUSES:
                 released[event.id] = event.seq
-        for event in self.log.read(kind="broker.order", limit=10_000):
+        for event in self.log.read(kind="broker.order", limit=10_000, newest=True):
             if event.public:
                 continue
             order_id = event.payload.get("order_id")

@@ -131,5 +131,28 @@ class EventLogTests(unittest.TestCase):
         self.assertEqual(events.now_iso(lambda: 1.9996), "1970-01-01T00:00:01.999Z")
 
 
+
+class NewestReadTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = EventLog(Path(self.tmp.name) / "events.sqlite", clock=lambda: 1_789_000_000.0)
+
+    def tearDown(self):
+        self.log.close()
+        self.tmp.cleanup()
+
+    def test_newest_returns_the_last_n_in_sequence_order(self):
+        for n in range(6):
+            self.log.append("desk:a", "desk.thought", {"session_id": "s", "text": str(n)}, id=f"t{n}")
+        oldest = [e.payload["text"] for e in self.log.read(kind="desk.thought", limit=4)]
+        newest = [e.payload["text"] for e in self.log.read(kind="desk.thought", limit=4, newest=True)]
+        self.assertEqual(oldest, ["0", "1", "2", "3"])
+        self.assertEqual(newest, ["2", "3", "4", "5"], "the recent tape, still oldest first")
+        self.assertEqual(
+            [e.payload["text"] for e in self.log.read(kind="desk.thought", limit=100, newest=True)],
+            ["0", "1", "2", "3", "4", "5"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

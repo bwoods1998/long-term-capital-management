@@ -1045,6 +1045,46 @@ class EnvTests(unittest.TestCase):
         self.assertEqual(load_env("/nonexistent/.env"), {})
 
 
+
+class PromotedDeskTests(ServiceCase):
+    """A promotion is a log event; in memory the desk must be live everywhere, at once."""
+
+    def promote(self, at="2026-09-14T20:00:00.000Z"):
+        self.service.log.append(
+            "evolution", "evolution.promoted",
+            {"desk_id": DESK, "from": "shadow", "to": "live", "venue": "shadow", "score": {}},
+            id="promoted:" + DESK, at=at,
+        )
+
+    def test_a_desk_promoted_before_start_loads_as_live(self):
+        self.promote()
+        self.service.close()
+        self.service = self.build()
+        self.assertTrue(self.service.manifests[DESK].live)
+        self.assertTrue(self.service.gateway.manifests[DESK].live)
+        self.assertTrue(self.service.committee.manifests[DESK].live)
+        self.assertEqual(self.service.live_ids(), {DESK})
+        self.assertEqual(self.service.shadow_books, {}, "a live desk has no scoring book")
+
+    def test_a_promotion_during_the_run_flips_the_desk_on_the_next_reload(self):
+        self.assertFalse(self.service.manifests[DESK].live)
+        self.promote()
+        self.service.reload_manifests()
+        self.assertTrue(self.service.manifests[DESK].live)
+        self.assertTrue(self.service.gateway.manifests[DESK].live)
+        self.assertTrue(self.service.gateway.live_desk(DESK))
+
+    def test_the_evolution_loop_judges_with_the_committees_own_gates(self):
+        self.assertEqual(self.service.evolution.config["committee"], {"bandit_enabled": False})
+
+    def test_feeds_follow_the_markets_the_desks_are_quoting(self):
+        self.service.gateway.open_orders = lambda desk_id=None: [
+            {"order_id": "o1", "desk_id": DESK, "status": "accepted",
+             "instrument": {"asset_class": "event", "symbol": "KXBTC-1", "market_id": "KXBTC-1", "venue": "kalshi", "right": "yes"}}
+        ]
+        self.assertEqual(self.service._held_symbols().get("kalshi"), {"KXBTC-1"})
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
 
@@ -1900,7 +1940,7 @@ class WorkingOrdersCheckpointTests(ServiceCase):
             "side": "buy", "quantity": "13", "limit_price": "0.75", "submitted_at": "2026-09-13T13:00:00.000Z",
             "purpose": "entry", "strategy": "hourly_quotes", "intent_id": "oi-7",
         }])
-        self.assertEqual(desk["budget_factor"], "1", "no record yet: the manifest's budget as written")
+        self.assertEqual(Decimal(str(desk["budget_factor"])), Decimal("1"), "no record yet: the manifest's budget as written")
         self.service.close()
         self.service = self.build(checkpoint_strategies=False)
         self.tick()

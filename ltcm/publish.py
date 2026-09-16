@@ -506,17 +506,16 @@ class Publisher:
             )
             return len(chunk), 0
         except PublishError as exc:
-            if exc.status == 409:
-                self.alert(
-                    f"site already holds a different version of {len(chunk)} event(s) "
-                    f"from {chunk[0].id}: {exc}",
-                    level="critical",
-                )
-                return 0, len(chunk)
-            if exc.status != 400:
+            if exc.status not in (400, 409):
                 raise
+            # The site takes a batch in one transaction, so one bad id refuses all of them:
+            # halve until the one is alone, then say so and move past it. A 409 is one event
+            # the site holds with a different digest; the other ninety-nine still go.
             if len(chunk) == 1:
-                self.alert(f"site refused event {chunk[0].id}: {exc}", level="warning")
+                self.alert(
+                    f"site refused event {chunk[0].id}: {exc}",
+                    level="critical" if exc.status == 409 else "warning",
+                )
                 return 0, 1
         middle = len(chunk) // 2
         first = self.send_batch(chunk[:middle])
@@ -545,7 +544,57 @@ class Publisher:
             "published_at": body.get("published_at") or now_iso(self.clock),
             **{k: v for k, v in body.items() if k not in ("schema_version", "published_at")},
         }
+        payload, trimmed = fit_checkpoint(payload)
+        if trimmed:
+            self.alert(f"checkpoint trimmed to fit the site's cap: {trimmed}", level="warning")
         return self.post(CHECKPOINT_PATH, payload)
+
+
+#: The site refuses a checkpoint over 256 KB; the floor keeps a margin under it.
+CHECKPOINT_CAP_BYTES = 240 * 1024
+
+
+def _checkpoint_bytes(payload: Mapping[str, Any]) -> int:
+    return len(canonical(jsonable(payload)).encode("utf-8"))
+
+
+def fit_checkpoint(payload: Mapping[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """Trim a checkpoint that would exceed the site's cap: shadow desks' positions first (they
+    are scores, not money), then every thesis to a line, then the shadow desks' strategies. A
+    book of sixteen desks holding fifty contracts each would otherwise refuse every checkpoint
+    with nothing on the runtime side saying why (audit, Sept 16, 2026)."""
+    body = dict(payload)
+    if _checkpoint_bytes(body) <= CHECKPOINT_CAP_BYTES:
+        return body, None
+    steps: list[str] = []
+    desks = [dict(d) for d in body.get("desks") or []]
+    for desk in desks:
+        if desk.get("mode") != "live" and desk.get("positions"):
+            desk["positions"] = []
+    body["desks"] = desks
+    steps.append("shadow positions dropped")
+    if _checkpoint_bytes(body) > CHECKPOINT_CAP_BYTES:
+        for desk in desks:
+            for row in desk.get("positions") or []:
+                if isinstance(row, dict) and isinstance(row.get("thesis"), str):
+                    row["thesis"] = row["thesis"][:80]
+        steps.append("theses cut to a line")
+    if _checkpoint_bytes(body) > CHECKPOINT_CAP_BYTES:
+        for desk in desks:
+            if desk.get("mode") != "live":
+                desk.pop("strategies", None)
+                desk.pop("working", None)
+        steps.append("shadow strategies dropped")
+    return body, ", ".join(steps)
+
+
+def _site_factor(value: Any) -> Any:
+    """The site accepts a budget factor in (0, 10]; the config could say otherwise."""
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return max(Decimal("0.01"), min(Decimal("10"), number)).quantize(Decimal("0.01"))
 
 
 def unsigned(value: Any) -> Any:
@@ -695,6 +744,8 @@ def _plain_params_for_site(value: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, raw in sorted(dict(value).items()):
         name = str(key)[:40]
+        if not SITE_KEY.match(name) or name.startswith("_"):
+            continue
         if isinstance(raw, bool) or isinstance(raw, (int, float)):
             out[name] = raw
         elif isinstance(raw, str):
@@ -778,7 +829,11 @@ def working_rows(value: Any, published_at: str | None = None) -> list[dict[str, 
         side = str(row.get("side") or "")
         if not symbol or not asset_class or not venue or side not in ("buy", "sell"):
             continue
-        quantity = floor_at_zero(row.get("quantity"))
+        try:
+            quantity = floor_at_zero(row.get("quantity"))
+            limit_price = None if row.get("limit_price") in (None, "") else floor_at_zero(row.get("limit_price"))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
         if quantity is None:
             continue
         submitted = row.get("submitted_at")
@@ -794,7 +849,7 @@ def working_rows(value: Any, published_at: str | None = None) -> list[dict[str, 
                 "instrument": wire_instrument,
                 "side": side,
                 "quantity": quantity,
-                "limit_price": None if row.get("limit_price") in (None, "") else floor_at_zero(row.get("limit_price")),
+                "limit_price": limit_price,
                 "submitted_at": submitted,
                 "purpose": "exit" if row.get("purpose") == "exit" else "entry",
                 "strategy": (str(row["strategy"])[:40] if row.get("strategy") else None),
@@ -822,7 +877,7 @@ def public_change(value: Any) -> dict[str, Any]:
     """An experiment's change as the checkpoint carries it. The site caps a change at 4 KB, so
     a strategy's code (up to 6,000 characters) travels as its digest and length; the code itself
     is on the tape in the `lab.experiment` event and in the variant's toolbox."""
-    change = dict(value) if isinstance(value, Mapping) else {}
+    change = {str(k): v for k, v in dict(value).items() if isinstance(k, str) and SITE_KEY.match(k) and not k.startswith("_")} if isinstance(value, Mapping) else {}
     spec = change.get("strategy")
     if isinstance(spec, Mapping):
         import hashlib
@@ -831,10 +886,16 @@ def public_change(value: Any) -> dict[str, Any]:
         change["strategy"] = {
             "name": str(spec.get("name") or "")[:40],
             "cadence_seconds": spec.get("cadence_seconds"),
-            "params": dict(spec.get("params") or {}) if isinstance(spec.get("params"), Mapping) else {},
+            "params": _plain_params_for_site(spec.get("params") or {}) if isinstance(spec.get("params"), Mapping) else {},
             "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest()[:16],
             "code_chars": len(code),
         }
+    if isinstance(change.get("playbook_note"), str):
+        change["playbook_note"] = sanitize_string(change["playbook_note"])[:600]
+    # Whatever the site would still refuse is withheld rather than sent: one bad experiment on
+    # the checkpoint would freeze the whole page for as long as it stayed on the list.
+    if payload_problem(change) is not None:
+        return {"withheld": "the change did not fit the site's shape"}
     return change
 
 
@@ -847,7 +908,7 @@ def lab_block(value: Any) -> dict[str, Any]:
             continue
         entry = {
             "experiment_id": str(row.get("experiment_id") or ""),
-            "hypothesis": str(row.get("hypothesis") or "")[:600],
+            "hypothesis": sanitize_string(str(row.get("hypothesis") or ""))[:600],
             "family": str(row.get("family") or ""),
             "parent_id": row.get("parent_id"),
             "change": public_change(row.get("change")),
@@ -857,7 +918,7 @@ def lab_block(value: Any) -> dict[str, Any]:
             "evaluate_after": row.get("evaluate_after"),
         }
         if row.get("verdict_reason"):
-            entry["verdict_reason"] = str(row["verdict_reason"])[:600]
+            entry["verdict_reason"] = sanitize_string(str(row["verdict_reason"]))[:600]
         experiments.append(entry)
     curve = [dict(row) for row in list(lab.get("curve") or [])[:40] if isinstance(row, Mapping)]
     calibration = lab.get("calibration") if isinstance(lab.get("calibration"), Mapping) else {}
@@ -935,14 +996,14 @@ def checkpoint_body(
                 "days_live": desk.get("days_live"),
                 "orders": desk.get("orders"),
                 "cost_usd": floor_at_zero(desk.get("cost_usd")),
-                "status": desk.get("status"),
+                "status": "halted" if desk.get("status") == "blocked" else desk.get("status"),
                 "gate": desk.get("gate"),
                 "updated_at": not_after(desk.get("updated_at"), published_at),
                 **({"next_session_at": desk.get("next_session_at")} if "next_session_at" in desk else {}),
                 # leap: exits and watch. Optional on the wire: an older floor omits them.
-                **({"positions": [position_row(row) for row in list(desk.get("positions") or [])[:50]]}
+                **({"positions": [position_row(row, published_at) for row in list(desk.get("positions") or [])[:50]]}
                    if desk.get("positions") is not None else {}),
-                **({"live_session": live_session_row(desk.get("live_session"))}
+                **({"live_session": live_session_row(desk.get("live_session"), published_at)}
                    if desk.get("live_session") else {}),
                 # leap: lab -- optional, absent for a founder or a desk with no scored forecast.
                 **({"mutation": mutation_block(desk["mutation"])} if mutation_block(desk.get("mutation")) else {}),
@@ -950,7 +1011,7 @@ def checkpoint_body(
                 # leap: strategies -- optional; an older floor, or a desk with none, omits it.
                 **({"strategies": strategy_rows(desk["strategies"], published_at)} if strategy_rows(desk.get("strategies"), published_at) else {}),
                 **({"working": working_rows(desk["working"], published_at)} if working_rows(desk.get("working"), published_at) else {}),
-                **({"budget_factor": desk.get("budget_factor")} if desk.get("budget_factor") not in (None, "") else {}),
+                **({"budget_factor": _site_factor(desk.get("budget_factor"))} if desk.get("budget_factor") not in (None, "") else {}),
             }
             for desk in desks
         ],
@@ -979,7 +1040,7 @@ def checkpoint_body(
             "requests_today": counted(infra.get("requests_today")),
         },
         # leap: watch. What the night desk did today; absent on a floor without one.
-        **({"watch": watch_row(watch)} if watch is not None else {}),
+        **({"watch": watch_row(watch, published_at)} if watch is not None else {}),
         # leap: lab -- present whenever the floor runs a lab, however empty its record.
         **({"lab": lab_block(lab)} if lab is not None else {}),
         # leap: run clock -- how long the desks have worked, what it cost, what it earned.
@@ -987,7 +1048,7 @@ def checkpoint_body(
     }
 
 
-def position_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def position_row(row: Mapping[str, Any], published_at: str | None = None) -> dict[str, Any]:
     """One entry of a desk's positions board, in the contract's shape (leap: exits)."""
     instrument = dict(row.get("instrument") or {})
     exits = []
@@ -1011,8 +1072,9 @@ def position_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "mark_price": floor_at_zero(row.get("mark_price")),
         "market_value": floor_at_zero(row.get("market_value")),
         "unrealized_pnl": row.get("unrealized_pnl"),
-        "opened_at": row.get("opened_at"),
-        "thesis": str(row.get("thesis") or "")[:240],
+        "opened_at": not_after(row.get("opened_at"), published_at) if published_at else row.get("opened_at"),
+        # A desk writes inline math ("S<K"); the site refuses a raw "<" in prose.
+        "thesis": sanitize_string(str(row.get("thesis") or ""))[:240],
         "intent_id": row.get("intent_id"),
         "session_id": row.get("session_id"),
         "target_price": None if row.get("target_price") is None else floor_at_zero(row.get("target_price")),
@@ -1022,11 +1084,11 @@ def position_row(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def live_session_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def live_session_row(row: Mapping[str, Any], published_at: str | None = None) -> dict[str, Any]:
     return {
         "session_id": row.get("session_id"),
         "trigger": row.get("trigger"),
-        "started_at": row.get("started_at"),
+        "started_at": not_after(row.get("started_at"), published_at) if published_at else row.get("started_at"),
     }
 
 
@@ -1054,10 +1116,10 @@ def run_row(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def watch_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def watch_row(row: Mapping[str, Any], published_at: str | None = None) -> dict[str, Any]:
     return {
         "triggers_today": counted(row.get("triggers_today")),
         "wakes_today": counted(row.get("wakes_today")),
-        "last_trigger_at": row.get("last_trigger_at"),
+        "last_trigger_at": not_after(row.get("last_trigger_at"), published_at) if published_at else row.get("last_trigger_at"),
         "cost_today_usd": floor_at_zero(row.get("cost_today_usd")),
     }

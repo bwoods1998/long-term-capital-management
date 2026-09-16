@@ -121,7 +121,7 @@ STATUS_MAP: dict[str, str] = {
 
 TIF_V2 = {
     "gtc": "good_till_canceled",
-    "day": "good_till_canceled",
+    "day": "good_till_canceled",  # Kalshi has no day orders; the floor's own exits bound a resting order
     "ioc": "immediate_or_cancel",
 }
 
@@ -430,8 +430,9 @@ class KalshiBroker:
             # shard must already hold collateral: scripts/kalshi_shard.py moves it.
             "exchange_index": -1,
         }
-        if intent.side == "sell":
-            body["reduce_only"] = True
+        # No `reduce_only`: Kalshi nets YES and NO into one position while the floor's ledger
+        # holds each leg, so a NO sell against a YES-heavy net position was refused by the
+        # venue. The risk engine already forbids selling more of a leg than the desk holds.
         if getattr(intent, "post_only", False):
             body["post_only"] = True  # rest or be rejected; a maker pays no fee here
         return body
@@ -704,7 +705,7 @@ class KalshiBroker:
             venue=self.venue,
             broker_order_id=str(row.get("order_id") or "") or None,
             filled_quantity=filled,
-            average_price=dec(row.get("average_fill_price")) or limit_price if filled else None,
+            average_price=(dec(row.get("average_fill_price_dollars")) or dollars_from_cents(row.get("average_fill_price")) or limit_price) if filled else None,
             fees=fees,
             submitted_at=_stamp(row.get("created_time")) or iso(self.clock()),
             updated_at=_stamp(row.get("last_update_time") or row.get("created_time")),

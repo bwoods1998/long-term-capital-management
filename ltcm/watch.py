@@ -115,7 +115,7 @@ class NightWatch:
     # ------------------------------------------------------------------ state
     def _restore_cooldowns(self) -> None:
         """After a restart the log still knows when each desk was last woken."""
-        for event in self.service.log.read(kind="desk.watch", limit=10_000):
+        for event in self.service.log.read(kind="desk.watch", limit=10_000, newest=True):
             if event.payload.get("decision") != "wake":
                 continue
             desk_id = event.stream.split(":", 1)[1] if ":" in event.stream else event.stream
@@ -161,7 +161,7 @@ class NightWatch:
         lookback = int(self.config["lookback_seconds"])
         stream = f"ledger:{desk_id}"
         chosen: Decimal | None = None
-        for event in self.service.log.read(stream=stream, kind="ledger.mark", limit=2000):
+        for event in self.service.log.read(stream=stream, kind="ledger.mark", limit=2000, newest=True):
             as_of = event.payload.get("as_of") or event.at
             try:
                 age = _seconds_between(as_of, at)
@@ -247,7 +247,7 @@ class NightWatch:
             ticker = str(position.instrument.market_id or position.instrument.symbol or "")
             if ticker:
                 series.add(ticker.split("-")[0].upper())
-        for event in self.service.log.read(stream=manifest.stream, kind="desk.forecast", limit=500):
+        for event in self.service.log.read(stream=manifest.stream, kind="desk.forecast", limit=500, newest=True):
             market = str(event.payload.get("market") or "")
             if market:
                 series.add(market.split("-")[0].upper())
@@ -417,7 +417,7 @@ class NightWatch:
         triggers = wakes = 0
         cost = ZERO
         last: str | None = None
-        for event in self.service.log.read(kind="desk.watch", limit=10_000):
+        for event in self.service.log.read(kind="desk.watch", limit=10_000, newest=True):
             if not event.at.startswith(day):
                 continue
             triggers += 1

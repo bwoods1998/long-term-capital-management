@@ -341,14 +341,14 @@ class Lab:
     def experiments(self) -> dict[str, dict[str, Any]]:
         """Every experiment the log knows, with its latest status. Verdicts are final."""
         out: dict[str, dict[str, Any]] = {}
-        for event in self.log.read(kind=EXPERIMENT_KIND, limit=10_000):
+        for event in self.log.read(kind=EXPERIMENT_KIND, limit=10_000, newest=True):
             p = event.payload
             exp_id = p.get("experiment_id")
             if not isinstance(exp_id, str):
                 continue
             current = out.get(exp_id, {})
             out[exp_id] = {**current, **dict(p), "at": event.at}
-        for event in self.log.read(kind=VERDICT_KIND, limit=10_000):
+        for event in self.log.read(kind=VERDICT_KIND, limit=10_000, newest=True):
             p = event.payload
             exp_id = p.get("experiment_id")
             if isinstance(exp_id, str) and exp_id in out:
@@ -717,7 +717,7 @@ class Lab:
         return "\n".join(rows) if rows else "(no activity in the window)"
 
     def _reports_block(self) -> str:
-        events = self.log.read(kind="lab.result", limit=10_000)[-3:]
+        events = self.log.read(kind="lab.result", limit=10_000, newest=True)[-3:]
         if not events:
             return "(none yet)"
         return "\n".join(f"- {e.at[:10]}: {str(e.payload.get('verdict'))[:400]}" for e in events)

@@ -85,7 +85,7 @@ def retired_desks(log: EventLog) -> set[str]:
     """Desks the evolution loop has retired. Manifests are never edited, so the log is the truth."""
     return {
         event.payload["desk_id"]
-        for event in log.read(kind="evolution.retired", limit=10_000)
+        for event in log.read(kind="evolution.retired", limit=10_000, newest=True)
         if isinstance(event.payload.get("desk_id"), str)
     }
 
@@ -97,7 +97,7 @@ def promoted_desks(log: EventLog) -> dict[str, str]:
     rename still says the same thing years later.
     """
     modes: dict[str, str] = {}
-    for event in log.read(kind="evolution.promoted", limit=10_000):
+    for event in log.read(kind="evolution.promoted", limit=10_000, newest=True):
         desk_id = event.payload.get("desk_id")
         to = event.payload.get("to")
         if to == "paper":
@@ -192,7 +192,7 @@ class Committee:
     def cost_usd(self, desk_id: str) -> Decimal:
         """Everything the floor has paid the model provider on this desk's behalf."""
         total = ZERO
-        for event in self.log.read(kind="provider.request", limit=10_000):
+        for event in self.log.read(kind="provider.request", limit=10_000, newest=True):
             if event.payload.get("desk_id") != desk_id:
                 continue
             value = event.payload.get("cost_usd")
@@ -208,7 +208,7 @@ class Committee:
         scope = f"desk:{desk_id}"
         return sum(
             1
-            for event in self.log.read(kind="risk.breaker", limit=10_000)
+            for event in self.log.read(kind="risk.breaker", limit=10_000, newest=True)
             if event.payload.get("scope") == scope
         )
 
@@ -216,13 +216,13 @@ class Committee:
         scope = f"desk:{desk_id}"
         return any(
             event.payload.get("scope") == scope and event.payload.get("action") == "pause_desk"
-            for event in self.log.read(kind="risk.breaker", limit=10_000)
+            for event in self.log.read(kind="risk.breaker", limit=10_000, newest=True)
         )
 
     def reconciliation_clean(self, desk_id: str) -> bool:
         manifest = self.manifests.get(desk_id)
         venues = set(manifest.venues) if manifest else set()
-        for event in self.log.read(kind="broker.reconciled", limit=10_000):
+        for event in self.log.read(kind="broker.reconciled", limit=10_000, newest=True):
             if venues and event.payload.get("venue") not in venues:
                 continue
             if event.payload.get("mismatches"):

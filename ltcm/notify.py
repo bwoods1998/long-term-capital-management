@@ -109,7 +109,7 @@ class TradeNotifier:
 
     # ------------------------------------------------------------------ folding
     def _first(self, kind: str, **match: Any) -> Any:
-        for event in self.log.read(kind=kind, limit=5000):
+        for event in self.log.read(kind=kind, limit=5000, newest=True):
             if all(event.payload.get(k) == v for k, v in match.items()):
                 return event
         return None
@@ -236,12 +236,12 @@ class TradeNotifier:
         # and a 333-contract order filled in six on Sept 16, 2026 would have been six emails.
         pending: list[tuple[list[str], list[Any], Callable[[list[Any]], dict[str, Any] | None]]] = []
         by_order: dict[str, list[Any]] = {}
-        for event in self.log.read(kind="broker.fill", limit=2000):
+        for event in self.log.read(kind="broker.fill", limit=2000, newest=True):
             if news(event):
                 by_order.setdefault(str(event.payload.get("order_id") or event.id), []).append(event)
         for events in by_order.values():
             pending.append(([e.id for e in events], events, self.story_group))
-        for event in self.log.read(kind="desk.outcome", limit=2000):
+        for event in self.log.read(kind="desk.outcome", limit=2000, newest=True):
             if news(event):
                 pending.append(([event.id], [event], lambda events: self.settlement(events[0])))
         pending.sort(key=lambda item: item[1][0].at)

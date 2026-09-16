@@ -311,7 +311,11 @@ class EventLog:
         after: int = 0,
         limit: int = 1000,
         public_only: bool = False,
+        newest: bool = False,
     ) -> list[Event]:
+        """Events in sequence order. `newest=True` returns the LAST `limit` events (still oldest
+        first): a reader folding state from a kind that has outgrown the clamp wants the recent
+        tape, not the first ten thousand rows written years ago."""
         clauses = ["seq > ?"]
         params: list[Any] = [int(after)]
         if stream is not None:
@@ -323,11 +327,13 @@ class EventLog:
         if public_only:
             clauses.append("public = 1")
         params.append(max(1, min(int(limit), 10_000)))
+        order = "DESC" if newest else "ASC"
         rows = self._db.execute(
-            f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY seq ASC LIMIT ?",
+            f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY seq {order} LIMIT ?",
             params,
         ).fetchall()
-        return [_row_to_event(r) for r in rows]
+        events = [_row_to_event(r) for r in rows]
+        return events[::-1] if newest else events
 
     def iter_all(self) -> Iterator[Event]:
         after = 0
