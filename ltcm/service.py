@@ -1433,6 +1433,8 @@ class Service:
             hub.check_health()
         except Exception:
             pass
+        self._taker_drained = getattr(self, "_taker_drained", 0) + len(trades)
+        self._taker_fills = getattr(self, "_taker_fills", 0) + filled
         return {
             "fill_venues": list(drained.get("fill_venues") or []),
             "fills_confirmed": [f for f in confirmed if f],
@@ -3205,6 +3207,7 @@ class Service:
             "feeds": self._feeds_status(),
             "rss_mb": _rss_mb(),
             "disk_free_gb": _disk_free_gb(self.root),
+            "taker_model": {"prints_drained": getattr(self, "_taker_drained", 0), "shadow_fills": getattr(self, "_taker_fills", 0)},
             "floor": {
                 "equity": text(floor["equity"]),
                 "cash": text(floor["cash"]),
