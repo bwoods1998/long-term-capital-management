@@ -403,6 +403,20 @@ desk is live, it is `min_days` old, and its best desk with `min_decisions` has `
 cost-adjusted excess below `retire_below` percent; or when after `idle_days` (10) no desk has reached
 `min_decisions`. By hand: `scripts/found_family.py --packet | --dry-run | --apply`, `--wind-down [--apply]`.
 
+### Keeping the tick's clock
+
+The tick is the floor's heartbeat: stops, targets, marks, order polls and strategy dispatch all
+wait on it. Everything slow runs beside it. Desk sessions run on their own threads; strategy
+runs go to a pool (`strategies.parallel_runs`, one run per desk, each desk on its own Sail
+sandbox); the night watch's model calls, the Kalshi index warm-up, the lab's night and the
+committee memo run on single named workers (`Service._off_tick`, `background_work`) whose
+results the next tick picks up; trade notices read from a log cursor (`notify_seq`); settlement
+sweeps run every `settlement_interval_seconds`; strategy records share one order-and-fill index
+for `strategies.record_cache_seconds`. Each tick writes the step it is in to
+`.data/ltcm/tick-phase.json` and the seconds each step took to `health.json` `last_tick.timing`,
+so a slow tick names its own culprit. On Sept 16, 2026 this took the tick from 4 to 10 minutes
+to about 30 seconds.
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:
