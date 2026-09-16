@@ -71,6 +71,7 @@
   },
   "sources": {},
   "publish": true,
+  "background_work": true,
   "checkpoint_strategies": true,
   "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
   "shadow_slippage_bps": 5,

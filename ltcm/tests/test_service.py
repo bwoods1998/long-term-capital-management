@@ -214,6 +214,8 @@ class ServiceCase(unittest.TestCase):
             "evolution": {"target_variants": 1},
             # No sandboxes unless a case installs a fake: the packaged config names a lab image.
             "sandbox": {"enabled": False},
+            # Slow work inline, so a tick's result is complete when a case reads it.
+            "background_work": False,
             # The ratio allocation rule, so the capital assertions test arithmetic, not a draw;
             # the bandit has its own case in test_committee.
             "committee": {"bandit_enabled": False},
@@ -1154,6 +1156,25 @@ class PromotedDeskTests(ServiceCase):
         self.service._apply_capital_modes()
         self.assertEqual(self.service.live_ids(), set())
         self.assertEqual(self.service._live_pnl(at), Decimal("-100"), "the loss stays on the record")
+
+    def test_slow_work_runs_off_the_tick_one_worker_at_a_time(self):
+        import threading as _threading
+
+        self.service.config["background_work"] = True
+        gate = _threading.Event()
+        calls = []
+
+        def slow():
+            calls.append(1)
+            gate.wait(5)
+            return ["done"]
+
+        self.assertIsNone(self.service._off_tick("x", slow), "nothing finished yet")
+        self.assertIsNone(self.service._off_tick("x", slow), "one worker per name")
+        self.assertEqual(len(calls), 1)
+        gate.set()
+        self.service._workers["x"]["thread"].join(5)
+        self.assertEqual(self.service._off_tick("x", lambda: ["next"]), ["done"], "the finished result is handed over")
 
     def test_the_evolution_loop_judges_with_the_committees_own_gates(self):
         self.assertEqual(self.service.evolution.config["committee"], {"bandit_enabled": False})

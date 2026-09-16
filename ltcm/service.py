@@ -1739,6 +1739,34 @@ class Service:
                     router.add(manifest.id, broker)
         self._apply_capital_modes()
 
+    def _off_tick(self, name: str, work: Callable[[], Any]) -> Any:
+        """Run slow work (model calls, venue sweeps) on one worker per name, so the tick keeps its
+        clock: stops, marks, orders and strategy dispatch every pass. Returns the result of the
+        previous run once it has finished (None while it runs), or runs inline when `background`
+        is off. On Sept 16, 2026 the night watch's model calls held one tick for four minutes
+        once they stopped being cut off at 300 tokens."""
+        if not bool(self.config.get("background_work", False)):
+            return work()
+        workers = getattr(self, "_workers", None)
+        if workers is None:
+            workers = self._workers = {}
+        slot = workers.get(name)
+        if slot is not None and slot["thread"].is_alive():
+            return None
+        previous = slot.get("result") if slot is not None else None
+        entry: dict[str, Any] = {"result": None}
+
+        def run() -> None:
+            try:
+                entry["result"] = work()
+            except Exception as exc:  # pragma: no cover - the work guards itself
+                self.alert("warning", f"{name} failed off the tick: {type(exc).__name__}")
+
+        entry["thread"] = threading.Thread(target=run, name=f"off-tick-{name}", daemon=True)
+        workers[name] = entry
+        entry["thread"].start()
+        return previous
+
     def _apply_capital_modes(self) -> None:
         """leap: evolution -- a promotion is an event, not an edit, so the manifest on disk still
         says "shadow" after the committee moved the desk onto real money. Every reader that asks
@@ -2740,19 +2768,29 @@ class Service:
         # leap: watch. The night desk looks after the marks are fresh; it costs nothing
         # until something happens, and it is quiet when the floor has stopped for credit.
         if self.watch is not None and not result["kill_switch"] and not stopped:
-            try:
-                result["watch"] = self.watch.tick(at, allow_shadow=not live_only)
-            except Exception as exc:
-                self.alert("warning", f"night watch failed: {type(exc).__name__}: {exc}")
+            allow_shadow = not live_only
+
+            def watch_once(at: str = at, allow: bool = allow_shadow) -> Any:
+                try:
+                    return self.watch.tick(at, allow_shadow=allow)
+                except Exception as exc:
+                    self.alert("warning", f"night watch failed: {type(exc).__name__}: {exc}")
+                    return []
+
+            result["watch"] = self._off_tick("watch", watch_once) or []
 
         # Keep the event-contract index warm so a desk's first search does not wait on a sweep.
         if any("event" in m.instruments.asset_classes for m in self.manifests.values()):
             source = self.source("event")
             if source is not None:
-                try:
-                    self.event_index(source)
-                except Exception as exc:
-                    self.alert("warning", f"event index warm-up failed: {type(exc).__name__}")
+
+                def warm(source: Any = source) -> None:
+                    try:
+                        self.event_index(source)
+                    except Exception as exc:
+                        self.alert("warning", f"event index warm-up failed: {type(exc).__name__}")
+
+                self._off_tick("event_index", warm)
 
         day = local.date().isoformat()
         if state.get("last_rate_card_day") != day:
@@ -2782,22 +2820,33 @@ class Service:
         # twenty minutes would have the watchdog restart the box in the middle of it.
         lab_pending = state.get("lab_pending_day") == day
         if not stopped and (lab_pending or self._due(local, self.config["lab_time"], state.get("last_lab_day"), day)):
-            experiments: list[dict[str, Any]] = []
-            try:
-                if not lab_pending:
-                    self._save_state(lab_pending_day=day)
-                    experiments.extend(self.lab.evaluate(at))
-                experiments.extend(self.lab.propose(at, max_work=1))
-            except Exception as exc:
-                # One alert, and the night is over: a lab that fails every tick until midnight
-                # would write the same alert to the public tape every thirty seconds.
-                self.alert("warning", f"lab run failed: {type(exc).__name__}: {exc}")
-                self._save_state(last_lab_day=day, lab_pending_day=None)
-            self.reload_manifests()
-            self._install_experiment_strategies(experiments)  # leap: lab
-            if not self.lab.pending(at):
-                self._save_state(last_lab_day=day, lab_pending_day=None)
-            result["experiments"] = experiments
+            if not lab_pending:
+                self._save_state(lab_pending_day=day)
+
+            def lab_step(at: str = at, day: str = day, first: bool = not lab_pending) -> dict[str, Any]:
+                # The model call (K3, a long answer) runs on a worker; the roster reload and the
+                # strategy installs stay on the tick, which owns the manifests.
+                experiments: list[dict[str, Any]] = []
+                try:
+                    if first:
+                        experiments.extend(self.lab.evaluate(at))
+                    experiments.extend(self.lab.propose(at, max_work=1))
+                except Exception as exc:
+                    # One alert, and the night is over: a lab that fails every tick until
+                    # midnight would write the same alert to the public tape every thirty seconds.
+                    self.alert("warning", f"lab run failed: {type(exc).__name__}: {exc}")
+                    return {"day": day, "experiments": experiments, "failed": True}
+                return {"day": day, "experiments": experiments, "failed": False}
+
+            done = self._off_tick("lab", lab_step)
+            if isinstance(done, Mapping) and done.get("day") == day:
+                if done.get("failed"):
+                    self._save_state(last_lab_day=day, lab_pending_day=None)
+                self.reload_manifests()
+                self._install_experiment_strategies(list(done.get("experiments") or []))  # leap: lab
+                if not self.lab.pending(at):
+                    self._save_state(last_lab_day=day, lab_pending_day=None)
+                result["experiments"] = list(done.get("experiments") or [])
         if stopped:
             pass  # the memo and the evolution loop both ask the model; they wait for credit
         elif self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
@@ -2821,7 +2870,9 @@ class Service:
                 self._save_state(last_resize_day=day)
                 result["committee"] = True
             if resize_day or memo_daily:
-                result["memo"] = bool(self.committee.memo(at))
+                # Meriwether's memo is a model call: off the tick, once for the day.
+                self._off_tick("memo", lambda at=at: bool(self.committee.memo(at)))
+                result["memo"] = True
                 self._save_state(last_committee_day=day)
         if not stopped and self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day):
             actions = list(self.evolution.select(at)) + list(self.evolution.promote(at))
