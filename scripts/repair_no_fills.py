@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true", help="write the corrected copies (default: dry run)")
     parser.add_argument("--since", default="2026-09-16T04:00:00Z", help="read venue fills from this instant")
     parser.add_argument("--log", default=str(ROOT / ".data" / "ltcm" / "events.sqlite"))
+    parser.add_argument("--tag", default="3", help="suffix for this pass's event and fill ids (a pass that went wrong keeps its ids)")
+    parser.add_argument("--skip", action="append", default=[], help="event id suffix of a fill an earlier pass already corrected")
     args = parser.parse_args(argv)
     broker = kalshi_shard.broker()
     truth = {}
@@ -46,14 +48,17 @@ def main(argv: list[str] | None = None) -> int:
     # The ledger folds each fill_id once, so a copy needs its own: `<fill_id>:reversal` and
     # `<fill_id>:corrected`. (A first pass on Sept 16 copied the original fill_id and the
     # ledgers ignored the copies.)
-    corrected = {str(e.payload.get("fill_id"))[: -len(":corrected")] for e in fills if str(e.payload.get("fill_id", "")).endswith(":corrected")}
+    marker = f":corrected{args.tag}"
+    corrected = {str(e.payload.get("fill_id"))[: -len(marker)] for e in fills if str(e.payload.get("fill_id", "")).endswith(marker)}
     todo = []
     for event in fills:
         p = event.payload
         if p.get("venue") != "kalshi" or p.get("shadow") or p.get("settlement") or not p.get("desk_id"):
             continue  # a fill without a desk folds into no ledger; its attributed copy carries the intent's side
         fill_id = str(p.get("fill_id") or "")
-        if ":" in fill_id or str(event.id).endswith((":corrected", ":reversal", ":corrected:2", ":reversal:2")):
+        if ":" in fill_id or ":reversal" in str(event.id) or ":corrected" in str(event.id):
+            continue
+        if any(str(event.id).endswith(s) for s in args.skip):
             continue
         if fill_id in corrected or fill_id not in truth:
             continue
@@ -65,12 +70,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(todo)} tape fill(s) carry the wrong side")
     for event, true_side, right in todo:
         p = event.payload
+        fill_id = str(p.get("fill_id") or "")  # this fill's own id: a first pass reused the loop's last one
         print(f"  {event.at} {p.get('desk_id') or '-'} tape {p.get('side')} {right} {p.get('quantity')} {(p.get('instrument') or {}).get('market_id')} @ {p.get('price')} -> {true_side}")
         if args.apply:
-            reversal = {**p, "fill_id": f"{fill_id}:reversal", "side": true_side, "fee": "0", "corrected_from": event.id, "note": "reverses a fill recorded on the wrong side"}
-            log.append(event.stream, "broker.fill", reversal, id=f"{event.id}:reversal:2", at=event.at)
-            fixed = {**p, "fill_id": f"{fill_id}:corrected", "side": true_side, "corrected_from": event.id}
-            log.append(event.stream, "broker.fill", fixed, id=f"{event.id}:corrected:2", at=event.at)
+            reversal = {**p, "fill_id": f"{fill_id}:reversal{args.tag}", "side": true_side, "fee": "0", "corrected_from": event.id, "note": "reverses a fill recorded on the wrong side"}
+            log.append(event.stream, "broker.fill", reversal, id=f"{event.id}:reversal:{args.tag}", at=event.at)
+            fixed = {**p, "fill_id": f"{fill_id}:corrected{args.tag}", "side": true_side, "corrected_from": event.id}
+            log.append(event.stream, "broker.fill", fixed, id=f"{event.id}:corrected:{args.tag}", at=event.at)
     print("applied" if args.apply else "dry run", len(todo))
     if args.apply and todo:
         print("restart the loop so the ledgers refold:  python3 scripts/floor_box.py deploy")
