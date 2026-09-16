@@ -1001,13 +1001,22 @@ class Strategies:
         back to learning size on the next run. This is the floor's capital following the
         strategies that earn it, one step at a time."""
         learning = self.learning_usd(manifest)
+        fit = self.limit_fit_usd(manifest)
         if manifest.live:
             record = self.record(manifest.id, name)
             settled = int(record.get("settled") or 0)
             pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
             if settled >= int(self.config.get("earned_settled", 20)) and pnl > 0:
-                learning = learning * Decimal(str(self.config.get("earned_multiple", 3)))
-        fit = self.limit_fit_usd(manifest)
+                earned = learning * Decimal(str(self.config.get("earned_multiple", 3)))
+                # Compounding: a strategy that keeps earning ramps toward the desk's own order
+                # limit, a share of the desk's equity, so its bets grow as the book grows. Full
+                # size at `full_size_settled` settlements; the desk's position, daily-loss and
+                # floor limits still bind above it.
+                if fit is not None:
+                    full_at = max(1, int(self.config.get("full_size_settled", 40)))
+                    ramp = min(Decimal(1), Decimal(settled) / Decimal(full_at))
+                    earned = max(earned, (fit * ramp).quantize(Decimal("0.01")))
+                learning = earned
         return min(learning, fit) if fit is not None else learning
 
     def limit_fit_usd(self, manifest: DeskManifest) -> Decimal | None:

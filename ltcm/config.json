@@ -59,6 +59,8 @@
     "max_runs_per_tick": 4,
     "parallel_runs": 12,
     "record_cache_seconds": 60,
+    "earned_settled": 6,
+    "full_size_settled": 40,
     "promotion": {"min_settled": 6, "interval_seconds": 1800},
     "run_timeout_seconds": 90,
     "idle_publish_seconds": 3600,

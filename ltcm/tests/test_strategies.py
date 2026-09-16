@@ -329,6 +329,24 @@ class CancelAndRecordTests(StrategyCase):
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "a losing record goes back to learning size")
         self.assertEqual(self.strategies.size_cap(self.manifest, "edge"), Decimal("15"), "a shadow desk keeps its learning size")
 
+    def test_an_earning_strategy_ramps_toward_the_desks_order_limit(self):
+        live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "1000"})
+        self.manager.files["scholes"] = {"edge.py": "def decide(kit, params):\n    return []\n"}
+        self.strategies.deploy(live, "edge", 600, {})
+
+        class Ledger:
+            def state(self, at):
+                return type("S", (), {"equity": Decimal("1000")})()
+
+        self.service.ledgers = {"scholes": Ledger()}
+        fit = (Decimal("1000") * min(live.limits.max_order_notional_pct, live.limits.max_position_pct) * Decimal("0.9")).quantize(Decimal("0.01"))
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "no record: learning size")
+        wins = [("desk:scholes", "desk.outcome", {"pnl": "0.50", "rationale_excerpt": "[strategy edge] x"}) for _ in range(20)]
+        self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})] + wins
+        self.assertEqual(self.strategies.size_cap(live, "edge"), max(Decimal("30"), (fit * Decimal("0.5")).quantize(Decimal("0.01"))), "20 of 40 settlements: half the desk's order limit")
+        self.log_events += wins + wins
+        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "40 or more: the full limit")
+
     def test_a_shrinking_desk_is_sized_to_fit_its_own_limits(self):
         """Scholes at $33 with a 15% cap: a $10 learning order is refused forever; $4.45 trades."""
         live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
