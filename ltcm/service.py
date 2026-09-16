@@ -1411,6 +1411,24 @@ class Service:
                 confirmed.extend(row.get("fill_id", "") for row in self.gateway.ingest_fills(venue))
             except Exception as exc:
                 self.alert("warning", f"fill confirmation on {venue} failed: {type(exc).__name__}")
+        # leap: taker model -- every print the sockets saw fills the shadow quotes it would have hit.
+        trades = []
+        drainer = getattr(hub, "drain_trades", None)
+        if callable(drainer):
+            try:
+                trades = list(drainer())
+            except Exception as exc:
+                self.alert("warning", f"trade drain failed: {type(exc).__name__}")
+        filled = 0
+        for trade in trades:
+            for desk_id, book in list(self.shadow_books.items()):
+                on_trade = getattr(book, "on_trade", None)
+                if not callable(on_trade):
+                    continue
+                try:
+                    filled += len(on_trade(trade["venue"], trade["symbol"], trade["price"], trade["size"], trade["taker_side"], at) or [])
+                except Exception as exc:
+                    self.alert("warning", f"shadow taker fill on {desk_id} failed: {type(exc).__name__}")
         try:
             hub.check_health()
         except Exception:
@@ -1419,6 +1437,8 @@ class Service:
             "fill_venues": list(drained.get("fill_venues") or []),
             "fills_confirmed": [f for f in confirmed if f],
             "resolutions": len(drained.get("resolutions") or []),
+            "trades": len(trades),
+            "shadow_taker_fills": filled,
         }
 
     def _maybe_upgrade_kalshi_tier(self, at: str) -> None:

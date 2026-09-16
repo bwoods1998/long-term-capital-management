@@ -198,6 +198,7 @@ class FeedHub:
         self._prices: dict[tuple[str, str], dict[str, Any]] = {}
         self._fill_venues: set[str] = set()
         self._resolutions: list[dict[str, Any]] = []
+        self._trades: list[dict[str, Any]] = []  # leap: taker model -- prints the shadow books fill against
         self._status: dict[str, dict[str, Any]] = {}
         self._down_since: dict[str, float] = {}
         self._last_alert_at: dict[str, float] = {}
@@ -264,6 +265,25 @@ class FeedHub:
                 "at": float(at if at is not None else self.clock()),
                 "source": source,
             }
+
+    def on_trade(self, venue: str, symbol: str, *, price: Any, size: Any, taker_side: str, at: float | None = None) -> None:
+        """A trade the venue printed. The shadow books fill a resting quote against it the way
+        a real queue would: a taker who sold at or through our bid hit us. Bounded; the tick
+        drains it (`drain_trades`)."""
+        price_d, size_d = _dec(price), _dec(size)
+        if price_d is None or size_d is None or price_d <= 0 or size_d <= 0:
+            return
+        row = {"venue": venue, "symbol": str(symbol).upper(), "price": price_d, "size": size_d,
+               "taker_side": str(taker_side or "").lower(), "at": float(at if at is not None else self.clock())}
+        with self._lock:
+            self._trades.append(row)
+            if len(self._trades) > 5000:
+                del self._trades[: len(self._trades) - 5000]
+
+    def drain_trades(self) -> list[dict[str, Any]]:
+        with self._lock:
+            trades, self._trades = self._trades, []
+        return trades
 
     def on_fill_candidate(self, venue: str, payload: Mapping[str, Any]) -> None:
         with self._lock:

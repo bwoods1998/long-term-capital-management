@@ -176,7 +176,7 @@ class KalshiFeedTests(HubCase):
         self.assertEqual(url, "wss://api.elections.kalshi.com/trade-api/ws/v2")
         self.assertEqual(headers, KALSHI_HEADERS)
         self.assertEqual([m["params"]["channels"] for m in sock.sent[:2]], [["fill"], ["market_lifecycle_v2"]])
-        self.assertEqual(sock.sent[2]["params"], {"channels": ["ticker"], "market_tickers": ["KXFED-26SEP-T3.75"]})
+        self.assertEqual(sock.sent[2]["params"], {"channels": ["ticker", "trade"], "market_tickers": ["KXFED-26SEP-T3.75"]})
         self.assertEqual(feed.sids, {"fill": 7})
         self.assertTrue(sock.closed)
 
@@ -321,3 +321,29 @@ class CoinbaseFeedTests(HubCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TakerPrintTests(HubCase):
+    def test_prints_are_kept_and_drained_once(self):
+        self.hub.on_trade("kalshi", "kxbtc-1", price="0.37", size="4", taker_side="YES")
+        self.hub.on_trade("coinbase", "BTC-USD", price="76000.5", size="0.01", taker_side="SELL")
+        self.hub.on_trade("coinbase", "BTC-USD", price="x", size="1", taker_side="buy")
+        trades = self.hub.drain_trades()
+        self.assertEqual([(t["venue"], t["symbol"], str(t["price"]), str(t["size"]), t["taker_side"]) for t in trades],
+                         [("kalshi", "KXBTC-1", "0.37", "4", "yes"), ("coinbase", "BTC-USD", "76000.5", "0.01", "sell")])
+        self.assertEqual(self.hub.drain_trades(), [])
+
+    def test_a_kalshi_trade_message_and_a_coinbase_market_trade_reach_the_hub(self):
+        from ltcm.feeds.kalshi import KalshiFeed
+        from ltcm.feeds.coinbase import CoinbaseMarketFeed
+
+        kalshi = KalshiFeed.__new__(KalshiFeed)
+        kalshi.hub, kalshi.venue, kalshi.sids = self.hub, "kalshi", {}
+        kalshi.handle(None, {"type": "trade", "sid": 4, "msg": {"market_ticker": "KXFED-26SEP-T3.75", "yes_price_dollars": "0.8900", "count_fp": "12.00", "taker_side": "no"}})
+        kalshi.handle(None, {"type": "trade", "sid": 4, "msg": {"market_ticker": "KXFED-26SEP-T3.75", "yes_price": 88, "count": 3, "taker_side": "yes"}})
+        coinbase = CoinbaseMarketFeed.__new__(CoinbaseMarketFeed)
+        coinbase.hub, coinbase.venue = self.hub, "coinbase"
+        coinbase.handle(None, "market_trades", {"events": [{"trades": [{"product_id": "BTC-USD", "price": "76795.1", "size": "0.002", "side": "SELL"}]}]})
+        trades = self.hub.drain_trades()
+        self.assertEqual([(t["venue"], t["symbol"], str(t["price"]), str(t["size"]), t["taker_side"]) for t in trades],
+                         [("kalshi", "KXFED-26SEP-T3.75", "0.8900", "12.00", "no"), ("kalshi", "KXFED-26SEP-T3.75", "0.88", "3", "yes"), ("coinbase", "BTC-USD", "76795.1", "0.002", "sell")])

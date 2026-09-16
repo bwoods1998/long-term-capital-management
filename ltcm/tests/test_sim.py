@@ -585,3 +585,41 @@ class FillHistoryTests(SimTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TakerModelTests(SimTestCase):
+    """leap: taker model -- prints fill the resting quotes a taker would have hit."""
+
+    NO = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="no")
+    BTC = Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD")
+
+    def test_a_print_on_the_other_leg_fills_a_resting_no_bid_at_its_own_limit_in_pieces(self):
+        self.book(self.NO, bid="0.68", ask="0.70", last="0.69")
+        self.broker = self.make_broker("kalshi.db", market_venue="kalshi")
+        self.addCleanup(self.broker.close)
+        order = self.broker.submit(intent(self.NO, quantity="10", order_type="limit", limit_price="0.65"))
+        self.assertEqual(order.status, "accepted", "0.65 rests under the 0.70 ask")
+        self.assertEqual(self.broker.on_trade("kalshi", "KXBTC-1", "0.36", "5", "no"), [], "a taker buying NO lifts the ask; our bid is not hit")
+        self.assertEqual(self.broker.on_trade("kalshi", "KXBTC-1", "0.30", "5", "yes"), [], "YES bought at 0.30 is NO sold at 0.70, above our 0.65 bid: not hit")
+        changed = self.broker.on_trade("kalshi", "KXBTC-1", "0.37", "4", "yes")  # NO sold at 0.63 <= 0.65
+        self.assertEqual([(o.status, o.filled_quantity, o.average_price) for o in changed], [("partially_filled", Decimal("4"), Decimal("0.65"))])
+        changed = self.broker.on_trade("kalshi", "KXBTC-1", "0.35", "50", "yes")
+        self.assertEqual([(o.status, o.filled_quantity) for o in changed], [("filled", Decimal("10"))])
+        position = self.broker.position(self.NO)
+        self.assertEqual((position.quantity, position.average_cost), (Decimal("10"), Decimal("0.65")))
+        fills = self.broker.fills()
+        self.assertEqual(sorted(f.quantity for f in fills), [Decimal("4"), Decimal("6")])
+
+    def test_a_crypto_print_by_a_selling_taker_fills_a_resting_bid_and_a_buying_taker_a_resting_offer(self):
+        self.book(self.BTC, bid="100", ask="101", last="100.5")
+        self.broker = self.make_broker("coinbase.db", market_venue="coinbase")
+        self.addCleanup(self.broker.close)
+        bid = self.broker.submit(intent(self.BTC, quantity="1", order_type="limit", limit_price="99"))
+        self.assertEqual(bid.status, "accepted")
+        self.assertEqual(self.broker.on_trade("coinbase", "BTC-USD", "98.5", "2", "buy"), [], "a buying taker does not hit a bid")
+        filled = self.broker.on_trade("coinbase", "BTC-USD", "98.5", "2", "sell")
+        self.assertEqual([(o.status, o.average_price) for o in filled], [("filled", Decimal("99"))])
+        offer = self.broker.submit(intent(self.BTC, side="sell", quantity="1", order_type="limit", limit_price="103"))
+        self.assertEqual(offer.status, "accepted")
+        self.assertEqual(self.broker.on_trade("coinbase", "ETH-USD", "104", "1", "buy"), [], "another product")
+        self.assertEqual([o.status for o in self.broker.on_trade("coinbase", "BTC-USD", "103.5", "1", "buy")], ["filled"])

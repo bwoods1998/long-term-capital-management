@@ -2045,3 +2045,29 @@ class LifetimePnlTests(ServiceCase):
         row = {r["id"]: r for r in self.publisher.checkpoints[-1]["desks"]}[DESK]
         self.assertIn("pnl_usd", row)
         self.assertEqual(Decimal(str(row["pnl_usd"])), Decimal(str(row["equity"])) - Decimal(str(row["capital_usd"])), "a fresh desk: equity less its allocation")
+
+
+class TakerModelWiringTests(ServiceCase):
+    def test_drained_prints_reach_every_shadow_book(self):
+        seen = []
+
+        class Hub:
+            def drain(self):
+                return {"fill_venues": [], "resolutions": []}
+
+            def drain_trades(self):
+                return [{"venue": "kalshi", "symbol": "KXBTC-1", "price": Decimal("0.37"), "size": Decimal("4"), "taker_side": "yes", "at": 0.0}]
+
+            def check_health(self):
+                return []
+
+        class Book:
+            def on_trade(self, venue, symbol, price, size, taker_side, at):
+                seen.append((venue, symbol, str(price), str(size), taker_side))
+                return ["order"]
+
+        self.service.feeds = Hub()
+        self.service.shadow_books = {"scholes-2": Book(), "scholes-3": Book()}
+        result = self.service._drain_feeds(moment_iso(2026, 9, 14, 19, 5))
+        self.assertEqual((result["trades"], result["shadow_taker_fills"]), (1, 2))
+        self.assertEqual(seen, [("kalshi", "KXBTC-1", "0.37", "4", "yes")] * 2)

@@ -111,6 +111,7 @@ class CoinbaseMarketFeed(_CoinbaseFeed):
         try:
             sock.send(json.dumps({"type": "subscribe", "product_ids": products, "channel": "heartbeats"}))
             sock.send(json.dumps({"type": "subscribe", "product_ids": products, "channel": "ticker"}))
+            sock.send(json.dumps({"type": "subscribe", "product_ids": products, "channel": "market_trades"}))
             self._read(sock, stop)
         finally:
             sock.close()
@@ -121,6 +122,18 @@ class CoinbaseMarketFeed(_CoinbaseFeed):
             raise ConnectionError("coinbase product list changed; reconnecting")
 
     def handle(self, sock: Any, channel: str, envelope: Mapping[str, Any]) -> None:
+        if channel == "market_trades":
+            # Public prints; `side` is the taker's side. The shadow books fill against them.
+            for event in envelope.get("events") or []:
+                if not isinstance(event, dict):
+                    continue
+                for row in event.get("trades") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    product = str(row.get("product_id") or "").upper()
+                    if product:
+                        self.hub.on_trade(self.venue, product, price=row.get("price"), size=row.get("size"), taker_side=str(row.get("side") or ""))
+            return
         if channel != "ticker":
             return
         for event in envelope.get("events") or []:

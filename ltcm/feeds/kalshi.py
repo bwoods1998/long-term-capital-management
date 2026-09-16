@@ -78,14 +78,16 @@ class KalshiFeed(Feed):
         return request_id
 
     def _subscribe_ticker(self, sock: Any, tickers: set[str]) -> None:
-        previous = self.sids.pop("ticker", None)
-        if previous is not None:
+        # The ticker and the public trade prints ride one subscription per set of markets: the
+        # prints are what the shadow books fill their resting quotes against (leap: taker model).
+        previous = [sid for sid in (self.sids.pop("ticker", None), self.sids.pop("trade", None)) if sid is not None]
+        if previous:
             try:
-                self._command(sock, "unsubscribe", {"sids": [previous]})
+                self._command(sock, "unsubscribe", {"sids": previous})
             except Exception:
                 raise  # a broken socket reconnects; the next connection subscribes afresh
         if tickers:
-            self._command(sock, "subscribe", {"channels": ["ticker"], "market_tickers": sorted(tickers)})
+            self._command(sock, "subscribe", {"channels": ["ticker", "trade"], "market_tickers": sorted(tickers)})
         self._subscribed_tickers = set(tickers)
 
     # ------------------------------------------------------------- the loop
@@ -158,6 +160,13 @@ class KalshiFeed(Feed):
                     "provisional": event_type != "settled",
                 },
             )
+            return
+        if kind == "trade":
+            ticker = str(msg.get("market_ticker") or msg.get("ticker") or "").upper()
+            price = dollars(msg, "yes_price")
+            count = msg.get("count_fp") if msg.get("count_fp") is not None else msg.get("count")
+            if ticker and price is not None and count is not None:
+                self.hub.on_trade(self.venue, ticker, price=price, size=count, taker_side=str(msg.get("taker_side") or ""))
             return
         if kind == "ticker":
             ticker = str(msg.get("market_ticker") or msg.get("ticker") or "").upper()

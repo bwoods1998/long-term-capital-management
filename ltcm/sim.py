@@ -35,7 +35,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import timedelta
-from decimal import Decimal, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Callable
 
@@ -151,6 +151,14 @@ def quantize_cash(value: Decimal) -> Decimal:
 def ceil_cents(value: Decimal) -> Decimal:
     """Round a charge up to the next whole cent. Venues never round a fee in our favour."""
     return money(value).quantize(CENT, rounding=ROUND_CEILING)
+
+
+def _dec_or_none(value: Any) -> "Decimal | None":
+    try:
+        d = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return d if d.is_finite() else None
 
 
 @dataclass(frozen=True)
@@ -568,8 +576,10 @@ class ShadowBook:
         return None
 
     # -------------------------------------------------------------- execution
-    def _fill(self, order: Order, price: Decimal, stamp: str, *, liquidity: str = "taker") -> Order:
-        quantity = order.remaining
+    def _fill(self, order: Order, price: Decimal, stamp: str, *, liquidity: str = "taker", quantity: "Decimal | None" = None) -> Order:
+        quantity = order.remaining if quantity is None else min(order.remaining, quantity)
+        if quantity <= 0:
+            return order
         fee = self.fee_model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity)
         notional = quantity * price * order.instrument.multiplier
         account = self._account()
@@ -616,12 +626,71 @@ class ShadowBook:
             ),
         )
         filled_quantity = order.filled_quantity + quantity
+        status = "filled" if filled_quantity >= order.quantity else "partially_filled"
+        # The average price weighs every partial fill; a single fill is its own average.
+        average = price if order.filled_quantity == 0 else quantize_price(
+            ((order.average_price or ZERO) * order.filled_quantity + price * quantity) / filled_quantity
+        )
         self._db.execute(
-            "UPDATE orders SET status = 'filled', filled_quantity = ?, average_price = ?,"
+            "UPDATE orders SET status = ?, filled_quantity = ?, average_price = ?,"
             " fees = ?, updated_at = ?, reason = NULL WHERE id = ?",
-            (text(filled_quantity), text(price), text(order.fees + fee), stamp, order.id),
+            (status, text(filled_quantity), text(average), text(order.fees + fee), stamp, order.id),
         )
         return self.get_order(order.id)
+
+    # ----------------------------------------------------------- taker model
+    def on_trade(self, venue: str, symbol: str, price: Any, size: Any, taker_side: str, now: Any = None) -> list[Order]:
+        """leap: taker model -- a print on the venue fills the resting quotes it would have hit.
+
+        Until Sept 16, 2026 a resting shadow quote filled only when the quote itself crossed
+        it, so a maker strategy never filled in shadow while its live twin filled ninety
+        times: the takers who cross the spread to hit a resting bid are exactly what the
+        shadow book could not see. A print of `size` at `price` by a taker on `taker_side`
+        fills, at the order's own limit and as a maker, every resting buy on the leg the taker
+        sold at or through its limit, and every resting sell on the leg the taker bought at or
+        through its limit, up to the printed size. Event prints carry the YES price and a taker
+        side of yes/no; a crypto print carries the product price and buy/sell."""
+        price_d, size_d = _dec_or_none(price), _dec_or_none(size)
+        if price_d is None or size_d is None or size_d <= 0:
+            return []
+        taker = str(taker_side or "").lower()
+        wanted = str(symbol or "").upper()
+        with self._lock:
+            stamp = iso(now) if now is not None else self.now()
+            changed: list[Order] = []
+            for order in self.open_orders():
+                inst = order.instrument
+                if order.order_type != "limit" or inst.venue != venue:
+                    continue
+                if inst.asset_class == "event":
+                    if str(inst.market_id or inst.symbol).upper() != wanted:
+                        continue
+                    leg = str(inst.right or "yes").lower()
+                    leg_price = price_d if leg == "yes" else (ONE - price_d)
+                    taker_bought_leg = taker == leg
+                    if taker not in ("yes", "no"):
+                        continue
+                else:
+                    if str(inst.symbol).upper() != wanted or taker not in ("buy", "sell"):
+                        continue
+                    leg_price = price_d
+                    taker_bought_leg = taker == "buy"
+                hit = (order.side == "buy" and not taker_bought_leg and leg_price <= order.limit_price) or (
+                    order.side == "sell" and taker_bought_leg and leg_price >= order.limit_price
+                )
+                if not hit:
+                    continue
+                take = min(size_d, order.remaining)
+                try:
+                    filled = self._fill(order, quantize_price(order.limit_price), stamp, liquidity="maker", quantity=take)
+                except RejectedOrder:
+                    changed.append(self.get_order(order.id))
+                    continue
+                changed.append(filled)
+                size_d -= take
+                if size_d <= 0:
+                    break
+            return changed
 
     def _apply_to_position(
         self, instrument: Instrument, side: str, quantity: Decimal, price: Decimal
