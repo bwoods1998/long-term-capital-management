@@ -609,6 +609,30 @@ class Strategies:
         keys = ("cadence_seconds", "params", "deployed_at", "note", "house", "enabled", "last_run_at", "runs", "intents", "approved", "errors", "last_error", "last_notes")
         return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **self.record(desk_id, name)}
 
+    def _broker_index(self, reader: Callable[..., Any]) -> tuple[dict[str, set[str]], dict[str, list[Any]]]:
+        """intent id -> its order ids, and order id -> its fills, over the newest 20,000 orders
+        and fills. Kept for `record_cache_seconds`: a checkpoint asks for every strategy's
+        record, and reading 40,000 events per strategy made publishing take minutes (Sept 16,
+        2026). With the cache at 0 (the default) every call reads the log afresh."""
+        ttl = float(self.config.get("record_cache_seconds") or 0)
+        cached = getattr(self, "_index_cache", None)
+        now = time.monotonic()
+        if ttl > 0 and cached is not None and now - cached[0] < ttl:
+            return cached[1], cached[2]
+        orders_by_intent: dict[str, set[str]] = {}
+        for e in reader(kind="broker.order", limit=20_000, newest=True):
+            intent_id, order_id = e.payload.get("intent_id"), e.payload.get("order_id")
+            if intent_id and order_id:
+                orders_by_intent.setdefault(intent_id, set()).add(order_id)
+        fills_by_order: dict[str, list[Any]] = {}
+        for e in reader(kind="broker.fill", limit=20_000, newest=True):
+            order_id = e.payload.get("order_id")
+            if order_id:
+                fills_by_order.setdefault(order_id, []).append(e)
+        if ttl > 0:
+            self._index_cache = (now, orders_by_intent, fills_by_order)
+        return orders_by_intent, fills_by_order
+
     def record(self, desk_id: str, name: str, since: str | None = None) -> dict[str, Any]:
         """What the strategy's orders did: fills, fees and the settled P&L of the positions it
         opened, read from the desk's own tape (the `[strategy <name>]` prefix on its rationales).
@@ -635,12 +659,9 @@ class Strategies:
             # in a desk's own stream: read every broker stream and match on the intent and order ids.
             # Until Sept 16, 2026 this read `broker:<desk>` and every record showed zero fills, so
             # no variant ever had a return on notional and the promotion loop had nothing to compare.
-            orders = {
-                e.payload.get("order_id")
-                for e in reader(kind="broker.order", limit=20_000, newest=True)
-                if e.payload.get("intent_id") in intents
-            }
-            fills = [e for e in reader(kind="broker.fill", limit=20_000, newest=True) if e.payload.get("order_id") in orders and fresh(e)]
+            orders_by_intent, fills_by_order = self._broker_index(reader)
+            orders = set().union(*(orders_by_intent.get(i, set()) for i in intents)) if intents else set()
+            fills = [e for order in orders for e in fills_by_order.get(order, ()) if fresh(e)]
             outcomes = [
                 e for e in reader(stream=stream, kind="desk.outcome", limit=10_000, newest=True)
                 if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e)
