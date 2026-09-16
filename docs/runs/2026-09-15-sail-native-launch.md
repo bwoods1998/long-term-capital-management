@@ -620,3 +620,7 @@ breaker, and settings that leave the last twenty minutes alone.
   `provider_http_400`, the third such since last evening (scholes-2 22:47, haghani-3 01:21),
   all on bred variants; the alert carries no body. Rare, not new tonight, and the session
   retries at its next slot. Worth capturing the response body in the alert when it recurs.
+- **Prints confirmed** (11:17 UTC): the feed health now counts prints per venue; in the
+  first three minutes 2,133 Coinbase and 41 Kalshi trades reached the hub, so the taker model
+  has its input. Kalshi's public trade message is `{trade_id, market_ticker,
+  yes_price_dollars, no_price_dollars, count_fp, taker_side, ts}`, which the parser reads.
