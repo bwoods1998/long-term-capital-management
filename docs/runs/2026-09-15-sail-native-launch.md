@@ -569,3 +569,9 @@ are rewarded and punished. Shipped, in order:
   the settled 08:00 buckets that the settlement sweep now closes at the settlement price; the
   `desk.outcome` records written against the wrong positions before the repair stand as
   written, and the ledger's realized P&L from fills is the truth.
+- **The ledgers agree with the venue** (09:25 UTC). Haghani's folded fills sum to -92.14 of
+  cash, its positions match Kalshi one for one, and its ledger cash of 12.79 is the committee's
+  new allocation (104.93, cut from 150 at the daily resize) less that spend. Scholes's true
+  settled P&L from Kalshi's own fills and settlements is -79.58 over seven markets, and its
+  ledger cash agrees once the resized allocation is counted. Capital moved today: Scholes and
+  Haghani cut, Mullins (300.59) and Hilibrand (368.80) raised. The reward loop is turning.
