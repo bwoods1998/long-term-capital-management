@@ -305,6 +305,30 @@ class FloorTests(LedgerCase):
         self.assertEqual(state.gross_exposure, Decimal("1200"))
 
 
+class UnfundedBookTests(unittest.TestCase):
+    def test_a_book_cut_to_zero_does_not_turn_leftover_pennies_into_drawdowns(self):
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        log = EventLog(Path(tmp.name) / "events.sqlite")
+        self.addCleanup(log.close)
+        mark = lambda equity, at: log.append("ledger:d1", "ledger.mark", {"equity": equity, "cash": equity, "positions": [], "daily_pnl": "0", "as_of": at}, at=at)
+        log.append("committee", "committee.allocation", {"allocations": {"d1": "150"}, "reasons": {}}, at="2026-09-16T10:00:00.000Z")
+        mark("156.50", "2026-09-16T11:00:00.000Z")
+        log.append("committee", "committee.allocation", {"allocations": {"d1": "0"}, "reasons": {}}, at="2026-09-16T12:00:00.000Z")
+        at_cut = DeskLedger(log, "d1").state("2026-09-16T12:00:00.000Z").max_drawdown_pct
+        mark("4.00", "2026-09-16T13:00:00.000Z")
+        mark("6.90", "2026-09-16T14:00:00.000Z")
+        mark("2.10", "2026-09-16T15:00:00.000Z")
+        state = DeskLedger(log, "d1").state("2026-09-16T15:00:00.000Z")
+        self.assertEqual(state.max_drawdown_pct, at_cut, "no drawdown from a book with no capital")
+        log.append("committee", "committee.allocation", {"allocations": {"d1": "150"}, "reasons": {}}, at="2026-09-16T16:00:00.000Z")
+        mark("120.00", "2026-09-16T17:00:00.000Z")
+        funded = DeskLedger(log, "d1").state("2026-09-16T17:00:00.000Z")
+        self.assertGreater(funded.max_drawdown_pct, Decimal("0.15"), "a funded book's real loss still counts")
+
+
 class ConcurrentFoldTests(unittest.TestCase):
     def test_threads_folding_one_ledger_agree_with_a_single_fold(self):
         import tempfile, threading

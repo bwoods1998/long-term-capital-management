@@ -235,6 +235,7 @@ class DeskLedger:
         self._allocation = ZERO
         self._growth = ONE
         self._base_equity = ZERO
+        self._peak_capital = ZERO
         self._peak_growth = ONE
         self._max_dd = Fraction(0)
         self._day: str | None = None
@@ -315,13 +316,15 @@ class DeskLedger:
             self._start_of_day = equity_before + flow
             self._last_mark_equity = equity_before + flow
         else:
-            if self._base_equity > 0:
+            if self._base_equity > 0 and not self._unfunded():
                 self._growth *= _fraction(equity_before) / _fraction(self._base_equity)
             self._base_equity = equity_before + flow
             self._start_of_day += flow
             self._last_mark_equity += flow
         self._cash += flow
         self._net_deposits += flow
+        if self._net_deposits > self._peak_capital:
+            self._peak_capital = self._net_deposits
         self._observe(event.at, equity_before + flow, flow=True)
 
     # -- fills ---------------------------------------------------------------
@@ -418,8 +421,15 @@ class DeskLedger:
         self._observe(as_of, equity)
 
     # -- the growth index ----------------------------------------------------
+    def _unfunded(self) -> bool:
+        """True while the book holds less than a tenth of the most capital it ever had. Its return
+        index is then frozen: measured against a few dollars of leftover P&L, a sleeve cut to zero
+        read a $2.50 mark move as a 38 percent drawdown (Sept 16, 2026), and the committee acted
+        on it."""
+        return self._peak_capital > 0 and self._base_equity < self._peak_capital / 10
+
     def _growth_at(self, equity: Decimal) -> Fraction:
-        if self._base_equity <= 0:
+        if self._base_equity <= 0 or self._unfunded():
             return self._growth
         return self._growth * (_fraction(equity) / _fraction(self._base_equity))
 
