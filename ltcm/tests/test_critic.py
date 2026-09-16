@@ -111,6 +111,15 @@ class PacketTests(unittest.TestCase):
         self.assertIn("Watching AAPL into the print", body)  # the memo
         self.assertIn("equity:AAPL:alpaca: 30 at average cost 180", body)
 
+    def test_an_event_order_names_its_leg(self):
+        # On Sept 16, 2026 the critic read "buy ... at 0.65" as a YES purchase and blocked a NO
+        # order whose rationale argued for NO. The packet names the leg on both lines.
+        no_leg = Instrument("event", "KXETH-26SEP1601-B2402", "kalshi", right="no", market_id="KXETH-26SEP1601-B2402")
+        order = intent(instrument=no_leg, quantity="15", limit_price="0.65")
+        body = packet(intent=order, manifest=manifest(venues=["kalshi"]), decision=decision(order))
+        self.assertIn("(market KXETH-26SEP1601-B2402), the NO leg", body)
+        self.assertIn("- side: buy (buys NO contracts: a position that pays if the market resolves NO)", body)
+
     def test_a_market_order_with_no_memo_and_no_book_still_reads_cleanly(self):
         order = intent(order_type="market", limit_price=None)
         body = packet(intent=order, manifest=manifest(), decision=decision(order))

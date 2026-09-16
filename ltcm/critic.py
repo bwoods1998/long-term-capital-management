@@ -104,7 +104,19 @@ def _instrument_label(instrument: Any) -> str:
         label += f" expiring {instrument.expiry}"
     if instrument.strike is not None and instrument.right:
         label += f", {text(instrument.strike)} {instrument.right}"
+    elif instrument.asset_class == "event" and instrument.right:
+        # A contract has two legs. On Sept 16, 2026 the critic read "buy ... at 0.65" as a YES
+        # purchase and blocked a NO order whose rationale argued for NO; name the leg.
+        label += f", the {str(instrument.right).upper()} leg"
     return label
+
+
+def _side_line(intent: OrderIntent) -> str:
+    if intent.instrument.asset_class == "event" and intent.instrument.right:
+        leg = str(intent.instrument.right).upper()
+        verb = "buys" if intent.side == "buy" else "sells"
+        return f"- side: {intent.side} ({verb} {leg} contracts: a position that pays if the market resolves {leg})"
+    return f"- side: {intent.side}"
 
 
 def _limits_line(manifest: DeskManifest) -> str:
@@ -151,7 +163,7 @@ def packet(
             "",
             "The order the desk wants to send:",
             f"- instrument: {_instrument_label(intent.instrument)}",
-            f"- side: {intent.side}",
+            _side_line(intent),
             f"- quantity: {text(intent.quantity)}",
             f"- order type: {intent.order_type}",
             f"- limit price: {limit_price}",
