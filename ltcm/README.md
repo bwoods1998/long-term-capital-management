@@ -55,6 +55,7 @@ Design rules, inherited from the first generation and kept on purpose:
 | `sailbox.py` | The Sailbox API client the operator scripts and the sandboxes use: create, fork, exec, egress, checkpoints. |
 | `hostinfo.py` | What machine the floor runs on and for how long, for the checkpoint's infra block. |
 | `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
+| `founding.py` | The firm hires itself: one model call a night proposes a new family from what the venues list and the floor does not trade, validated in code and born shadow; founded families that fail are wound down whole. |
 | `publish.py` | Batches public events and leaderboard rows to the site API. |
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
 | `service.py` | The always-on loop: schedule desk sessions, tick simulators, mark ledgers, run risk breakers, run the committee and evolution on their cadences, publish. |
@@ -104,6 +105,7 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `evolution.spawned` | evolution | yes | `desk_id`, `family`, `parent_id`, `generation`, `mutation` |
 | `evolution.retired` | evolution | yes | `desk_id`, `reason`, `score{}` |
 | `evolution.promoted` | evolution | yes | `desk_id`, `from`, `to`, `score{}` |
+| `evolution.founded` | evolution | yes | `desk_id`, `family`, `name`, `rationale`, `venues[]`, `asset_classes[]`, `universe`, `model`, `as_of` |
 | `lab.hypothesis` | lab | yes | `hypothesis_id`, `text`, `test_plan` |
 | `lab.result` | lab | yes | `hypothesis_id`, `metrics{}`, `verdict` |
 | `ops.alert` | ops | yes | `level`, `text` |
@@ -369,9 +371,33 @@ person, and closed them:
   time-in-force maps to GTC (the floor's exits bound a resting order).
 
 What still needs a person: code and deploys, credentials and venue deposits, Sail credit,
-the founder manifests, families and venues, the starter universes (the ranges series and
-the weather cities), and the learning sizes and caps in `config.json`. Everything between
-a print and a promotion runs without one.
+the venues, the starter universes (the ranges series and the weather cities), and the
+learning sizes and caps in `config.json`. Everything between a print and a promotion runs
+without one, and so, since the next section, does opening and closing a family.
+
+### The firm founds families
+
+`ltcm/founding.py` lets the floor open a line of business itself. Once a day after `founding.founding_time`
+(21:30 New York, after the evolution run), `Service._founding_tick` reads the floor's coverage on the tick
+(each family's venues, asset classes, the Kalshi series and Coinbase products its desks filled or proposed
+in 30 days, its best score and P&L) and hands a worker the rest: a digest of the venues of at most 6 KB
+(Kalshi's open markets by category and series, ranked by dollar volume, combos left out; Coinbase's USD
+spot products by 24h dollar volume) and one call to `founding.profile` (Kimi K3, high effort). The model
+answers with a family, an id, a rationale, its targets, a manifest in the founders' shape and a playbook
+that opens with an `## Edge thesis`. `Founding.validate` refuses, with the reason in one `ops.alert`: a
+name already used (parked desks included), a target the floor already trades or the venues do not list,
+a venue outside `live_venues`, a tool no human founder carries, a limit outside `lab.hard_limits`, any
+capital mode but shadow or more than `founding.capital_usd`, sessions under 30 minutes apart, a playbook
+over 12 KB. A valid family is written like a spawned child (generation 1, no parent), published as
+`evolution.founded`, and loaded by `reload_manifests` on the same tick; `seed` breeds its variants and
+only the committee's gates can promote one. Caps: one founding in 24 hours, eight active founded
+families, `founding.budget_usd_per_day` of model spend. The request key is the day, so a restart pays once.
+
+The same slot winds founded families down. A family an `evolution.founded` names, and never one with a
+human founder in it, is retired whole (`evolution.retired`, reason "founded family wound down") when no
+desk is live, it is `min_days` old, and its best desk with `min_decisions` has `min_days` behind it and a
+cost-adjusted excess below `retire_below` percent; or when after `idle_days` (10) no desk has reached
+`min_decisions`. By hand: `scripts/found_family.py --packet | --dry-run | --apply`, `--wind-down [--apply]`.
 
 ## The checkpoint
 
