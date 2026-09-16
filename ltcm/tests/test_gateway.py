@@ -388,6 +388,29 @@ class LifecycleTests(GatewayCase):
         self.assertEqual(released_kinds, ["broker.order", "desk.intent"])
         self.assertEqual(len(released), 3)  # the intent plus both order states
 
+    def test_a_swept_fill_naming_the_venues_order_id_reaches_the_desks_ledger(self):
+        # Kalshi's fills carry Kalshi's order id and no desk. On Sept 16, 2026 seven live
+        # positions the venue held sat in no ledger for want of this map.
+        result = self.gateway.propose(self.intent(), NOW)
+        order = self.broker.orders[result["order_id"]]
+        order.broker_order_id = "01a0a89a-venue"
+        self.gateway._record_order(order, status="accepted", at=NOW)
+        self.assertEqual(self.gateway._venue_orders["01a0a89a-venue"], result["order_id"])
+        swept = Fill(id="f-swept", order_id="01a0a89a-venue", desk_id="", instrument=AAPL, side="buy",
+                     quantity=Decimal("2"), price=Decimal("101"), fee=Decimal("0.10"), at="2026-09-14T14:36:00.000Z")
+        self.broker._fills.append(swept)
+        written = self.gateway.ingest_fills(self.broker.venue)
+        self.assertEqual(len(written), 1)
+        self.assertEqual((written[0]["desk_id"], written[0]["order_id"], written[0]["venue_order_id"]), (DESK, result["order_id"], "01a0a89a-venue"))
+        self.assertEqual(self.ledger.state("2026-09-14T14:37:00.000Z").positions[AAPL.key].quantity, Decimal("2"))
+        # A fill for an order the floor never placed is recorded as it came, and said once.
+        stray = Fill(id="f-stray", order_id="nobody", desk_id="", instrument=AAPL, side="buy",
+                     quantity=Decimal("1"), price=Decimal("101"), fee=Decimal("0"), at="2026-09-14T14:38:00.000Z")
+        self.broker._fills.append(stray)
+        written = self.gateway.ingest_fills(self.broker.venue)
+        self.assertEqual(written[0].get("desk_id"), "")
+        self.assertTrue(any("did not place" in e.payload.get("text", "") for e in self.log.read(kind="ops.alert")))
+
     def test_cancel_is_terminal_and_releases_the_intent(self):
         result = self.gateway.propose(self.intent(), NOW)
         row = self.gateway.cancel(DESK, result["order_id"], "2026-09-14T14:40:00.000Z")

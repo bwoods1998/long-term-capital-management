@@ -350,7 +350,26 @@ class OrderTests(unittest.TestCase):
         fill = client.fills()[0]
         self.assertEqual(fill.price, Decimal("0.4250"))
         self.assertEqual(fill.quantity, Decimal("5.00"))
-        self.assertEqual(fill.side, "sell", "an ask on the book is a sell")
+        self.assertEqual(fill.side, "sell", "a YES order on the ask is a sale of YES")
+
+    def test_a_no_leg_fill_on_the_ask_is_a_buy(self):
+        # The v2 book is the YES book: a NO order rests on the ask, so its fill is a buy of NO.
+        # Read without the leg, every NO buy on Sept 16, 2026 was recorded as a sell.
+        rows = {
+            "fills": [
+                {"fill_id": "f-3", "order_id": "o-3", "ticker": TICKER, "outcome_side": "no", "book_side": "ask",
+                 "count_fp": "12.00", "no_price_dollars": "0.8100", "fee_cost": "0", "created_time": "2026-09-16T05:08:00Z"},
+                {"fill_id": "f-4", "order_id": "o-4", "ticker": TICKER, "outcome_side": "no", "book_side": "bid",
+                 "count_fp": "3.00", "no_price_dollars": "0.6000", "fee_cost": "0", "created_time": "2026-09-16T05:09:00Z"},
+                {"fill_id": "f-5", "order_id": "o-5", "ticker": TICKER, "outcome_side": "yes", "book_side": "bid",
+                 "count_fp": "41.00", "yes_price_dollars": "0.1700", "fee_cost": "0", "created_time": "2026-09-16T05:10:00Z"},
+            ]
+        }
+        client, _, _ = make({BASE + "/portfolio/fills*": rows})
+        fills = {f.id: f for f in client.fills()}
+        self.assertEqual((fills["f-3"].side, fills["f-3"].instrument.right, fills["f-3"].price), ("buy", "no", Decimal("0.8100")))
+        self.assertEqual(fills["f-4"].side, "sell", "a NO order on the bid sells NO")
+        self.assertEqual(fills["f-5"].side, "buy")
 
     def test_quotes_come_from_the_public_market_data_with_no_signature(self):
         market = {"market": {"ticker": TICKER, "yes_bid": 38, "yes_ask": 41, "last_price": 40}}

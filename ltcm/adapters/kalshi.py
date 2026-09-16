@@ -538,10 +538,9 @@ class KalshiBroker:
         price = dec(row.get(field + "_dollars")) or dollars_from_cents(row.get(field))
         if price is None:
             return None
-        action = str(row.get("action") or "").lower()
-        if action not in ("buy", "sell"):
-            # The fixed-point surface replaced `action` with `book_side`: bid is a buy.
-            action = "buy" if str(row.get("book_side") or "bid").lower() == "bid" else "sell"
+        # The fixed-point surface replaced `action` with `book_side`, which only means buy or
+        # sell together with the leg (see `_action_of`).
+        action = _action_of(row, None, leg)
         fee = dec(row.get("fee_cost_dollars")) or dec(row.get("fee_cost")) or money(0)
         return Fill(
             id=str(row.get("fill_id") or row.get("trade_id") or ""),
@@ -655,7 +654,7 @@ class KalshiBroker:
             intent_id=client_order_id,
             desk_id=intent.desk_id if intent else "",
             instrument=instrument,
-            side=_action_of(row, intent),
+            side=_action_of(row, intent, leg),
             quantity=initial or money(0),
             order_type=str(row.get("type") or (intent.order_type if intent else "limit")),
             limit_price=limit_price,
@@ -674,12 +673,21 @@ class KalshiBroker:
         return order
 
 
-def _action_of(row: dict[str, Any], intent: "OrderIntent | None") -> str:
+def _action_of(row: dict[str, Any], intent: "OrderIntent | None", leg: "str | None" = None) -> str:
+    """buy or sell, from `action` when the row carries it, else from the book side and the leg.
+
+    The v2 book is the YES book: a bid is the YES side and an ask the NO side, always. So a
+    NO order rests on the ask, and a fill of it with `book_side: "ask"` is a *buy* of NO. Read
+    without the leg, every NO buy on Sept 16, 2026 was recorded as a sell, and the desks'
+    books went short contracts they had bought."""
     action = str(row.get("action") or "").lower()
     if action in ("buy", "sell"):
         return action
     book_side = str(row.get("book_side") or "").lower()
     if book_side in ("bid", "ask"):
+        leg = (leg or str(row.get("outcome_side") or row.get("side") or "yes")).lower()
+        if leg == "no":
+            return "buy" if book_side == "ask" else "sell"
         return "buy" if book_side == "bid" else "sell"
     return intent.side if intent else "buy"
 

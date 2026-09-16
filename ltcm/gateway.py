@@ -173,6 +173,11 @@ class Gateway:
         self.reconciliation_mismatch = False
         self._orders: dict[str, dict[str, Any]] = {}
         self._intent_orders: dict[str, str] = {}
+        #: The venue's id for each order -> the floor's. A swept fill names the venue's id and
+        #: nothing else; without this map it belonged to no desk (Sept 16, 2026: seven live
+        #: Kalshi positions that no ledger held).
+        self._venue_orders: dict[str, str] = {}
+        self._unattributed: set[str] = set()
         self._fill_cursor: dict[str, str | None] = {}
         self._settlement_cursor: dict[str, str | None] = {}
         self._seen_fills: set[str] = set()
@@ -217,6 +222,9 @@ class Gateway:
         intent_id = payload.get("intent_id")
         if isinstance(intent_id, str):
             self._intent_orders[intent_id] = order_id
+        venue_order_id = payload.get("venue_order_id")
+        if isinstance(venue_order_id, str) and venue_order_id:
+            self._venue_orders[venue_order_id] = order_id
         desk_id = payload.get("desk_id")
         if row["status"] == "unknown" and isinstance(desk_id, str):
             self.blocked_desks.setdefault(desk_id, order_id)
@@ -594,7 +602,10 @@ class Gateway:
             "submitted_at": order.submitted_at or at,
             "updated_at": order.updated_at or at,
             "reason": reason or order.reason,
+            "venue_order_id": order.broker_order_id or None,
         }
+        if order.broker_order_id:
+            self._venue_orders[str(order.broker_order_id)] = order.id
         if order.venue == SHADOW_VENUE:
             # Nothing was sent. The row says so on its face, wherever it is read.
             payload["shadow"] = True
@@ -652,9 +663,29 @@ class Gateway:
                 cursor = fill.at
             if fill.id in self._seen_fills:
                 continue
-            written.append(self._record_fill(venue, fill))
+            written.append(self._record_fill(venue, fill, self._attribution(fill)))
         self._fill_cursor[venue] = cursor
         return written
+
+    def _attribution(self, fill: Fill) -> dict[str, Any] | None:
+        """The desk, intent and floor order id a venue fill belongs to, from the venue's order
+        id. A fill the floor cannot place is recorded as it came, and said once."""
+        if fill.desk_id:
+            return None  # the shadow book names its desk
+        venue_id = str(fill.order_id or "")
+        ours = self._venue_orders.get(venue_id) or (venue_id if venue_id in self._orders else None)
+        if ours is None:
+            if venue_id and venue_id not in self._unattributed:
+                self._unattributed.add(venue_id)
+                self._alert("warning", f"fill for an order the floor did not place: {venue_id[:24]}", self.now())
+            return {"venue_order_id": venue_id} if venue_id else None
+        row = self._orders.get(ours) or {}
+        extra: dict[str, Any] = {"order_id": ours, "venue_order_id": venue_id}
+        if row.get("desk_id"):
+            extra["desk_id"] = row["desk_id"]
+        if row.get("intent_id"):
+            extra["intent_id"] = row["intent_id"]
+        return extra
 
     def _record_fill(
         self, venue: str, fill: Fill, extra: "Mapping[str, Any] | None" = None
