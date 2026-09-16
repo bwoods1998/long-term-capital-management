@@ -1907,3 +1907,47 @@ class WorkingOrdersCheckpointTests(ServiceCase):
         desk = {r["id"]: r for r in self.publisher.checkpoints[-1]["desks"]}[DESK]
         self.assertNotIn("working", desk)
         self.assertNotIn("budget_factor", desk)
+
+
+class DiskCheckTests(ServiceCase):
+    def test_low_disk_trims_the_cache_files_an_alert_and_mails_the_owner_below_the_stop_line(self):
+        import ltcm.service as service_module
+
+        posted = []
+        trimmed = []
+        self.service.notifier.gateway_url = "https://gateway.test"
+        self.service.notifier.token = "t"
+        self.service.notifier.poster = lambda url, token, facts: posted.append((url, facts)) or {"sent": True}
+        self.service._http_transport = type("T", (), {"trim": lambda self, force=False: trimmed.append(force) or 7})()
+        free = {"gb": 10.0}
+        original = service_module._disk_free_gb
+        service_module._disk_free_gb = lambda path: free["gb"]
+        try:
+            self.service._disk_check(moment_iso(2026, 9, 14, 19, 5))
+            self.assertEqual(trimmed, [], "plenty of room: nothing happens")
+            free["gb"] = 3.0
+            self.service._disk_check(moment_iso(2026, 9, 14, 19, 5))
+            self.assertEqual(trimmed, [], "the ten-minute interval has not passed")
+            self.service._disk_check(moment_iso(2026, 9, 14, 19, 16))
+            self.assertEqual(trimmed, [True])
+            alerts = [e.payload for e in self.service.log.read(kind="ops.alert") if e.payload.get("text", "").startswith("disk:")]
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0]["level"], "warning")
+            self.assertIn("trimmed 7", alerts[0]["text"])
+            self.assertEqual(posted, [], "a warning does not mail")
+            free["gb"] = 1.2
+            self.service._disk_check(moment_iso(2026, 9, 14, 19, 27))
+            alerts = [e.payload for e in self.service.log.read(kind="ops.alert") if e.payload.get("text", "").startswith("disk:")]
+            self.assertEqual([a["level"] for a in alerts], ["warning", "error"])
+            self.assertEqual(len(posted), 1)
+            self.assertEqual(posted[0][1]["kind"], "disk_low")
+            self.assertEqual(posted[0][1]["free_gb"], 1.2)
+            self.service._disk_check(moment_iso(2026, 9, 14, 19, 38))
+            self.assertEqual(len(posted), 1, "one mail per level per hour")
+        finally:
+            service_module._disk_free_gb = original
+
+    def test_the_health_record_carries_free_disk(self):
+        self.tick()
+        health = json.loads(self.service.health_path.read_text(encoding="utf-8"))
+        self.assertIsInstance(health.get("disk_free_gb"), float)

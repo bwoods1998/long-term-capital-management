@@ -42,6 +42,10 @@ UTC = timezone.utc
 
 USER_AGENT = "LTCM/0.1 (blakewoods.us; blakewoods98@gmail.com)"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+#: The on-disk HTTP cache never grows past this; the oldest entries go first.
+CACHE_CAP_BYTES = 256 * 1024 * 1024
+#: How many stores between trims: a glob of the cache directory is cheap but not free.
+TRIM_EVERY_STORES = 50
 DEFAULT_TIMEOUT = 20
 
 INTERVALS = ("1m", "2m", "5m", "15m", "30m", "60m", "1h", "1d", "1wk", "1mo")
@@ -377,6 +381,7 @@ class HttpTransport:
         user_agent: str = USER_AGENT,
         max_bytes: int = MAX_RESPONSE_BYTES,
         min_interval: float = 0.0,
+        cache_cap_bytes: int = CACHE_CAP_BYTES,
     ):
         self.cache_dir = Path(cache_dir) if cache_dir else None
         if self.cache_dir is not None:
@@ -387,6 +392,8 @@ class HttpTransport:
         self.user_agent = user_agent
         self.max_bytes = int(max_bytes)
         self.min_interval = float(min_interval)
+        self.cache_cap_bytes = int(cache_cap_bytes)
+        self._stores = 0
         self._opener = opener or urllib.request.build_opener(_NoRedirect).open
         self._lock = threading.RLock()
         self._next_at: dict[str, float] = {}
@@ -431,7 +438,50 @@ class HttpTransport:
             tmp.write_text(json.dumps(record), encoding="utf-8")
             tmp.replace(path)
         except OSError:
+            try:
+                tmp.unlink()  # a half-written entry on a full disk is never a cache hit
+            except OSError:
+                pass
             return
+        self._stores += 1
+        if self._stores % TRIM_EVERY_STORES == 0:
+            self.trim()
+
+    def trim(self, *, force: bool = False) -> int:
+        """Keep the cache directory bounded: drop expired entries and stray temp files, then
+        the oldest entries until the directory fits `cache_cap_bytes`. Returns the number removed.
+        The cache had no eviction at all before Sept 16, 2026, when a floor box ran its disk full
+        and the loop died with nothing on the tape about it; every store now trims periodically."""
+        if self.cache_dir is None:
+            return 0
+        removed = self.purge()
+        now = float(self.clock())
+        entries: list[tuple[float, int, Path]] = []
+        for path in self.cache_dir.iterdir():
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if path.suffix == ".tmp" and (force or now - stat.st_mtime > 600):
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+                continue
+            if path.suffix == ".json":
+                entries.append((stat.st_mtime, stat.st_size, path))
+        total = sum(size for _, size, _ in entries)
+        for _, size, path in sorted(entries):
+            if total <= self.cache_cap_bytes:
+                break
+            try:
+                path.unlink()
+                removed += 1
+                total -= size
+            except OSError:
+                pass
+        return removed
 
     def purge(self) -> int:
         """Delete expired cache entries. Returns the number removed."""

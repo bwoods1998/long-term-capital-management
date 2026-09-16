@@ -31,6 +31,12 @@
     "min": "0.25",
     "max": "3"
   },
+  "disk": {
+    "enabled": true,
+    "interval_seconds": 600,
+    "warn_gb": 4,
+    "stop_gb": 2
+  },
   "strategies": {
     "enabled": true,
     "max_per_desk": 3,

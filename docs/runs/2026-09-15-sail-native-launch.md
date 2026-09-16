@@ -433,3 +433,34 @@ those answers need.
   each desk row as `budget_factor` so the site can show who earned their compute.
 
 Tests: site 53 pass; runtime suite rerun below.
+
+## Incident, 06:12 UTC Sept 16: the floor box ran its disk full and the loop died
+
+- **What happened.** The 06:10 deploy restarted the loop into the new code; at 06:11 the box's
+  32 GiB disk was full (`disk_used_bytes` 33.8 of 34.4 GB) and every start since has exited
+  with `[Errno 28] No space left on device` (ltcm.log). The last checkpoint the site received is
+  06:09:36 UTC. Sail's runtime writes a record for every exec before launching it, so with the
+  disk full every exec fails (`record exec before launch: ... no space left on device`), which
+  also stops `floor_box.py status` from seeing the loop (it now says so instead of "dead").
+- **What is not the culprit.** The files API still reads: events.sqlite is 7.5 MB, ltcm.log
+  5 KB, provider.sqlite 114 MB, memory.sqlite and the twelve shadow books under 100 KB each,
+  the weather cache entries ~220 KB each. The Sail agent (pid 1) wrote 0.8 GB since boot; the
+  loop's own processes are gone. No file writer in the runtime explains 31 GB; the leading
+  suspects are Sail's `/state` (exec records; the box is at checkpoint generation 148) and the
+  HTTP cache directory, which had no eviction at all. `du` on the box will settle it.
+- **What the agent could and could not do.** Reads through the files API worked. Truncating
+  three expired cache entries freed ~660 KB, not enough for the runtime's record (ext4 keeps
+  5 %, 1.6 GiB, for root, so an unprivileged writer needs that much free). Claude Code's
+  permission classifier then refused enabling SSH (`POST /sailboxes/{id}/ssh`), truncating
+  ltcm.log, reading `/proc` for process file positions, and widening the client's route list to
+  read the metrics endpoint, each as a different category. The owner's step: `python3
+  scripts/floor_ssh.py`, then `du -xsh /workspace/.data/ltcm/* /state/* /tmp /var/*` on the
+  box, delete the culprit, `python3 scripts/floor_box.py start`.
+- **Money.** Positions are binary contracts held to settlement; Coinbase holds cash only; three
+  $10 maker orders rest on Kalshi (two ETH 07:00 legs, one NY high). Nothing needs a stop.
+- **Prevention shipped in this commit.** `HttpTransport.trim()` keeps the cache directory under
+  `cache_cap_bytes` (256 MB), drops stray `.tmp` files and runs every 50 stores;
+  `Service._disk_check` runs every 10 minutes, trims the cache under `disk.warn_gb` (4) with a
+  warning on the tape, and under `disk.stop_gb` (2) files an error and posts a `disk_low` notice
+  the gateway mails (`NOTICE_KINDS` grew; `gateway` needs a deploy). `health.json` carries
+  `disk_free_gb`. `floor_box.py status` reports a failed probe instead of a dead loop.

@@ -57,6 +57,14 @@ export function compose(kind, facts = {}) {
         'Add credit at Sail and the floor resumes on its own within a minute. Nothing else is needed.',
       );
       break;
+    case 'disk_low':
+      subject = 'LTCM: the floor box is running out of disk';
+      lines.push(
+        `The Sailbox has ${number(facts.free_gb)} GiB free${facts.total_gb ? ` of ${number(facts.total_gb)} GiB` : ''} under ${facts.root || '/workspace'}.`,
+        facts.detail || 'The floor trimmed its caches. If the space keeps falling the loop stops when the disk is full.',
+        'Find the culprit on the box (du -xsh /workspace/.data/ltcm/* /state/* /tmp /var/*) and free or grow the disk before the loop dies.',
+      );
+      break;
     case 'box_not_running':
       subject = 'LTCM: the desks are not running';
       lines.push(
@@ -102,7 +110,8 @@ export function compose(kind, facts = {}) {
   return { subject, text: lines.filter(line => line !== undefined && line !== null).join('\n') + '\n' };
 }
 
-export const NOTICE_KINDS = ['trade', 'settled', 'test'];
+// What the floor may post to /v1/notify: fills, settlements, the sample, and a disk warning.
+export const NOTICE_KINDS = ['trade', 'settled', 'test', 'disk_low'];
 const clip = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
 const price = value => (typeof value === 'string' && value ? `$${value}` : 'unknown');
 

@@ -180,6 +180,24 @@ def load_env(path: str | Path) -> dict[str, str]:
 RESOLUTION_COOLDOWN_SECONDS = 1800
 
 
+def _epoch_of(at: Any) -> float:
+    """Seconds since the epoch for an ISO-8601 UTC stamp; 0 for anything unreadable."""
+    try:
+        return datetime.fromisoformat(str(at).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _disk_free_gb(path: Any) -> float | None:
+    """Free space on the filesystem under `path` in GiB, or None where it cannot be read."""
+    try:
+        import shutil
+
+        return round(shutil.disk_usage(str(path)).free / 2**30, 2)
+    except Exception:
+        return None
+
+
 def _rss_mb() -> int | None:
     """The process's resident memory in MiB from /proc, or None where /proc is not there."""
     try:
@@ -900,6 +918,7 @@ class Service:
             transport = self.transport or HttpTransport(
                 cache_dir=self.capital_dir / "cache", ttl=300.0, min_interval=0.2
             )
+            self._http_transport = transport  # kept so the disk check can trim its cache
             return CompositeMarketData(transport=transport)
         except Exception:
             return None
@@ -2312,6 +2331,7 @@ class Service:
             "exits": [],  # leap: exits
             "watch": [],  # leap: watch
         }
+        self._disk_check(at)  # leap: ops -- before anything else writes
 
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
         # leap: feeds -- what the sockets saw since the last tick, confirmed by REST before it counts
@@ -2500,6 +2520,64 @@ class Service:
         except Exception as exc:
             self.alert("warning", f"rate card check failed: {type(exc).__name__}: {exc}")
             return None
+
+    def _disk_check(self, at: str) -> None:
+        """leap: ops -- once every ten minutes, read the free space under the floor's root.
+        Under `disk.warn_gb` the HTTP cache is trimmed and a warning is filed; under
+        `disk.stop_gb` an error is filed and the owner is mailed (`disk_low`). On Sept 16, 2026
+        the floor box filled its 32 GiB disk and the loop died at 06:12 UTC with nothing on the
+        tape about it. Never raises."""
+        try:
+            policy = dict(self.config.get("disk") or {})
+            if not bool(policy.get("enabled", True)):
+                return
+            last = getattr(self, "_disk_checked_at", None)
+            if last is not None and (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 600)):
+                return
+            self._disk_checked_at = at
+            free = _disk_free_gb(self.root)
+            if free is None:
+                return
+            warn, stop = float(policy.get("warn_gb", 4)), float(policy.get("stop_gb", 2))
+            if free >= warn:
+                self._disk_alerted = None
+                return
+            trimmed = 0
+            transport = getattr(self, "_http_transport", None)
+            if hasattr(transport, "trim"):
+                try:
+                    trimmed = int(transport.trim(force=True))
+                except Exception:
+                    trimmed = 0
+            level = "error" if free < stop else "warning"
+            key = (level, at[:13])
+            if getattr(self, "_disk_alerted", None) == key:
+                return
+            self._disk_alerted = key
+            self.alert(level, f"disk: {free:.2f} GiB free under {self.root} ({'below the stop line' if level == 'error' else 'low'}); trimmed {trimmed} cache entries")
+            if level == "error":
+                self._mail_disk_low(free, at)
+        except Exception:
+            return
+
+    def _mail_disk_low(self, free: float, at: str) -> None:
+        """One `disk_low` notice through the gateway (it mails the owner)."""
+        notifier = getattr(self, "notifier", None)
+        poster, url, token = getattr(notifier, "poster", None), getattr(notifier, "gateway_url", None), getattr(notifier, "token", None)
+        if not callable(poster) or not url or not token:
+            return
+        total = None
+        try:
+            import shutil
+
+            total = round(shutil.disk_usage(str(self.root)).total / 2**30, 1)
+        except Exception:
+            pass
+        try:
+            poster(f"{url}/v1/notify", token, {"kind": "disk_low", "free_gb": free, "total_gb": total, "root": str(self.root), "at": at,
+                                               "detail": "The floor trimmed its HTTP cache. If the space keeps falling the loop stops when the disk is full."})
+        except Exception as exc:
+            self.alert("warning", f"disk_low notice not sent: {type(exc).__name__}")
 
     @staticmethod
     def _due(local: datetime, clock_time: str, last_day: Any, day: str) -> bool:
@@ -2958,6 +3036,7 @@ class Service:
             "events": self.log.latest_seq(),
             "feeds": self._feeds_status(),
             "rss_mb": _rss_mb(),
+            "disk_free_gb": _disk_free_gb(self.root),
             "floor": {
                 "equity": text(floor["equity"]),
                 "cash": text(floor["cash"]),

@@ -337,3 +337,33 @@ class _Response:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CacheTrimTests(unittest.TestCase):
+    def test_the_cache_directory_stays_under_its_cap_oldest_first_and_drops_stray_temp_files(self):
+        clock = Clock("2026-09-16T06:00:00Z")
+        with tempfile.TemporaryDirectory() as directory:
+            transport = HttpTransport(cache_dir=directory, ttl=3600, opener=lambda request, timeout=None: _Response(200, b"x" * 1000), clock=clock, cache_cap_bytes=3500)
+            for n in range(4):
+                transport.get(f"https://example.test/{n}")
+                clock.advance(1)
+            (Path(directory) / "deadbeef.tmp").write_text("half", encoding="utf-8")
+            self.assertEqual(len(list(Path(directory).glob("*.json"))), 4, "four entries of ~1 KB each before the trim")
+            removed = transport.trim(force=True)
+            kept = sorted(Path(directory).glob("*.json"))
+            self.assertEqual(len(kept), 2, "a 1000-byte body is ~1.5 KB once base64 and framed: two fit under 3500 bytes")
+            self.assertFalse((Path(directory) / "deadbeef.tmp").exists(), "a stray temp file goes with force")
+            self.assertGreaterEqual(removed, 3)
+            newest = transport.cached("https://example.test/3")
+            self.assertIsNotNone(newest, "the newest entry survives")
+            self.assertIsNone(transport.cached("https://example.test/0"), "the oldest went first")
+
+    def test_stores_trim_periodically_without_being_asked(self):
+        from ltcm.data import TRIM_EVERY_STORES
+
+        clock = Clock("2026-09-16T06:00:00Z")
+        with tempfile.TemporaryDirectory() as directory:
+            transport = HttpTransport(cache_dir=directory, ttl=3600, opener=lambda request, timeout=None: _Response(200, b"y" * 100), clock=clock, cache_cap_bytes=1)
+            for n in range(TRIM_EVERY_STORES):
+                transport.get(f"https://example.test/p{n}")
+            self.assertLessEqual(len(list(Path(directory).glob("*.json"))), 1, "the fiftieth store trims the directory to the cap")

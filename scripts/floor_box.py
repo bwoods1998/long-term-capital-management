@@ -701,7 +701,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     report["loop"] = {
         "supervisor_pid": seen.get("run.pid"),
         "loop_pid": seen.get("loop.pid"),
-        "alive": seen.get("loop.pid", "-") != "-",
+        # An exec that fails (a full disk stops the runtime writing its record) says nothing
+        # about the loop: report the probe error rather than a dead loop.
+        "alive": None if seen.get("error") else seen.get("loop.pid", "-") != "-",
+        "probe_error": str(seen.get("error") or "")[:200] or None,
         "stop_latch": seen.get("stop") == "yes",
         "kill_switch": seen.get("kill") == "yes",
     }
@@ -732,6 +735,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     say(f"egress       {len(report.get('egress') or [])} hosts, "
         f"matches the recorded policy: {report.get('egress_ok')}")
     loop = report["loop"]
+    if loop.get("probe_error"):
+        say(f"loop         unknown: the probe failed ({loop['probe_error']})")
     say(f"loop         alive={loop['alive']} supervisor={loop['supervisor_pid']} "
         f"loop={loop['loop_pid']} stop_latch={loop['stop_latch']} kill={loop['kill_switch']}")
     floor = report.get("floor_health")

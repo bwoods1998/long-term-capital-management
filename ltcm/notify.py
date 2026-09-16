@@ -71,6 +71,16 @@ def post_json(url: str, token: str, body: Mapping[str, Any], *, timeout: float =
         return {}
 
 
+def _strategy_note(intent: Any) -> str:
+    """A strategy's order is not read by the critic: the desk deployed the code and the risk
+    engine checked the order. Say so instead of "no review"."""
+    session = str((intent.payload.get("session_id") if intent else "") or "")
+    if ":strategy:" not in session:
+        return ""
+    name = session.rsplit(":strategy:", 1)[1]
+    return f"not reviewed: placed by the desk's {name} strategy (code it deployed; the risk engine checked the order)"
+
+
 class TradeNotifier:
     """Folds a fill or a settlement into a notice and posts it to the gateway's /v1/notify."""
 
@@ -143,7 +153,10 @@ class TradeNotifier:
                 ("approved" if decision.payload.get("approved") else "refused")
                 + (": " + "; ".join(str(r) for r in decision.payload.get("reasons") or []) if decision.payload.get("reasons") else "")
             ) if decision else "no engine record",
-            "critic": (f"{review.payload.get('verdict')}: {review.payload.get('reason')}" if review else "no review"),
+            "critic": (
+                f"{review.payload.get('verdict')}: {review.payload.get('reason')}" if review
+                else _strategy_note(intent) or "no review"
+            ),
             "target_price": plan.payload.get("target_price") if plan else (intent.payload.get("target_price") if intent else None),
             "stop_price": plan.payload.get("stop_price") if plan else (intent.payload.get("stop_price") if intent else None),
             "time_stop_at": plan.payload.get("time_stop_at") if plan else (intent.payload.get("time_stop_at") if intent else None),
