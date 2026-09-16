@@ -388,13 +388,18 @@ RUN_CODE_SCHEMA: dict[str, Any] = {
         "type": "object",
         "properties": {
             "code": {"type": "string", "description": "Python 3 source, under 40000 characters."},
-            "purpose": {"type": "string", "description": "One line: what this run is for, published."},
+            "purpose": {
+                "type": "string",
+                "description": "One line: what this run is for, published. Optional, but say it.",
+            },
             "save_as": {
                 "type": "string",
                 "description": "Optional tool name (lowercase letters, digits, underscores) to keep this code.",
             },
         },
-        "required": ["code", "purpose"],
+        # `code` alone is required: on Sept 16, 2026 a 24-turn hourly session burned a third of
+        # its turns on calls the schema refused for a missing purpose line.
+        "required": ["code"],
         "additionalProperties": False,
     },
 }
@@ -403,7 +408,7 @@ RUN_CODE_SCHEMA: dict[str, Any] = {
 def execute_run_code(manager: "SandboxManager | None", desk_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
     """The tool's executor: validates, runs, and returns the run as a plain dict for the model."""
     code = arguments.get("code")
-    purpose = str(arguments.get("purpose") or "")[:200]
+    purpose = str(arguments.get("purpose") or "unlabelled run")[:200]
     save_as = arguments.get("save_as")
     if save_as is not None and not isinstance(save_as, str):
         save_as = None
