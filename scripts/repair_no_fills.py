@@ -47,8 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     todo = []
     for event in fills:
         p = event.payload
-        if p.get("venue") != "kalshi" or p.get("shadow") or p.get("settlement"):
-            continue
+        if p.get("venue") != "kalshi" or p.get("shadow") or p.get("settlement") or not p.get("desk_id"):
+            continue  # a fill without a desk folds into no ledger; its attributed copy carries the intent's side
         if str(event.id).endswith((":corrected", ":reversal")):
             continue
         fill_id = str(p.get("fill_id") or "")
