@@ -552,3 +552,13 @@ are rewarded and punished. Shipped, in order:
   permitted": the Coinbase fill's instrument carries `market_id` (the product id) and the
   intent's did not, so the position sat under a different key. `tools.instrument_from` now
   sets `market_id` for crypto. The Coinbase universe drops stablecoins (USDT-USD had a z-score).
+- **The NO side, again** (e72b4ec, 09:30 UTC). The first hourly reconciliation showed four
+  weather markets where the ledger held the opposite of the venue (DEN: ledger +20 YES-scale,
+  venue 40 NO). Kalshi writes a fill's `action` on the YES book: a fill of the floor's resting
+  NO bid comes back as `side: no, action: sell, book_side: ask`, and the parser trusted
+  `action`, so every polled NO buy since 05:00 UTC was a sell on the tape. The parser now
+  prefers the book side and reads `action` inverted for NO; `scripts/repair_no_fills.py`
+  re-read the venue's fills and appended a reversal and a corrected copy for the 16 wrong
+  fills a ledger folds (the desk-less originals already had attributed copies with the
+  intent's side). Settlement fills written against the wrong positions before the repair are
+  not undone; `settle_finalized_markets` closes what remains in finalized markets.
