@@ -175,6 +175,8 @@ FLOOR_EXTRAS = (
     "ltcm/data/kalshi.py",
     "ltcm/data/coinbase.py",
     "ltcm/data/weather.py",
+    "ltcm/history.py",
+    "ltcm/backtest.py",
 )
 
 
@@ -234,6 +236,22 @@ class Toolbox:
         self.dir = Path(root) / desk_id
         self.dir.mkdir(parents=True, exist_ok=True)
 
+    def remove(self, name: str) -> bool:
+        """Delete a saved tool (leap: foundry -- a replaced candidate leaves no file behind, so a
+        desk's toolbox, uploaded whole before every run, does not grow with every cycle)."""
+        if not TOOL_NAME.match(name):
+            return False
+        path = self.dir / f"{name}.py"
+        existed = path.exists()
+        try:
+            path.unlink()
+        except OSError:
+            existed = False
+        index = self.index()
+        if index.pop(name, None) is not None:
+            (self.dir / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+        return existed
+
     def save(self, name: str, code: str, purpose: str) -> None:
         if not TOOL_NAME.match(name):
             raise ValueError("a tool name is lowercase letters, digits and underscores, 40 at most")
@@ -284,6 +302,9 @@ class SandboxManager:
         self.clock = clock
         self.daily_seconds = int(daily_seconds)
         self._lock = threading.RLock()
+        #: desk id prefix -> {daily_seconds, max_timeout}: the Foundry's backtest sandboxes run for
+        #: minutes at a time all day, which a desk's fuse (and the ten-minute run cap) would stop.
+        self._prefix_limits: dict[str, dict[str, int]] = {}
 
     # ------------------------------------------------------------------ state
     def state(self) -> dict[str, Any]:
@@ -308,6 +329,28 @@ class SandboxManager:
 
     def toolbox_save(self, desk_id: str, name: str, code: str, purpose: str) -> None:
         Toolbox(self.toolbox_root, desk_id).save(name, code, purpose)
+
+    def toolbox_remove(self, desk_id: str, name: str) -> bool:
+        return Toolbox(self.toolbox_root, desk_id).remove(name)
+
+    def set_limits(self, prefix: str, *, daily_seconds: int | None = None, max_timeout: int | None = None) -> None:
+        """Give the sandboxes whose desk id starts with `prefix` their own daily fuse and run cap
+        (leap: foundry). Every other sandbox keeps the manager's."""
+        limits: dict[str, int] = {}
+        if daily_seconds is not None:
+            limits["daily_seconds"] = max(60, int(daily_seconds))
+        if max_timeout is not None:
+            limits["max_timeout"] = max(5, int(max_timeout))
+        self._prefix_limits[str(prefix)] = limits
+
+    def limits_for(self, desk_id: str) -> tuple[int, int]:
+        """(daily seconds, longest run) for one sandbox."""
+        daily, cap = self.daily_seconds, DEFAULT_TIMEOUT * 5
+        for prefix, limits in getattr(self, "_prefix_limits", {}).items():
+            if prefix and str(desk_id).startswith(prefix):
+                daily = int(limits.get("daily_seconds", daily))
+                cap = int(limits.get("max_timeout", cap))
+        return daily, cap
 
     def box_for(self, desk_id: str) -> str | None:
         return (self.state().get("boxes") or {}).get(desk_id)
@@ -399,10 +442,11 @@ class SandboxManager:
             return CodeRun(desk_id, digest, f"code is over {MAX_CODE_CHARS} characters", 2, zero, None, purpose)
         if not self.available():
             return CodeRun(desk_id, digest, "no sandbox is available on this floor", 3, zero, None, purpose)
-        remaining = self.daily_seconds - self.seconds_today(desk_id)
+        daily, longest = self.limits_for(desk_id)
+        remaining = daily - self.seconds_today(desk_id)
         if remaining <= 0:
             return CodeRun(desk_id, digest, "the desk's sandbox time for today is used up", 4, zero, None, purpose)
-        timeout = max(5, min(int(timeout), remaining, DEFAULT_TIMEOUT * 5))
+        timeout = max(5, min(int(timeout), remaining, longest))
         toolbox = Toolbox(self.toolbox_root, desk_id)
         if save_as:
             try:

@@ -417,6 +417,31 @@ for `strategies.record_cache_seconds`. Each tick writes the step it is in to
 so a slow tick names its own culprit. On Sept 16, 2026 this took the tick from 4 to 10 minutes
 to about 30 seconds.
 
+### The Foundry: an evidence loop every half hour
+
+`ltcm/foundry.py` replaces days of waiting (twelve settlements, three-day gates, one lab night) with a
+cycle every `foundry.interval_minutes` (30) off the tick (`Service._foundry_tick`, worker `foundry`,
+`last_foundry_at`; state in `.data/ltcm/foundry.json`). A cycle takes the next family of `families`
+(kalshi, ranges, crypto; weather has no forecast history) and the next of its strategies (house starter,
+then what the live desk runs):
+1. **Candidates.** Baselines are the live settings and the best shadow's. `param_candidates` (10) jitter
+   the best-known settings 10-50%, seeded by the cycle, every other one flipping a `STARTER_VARIANTS`
+   choice. `code_candidates` (2) come from `profile` (K3, high, 16,000 tokens, $25 a day on desk
+   `foundry`) and must pass the lab's `validate_change` and compile. `frozen_params` never move.
+2. **Backtests side by side**, one per sandbox `foundry-0..7` (own fuse, 900 s cap via
+   `SandboxManager.set_limits`): the runner runs `ltcm.backtest.main` on the spec and prints one compact
+   `BACKTEST-RESULT` line with its split. `window_days` (5) to the last whole hour, `step_minutes` 15 (5 ranges).
+3. **Selection on the out-of-sample third only**: >= 25 positions, >= 60 trades, return on notional above
+   the best measured baseline by `margin` (0.01), 95% lower bound on mean P&L above 0.
+4. **Shadow at once**: the worst shadow desk (settled P&L, then equity; one still proving a candidate for
+   `protect_hours` is spared) gets the params (`promoted_at`, `foundry_id`) or the code
+   (`Strategies.install`). Never a live desk.
+5. **Live**: a positive backtest bound and `min_forward_settled` (5) settlements at P&L >= 0 since
+   deployment, and the live desk adopts it (params as `Strategies.promote` does; code installed, its
+   parent paused). Never under the kill switch; sizes, limits, capital unchanged; unproven in 72 h, expired.
+Tape: a `lab.hypothesis` per cycle (`foundry-<n>`), a `desk.code_run` per deployment or adoption, an
+`ops.alert` per adoption. `health.json` carries `last_foundry`.
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:
