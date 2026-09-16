@@ -45,6 +45,7 @@
   },
   "sources": {},
   "publish": true,
+  "checkpoint_strategies": false,
   "publish_token_env": "CAPITAL_PUBLISH_TOKEN",
   "shadow_slippage_bps": 5,
   "gateway_url": "https://ltcm-gateway.blake-woods-personal-site.workers.dev",

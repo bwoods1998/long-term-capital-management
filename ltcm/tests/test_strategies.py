@@ -334,7 +334,30 @@ class CancelAndRecordTests(StrategyCase):
         self.assertEqual((row["settled"], row["wins"], row["settled_pnl_usd"]), (2, 1, "2.50"))
 
 
+class RetryTests(StrategyCase):
+    def test_a_house_starter_whose_dry_run_failed_is_tried_again_on_a_later_build(self):
+        self.strategies.config["starters"] = True
+        self.manager.script = lambda d, c: Run('STRATEGY-RESULT {"intents": [], "error": "AttributeError: hint"}', 1)
+        self.assertEqual(self.strategies.bootstrap(self.service.manifests), [])
+        row = self.strategies.report(self.manifest, "hourly_ranges")
+        self.assertEqual((row["enabled"], row["house"]), (False, True))
+        self.assertIn("AttributeError", row["last_error"])
+        self.assertEqual(self.strategies.tick(self.service.manifests, NOW), [], "a disabled starter never runs")
+        # The next build's dry run passes: the starter is deployed after all.
+        self.manager.script = lambda d, c: Run('STRATEGY-RESULT {"intents": [], "notes": "quiet"}')
+        self.assertEqual(self.strategies.bootstrap(self.service.manifests), ["scholes-2/hourly_ranges", "scholes-2/hourly_quotes"])
+        self.assertTrue(self.strategies.report(self.manifest, "hourly_ranges")["enabled"])
+
+
 class HelperTests(unittest.TestCase):
+    def test_the_runner_renders_and_compiles(self):
+        from ltcm.strategies import RUNNER
+
+        code = RUNNER % {"params": json.dumps(json.dumps({"a": 1})), "context": json.dumps(json.dumps({"now": NOW})), "name": "edge", "max_intents": 5}
+        compile(code, "main.py", "exec")
+        self.assertIn("from toolbox import edge as strategy", code)
+        self.assertIn("series_hint", code)
+
     def test_the_result_line_is_the_last_marker_and_bad_lines_are_nothing(self):
         self.assertIsNone(_parse_result(""))
         self.assertIsNone(_parse_result("no marker here"))

@@ -2117,6 +2117,36 @@ class Service:
             "model_changed": bool(mutation.get("model_changed")),
         }
 
+    def _strategies_of(self, manifest: DeskManifest) -> list[dict[str, Any]]:
+        """leap: strategies -- the desk's deployed strategies with their records, for the checkpoint."""
+        runner = getattr(self, "strategies", None)
+        if runner is None:
+            return []
+        try:
+            rows = runner.report(manifest).get("strategies") or []
+        except Exception:
+            return []
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append(
+                {
+                    "name": row.get("name"),
+                    "house": bool(row.get("house")),
+                    "cadence_seconds": row.get("cadence_seconds"),
+                    "runs": row.get("runs") or 0,
+                    "intents": row.get("intents") or 0,
+                    "approved": row.get("approved") or 0,
+                    "errors": row.get("errors") or 0,
+                    "fills": row.get("fills") or 0,
+                    "settled": row.get("settled") or 0,
+                    "wins": row.get("wins") or 0,
+                    "settled_pnl_usd": row.get("settled_pnl_usd") or "0",
+                    "last_run_at": row.get("last_run_at"),
+                    "last_notes": row.get("last_notes") or "",
+                }
+            )
+        return out
+
     def _calibration_of(self, desk_id: str, at: str) -> dict[str, Any] | None:
         try:
             row = self.calibration.summary("desk", desk_id=desk_id, at=at)
@@ -2605,6 +2635,8 @@ class Service:
                     # leap: lab -- why a bred desk differs from its parent, and how well it forecasts.
                     "mutation": self._mutation_of(desk_id, spawn_records),
                     "calibration": self._calibration_of(desk_id, at),
+                    # leap: strategies -- the code trading for the desk, with each one's record.
+                    **({"strategies": self._strategies_of(manifest)} if self.config.get("checkpoint_strategies") else {}),
                 }
             )
         shadow_count = sum(1 for desk_id in self.manifests if desk_id not in live and desk_id not in retired)

@@ -151,7 +151,10 @@ class Kit:
         return Weather(transport=HttpTransport(cache_dir="/lab/cache", ttl=600.0, min_interval=0.2)).forecast(city)
     def weather_cities(self):
         from ltcm.data.weather import CITIES
-        return [{"name": c.name, "series": c.hint, "station": c.station} for c in CITIES.values()]
+        return [
+            {"name": c.name, "series": getattr(c, "series_hint", None) or getattr(c, "hint", None), "station": c.station}
+            for c in CITIES.values()
+        ]
     def kalshi_series(self, series, limit=1000, status="open"):
         """Open markets of one series (KXBTC, KXETH, KXHIGHNY...), prices in dollars. An hourly
         series lists dozens of buckets for several hours at once, so ask for them all."""
@@ -491,6 +494,18 @@ class Strategies:
             existing = self.store.for_desk(desk_id)
             for name, params, cadence in wanted:
                 row = existing.get(name)
+                if row is not None and row.get("house") and not row.get("enabled", True) and not int(row.get("runs") or 0):
+                    # A house starter whose dry run failed on an earlier build: the code may be
+                    # fixed now, so it is tried again from the repo (and stays off if it fails).
+                    path = STARTERS_DIR / f"{name}.py"
+                    if path.is_file() and hasattr(manager, "toolbox_save"):
+                        try:
+                            manager.toolbox_save(desk_id, name, path.read_text(encoding="utf-8"), f"house starter for the {manifest.family} family")
+                            self.deploy(manifest, name, cadence, params, note="house starter", house=True)
+                            deployed.append(f"{desk_id}/{name}")
+                        except Exception as exc:
+                            self.store.update(desk_id, name, last_error=str(exc)[:300])
+                    continue
                 if row is not None:
                     # A house starter follows the house params, cadence and code until the desk
                     # changes the file or redeploys it as its own.

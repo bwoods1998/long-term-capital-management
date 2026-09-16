@@ -687,6 +687,57 @@ def mutation_block(value: Any) -> dict[str, Any] | None:
     }
 
 
+STRATEGY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
+
+def strategy_rows(value: Any, published_at: str | None = None) -> list[dict[str, Any]]:
+    """leap: strategies -- the site's shape for a desk's strategies: at most eight rows of
+    `{name, house, cadence_seconds, runs, intents, approved, errors, fills, settled, wins,
+    settled_pnl_usd, last_run_at, last_notes}`. Anything malformed is left out, never sent."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in value:
+        if not isinstance(row, Mapping):
+            continue
+        name = str(row.get("name") or "")
+        if not STRATEGY_NAME.match(name) or name in seen:
+            continue
+        seen.add(name)
+        counters = {}
+        for key in ("runs", "intents", "approved", "errors", "fills", "settled", "wins"):
+            try:
+                counters[key] = max(0, int(row.get(key) or 0))
+            except (TypeError, ValueError):
+                counters[key] = 0
+        try:
+            cadence = max(1, min(86_400, int(row.get("cadence_seconds") or 600)))
+        except (TypeError, ValueError):
+            cadence = 600
+        pnl = row.get("settled_pnl_usd")
+        try:
+            pnl_text = format(Decimal(str(pnl)).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN), "f") if pnl not in (None, "") else "0.00"
+        except (InvalidOperation, ValueError):
+            pnl_text = "0.00"
+        last_run = row.get("last_run_at")
+        last_run = not_after(last_run, published_at) if isinstance(last_run, str) and AT_PATTERN.match(last_run) else None
+        out.append(
+            {
+                "name": name,
+                "house": bool(row.get("house")),
+                "cadence_seconds": cadence,
+                **counters,
+                "settled_pnl_usd": pnl_text,
+                "last_run_at": last_run,
+                "last_notes": sanitize_string(str(row.get("last_notes") or ""))[:240],
+            }
+        )
+        if len(out) >= 8:
+            break
+    return out
+
+
 def calibration_block(value: Any) -> dict[str, Any] | None:
     """leap: lab -- `{n, brier, since}` when a desk has scored forecasts, else None."""
     if not isinstance(value, Mapping) or not int(value.get("n") or 0):
@@ -807,6 +858,8 @@ def checkpoint_body(
                 # leap: lab -- optional, absent for a founder or a desk with no scored forecast.
                 **({"mutation": mutation_block(desk["mutation"])} if mutation_block(desk.get("mutation")) else {}),
                 **({"calibration": calibration_block(desk["calibration"])} if calibration_block(desk.get("calibration")) else {}),
+                # leap: strategies -- optional; an older floor, or a desk with none, omits it.
+                **({"strategies": strategy_rows(desk["strategies"], published_at)} if strategy_rows(desk.get("strategies"), published_at) else {}),
             }
             for desk in desks
         ],
