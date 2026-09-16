@@ -38,6 +38,10 @@ LEDGER_KINDS = ("committee.allocation", "broker.fill", "ledger.mark")
 
 _HISTORY_LIMIT = 1000
 
+#: How long after its stamp an event can still be appended. A settlement fill carries the venue's
+#: settled time and lands on a later tick, so an `until` fold reads this far past its instant.
+UNTIL_LAG_SECONDS = 24 * 3600
+
 
 # --------------------------------------------------------------------------- time helpers
 
@@ -271,13 +275,27 @@ class DeskLedger:
     # ------------------------------------------------------------------ folding
     @_locked
     def _consume(self) -> None:
+        horizon = None
+        if self.until is not None:
+            try:
+                horizon = iso_time(parse_iso(self.until) + _dt.timedelta(seconds=UNTIL_LAG_SECONDS))
+            except (TypeError, ValueError):
+                horizon = self.until
         while True:
             batch = self.log.read(after=self._seq, limit=2000)
             if not batch:
                 return
             for event in batch:
+                if not isinstance(event.seq, int) or event.seq <= self._seq:
+                    continue  # never fold a row twice, never move the cursor to a non-seq
                 if self.until is not None and event.at > self.until:
-                    return
+                    # The log's order is not its clock's: a settlement is stamped with the
+                    # venue's settled time and appended later, so a later stamp is skipped, not
+                    # the end of the fold. An `until` ledger is built fresh for each question.
+                    if event.at > horizon:
+                        return
+                    self._seq = event.seq
+                    continue
                 if event.kind in LEDGER_KINDS:
                     self._apply(event)
                 self._seq = event.seq
@@ -562,7 +580,8 @@ def floor_totals(
     floor's equity would publish a number nobody owns.
     """
     equity = cash = daily = deposits = ZERO
-    for desk_id, ledger in ledgers.items():
+    # A snapshot: the tick adds desks to the roster while workers sum it (Sept 16, 2026).
+    for desk_id, ledger in list(ledgers.items()):
         if include is not None and desk_id not in include:
             continue
         state = ledger.state(now)

@@ -37,8 +37,10 @@ charged exactly as the real one would have been.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import re
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -65,6 +67,24 @@ from .risk import Breaker, Decision, RiskContext, RiskEngine
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
+
+#: How far behind its cursor a fill sweep reads again. Fills are not ingested in the order they
+#: are stamped (a shadow fill carries its book's clock, a worker's sweep can run before the tick's),
+#: so a sweep that asked only for fills after the newest one it saw skipped older ones for good
+#: (Sept 16, 2026 audit). `_seen_fills` keeps the overlap from writing anything twice.
+FILL_LOOKBACK_SECONDS = 600
+
+
+def _stamp_minus(stamp: "str | None", seconds: int) -> "str | None":
+    """`stamp` moved `seconds` earlier, in the log's shape; unreadable stamps are kept."""
+    if stamp is None:
+        return None
+    try:
+        from datetime import timedelta
+
+        return iso_time(parse_iso(stamp) - timedelta(seconds=seconds))
+    except Exception:
+        return stamp
 
 #: The routing key of the scoring book. A shadow desk's orders go here and no further.
 SHADOW_VENUE = "shadow"
@@ -183,6 +203,26 @@ class Gateway:
         self.clock = clock
         self.kill_switch_path = Path(kill_switch_path) if kill_switch_path else None
         self.floor_max_daily_loss_pct = money(floor_max_daily_loss_pct)
+        # Concurrency (Sept 16, 2026 audit). Strategy workers, sessions, feed threads and the tick
+        # all call the gateway at once. `_book_lock` guards the in-memory book below (orders, the
+        # venue and intent maps, decisions, seen fills, blocked desks, the scan cursor, what is in
+        # flight) and is held over memory and the local log only, never over a venue call. A
+        # desk's lock makes one proposal's check-and-reserve atomic against another's; a venue's
+        # ingest lock does the same for fetch-attribute-append-cursor. Lock order, outermost
+        # first: desk or ingest lock -> `_book_lock` -> a DeskLedger's lock -> the EventLog's.
+        self._book_lock = threading.RLock()
+        self._desk_locks: dict[str, threading.Lock] = {}
+        self._ingest_locks: dict[str, threading.Lock] = {}
+        #: desk_id -> intent_id -> what an approved order not yet recorded and swept commits:
+        #: side, instrument key, quantity, notional. `risk_context` counts it.
+        self._inflight: dict[str, dict[str, dict[str, Any]]] = {}
+        #: venue -> submissions whose venue order id is not known yet. A fill on that venue the
+        #: floor cannot place may be theirs, so it waits for the next sweep.
+        self._submitting: dict[str, int] = {}
+        #: True when the owner (the service) rewrites `manifests` itself as promotions land. The
+        #: capital mode is then read from the manifest, which moves only once the sleeve is set
+        #: up, and a desk whose logged mode differs is mid-move and proposes nothing until it has.
+        self.manifests_carry_mode = False
         #: desk_id -> order_id that could not be confirmed.
         self.blocked_desks: dict[str, str] = {}
         #: True once a reconciliation found a difference the humans have not cleared.
@@ -206,11 +246,17 @@ class Gateway:
     # ------------------------------------------------------------------ log folding
     def _load(self) -> None:
         """Rebuild the order book and the deferred-release view from the log."""
+        with self._book_lock:
+            self._load_locked()
+
+    def _load_locked(self) -> None:
         while True:
             batch = self.log.read(after=self._scan_seq, limit=2000)
             if not batch:
                 return
             for event in batch:
+                if not isinstance(event.seq, int) or event.seq <= self._scan_seq:
+                    continue
                 self._scan_seq = event.seq
                 if event.kind == "broker.order":
                     self._absorb_order_event(event)
@@ -249,8 +295,26 @@ class Gateway:
         desk_id = payload.get("desk_id")
         if row["status"] == "unknown" and isinstance(desk_id, str):
             self.blocked_desks.setdefault(desk_id, order_id)
-        elif isinstance(desk_id, str) and self.blocked_desks.get(desk_id) == order_id:
+        elif isinstance(desk_id, str):
+            self._unblock(desk_id, order_id)
+
+    def _unblock(self, desk_id: str, order_id: str) -> None:
+        """The order no longer blocks its desk. Another order of the desk still unknown does:
+        two proposals that both ended unknown kept one id, and the other was never reconciled."""
+        with self._book_lock:
+            if self.blocked_desks.get(desk_id) != order_id:
+                return
+            for other_id, row in self._orders.items():
+                if other_id != order_id and row.get("desk_id") == desk_id and row.get("status") == "unknown":
+                    self.blocked_desks[desk_id] = other_id
+                    return
             self.blocked_desks.pop(desk_id, None)
+
+    def _rows(self) -> list[dict[str, Any]]:
+        """A copy of every order row, taken under the book lock: the book is never iterated
+        live while other threads insert into it."""
+        with self._book_lock:
+            return [dict(row) for row in self._orders.values()]
 
     # ------------------------------------------------------------------ environment
     def now(self) -> str:
@@ -320,7 +384,7 @@ class Gateway:
     def orders_today(self, desk_id: str, day: str) -> int:
         """Distinct orders the desk has sent today, from the log rather than memory."""
         seen: set[str] = set()
-        for row in self._orders.values():
+        for row in self._rows():
             if row.get("desk_id") != desk_id:
                 continue
             stamp = row.get("submitted_at") or row.get("at") or ""
@@ -329,98 +393,204 @@ class Gateway:
         return len(seen)
 
     # ------------------------------------------------------------------ risk context
-    def risk_context(self, intent: OrderIntent, now: Any = None) -> RiskContext:
+    def risk_context(self, intent: OrderIntent, now: Any = None, *, venue: str | None = None) -> RiskContext:
         self._load()
         at = iso_time(now) if now is not None else self.now()
         manifest = self.manifests.get(intent.desk_id)
         if manifest is None:
             raise GatewayError(f"no manifest for desk {intent.desk_id}")
-        ledger = self.ledgers.get(intent.desk_id)
-        if ledger is None:
+        if self.ledgers.get(intent.desk_id) is None:
             raise GatewayError(f"no ledger for desk {intent.desk_id}")
-        state = ledger.state(at)
         # Only live sleeves are the floor's money, so only they can trip the floor's loss limit.
         floor = floor_totals(self.ledgers, at, include=self.live_ids())
-        # Cash already committed to the desk's resting buys is not free to spend again: ten
-        # resting bids that each pass the cash rule alone can fill together (audit, Sept 16).
-        committed = ZERO
-        for row in self._orders.values():
-            if row.get("desk_id") != intent.desk_id or row.get("status") in TERMINAL_STATUSES or row.get("side") != "buy":
-                continue
-            try:
-                remaining = money(row.get("quantity") or 0) - money(row.get("filled_quantity") or 0)
-                price = money(row.get("limit_price") or 0)
-                committed += max(ZERO, remaining) * price * money((row.get("instrument") or {}).get("multiplier") or 1)
-            except Exception:
-                continue
+        venue = venue or self.route(intent.desk_id, intent.instrument.venue)
         return RiskContext(
             manifest=manifest,
-            desk_equity=state.equity,
-            desk_cash=state.cash - committed,
-            positions=state.positions,
             quote=self._quote(intent.instrument, intent.desk_id),
             now=at,
-            desk_daily_pnl=state.daily_pnl,
-            desk_orders_today=self.orders_today(intent.desk_id, at[:10]),
             floor_equity=floor["equity"],
             floor_daily_pnl=floor["daily_pnl"],
             floor_max_daily_loss_pct=self.floor_max_daily_loss_pct,
             kill_switch=self.kill_switch_engaged(),
             market_open=self.market_open(intent.instrument, at),
             adv_usd=self._adv_usd(intent.instrument),
-            open_orders=sum(
-                1
-                for row in self._orders.values()
-                if row.get("desk_id") == intent.desk_id
-                and row.get("status") not in TERMINAL_STATUSES
-            ),
-            venue_capabilities=self._capabilities(
-                self.route(intent.desk_id, intent.instrument.venue)
-            ),
+            venue_capabilities=self._capabilities(venue),
+            **self._book_fields(intent, at),
         )
 
+    def _book_fields(self, intent: OrderIntent, at: str) -> dict[str, Any]:
+        """The parts of the risk context the desk's own book decides: its ledger, what its
+        resting orders commit, and what its other proposals in flight will commit. Read again
+        under the desk's lock just before a proposal reserves, so two proposals of one desk
+        never both spend the same cash or sell the same position (Sept 16, 2026 audit: $150 at
+        the venue on a $100 desk, 200 sold of 100 held)."""
+        desk_id = intent.desk_id
+        ledger = self.ledgers.get(desk_id)
+        if ledger is None:
+            raise GatewayError(f"no ledger for desk {desk_id}")
+        state = ledger.state(at)
+        with self._book_lock:
+            self._load_locked()
+            flying = {
+                intent_id: dict(entry)
+                for intent_id, entry in (self._inflight.get(desk_id) or {}).items()
+                if intent_id != intent.id
+            }
+            rows = [
+                dict(row)
+                for row in self._orders.values()
+                if row.get("desk_id") == desk_id and row.get("intent_id") not in flying and row.get("intent_id") != intent.id
+            ]
+        # Cash already committed to the desk's resting buys is not free to spend again: ten
+        # resting bids that each pass the cash rule alone can fill together (audit, Sept 16).
+        committed = ZERO
+        # Likewise a position already offered by a working sell is not there to sell twice.
+        selling: dict[str, Decimal] = {}
+        open_orders = 0
+        orders_today = 0
+        for row in rows:
+            stamp = row.get("submitted_at") or row.get("at") or ""
+            if stamp[:10] == at[:10]:
+                orders_today += 1
+            if row.get("status") in TERMINAL_STATUSES:
+                continue
+            open_orders += 1
+            try:
+                remaining = max(ZERO, money(row.get("quantity") or 0) - money(row.get("filled_quantity") or 0))
+                if row.get("side") == "buy":
+                    price = money(row.get("limit_price") or 0)
+                    committed += remaining * price * money((row.get("instrument") or {}).get("multiplier") or 1)
+                elif row.get("side") == "sell":
+                    key = _key_of(row.get("instrument"))
+                    if key is not None:
+                        selling[key] = selling.get(key, ZERO) + remaining
+            except Exception:
+                continue
+        for entry in flying.values():
+            open_orders += 1
+            orders_today += 1
+            if entry["side"] == "buy":
+                committed += entry["notional"]
+            else:
+                selling[entry["key"]] = selling.get(entry["key"], ZERO) + entry["quantity"]
+        return {
+            "desk_equity": state.equity,
+            "desk_cash": state.cash - committed,
+            "positions": state.positions,
+            "desk_daily_pnl": state.daily_pnl,
+            "desk_orders_today": orders_today,
+            "open_orders": open_orders,
+            "working_sells": selling,
+        }
+
+    def _desk_lock(self, desk_id: str) -> threading.Lock:
+        with self._book_lock:
+            lock = self._desk_locks.get(desk_id)
+            if lock is None:
+                lock = self._desk_locks[desk_id] = threading.Lock()
+            return lock
+
+    def _mode_moving(self, desk_id: str) -> bool:
+        """True while a promotion or a demotion is logged but the owner has not moved the
+        desk's manifest yet: its sleeve is not set up, so nothing it proposes can be sized or
+        routed truthfully."""
+        if not self.manifests_carry_mode:
+            return False
+        manifest = self.manifests.get(desk_id)
+        if manifest is None:
+            return False
+        try:
+            return capital_mode(manifest, promoted_desks(self.log)) != manifest.capital_mode
+        except Exception:
+            return True
+
+    def inflight(self, desk_id: str) -> int:
+        """Approved proposals of this desk not yet recorded and swept."""
+        with self._book_lock:
+            return len(self._inflight.get(desk_id) or {})
+
+    def settle_inflight(self, desk_id: str, timeout: float = 30.0) -> bool:
+        """Wait (holding no lock while waiting) until the desk has nothing in flight; True if so.
+        The desk's lock is taken once first, so a check-and-reserve under way is counted."""
+        with self._desk_lock(desk_id):
+            pass
+        deadline = time.monotonic() + timeout
+        while self.inflight(desk_id):
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+        return True
+
     # ------------------------------------------------------------------ the decision
+    def _refusal(self, intent: OrderIntent, at: str, reason: str) -> Decision:
+        return Decision(
+            intent_id=intent.id,
+            desk_id=intent.desk_id,
+            approved=False,
+            reasons=(reason,),
+            reference_price=None,
+            notional=None,
+            checked_at=at,
+        )
+
+    def _blocked_outcome(self, intent: OrderIntent, at: str, blocked: str) -> dict[str, Any]:
+        decision = self._refusal(intent, at, f"desk blocked: order {blocked} has an unknown outcome; reconcile first")
+        self._record_intent(intent, at)
+        self._record_decision(decision)
+        return self._outcome(intent, decision, None, [], blocked=True)
+
     def propose(self, intent: OrderIntent, now: Any = None) -> dict[str, Any]:
         """Check one intent and, when it passes, send it. Returns the outcome as plain data."""
         at = iso_time(now) if now is not None else self.now()
         blocked = self.blocked_desks.get(intent.desk_id)
         if blocked:
-            reasons = (f"desk blocked: order {blocked} has an unknown outcome; reconcile first",)
-            decision = Decision(
-                intent_id=intent.id,
-                desk_id=intent.desk_id,
-                approved=False,
-                reasons=reasons,
-                reference_price=None,
-                notional=None,
-                checked_at=at,
-            )
+            return self._blocked_outcome(intent, at, blocked)
+
+        # The capital mode is read once, and the risk context, the critic and the route all use
+        # that one answer: a promotion landing mid-proposal once checked an order against the
+        # shadow book and sent it to the real venue (Sept 16, 2026 audit).
+        live = self.live_desk(intent.desk_id)
+        venue = intent.instrument.venue if live else SHADOW_VENUE
+        ctx = self.risk_context(intent, at, venue=venue)
+        reserved = False
+        with self._desk_lock(intent.desk_id):
+            blocked = self.blocked_desks.get(intent.desk_id)
+            # Moving: logged but not yet applied, or applied since `live` was read above.
+            moving = not blocked and (self._mode_moving(intent.desk_id) or self.live_desk(intent.desk_id) != live)
+            if not blocked and not moving:
+                ctx = dataclasses.replace(ctx, **self._book_fields(intent, at))
+                decision = self.risk_engine.check(intent, ctx)
+                if decision.approved:
+                    self._reserve(intent, decision)
+                    reserved = True
+        if blocked:
+            return self._blocked_outcome(intent, at, blocked)
+        if moving:
+            decision = self._refusal(intent, at, "the desk's capital mode is changing; propose again once its sleeve is set up")
+        try:
             self._record_intent(intent, at)
             self._record_decision(decision)
-            return self._outcome(intent, decision, None, [], blocked=True)
+            if not decision.approved:
+                return self._outcome(intent, decision, None, [])
 
-        ctx = self.risk_context(intent, at)
-        decision = self.risk_engine.check(intent, ctx)
-        self._record_intent(intent, at)
-        self._record_decision(decision)
-        if not decision.approved:
-            return self._outcome(intent, decision, None, [])
+            review = self.review(intent, decision, ctx, at, live=live)
+            if review is not None and review.blocked:
+                blocked_decision = Decision(
+                    intent_id=intent.id,
+                    desk_id=intent.desk_id,
+                    approved=False,
+                    reasons=(f"critic: {review.reason}",),
+                    reference_price=decision.reference_price,
+                    notional=decision.notional,
+                    checked_at=at,
+                )
+                self._record_decision(blocked_decision)
+                return self._outcome(intent, blocked_decision, None, [])
 
-        review = self.review(intent, decision, ctx, at)
-        if review is not None and review.blocked:
-            blocked = Decision(
-                intent_id=intent.id,
-                desk_id=intent.desk_id,
-                approved=False,
-                reasons=(f"critic: {review.reason}",),
-                reference_price=decision.reference_price,
-                notional=decision.notional,
-                checked_at=at,
-            )
-            self._record_decision(blocked)
-            return self._outcome(intent, blocked, None, [])
-
-        order_row, fills = self._submit(intent, at)
+            order_row, fills = self._submit(intent, at, venue=venue)
+        finally:
+            if reserved:
+                self._release(intent)
         if intent.has_exit_plan and self.exits is not None:  # leap: exits
             try:
                 self.exits.record_for(intent, order_row, at)
@@ -428,12 +598,32 @@ class Gateway:
                 self._alert("warning", f"exit plan for {intent.id} not recorded: {type(exc).__name__}", at)
         return self._outcome(intent, decision, order_row, fills)
 
+    def _reserve(self, intent: OrderIntent, decision: Decision) -> None:
+        notional = decision.notional if decision.notional is not None else ZERO
+        with self._book_lock:
+            self._inflight.setdefault(intent.desk_id, {})[intent.id] = {
+                "side": intent.side,
+                "key": intent.instrument.key,
+                "quantity": money(intent.quantity),
+                "notional": money(notional),
+            }
+
+    def _release(self, intent: OrderIntent) -> None:
+        with self._desk_lock(intent.desk_id):
+            with self._book_lock:
+                flying = self._inflight.get(intent.desk_id) or {}
+                flying.pop(intent.id, None)
+                if not flying:
+                    self._inflight.pop(intent.desk_id, None)
+
     # ------------------------------------------------------------------ the second pair of eyes
     def live_desk(self, desk_id: str) -> bool:
         """True when this desk is trading real money, promotions included."""
         manifest = self.manifests.get(desk_id)
         if manifest is None:
             return False
+        if self.manifests_carry_mode:
+            return manifest.live
         try:
             return capital_mode(manifest, promoted_desks(self.log)) == "live"
         except Exception:  # pragma: no cover - a log read that fails is not a licence to trade
@@ -445,7 +635,7 @@ class Gateway:
 
     def live_ids(self) -> set[str]:
         """Every desk on real capital. The floor's book is the sum of these and nothing else."""
-        return {desk_id for desk_id in self.ledgers if self.live_desk(desk_id)}
+        return {desk_id for desk_id in list(self.ledgers) if self.live_desk(desk_id)}
 
     def route(self, desk_id: str, venue: str) -> str:
         """Where an approved order actually goes: the venue, or the shadow book.
@@ -456,7 +646,7 @@ class Gateway:
         return venue if self.live_desk(desk_id) else SHADOW_VENUE
 
     def review(
-        self, intent: OrderIntent, decision: Decision, ctx: RiskContext, at: str
+        self, intent: OrderIntent, decision: Decision, ctx: RiskContext, at: str, *, live: bool | None = None
     ) -> Any | None:
         """Ask the critic about one approved live order. None when it does not apply.
 
@@ -464,7 +654,9 @@ class Gateway:
         every failure to get a verdict is an `ops.alert`. A verdict, either way, is published as
         `risk.review`.
         """
-        if self.critic is None or not self.live_desk(intent.desk_id):
+        if live is None:
+            live = self.live_desk(intent.desk_id)
+        if self.critic is None or not live:
             return None
         if intent.purpose == "exit":
             # leap: exits. An exit reduces exposure the desk already took; the critic's
@@ -554,12 +746,13 @@ class Gateway:
         payload = decision.to_dict()
         payload["desk_id"] = decision.desk_id
         event_id = f"risk:{decision.intent_id}:{_short(canonical(payload))}"
-        self._decisions[decision.intent_id] = decision.approved
+        with self._book_lock:
+            self._decisions[decision.intent_id] = decision.approved
         return self.log.append("risk", "risk.decision", payload, id=event_id, at=decision.checked_at)
 
     # ------------------------------------------------------------------ submission
-    def _submit(self, intent: OrderIntent, at: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        venue = self.route(intent.desk_id, intent.instrument.venue)
+    def _submit(self, intent: OrderIntent, at: str, *, venue: str | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        venue = venue or self.route(intent.desk_id, intent.instrument.venue)
         broker = self.brokers.get(venue)
         if broker is None:
             row = self._record_order(
@@ -569,14 +762,20 @@ class Gateway:
                 reason=f"no broker configured for venue {venue}",
             )
             return row, []
+        # Until the venue answers, a fill on this venue may be this order's with no way to say
+        # so: the sweep leaves such a fill for later instead of writing it as nobody's.
+        with self._book_lock:
+            self._submitting[venue] = self._submitting.get(venue, 0) + 1
         try:
             order = broker.submit(intent)
         except RejectedOrder as exc:
+            self._done_submitting(venue)
             row = self._record_order(
                 Order.from_intent(intent, venue=venue), status="rejected", at=at, reason=str(exc)
             )
             return row, []
         except VenueUnavailable as exc:
+            self._done_submitting(venue)
             row = self._record_order(
                 Order.from_intent(intent, venue=venue),
                 status="rejected",
@@ -586,6 +785,7 @@ class Gateway:
             self._alert("warning", f"{venue} unavailable for {intent.id}: {exc}", at)
             return row, []
         except UnknownOutcome as exc:
+            self._done_submitting(venue)
             order = Order.from_intent(intent, venue=venue)
             order.status = "unknown"
             row = self._record_order(order, status="unknown", at=at, reason=str(exc))
@@ -597,6 +797,7 @@ class Gateway:
             )
             return row, []
         except Exception as exc:
+            self._done_submitting(venue)
             # Anything else after the request went out (a 2xx with a body the adapter could
             # not read, a parse error) is an unknown outcome too: the venue may hold the order.
             # Record it, block the desk, say so. Never let it vanish into a traceback.
@@ -610,13 +811,24 @@ class Gateway:
                 at,
             )
             return row, []
+        except BaseException:
+            self._done_submitting(venue)
+            raise
 
-        row = self._record_order(order, status=order.status, at=at)
+        row = self._record_order(order, status=order.status, at=at, submitting=venue)
         # Refresh first, then sweep fills: an order that executed inline (an IOC, a marketable
         # limit) shows its fill only once the venue has recorded it.
         row = self._refresh(order.id, venue, at) or row
         fills = self.ingest_fills(venue)
         return row, [f for f in fills if f.get("order_id") == order.id]
+
+    def _done_submitting(self, venue: str) -> None:
+        with self._book_lock:
+            left = self._submitting.get(venue, 0) - 1
+            if left > 0:
+                self._submitting[venue] = left
+            else:
+                self._submitting.pop(venue, None)
 
     def _refresh(self, order_id: str, venue: str, at: str) -> dict[str, Any] | None:
         """Re-read one order from the venue and record any status change."""
@@ -632,9 +844,24 @@ class Gateway:
         return self._record_order(fresh, status=fresh.status, at=at, reason=fresh.reason)
 
     def _record_order(
-        self, order: Order, *, status: str, at: str, reason: str | None = None
+        self, order: Order, *, status: str, at: str, reason: str | None = None, submitting: str | None = None
     ) -> dict[str, Any]:
-        known = self._orders.get(order.id) or {}
+        with self._book_lock:
+            try:
+                known = dict(self._orders.get(order.id) or {})
+                # The row (desk, intent) and the venue's id go into the book before the event is
+                # written, in one step with the end of the submission: a fill another thread swept
+                # in between was written with no desk, marked seen, and dropped by every ledger
+                # (Sept 16, 2026 audit: 25 of 288 fills).
+                row = self._orders.setdefault(order.id, {"order_id": order.id})
+                for key, value in (("desk_id", order.desk_id), ("intent_id", order.intent_id), ("venue", order.venue)):
+                    if value and not row.get(key):
+                        row[key] = value
+                if order.broker_order_id:
+                    self._venue_orders[str(order.broker_order_id)] = order.id
+            finally:
+                if submitting is not None:
+                    self._done_submitting(submitting)
         payload: dict[str, Any] = {
             "order_id": order.id,
             "intent_id": order.intent_id or known.get("intent_id"),
@@ -654,8 +881,6 @@ class Gateway:
             "reason": reason or order.reason,
             "venue_order_id": order.broker_order_id or None,
         }
-        if order.broker_order_id:
-            self._venue_orders[str(order.broker_order_id)] = order.id
         if order.venue == SHADOW_VENUE:
             # Nothing was sent. The row says so on its face, wherever it is read.
             payload["shadow"] = True
@@ -685,41 +910,75 @@ class Gateway:
             self.log.append(
                 f"broker:{order.venue}", "broker.order", payload, id=event_id, at=at
             )
-        row = self._orders.setdefault(order.id, {"order_id": order.id})
-        row.update({k: v for k, v in payload.items() if v is not None})
-        row["status"] = status
-        row["reason"] = payload["reason"]
-        self._intent_orders[order.intent_id] = order.id
-        if status == "unknown":
-            self.blocked_desks.setdefault(order.desk_id, order.id)
-        elif self.blocked_desks.get(order.desk_id) == order.id:
-            self.blocked_desks.pop(order.desk_id, None)
-        return dict(row)
+        with self._book_lock:
+            row = self._orders.setdefault(order.id, {"order_id": order.id})
+            row.update({k: v for k, v in payload.items() if v is not None})
+            row["status"] = status
+            row["reason"] = payload["reason"]
+            self._intent_orders[order.intent_id] = order.id
+            if status == "unknown":
+                self.blocked_desks.setdefault(order.desk_id, order.id)
+            else:
+                self._unblock(order.desk_id, order.id)
+            return dict(row)
 
     # ------------------------------------------------------------------ fills
     def ingest_fills(self, venue: str) -> list[dict[str, Any]]:
-        """Pull new fills from one venue and write them to the log. Idempotent on fill id."""
+        """Pull new fills from one venue and write them to the log. Idempotent on fill id.
+
+        Every thread sweeps (workers after a submission, the tick's poll, cancels), so the sweep
+        of one venue is serialized from attribution to cursor, reads back `FILL_LOOKBACK_SECONDS`
+        behind its cursor, and never writes a fill it cannot place while a submission on the
+        venue is still waiting for its order id. The venue is asked outside every lock."""
+        from .events import EventConflict
+
         broker = self.brokers.get(venue)
         if broker is None:
             return []
         try:
-            fills = broker.fills(since=self._fill_cursor.get(venue))
+            fills = broker.fills(since=_stamp_minus(self._fill_cursor.get(venue), FILL_LOOKBACK_SECONDS))
         except Exception:
             return []
-        written: list[dict[str, Any]] = []
-        cursor = self._fill_cursor.get(venue)
-        for fill in sorted(fills, key=lambda f: (f.at, f.id)):
-            if cursor is None or fill.at > cursor:
-                cursor = fill.at
-            if fill.id in self._seen_fills:
-                continue
-            extra = self._attribution(fill)
-            before = self._position_before(fill, extra)
-            payload = self._record_fill(venue, fill, extra)
-            written.append(payload)
+        written: list[tuple[dict[str, Any], Any]] = []
+        with self._ingest_lock(venue):
+            cursor = self._fill_cursor.get(venue)
+            held_back: str | None = None
+            for fill in sorted(fills, key=lambda f: (f.at, f.id)):
+                if cursor is None or fill.at > cursor:
+                    cursor = fill.at
+                with self._book_lock:
+                    if fill.id in self._seen_fills:
+                        continue
+                    extra = self._attribution(fill)
+                    if not fill.desk_id and "desk_id" not in (extra or {}) and self._submitting.get(venue):
+                        # Perhaps the order a worker is still waiting on: leave it, and the cursor
+                        # before it, for the next sweep.
+                        held_back = fill.at if held_back is None or fill.at < held_back else held_back
+                        continue
+                if extra is not None and "order_id" not in extra and extra.get("venue_order_id"):
+                    self._say_unattributed(str(extra["venue_order_id"]))
+                before = self._position_before(fill, extra)
+                try:
+                    payload = self._record_fill(venue, fill, extra)
+                except EventConflict:
+                    # Already on the tape under the same id (another sweep wrote it first).
+                    with self._book_lock:
+                        self._seen_fills.add(fill.id)
+                    continue
+                written.append((payload, before))
+            if held_back is not None and (cursor is None or held_back < cursor):
+                cursor = held_back
+            self._fill_cursor[venue] = cursor
+        for payload, before in written:
             self._score_reduction(payload, before)
-        self._fill_cursor[venue] = cursor
-        return written
+        return [payload for payload, _ in written]
+
+    def _ingest_lock(self, venue: str) -> threading.Lock:
+        with self._book_lock:
+            lock = self._ingest_locks.get(venue)
+            if lock is None:
+                lock = self._ingest_locks[venue] = threading.Lock()
+            return lock
 
     def _position_before(self, fill: Fill, extra: "Mapping[str, Any] | None") -> Any:
         """The desk's position in the fill's instrument before this fill is folded, for a
@@ -779,23 +1038,29 @@ class Gateway:
 
     def _attribution(self, fill: Fill) -> dict[str, Any] | None:
         """The desk, intent and floor order id a venue fill belongs to, from the venue's order
-        id. A fill the floor cannot place is recorded as it came, and said once."""
+        id. A fill the floor cannot place is recorded as it came (`ingest_fills` says so once)."""
         if fill.desk_id:
             return None  # the shadow book names its desk
         venue_id = str(fill.order_id or "")
-        ours = self._venue_orders.get(venue_id) or (venue_id if venue_id in self._orders else None)
+        with self._book_lock:
+            ours = self._venue_orders.get(venue_id) or (venue_id if venue_id in self._orders else None)
+            row = dict(self._orders.get(ours) or {}) if ours is not None else {}
         if ours is None:
-            if venue_id and venue_id not in self._unattributed:
-                self._unattributed.add(venue_id)
-                self._alert("warning", f"fill for an order the floor did not place: {venue_id[:24]}", self.now())
             return {"venue_order_id": venue_id} if venue_id else None
-        row = self._orders.get(ours) or {}
         extra: dict[str, Any] = {"order_id": ours, "venue_order_id": venue_id}
         if row.get("desk_id"):
             extra["desk_id"] = row["desk_id"]
         if row.get("intent_id"):
             extra["intent_id"] = row["intent_id"]
         return extra
+
+    def _say_unattributed(self, venue_id: str) -> None:
+        """A fill the floor cannot place is recorded as it came, and said once."""
+        with self._book_lock:
+            if venue_id in self._unattributed:
+                return
+            self._unattributed.add(venue_id)
+        self._alert("warning", f"fill for an order the floor did not place: {venue_id[:24]}", self.now())
 
     def _record_fill(
         self, venue: str, fill: Fill, extra: "Mapping[str, Any] | None" = None
@@ -814,7 +1079,8 @@ class Gateway:
             id=f"fill:{venue}:{fill.id}",
             at=_stamp(fill.at, self.now()),
         )
-        self._seen_fills.add(fill.id)
+        with self._book_lock:
+            self._seen_fills.add(fill.id)
         return payload
 
     # ------------------------------------------------------------------ settlement
@@ -1137,12 +1403,13 @@ class Gateway:
         self._load()
         at = iso_time(now) if now is not None else self.now()
         changed: list[dict[str, Any]] = []
+        rows = self._rows()
         venues = {
             row.get("venue")
-            for row in self._orders.values()
+            for row in rows
             if row.get("status") not in TERMINAL_STATUSES and row.get("venue")
         }
-        for order_id, row in sorted(self._orders.items()):
+        for order_id, row in sorted((row["order_id"], row) for row in rows):
             if row.get("status") in TERMINAL_STATUSES or row.get("status") == "unknown":
                 continue
             venue = row.get("venue")
@@ -1164,7 +1431,8 @@ class Gateway:
         """Cancel one of the desk's own orders."""
         self._load()
         at = iso_time(now) if now is not None else self.now()
-        row = self._orders.get(order_id)
+        with self._book_lock:
+            row = dict(self._orders[order_id]) if order_id in self._orders else None
         if row is None:
             raise GatewayError(f"unknown order {order_id}")
         if row.get("desk_id") != desk_id:
@@ -1195,9 +1463,17 @@ class Gateway:
         if broker is None:
             raise GatewayError(f"no broker configured for venue {venue}")
 
-        # Resolve anything the gateway could not confirm before comparing books.
-        for desk_id, order_id in list(self.blocked_desks.items()):
-            row = self._orders.get(order_id) or {}
+        # Resolve anything the gateway could not confirm before comparing books: every order
+        # still unknown, not only the one each desk's block names (two concurrent submissions
+        # that both ended unknown left one of them unreconciled for good).
+        with self._book_lock:
+            unresolved = sorted(
+                {(str(row.get("desk_id") or ""), order_id) for order_id, row in self._orders.items() if row.get("status") == "unknown"}
+                | set(self.blocked_desks.items())
+            )
+            rows = {order_id: dict(self._orders.get(order_id) or {}) for _, order_id in unresolved}
+        for desk_id, order_id in unresolved:
+            row = rows.get(order_id) or {}
             if row.get("venue") != venue:
                 continue
             try:
@@ -1210,13 +1486,13 @@ class Gateway:
                     at=at,
                     reason=f"unresolved after reconciliation; venue has no such order ({exc})"[:300],
                 )
-                self.blocked_desks.pop(desk_id, None)
+                self._unblock(desk_id, order_id)
                 continue
             except Exception:
                 continue  # the venue did not answer: the desk stays blocked until it does
             fresh = self._refresh(order_id, venue, at)
             if fresh is not None and fresh.get("status") not in ("unknown", None):
-                self.blocked_desks.pop(desk_id, None)  # resolved to a real status
+                self._unblock(desk_id, order_id)  # resolved to a real status
         self.ingest_fills(venue)
 
         try:
@@ -1241,7 +1517,7 @@ class Gateway:
             key, quantity = scale(position)
             theirs[key] = theirs.get(key, ZERO) + quantity
         ours: dict[str, Decimal] = {}
-        for desk_id, ledger in self.ledgers.items():
+        for desk_id, ledger in list(self.ledgers.items()):
             manifest = self.manifests.get(desk_id)
             shadow = self.shadow_desk(desk_id)
             if venue == SHADOW_VENUE:
@@ -1363,10 +1639,18 @@ class Gateway:
     # ------------------------------------------------------------------ reads
     def orders(self, desk_id: str | None = None) -> list[dict[str, Any]]:
         self._load()
-        rows = [dict(r) for r in self._orders.values()]
+        rows = self._rows()
         if desk_id is not None:
             rows = [r for r in rows if r.get("desk_id") == desk_id]
         return sorted(rows, key=lambda r: (r.get("submitted_at") or "", r["order_id"]))
+
+    def order_for_intent(self, intent_id: str) -> dict[str, Any] | None:
+        """A copy of the order row the intent became, or None."""
+        self._load()
+        with self._book_lock:
+            order_id = self._intent_orders.get(intent_id)
+            row = self._orders.get(order_id) if order_id is not None else None
+            return dict(row) if row is not None else None
 
     def open_orders(self, desk_id: str | None = None) -> list[dict[str, Any]]:
         return [r for r in self.orders(desk_id) if r.get("status") not in TERMINAL_STATUSES]

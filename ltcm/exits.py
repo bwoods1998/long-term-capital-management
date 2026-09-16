@@ -202,6 +202,8 @@ class ExitBook:
             if not batch:
                 return
             for event in batch:
+                if not isinstance(event.seq, int) or event.seq <= self._scan_seq:
+                    continue
                 self._scan_seq = event.seq
                 if event.kind == "desk.exit_plan":
                     desk_id = event.stream.split(":", 1)[1] if ":" in event.stream else event.stream
@@ -222,7 +224,8 @@ class ExitBook:
     def plans(self) -> dict[str, ExitPlan]:
         """Open plans by entry intent id."""
         self._fold()
-        return {k: v for k, v in self._plans.items() if k not in self._closed}
+        # A snapshot: proposing threads add plans (`record_for`) while the tick reads them.
+        return {k: v for k, v in list(self._plans.items()) if k not in self._closed}
 
     def plan_for_position(self, desk_id: str, key: str) -> ExitPlan | None:
         """The newest open plan this desk holds on that instrument, for the positions board."""
@@ -313,6 +316,8 @@ class ExitBook:
             held = getattr(position, "quantity", ZERO) if position is not None else ZERO
             same_way = (held > 0) if plan.entry_side == "buy" else (held < 0)
             if position is None or held == 0 or not same_way:
+                if self._entry_working(intent_id):
+                    continue  # the entry still rests: the plan waits for its fill
                 self._closed.add(intent_id)  # the position is gone; the plan is moot
                 continue
             reason = plan.due(self._mark(plan, position), at)
@@ -323,12 +328,59 @@ class ExitBook:
             if last is not None and _seconds_between(last, at) < self.retry_seconds:
                 continue
             self._attempts[key] = at
-            outcomes.append(self._file_exit(plan, reason, min(plan.quantity, abs(held)), at))
+            outcomes.append(self._file_exit(plan, reason, min(plan.quantity, abs(held)), at, held=held))
         return outcomes
 
-    def _file_exit(self, plan: ExitPlan, reason: str, quantity: Decimal, at: str) -> dict[str, Any]:
+    def _entry_working(self, intent_id: str) -> bool:
+        """True while the plan's entry order is still working at the venue. A resting maker
+        entry is flat until it fills; closing its plan then (Sept 16, 2026 audit) left the
+        position it later opened with no stop at all."""
+        finder = getattr(self.gateway, "order_for_intent", None)
+        if not callable(finder):
+            return False
+        try:
+            row = finder(intent_id)
+        except Exception:
+            return False
+        return row is not None and row.get("status") not in TERMINAL_STATUSES
+
+    def _cancel_working_sells(self, plan: ExitPlan, quantity: Decimal, held: Decimal, at: str) -> None:
+        """Cancel the desk's own resting sells of this instrument when they offer what the exit
+        must sell. The gateway counts a working sell against the position it offers (two sells
+        of one position at once sold it twice, Sept 16, 2026 audit), so a stop filed next to a
+        resting offer would be refused as a short; the exit replaces the offer instead."""
+        reader = getattr(self.gateway, "open_orders", None)
+        canceller = getattr(self.gateway, "cancel", None)
+        if plan.exit_side != "sell" or not callable(reader) or not callable(canceller):
+            return
+        try:
+            rows = list(reader(plan.desk_id))
+        except Exception:
+            return
+        working = []
+        for row in rows:
+            if row.get("side") != "sell" or row.get("purpose") == "exit":
+                continue
+            instrument = row.get("instrument")
+            try:
+                key = Instrument.from_dict(dict(instrument)).key if isinstance(instrument, Mapping) else None
+                remaining = money(row.get("quantity") or 0) - money(row.get("filled_quantity") or 0)
+            except Exception:
+                continue
+            if key == plan.instrument.key and remaining > 0:
+                working.append((row, remaining))
+        if abs(held) - sum((r for _, r in working), ZERO) >= quantity:
+            return  # the offers leave enough for the exit; they stay
+        for row, _ in working:
+            try:
+                canceller(plan.desk_id, str(row.get("order_id")), at)
+            except Exception as exc:
+                self.alert("warning", f"exit of {plan.intent_id} could not cancel working order {row.get('order_id')}: {type(exc).__name__}")
+
+    def _file_exit(self, plan: ExitPlan, reason: str, quantity: Decimal, at: str, *, held: Decimal | None = None) -> dict[str, Any]:
         if plan.venue_native and reason == "time_stop":
             self._release_venue_bracket(plan, at)
+        self._cancel_working_sells(plan, quantity, quantity if held is None else held, at)
         level = {
             "stop": plan.stop_price,
             "target": plan.target_price,

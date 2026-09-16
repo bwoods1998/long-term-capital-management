@@ -865,6 +865,9 @@ class Service:
         self.stopping = False
         self.last_error: str | None = None
         self._sessions: list[threading.Thread] = []
+        #: Serializes every read-modify-write of `service-state.json`: the lab worker's rewrite
+        #: scheduling and the tick both saved it at once and each wiped the other's keys.
+        self._state_lock = threading.RLock()
         self._last_tick: dict[str, Any] | None = None
         self._budget: dict[str, Any] = {}
         self._sources: dict[str, Any] = {}
@@ -917,6 +920,9 @@ class Service:
             floor_max_daily_loss_pct=self.config["floor_max_daily_loss_pct"],
             critic=self.critic,
         )
+        # `_apply_capital_modes` moves each manifest once the desk's sleeve is ready; the gateway
+        # routes by that, and refuses a desk whose promotion or demotion is logged but not done.
+        self.gateway.manifests_carry_mode = True
         self.committee = Committee(
             self.log,
             self.manifests,
@@ -1557,7 +1563,13 @@ class Service:
             return None
 
     def _held_symbols(self) -> dict[str, set[str]]:
-        """venue -> the market tickers and product ids the desks currently hold, from the ledgers."""
+        """venue -> the market tickers and product ids the desks currently hold, from the ledgers.
+
+        Feed threads ask after every message; the answer is kept for a couple of seconds so the
+        sockets do not fold every ledger and copy the order book against the proposals in flight."""
+        cached = getattr(self, "_held_cache", None)
+        if cached is not None and time.monotonic() - cached[0] < 2.0:
+            return {venue: set(symbols) for venue, symbols in cached[1].items()}
         held: dict[str, set[str]] = {}
         at = self.now()
         for ledger in list(self.ledgers.values()):
@@ -1589,6 +1601,7 @@ class Service:
                 venue = str(inst.get("venue") or row.get("venue") or "")
                 if symbol and venue:
                     held.setdefault(venue, set()).add(symbol)
+        self._held_cache = (time.monotonic(), {venue: set(symbols) for venue, symbols in held.items()})
         return held
 
     def _allowed_symbols(self) -> dict[str, set[str]]:
@@ -1630,7 +1643,9 @@ class Service:
                 if not callable(on_trade):
                     continue
                 try:
-                    filled += len(on_trade(trade["venue"], trade["symbol"], trade["price"], trade["size"], trade["taker_side"], at) or [])
+                    # Stamped by the book's own clock, not the tick's start: a worker's shadow fill
+                    # swept before this drain moved the fill cursor past a tick-stamped one.
+                    filled += len(on_trade(trade["venue"], trade["symbol"], trade["price"], trade["size"], trade["taker_side"], None) or [])
                 except Exception as exc:
                     self.alert("warning", f"shadow taker fill on {desk_id} failed: {type(exc).__name__}")
         try:
@@ -1768,16 +1783,17 @@ class Service:
         return data if isinstance(data, dict) else {}
 
     def _save_state(self, **updates: Any) -> dict[str, Any]:
-        data = {**self.state(), **updates, "updated_at": self.now()}
-        tmp = self.state_path.with_name(self.state_path.name + f".tmp-{os.getpid()}")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.chmod(0o600)
-        tmp.replace(self.state_path)
-        return data
+        with self._state_lock:
+            data = {**self.state(), **updates, "updated_at": self.now()}
+            tmp = self.state_path.with_name(self.state_path.name + f".tmp-{os.getpid()}-{threading.get_ident()}")
+            tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            tmp.chmod(0o600)
+            tmp.replace(self.state_path)
+            return data
 
     def active_manifests(self) -> dict[str, DeskManifest]:
         retired = retired_desks(self.log)
-        return {k: v for k, v in self.manifests.items() if k not in retired}
+        return {k: v for k, v in list(self.manifests.items()) if k not in retired}
 
     def reload_manifests(self) -> None:
         """Pick up manifests the evolution loop spawned without restarting the process."""
@@ -1863,17 +1879,18 @@ class Service:
             modes = promoted_desks(self.log)
         except Exception:
             return
-        holders = [getattr(self, name, None) for name in ("gateway", "committee", "calibration", "lab", "evolution")]
+        # The gateway routes by its own manifest, so it is told last (Sept 16, 2026 audit: an
+        # order checked against a shadow book went to the real venue while a promotion was being
+        # set up): a demoted desk's book exists before its orders are routed there, and a promoted
+        # desk goes live in the gateway once `_begin_live` has flattened and funded it. Until then
+        # the gateway refuses the desk's proposals, and this waits for those already in flight.
+        gateway = getattr(self, "gateway", None)
+        holders = [getattr(self, name, None) for name in ("committee", "calibration", "lab", "evolution")]
         for desk_id, manifest in list(self.manifests.items()):
             mode = capital_mode(manifest, modes)
             if mode == manifest.capital_mode:
                 continue
             fresh = dataclasses.replace(manifest, capital_mode=mode)
-            self.manifests[desk_id] = fresh
-            for holder in holders:
-                table = getattr(holder, "manifests", None)
-                if isinstance(table, dict):
-                    table[desk_id] = fresh
             # A desk demoted to shadow trades a scoring book from now on; it had none while live.
             books = getattr(self, "shadow_books", None)
             if mode != "live" and isinstance(books, dict) and desk_id not in books:
@@ -1888,8 +1905,18 @@ class Service:
                     if isinstance(router, _ShadowRouter):
                         router.add(desk_id, broker)
                     self.alert("warning", f"{desk_id} moved to a shadow book: its orders are scored, not sent")
-                # Its real resting orders go: nothing on the venue may outlive the sleeve.
-                gateway = getattr(self, "gateway", None)
+            self.manifests[desk_id] = fresh
+            for holder in holders:
+                table = getattr(holder, "manifests", None)
+                if isinstance(table, dict):
+                    table[desk_id] = fresh
+            if mode != "live" and gateway is not None:
+                gateway.manifests[desk_id] = fresh
+            if mode != "live" and isinstance(books, dict):
+                # Its real resting orders go: nothing on the venue may outlive the sleeve, a live
+                # order still in flight when the demotion landed included.
+                if gateway is not None and not self._settle_inflight(desk_id):
+                    self.alert("warning", f"{desk_id}: an order was still in flight when its demotion was applied")
                 try:
                     resting = [r for r in (gateway.open_orders(desk_id) if gateway is not None else []) if r.get("venue") not in (None, SHADOW_VENUE)]
                 except Exception:
@@ -1899,10 +1926,18 @@ class Service:
                         gateway.cancel(desk_id, str(row.get("order_id")), self.now())
                     except Exception as exc:
                         self.alert("warning", f"could not cancel {desk_id}'s real order {row.get('order_id')} on demotion: {type(exc).__name__}")
+        #: desk_id -> its live manifest, which the gateway has not been given yet.
+        going_live = {
+            desk_id: fresh
+            for desk_id, fresh in list(self.manifests.items())
+            if gateway is not None and fresh.live and not getattr(gateway.manifests.get(desk_id), "live", True)
+        }
         # Each promotion to live is set up once: flat book, real sleeve. Keyed by the promotion's
         # time in service state, so a restart (manifests on disk still say shadow) never repeats it,
         # and a desk promoted before this existed is set up on the next tick.
         if getattr(self, "committee", None) is None:
+            for desk_id, fresh in going_live.items():
+                gateway.manifests[desk_id] = fresh
             return
         promoted_at: dict[str, str] = {}
         try:
@@ -1920,9 +1955,21 @@ class Service:
             manifest = self.manifests.get(desk_id)
             if manifest is None or not manifest.live or begun.get(desk_id) == when:
                 continue
+            if not self._settle_inflight(desk_id):
+                self.alert("warning", f"{desk_id}: a shadow order was still in flight when its promotion was set up")
             self._begin_live(manifest)
             begun[desk_id] = when
             self._save_state(live_begun=begun)
+            if desk_id in going_live:
+                gateway.manifests[desk_id] = going_live.pop(desk_id)
+        for desk_id, fresh in going_live.items():
+            if desk_id not in promoted_at or begun.get(desk_id) == promoted_at[desk_id]:
+                gateway.manifests[desk_id] = fresh
+
+    def _settle_inflight(self, desk_id: str, timeout: float = 15.0) -> bool:
+        """Wait, holding no lock, for the desk's proposals already past the gateway's check."""
+        settle = getattr(getattr(self, "gateway", None), "settle_inflight", None)
+        return settle(desk_id, timeout) if callable(settle) else True
 
     def _begin_live(self, manifest: DeskManifest) -> None:
         """A shadow desk promoted to real money starts its live life flat and funded.
@@ -2444,9 +2491,10 @@ class Service:
             self._rewrite_jobs: Any = queue.Queue()
             self._rewrite_done: Any = queue.Queue()
         if persist:
-            pending = dict(self.state().get("pending_rewrites") or {})
-            pending[str(job["desk_id"])] = dict(job)
-            self._save_state(pending_rewrites=pending)
+            with self._state_lock:
+                pending = dict(self.state().get("pending_rewrites") or {})
+                pending[str(job["desk_id"])] = dict(job)
+                self._save_state(pending_rewrites=pending)
         self._rewrite_jobs.put(dict(job))
         worker = getattr(self, "_rewrite_thread", None)
         if worker is None or not worker.is_alive():
@@ -2521,11 +2569,12 @@ class Service:
             except Exception as exc:
                 self.alert("warning", f"playbook rewrite for {desk_id} not applied: {type(exc).__name__}")
         if finished:
-            pending = dict(self.state().get("pending_rewrites") or {})
-            if any(desk_id in pending for desk_id in finished):
-                for desk_id in finished:
-                    pending.pop(desk_id, None)
-                self._save_state(pending_rewrites=pending)
+            with self._state_lock:
+                pending = dict(self.state().get("pending_rewrites") or {})
+                if any(desk_id in pending for desk_id in finished):
+                    for desk_id in finished:
+                        pending.pop(desk_id, None)
+                    self._save_state(pending_rewrites=pending)
         return applied
 
     def seed_population(self, at: str) -> list[dict[str, Any]]:
@@ -3903,7 +3952,7 @@ class Service:
                 except Exception as exc:
                     self.last_error = str(exc)
                     self.alert("critical", f"tick failed: {exc}")
-                    self.health()
+                    self._health_guarded()
                 if once or self.stopping:
                     break
                 self.sleeper(float(self.config["sleep_seconds"]))
@@ -3913,8 +3962,15 @@ class Service:
                     signal.signal(sig, handler)
                 except ValueError:
                     pass
-            self.health()
+            self._health_guarded()
         return result
+
+    def _health_guarded(self) -> None:
+        """The health file after a failed tick. A second failure here must not end the loop."""
+        try:
+            self.health()
+        except Exception as exc:
+            self.last_error = f"health failed: {type(exc).__name__}: {exc}"
 
     def close(self) -> None:
         if getattr(self, "sandboxes", None) is not None:  # leap: sandbox
@@ -3968,28 +4024,31 @@ class _ShadowRouter:
     def _for(self, desk_id: str) -> Any:
         broker = self.brokers.get(desk_id)
         if broker is None:
-            raise KeyError(f"no shadow book for desk {desk_id}")
+            # A refusal, not an unknown outcome: nothing was sent, so the desk is not blocked.
+            from .broker import RejectedOrder
+
+            raise RejectedOrder(f"no shadow book for desk {desk_id}")
         return broker
 
     def capabilities(self) -> set[str]:
         merged: set[str] = set()
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             merged |= set(broker.capabilities())
         return merged
 
     def quote(self, instrument: Instrument):
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             return broker.quote(instrument)
         return None
 
     def balance(self):
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             return broker.balance()
         return None
 
     def positions(self) -> list[Any]:
         out: list[Any] = []
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             out.extend(broker.positions())
         return out
 
@@ -4009,7 +4068,7 @@ class _ShadowRouter:
         desk_id = self._orders.get(order_id)
         if desk_id is not None:
             return getattr(self._for(desk_id), method)(*args)
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             try:
                 return getattr(broker, method)(*args)
             except Exception:
@@ -4018,13 +4077,13 @@ class _ShadowRouter:
 
     def open_orders(self) -> list[Any]:
         out: list[Any] = []
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             out.extend(broker.open_orders())
         return out
 
     def fills(self, since: str | None = None) -> list[Any]:
         out: list[Any] = []
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             out.extend(broker.fills(since))
         return out
 
@@ -4036,7 +4095,7 @@ class _ShadowRouter:
         no fills, and it keeps the router from having to know which desk held what.
         """
         out: list[Any] = []
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             settle = getattr(broker, "settle_event", None)
             if settle is None:
                 continue
@@ -4044,7 +4103,7 @@ class _ShadowRouter:
         return out
 
     def tick(self) -> None:
-        for broker in self.brokers.values():
+        for broker in list(self.brokers.values()):
             ticker = getattr(broker, "tick", None)
             if ticker is not None:
                 ticker()

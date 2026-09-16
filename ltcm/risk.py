@@ -39,6 +39,10 @@ class RiskContext:
     adv_usd: Decimal | None = None  # average daily dollar volume when known
     open_orders: int = 0
     venue_capabilities: set[str] = field(default_factory=set)
+    #: Instrument key -> quantity the desk's working sells (resting, or in flight on another
+    #: thread) already offer. A position is sold once: an exit and a strategy selling it at the
+    #: same moment sold 200 of 100 held (Sept 16, 2026 audit).
+    working_sells: dict[str, Decimal] = field(default_factory=dict)
 
     def __post_init__(self):
         for name in ("desk_equity", "desk_cash", "desk_daily_pnl", "floor_equity", "floor_daily_pnl"):
@@ -144,7 +148,7 @@ def rule_short(intent: OrderIntent, ctx: RiskContext) -> str | None:
     if intent.side != "sell":
         return None
     held = ctx.positions.get(intent.instrument.key)
-    held_qty = held.quantity if held else ZERO
+    held_qty = (held.quantity if held else ZERO) - (ctx.working_sells or {}).get(intent.instrument.key, ZERO)
     if held_qty - intent.quantity < 0:
         if not ctx.manifest.instruments.allow_short:
             return f"sell exceeds position and shorting is not permitted ({_held_on_market(intent, ctx, held_qty)})"

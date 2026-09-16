@@ -381,6 +381,16 @@ class StrategyStore:
             self.write(desks)
             return row
 
+    def patch(self, desk_id: str, name: str, expect: Mapping[str, Any] | None = None, **fields: Any) -> dict[str, Any] | None:
+        """`update`, but only on a row that still exists and still holds `expect`; None otherwise.
+        A run that finished after its strategy was undeployed wrote the row back, enabled, every
+        300s, with no params (Sept 16, 2026 audit)."""
+        with self._lock:
+            row = (self.read().get(desk_id) or {}).get(name)
+            if row is None or any(row.get(key) != value for key, value in (expect or {}).items()):
+                return None
+            return self.update(desk_id, name, **fields)
+
     def remove(self, desk_id: str, name: str) -> bool:
         with self._lock:
             desks = self.read()
@@ -865,7 +875,7 @@ class Strategies:
             return self.run_one(manifest, name, row, at)
         except Exception as exc:
             self.service.alert("warning", f"strategy {manifest.id}/{name} failed: {type(exc).__name__}")
-            self.store.update(manifest.id, name, last_run_at=at, errors=int(row.get("errors") or 0) + 1, last_error=f"{type(exc).__name__}")
+            self.store.patch(manifest.id, name, {"deployed_at": row.get("deployed_at")}, last_run_at=at, errors=int(row.get("errors") or 0) + 1, last_error=f"{type(exc).__name__}")
             return None
 
     def _collect(self) -> list[dict[str, Any]]:
@@ -953,7 +963,10 @@ class Strategies:
                 if params == _plain_params(row.get("params")):
                     continue
                 note = f"promoted from {winner}: {wrecord.get('settled')} settled, {best_score:+.3f} per $ vs live {'n/a' if live_score is None else f'{live_score:+.3f}'}"
-                self.store.update(live.id, name, params=params, promoted_at=at, promoted_from=winner, note=note[:200], foundry_id=None)
+                # Only onto the house row it scored: a desk that redeployed the strategy as its own
+                # while the record was read keeps its own params.
+                if self.store.patch(live.id, name, {"house": row.get("house"), "deployed_at": row.get("deployed_at"), "params": row.get("params")}, params=params, promoted_at=at, promoted_from=winner, note=note[:200], foundry_id=None) is None:
+                    continue
                 run = {
                     "intents": [], "notes": note, "code_sha256": row.get("code_sha256"),
                     "log": [f"live {live.id}: {live_record.get('settled', 0)} settled since {row.get('promoted_at') or row.get('deployed_at')}",
@@ -981,14 +994,19 @@ class Strategies:
         cancels = [str(c) for c in (run.get("cancels") or []) if isinstance(c, str)][:20] if not run.get("error") else []
         cancelled = self._cancel(manifest, name, cancels, at) if cancels else 0
         decisions: list[dict[str, Any]] = []
+        # The desk may have undeployed or redeployed the strategy while this run was in the sandbox.
+        current = self.store.for_desk(manifest.id).get(name)
+        if current is None or current.get("deployed_at") != row.get("deployed_at"):
+            intents = []
         if not run.get("error") and intents:
             decisions = self._propose(manifest, name, intents, at)
         approved = sum(1 for d in decisions if d.get("approved"))
         if cancelled:
             run["notes"] = f"{cancelled} cancelled; " + str(run.get("notes") or "")
-        self.store.update(
+        self.store.patch(
             manifest.id,
             name,
+            {"deployed_at": row.get("deployed_at")},
             last_run_at=at,
             runs=int(row.get("runs") or 0) + 1,
             intents=int(row.get("intents") or 0) + len(intents),
@@ -1108,10 +1126,16 @@ class Strategies:
         session = tools_module.ToolSession(session_id=session_id, desk_id=manifest.id, now=at)
         # A live desk: learning size, earned size, and the desk's own limits. A shadow desk sizes
         # itself (a variant's params may explore size); only its limits bind, so it is never
-        # refused into silence.
-        cap = self.size_cap(manifest, name) if manifest.live else self.limit_fit_usd(manifest)
+        # refused into silence. The mode is the one the floor holds as each order goes, not the
+        # one at dispatch: a promotion during the run once sent shadow-sized orders to real money.
+        caps: dict[bool, Decimal | None] = {}
         out: list[dict[str, Any]] = []
         for raw in intents[: int(self.config["max_intents_per_run"])]:
+            live = self._live_now(manifest)
+            if live not in caps:
+                current = self._manifest_now(manifest)
+                caps[live] = self.size_cap(current, name) if live else self.limit_fit_usd(current)
+            cap = caps[live]
             args = dict(raw)
             args.setdefault("order_type", "limit")
             if args.get("order_type") != "limit" or _dec(args.get("limit_price")) is None:
@@ -1130,6 +1154,20 @@ class Strategies:
             else:
                 out.append({"approved": bool(data.get("approved")), "reasons": list(data.get("reasons") or []), "intent_id": data.get("intent_id")})
         return out
+
+    def _manifest_now(self, manifest: DeskManifest) -> DeskManifest:
+        manifests = getattr(self.service, "manifests", None)
+        current = manifests.get(manifest.id) if isinstance(manifests, Mapping) else None
+        return current if isinstance(current, DeskManifest) else manifest
+
+    def _live_now(self, manifest: DeskManifest) -> bool:
+        live_desk = getattr(getattr(self.service, "gateway", None), "live_desk", None)
+        if callable(live_desk):
+            try:
+                return bool(live_desk(manifest.id))
+            except Exception:
+                pass
+        return self._manifest_now(manifest).live
 
     def _publish_run(self, manifest: DeskManifest, name: str, run: Mapping[str, Any], at: str, purpose: str, *, always: bool, row: Mapping[str, Any] | None = None) -> None:
         """A `desk.code_run` for the run: always for a deploy, an error or an intent; hourly when idle."""
@@ -1160,7 +1198,7 @@ class Strategies:
         }
         try:
             self.service.log.append(manifest.stream, "desk.code_run", payload, id=f"strategy:{manifest.id}:{name}:{at}", at=at)
-            self.store.update(manifest.id, name, last_published_at=at)
+            self.store.patch(manifest.id, name, last_published_at=at)
         except Exception as exc:
             self.service.alert("warning", f"strategy run not published: {type(exc).__name__}")
 

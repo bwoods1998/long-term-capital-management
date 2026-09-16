@@ -29,6 +29,7 @@ Fee defaults follow the venues the floor actually uses; see `FeeModel` for the s
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import sqlite3
@@ -252,6 +253,19 @@ class FeeModel:
         return quantize_cash(charged) if charged > 0 else ZERO
 
 
+def _locked(method):
+    """Run a read under the book's lock. Every thread shares the book's one connection: the tick's
+    order poll reading while a worker's submit wrote cancelled the wrong resting order and raised
+    after a fill was already written (Sept 16, 2026 audit). The writes already held the lock."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 def _loads_instrument(blob: str) -> Instrument:
     return Instrument.from_dict(json.loads(blob))
 
@@ -337,6 +351,7 @@ class ShadowBook:
         return self.data.quote(instrument)
 
     # ------------------------------------------------------------------ account
+    @_locked
     def _account(self) -> sqlite3.Row:
         return self._db.execute("SELECT * FROM account WHERE id = 1").fetchone()
 
@@ -348,6 +363,7 @@ class ShadowBook:
     def realized_pnl(self) -> Decimal:
         return money(self._account()["realized_pnl"])
 
+    @_locked
     def balance(self) -> Balance:
         account = self._account()
         cash = money(account["cash"])
@@ -361,10 +377,12 @@ class ShadowBook:
             currency=self.currency,
         )
 
+    @_locked
     def positions(self) -> list[Position]:
         rows = self._db.execute("SELECT * FROM positions ORDER BY key").fetchall()
         return [self._row_to_position(row) for row in rows if money(row["quantity"]) != 0]
 
+    @_locked
     def position(self, instrument: Instrument) -> "Position | None":
         row = self._db.execute(
             "SELECT * FROM positions WHERE key = ?", (instrument.key,)
@@ -415,18 +433,21 @@ class ShadowBook:
         order._raw = {"expires_at": row["expires_at"]}
         return order
 
+    @_locked
     def get_order(self, order_id: str) -> Order:
         row = self._db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
         if row is None:
             raise RejectedOrder(f"unknown order {order_id}")
         return self._row_to_order(row)
 
+    @_locked
     def order_for_intent(self, intent_id: str) -> "Order | None":
         row = self._db.execute(
             "SELECT * FROM orders WHERE intent_id = ?", (intent_id,)
         ).fetchone()
         return self._row_to_order(row) if row else None
 
+    @_locked
     def open_orders(self) -> list[Order]:
         rows = self._db.execute(
             "SELECT * FROM orders WHERE status IN ('new', 'accepted', 'partially_filled')"
@@ -434,6 +455,7 @@ class ShadowBook:
         ).fetchall()
         return [self._row_to_order(row) for row in rows]
 
+    @_locked
     def orders(self, *, desk_id: "str | None" = None) -> list[Order]:
         if desk_id is None:
             rows = self._db.execute("SELECT * FROM orders ORDER BY seq ASC").fetchall()
@@ -443,6 +465,7 @@ class ShadowBook:
             ).fetchall()
         return [self._row_to_order(row) for row in rows]
 
+    @_locked
     def fills(self, since: "str | None" = None) -> list[Fill]:
         if since is None:
             rows = self._db.execute("SELECT * FROM fills ORDER BY at ASC, id ASC").fetchall()
@@ -856,6 +879,7 @@ class ShadowBook:
                 currency=self.currency,
             )
 
+    @_locked
     def marks(self, since: "str | None" = None) -> list[dict[str, Any]]:
         if since is None:
             rows = self._db.execute("SELECT * FROM marks ORDER BY at ASC").fetchall()
@@ -990,6 +1014,7 @@ class ShadowBook:
             )
             return self.balance()
 
+    @_locked
     def snapshot(self) -> dict[str, Any]:
         """Everything the ledger stream needs for one `ledger.mark` event."""
         account = self._account()

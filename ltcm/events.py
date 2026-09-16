@@ -295,14 +295,29 @@ class EventLog:
             except Exception:
                 try:
                     self._db.execute("ROLLBACK")
-                except sqlite3.OperationalError:
+                except sqlite3.Error:
                     pass
                 raise
         return _row_to_event(row)
 
     # ------------------------------------------------------------------- reads
+    # Every read runs its statement and fetches its rows under `_lock`, the lock `append` holds
+    # from BEGIN to COMMIT. All threads share one connection: on Sept 16, 2026 two readers on it
+    # at once got each other's rows (a `read(after=100)` answered from seq 451), rows with a
+    # `seq` of None that wedged a ledger's cursor, and rows an append had not committed yet (and
+    # then rolled back, its seq reused by a different event the cursor had already passed).
+    # Decoding happens after the lock is released. Nothing is acquired while `_lock` is held, so
+    # the only lock order is a caller's own lock (a ledger's, the gateway's), then this one.
+    def _fetchone(self, sql: str, params: Any = ()) -> sqlite3.Row | None:
+        with self._lock:
+            return self._db.execute(sql, params).fetchone()
+
+    def _fetchall(self, sql: str, params: Any = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._db.execute(sql, params).fetchall()
+
     def get(self, event_id: str) -> Event | None:
-        row = self._db.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+        row = self._fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
         return _row_to_event(row) if row else None
 
     def read(
@@ -330,10 +345,10 @@ class EventLog:
             clauses.append("public = 1")
         params.append(max(1, min(int(limit), 10_000)))
         order = "DESC" if newest else "ASC"
-        rows = self._db.execute(
+        rows = self._fetchall(
             f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY seq {order} LIMIT ?",
             params,
-        ).fetchall()
+        )
         events = [_row_to_event(r) for r in rows]
         return events[::-1] if newest else events
 
@@ -348,29 +363,27 @@ class EventLog:
 
     def last(self, stream: str, kind: str | None = None) -> Event | None:
         if kind is None:
-            row = self._db.execute(
+            row = self._fetchone(
                 "SELECT * FROM events WHERE stream = ? ORDER BY seq DESC LIMIT 1", (stream,)
-            ).fetchone()
+            )
         else:
-            row = self._db.execute(
+            row = self._fetchone(
                 "SELECT * FROM events WHERE stream = ? AND kind = ? ORDER BY seq DESC LIMIT 1",
                 (stream, kind),
-            ).fetchone()
+            )
         return _row_to_event(row) if row else None
 
     def count(self, stream: str | None = None) -> int:
         if stream is None:
-            return self._db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        return self._db.execute(
-            "SELECT COUNT(*) FROM events WHERE stream = ?", (stream,)
-        ).fetchone()[0]
+            return self._fetchone("SELECT COUNT(*) FROM events")[0]
+        return self._fetchone("SELECT COUNT(*) FROM events WHERE stream = ?", (stream,))[0]
 
     def streams(self) -> list[str]:
-        rows = self._db.execute("SELECT DISTINCT stream FROM events ORDER BY stream").fetchall()
+        rows = self._fetchall("SELECT DISTINCT stream FROM events ORDER BY stream")
         return [r["stream"] for r in rows]
 
     def latest_seq(self) -> int:
-        row = self._db.execute("SELECT MAX(seq) AS m FROM events").fetchone()
+        row = self._fetchone("SELECT MAX(seq) AS m FROM events")
         return int(row["m"] or 0)
 
     # ------------------------------------------------------------- integrity

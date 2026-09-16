@@ -1,5 +1,6 @@
 import copy
 import tempfile
+import threading
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -1114,6 +1115,7 @@ class PolledOrderKeepsItsDeskTests(unittest.TestCase):
 
         gateway = Gateway.__new__(Gateway)
         gateway._orders, gateway._intent_orders, gateway._venue_orders, gateway.blocked_desks = {}, {}, {}, {}
+        gateway._book_lock = threading.RLock()
         gateway._absorb_order_event(Row({"order_id": "ord-1", "desk_id": "hilibrand", "intent_id": "oi-1", "status": "accepted", "purpose": "entry", "venue": "coinbase"}, 1))
         gateway._absorb_order_event(Row({"order_id": "ord-1", "desk_id": "", "intent_id": None, "status": "accepted", "filled_quantity": "0", "venue": "coinbase"}, 2))
         row = gateway._orders["ord-1"]
@@ -1133,6 +1135,7 @@ class UnreadableAnswerTests(unittest.TestCase):
         seen = {}
         gateway = Gateway.__new__(Gateway)
         gateway._orders, gateway._intent_orders, gateway._venue_orders, gateway.blocked_desks, gateway._seen_fills = {}, {}, {}, {}, set()
+        gateway._book_lock, gateway._submitting = threading.RLock(), {}
         gateway._record_order = lambda order, status, at, reason=None: seen.update({"status": status, "reason": reason}) or {"order_id": order.id, "status": status}
         gateway._alert = lambda level, text, at: seen.update({"alert": (level, text)})
         gateway.brokers = {"kalshi": Broker()}

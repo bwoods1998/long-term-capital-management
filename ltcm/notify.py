@@ -241,7 +241,9 @@ class TradeNotifier:
         for kind in ("broker.fill", "desk.outcome"):
             after = cursor
             while True:
-                batch = self.log.read(kind=kind, after=after, limit=2000)
+                # Nothing past `latest`: the cursor moves to it, so a later event read now would
+                # be mailed again next tick.
+                batch = [e for e in self.log.read(kind=kind, after=after, limit=2000) if e.seq <= latest]
                 for event in batch:
                     after = event.seq
                     if _age_seconds(event.at, at) > MAX_AGE_SECONDS:
