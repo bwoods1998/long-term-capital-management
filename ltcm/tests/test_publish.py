@@ -556,3 +556,16 @@ class PublicChangeTests(unittest.TestCase):
         block = lab_block({"experiments": [{"experiment_id": "exp-000000000001", "hypothesis": "h", "family": "ranges", "parent_id": "scholes", "change": change, "variant_desk_id": "scholes-5", "status": "running", "proposed_at": "2026-09-16T00:00:00.000Z", "evaluate_after": "2026-09-19T00:00:00.000Z"}], "curve": [], "calibration": {}})
         self.assertNotIn("code", block["experiments"][0]["change"]["strategy"])
         self.assertEqual(public_change("nope"), {})
+
+
+class StrategyRowExtrasTests(unittest.TestCase):
+    def test_a_strategy_row_carries_its_note_and_plain_params_when_it_has_them(self):
+        from ltcm.publish import strategy_rows
+
+        rows = strategy_rows([
+            {"name": "hourly_quotes", "house": True, "cadence_seconds": 300, "runs": 3, "note": "promoted from scholes-3: 14 settled <b>", "params": {"spread": 0.05, "buckets": 2, "symbols": ["BTC-USD", "ETH-USD"], "window": "5m", "flag": True, "_private": object()}},
+            {"name": "plain", "house": False, "cadence_seconds": 600},
+        ])
+        self.assertEqual(rows[0]["note"], "promoted from scholes-3: 14 settled ‹b>", "markup is defanged, never dropped")
+        self.assertEqual(rows[0]["params"], {"buckets": 2, "flag": True, "spread": 0.05, "symbols": ["BTC-USD", "ETH-USD"], "window": "5m"})
+        self.assertNotIn("note", rows[1]); self.assertNotIn("params", rows[1])

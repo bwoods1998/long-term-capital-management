@@ -690,6 +690,23 @@ def mutation_block(value: Any) -> dict[str, Any] | None:
 STRATEGY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 
 
+def _plain_params_for_site(value: Any) -> dict[str, Any]:
+    """A strategy's params as the site accepts them: plain values, sanitized strings, under 1 KB."""
+    out: dict[str, Any] = {}
+    for key, raw in sorted(dict(value).items()):
+        name = str(key)[:40]
+        if isinstance(raw, bool) or isinstance(raw, (int, float)):
+            out[name] = raw
+        elif isinstance(raw, str):
+            out[name] = sanitize_string(raw)[:80]
+        elif isinstance(raw, (list, tuple)):
+            out[name] = [sanitize_string(str(item))[:40] for item in list(raw)[:20]]
+        if len(json.dumps(out)) > 900:
+            out.pop(name, None)
+            break
+    return out
+
+
 def strategy_rows(value: Any, published_at: str | None = None) -> list[dict[str, Any]]:
     """leap: strategies -- the site's shape for a desk's strategies: at most eight rows of
     `{name, house, cadence_seconds, runs, intents, approved, errors, fills, settled, wins,
@@ -731,6 +748,9 @@ def strategy_rows(value: Any, published_at: str | None = None) -> list[dict[str,
                 "settled_pnl_usd": pnl_text,
                 "last_run_at": last_run,
                 "last_notes": sanitize_string(str(row.get("last_notes") or ""))[:240],
+                # Why these settings (a promotion, a lab experiment, the house) and the settings.
+                **({"note": sanitize_string(str(row["note"]))[:200]} if row.get("note") else {}),
+                **({"params": _plain_params_for_site(row.get("params"))} if isinstance(row.get("params"), Mapping) and row.get("params") else {}),
             }
         )
         if len(out) >= 8:
