@@ -557,12 +557,16 @@ class Strategies:
                 for e in reader(stream=stream, kind="desk.intent", limit=10_000)
                 if _strategy_of(str(e.payload.get("session_id") or "")) == name and fresh(e)
             }
+            # Orders and fills live in `broker:<venue>` streams (kalshi, coinbase, shadow), never
+            # in a desk's own stream: read every broker stream and match on the intent and order ids.
+            # Until Sept 16, 2026 this read `broker:<desk>` and every record showed zero fills, so
+            # no variant ever had a return on notional and the promotion loop had nothing to compare.
             orders = {
                 e.payload.get("order_id")
-                for e in reader(stream=f"broker:{desk_id}", kind="broker.order", limit=10_000)
+                for e in reader(kind="broker.order", limit=20_000)
                 if e.payload.get("intent_id") in intents
             }
-            fills = [e for e in reader(stream=f"broker:{desk_id}", kind="broker.fill", limit=10_000) if e.payload.get("order_id") in orders]
+            fills = [e for e in reader(kind="broker.fill", limit=20_000) if e.payload.get("order_id") in orders and fresh(e)]
             outcomes = [
                 e for e in reader(stream=stream, kind="desk.outcome", limit=10_000)
                 if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e)

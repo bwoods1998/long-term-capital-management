@@ -293,7 +293,7 @@ class CancelAndRecordTests(StrategyCase):
                 self.payload = payload
 
         def read(stream=None, kind=None, limit=None):
-            return [Event(p) for s, k, p in self.log_events if s == stream and k == kind]
+            return [Event(p) for s, k, p in self.log_events if (stream is None or s == stream) and k == kind]
 
         self.service.log.read = read
         self.open_orders = []
@@ -333,10 +333,10 @@ class CancelAndRecordTests(StrategyCase):
         self.log_events += [
             ("desk:scholes-2", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes-2:20260916-0400:strategy:edge"}),
             ("desk:scholes-2", "desk.intent", {"intent_id": "oi-2", "session_id": "scholes-2:20260916-0405:cadence:04:05"}),
-            ("broker:scholes-2", "broker.order", {"order_id": "ord-1", "intent_id": "oi-1"}),
-            ("broker:scholes-2", "broker.order", {"order_id": "ord-2", "intent_id": "oi-2"}),
-            ("broker:scholes-2", "broker.fill", {"order_id": "ord-1", "quantity": "20", "price": "0.65", "fee": "0.32"}),
-            ("broker:scholes-2", "broker.fill", {"order_id": "ord-2", "quantity": "5", "price": "0.10", "fee": "0.01"}),
+            ("broker:kalshi", "broker.order", {"order_id": "ord-1", "intent_id": "oi-1", "desk_id": "scholes-2"}),
+            ("broker:shadow", "broker.order", {"order_id": "ord-2", "intent_id": "oi-2", "desk_id": "scholes-2"}),
+            ("broker:kalshi", "broker.fill", {"order_id": "ord-1", "quantity": "20", "price": "0.65", "fee": "0.32"}),
+            ("broker:shadow", "broker.fill", {"order_id": "ord-2", "quantity": "5", "price": "0.10", "fee": "0.01"}),
             ("desk:scholes-2", "desk.outcome", {"pnl": "7.00", "rationale_excerpt": "[strategy edge] NO at 0.65 has edge"}),
             ("desk:scholes-2", "desk.outcome", {"pnl": "-4.50", "rationale_excerpt": "[strategy edge] YES at 0.20"}),
             ("desk:scholes-2", "desk.outcome", {"pnl": "9.00", "rationale_excerpt": "Exit stale offside long"}),
@@ -570,7 +570,7 @@ class PromotionTests(StrategyCase):
                 self.payload, self.at = payload, at
 
         def read(stream=None, kind=None, limit=None):
-            return [Event(p, *rest) for s, k, p, *rest in self.log_events if s == stream and k == kind]
+            return [Event(p, *rest) for s, k, p, *rest in self.log_events if (stream is None or s == stream) and k == kind]
 
         self.service.log.read = read
         self.service.gateway = type("G", (), {"open_orders": lambda g, desk_id: []})()
