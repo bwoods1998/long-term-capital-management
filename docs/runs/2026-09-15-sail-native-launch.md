@@ -319,3 +319,24 @@ What the first hour of strategies found (04:04-04:45 UTC), each fixed and deploy
   the packet now names the leg on both lines (next commit).
 - The owner deployed the gateway and moved $100 to Kalshi's crypto shard at 04:25, so live
   crypto orders are no longer refused at the venue.
+
+## Addendum: the first live trades, and the maker side (04:47-05:05 UTC, Sept 16)
+
+At 04:47 the live Scholes desk's hourly-ranges strategy bought 18 NO on the 05:00 BTC bucket at
+0.53 and 16 NO on the ETH bucket at 0.60, both at learning size, both approved by the risk engine
+and by the critic now that the packet names the leg. The owner's Kalshi email confirmed the
+fills. Two defects surfaced with them and were fixed within the hour (f892faa): the venue's
+`portfolio_value` is the positions' value alone, so equity had collapsed to $16 on the site;
+and Cloudflare answers the stock Python user agent with a 403, so three trade notices were
+refused before reaching mail.
+
+Commit 8ff8b9d widened what a strategy can be: it may cancel its own resting orders and sees
+them in its context, so `hourly_quotes` (the ranges family's second house starter) rests a YES
+bid and a NO bid a spread under fair on the buckets nearest spot and replaces them as fair
+drifts, the maker side of the market the first starter takes; `daily_temps` prices the daily
+high-temperature markets from the NWS forecast, the weather module riding into each sandbox
+per run because the image predates it; shadow siblings are dealt different house params so the
+family compares settings on the same markets; and `strategy_report` reads each strategy's
+fills, fees and settled P&L from the tape. Ranges desks may place 240 orders a day. The
+gateway's `MAX_DAY_ORDERS` (100) is the next cap a quoting live desk will meet; raising it is
+a `wrangler.jsonc` change and the owner's deploy.
