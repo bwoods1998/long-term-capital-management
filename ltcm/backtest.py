@@ -276,6 +276,19 @@ class Market:
         self._last = last
         self._decimals = {}
 
+    def refine(self, new_from: float, minute_candles: Iterable[Mapping[str, Any]]) -> bool:
+        """Replace the hourly candles after `new_from` (an hour boundary) with minute candles,
+        so fills on an order resting there are judged minute by minute."""
+        if new_from >= self.fine_from:
+            return False
+        minutes = [(60, dict(c)) for c in minute_candles if new_from < int(c["ts"]) <= self.fine_from]
+        if not minutes:
+            return False  # no minute history came back: the hourly evidence stays
+        kept = [(period, candle) for end, period, candle in zip(self.ends, self.periods, self.candles) if period != 3600 or end <= new_from]
+        self.fine_from = new_from
+        self.attach(kept + minutes)
+        return True
+
     def index_at(self, t: float) -> int:
         """Index of the last candle whose period ended at or before t, or -1."""
         return bisect.bisect_right(self.ends, t) - 1
@@ -372,6 +385,12 @@ class DataSet:
         self.crypto: dict[tuple[str, str], CryptoSeries] = {}
         self.errors = 0
         self._noted: set[str] = set()
+        #: Markets whose hourly candles are replaced by minute candles once an order rests on
+        #: them (ticker -> the hour to refine from), fetched in batches before the next step.
+        self.pending_refine: dict[str, float] = {}
+        self.refined: set[str] = set()
+        self.refine_tried: dict[str, float] = {}
+        self.max_refine = 400
 
     def note_once(self, key: str, text: str) -> None:
         if key not in self._noted:
@@ -548,6 +567,48 @@ class DataSet:
         if current:
             groups.append(current)
         return groups
+
+    def request_refine(self, market: Market, t: float) -> None:
+        """Ask for minute candles from the hour of `t` to the minute window, when an order rests
+        on a market still priced by the hour: an hourly candle cannot say whether the book
+        traded through the order after it was placed or before."""
+        hour = math.floor(t / 3600.0) * 3600
+        if market.fine_from <= hour or self.refine_tried.get(market.ticker, math.inf) <= hour:
+            return  # already minute-resolved there, or asked before and nothing finer came back
+        known = market.ticker in self.refine_tried or market.ticker in self.pending_refine
+        if not known and len(self.refine_tried) + len(self.pending_refine) >= self.max_refine:
+            self.note_once("refine-cap", f"minute candles fetched for {self.max_refine} markets at most; later resting orders are judged on hourly candles")
+            return
+        self.pending_refine[market.ticker] = min(self.pending_refine.get(market.ticker, hour), hour)
+
+    def flush_refine(self) -> None:
+        if not self.pending_refine:
+            return
+        items = []
+        for ticker, hour in sorted(self.pending_refine.items()):
+            market = self.markets.get(ticker)
+            if market is not None and hour < market.fine_from:
+                items.append((hour, market.fine_from, market))
+                self.refine_tried[ticker] = min(hour, self.refine_tried.get(ticker, hour))
+        self.pending_refine.clear()
+        many = getattr(self.history, "kalshi_candles_many", None)
+        groups = self._group(items, 1) if callable(many) else [[item] for item in items]
+        for group in groups:
+            lo = min(item[0] for item in group)
+            hi = max(item[1] for item in group)
+            try:
+                if callable(many):
+                    found = many([item[2].ticker for item in group], start_ts=int(lo), end_ts=int(math.ceil(hi)), period_minutes=1)
+                else:
+                    market = group[0][2]
+                    found = {market.ticker: self.history.kalshi_candles(market.series, market.ticker, start_ts=int(lo), end_ts=int(math.ceil(hi)), period_minutes=1)}
+            except Exception as exc:
+                self.errors += 1
+                self.note_once(f"refine-{type(exc).__name__}", f"minute candles for resting orders failed ({type(exc).__name__}: {str(exc)[:160]}); hourly candles judged them")
+                continue
+            for item_lo, _item_hi, market in group:
+                if market.refine(item_lo, found.get(market.ticker) or []):
+                    self.refined.add(market.ticker)
 
     def open_markets(self, t: float, *, series: str | None = None, max_close: float | None = None) -> list[Market]:
         """Markets open at t, optionally of one series and closing by `max_close`."""
@@ -927,6 +988,7 @@ class Simulator:
             fill_price = round(touch, 4)
             self._fill_event(market, right, side, contracts, fill_price, kalshi_taker_fee(fill_price) * contracts, False, t, plan)
             return "filled"
+        self.data.request_refine(market, t)
         order = self.add_order(
             {
                 "strategy": self.strategy,
@@ -940,7 +1002,7 @@ class Simulator:
                 "price": price,
                 "price_text": f"{price:.2f}" if abs(price * 100 - round(price * 100)) < 1e-6 else _text_number(price),
                 "submitted_ts": t,
-                "next_index": bisect.bisect_right(market.ends, t),
+                "checked_ts": t,
                 "plan": plan,
             }
         )
@@ -1052,6 +1114,7 @@ class Simulator:
     # ------------------------------------------------------------------ clock
     def advance(self, t: float) -> None:
         """Everything the venue would have done by t: resting fills, settlements, expiries, exits."""
+        self.data.flush_refine()
         for order in sorted(list(self.orders.values()), key=lambda o: o["submitted_ts"]):
             if order["order_id"] not in self.orders:
                 continue
@@ -1075,7 +1138,7 @@ class Simulator:
         if market is None:
             return
         horizon = min(t, market.close_ts)
-        index = max(order["next_index"], bisect.bisect_right(market.ends, order["submitted_ts"]))
+        index = bisect.bisect_right(market.ends, max(order["checked_ts"], order["submitted_ts"]))
         price, right, side = order["price"], order["right"], order["side"]
         while index < len(market.ends) and market.ends[index] <= horizon:
             candle = market.candles[index]
@@ -1102,7 +1165,8 @@ class Simulator:
                         return
                 self._fill_event(market, right, side, contracts, price, 0.0, True, float(market.ends[index - 1]), order.get("plan"))
                 return
-        order["next_index"] = index
+        if index > 0:
+            order["checked_ts"] = max(order["checked_ts"], market.ends[index - 1])
 
     def _check_crypto_order(self, order: dict[str, Any], t: float) -> None:
         series = self.data.crypto_series(order["symbol"], QUOTE_GRANULARITY, order["submitted_ts"] - 3 * GRANULARITY_SECONDS[QUOTE_GRANULARITY])
@@ -1511,6 +1575,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         maker_fills=sum(1 for f in sim.fills if f["maker"]),
         markets_loaded=len(data.markets),
         markets_priced=sum(1 for m in data.markets.values() if m.candles),
+        markets_refined=len(data.refined),
         http_requests=int(getattr(history, "requests", 0) or 0),
         cache_hits=int(getattr(history, "cache_hits", 0) or 0),
         runtime_seconds=round(time.monotonic() - began, 1),

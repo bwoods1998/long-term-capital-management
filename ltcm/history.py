@@ -60,7 +60,9 @@ SINGLE_PERIODS = 4_000
 #: still grow while recent markets finalize, and the newest candle can still be moving.
 LISTING_SETTLE_SECONDS = 12 * 3600
 CANDLE_SETTLE_SECONDS = 3600
-MAX_RETRIES = 5
+#: Retries of a 429 or 5xx, backing off 1, 2, 4 ... 30 seconds: about five minutes in all. The
+#: public limit is per address, so another reader on the same machine can spend it for us.
+MAX_RETRIES = 12
 
 
 class HistoryError(RuntimeError):
@@ -192,6 +194,7 @@ class History:
         min_interval: float = 0.15,
         sleep: Callable[[float], None] = time.sleep,
         verbose: bool = True,
+        max_retries: int = MAX_RETRIES,
     ):
         if transport is None:
             from .data import HttpTransport
@@ -204,6 +207,7 @@ class History:
         self.min_interval = float(min_interval)
         self.sleep = sleep
         self.verbose = bool(verbose)
+        self.max_retries = max(0, int(max_retries))
         self.requests = 0
         self.cache_hits = 0
         self.rate_limited = 0
@@ -240,17 +244,17 @@ class History:
                     return json.loads(body.decode("utf-8"))
                 except (UnicodeDecodeError, ValueError):
                     pass
-        delay = 0.5
+        delay = 1.0
         last = ""
-        for attempt in range(MAX_RETRIES + 1):
+        for attempt in range(self.max_retries + 1):
             self._throttle(url)
             self.requests += 1
             try:
-                status, _headers, body = self.transport.get(url, {"Accept": "application/json"}, 30)
+                status, headers, body = self.transport.get(url, {"Accept": "application/json"}, 30)
             except Exception as exc:  # a transport failure is retried like a 5xx
                 if type(exc).__name__ == "DataError":  # refused locally (size, scheme): final
                     raise HistoryError(f"{url[:160]}: {exc}") from exc
-                status, body, last = 0, b"", f"{type(exc).__name__}: {exc}"
+                status, headers, body, last = 0, {}, b"", f"{type(exc).__name__}: {exc}"
             if status:
                 self._pace(url, status == 429)
             if status == 429:
@@ -266,11 +270,18 @@ class History:
             if status and status != 429 and status < 500:
                 snippet = body[:200].decode("utf-8", "replace") if body else ""
                 raise HistoryError(f"HTTP {status} from {url[:160]}: {snippet}")
-            last = last or f"HTTP {status}"
-            if attempt < MAX_RETRIES:
-                self.sleep(delay)
+            last = f"HTTP {status}" if status else last
+            if attempt < self.max_retries:
+                wait = delay
+                try:
+                    wait = max(wait, min(60.0, float((headers or {}).get("retry-after") or 0))) if status else wait
+                except (TypeError, ValueError, AttributeError):
+                    pass
+                if attempt >= 2:
+                    self.say(f"{last} from {urllib.parse.urlsplit(url).netloc}; retry {attempt + 1} in {wait:.0f}s")
+                self.sleep(wait)
                 delay = min(delay * 2, 30.0)
-        raise HistoryError(f"{url[:160]} failed after {MAX_RETRIES} retries: {last}")
+        raise HistoryError(f"{url[:160]} failed after {self.max_retries} retries: {last}")
 
     def _settled_window(self, end_ts: float, margin: float) -> bool:
         return float(end_ts) <= float(self.clock()) - margin
@@ -334,6 +345,8 @@ class History:
                 parsed["settlement_value"] = _float(value)
                 out.append(parsed)
             cursor = payload.get("cursor")
+            if pages % 5 == 0:
+                self.say(f"kalshi settled {series or 'board'}: {pages} pages, {len(out)} markets kept so far")
             if not cursor or not rows:
                 break
         else:

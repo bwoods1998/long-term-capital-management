@@ -251,6 +251,32 @@ class FillTests(unittest.TestCase):
         sim.advance(open_ts + 3 * HOUR)
         self.assertEqual(len(sim.fills), 1)
 
+    def test_an_order_resting_on_an_hourly_market_is_judged_on_minute_candles(self):
+        open_ts = T0 + 1 * HOUR
+        close = open_ts + 30 * HOUR
+        ticker = "KXLONG-26SEP11-A"
+        sub = open_ts + HOUR + 20 * MINUTE
+        hourly = [candle(open_ts + h * HOUR, 0.10, 0.20, ask_low=0.05) for h in range(1, 28)]
+        minutes = [
+            candle(open_ts + HOUR + 10 * MINUTE, 0.10, 0.20, ask_low=0.05),  # before the order
+            candle(open_ts + HOUR + 25 * MINUTE, 0.10, 0.20, ask_low=0.16),  # after, not through
+            candle(open_ts + HOUR + 40 * MINUTE, 0.10, 0.20, ask_low=0.14),  # after, through
+        ]
+        history = FakeHistory([market_row(ticker, open_ts, close)], {(ticker, 60): hourly, (ticker, 1): minutes})
+        data = dataset(history, end=T0 + 48 * HOUR, series=("KXLONG",))
+        sim = simulator(data)
+        self.assertTrue(sim.submit(buy(ticker, "yes", 0.15, 3), sub).startswith("resting:"))
+        sim.advance(open_ts + HOUR + 30 * MINUTE)
+        self.assertIn(ticker, data.refined)
+        self.assertEqual(sim.fills, [], "the minute before the order does not fill it")
+        requested = [c for c in history.calls if c[0] == "candles" and c[4] == 1 and c[2] == open_ts + HOUR]
+        self.assertTrue(requested, "minute candles are fetched from the hour the order rests in")
+        sim.advance(open_ts + HOUR + 45 * MINUTE)
+        self.assertEqual(len(sim.fills), 1)
+        self.assertEqual(sim.fills[0]["ts"], open_ts + HOUR + 40 * MINUTE)
+        view = BacktestKit(data, sim, open_ts + HOUR + 26 * MINUTE, products=None, half_spread=0.0).kalshi_market(ticker)
+        self.assertEqual(str(view["yes_ask"]), "0.2000")
+
     def test_post_only_that_would_cross_is_rejected(self):
         sim = self.build([candle(self.open + MINUTE, 0.40, 0.45)])
         t = self.open + 2 * MINUTE
