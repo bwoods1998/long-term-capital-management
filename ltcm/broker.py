@@ -107,7 +107,11 @@ class Instrument:
             parts.append(format(self.strike, "f"))
         if self.right:
             parts.append(self.right)
-        if self.market_id:
+        # A crypto product's market id is its symbol again (Coinbase names products by id); it
+        # adds nothing to the key, and a fill that carried it against an intent that did not had
+        # split one position in two (Sept 16, 2026). Event contracts keep it: their positions
+        # have always been keyed with it.
+        if self.market_id and not (self.asset_class == "crypto" and self.market_id == self.symbol):
             parts.append(self.market_id)
         return ":".join(parts)
 

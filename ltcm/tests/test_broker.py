@@ -124,3 +124,13 @@ class OrderAndFillTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CryptoKeyTests(unittest.TestCase):
+    def test_a_crypto_product_keys_the_same_with_or_without_its_market_id(self):
+        from ltcm.broker import Instrument
+
+        self.assertEqual(Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD").key, Instrument("crypto", "BTC-USD", "coinbase").key)
+        self.assertEqual(Instrument("crypto", "BTC-USD", "coinbase").key, "crypto:BTC-USD:coinbase")
+        event = Instrument("event", "KXBTC-1", "kalshi", market_id="KXBTC-1", right="no")
+        self.assertEqual(event.key, "event:KXBTC-1:kalshi:no:KXBTC-1", "event keys keep the market id: their positions were always keyed with it")
