@@ -283,3 +283,24 @@ stopped out thirteen seconds after filling at a mark of 0.24-0.28 (the YES side)
 0.72, a phantom loss of about $1 on the shadow book. `FeedHub.quote` now complements the NO leg
 exactly as the REST quote does (commit after 11fb194). scholes-2's record carries the phantom
 stop; its post-mortem should not read it as a lesson about stops.
+
+## Addendum: strategies, the decision engine (04:00-04:45 UTC, Sept 16)
+
+The owner's question at 04:00: no trades, and no recursive improvement without action. Two
+answers. The live blocker is Kalshi's unfunded crypto shard (the owner's two commands). The
+structural one is that a model session is the slow, expensive, cautious way to decide: the
+floor's decision rate was bounded by sessions (five to twenty-four a desk a day, ten to forty
+minutes each, a dollar of inference for a handful of decisions), and the models' default under
+uncertainty is to pass. A recursive loop needs decisions by the hundred with outcomes in hours.
+
+Commit b35beab adds strategies (`ltcm/strategies.py`): a desk saves a module with
+`decide(kit, params)` to its toolbox and deploys it; the floor runs it every `cadence_seconds`
+(300 minimum) in the desk's sandbox, reads back the limit orders it proposes, and proposes them
+through the same risk engine and critic under a session id `<desk>:<stamp>:strategy:<name>`.
+Runs that propose or fail are public `desk.code_run` events; idle runs once an hour. Live desks'
+strategy orders are capped at learning size. House starters go to desks with no strategy of
+their own: hourly range pricing from realized volatility (ranges family), hourly mean reversion
+(crypto family). The desks' sessions become what they should be: reading `strategy_report`,
+post-mortems, and shipping a better version. The site shows runs and orders on the tape already;
+a strategies panel on the desk page needs a site deploy (blocked for the agent, the owner's
+`npm run build && npx wrangler deploy` in personal-site once the schema carries it).
