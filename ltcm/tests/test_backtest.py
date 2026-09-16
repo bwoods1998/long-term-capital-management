@@ -7,16 +7,20 @@ import io
 import json
 import math
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from ltcm.backtest import (
+    KIT_CALLS,
     RESULT_PREFIX,
     BacktestKit,
+    CodeRefused,
     DataSet,
     Simulator,
     bootstrap_ci,
+    check_code,
     iso,
     kalshi_plan,
     kalshi_taker_fee,
@@ -24,9 +28,10 @@ from ltcm.backtest import (
     max_drawdown,
     parse_time,
     run_backtest,
+    sample_markets,
     split_report,
 )
-from ltcm.history import DiskCache, History
+from ltcm.history import DiskCache, History, HistoryTimeout
 
 T0 = parse_time("2026-09-10T00:00:00Z")
 HOUR = 3600
@@ -98,7 +103,7 @@ def one_hour_market(ticker="KXTEST-26SEP10-T1", open_ts=T0 + 10 * HOUR, *, resul
 def dataset(history, start=T0, end=T0 + 24 * HOUR, series=("KXTEST",)):
     notes = []
     data = DataSet(history, start, end, say=lambda text: None, notes=notes)
-    data.load_kalshi(series=list(series), board=False, max_markets=3000, min_volume=None, max_pages=20)
+    data.load_kalshi(series=list(series), board=False, max_markets=3000, max_pages=20)
     return data
 
 
@@ -530,16 +535,16 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("weather", report["unsupported"])
         self.assertEqual(report["trades"], 0)
         code = "def decide(kit, params):\n    try:\n        kit.weather('NYC')\n    except Exception:\n        pass\n    return []\n"
-        report = run_backtest({"strategy": "custom", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory())
+        report = run_backtest({"strategy": "custom", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory(), trusted_code=True)
         self.assertIn("NWS", report["unsupported"], "a strategy that swallows the error is still unsupported")
 
     def test_strategy_errors_are_counted_never_fatal(self):
         code = "def decide(kit, params):\n    raise RuntimeError('boom')\n"
-        report = run_backtest({"strategy": "broken", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR), "step_minutes": 15}, history=FakeHistory())
+        report = run_backtest({"strategy": "broken", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR), "step_minutes": 15}, history=FakeHistory(), trusted_code=True)
         self.assertEqual(report["steps"], 5)
         self.assertEqual(report["errors"], 5)
         self.assertTrue(any("boom" in n for n in report["notes"]))
-        report = run_backtest({"strategy": "bad", "code": "def decide(:\n", "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory())
+        report = run_backtest({"strategy": "bad", "code": "def decide(:\n", "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory(), trusted_code=True)
         self.assertEqual(report["errors"], 1)
         self.assertEqual(report["steps"], 0)
 
@@ -547,7 +552,7 @@ class EndToEndTests(unittest.TestCase):
         code = "def decide(kit, params):\n    print('chatty')\n    return []\n"
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            run_backtest({"strategy": "chatty", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory())
+            run_backtest({"strategy": "chatty", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory(), trusted_code=True)
         self.assertEqual(out.getvalue(), "")
 
 
@@ -590,7 +595,7 @@ class CliTests(unittest.TestCase):
     def run_main(self, argv, stdin=""):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch("sys.stdin", io.StringIO(stdin)), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-                mock.patch("ltcm.history.History", lambda **kwargs: FakeHistory()):
+                mock.patch("ltcm.history.History", lambda **kwargs: FakeHistory()), mock.patch("ltcm.backtest.in_sandbox", lambda: True):
             code = main(argv)
         return code, out.getvalue()
 
@@ -721,6 +726,393 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(len(again), 1)
             self.assertEqual(history.requests, 1)
             self.assertEqual(history.cache_hits, 1)
+
+
+# ----------------------------------------------------------------- review regressions (Sept 16)
+
+BUY_EVERY_BUCKET = """
+def decide(kit, params):
+    out = []
+    held = {p["market_id"] for p in kit.context["positions"]}
+    for m in kit.kalshi_series("KXBUCK"):
+        if m["ticker"] in held or m["yes_ask"] is None:
+            continue
+        out.append({"instrument": {"asset_class": "event", "symbol": m["ticker"], "market_id": m["ticker"], "right": "yes"},
+                    "side": "buy", "quantity": "1", "order_type": "limit", "limit_price": str(m["yes_ask"]), "rationale": "x"})
+    return out[:5]
+"""
+
+
+def bucket_events(events, buckets, *, winner_volume, seed_shift=0):
+    """`events` hourly events of `buckets` identical buckets; one wins, and (unless its volume is
+    the same as the rest) it traded far more by its close, as winning buckets do."""
+    markets, candles = [], {}
+    for e in range(events):
+        open_ts = T0 + e * HOUR
+        close = open_ts + HOUR
+        winner = (e * 7 + seed_shift) % buckets
+        for b in range(buckets):
+            ticker = f"KXBUCK-26SEP10{e:02d}-B{b:02d}"
+            won = b == winner
+            markets.append(market_row(ticker, open_ts, close, result="yes" if won else "no", volume=winner_volume if won else 10))
+            candles[(ticker, 1)] = [candle(open_ts + m * MINUTE, 0.03, 0.04, volume=1) for m in range(1, 60)]
+    return markets, candles
+
+
+class SelectionTests(unittest.TestCase):
+    """Finding 1: a capped listing chose markets by lifetime volume, which keeps the winners."""
+
+    def load(self, markets, candles, *, board, cap):
+        data = DataSet(FakeHistory(markets, candles), T0, T0 + 30 * HOUR, say=lambda text: None, notes=[])
+        data.load_kalshi(series=None if board else ["KXBUCK"], board=board, max_markets=cap, max_pages=20, seed=7)
+        return data
+
+    def test_a_capped_listing_never_keeps_markets_by_final_volume_or_result(self):
+        for board in (False, True):
+            loud = self.load(*bucket_events(24, 10, winner_volume=1_000_000), board=board, cap=24)
+            quiet = self.load(*bucket_events(24, 10, winner_volume=10, seed_shift=3), board=board, cap=24)
+            self.assertEqual(len(loud.markets), 24)
+            self.assertEqual(sorted(loud.markets), sorted(quiet.markets), "volume and result never pick a market")
+            self.assertEqual(len({m.event for m in loud.markets.values()}), 24, "every event keeps a draw before any keeps two")
+            winners = sum(1 for m in loud.markets.values() if m.payout_yes == 1.0)
+            self.assertLessEqual(winners, 8, f"about one in ten kept should be a winner, not {winners} of 24")
+            self.assertTrue(any("never by volume or result" in n for n in loud.notes))
+
+    def test_the_draw_is_seeded_and_a_bigger_cap_keeps_a_superset(self):
+        data = self.load(*bucket_events(6, 10, winner_volume=5), board=False, cap=3000)
+        pool = list(data.markets.values())
+        small = {m.ticker for m in sample_markets(pool, 12, 7)}
+        big = {m.ticker for m in sample_markets(list(reversed(pool)), 30, 7)}
+        self.assertLessEqual(small, big)
+        self.assertEqual(small, {m.ticker for m in sample_markets(pool, 12, 7)})
+        self.assertNotEqual(small, {m.ticker for m in sample_markets(pool, 12, 8)})
+
+    def test_a_strategy_buying_every_listed_bucket_is_not_paid_by_the_cap(self):
+        markets, candles = bucket_events(1, 50, winner_volume=90_000)
+        spec = {"strategy": "buckets", "code": BUY_EVERY_BUCKET, "series": ["KXBUCK"], "start": iso(T0), "end": iso(T0 + 2 * HOUR),
+                "step_minutes": 5, "max_markets": 5, "verbose": False, "min_volume": 500}
+        loud = run_backtest(spec, history=FakeHistory(markets, candles), trusted_code=True)
+        flat = run_backtest(spec, history=FakeHistory(*bucket_events(1, 50, winner_volume=10)), trusted_code=True)
+        self.assertEqual(loud["markets_loaded"], 5)
+        self.assertEqual(loud["trade_pnls"], flat["trade_pnls"], "the winner's final volume changes nothing")
+        self.assertTrue(any("min_volume ignored" in n for n in loud["notes"]))
+
+
+PEEK = """
+def decide(kit, params):
+    out = []
+    for m in kit.kalshi_series("KXBUCK"):
+        won = kit._data.markets[m["ticker"]].payout_yes == 1.0
+        out.append({"instrument": {"asset_class": "event", "symbol": m["ticker"], "market_id": m["ticker"], "right": "yes" if won else "no"},
+                    "side": "buy", "quantity": "10", "order_type": "limit", "limit_price": "0.99", "rationale": "x"})
+    return out[:5]
+"""
+
+
+class IsolationTests(unittest.TestCase):
+    """Finding 2: the kit carried the settled history one attribute away, in the caller's process."""
+
+    def test_a_strategy_reading_the_kits_history_is_refused(self):
+        markets, candles = bucket_events(2, 10, winner_volume=10)
+        report = run_backtest({"strategy": "peek", "code": PEEK, "series": ["KXBUCK"], "start": iso(T0), "end": iso(T0 + 3 * HOUR),
+                               "verbose": False}, history=FakeHistory(markets, candles), trusted_code=True)
+        self.assertEqual(report["errors"], 1)
+        self.assertEqual(report["trades"], 0)
+        self.assertTrue(any("._data is not allowed" in n for n in report["notes"]), report["notes"])
+
+    def test_the_screen_refuses_every_way_out_of_decide(self):
+        for code in (
+            "import gc\ndef decide(kit, params):\n    return []\n",
+            "import inspect\ndef decide(kit, params):\n    return []\n",
+            "from ltcm import backtest\ndef decide(kit, params):\n    return []\n",
+            "import os\ndef decide(kit, params):\n    return []\n",
+            "import urllib.request\ndef decide(kit, params):\n    return []\n",
+            "def decide(kit, params):\n    return kit.quote.__closure__\n",
+            "def decide(kit, params):\n    name = 'context'\n    return getattr(kit, name)\n",
+            "def decide(kit, params):\n    return '{0.x}'.format(kit)\n",
+            "def decide(kit, params):\n    return __builtins__\n",
+            "def decide(kit, params):\n    exit(0)\n",
+            "def decide(kit, params):\n    kit.say = print\n",
+            "import statistics\ndef decide(kit, params):\n    return statistics.sys\n",
+        ):
+            with self.assertRaises(CodeRefused, msg=code):
+                check_code(code)
+        check_code("import math, re\nfrom datetime import datetime\ndef decide(kit, params):\n    return getattr(kit, 'context')\n")
+
+    def test_decide_gets_a_facade_with_no_path_to_the_history(self):
+        row, candles = one_hour_market(minute_candles=[candle(T0 + 10 * HOUR + MINUTE, 0.40, 0.45)])
+        data = dataset(FakeHistory([row], candles))
+        core = BacktestKit(data, simulator(data), T0 + 10 * HOUR + 5 * MINUTE, products=None, half_spread=0.0)
+        kit = core.strategy_kit()
+        public = {name for name in dir(kit) if not name.startswith("_")}
+        self.assertEqual(public, {"context"} | set(KIT_CALLS))
+        for name in ("_data", "_sim", "_t", "__dict__"):
+            self.assertFalse(hasattr(kit, name), name)
+        self.assertEqual(str(kit.kalshi_market("KXTEST-26SEP10-T1")["yes_ask"]), "0.4500")
+        self.assertEqual(len(kit.kalshi_series("KXTEST")), 1)
+        shown = run_backtest({"strategy": "who", "code": "def decide(kit, params):\n    raise ValueError(repr(kit))\n", "verbose": False,
+                              "start": iso(T0), "end": iso(T0 + HOUR)}, history=FakeHistory(), trusted_code=True)
+        self.assertTrue(any("StrategyKit(backtest)" in n for n in shown["notes"]), "decide is handed the facade, not the engine's kit")
+
+    def test_model_code_runs_only_in_a_sandbox_unless_the_caller_vouches(self):
+        code = "def decide(kit, params):\n    return []\n"
+        spec = {"strategy": "mine", "code": code, "verbose": False, "start": iso(T0), "end": iso(T0 + HOUR)}
+        with mock.patch("ltcm.backtest.in_sandbox", lambda: False):
+            refused = run_backtest(spec, history=FakeHistory())
+            self.assertEqual(refused["errors"], 1)
+            self.assertTrue(any("runs only in a desk's sandbox" in n for n in refused["notes"]))
+            self.assertEqual(run_backtest(spec, history=FakeHistory(), trusted_code=True)["errors"], 0)
+            starter = (Path(__file__).resolve().parent.parent / "starters" / "hourly_reversion.py").read_text(encoding="utf-8")
+            self.assertNotIn("runs only in", " ".join(run_backtest({**spec, "strategy": "hourly_reversion", "code": starter}, history=FakeHistory())["notes"]))
+        with mock.patch("ltcm.backtest.in_sandbox", lambda: True):
+            self.assertEqual(run_backtest(spec, history=FakeHistory())["errors"], 0)
+
+
+class HorizonTests(unittest.TestCase):
+    """Finding 3: near `end`, only markets that had closed by `end` existed, favouring early closes."""
+
+    def twins(self):
+        listed = T0 + 30 * HOUR
+        early = market_row("KXEV-26SEP12-A", T0, T0 + 20 * HOUR + 17, result="yes", can_close_early=True, latest_expiration_time=iso(listed))
+        on_time = market_row("KXEV-26SEP12-B", T0, listed, result="no", can_close_early=True, latest_expiration_time=iso(listed))
+        soon = market_row("KXEV-26SEP10-C", T0, T0 + 10 * HOUR, result="no")
+        later = market_row("KXEV-26SEP12-D", T0 + 25 * HOUR, T0 + 40 * HOUR, result="no")
+        candles = {}
+        for row in (early, on_time, soon):
+            candles[(row["ticker"], 60)] = [candle(T0 + k * HOUR, 0.05, 0.06, volume=2000) for k in range(1, 20)]
+        return FakeHistory([early, on_time, soon, later], candles)
+
+    def test_a_market_that_closes_on_schedule_after_end_is_listed_beside_its_early_twin(self):
+        history = self.twins()
+        data = DataSet(history, T0, T0 + 24 * HOUR, say=lambda text: None, notes=[])
+        data.load_kalshi(series=None, board=True, max_markets=3000, max_pages=20)
+        self.assertGreaterEqual(max(c[3] for c in history.calls if c[0] == "settled"), T0 + 24 * HOUR + 48 * HOUR - 1)
+        self.assertNotIn("KXEV-26SEP12-D", data.markets, "a market opening after end never takes a place in the draw")
+        sim = simulator(data)
+        kit = BacktestKit(data, sim, T0 + 12 * HOUR, products=None, half_spread=0.0)
+        self.assertEqual({r["ticker"] for r in kit.kalshi_markets(max_close_hours=36)}, {"KXEV-26SEP12-A", "KXEV-26SEP12-B"})
+        self.assertEqual(sim.submit(buy("KXEV-26SEP12-B", "yes", 0.06, 10), T0 + 12 * HOUR), "filled")
+        marks = sim.finish(T0 + 24 * HOUR)
+        self.assertEqual(marks["open_positions"], 1, "it trades until end and is marked there, never settled")
+        self.assertEqual(sim.counts["settled"], 0)
+        self.assertFalse([c for c in history.calls if c[0] == "candles" and c[3] > T0 + 24 * HOUR], "no candles past end")
+
+    def test_an_early_close_listed_past_the_horizon_is_hidden_with_its_twin(self):
+        data = DataSet(self.twins(), T0, T0 + 24 * HOUR, say=lambda text: None, notes=[])
+        data.load_kalshi(series=None, board=True, max_markets=3000, max_pages=20, horizon_seconds=0)
+        self.assertEqual(set(data.markets), {"KXEV-26SEP10-C"}, "A closed inside the window but was listed past it")
+        self.assertTrue(any("hidden" in n for n in data.notes))
+
+    def test_listings_stop_where_settlements_may_still_be_arriving(self):
+        history = self.twins()
+        history.clock = lambda: T0 + 40 * HOUR
+        report = run_backtest({"strategy": "kalshi_favorites", "start": iso(T0), "end": iso(T0 + 24 * HOUR), "verbose": False}, history=history)
+        self.assertEqual(report["listed_through"], iso(T0 + 16 * HOUR))
+        self.assertLessEqual(max(c[3] for c in history.calls if c[0] == "settled"), T0 + 16 * HOUR)
+        self.assertTrue(any("complete only through" in n for n in report["notes"]), report["notes"])
+
+
+class StaleBookTests(unittest.TestCase):
+    """Finding 4: a taker filled at an hourly close up to 59 minutes old."""
+
+    ticker = "KXLONG-26SEP10-T1"
+
+    def build(self, minutes):
+        row = market_row(self.ticker, T0, T0 + 20 * HOUR, result="no")
+        hourly = [candle(T0 + k * HOUR, 0.28, 0.30, volume=100) for k in range(1, 11)]
+        hourly.append(candle(T0 + 11 * HOUR, 0.79, 0.80, bid_high=0.80, ask_low=0.30, volume=500))
+        data = dataset(FakeHistory([row], {(self.ticker, 60): hourly, (self.ticker, 1): minutes}), series=("KXLONG",))
+        return data, simulator(data)
+
+    def test_a_taker_is_judged_on_minute_history_not_a_stale_hourly_close(self):
+        data, sim = self.build([candle(T0 + 10 * HOUR + m * MINUTE, 0.79, 0.80, volume=5) for m in range(5, 61)])
+        t = T0 + 10 * HOUR + 45 * MINUTE
+        sim.advance(t)
+        status = sim.submit(buy(self.ticker, "yes", 0.35, 10), t)
+        self.assertTrue(status.startswith("resting:"), status)
+        self.assertEqual(sim.fills, [], "the ask had been 0.80 since 10:05")
+        view = BacktestKit(data, sim, t, products=None, half_spread=0.0).kalshi_market(self.ticker)
+        self.assertEqual(str(view["yes_ask"]), "0.8000")
+
+    def test_a_crossing_order_on_a_stale_book_without_minute_history_is_refused(self):
+        data, sim = self.build([])
+        t = T0 + 10 * HOUR + 45 * MINUTE
+        self.assertEqual(sim.submit(buy(self.ticker, "yes", 0.35, 10), t), "rejected:the book is an hourly close over five minutes old with no minute history")
+        self.assertTrue(sim.submit(buy(self.ticker, "yes", 0.25, 10), t).startswith("resting:"), "a bid under the book still rests")
+        self.assertEqual(sim.submit(buy(self.ticker, "yes", 0.35, 10), T0 + 10 * HOUR + 4 * MINUTE), "filled", "a close four minutes old is fresh")
+        self.assertAlmostEqual(sim.fills[-1]["price"], 0.30)
+
+
+class CryptoFillModelTests(unittest.TestCase):
+    """Finding 5: a conservative Coinbase maker filled when the low only touched its limit."""
+
+    def run_model(self, model, low):
+        rows = [{"ts": int(T0) + i * 300, "open": 100.5, "high": 101.0, "low": 100.2, "close": 100.5, "volume": 1.0} for i in range(40)]
+        rows[20] = {**rows[20], "low": low}
+        data = DataSet(FakeHistory(coinbase={("BTC-USD", "FIVE_MINUTE"): rows}), T0 + HOUR, T0 + 3 * HOUR, say=lambda text: None, notes=[])
+        sim = Simulator(data, strategy="x", learning_usd=10, half_spread=0.0001, maker_fee=0.0025, taker_fee=0.006, fill_model=model)
+        intent = {"instrument": {"asset_class": "crypto", "symbol": "BTC-USD"}, "side": "buy", "quantity": "0.05", "order_type": "limit",
+                  "limit_price": "100.0", "post_only": True}
+        self.assertTrue(sim.submit(intent, T0 + HOUR).startswith("resting:"))
+        sim.advance(T0 + 2 * HOUR)
+        return sim.fills
+
+    def test_conservative_needs_a_trade_through_and_touch_takes_the_touch(self):
+        self.assertEqual(self.run_model("conservative", 100.0), [])
+        self.assertEqual(len(self.run_model("touch", 100.0)), 1)
+        fills = self.run_model("conservative", 99.99)
+        self.assertEqual(len(fills), 1)
+        self.assertAlmostEqual(fills[0]["price"], 100.0)
+
+
+class ExitTests(unittest.TestCase):
+    """Finding 6: a strategy calling sys.exit ended the CLI with no result line."""
+
+    def run_main(self, spec, patches=()):
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch("sys.stdin", io.StringIO(json.dumps(spec))))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            stack.enter_context(mock.patch("ltcm.history.History", lambda **kwargs: FakeHistory()))
+            stack.enter_context(mock.patch("ltcm.backtest.in_sandbox", lambda: True))
+            for patch in patches:
+                stack.enter_context(patch)
+            code = main([])
+        lines = out.getvalue().splitlines()
+        self.assertEqual(code, 0)
+        self.assertEqual(len(lines), 1, out.getvalue())
+        self.assertTrue(lines[0].startswith(RESULT_PREFIX))
+        return json.loads(lines[0][len(RESULT_PREFIX):])
+
+    def test_a_strategy_raising_system_exit_still_gets_a_result_line(self):
+        spec = {"strategy": "quits", "code": "def decide(kit, params):\n    raise SystemExit(0)\n", "start": iso(T0), "end": iso(T0 + HOUR)}
+        report = self.run_main(spec)
+        self.assertEqual(report["steps"], 5)
+        self.assertEqual(report["errors"], 5)
+        report = self.run_main({**spec, "code": "raise SystemExit(3)\ndef decide(kit, params):\n    return []\n"})
+        self.assertEqual(report["errors"], 1)
+        self.assertTrue(any("did not load" in n for n in report["notes"]))
+
+    def test_the_line_prints_whatever_ends_the_engine(self):
+        spec = {"strategy": "quiet", "code": "def decide(kit, params):\n    return []\n", "start": iso(T0), "end": iso(T0 + HOUR)}
+        for error in (SystemExit(2), KeyboardInterrupt(), RuntimeError("boom")):
+            report = self.run_main(spec, [mock.patch("ltcm.backtest.run_backtest", side_effect=error)])
+            self.assertEqual(report["errors"], 1)
+            self.assertTrue(any(type(error).__name__ in n for n in report["notes"]), report["notes"])
+
+
+class BudgetTests(unittest.TestCase):
+    """Finding 7: the time budget was checked only between steps, and verbose did not reach History."""
+
+    def test_the_budget_stops_loading_and_the_report_says_nothing_was_replayed(self):
+        clock = [1000.0]
+        history = FakeHistory(*bucket_events(3, 3, winner_volume=10))
+        listing = history.kalshi_settled
+
+        def slow(*args, **kwargs):
+            clock[0] += 60.0
+            return listing(*args, **kwargs)
+
+        history.kalshi_settled = slow
+        with mock.patch("ltcm.backtest._monotonic", lambda: clock[0]):
+            report = run_backtest({"strategy": "buckets", "code": BUY_EVERY_BUCKET, "series": ["KXBUCK"], "start": iso(T0),
+                                   "end": iso(T0 + 5 * 86400), "max_seconds": 150, "verbose": False}, history=history, trusted_code=True)
+        self.assertEqual(report["steps"], 0)
+        self.assertGreaterEqual(report["errors"], 1)
+        self.assertIn("nothing was replayed", report["incomplete"])
+        self.assertLessEqual(len([c for c in history.calls if c[0] == "settled"]), 4, "listing stopped at the budget")
+        self.assertIn("second run", report["notes"][0])
+
+    def test_candle_loading_stops_at_the_budget(self):
+        clock = [1000.0]
+        history = FakeHistory(*bucket_events(4, 2, winner_volume=10))
+        candles = history.kalshi_candles
+
+        def slow(*args, **kwargs):
+            clock[0] += 60.0
+            return candles(*args, **kwargs)
+
+        history.kalshi_candles = slow
+        data = DataSet(history, T0, T0 + 6 * HOUR, say=lambda text: None, notes=[], deadline=1100.0)
+        with mock.patch("ltcm.backtest._monotonic", lambda: clock[0]):
+            data.load_kalshi(series=["KXBUCK"], board=False, max_markets=3000, max_pages=20)
+        self.assertIn("candles", data.cut)
+        self.assertEqual(len([c for c in history.calls if c[0] == "candles"]), 2)
+
+    def test_history_gives_up_at_its_deadline_instead_of_sleeping_past_it(self):
+        transport = Transport([(429, {})] * 5)
+        sleeps = []
+        history = History(transport, min_interval=0, sleep=sleeps.append, verbose=False, deadline=time.monotonic() + 0.5)
+        with self.assertRaises(HistoryTimeout):
+            history.kalshi_settled("KXA", start_ts=T0, end_ts=T0 + HOUR)
+        self.assertEqual(len(transport.urls), 1)
+        self.assertEqual(sleeps, [], "a one-second backoff would pass the deadline")
+        history.deadline = time.monotonic() - 1
+        with self.assertRaises(HistoryTimeout):
+            history.kalshi_settled("KXA", start_ts=T0, end_ts=T0 + HOUR)
+        self.assertEqual(len(transport.urls), 1, "no request starts after the deadline")
+
+    def test_quiet_and_compact_runs_silence_history_and_a_sandbox_run_has_a_budget(self):
+        made = []
+
+        class Recording(FakeHistory):
+            def __init__(self, **kwargs):
+                super().__init__()
+                made.append(kwargs)
+                self.verbose = kwargs.get("verbose", True)
+                self.deadline = None
+
+        spec = {"strategy": "quiet", "code": "def decide(kit, params):\n    print('noise')\n    return []\n", "start": iso(T0), "end": iso(T0 + HOUR)}
+        quiet, compact = io.StringIO(), io.StringIO()
+        with mock.patch("ltcm.history.History", Recording), mock.patch("ltcm.backtest.in_sandbox", lambda: True):
+            with contextlib.redirect_stderr(quiet):
+                run_backtest({**spec, "verbose": False})
+            with contextlib.redirect_stderr(compact):
+                run_backtest({**spec, "compact": True})
+        self.assertEqual([m["verbose"] for m in made], [False, False])
+        self.assertEqual(quiet.getvalue(), "noise\n" * 5, "without compact the strategy's prints still reach stderr")
+        self.assertEqual(compact.getvalue(), "", "a compact run prints nothing but its result line")
+        passed = Recording()
+        with mock.patch("ltcm.backtest.in_sandbox", lambda: True), contextlib.redirect_stderr(io.StringIO()):
+            run_backtest({**spec, "verbose": False}, history=passed)
+        self.assertIsNotNone(passed.deadline, "540 seconds by default in a sandbox")
+        self.assertFalse(passed.verbose)
+
+
+class SharedCacheTests(unittest.TestCase):
+    """Finding 8: each DiskCache counted only its own writes."""
+
+    def test_caches_sharing_a_directory_hold_one_cap_between_them(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cap = 1_000_000
+            caches = [DiskCache(tmp, cap) for _ in range(4)]
+            peak = 0
+            for i in range(9):
+                for n, cache in enumerate(caches):
+                    cache.put(f"k{n}-{i}", os.urandom(110_000))
+                    peak = max(peak, sum(p.stat().st_size for p in Path(tmp).glob("*.z")))
+            self.assertLessEqual(peak, cap)
+            self.assertIsNotNone(caches[0].get("k3-8"), "the newest entry of another writer survives")
+            later = DiskCache(tmp, cap)
+            later.put("fresh", os.urandom(110_000))
+            self.assertLessEqual(sum(p.stat().st_size for p in Path(tmp).glob("*.z")), cap)
+
+
+class CompactSplitTests(unittest.TestCase):
+    """Finding 9: split_report on a compact line returned two empty halves."""
+
+    def test_a_compact_report_splits_from_its_precomputed_split(self):
+        report = {"trade_pnls": [1.0, 2.0, -0.5, 3.0], "trade_notionals": [5.0] * 4, "seed": 7}
+        report["split"] = split_report(report)
+        report["split_fraction"] = 0.66
+        compact = {k: v for k, v in report.items() if k not in ("trade_pnls", "trade_notionals")}
+        self.assertEqual(split_report(compact), report["split"])
+        self.assertEqual(split_report(compact)["in_sample"]["trades"], 3)
+        with self.assertRaises(ValueError):
+            split_report(compact, fraction=0.5)
 
 
 if __name__ == "__main__":

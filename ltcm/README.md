@@ -328,11 +328,27 @@ touch or a print: the optimistic bracket for a maker. The report carries trades,
 return on notional, drawdown, daily P&L, per-trade P&L with a seeded bootstrap CI and its
 `split_report` in and out of sample. Weather is unsupported (no forecast history). Run it with
 `python3 scripts/backtest.py --strategy kalshi_favorites --days 3`, or in a desk's sandbox with
-`python3 -m ltcm.backtest --spec spec.json` (one `BACKTEST-RESULT` line; `compact` fits the
-sandbox's 4,000 characters). Reads back off on 429s and cache settled data under 128 MB. Biases:
-trade-through fills are the adverse ones (maker P&L reads low, `touch` reads high); the board is
-what had settled by `end`, ranked by lifetime volume; a capped series keeps each event's most
-traded strikes; an early close is recognised by its off-minute timestamp.
+`python3 -m ltcm.backtest --spec spec.json` (one `BACKTEST-RESULT` line, printed whatever the
+strategy raises; `compact` fits the sandbox's 4,000 characters and silences everything else).
+Reads back off on 429s and cache settled data under 128 MB, a cap shared by every process on the
+directory (`flock`).
+
+What keeps the replay honest (the Sept 16 review): nothing picks markets by what a settled row
+knows only after the close; a capped listing (`max_markets`) is a seeded draw spread over events,
+since the winning bucket of a busy event is the one that traded most by its end. Settled markets
+are listed through `end + listing_horizon_hours` (48) and no later than `settle_lag_hours` (24)
+before the run, and one listed to close past that is hidden even if it closed early, so the board
+near `end` does not favour early closes; a window that ends near now thins toward its end, so the
+full board needs a window ending about three days back. A taker is never filled against an hourly
+close more than five minutes old (minute candles are fetched first). The strategy gets a facade
+kit with no path to the history, and its code must pass `check_code` (safe imports, no
+underscore attributes); code a person did not write runs only in a desk's sandbox
+(`run_backtest(..., trusted_code=True)` is for your own). `max_seconds` bounds loading too (540 by
+default in a sandbox, under its 600-second kill); a run cut while loading replays nothing and says
+`incomplete`, and a second run continues from the warm cache. Biases left: trade-through fills are
+the adverse ones (maker P&L reads low, `touch` reads high); a capped board shows each strategy a
+sample, so trade counts scale with the sampled share; an early close is recognised by its
+off-minute timestamp.
 
 ### The floor board
 

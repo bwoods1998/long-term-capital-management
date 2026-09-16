@@ -101,7 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.products:
         spec["products"] = args.products
     history = History(cache_dir=args.cache_dir)
-    report = run_backtest(spec, history=history)
+    # --code is a file on this machine that the operator chose to run here; a model's code runs
+    # in a desk's sandbox instead (python3 -m ltcm.backtest there).
+    report = run_backtest(spec, history=history, trusted_code=bool(args.code))
     split = report.get("split") or split_report(report)
     if not args.json_only:
         print(summary(report, split))

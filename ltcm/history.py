@@ -23,6 +23,7 @@ Progress goes to stderr, never stdout.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -35,6 +36,11 @@ import zlib
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+try:  # POSIX; elsewhere the cache measures its directory on every put
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
 
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 COINBASE = "https://api.coinbase.com/api/v3/brokerage/market"
@@ -69,6 +75,10 @@ class HistoryError(RuntimeError):
     """A history read failed after its retries."""
 
 
+class HistoryTimeout(HistoryError):
+    """A read was not started, or its retries were abandoned, because `History.deadline` passed."""
+
+
 def _float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -87,29 +97,111 @@ def _log(text: str) -> None:
 
 
 class DiskCache:
-    """Compressed response bodies keyed by URL, never larger than `cap_bytes` on disk."""
+    """Compressed response bodies keyed by URL, never larger than `cap_bytes` on disk.
+
+    The cap holds for every process and thread sharing the directory, not only this instance:
+    four backtests on one cache directory once each counted only their own writes and together
+    held four times the cap. A put takes an exclusive `flock` on the directory's `.lock` file,
+    reads the byte count every writer keeps in `.bytes`, evicts the least recently used entries
+    first when the new body would pass the cap, writes the body and the new count, and lets go.
+    The count is measured from the directory again every `RESCAN_EVERY` puts and whenever it is
+    missing, so a writer that died between the two writes cannot leave it wrong for long. Where
+    `flock` is unavailable every put measures the directory itself."""
+
+    RESCAN_EVERY = 32
+    LOCK_NAME = ".lock"
+    COUNT_NAME = ".bytes"
 
     def __init__(self, directory: str | Path, cap_bytes: int):
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.cap = max(1024, int(cap_bytes))
         self._lock = threading.Lock()
+        self._puts = 0
         self._bytes = 0
-        for path in self.dir.glob("*.z"):
+        with self._exclusive():
+            for stray in self.dir.glob("*.tmp"):
+                try:
+                    stray.unlink()  # every writer holds the lock while its temp file exists
+                except OSError:
+                    pass
+            total = self._measure()
+            if total > self.cap:
+                total = self._evict(int(self.cap * 0.9))
+            self._store_count(total)
+
+    @contextlib.contextmanager
+    def _exclusive(self):
+        """This thread alone, and (where `flock` works) this process alone, on the directory.
+        Yields whether other processes are shut out."""
+        with self._lock:
+            handle = None
+            if fcntl is not None:
+                try:
+                    handle = open(self.dir / self.LOCK_NAME, "a+b")
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                except OSError:
+                    if handle is not None:
+                        handle.close()
+                    handle = None
             try:
-                self._bytes += path.stat().st_size
-            except OSError:
-                continue
-        for stray in self.dir.glob("*.tmp"):
-            try:
-                stray.unlink()
-            except OSError:
-                pass
-        if self._bytes > self.cap:
-            self.trim()
+                yield handle is not None
+            finally:
+                if handle is not None:
+                    try:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+                    handle.close()
 
     def _path(self, key: str) -> Path:
         return self.dir / (hashlib.sha256(key.encode("utf-8")).hexdigest()[:40] + ".z")
+
+    def _entries(self) -> list[tuple[float, int, Path]]:
+        entries = []
+        for path in self.dir.glob("*.z"):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            entries.append((stat.st_mtime, stat.st_size, path))
+        return entries
+
+    def _measure(self) -> int:
+        return sum(size for _, size, _ in self._entries())
+
+    def _evict(self, target: int) -> int:
+        """Remove the least recently used entries until the directory holds at most `target`
+        bytes. Returns the bytes left."""
+        entries = self._entries()
+        total = sum(size for _, size, _ in entries)
+        for _, size, path in sorted(entries):
+            if total <= target:
+                break
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                continue
+            total -= size
+        return total
+
+    def _read_count(self) -> int | None:
+        try:
+            value = int((self.dir / self.COUNT_NAME).read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            return None
+        return value if value >= 0 else None
+
+    def _store_count(self, total: int) -> None:
+        self._bytes = max(0, int(total))
+        fresh = self.dir / (self.COUNT_NAME + ".new")
+        try:
+            fresh.write_text(str(self._bytes), encoding="ascii")
+            fresh.replace(self.dir / self.COUNT_NAME)
+        except OSError:
+            pass
 
     def get(self, key: str) -> bytes | None:
         path = self._path(key)
@@ -137,9 +229,23 @@ class DiskCache:
             return  # one entry never takes more than an eighth of the cap
         path = self._path(key)
         tmp = path.with_suffix(".tmp")
-        with self._lock:
+        with self._exclusive() as shared:
+            self._puts += 1
+            total = self._read_count() if shared else None
+            if total is None or self._puts % self.RESCAN_EVERY == 0:
+                total = self._measure()
             try:
-                previous = path.stat().st_size if path.exists() else 0
+                previous = path.stat().st_size
+            except OSError:
+                previous = 0
+            if total - previous + len(packed) > self.cap:
+                # Room first, then the write: the directory never holds more than the cap.
+                total = self._evict(int(self.cap * 0.9) - len(packed))
+                try:
+                    previous = path.stat().st_size
+                except OSError:
+                    previous = 0
+            try:
                 tmp.write_bytes(packed)
                 tmp.replace(path)
             except OSError:
@@ -147,37 +253,21 @@ class DiskCache:
                     tmp.unlink()
                 except OSError:
                     pass
+                self._store_count(total)
                 return
-            self._bytes += len(packed) - previous
-            if self._bytes > self.cap:
-                self.trim()
+            self._store_count(total - previous + len(packed))
 
     def trim(self) -> int:
-        """Evict the oldest entries until the cache is under nine tenths of its cap."""
-        entries = []
-        total = 0
-        for path in self.dir.glob("*.z"):
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            entries.append((stat.st_mtime, stat.st_size, path))
-            total += stat.st_size
-        removed = 0
-        target = int(self.cap * 0.9)
-        for _, size, path in sorted(entries):
-            if total <= target:
-                break
-            try:
-                path.unlink()
-                total -= size
-                removed += 1
-            except OSError:
-                continue
-        self._bytes = total
-        return removed
+        """Evict the least recently used entries until the cache is under nine tenths of its cap.
+        Returns how many entries went."""
+        with self._exclusive():
+            before = len(self._entries())
+            total = self._evict(int(self.cap * 0.9))
+            self._store_count(total)
+            return before - len(self._entries())
 
     def size(self) -> int:
+        """The bytes on disk, as the last put or trim by any writer left them."""
         return self._bytes
 
 
@@ -195,6 +285,7 @@ class History:
         sleep: Callable[[float], None] = time.sleep,
         verbose: bool = True,
         max_retries: int = MAX_RETRIES,
+        deadline: float | None = None,
     ):
         if transport is None:
             from .data import HttpTransport
@@ -208,6 +299,10 @@ class History:
         self.sleep = sleep
         self.verbose = bool(verbose)
         self.max_retries = max(0, int(max_retries))
+        #: A `time.monotonic()` moment after which no request starts and no retry waits: a caller
+        #: with a wall-clock budget (a sandbox kills a run at its timeout, output and all) gets a
+        #: `HistoryTimeout` it can report instead. None: no deadline.
+        self.deadline = deadline
         self.requests = 0
         self.cache_hits = 0
         self.rate_limited = 0
@@ -219,6 +314,10 @@ class History:
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ http
+    def _check_deadline(self, wait: float = 0.0) -> None:
+        if self.deadline is not None and time.monotonic() + max(0.0, wait) > float(self.deadline):
+            raise HistoryTimeout("the run's time budget is spent; no more history is read")
+
     def _throttle(self, url: str) -> None:
         if self.min_interval <= 0:
             return
@@ -248,6 +347,7 @@ class History:
         delay = 1.0
         last = ""
         for attempt in range(self.max_retries + 1):
+            self._check_deadline()
             self._throttle(url)
             self.requests += 1
             try:
@@ -278,6 +378,7 @@ class History:
                     wait = max(wait, min(60.0, float((headers or {}).get("retry-after") or 0))) if status else wait
                 except (TypeError, ValueError, AttributeError):
                     pass
+                self._check_deadline(wait)
                 if attempt >= 2:
                     self.say(f"{last} from {urllib.parse.urlsplit(url).netloc}; retry {attempt + 1} in {wait:.0f}s")
                 self.sleep(wait)
@@ -508,4 +609,4 @@ class History:
         return [found[k] for k in sorted(found)]
 
 
-__all__ = ["History", "HistoryError", "DiskCache", "GRANULARITY_SECONDS", "KALSHI", "COINBASE"]
+__all__ = ["History", "HistoryError", "HistoryTimeout", "DiskCache", "GRANULARITY_SECONDS", "KALSHI", "COINBASE"]

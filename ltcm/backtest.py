@@ -13,16 +13,32 @@ What the kit sees at simulated time t:
 
 * Kalshi markets with `open_time <= t < close_time`, priced from the last candlestick whose
   period ended at or before t (no candle yet: no prices). `volume_24h` sums candle volumes in
-  (t - 24h, t]. Nothing a settled row knows about its future (result, final volume) is shown.
+  (t - 24h, t]. Nothing a settled row knows about its future (result, final volume) is shown,
+  and nothing chooses which markets load by it: a capped listing is a seeded draw spread over
+  events (`sample_markets`), never a ranking by lifetime volume (the winning strike of a busy
+  event is the one that traded most by its end).
+* Only markets listed to close by the listing horizon: settled markets are listed through
+  `end + listing_horizon_hours` (48), and not past `settle_lag_hours` (24) before the run began,
+  when later settlements may still be missing. A market listed to close later is hidden even
+  if it closed early inside the window, because its twin that closed on schedule is not in the
+  listing. Markets closing after `end` trade until `end` and are marked there.
 * Coinbase bars that had closed by t (`start + granularity <= t`); a quote is the last closed
   five-minute close -/+ a half-spread (1 bp by default).
 * `weather` / `weather_cities` stop the run as unsupported: there is no NWS forecast history.
+
+The strategy gets a `StrategyKit`: the kit's calls as closures, with no attribute leading to the
+history or the simulator, and its code must pass `check_code` (safe imports only, no underscore
+attributes, no frames, no evaluation). It still runs in this process, so code a person did not
+write runs only in a desk's sandbox: `run_backtest` refuses `spec.code` elsewhere unless the
+caller passes `trusted_code=True`.
 
 The simulator (fill_model "conservative"):
 
 * Kalshi buy of leg L at p, not post-only: fills at once at the leg's ask if p >= ask (YES ask
   = yes_ask, NO ask = 1 - yes_bid), paying the taker fee ceil(0.07 p (1 - p) x 100) / 100 per
-  contract; else it rests. Post-only orders that would cross are rejected, as the venue does.
+  contract; else it rests. The book it is judged on is never an hourly close more than five
+  minutes old: such a market's minute candles are fetched first, and an order that would cross
+  a stale book with no minute history behind it is refused. Post-only orders that would cross are rejected, as the venue does.
   A resting bid fills at its limit, fee 0, only on a candle that ended after it was placed and
   shows the other side trading strictly through it (YES bid p: yes_ask_low < p; NO bid q:
   yes_bid_high > 1 - q). A candle that began before the order existed is judged on its close,
@@ -32,14 +48,20 @@ The simulator (fill_model "conservative"):
   Resting orders expire at the market's close; positions settle at close on the result.
 * Coinbase: marketable non-post-only limits take at the quote with the taker fee (0.60%);
   otherwise the order rests and fills at its limit on a later five-minute candle whose low
-  (buy) / high (sell) reaches it, with the maker fee (0.25%). Spot is long only.
+  (buy) / high (sell) trades strictly through it, with the maker fee (0.25%). Spot is long only.
 * The floor's exit plans are honoured at step resolution: a stop or target on the exit-side
   mark, and for crypto the holding-period time stop, close the position at the bid as a taker.
 * Each intent's notional is capped at 10x `learning_usd`; at most 5 intents and 20 cancels a
   run, as on the floor; a strategy may cancel only its own orders.
 
 fill_model "touch" is the optimistic bracket for makers: a resting Kalshi order also fills when
-the other side touches its price, or a trade prints at or through it, on a later candle.
+the other side touches its price, or a trade prints at or through it, on a later candle; a
+resting Coinbase order fills when a later candle's low (buy) or high (sell) touches its limit.
+
+Time: `max_seconds` bounds the whole run, loading included (in a desk's sandbox it defaults to
+540, under the sandbox's 600-second kill, which would take the result line with it). A run whose
+budget ends while history is still loading replays nothing and says so (`incomplete`); settled
+history read so far stays in the disk cache, so a second run gets further.
 
 Standard library only; importable in a desk's sandbox (`FLOOR_EXTRAS`).
 """
@@ -47,9 +69,12 @@ Standard library only; importable in a desk's sandbox (`FLOOR_EXTRAS`).
 from __future__ import annotations
 
 import argparse
+import ast
 import bisect
 import contextlib
 import copy
+import hashlib
+import importlib
 import json
 import math
 import os
@@ -58,10 +83,13 @@ import re
 import sys
 import time
 import traceback
+import types
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
+
+from .history import HistoryTimeout
 
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 RESULT_PREFIX = "BACKTEST-RESULT "
@@ -87,17 +115,26 @@ DEFAULT_SPEC: dict[str, Any] = {
     "max_markets": 3000,
     "seed": 7,
     # Engine knobs beyond the contract, each with the default the contract implies.
-    "min_volume": None,           # settled-market volume floor; None: 500 for the board, 0 for series
     "max_pages": None,            # settled listing pages per window: None is 20 a series-day, 50 a board six hours
+    "listing_horizon_hours": 48,  # settled markets are listed to close this long after `end` (see the docstring)
+    "settle_lag_hours": 24,       # ... and not past this long before the run began (settlements still arriving)
     "half_spread_bps": 1.0,       # Coinbase quote = close -/+ this
     "coinbase_maker_fee": 0.0025,
     "coinbase_taker_fee": 0.006,
-    "max_seconds": 0,             # wall-clock budget; 0 is none. A stopped run reports what it had.
-    "verbose": True,              # progress lines on stderr
-    # A desk's sandbox returns at most 4,000 characters of output: "compact" drops the per-trade
-    # lists and the daily rows from the printed line (the in/out-of-sample split stays).
+    "max_seconds": None,          # wall-clock budget, loading included; None: 540 in a sandbox, else none; 0: none
+    "verbose": None,              # progress lines on stderr; None: on, except under "compact"
+    # A desk's sandbox returns at most 4,000 characters of stdout and stderr together: "compact"
+    # drops the per-trade lists and the daily rows from the printed line (the in/out-of-sample
+    # split stays), silences progress and discards what the strategy prints.
     "compact": False,
 }
+#: The fraction `run_backtest` splits its report at (`report["split"]`).
+SPLIT_FRACTION = 0.66
+#: A desk's sandbox kills a run at 600 seconds (`ltcm/sandbox.py`), result line and all.
+SANDBOX_SECONDS = 540
+#: A book older than this, from an hourly candle, is stale for judging whether an order crosses.
+FRESH_SECONDS = 300
+_monotonic = time.monotonic
 
 #: Kit interval -> Coinbase granularity (as `ltcm/data/coinbase.py` spells them).
 INTERVALS = {
@@ -147,6 +184,159 @@ FILL_MODELS = ("conservative", "touch")
 
 class Unsupported(RuntimeError):
     """Raised by a kit call history cannot answer (weather forecasts)."""
+
+
+class CodeRefused(ValueError):
+    """Strategy code that could reach past `decide(kit, params)` (see `check_code`)."""
+
+
+def in_sandbox() -> bool:
+    """Whether this is the engine shipped to a desk's sandbox (`FLOOR_EXTRAS` land in /lab/floor)."""
+    try:
+        return Path(__file__).resolve().as_posix().startswith("/lab/floor/")
+    except OSError:
+        return False
+
+
+# ------------------------------------------------------------------------ code screen
+#: What a backtested strategy may import. `decide` runs inside the engine's process, next to the
+#: settled history it is replayed against, so code that could reach the interpreter (sys, gc,
+#: inspect, the engine's modules, a closure's cells, a frame) could read a market's result or
+#: write its own report. Everything a strategy reads comes through `kit`. These rules match the
+#: Foundry's screen for model-written candidates.
+SAFE_MODULES = frozenset({
+    "__future__", "bisect", "collections", "datetime", "decimal", "fractions", "functools", "heapq",
+    "itertools", "json", "math", "random", "re", "statistics", "time", "typing", "zoneinfo",
+})
+SAFE_TYPING = frozenset({
+    "Any", "Callable", "DefaultDict", "Dict", "FrozenSet", "Iterable", "Iterator", "List", "Mapping",
+    "MutableMapping", "Optional", "Sequence", "Set", "Tuple", "Union",
+})
+#: Names a strategy may not use: evaluation, files, the interpreter's namespaces, and library
+#: helpers that set attributes or evaluate annotations on the caller's behalf.
+BANNED_NAMES = frozenset({
+    "__import__", "breakpoint", "compile", "delattr", "eval", "exec", "exit", "globals", "help", "input",
+    "locals", "memoryview", "open", "quit", "setattr", "vars",
+    "get_type_hints", "singledispatch", "singledispatchmethod", "total_ordering", "update_wrapper", "wraps",
+})
+#: Attributes a strategy may not read: frames and code, dynamic lookups (`str.format` fields),
+#: and the modules a safe module happens to import.
+BANNED_ATTRIBUTES = frozenset({
+    "ag_await", "ag_code", "ag_frame", "co_code", "co_consts", "cr_await", "cr_code", "cr_frame", "cr_origin",
+    "f_back", "f_builtins", "f_code", "f_globals", "f_locals", "f_trace", "gi_code", "gi_frame", "gi_suspended",
+    "gi_yieldfrom", "tb_frame", "tb_next",
+    "format", "format_map", "attrgetter", "methodcaller",
+    "get_type_hints", "singledispatch", "singledispatchmethod", "total_ordering", "update_wrapper", "wraps",
+    "asyncio", "atexit", "builtins", "codecs", "concurrent", "copyreg", "ctypes", "enum", "environ",
+    "gc", "importlib", "inspect", "io", "labkit", "ltcm", "marshal", "modules", "multiprocessing", "nt", "numbers",
+    "operator", "os", "pathlib", "pickle", "popen", "posix", "runpy", "shutil", "signal", "socket", "stderr", "stdin",
+    "stdout", "string", "subprocess", "sys", "system", "tempfile", "threading", "traceback", "types", "typing",
+    "warnings", "weakref",
+})
+_REEXPORTED: frozenset[str] | None = None
+
+
+def _reexported_modules() -> frozenset[str]:
+    """Attribute names under which a safe module exposes a module that is not safe."""
+    global _REEXPORTED
+    if _REEXPORTED is not None:
+        return _REEXPORTED
+    found: set[str] = set()
+    seen: set[int] = set()
+
+    def scan(module: Any, depth: int) -> None:
+        if id(module) in seen or depth > 3:
+            return
+        seen.add(id(module))
+        for attr in dir(module):
+            if attr.startswith("_"):
+                continue
+            try:
+                value = getattr(module, attr)
+            except Exception:
+                continue
+            if isinstance(value, types.ModuleType):
+                if value.__name__.split(".")[0] in SAFE_MODULES:
+                    scan(value, depth + 1)
+                elif attr != "copy":  # dict.copy() is everywhere; the copy module is harmless
+                    found.add(attr)
+
+    for name in sorted(SAFE_MODULES - {"__future__"}):
+        try:
+            scan(importlib.import_module(name), 0)
+        except Exception:
+            continue
+    _REEXPORTED = frozenset(found)
+    return _REEXPORTED
+
+
+def check_code(code: str) -> None:
+    """Refuse strategy code that could reach past `decide(kit, params)`; raises CodeRefused.
+
+    A strategy imports only `SAFE_MODULES`; never reads or writes an attribute that starts with
+    an underscore (`__name__` read aside), a frame, or a module a safe module re-exports; never
+    assigns or deletes an attribute; calls `getattr` only with a plain literal name; and never
+    uses `BANNED_NAMES`. Sept 16, 2026: a strategy that read `kit._data.markets[t].payout_yes`
+    won 20 trades of 20 in a replay."""
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError) as exc:
+        raise CodeRefused(f"the code does not compile: {str(exc)[:120]}") from None
+    banned_attributes = BANNED_ATTRIBUTES | _reexported_modules()
+    literal_getattr: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr"):
+            name = node.args[1] if len(node.args) >= 2 else None
+            if (
+                isinstance(name, ast.Constant) and isinstance(name.value, str) and not name.value.startswith("_")
+                and name.value not in banned_attributes and len(node.args) <= 3 and not node.keywords
+            ):
+                literal_getattr.add(id(node.func))
+
+    def refuse(node: Any, text: str) -> None:
+        raise CodeRefused(f"line {getattr(node, 'lineno', '?')}: {text}")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root not in SAFE_MODULES or root in ("typing", "__future__"):
+                    refuse(node, f"import {alias.name} is not allowed; a strategy imports only {', '.join(sorted(SAFE_MODULES - {'__future__'}))}")
+        elif isinstance(node, ast.ImportFrom):
+            module = str(node.module or "")
+            if node.level or module.split(".")[0] not in SAFE_MODULES:
+                refuse(node, f"from {'.' * node.level}{module} import is not allowed")
+            for alias in node.names:
+                if alias.name == "*" or alias.name.startswith("_") or alias.name in banned_attributes:
+                    refuse(node, f"from {module} import {alias.name} is not allowed")
+                if module == "typing" and alias.name not in SAFE_TYPING:
+                    refuse(node, f"from typing import {alias.name} is not allowed")
+                if module == "__future__" and alias.name != "annotations":
+                    refuse(node, f"from __future__ import {alias.name} is not allowed")
+        elif isinstance(node, ast.Attribute):
+            if not isinstance(node.ctx, ast.Load):
+                refuse(node, f"assigning or deleting an attribute (.{node.attr}) is not allowed; keep state in dicts")
+            if (node.attr.startswith("_") and node.attr != "__name__") or node.attr in banned_attributes:
+                refuse(node, f".{node.attr} is not allowed")
+        elif isinstance(node, ast.Name):
+            if node.id.startswith("__") and node.id != "__name__":
+                refuse(node, f"{node.id} is not allowed")
+            if node.id in BANNED_NAMES:
+                refuse(node, f"{node.id} is not allowed")
+            if node.id == "getattr" and id(node) not in literal_getattr:
+                refuse(node, "getattr takes a literal attribute name here")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name.startswith("__"):
+                refuse(node, f"defining {node.name} is not allowed")
+            if isinstance(node, ast.ClassDef) and node.keywords:
+                refuse(node, "class keywords (a metaclass) are not allowed")
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            if any(name.startswith("__") for name in node.names):
+                refuse(node, "a dunder global is not allowed")
+        elif isinstance(node, ast.MatchClass):
+            for attr in node.kwd_attrs:
+                if attr.startswith("_") or attr in banned_attributes:
+                    refuse(node, f"matching on .{attr} is not allowed")
 
 
 def product_id(symbol: Any) -> str | None:
@@ -250,7 +440,7 @@ class Market:
     """One settled Kalshi market, replayable at any moment of its life."""
 
     __slots__ = (
-        "ticker", "series", "event", "open_ts", "close_ts", "listed_close_ts", "payout_yes", "static", "volume",
+        "ticker", "series", "event", "open_ts", "close_ts", "listed_close_ts", "payout_yes", "static",
         "ends", "periods", "candles", "_volume_prefix", "_last", "_decimals", "fine_from",
     )
 
@@ -261,7 +451,6 @@ class Market:
         self.open_ts = parse_time(row.get("open_time"))
         self.close_ts = parse_time(row.get("close_time"))
         self.listed_close_ts = listed_close(row, self.close_ts)
-        self.volume = _num(row.get("volume"), 0.0) or 0.0
         result = str(row.get("result") or "").lower()
         if result == "yes":
             self.payout_yes: float | None = 1.0
@@ -377,6 +566,34 @@ class Market:
         return row
 
 
+def sample_markets(markets: Iterable[Market], limit: int, seed: Any = 7) -> list[Market]:
+    """At most `limit` markets, drawn by a seeded hash and spread evenly over events: every event's
+    first draw comes before any event's second, and events take turns in a seeded order.
+
+    Nothing a settled row knows only after the close picks a market (final volume, open interest,
+    result). Sept 16, 2026: ranked by lifetime volume, the winning bucket of a Kalshi BTC event
+    was first or second of about 200 in 22 events of 24, so a capped board kept the winners. The
+    draw depends only on the seed and the tickers, so a bigger `limit` keeps a superset."""
+    pool = list(markets)
+    limit = max(0, int(limit))
+    if len(pool) <= limit:
+        return pool
+
+    def draw(text: str) -> bytes:
+        return hashlib.sha256(f"{seed}|{text}".encode("utf-8")).digest()
+
+    by_event: dict[str, list[Market]] = {}
+    for market in pool:
+        by_event.setdefault(market.event, []).append(market)
+    ranked: list[tuple[tuple[int, bytes, bytes], Market]] = []
+    for event, members in by_event.items():
+        turn = draw("event|" + event)
+        members.sort(key=lambda m: draw(m.ticker))
+        ranked.extend(((rank, turn, draw(m.ticker)), m) for rank, m in enumerate(members))
+    ranked.sort(key=lambda item: item[0])
+    return [market for _, market in ranked[:limit]]
+
+
 class CryptoSeries:
     """Coinbase candles of one product at one granularity, loaded on demand."""
 
@@ -406,12 +623,17 @@ class CryptoSeries:
 class DataSet:
     """Everything the kit and the simulator read, loaded once (Kalshi) or on demand (Coinbase)."""
 
-    def __init__(self, history: Any, start_ts: float, end_ts: float, *, say: Callable[[str], None], notes: list[str]):
+    def __init__(self, history: Any, start_ts: float, end_ts: float, *, say: Callable[[str], None], notes: list[str], deadline: float | None = None):
         self.history = history
         self.start_ts = start_ts
         self.end_ts = end_ts
         self.say = say
         self.notes = notes
+        #: A `_monotonic()` moment loading stops at; `cut` then says what was left unloaded.
+        self.deadline = deadline
+        self.cut: str | None = None
+        #: The latest listed close a market may have and be shown (see `load_kalshi`).
+        self.visible_until = end_ts
         self.markets: dict[str, Market] = {}
         self.by_series: dict[str, list[Market]] = {}
         self.series_closes: dict[str, list[float]] = {}
@@ -437,62 +659,91 @@ class DataSet:
             self.notes.append(_clean(text))
 
     # ------------------------------------------------------------------ kalshi
-    def load_kalshi(self, *, series: list[str] | None, board: bool, max_markets: int, min_volume: float | None, max_pages: int) -> None:
+    def out_of_time(self) -> bool:
+        return self.deadline is not None and _monotonic() > self.deadline
+
+    def load_kalshi(
+        self,
+        *,
+        series: list[str] | None,
+        board: bool,
+        max_markets: int,
+        max_pages: int,
+        seed: Any = 7,
+        horizon_seconds: float = 48 * 3600,
+        settled_through: float | None = None,
+    ) -> None:
+        """List the settled markets the run can show, cap them by a seeded draw, load candles.
+
+        A market is shown only if its listed close is at most `visible_until`: `end` plus the
+        horizon, and never past `settled_through` (when settlements may still be arriving). The
+        listing runs by actual close through the same moment, and an actual close never comes
+        after the listed one, so every market listed to close by then is in it, whatever its
+        result. A market listed to close later is dropped even when it closed early inside the
+        window: its twin that closed on schedule is not in the listing, and showing only the
+        early one would favour whatever closes early (a game that ends, a threshold that hits)."""
         rows: list[dict[str, Any]] = []
         truncated_before = int(getattr(self.history, "truncated_listings", 0) or 0)
-        if board:
-            self.board = True
-            floor = 500.0 if min_volume is None else float(min_volume)
-            # The whole board closes more than 20,000 markets on a busy day (Sept 2026), so it is
-            # listed six hours at a time.
-            for lo, hi in self._days(hours=6):
+        self.board = bool(board)
+        visible_until = self.end_ts + max(0.0, float(horizon_seconds))
+        if settled_through is not None and settled_through < visible_until:
+            visible_until = max(self.start_ts, float(settled_through))
+            self.notes.append(_clean(
+                f"settled listings are complete only through {iso(visible_until)} when the run began; markets listed to "
+                f"close later are hidden, so the board thins toward {iso(self.end_ts)} (end the window earlier for all of it)"
+            ))
+        self.visible_until = visible_until
+        # The whole board closes more than 20,000 markets on a busy day (Sept 2026), so it is
+        # listed six hours at a time; a series a day at a time.
+        windows = self._days(hours=6 if board else 24, until=visible_until)
+        names: list[str | None] = [None] if board else list(series or [])
+        for name in names:
+            ok = False
+            for lo, hi in windows:
+                if self.out_of_time():
+                    self.cut = f"the settled listing ({name or 'board'} {iso(lo)} onward)"
+                    break
                 try:
-                    rows.extend(self.history.kalshi_settled(None, start_ts=lo, end_ts=hi, max_pages=max_pages, min_volume=floor))
+                    rows.extend(self.history.kalshi_settled(name, start_ts=lo, end_ts=hi, max_pages=max_pages))
+                    ok = True
+                except HistoryTimeout:
+                    self.cut = f"the settled listing ({name or 'board'} {iso(lo)} onward)"
+                    break
                 except Exception as exc:
                     self.errors += 1
-                    self.notes.append(_clean(f"settled board {iso(lo)}..{iso(hi)} failed: {type(exc).__name__}: {exc}"))
-            chosen = self._dedupe(rows)
-            chosen.sort(key=lambda r: -(_num(r.get("volume"), 0.0) or 0.0))
-            if len(chosen) > max_markets:
-                self.notes.append(f"board capped at {max_markets} of {len(chosen)} settled markets (highest volume first)")
-            chosen = chosen[:max_markets]
-        else:
-            floor = 0.0 if min_volume is None else float(min_volume)
-            for name in series or []:
-                ok = False
-                for lo, hi in self._days():
-                    try:
-                        rows.extend(self.history.kalshi_settled(name, start_ts=lo, end_ts=hi, max_pages=max_pages, min_volume=floor))
-                        ok = True
-                    except Exception as exc:
-                        self.errors += 1
-                        self.notes.append(_clean(f"settled series {name} {iso(lo)}..{iso(hi)} failed: {type(exc).__name__}: {exc}"))
-                if ok:
-                    self.loaded_series.add(str(name).upper())
-            chosen = self._dedupe(rows)
-            if len(chosen) > max_markets:
-                # Every settlement keeps its most traded strikes: round-robin by rank within
-                # the event, so a quiet night is not dropped wholesale for a busy afternoon.
-                by_event: dict[str, list[dict[str, Any]]] = {}
-                for row in chosen:
-                    by_event.setdefault(str(row.get("event_ticker") or ""), []).append(row)
-                ranked = []
-                for members in by_event.values():
-                    members.sort(key=lambda r: -(_num(r.get("volume"), 0.0) or 0.0))
-                    ranked.extend((rank, -(_num(r.get("volume"), 0.0) or 0.0), r["ticker"], r) for rank, r in enumerate(members))
-                ranked.sort(key=lambda x: (x[0], x[1], x[2]))
-                self.notes.append(f"series capped at {max_markets} of {len(chosen)} settled markets (the most traded strikes of every event)")
-                chosen = [x[3] for x in ranked[:max_markets]]
+                    self.notes.append(_clean(f"settled {name or 'board'} {iso(lo)}..{iso(hi)} failed: {type(exc).__name__}: {exc}"))
+            if ok and name:
+                self.loaded_series.add(str(name).upper())
+            if self.cut:
+                break
         truncated = int(getattr(self.history, "truncated_listings", 0) or 0) - truncated_before
         if truncated:
             self.notes.append(f"{truncated} settled listing(s) stopped at max_pages ({max_pages}) with more markets left; raise max_pages for the whole window")
-        for row in chosen:
+        if self.cut:
+            self.say(f"time budget spent during {self.cut}")
+            return
+        pool: list[Market] = []
+        hidden = 0
+        for row in self._dedupe(rows):
             try:
                 market = Market(row)
             except (ValueError, TypeError):
                 continue
-            if market.close_ts <= market.open_ts:
+            if market.close_ts <= market.open_ts or market.open_ts > self.end_ts:
+                continue  # never open at a simulated moment: it would only take a place in the draw
+            if market.listed_close_ts > visible_until + EPS:
+                hidden += 1
                 continue
+            pool.append(market)
+        if hidden:
+            self.notes.append(f"{hidden} settled market(s) listed to close after {iso(visible_until)} hidden, early closes included")
+        chosen = sample_markets(pool, max_markets, seed)
+        if len(chosen) < len(pool):
+            self.notes.append(
+                f"{'board' if board else 'series'} capped at {len(chosen)} of {len(pool)} settled markets: a seeded draw "
+                f"spread over events (seed {seed}), never by volume or result; raise max_markets to see more"
+            )
+        for market in chosen:
             self.markets[market.ticker] = market
         self.ordered = sorted(self.markets.values(), key=lambda m: (m.close_ts, m.ticker))
         self.closes = [m.close_ts for m in self.ordered]
@@ -505,13 +756,14 @@ class DataSet:
         self.say(f"{len(self.markets)} settled markets loaded ({'board' if board else ', '.join(series or [])})")
         self._load_candles()
 
-    def _days(self, hours: int = 24) -> list[tuple[int, int]]:
-        """The window as listing windows of `hours` on a fixed UTC grid (so they cache)."""
+    def _days(self, hours: int = 24, until: float | None = None) -> list[tuple[int, int]]:
+        """[start, until] (default: end) as listing windows of `hours` on a fixed UTC grid (so they cache)."""
         out = []
         size = int(hours) * 3600
+        last = int(self.end_ts if until is None else until)
         lo = int(self.start_ts)
-        while lo <= self.end_ts:
-            hi = min(int(self.end_ts), (lo // size + 1) * size - 1)
+        while lo <= last:
+            hi = min(last, (lo // size + 1) * size - 1)
             out.append((lo, hi))
             lo = hi + 1
         return out
@@ -527,20 +779,23 @@ class DataSet:
 
     def _windows(self, market: Market) -> list[tuple[int, float, float]]:
         """(period minutes, from, to) windows for one market: hourly over a long life, minutes
-        over the last ninety minutes (or the whole of a short life). They never overlap."""
+        over the last ninety minutes (or the whole of a short life). They never overlap, and
+        never reach past `end` (a market closing later is only marked there)."""
         lo = max(market.open_ts, self.start_ts - VOLUME_LOOKBACK_SECONDS)
-        if market.close_ts <= lo:
+        hi = min(market.close_ts, self.end_ts)
+        if hi <= lo:
             return []
         if market.close_ts - market.open_ts <= LONG_LIFE_SECONDS:
             market.fine_from = math.floor(lo / 60.0) * 60
-            return [(1, market.fine_from, market.close_ts)]
+            return [(1, market.fine_from, hi)]
         fine_from = math.floor((market.close_ts - FINE_WINDOW_SECONDS) / 3600.0) * 3600
         fine_from = max(fine_from, math.floor(lo / 60.0) * 60)
         market.fine_from = fine_from
         windows = []
         if fine_from > lo:
-            windows.append((60, lo, fine_from))
-        windows.append((1, fine_from, market.close_ts))
+            windows.append((60, lo, min(fine_from, hi)))
+        if fine_from < hi:
+            windows.append((1, fine_from, hi))
         return windows
 
     def _load_candles(self) -> None:
@@ -558,6 +813,9 @@ class DataSet:
                 continue
             groups = self._group(items, period) if callable(many) else [[item] for item in items]
             for group in groups:
+                if self.out_of_time():
+                    self.cut = f"the candles ({done} of {total_jobs} market windows loaded)"
+                    break
                 lo = min(item[0] for item in group)
                 hi = max(item[1] for item in group)
                 try:
@@ -566,6 +824,9 @@ class DataSet:
                     else:
                         market = group[0][2]
                         found = {market.ticker: self.history.kalshi_candles(market.series, market.ticker, start_ts=int(lo), end_ts=int(math.ceil(hi)), period_minutes=period)}
+                except HistoryTimeout:
+                    self.cut = f"the candles ({done} of {total_jobs} market windows loaded)"
+                    break
                 except Exception as exc:
                     self.errors += 1
                     self.note_once(f"candles-{type(exc).__name__}", f"candle load failed ({type(exc).__name__}: {str(exc)[:160]}); those markets have no prices")
@@ -585,6 +846,9 @@ class DataSet:
                 if time.monotonic() - last_said > 15:
                     last_said = time.monotonic()
                     self.say(f"candles: {done}/{total_jobs} market windows")
+            if self.cut:
+                self.say(f"time budget spent during {self.cut}")
+                return
         for market in self.ordered:
             market.attach(collected.get(market.ticker) or [])
         priced = sum(1 for m in self.ordered if m.candles)
@@ -633,8 +897,8 @@ class DataSet:
         items = []
         for ticker, hour in sorted(self.pending_refine.items()):
             market = self.markets.get(ticker)
-            if market is not None and hour < market.fine_from:
-                items.append((hour, market.fine_from, market))
+            if market is not None and hour < market.fine_from and hour < self.end_ts:
+                items.append((hour, min(market.fine_from, self.end_ts), market))
                 self.refine_tried[ticker] = min(hour, self.refine_tried.get(ticker, hour))
         self.pending_refine.clear()
         many = getattr(self.history, "kalshi_candles_many", None)
@@ -648,6 +912,8 @@ class DataSet:
                 else:
                     market = group[0][2]
                     found = {market.ticker: self.history.kalshi_candles(market.series, market.ticker, start_ts=int(lo), end_ts=int(math.ceil(hi)), period_minutes=1)}
+            except HistoryTimeout:
+                continue  # the run is out of time; its step loop stops next
             except Exception as exc:
                 self.errors += 1
                 self.note_once(f"refine-{type(exc).__name__}", f"minute candles for resting orders failed ({type(exc).__name__}: {str(exc)[:160]}); hourly candles judged them")
@@ -655,6 +921,26 @@ class DataSet:
             for item_lo, _item_hi, market in group:
                 if market.refine(item_lo, found.get(market.ticker) or []):
                     self.refined.add(market.ticker)
+
+    def fresh_book(self, market: Market, t: float) -> bool:
+        """Whether `market.book(t)` is the book at t: minute history there (sparse minute candles
+        carry forward), or an hourly close at most `FRESH_SECONDS` old. When it is neither, the
+        market's minute candles from t's hour are fetched now; False if none came back (or the
+        minute-candle cap is reached). An hourly close can be 59 minutes old, and a taker filled
+        at it is filled at a price the book had left (Sept 16, 2026: ask 0.30 at 10:00, 0.80
+        from 10:05, a buy at 10:45 filled at 0.30)."""
+        if t >= market.fine_from:
+            return True
+        index = market.index_at(t)
+        if index < 0 or t - market.ends[index] <= FRESH_SECONDS:
+            return True
+        self.request_refine(market, t)
+        if market.ticker in self.pending_refine:
+            self.flush_refine()
+        if t >= market.fine_from:
+            return True
+        index = market.index_at(t)
+        return index < 0 or t - market.ends[index] <= FRESH_SECONDS
 
     def open_markets(self, t: float, *, series: str | None = None, max_close: float | None = None) -> list[Market]:
         """Markets open at t, optionally of one series and closing by `max_close`."""
@@ -694,6 +980,8 @@ class DataSet:
             lo = min(need_from, self.start_ts - 300 * seconds) if series.loaded_from is None else need_from
             try:
                 rows = self.history.coinbase_candles(product, start_ts=int(lo), end_ts=int(hi), granularity=granularity)
+            except HistoryTimeout:
+                return None  # out of time: not a failed product, the run stops next
             except Exception as exc:
                 self.errors += 1
                 series.failed = True
@@ -707,8 +995,35 @@ class DataSet:
 # ------------------------------------------------------------------------------ kit
 
 
+#: The calls a strategy's `kit` carries, as on the floor (`ltcm/strategies.py` RUNNER).
+KIT_CALLS = (
+    "say", "bars", "quote", "products", "futures", "kalshi_markets", "kalshi_market", "kalshi_series",
+    "weather", "weather_cities",
+)
+
+
+class StrategyKit:
+    """What `decide(kit, params)` is handed: `context` and the kit's calls, nothing else.
+
+    Each call is a closure over the engine's `BacktestKit`, so no attribute of this object leads
+    to the loaded history or the simulator (on `BacktestKit` a settled market's result is one
+    attribute away). A closure's cells are reachable only through a dunder, which `check_code`
+    refuses."""
+
+    __slots__ = ("context",) + KIT_CALLS
+
+    def __init__(self, context: dict[str, Any], calls: Mapping[str, Callable[..., Any]]):
+        self.context = context
+        for name in KIT_CALLS:
+            object.__setattr__(self, name, calls[name])
+
+    def __repr__(self) -> str:
+        return "StrategyKit(backtest)"
+
+
 class BacktestKit:
-    """The strategy's `kit`, answering from history as of the simulated time."""
+    """The engine's side of the strategy's `kit`, answering from history as of the simulated time.
+    A strategy never holds this object: it gets `strategy_kit()`."""
 
     def __init__(self, data: DataSet, sim: "Simulator", t: float, *, products: list[str] | None, half_spread: float):
         self._data = data
@@ -719,6 +1034,20 @@ class BacktestKit:
         self.context = sim.context(t)
         self.log: list[str] = []
         self.unsupported: str | None = None
+
+    def strategy_kit(self) -> StrategyKit:
+        """The facade handed to `decide`."""
+
+        def bind(name: str) -> Callable[..., Any]:
+            method = getattr(self, name)
+
+            def call(*args: Any, **kwargs: Any) -> Any:
+                return method(*args, **kwargs)
+
+            call.__name__ = name
+            return call
+
+        return StrategyKit(self.context, {name: bind(name) for name in KIT_CALLS})
 
     def say(self, text: Any) -> None:
         self.log.append(str(text)[:300])
@@ -835,6 +1164,13 @@ class BacktestKit:
         if not self._data.board:
             self._data.note_once("board", "kit.kalshi_markets() read only the loaded series; pass no series to load the board")
         until = self._t + float(max_close_hours) * 3600.0
+        if until > self._data.visible_until + 60:
+            self._data.note_once(
+                "horizon",
+                f"kit.kalshi_markets(max_close_hours={_text_number(float(max_close_hours))}) at {iso(self._t)} reached past "
+                f"{iso(self._data.visible_until)}, the last listed close loaded; later markets were not shown "
+                "(raise listing_horizon_hours, or end the window earlier)",
+            )
         rows = [m.view(self._t) for m in self._data.open_markets(self._t, max_close=until)]
         return rows[: max(1, int(pages)) * 1000]
 
@@ -1021,6 +1357,7 @@ class Simulator:
             contracts = min(contracts, int(round(held - resting)))
             if contracts < 1:
                 return self._refuse("sell of a leg not held")
+        fresh = self.data.fresh_book(market, t)
         yes_bid, yes_ask = market.book(t)
         if side == "buy":
             touch = yes_ask if right == "yes" else (None if yes_bid is None else 1.0 - yes_bid)
@@ -1028,14 +1365,20 @@ class Simulator:
         else:
             touch = yes_bid if right == "yes" else (None if yes_ask is None else 1.0 - yes_ask)
             crosses = touch is not None and 0.0 < touch < 1.0 and price <= touch + EPS
+        if crosses and not fresh:
+            # Only an hourly close stands behind this book, and it is too old to fill against:
+            # the price may have left it. An order that does not cross rests and is judged on
+            # the candles that follow it.
+            return self._refuse("the book is an hourly close over five minutes old with no minute history")
         if crosses and post_only:
             return self._refuse("post-only order would cross")
         self.counts["orders"] += 1
+        # Minute candles for a market the strategy trades, so its view, marks and exits are fresh.
+        self.data.request_refine(market, t)
         if crosses:
             fill_price = round(touch, 4)
             self._fill_event(market, right, side, contracts, fill_price, kalshi_taker_fee(fill_price) * contracts, False, t, plan)
             return "filled"
-        self.data.request_refine(market, t)
         order = self.add_order(
             {
                 "strategy": self.strategy,
@@ -1233,7 +1576,10 @@ class Simulator:
         while index < len(series.starts) and series.starts[index] + series.seconds <= t:
             candle = series.candles[index]
             order["next_start"] = series.starts[index] + series.seconds
-            touched = candle["low"] <= order["price"] + EPS if order["side"] == "buy" else candle["high"] >= order["price"] - EPS
+            if self.fill_model == "touch":
+                touched = candle["low"] <= order["price"] + EPS if order["side"] == "buy" else candle["high"] >= order["price"] - EPS
+            else:  # conservative: the market traded strictly through the limit, as on Kalshi
+                touched = candle["low"] < order["price"] - EPS if order["side"] == "buy" else candle["high"] > order["price"] + EPS
             if touched:
                 del self.orders[order["order_id"]]
                 quantity = order["quantity"]
@@ -1280,8 +1626,8 @@ class Simulator:
                 continue
             if key[0] == "event":
                 market = self.data.markets.get(key[1])
-                if market is None or not market.is_open(t):
-                    continue
+                if market is None or not market.is_open(t) or not self.data.fresh_book(market, t):
+                    continue  # a stop or target fills as a taker, never against a stale hourly close
             mark = self.mark(key, position, t)
             reason = None
             if mark is not None and plan.get("stop") is not None and mark <= plan["stop"] + EPS:
@@ -1340,8 +1686,17 @@ def max_drawdown(pnls: Iterable[float]) -> float:
     return round(worst, 4)
 
 
-def split_report(report: Mapping[str, Any], fraction: float = 0.66) -> dict[str, Any]:
-    """The closed trades split chronologically: the first `fraction` in sample, the rest out."""
+def split_report(report: Mapping[str, Any], fraction: float = SPLIT_FRACTION) -> dict[str, Any]:
+    """The closed trades split chronologically: the first `fraction` in sample, the rest out.
+
+    A compact report (the CLI's `compact` line) has no `trade_pnls`; its precomputed `split` is
+    returned when it was cut at the same fraction, and anything else raises ValueError rather
+    than return two empty halves."""
+    if report.get("trade_pnls") is None and isinstance(report.get("split"), Mapping):
+        used = _num(report.get("split_fraction"), SPLIT_FRACTION)
+        if used is None or abs(used - float(fraction)) > 1e-9:
+            raise ValueError(f"a compact report carries only its split at {used}; run without compact for {fraction}")
+        return copy.deepcopy(dict(report["split"]))
     pnls = [float(x) for x in (report.get("trade_pnls") or [])]
     notionals = [float(x) for x in (report.get("trade_notionals") or [])]
     if len(notionals) != len(pnls):
@@ -1431,15 +1786,40 @@ def kalshi_plan(code: str, params: Mapping[str, Any], spec: Mapping[str, Any], n
     return "board", []
 
 
-def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, Any]:
-    """Replay `spec["strategy"]` over [start, end]; see the module docstring for the rules."""
-    began = time.monotonic()
+def _is_starter_source(code: str) -> bool:
+    """Whether `code` is, byte for byte, one of the house starters in `ltcm/starters/`."""
+    try:
+        return any(path.read_text(encoding="utf-8") == code for path in STARTERS_DIR.glob("*.py"))
+    except OSError:
+        return False
+
+
+class _Discard:
+    """A stdout for strategy code whose prints nobody reads (the compact CLI line)."""
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+
+def run_backtest(spec: Mapping[str, Any], *, history: Any = None, trusted_code: bool = False) -> dict[str, Any]:
+    """Replay `spec["strategy"]` over [start, end]; see the module docstring for the rules.
+
+    `decide` runs inside this process. `spec.code` that is not a house starter runs only in a
+    desk's sandbox (`python3 -m ltcm.backtest` there), unless the caller vouches for it with
+    `trusted_code=True` (code the operator wrote, run on the operator's machine). Every strategy,
+    starters included, must pass `check_code`."""
+    began = _monotonic()
     spec = {**DEFAULT_SPEC, **dict(spec or {})}
     report = _empty_report(spec)
     notes: list[str] = report["notes"]
+    compact = bool(spec.get("compact"))
+    verbose = bool(spec["verbose"]) if spec.get("verbose") is not None else not compact
 
     def say(text: str) -> None:
-        if not spec.get("verbose", True):
+        if not verbose:
             return
         try:
             print(f"[backtest] {text}", file=sys.stderr, flush=True)
@@ -1462,6 +1842,13 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
             notes.append(f"fill_model {fill_model} is not known; conservative used")
             fill_model = "conservative"
         code = _load_code(spec)
+        given = isinstance(spec.get("code"), str) and bool(spec["code"].strip())
+        if given and not trusted_code and not in_sandbox() and not _is_starter_source(code):
+            raise CodeRefused(
+                "spec.code runs only in a desk's sandbox (python3 -m ltcm.backtest there): a strategy runs inside the "
+                "engine's process; pass trusted_code=True only for code you wrote"
+            )
+        check_code(code)
         name = str(spec.get("strategy") or "strategy")
         compiled = compile(code, f"strategy:{name}", "exec")
     except Exception as exc:
@@ -1471,14 +1858,25 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
     report["start"], report["end"] = iso(start_ts), iso(end_ts)
     report["params"] = params
     report["seed"] = spec.get("seed", 7)
+    if spec.get("min_volume"):
+        notes.append("min_volume ignored: a settled market's lifetime volume includes trading after the simulated moment")
+    # Where a strategy's prints go: stderr, or nowhere when the sandbox's bounded output must
+    # keep room for the result line.
+    sink: Any = _Discard() if compact else sys.stderr
+    budget = _num(spec.get("max_seconds"))
+    if budget is None:
+        budget = float(SANDBOX_SECONDS) if in_sandbox() else 0.0
+    deadline = began + budget if budget > 0 else None
 
     namespace: dict[str, Any] = {"__name__": f"backtest_{name}"}
     try:
-        with contextlib.redirect_stdout(sys.stderr):
+        with contextlib.redirect_stdout(sink):
             exec(compiled, namespace)
         if not callable(namespace.get("decide")):
             raise ValueError("the code defines no decide(kit, params)")
-    except Exception as exc:
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # SystemExit too: a strategy never ends the run
         report["errors"] = 1
         notes.append(_clean(f"strategy did not load: {type(exc).__name__}: {exc}"))
         return report
@@ -1486,8 +1884,12 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
     if history is None:
         from .history import History
 
-        history = History(cache_dir=spec.get("cache_dir") or _default_cache_dir())
-    data = DataSet(history, start_ts, end_ts, say=say, notes=notes)
+        history = History(cache_dir=spec.get("cache_dir") or _default_cache_dir(), verbose=verbose)
+    elif not verbose and hasattr(history, "verbose"):
+        history.verbose = False
+    if hasattr(history, "deadline"):
+        history.deadline = deadline
+    data = DataSet(history, start_ts, end_ts, say=say, notes=notes, deadline=deadline)
     mode, series = kalshi_plan(code, params, spec, namespace)
     if "weather" in code:
         # A strategy that reads forecasts cannot be replayed; find out before loading anything.
@@ -1495,24 +1897,36 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         probe = BacktestKit(probe_data, Simulator(probe_data, strategy=name, learning_usd=learning, half_spread=0.0, maker_fee=0.0, taker_fee=0.0), start_ts, products=[], half_spread=0.0)
         try:
             probe_ns = {"__name__": f"backtest_{name}"}
-            with contextlib.redirect_stdout(sys.stderr):
+            with contextlib.redirect_stdout(sink):
                 exec(compiled, probe_ns)
-                probe_ns["decide"](probe, copy.deepcopy(params))
-        except Exception:
+                probe_ns["decide"](probe.strategy_kit(), copy.deepcopy(params))
+        except KeyboardInterrupt:
+            raise
+        except BaseException:
             pass
         if probe.unsupported:
             report["unsupported"] = probe.unsupported
             notes.append(_clean(probe.unsupported))
-            report["runtime_seconds"] = round(time.monotonic() - began, 1)
+            report["runtime_seconds"] = round(_monotonic() - began, 1)
             return report
+    settled_through = None
+    clock = getattr(history, "clock", None)
+    if callable(clock):
+        try:
+            settled_through = float(clock()) - max(0.0, float(_num(spec.get("settle_lag_hours"), 24.0) or 0.0)) * 3600.0
+        except Exception:
+            settled_through = None
+    horizon_hours = min(24.0 * 14, max(0.0, float(_num(spec.get("listing_horizon_hours"), 48.0) or 0.0)))
     try:
         if mode != "none":
             data.load_kalshi(
                 series=series,
                 board=(mode == "board"),
                 max_markets=int(spec.get("max_markets") or 3000),
-                min_volume=_num(spec.get("min_volume")),
                 max_pages=int(spec.get("max_pages") or (50 if mode == "board" else 20)),
+                seed=spec.get("seed", 7),
+                horizon_seconds=horizon_hours * 3600.0,
+                settled_through=settled_through,
             )
     except Exception as exc:
         data.errors += 1
@@ -1521,6 +1935,10 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         notes.append("series loaded: " + ", ".join(series))
     elif mode == "board":
         notes.append("the settled board was loaded")
+    if data.cut:
+        data.errors += 1
+        report["incomplete"] = _clean(f"time budget of {budget:.0f}s spent loading {data.cut}; nothing was replayed", 200)
+        notes.insert(0, report["incomplete"] + "; history read so far is cached, so a second run gets further")
 
     half_spread = float(_num(spec.get("half_spread_bps"), 1.0) or 0.0) / 10_000.0
     products = spec.get("products")
@@ -1536,26 +1954,27 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         taker_fee=float(_num(spec.get("coinbase_taker_fee"), 0.006)),
         fill_model=fill_model,
     )
-    budget = float(_num(spec.get("max_seconds"), 0.0) or 0.0)
     errors = 0
     first_errors: list[str] = []
     steps = 0
     total_steps = int((end_ts - start_ts) // step) + 1
     last_said = time.monotonic()
     t = start_ts
-    stopped_at = None
-    while t <= end_ts + EPS:
+    stopped_at = start_ts if data.cut else None
+    while stopped_at is None and t <= end_ts + EPS:
         sim.advance(t)
         kit = BacktestKit(data, sim, t, products=products, half_spread=half_spread)
         run_ns = {"__name__": f"backtest_{name}"}
         out: Any = None
         try:
-            with contextlib.redirect_stdout(sys.stderr):
+            with contextlib.redirect_stdout(sink):
                 exec(compiled, run_ns)  # a fresh module each run, as each floor run is a fresh process
-                out = run_ns["decide"](kit, copy.deepcopy(params))
+                out = run_ns["decide"](kit.strategy_kit(), copy.deepcopy(params))
         except Unsupported:
             pass
-        except Exception as exc:
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:  # SystemExit and GeneratorExit too: a strategy never ends the run
             errors += 1
             if len(first_errors) < 3:
                 first_errors.append(f"{iso(t)} {type(exc).__name__}: {str(exc)[:160]}")
@@ -1583,11 +2002,16 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         if time.monotonic() - last_said > 20:
             last_said = time.monotonic()
             say(f"{iso(t)}: step {steps}/{total_steps}, {len(sim.fills)} fills, {len(sim.closed)} closed")
-        if budget and time.monotonic() - began > budget:
+        if deadline is not None and _monotonic() > deadline:
             stopped_at = t
             notes.append(f"time budget of {budget:.0f}s reached at {iso(t)}; the report covers the window up to there")
             break
         t += step
+    if deadline is not None:
+        # Settling and marking what is open may still read a little history.
+        data.deadline = _monotonic() + 30.0
+        if hasattr(history, "deadline"):
+            history.deadline = data.deadline
     finish_at = min(end_ts, stopped_at) if stopped_at is not None else end_ts
     marks = sim.finish(finish_at)
 
@@ -1636,9 +2060,10 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         markets_loaded=len(data.markets),
         markets_priced=sum(1 for m in data.markets.values() if m.candles),
         markets_refined=len(data.refined),
+        listed_through=iso(data.visible_until),
         http_requests=int(getattr(history, "requests", 0) or 0),
         cache_hits=int(getattr(history, "cache_hits", 0) or 0),
-        runtime_seconds=round(time.monotonic() - began, 1),
+        runtime_seconds=round(_monotonic() - began, 1),
         fill_model=fill_model,
     )
     for text in first_errors:
@@ -1647,7 +2072,8 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         top = sorted(sim.reasons.items(), key=lambda kv: -kv[1])[:4]
         notes.append(_clean("rejected intents: " + "; ".join(f"{k} x{v}" for k, v in top)))
     report["notes"] = [_clean(n) for n in notes][:24]
-    report["split"] = split_report(report)
+    report["split"] = split_report(report, SPLIT_FRACTION)
+    report["split_fraction"] = SPLIT_FRACTION
     say(f"done in {report['runtime_seconds']}s: {report['trades']} trades, pnl {report['pnl_usd']}, {report['http_requests']} requests")
     return report
 
@@ -1676,59 +2102,80 @@ def _default_cache_dir() -> str | None:
     return None
 
 
+def _result_line(report: Any, spec: Any) -> str:
+    """The one stdout line: `BACKTEST-RESULT {json}` (compact when the spec asked)."""
+    if not isinstance(report, dict):
+        report = _empty_report(spec if isinstance(spec, dict) else {})
+        report["errors"] = 1
+        report["notes"].append("backtest failed: no report was produced")
+    if isinstance(spec, dict) and spec.get("compact"):
+        report = {k: v for k, v in report.items() if k not in ("trade_pnls", "trade_notionals", "daily")}
+        report["notes"] = [str(n)[:160] for n in report.get("notes") or []][:8]
+        return RESULT_PREFIX + json.dumps(report, default=str, separators=(",", ":"))
+    return RESULT_PREFIX + json.dumps(report, default=str)
+
+
 def main(argv: list[str] | None = None) -> int:
-    """`python3 -m ltcm.backtest --spec FILE` (or the spec on stdin): one BACKTEST-RESULT line."""
+    """`python3 -m ltcm.backtest --spec FILE` (or the spec on stdin): one BACKTEST-RESULT line.
+
+    The line is printed in a `finally`, so nothing a strategy raises (`SystemExit` included) and
+    nothing that fails in the engine leaves the caller without it; the exit status is 0."""
     parser = argparse.ArgumentParser(prog="python3 -m ltcm.backtest", add_help=False)
     parser.add_argument("--spec", help="a JSON spec file; without it the spec is read from stdin")
-    try:
-        args = parser.parse_args(argv)
-    except SystemExit:
-        report = _empty_report({})
-        report["errors"] = 1
-        report["notes"].append("usage: python3 -m ltcm.backtest --spec FILE (or the spec as JSON on stdin)")
-        print(RESULT_PREFIX + json.dumps(report, default=str), flush=True)
-        return 0
     spec: Any = {}
+    report: Any = None
     try:
-        raw = Path(args.spec).read_text(encoding="utf-8") if args.spec else sys.stdin.read()
-        spec = json.loads(raw)
-        if not isinstance(spec, dict):
-            raise ValueError("the spec is not a JSON object")
-    except Exception as exc:
-        report = _empty_report({})
-        report["errors"] = 1
-        report["notes"].append(_clean(f"spec unreadable: {type(exc).__name__}: {exc}"))
-        print(RESULT_PREFIX + json.dumps(report, default=str), flush=True)
-        return 0
-    try:
+        try:
+            args = parser.parse_args(argv)
+        except SystemExit:
+            report = _empty_report({})
+            report["errors"] = 1
+            report["notes"].append("usage: python3 -m ltcm.backtest --spec FILE (or the spec as JSON on stdin)")
+            return 0
+        try:
+            raw = Path(args.spec).read_text(encoding="utf-8") if args.spec else sys.stdin.read()
+            loaded = json.loads(raw)
+            if not isinstance(loaded, dict):
+                raise ValueError("the spec is not a JSON object")
+            spec = loaded
+        except Exception as exc:
+            report = _empty_report({})
+            report["errors"] = 1
+            report["notes"].append(_clean(f"spec unreadable: {type(exc).__name__}: {exc}"))
+            return 0
         report = run_backtest(spec)
-    except Exception as exc:  # the caller reads a report, never a bare traceback
-        report = _empty_report(spec)
+    except BaseException as exc:  # the caller reads a report, never a bare traceback or nothing
+        report = _empty_report(spec if isinstance(spec, dict) else {})
         report["errors"] = 1
         report["notes"].append(_clean(f"backtest failed: {type(exc).__name__}: {exc}"))
         tail = traceback.format_exc().strip().splitlines()[-3:]
         report["notes"].extend(_clean(line, 200) for line in tail)
-    if isinstance(spec, dict) and spec.get("compact"):
-        report = {k: v for k, v in report.items() if k not in ("trade_pnls", "trade_notionals", "daily")}
-        report["notes"] = [str(n)[:160] for n in report.get("notes") or []][:8]
-        print(RESULT_PREFIX + json.dumps(report, default=str, separators=(",", ":")), flush=True)
-        return 0
-    print(RESULT_PREFIX + json.dumps(report, default=str), flush=True)
+    finally:
+        try:
+            line = _result_line(report, spec)
+        except Exception as exc:
+            line = RESULT_PREFIX + json.dumps({"strategy": None, "trades": 0, "errors": 1, "notes": [_clean(f"the report did not serialize: {type(exc).__name__}")]})
+        print(line, flush=True)
     return 0
 
 
 __all__ = [
     "BacktestKit",
+    "CodeRefused",
     "DataSet",
     "Market",
     "Simulator",
+    "StrategyKit",
     "Unsupported",
     "bootstrap_ci",
+    "check_code",
+    "in_sandbox",
     "kalshi_plan",
     "kalshi_taker_fee",
     "main",
     "max_drawdown",
     "run_backtest",
+    "sample_markets",
     "split_report",
 ]
 
