@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Mapping
 
 from .events import EventLog
@@ -152,6 +152,31 @@ class TradeNotifier:
             "fill_id": payload.get("fill_id") or fill.id,
         }
 
+    def story_group(self, fills: list[Any]) -> dict[str, Any] | None:
+        """One notice for every fill of one order in the tick: the story of the first, with the
+        quantity summed, the price averaged by quantity and the fees summed."""
+        facts = self.story(fills[0])
+        if facts is None or len(fills) == 1:
+            return facts
+        quantity = Decimal(0)
+        cost = Decimal(0)
+        fees = Decimal(0)
+        for fill in fills:
+            try:
+                q = Decimal(str(fill.payload.get("quantity") or 0))
+                p = Decimal(str(fill.payload.get("price") or 0))
+                fees += Decimal(str(fill.payload.get("fee") or 0))
+            except (InvalidOperation, ValueError):
+                continue
+            quantity += q
+            cost += q * p
+        if quantity > 0:
+            facts["quantity"] = format(quantity.normalize(), "f")
+            facts["price"] = format((cost / quantity).quantize(Decimal("0.0001")), "f")
+            facts["fee"] = format(fees, "f")
+        facts["at"] = fills[-1].at
+        return facts
+
     def settlement(self, outcome: Any) -> dict[str, Any] | None:
         payload = outcome.payload
         desk_id = outcome.stream.split(":", 1)[1] if ":" in outcome.stream else None
@@ -184,30 +209,38 @@ class TradeNotifier:
         state = dict(self.state())
         sent: list[str] = []
         done = set(state.get("notified") or [])
-        pending: list[tuple[str, Any, Callable[[Any], dict[str, Any] | None]]] = []
-        for event in self.log.read(kind="broker.fill", limit=2000):
-            pending.append((event.id, event, self.story))
-        for event in self.log.read(kind="desk.outcome", limit=2000):
-            pending.append((event.id, event, self.settlement))
         floor = state.get("notify_floor")
-        for event_id, event, fold in pending:
-            if event_id in done:
-                continue
-            if floor is None:
-                continue  # first run: everything before now is history, not news
-            if event.at < floor:
-                continue
+
+        def news(event: Any) -> bool:
+            if event.id in done or floor is None or event.at < floor:
+                return False  # seen, or before the floor: the first run mails nothing old
             if _age_seconds(event.at, at) > MAX_AGE_SECONDS:
-                done.add(event_id)  # too old to be news; give up quietly
-                continue
+                done.add(event.id)  # too old to be news; give up quietly
+                return False
+            return True
+
+        # The fills of one order in one tick are one notice: a resting quote fills in pieces,
+        # and a 333-contract order filled in six on Sept 16, 2026 would have been six emails.
+        pending: list[tuple[list[str], list[Any], Callable[[list[Any]], dict[str, Any] | None]]] = []
+        by_order: dict[str, list[Any]] = {}
+        for event in self.log.read(kind="broker.fill", limit=2000):
+            if news(event):
+                by_order.setdefault(str(event.payload.get("order_id") or event.id), []).append(event)
+        for events in by_order.values():
+            pending.append(([e.id for e in events], events, self.story_group))
+        for event in self.log.read(kind="desk.outcome", limit=2000):
+            if news(event):
+                pending.append(([event.id], [event], lambda events: self.settlement(events[0])))
+        pending.sort(key=lambda item: item[1][0].at)
+        for event_ids, events, fold in pending:
             try:
-                facts = fold(event)
+                facts = fold(events)
             except Exception as exc:
                 self.alert("warning", f"trade notice could not be folded: {type(exc).__name__}")
-                done.add(event_id)
+                done.update(event_ids)
                 continue
             if facts is None:
-                done.add(event_id)
+                done.update(event_ids)
                 continue
             try:
                 answer = self.poster(f"{self.gateway_url}/v1/notify", self.token, facts)
@@ -222,8 +255,8 @@ class TradeNotifier:
                 break
             if isinstance(answer, Mapping) and answer.get("sent") is False:
                 self.alert("warning", "trade notice not sent: the gateway has no mail binding")
-            done.add(event_id)
-            sent.append(event_id)
+            done.update(event_ids)
+            sent.extend(event_ids)
         if floor is None:
             state["notify_floor"] = at
         state["notified"] = sorted(done)[-500:]

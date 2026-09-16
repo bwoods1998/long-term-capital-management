@@ -94,6 +94,23 @@ class NotifierTests(NotifierCase):
         self.assertEqual(notifier.tick("2026-09-15T14:07:00.000Z"), [])
         self.assertEqual(len(self.posts), 1)
 
+    def test_the_fills_of_one_order_in_one_tick_are_one_notice(self):
+        # A 333-contract weather order filled in six pieces on Sept 16, 2026: one email, not six.
+        notifier = self.notifier()
+        notifier.tick(T0)
+        first = self.trade(at=T1)
+        second = self.log.append("broker:kalshi", "broker.fill", {
+            "fill_id": "f-o1-b", "order_id": "o1", "instrument": INSTRUMENT, "side": "buy", "quantity": "10", "price": "0.59", "fee": "0.07",
+        }, at="2026-09-15T14:05:30.000Z")
+        other = self.trade(at="2026-09-15T14:05:40.000Z", order="o2", intent="oi-2")
+        sent = notifier.tick(T2)
+        self.assertEqual(sorted(sent), sorted([first.id, second.id, other.id]))
+        self.assertEqual(len(self.posts), 2, "one notice per order, not per fill")
+        grouped = self.posts[0][2]
+        self.assertEqual((grouped["quantity"], grouped["price"], grouped["fee"]), ("30", "0.5700", "0.21"))
+        self.assertEqual(grouped["at"], "2026-09-15T14:05:30.000Z")
+        self.assertEqual(self.posts[1][2]["quantity"], "20")
+
     def test_a_shadow_fill_is_a_score_not_a_notice(self):
         notifier = self.notifier()
         notifier.tick(T0)
