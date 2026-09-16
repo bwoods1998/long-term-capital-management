@@ -10,6 +10,7 @@
   "floor_max_daily_loss_pct": "0.15",
   "mark_interval_seconds": 300,
   "sleep_seconds": 30,
+  "settlement_interval_seconds": 90,
   "session_catchup_seconds": 3600,
   "committee_weekday": 6,
   "committee_time": "18:00",

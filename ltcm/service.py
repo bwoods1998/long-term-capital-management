@@ -2948,6 +2948,13 @@ class Service:
         fails, is a no-op: nothing here may stop the rest of the tick.
         """
         written: list[str] = []
+        # A market finalizes once; asking about every held market every thirty seconds took 11
+        # seconds of each tick on Sept 16, 2026. `settlement_interval_seconds` spaces the sweeps.
+        interval = float(self.config.get("settlement_interval_seconds") or 0)
+        last = getattr(self, "_settled_swept_at", None)
+        if interval > 0 and last is not None and (_epoch_of(at) - _epoch_of(last)) < interval:
+            return written
+        self._settled_swept_at = at
         for venue in sorted(self.gateway.brokers):
             broker = self.gateway.brokers[venue]
             if getattr(broker, "settlements", None) is None:

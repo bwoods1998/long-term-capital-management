@@ -216,6 +216,7 @@ class ServiceCase(unittest.TestCase):
             "sandbox": {"enabled": False},
             # Slow work inline, so a tick's result is complete when a case reads it.
             "background_work": False,
+            "settlement_interval_seconds": 0,
             # The ratio allocation rule, so the capital assertions test arithmetic, not a draw;
             # the bandit has its own case in test_committee.
             "committee": {"bandit_enabled": False},
