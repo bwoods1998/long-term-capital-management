@@ -265,6 +265,24 @@ decision every session:
   "day" order used to die at UTC midnight in the shadow book alone. The limit-sanity rule judges an
   event contract in cents through the touch (five), not as a percentage of a penny reference.
 
+### Strategies: code that trades between sessions
+
+A model session is the slow, expensive, cautious way to make a decision. A **strategy** is the
+desk's judgement as code: a toolbox module with `decide(kit, params) -> list of order dicts`,
+deployed with the `deploy_strategy` tool, which `ltcm/strategies.py` runs every
+`cadence_seconds` in the desk's sandbox and whose limit orders it proposes through the same
+risk engine (and, for a live desk, the same critic) under a session id of the form
+`<desk>:<stamp>:strategy:<name>`. Every run that proposes or fails is a public `desk.code_run`
+(purpose `strategy <name>`), idle runs once an hour; the orders are ordinary intents, decisions,
+orders and fills. `kit` reads bars, quotes, `kalshi_series` and `kalshi_market`, and
+`kit.context` carries the clock, the desk's positions and its learning size. A live desk's
+strategy orders are capped at the learning size; `config.json` `strategies` bounds the rest
+(three per desk, five intents a run, two runs a tick, a 300-second floor on the cadence, the
+sandbox's daily fuse). Desks of the `ranges` and `crypto` families that have no strategy get the
+house starters in `ltcm/starters/` (hourly range pricing from realized volatility; hourly mean
+reversion), exactly as bred desks get the house playbook: the desk owns the file from then on.
+The state lives in `.data/ltcm/strategies.json`.
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:

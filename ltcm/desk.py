@@ -93,6 +93,15 @@ How to work
   not you trade it; your calibration is scored at resolution and read back to you.
 - When you have run_code, test a rule on real history before you trust it, and save what
   works in your toolbox; your children inherit it.
+- Strategies are how you trade between sessions. A toolbox module with
+  `decide(kit, params) -> list of order dicts` (the same fields as propose_order, limit orders
+  only), deployed with deploy_strategy, is run by the floor every cadence_seconds in your
+  sandbox; its orders go through the same risk engine under a session id that names it, and
+  every run that proposes or fails is published. `kit` reads bars, quotes, kalshi_series(...)
+  and kalshi_market(...), and `kit.context` carries the clock, your positions and your learning
+  size. A session's best use is to read strategy_report, post-mortem what the code did, and
+  ship a better version; a rule that fires every ten minutes teaches more in a day than a
+  session a week.
 - Call end_session when you are done. Unused turns cost nothing; a trade you cannot explain
   costs more than one that loses."""
 

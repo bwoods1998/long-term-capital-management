@@ -86,7 +86,10 @@
     "playbook_write",
     "record_forecast",
     "memo_read",
-    "run_code"
+    "run_code",
+    "deploy_strategy",
+    "undeploy_strategy",
+    "strategy_report"
   ],
   "budget": {
     "usd_per_day": "25"

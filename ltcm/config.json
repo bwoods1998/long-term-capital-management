@@ -24,6 +24,16 @@
     "live_coinbase_usd": "25",
     "live_orders_per_day": 6
   },
+  "strategies": {
+    "enabled": true,
+    "max_per_desk": 3,
+    "min_cadence_seconds": 300,
+    "max_intents_per_run": 5,
+    "max_runs_per_tick": 2,
+    "run_timeout_seconds": 90,
+    "idle_publish_seconds": 3600,
+    "starters": true
+  },
   "evolution": {
     "min_days": 1,
     "min_decisions": 5,

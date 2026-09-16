@@ -238,6 +238,13 @@ class SandboxManager:
     def available(self) -> bool:
         return bool(self.image.get("checkpoint_id")) and self.client is not None
 
+    def toolbox_files(self, desk_id: str) -> dict[str, str]:
+        """The desk's saved code, by file name (leap: strategies)."""
+        return Toolbox(self.toolbox_root, desk_id).files()
+
+    def toolbox_save(self, desk_id: str, name: str, code: str, purpose: str) -> None:
+        Toolbox(self.toolbox_root, desk_id).save(name, code, purpose)
+
     def box_for(self, desk_id: str) -> str | None:
         return (self.state().get("boxes") or {}).get(desk_id)
 

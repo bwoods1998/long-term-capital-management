@@ -430,6 +430,33 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         },
         ["desk_id", "limit"],
     ),
+    "deploy_strategy": _schema(  # leap: strategies
+        "deploy_strategy",
+        "Run a toolbox module as a strategy: the floor calls its decide(kit, params) every "
+        "cadence_seconds in your sandbox and proposes the limit orders it returns through the "
+        "same risk engine, under a session id that names it. Save the module first with "
+        "run_code(save_as=name). Live orders stay at learning size; runs are published.",
+        {
+            "name": {"type": "string", "description": "The toolbox module name (lowercase, digits, underscores)."},
+            "cadence_seconds": {"type": "integer", "minimum": 300, "maximum": 86400, "description": "Seconds between runs; 300 is the floor's minimum."},
+            "params": {"type": "object", "description": "JSON passed to decide() unchanged; under 4000 characters.", "additionalProperties": True},
+            "note": {"type": "string", "description": "One line on what the strategy does, published."},
+        },
+        ["name", "cadence_seconds"],
+    ),
+    "undeploy_strategy": _schema(
+        "undeploy_strategy",
+        "Stop a deployed strategy. Its code stays in your toolbox.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    "strategy_report": _schema(
+        "strategy_report",
+        "Your deployed strategies with their runs, intents, approvals, errors and last notes; "
+        "one by name, or all of them.",
+        {"name": {"type": "string", "description": "A strategy name, or omit for all."}},
+        [],
+    ),
     "end_session": _schema(
         "end_session",
         "Finish this session. Call it when you have nothing further to do; give a one-paragraph "
@@ -625,6 +652,20 @@ def _dispatch(
             _text(arguments, "purpose", limit=200),
             _text(arguments, "save_as", limit=40, required=False) or None,
         )
+    if name == "deploy_strategy":  # leap: strategies
+        params = arguments.get("params")
+        if params is not None and not isinstance(params, dict):
+            raise ToolError("params must be an object")
+        return ctx.deploy_strategy(
+            _text(arguments, "name", limit=40),
+            _count(arguments, "cadence_seconds", low=300, high=86_400),
+            params,
+            _text(arguments, "note", limit=200, required=False) or "",
+        )
+    if name == "undeploy_strategy":
+        return ctx.undeploy_strategy(_text(arguments, "name", limit=40))
+    if name == "strategy_report":
+        return ctx.strategy_report(_text(arguments, "name", limit=40, required=False) or None)
     if name == "end_session":
         summary = _text(arguments, "summary", limit=2000)
         session.ended = True
@@ -866,5 +907,14 @@ def _summarize(name: str, data: Any) -> str:
             f"code run: exit {data.get('exit_code', '?')} in {data.get('seconds', '?')}s"
             + (f", saved as {data['saved_as']}" if data.get("saved_as") else "")
         )
+    if name == "deploy_strategy":  # leap: strategies
+        return f"strategy {data.get('name', '?')} deployed every {data.get('cadence_seconds', '?')}s"
+    if name == "undeploy_strategy":
+        return f"strategy {data.get('undeployed', '?')} stopped"
+    if name == "strategy_report":
+        rows = data.get("strategies")
+        if isinstance(rows, list):
+            return "strategies: " + (", ".join(f"{r.get('name')} ({r.get('runs', 0)} runs, {r.get('approved', 0)} approved)" for r in rows) or "none deployed")
+        return f"strategy {data.get('name', '?')}: {data.get('runs', 0)} runs, {data.get('intents', 0)} intents, {data.get('approved', 0)} approved, {data.get('errors', 0)} errors"
     keys = ", ".join(sorted(str(k) for k in data)[:12])
     return f"{name}: {{{keys}}}"
