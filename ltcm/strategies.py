@@ -64,6 +64,12 @@ STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 #: Family -> starter module name. A desk of the family with no strategy of its own gets the
 #: house starter deployed under this name, exactly as a bred desk gets the house playbook.
 STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion"}
+#: A shadow desk's starter explores: a thinner edge and an earlier entry than the live desk's
+#: defaults, so the family's record fills with decisions the post-mortems can learn from.
+STARTER_PARAMS = {
+    ("ranges", "shadow"): {"min_edge": 0.005},
+    ("crypto", "shadow"): {"z_entry": 1.5},
+}
 
 #: Uploaded as `/lab/run/main.py` for every strategy run. It builds the kit, imports the
 #: strategy from the toolbox, calls `decide`, and prints one JSON line the floor reads back.
@@ -88,14 +94,23 @@ class Kit:
     def quote(self, symbol, asset_class="crypto", venue="coinbase"):
         return self._lab.quote(symbol, asset_class, venue)
     def _event_source(self):
+        # labkit's own kalshi helpers look for a public `source` that the composite never had;
+        # the route is `_source`. Try both so a rebuilt image keeps working.
         data = getattr(self._lab, "_data", None)
-        getter = getattr(data, "source", None)
-        return getter("event") if callable(getter) else None
+        for attr in ("_source", "source"):
+            getter = getattr(data, attr, None)
+            if callable(getter):
+                try:
+                    return getter("event")
+                except Exception:
+                    return None
+        return None
     def kalshi_market(self, ticker):
         src = self._event_source()
         return src.market(ticker) if src is not None else None
-    def kalshi_series(self, series, limit=200, status="open"):
-        """Open markets of one series (KXBTC, KXETH, KXHIGHNY...), prices in dollars."""
+    def kalshi_series(self, series, limit=1000, status="open"):
+        """Open markets of one series (KXBTC, KXETH, KXHIGHNY...), prices in dollars. An hourly
+        series lists dozens of buckets for several hours at once, so ask for them all."""
         src = self._event_source()
         if src is None:
             return []
@@ -338,7 +353,15 @@ class Strategies:
         deployed: list[str] = []
         for desk_id, manifest in sorted(manifests.items()):
             starter = STARTERS.get(manifest.family)
-            if not starter or self.store.for_desk(desk_id):
+            if not starter:
+                continue
+            params = dict(STARTER_PARAMS.get((manifest.family, "live" if manifest.live else "shadow")) or {})
+            existing = self.store.for_desk(desk_id)
+            if existing:
+                # A house starter deployed with no params before the explorer params existed.
+                row = existing.get(starter)
+                if row and row.get("house") and not row.get("params") and params:
+                    self.store.update(desk_id, starter, params=params)
                 continue
             path = STARTERS_DIR / f"{starter}.py"
             if not path.is_file():
@@ -347,7 +370,7 @@ class Strategies:
                 code = path.read_text(encoding="utf-8")
                 if hasattr(manager, "toolbox_save"):
                     manager.toolbox_save(desk_id, starter, code, f"house starter for the {manifest.family} family")
-                self.deploy(manifest, starter, 600, {}, note="house starter", house=True)
+                self.deploy(manifest, starter, 600, params, note="house starter", house=True)
                 deployed.append(f"{desk_id}/{starter}")
             except Exception as exc:
                 self.service.alert("warning", f"starter strategy for {desk_id} not deployed: {str(exc)[:160]}")
