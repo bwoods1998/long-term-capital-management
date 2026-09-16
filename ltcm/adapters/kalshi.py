@@ -280,11 +280,15 @@ class KalshiBroker:
         cash = dec(row.get("balance_dollars")) or dollars_from_cents(row.get("balance"))
         if cash is None:
             raise VenueUnavailable("kalshi balance: no balance field")
-        equity = (
+        # `portfolio_value` is the positions' value alone (it read 0 with $492 of cash and no
+        # positions), so equity is cash plus positions. Reading it as the whole equity made the
+        # venue show $16 of equity the moment the first live positions existed (Sept 16, 2026).
+        positions_value = (
             dec(row.get("portfolio_value_dollars"))
             or dollars_from_cents(row.get("portfolio_value"))
-            or cash
+            or Decimal(0)
         )
+        equity = cash + positions_value
         return Balance(
             venue=self.venue,
             cash=cash,

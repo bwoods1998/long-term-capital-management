@@ -142,7 +142,7 @@ class MoneyTests(unittest.TestCase):
         client, _, _ = make({BASE + "/portfolio/balance": BALANCE})
         balance = client.balance()
         self.assertEqual(balance.cash, Decimal("2500"))
-        self.assertEqual(balance.equity, Decimal("3125"))
+        self.assertEqual(balance.equity, Decimal("5625"), "cash plus the positions' value")
         self.assertEqual(balance.buying_power, Decimal("2500"))
         self.assertEqual(balance.as_of, NOW)
 
