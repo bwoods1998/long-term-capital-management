@@ -606,10 +606,24 @@ class Gateway:
         bracket = order._raw.get("bracket") if isinstance(order._raw, dict) else None
         if isinstance(bracket, bool):
             payload["bracket"] = bracket
-        event_id = f"order:{order.id}:{status}:{text(order.filled_quantity)}"
-        self.log.append(
-            f"broker:{order.venue}", "broker.order", payload, id=event_id, at=at
-        )
+        # One event per distinct state of the order. The state is the payload less its clock:
+        # a poll that finds the same status and fill with a new `updated_at` is the same event,
+        # and one that finds a new average price or fee at the same fill count is a new one
+        # (an id keyed on status and fill alone refused it as "different content" on Sept 16).
+        stable = {k: v for k, v in payload.items() if k not in ("updated_at",)}
+        digest = hashlib.sha256(canonical(stable).encode("utf-8")).hexdigest()[:12]
+        event_id = f"order:{order.id}:{status}:{text(order.filled_quantity)}:{digest}"
+        already = None
+        getter = getattr(self.log, "get", None)
+        if callable(getter):
+            try:
+                already = getter(event_id)
+            except Exception:
+                already = None
+        if already is None:
+            self.log.append(
+                f"broker:{order.venue}", "broker.order", payload, id=event_id, at=at
+            )
         row = self._orders.setdefault(order.id, {"order_id": order.id})
         row.update({k: v for k, v in payload.items() if v is not None})
         row["status"] = status
