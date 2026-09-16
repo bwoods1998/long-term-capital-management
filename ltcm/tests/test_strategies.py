@@ -288,19 +288,26 @@ class FakeKit:
         return {"bid": f"{base - 1:.2f}", "ask": f"{base + 1:.2f}", "last": f"{base:.2f}"}
 
     def kalshi_series(self, series, limit=200, status="open"):
+        # The listing carries bounds and stale, mis-scaled prices, as Kalshi's does; the live
+        # book comes from kalshi_market, one call per ticker.
         if series != "KXBTC":
             return []
         return [
-            {"ticker": "KXBTC-26SEP1600-B75950", "yes_sub_title": "$75,900 to $75,999.99", "status": "open",
-             "close_time": "2026-09-16T04:40:00Z", "yes_bid": "0.03", "yes_ask": "0.06"},  # at the money, priced at 6%
-            {"ticker": "KXBTC-26SEP1600-B80050", "yes_sub_title": "$80,000 to $80,099.99", "status": "open",
-             "close_time": "2026-09-16T04:40:00Z", "yes_bid": "0.01", "yes_ask": "0.02"},  # far tail
-            {"ticker": "KXBTC-26SEP1600-T76000", "title": "BTC above $76,000", "status": "open",
+            {"ticker": "KXBTC-26SEP1600-B75950", "yes_sub_title": "$75,900 to 75,999.99", "status": "active",
+             "close_time": "2026-09-16T04:40:00Z", "yes_bid": "0.0003", "yes_ask": "0.0006"},  # at the money
+            {"ticker": "KXBTC-26SEP1600-B80050", "yes_sub_title": "$80,000 to 80,099.99", "status": "active",
+             "close_time": "2026-09-16T04:40:00Z", "yes_bid": "0.0001", "yes_ask": "0.0002"},  # far tail
+            {"ticker": "KXBTC-26SEP1600-T76000", "title": "BTC above $76,000", "status": "active",
              "close_time": "2026-09-16T04:40:00Z", "yes_bid": "0.40", "yes_ask": "0.44"},  # a threshold: skipped
         ]
 
     def kalshi_market(self, ticker):
-        return None
+        self.quoted = getattr(self, "quoted", []) + [ticker]
+        live = {
+            "KXBTC-26SEP1600-B75950": {"ticker": ticker, "yes_bid": "0.03", "yes_ask": "0.06", "no_ask": "0.97"},  # priced at 6%
+            "KXBTC-26SEP1600-B80050": {"ticker": ticker, "yes_bid": "0.01", "yes_ask": "0.02", "no_ask": "0.99"},
+        }
+        return live.get(ticker)
 
 
 def load_starter(name):
@@ -327,6 +334,7 @@ class StarterTests(unittest.TestCase):
         self.assertEqual(intent["limit_price"], "0.06")
         self.assertEqual(intent["quantity"], str(int(15 / 0.06)))
         self.assertIn("edge after fees", intent["rationale"])
+        self.assertEqual(kit.quoted[0], "KXBTC-26SEP1600-B75950", "the nearest bucket is quoted live first")
         # A held bucket is never bought again.
         kit.context["positions"] = [{"market_id": "KXBTC-26SEP1600-B75950"}]
         self.assertEqual(load_starter("hourly_ranges").decide(kit, {})["intents"], [])

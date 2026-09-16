@@ -28,6 +28,7 @@ DEFAULTS = {
     "shrink": 0.5,
     "notional_usd": None,
     "max_intents": 2,
+    "max_quotes": 12,
 }
 RANGE = re.compile(r"\$?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:to|-|–)\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)")
 
@@ -95,6 +96,9 @@ def decide(kit, params):
         if not spot or not sigma_h:
             kit.say(f"{series}: no spot or volatility ({spot}, {sigma_h})")
             continue
+        # The series listing carries the buckets and their bounds but stale or empty prices; the
+        # live book is one call per market, so only the buckets nearest spot are quoted.
+        buckets = []
         for market in kit.kalshi_series(series):
             ticker = str(market.get("ticker") or "")
             if ticker in held or str(market.get("status") or "open") not in ("open", "active"):
@@ -106,11 +110,16 @@ def decide(kit, params):
             minutes = (close - now).total_seconds() / 60.0
             if not float(p["min_minutes"]) <= minutes <= float(p["max_minutes"]):
                 continue
-            yes_ask, yes_bid = _num(market.get("yes_ask")), _num(market.get("yes_bid"))
+            lo, hi = bounds
+            buckets.append((abs((lo + hi) / 2.0 - spot), ticker, market, close, minutes, lo, hi))
+        buckets.sort(key=lambda b: b[0])
+        for _, ticker, market, close, minutes, lo, hi in buckets[: int(p["max_quotes"])]:
+            live = kit.kalshi_market(ticker) or {}
+            yes_ask = _num(live.get("yes_ask")) or _num(market.get("yes_ask"))
+            yes_bid = _num(live.get("yes_bid")) if _num(live.get("yes_bid")) is not None else _num(market.get("yes_bid"))
             if yes_ask is None or yes_bid is None or yes_ask <= 0 or yes_ask >= 1:
                 continue
             sigma = sigma_h * math.sqrt(max(minutes, 1.0) / 60.0)
-            lo, hi = bounds
             prob = _phi(math.log(hi / spot) / sigma) - _phi(math.log(lo / spot) / sigma)
             market_p = (yes_ask + yes_bid) / 2.0
             shrunk = prob + float(p["shrink"]) * (market_p - prob)
@@ -140,5 +149,5 @@ def decide(kit, params):
                 "holding_period_hours": 1,
             }
         )
-    kit.say(f"{len(candidates)} candidate(s), {len(intents)} proposed")
+    kit.say(f"{len(candidates)} candidate(s) with edge >= {p['min_edge']}, {len(intents)} proposed")
     return {"intents": intents, "notes": f"{len(candidates)} buckets with edge >= {p['min_edge']}"}

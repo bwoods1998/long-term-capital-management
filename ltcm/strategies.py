@@ -358,10 +358,13 @@ class Strategies:
             params = dict(STARTER_PARAMS.get((manifest.family, "live" if manifest.live else "shadow")) or {})
             existing = self.store.for_desk(desk_id)
             if existing:
-                # A house starter follows the house params until the desk redeploys it as its own.
+                # A house starter follows the house params and the house code until the desk
+                # changes the file or redeploys it as its own.
                 row = existing.get(starter)
-                if row and row.get("house") and dict(row.get("params") or {}) != params:
-                    self.store.update(desk_id, starter, params=params)
+                if row and row.get("house"):
+                    if dict(row.get("params") or {}) != params:
+                        self.store.update(desk_id, starter, params=params)
+                    self._refresh_house_code(desk_id, starter, row, manager)
                 continue
             path = STARTERS_DIR / f"{starter}.py"
             if not path.is_file():
@@ -377,6 +380,26 @@ class Strategies:
                 # Remember the attempt so a broken starter is not retried every tick.
                 self.store.update(desk_id, starter, enabled=False, last_error=str(exc)[:300], deployed_at=self.service.now(), cadence_seconds=600, params={}, house=True)
         return deployed
+
+    def _refresh_house_code(self, desk_id: str, starter: str, row: Mapping[str, Any], manager: Any) -> None:
+        """Ship a newer house starter to a desk that has not touched its copy."""
+        path = STARTERS_DIR / f"{starter}.py"
+        if not path.is_file() or not hasattr(manager, "toolbox_files"):
+            return
+        try:
+            house = path.read_text(encoding="utf-8")
+            current = manager.toolbox_files(desk_id).get(f"{starter}.py")
+        except Exception:
+            return
+        if current is None or current == house:
+            return
+        if _sha(current) != str(row.get("code_sha256") or ""):
+            return  # the desk edited its copy; it is the desk's now
+        try:
+            manager.toolbox_save(desk_id, starter, house, "house starter (updated)")
+            self.store.update(desk_id, starter, code_sha256=_sha(house))
+        except Exception:
+            return
 
     def due(self, manifests: Mapping[str, DeskManifest], at: str) -> list[tuple[DeskManifest, str, dict[str, Any]]]:
         now = _epoch(at)
