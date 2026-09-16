@@ -539,3 +539,20 @@ class SiteLimitsTests(unittest.TestCase):
             )
             self.assertEqual(shape_problem(big), "payload is over 20 KB")
             log.close()
+
+
+class PublicChangeTests(unittest.TestCase):
+    def test_a_strategy_change_travels_as_its_digest_so_the_change_fits_the_sites_4kb_cap(self):
+        import json
+        from ltcm.publish import lab_block, public_change
+
+        code = "def decide(kit, params):\n" + "    x = 1\n" * 800
+        change = {"strategy": {"name": "sharper_vol", "cadence_seconds": 600, "params": {"window": "5m"}, "code": code}, "playbook_note": "note"}
+        shown = public_change(change)
+        self.assertNotIn("code", shown["strategy"])
+        self.assertEqual((shown["strategy"]["name"], shown["strategy"]["code_chars"], shown["playbook_note"]), ("sharper_vol", len(code), "note"))
+        self.assertEqual(len(shown["strategy"]["code_sha256"]), 16)
+        self.assertLess(len(json.dumps(shown)), 4096)
+        block = lab_block({"experiments": [{"experiment_id": "exp-000000000001", "hypothesis": "h", "family": "ranges", "parent_id": "scholes", "change": change, "variant_desk_id": "scholes-5", "status": "running", "proposed_at": "2026-09-16T00:00:00.000Z", "evaluate_after": "2026-09-19T00:00:00.000Z"}], "curve": [], "calibration": {}})
+        self.assertNotIn("code", block["experiments"][0]["change"]["strategy"])
+        self.assertEqual(public_change("nope"), {})

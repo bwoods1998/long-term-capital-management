@@ -798,6 +798,26 @@ def calibration_block(value: Any) -> dict[str, Any] | None:
     }
 
 
+def public_change(value: Any) -> dict[str, Any]:
+    """An experiment's change as the checkpoint carries it. The site caps a change at 4 KB, so
+    a strategy's code (up to 6,000 characters) travels as its digest and length; the code itself
+    is on the tape in the `lab.experiment` event and in the variant's toolbox."""
+    change = dict(value) if isinstance(value, Mapping) else {}
+    spec = change.get("strategy")
+    if isinstance(spec, Mapping):
+        import hashlib
+
+        code = str(spec.get("code") or "")
+        change["strategy"] = {
+            "name": str(spec.get("name") or "")[:40],
+            "cadence_seconds": spec.get("cadence_seconds"),
+            "params": dict(spec.get("params") or {}) if isinstance(spec.get("params"), Mapping) else {},
+            "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest()[:16],
+            "code_chars": len(code),
+        }
+    return change
+
+
 def lab_block(value: Any) -> dict[str, Any]:
     """leap: lab -- the checkpoint's lab block: experiments, the improvement curve, calibration."""
     lab = value if isinstance(value, Mapping) else {}
@@ -810,7 +830,7 @@ def lab_block(value: Any) -> dict[str, Any]:
             "hypothesis": str(row.get("hypothesis") or "")[:600],
             "family": str(row.get("family") or ""),
             "parent_id": row.get("parent_id"),
-            "change": dict(row.get("change") or {}) if isinstance(row.get("change"), Mapping) else {},
+            "change": public_change(row.get("change")),
             "variant_desk_id": row.get("variant_desk_id"),
             "status": str(row.get("status") or ""),
             "proposed_at": row.get("proposed_at"),
