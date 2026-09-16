@@ -1149,7 +1149,11 @@ class Service:
     def _build_event_index(self, source: Any) -> None:
         rows: list[dict[str, Any]] = []
         try:
-            now = time.time()
+            # Rounded to the hour on purpose: these timestamps go into the listing URLs, and the
+            # HTTP cache keys on the URL. With the raw clock every page of every ten-minute
+            # rebuild was a new 2 MB cache entry; 17,072 of them filled the floor box's 32 GiB
+            # disk on Sept 16, 2026. Within an hour the sweep now reuses the same handful of URLs.
+            now = float(int(time.time()) // 3600 * 3600)
             for window_days in (21, 60):
                 cursor = None
                 lower = int(now) if window_days == 21 else int(now) + 21 * 86400
