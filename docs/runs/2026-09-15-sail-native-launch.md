@@ -643,3 +643,5 @@ breaker, and settings that leave the last twenty minutes alone.
   first minutes after the restart, with no fill yet because the resting bids sit under the
   market and it has not dipped to them. The first shadow maker fills will come with the
   first dip; the promotion loop needs twelve settlements per variant after that.
+- **First shadow maker fills** (13:27 UTC): six resting shadow quotes filled against 27,030
+  prints. Maker strategies now earn a record in shadow; the promotion loop has what it needs.
