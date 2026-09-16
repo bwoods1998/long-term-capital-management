@@ -36,6 +36,8 @@ export const VENUE_PATHS = {
   ],
   coinbase: [
     ['GET', /^api\/v3\/brokerage\/accounts(\/[A-Za-z0-9._~%-]+)?$/],
+    // Read-only derivatives state: whether the account can hold futures, and what it holds.
+    ['GET', /^api\/v3\/brokerage\/cfm\/(balance_summary|positions(\/[A-Za-z0-9._~%-]+)?|intraday\/margin_setting)$/],
     ['GET', /^api\/v3\/brokerage\/best_bid_ask$/],
     ['GET', new RegExp(`^api\\/v3\\/brokerage\\/market\\/(products(\\/${SEGMENT}(\\/(candles|ticker))?)?|product_book)$`)],
     ['GET', /^api\/v3\/brokerage\/orders\/historical\/(fills|batch|[A-Za-z0-9._~%-]+)$/],

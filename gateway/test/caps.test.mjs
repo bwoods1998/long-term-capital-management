@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createsOrder, notional, caps, normalizePath } from '../lib/caps.mjs';
+import { createsOrder, notional, caps, normalizePath, allowedVenuePath } from '../lib/caps.mjs';
 import { formatUsd, parsePico, mulPico, picoToMicro } from '../lib/money.mjs';
 
 const usd = micro => formatUsd(micro);
@@ -85,4 +85,12 @@ test('money is exact, and a partial cent always rounds against the order', () =>
   assert.equal(usd(1n), '0.01', 'a fraction of a cent is charged as a cent');
   assert.equal(parsePico('abc'), null);
   assert.equal(parsePico(Number.NaN), null);
+});
+
+test('derivatives state is readable and never an order path', () => {
+  assert.equal(allowedVenuePath('coinbase', 'GET', 'api/v3/brokerage/cfm/balance_summary'), true);
+  assert.equal(allowedVenuePath('coinbase', 'GET', 'api/v3/brokerage/cfm/positions'), true);
+  assert.equal(allowedVenuePath('coinbase', 'GET', 'api/v3/brokerage/cfm/positions/BIP-20DEC30-CDE'), true);
+  assert.equal(allowedVenuePath('coinbase', 'POST', 'api/v3/brokerage/cfm/sweeps/schedule'), false);
+  assert.equal(createsOrder('coinbase', 'GET', 'api/v3/brokerage/cfm/balance_summary'), false);
 });
