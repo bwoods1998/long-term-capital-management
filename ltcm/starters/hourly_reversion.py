@@ -31,6 +31,21 @@ def _num(value, default=None):
         return default
 
 
+def _symbols(kit, spec, fallback):
+    """A list of product ids, or "top:N": the N most traded USD products on Coinbase right now,
+    so the universe is the venue's, not a hand-written list."""
+    if isinstance(spec, str) and spec.startswith("top:"):
+        try:
+            rows = kit.products(int(spec.split(":", 1)[1]))
+        except Exception:
+            rows = []
+        symbols = [r["symbol"] for r in rows if r.get("symbol")]
+        if symbols:
+            return symbols
+        return list(fallback)
+    return list(spec or fallback)
+
+
 def decide(kit, params):
     p = {**DEFAULTS, **(params or {})}
     ctx = kit.context or {}
@@ -38,7 +53,7 @@ def decide(kit, params):
     notional = _num(p.get("notional_usd")) or _num(ctx.get("learning_usd"), 25.0)
     intents = []
     scores = []
-    for symbol in p["symbols"]:
+    for symbol in _symbols(kit, p["symbols"], DEFAULTS["symbols"]):
         if symbol in held:
             continue
         bars = kit.bars(symbol, "1h", int(p["lookback"]) + 1) or []

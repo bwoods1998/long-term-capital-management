@@ -82,8 +82,8 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
         {"min_edge": 0.02, "shrink": 0.7, "vol_interval": "1h", "vol_bars": 24},
     ],
     "crypto": [
-        {"z_entry": 1.5},
-        {"z_entry": 2.0, "lookback": 48},
+        {"z_entry": 1.5, "symbols": "top:20"},
+        {"z_entry": 2.0, "lookback": 48, "symbols": "top:30"},
         {"z_entry": 1.25, "lookback": 12, "holding_hours": 6},
     ],
     "weather": [
@@ -99,7 +99,7 @@ QUOTE_VARIANTS: dict[str, list[dict[str, Any]]] = {
         {"spread": 0.03, "buckets": 3},
     ],
     "crypto": [
-        {"spread": 0.004},
+        {"spread": 0.004, "symbols": "top:6", "max_symbols": 6},
         {"spread": 0.006, "requote_seconds": 1800},
         {"spread": 0.003, "symbols": ["BTC-USD", "ETH-USD"]},
     ],
@@ -159,6 +159,43 @@ class Kit:
                 except Exception:
                     return None
         return None
+    def _crypto_source(self):
+        data = getattr(self._lab, "_data", None)
+        for attr in ("_source", "source"):
+            getter = getattr(data, attr, None)
+            if callable(getter):
+                try:
+                    return getter("crypto")
+                except Exception:
+                    return None
+        return None
+    def products(self, limit=25, quote="USD", min_volume_usd=250000.0):
+        """The most traded spot products on Coinbase, by 24h dollar volume: symbol, price and
+        volume. Anything the venue lists is in play; a strategy picks its universe from here."""
+        src = self._crypto_source()
+        lister = getattr(src, "products", None)
+        if not callable(lister):
+            return []
+        try:
+            rows = lister(product_type="SPOT", limit=None)
+        except Exception:
+            return []
+        out = []
+        for row in rows:
+            try:
+                if str(row.get("quote_currency_id") or "").upper() != str(quote).upper():
+                    continue
+                if str(row.get("status") or "online").lower() != "online" or row.get("trading_disabled"):
+                    continue
+                price = float(row.get("price") or 0)
+                volume = float(row.get("volume_24h") or 0) * price
+                if price <= 0 or volume < float(min_volume_usd):
+                    continue
+                out.append({"symbol": str(row.get("product_id")), "price": price, "volume_usd": volume})
+            except (TypeError, ValueError):
+                continue
+        out.sort(key=lambda r: -r["volume_usd"])
+        return out[: int(limit)]
     def kalshi_market(self, ticker):
         src = self._event_source()
         return src.market(ticker) if src is not None else None

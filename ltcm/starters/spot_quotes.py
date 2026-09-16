@@ -43,6 +43,21 @@ def _price(value):
     return f"{value:.2f}"
 
 
+def _symbols(kit, spec, fallback):
+    """A list of product ids, or "top:N": the N most traded USD products on Coinbase right now,
+    so the universe is the venue's, not a hand-written list."""
+    if isinstance(spec, str) and spec.startswith("top:"):
+        try:
+            rows = kit.products(int(spec.split(":", 1)[1]))
+        except Exception:
+            rows = []
+        symbols = [r["symbol"] for r in rows if r.get("symbol")]
+        if symbols:
+            return symbols
+        return list(fallback)
+    return list(spec or fallback)
+
+
 def decide(kit, params):
     p = {**DEFAULTS, **(params or {})}
     ctx = kit.context or {}
@@ -55,7 +70,7 @@ def decide(kit, params):
     resting = [o for o in (ctx.get("open_orders") or []) if o.get("strategy") == "spot_quotes"]
     cancels, intents, kept = [], [], {}
     targets = {}
-    for symbol in list(p["symbols"])[: int(p["max_symbols"])]:
+    for symbol in _symbols(kit, p["symbols"], DEFAULTS["symbols"])[: int(p["max_symbols"])]:
         quote = kit.quote(symbol) or {}
         bid, ask = _num(quote.get("bid")), _num(quote.get("ask"))
         if not bid or not ask or ask <= 0:

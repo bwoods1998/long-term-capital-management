@@ -1986,3 +1986,18 @@ class ShardFundingTests(ServiceCase):
         self.assertEqual(len(moves), 1, "the donor keeps its floor: 65 - 60 keep leaves 5, under the 10 minimum move")
         warnings = [e.payload for e in self.service.log.read(kind="ops.alert") if "no other shard can spare" in e.payload.get("text", "")]
         self.assertEqual(len(warnings), 1)
+
+
+class FloorBoardContextTests(ServiceCase):
+    def test_the_board_carries_one_newest_memo_per_other_desk_from_the_last_day(self):
+        self.write_manifest("mullins", venues=["kalshi"], instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []})
+        self.service.close()
+        self.service = self.build()
+        at = self.service.now()
+        self.service.log.append("desk:mullins", "desk.memo", {"session_id": "mullins:s1", "title": "Old", "text": "stale"}, at="2026-09-01T00:00:00.000Z")
+        self.service.log.append("desk:mullins", "desk.memo", {"session_id": "mullins:s2", "title": "Fed hike priced", "text": "89 vs my 93. " * 60}, at=at)
+        self.service.log.append(f"desk:{DESK}", "desk.memo", {"session_id": f"{DESK}:s1", "title": "Mine", "text": "my own memo"}, at=at)
+        rows = self.service.context(self.service.manifests[DESK]).floor_board(8)
+        self.assertEqual([(r["desk_id"], r["title"]) for r in rows], [("mullins", "Fed hike priced")], "newest per desk, never the desk's own, never a stale one")
+        self.assertLessEqual(len(rows[0]["text"]), 400)
+        self.assertEqual(rows[0]["mode"], self.service.manifests["mullins"].capital_mode)

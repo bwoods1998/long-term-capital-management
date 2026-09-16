@@ -146,6 +146,9 @@
   "committee": {
     "bandit_enabled": true,
     "bandit_prior_sd_pct": "5",
-    "bandit_scale_pct": "10"
+    "bandit_scale_pct": "10",
+    "gate_min_days": 3,
+    "gate_min_decisions": 15,
+    "resize_interval_days": 1
   }
 }

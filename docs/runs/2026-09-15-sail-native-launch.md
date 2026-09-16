@@ -464,3 +464,47 @@ Tests: site 53 pass; runtime suite rerun below.
   warning on the tape, and under `disk.stop_gb` (2) files an error and posts a `disk_low` notice
   the gateway mails (`NOTICE_KINDS` grew; `gateway` needs a deploy). `health.json` carries
   `disk_free_gb`. `floor_box.py status` reports a failed probe instead of a dead loop.
+
+### Resolved 06:55 UTC: the cache was the disk
+
+With the owner's permission mode in effect, exec on the box worked again (the platform had
+freed a little space) and `du` answered: `/workspace/.data/ltcm/cache` held 32.17 GB in
+17,072 files, everything else under 120 MB. Cause: `Service._build_event_index` swept up to
+300 Kalshi listing pages every ten minutes with the raw clock in `min_close_ts` and
+`max_close_ts`, so every page was a fresh ~2 MB cache entry that nothing ever evicted.
+Fixes: the sweep's timestamps are rounded to the hour (commit after 86a82bc), the cache is
+capped at 256 MB with periodic trimming, and the disk check alerts and mails before the disk
+fills. Cache cleared, loop restarted 06:57 UTC, gateway version 372fca76 carries `disk_low`.
+
+## Night of Sept 16 (07:30-08:30 UTC): the loop closes on itself
+
+Blake's overnight brief: a floor page with only the high-value things, and a floor that
+uses everything Sail, Kalshi and Coinbase offer, with partners that talk to each other and
+are rewarded and punished. Shipped, in order:
+
+- **The order fold bug** (11a8cc7). Every order poll re-recorded the order with the venue's
+  view (no desk, no intent) and the fold took the empty strings: live orders vanished from
+  `open_orders`, quoting strategies re-posted every run (six Coinbase bids in twelve minutes),
+  and venue fills went unattributed. Fixed at the fold and at the poll; the quoting starters
+  cancel duplicates; `attribute_fills.py` repaired 32 fills through the tape's own venue ids;
+  Coinbase equity counts USD on hold behind bids (the site had shown a $125 "loss").
+- **The site** (personal-site 4b3d497, version 04cfa0b8): five sections, in order: the run
+  strip; Live (the partners in session with their thoughts typing, then a tape of thoughts,
+  research and trades); Portfolio; Closed trades (every settled trade with the partner and
+  its reason, real first, shadow behind a chevron); Partners (a table sorted by profit per Sail
+  dollar, with hours of self-improvement, sessions, decisions and whether the newest generation
+  beats the last). The race, the box facts and the explainer diagram left the floor.
+- **Promotion** (b62532e): `Strategies.promote`, hourly. The best shadow variant of a house
+  strategy (twelve settlements, positive return on filled notional, a margin over the live
+  setting) has its params adopted by the live desk; it stays as the control; the other shadows
+  are dealt jittered copies around it. Published as `desk.code_run` on the live desk.
+- **Kalshi shards** (b62532e): `_fund_kalshi_shards` tops up any traded shard under $40 from
+  the richest one, hourly, on the tape.
+- **The floor board**: every session's context now carries the other partners' newest memos
+  from the last day (`DeskContext.floor_board`), framed as evidence, never orders.
+- **The whole Coinbase universe**: `Kit.products` lists every online USD spot product by 24h
+  dollar volume; `hourly_reversion` and `spot_quotes` take `symbols: "top:N"`; Hilibrand's
+  allow list is empty (any pair in the crypto class), and its shadow variants explore the top
+  20, 30 and 6.
+- **A faster reward loop**: committee gates at 3 days and 15 decisions, capital resized daily
+  (was 14 days, 20, weekly).
