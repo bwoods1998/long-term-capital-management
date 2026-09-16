@@ -160,6 +160,29 @@ class VisibilityTests(unittest.TestCase):
         self.assertEqual(kit.kalshi_markets(max_close_hours=0.5), [])
         self.assertEqual(len(kit.kalshi_markets(max_close_hours=1)), 1)
 
+    def test_an_early_close_is_listed_at_its_scheduled_close_and_trades_until_the_real_one(self):
+        open_ts = T0 + 2 * HOUR
+        actual = T0 + 20 * HOUR + 29 * MINUTE + 49
+        latest = T0 + 3 * 86400
+        ticker = "KXGAME-26SEP10-A"
+        row = market_row(ticker, open_ts, actual, result="yes", can_close_early=True, latest_expiration_time=iso(latest))
+        history = FakeHistory([row], {(ticker, 60): [candle(open_ts + h * HOUR, 0.05, 0.08) for h in range(1, 16)]})
+        data = dataset(history, start=T0, end=T0 + 30 * HOUR, series=("KXGAME",))
+        sim = simulator(data)
+        kit = BacktestKit(data, sim, T0 + 10 * HOUR, products=None, half_spread=0.0)
+        self.assertEqual(kit.kalshi_market(ticker)["close_time"], iso(latest), "the listing never shows when the game ends")
+        self.assertEqual(kit.kalshi_markets(max_close_hours=36), [], "a close three days out is outside 36 hours")
+        self.assertEqual(len(kit.kalshi_series("KXGAME")), 1)
+        self.assertIsNone(BacktestKit(data, sim, actual, products=None, half_spread=0.0).kalshi_market(ticker))
+        self.assertEqual(sim.submit(buy(ticker, "no", 0.95, 10), T0 + 10 * HOUR), "filled", "it trades while it is open")
+        sim.advance(actual)
+        self.assertEqual(sim.closed[0]["ts"], actual, "and settles when trading really stopped")
+        self.assertLess(sim.closed[0]["pnl"], 0)
+        on_time = market_row("KXBTCD-26SEP1017-T1", open_ts, T0 + 21 * HOUR, can_close_early=True, latest_expiration_time=iso(latest))
+        data = dataset(FakeHistory([on_time]), start=T0, end=T0 + 30 * HOUR, series=("KXBTCD",))
+        view = BacktestKit(data, simulator(data), T0 + 10 * HOUR, products=None, half_spread=0.0).kalshi_market("KXBTCD-26SEP1017-T1")
+        self.assertEqual(view["close_time"], iso(T0 + 21 * HOUR), "a close on the whole minute is the scheduled one")
+
     def test_volume_24h_counts_only_the_last_day(self):
         open_ts = T0 + 2 * HOUR
         close = open_ts + 40 * HOUR
@@ -233,6 +256,25 @@ class FillTests(unittest.TestCase):
         sim.advance(self.open + 7 * MINUTE)
         self.assertEqual(len(sim.fills), 1)
         self.assertAlmostEqual(sim.fills[0]["price"], 0.50)
+
+    def test_the_touch_model_fills_on_a_touch_or_a_print_where_the_conservative_one_does_not(self):
+        minutes = [
+            candle(self.open + 5 * MINUTE, 0.40, 0.55),
+            candle(self.open + 6 * MINUTE, 0.45, 0.55, bid_high=0.50),  # touches 1 - q
+        ]
+        for model, expected in (("conservative", 0), ("touch", 1)):
+            sim = self.build(minutes)
+            sim.fill_model = model
+            sim.submit(buy(self.ticker, "no", 0.50, 2), self.open + 5 * MINUTE)
+            sim.advance(self.open + 6 * MINUTE)
+            self.assertEqual(len(sim.fills), expected, model)
+        printed = [candle(self.open + 5 * MINUTE, 0.40, 0.55), {**candle(self.open + 6 * MINUTE, 0.40, 0.55), "price_low": 0.42}]
+        for model, expected in (("conservative", 0), ("touch", 1)):
+            sim = self.build(printed)
+            sim.fill_model = model
+            sim.submit(buy(self.ticker, "yes", 0.42, 2), self.open + 5 * MINUTE)
+            sim.advance(self.open + 6 * MINUTE)
+            self.assertEqual(len(sim.fills), expected, model)
 
     def test_an_hourly_candle_that_began_before_the_order_is_judged_on_its_close(self):
         open_ts = T0 + 1 * HOUR
@@ -634,6 +676,7 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(found["KXA-1-7"][0]["yes_bid_high"], 0.42)
         self.assertEqual(found["KXA-1-7"][0]["yes_ask_close"], 0.45)
         self.assertIsNone(found["KXA-1-7"][0]["price_close"])
+        self.assertIsNone(found["KXA-1-7"][0]["price_high"])
         transport = Transport([(200, {"markets": []})] * 20)
         History(transport, min_interval=0, verbose=False).kalshi_candles_many(tickers[:60], start_ts=T0, end_ts=T0 + 400 * MINUTE, period_minutes=1)
         self.assertGreater(len(transport.urls), 1, "markets x periods stays under 10,000 a call")

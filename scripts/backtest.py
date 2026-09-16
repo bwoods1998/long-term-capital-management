@@ -31,7 +31,7 @@ def summary(report: dict, split: dict) -> str:
 
     lo, hi = report.get("ci95_mean_pnl") or [None, None]
     lines = [
-        f"{report.get('strategy')}  {report.get('start')} -> {report.get('end')}  ({report.get('steps')} steps)",
+        f"{report.get('strategy')}  {report.get('start')} -> {report.get('end')}  ({report.get('steps')} steps, fill model {report.get('fill_model')})",
         f"  trades {report.get('trades')}  fills {report.get('fills')} ({report.get('maker_fills', 0)} maker)  "
         f"settled {report.get('settled')}  wins {report.get('wins')}",
         f"  notional {money(report.get('notional_usd'))}  pnl {money(report.get('pnl_usd'))} "
@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-markets", type=int, default=3000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--max-seconds", type=float, default=0.0, help="wall-clock budget (0: none)")
+    parser.add_argument("--fill-model", default="conservative", choices=("conservative", "touch"),
+                        help="touch: resting orders also fill on a touch or a print (the optimistic bracket)")
     parser.add_argument("--cache-dir", default=str(ROOT / ".data" / "history-cache"))
     parser.add_argument("--json-only", action="store_true", help="print only the report JSON")
     args = parser.parse_args(argv)
@@ -90,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         "max_markets": args.max_markets,
         "seed": args.seed,
         "max_seconds": args.max_seconds,
+        "fill_model": args.fill_model,
     }
     if args.code:
         spec["code"] = Path(args.code).read_text(encoding="utf-8")

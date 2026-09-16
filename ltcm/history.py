@@ -211,6 +211,7 @@ class History:
         self.requests = 0
         self.cache_hits = 0
         self.rate_limited = 0
+        self.truncated_listings = 0
         self._next_at: dict[str, float] = {}
         #: Per host, how many times `min_interval` requests are spaced now. A 429 doubles it (the
         #: public limit is shared with whatever else runs from this address); successes ease it.
@@ -339,6 +340,7 @@ class History:
                 parsed["volume"] = Decimal(str(volume))
                 parsed["result"] = str(row.get("result") or "").lower() or None
                 parsed["open_time"] = row.get("open_time")
+                parsed["latest_expiration_time"] = row.get("latest_expiration_time")
                 value = row.get("settlement_value_dollars")
                 if value is None and row.get("settlement_value") is not None:
                     value = (_float(row.get("settlement_value")) or 0.0) / 100.0
@@ -351,6 +353,7 @@ class History:
                 break
         else:
             if cursor:
+                self.truncated_listings += 1
                 self.say(f"kalshi settled {series or 'board'}: stopped at {max_pages} pages; more markets exist")
         self.say(f"kalshi settled {series or 'board'}: {len(out)} markets in {pages} page(s)")
         return out
@@ -374,11 +377,12 @@ class History:
                     value = None if cents is None else cents / 100.0
                 out[f"{side}_{part}"] = _float(value)
         price = row.get("price") if isinstance(row.get("price"), dict) else {}
-        last = price.get("close_dollars")
-        if last is None and price.get("close") is not None:
-            cents = _float(price.get("close"))
-            last = None if cents is None else cents / 100.0
-        out["price_close"] = _float(last)
+        for part in ("close", "high", "low"):
+            value = price.get(f"{part}_dollars")
+            if value is None and price.get(part) is not None:
+                cents = _float(price.get(part))
+                value = None if cents is None else cents / 100.0
+            out[f"price_{part}"] = _float(value)
         volume = row.get("volume_fp") if row.get("volume_fp") is not None else row.get("volume")
         interest = row.get("open_interest_fp") if row.get("open_interest_fp") is not None else row.get("open_interest")
         out["volume"] = _float(volume)

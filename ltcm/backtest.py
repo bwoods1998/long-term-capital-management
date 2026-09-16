@@ -26,8 +26,10 @@ The simulator (fill_model "conservative"):
   A resting bid fills at its limit, fee 0, only on a candle that ended after it was placed and
   shows the other side trading strictly through it (YES bid p: yes_ask_low < p; NO bid q:
   yes_bid_high > 1 - q). A candle that began before the order existed is judged on its close,
-  not its extremes, so an hourly low printed before the order cannot fill it. Sells mirror
-  this. Resting orders expire at the market's close; positions settle at close on the result.
+  not its extremes, so an hourly low printed before the order cannot fill it; and once an order
+  rests on a market still priced by the hour, that market's minute candles from the order's
+  hour on are fetched before the next step and replace the hourly ones. Sells mirror this.
+  Resting orders expire at the market's close; positions settle at close on the result.
 * Coinbase: marketable non-post-only limits take at the quote with the taker fee (0.60%);
   otherwise the order rests and fills at its limit on a later five-minute candle whose low
   (buy) / high (sell) reaches it, with the maker fee (0.25%). Spot is long only.
@@ -35,6 +37,9 @@ The simulator (fill_model "conservative"):
   mark, and for crypto the holding-period time stop, close the position at the bid as a taker.
 * Each intent's notional is capped at 10x `learning_usd`; at most 5 intents and 20 cancels a
   run, as on the floor; a strategy may cancel only its own orders.
+
+fill_model "touch" is the optimistic bracket for makers: a resting Kalshi order also fills when
+the other side touches its price, or a trade prints at or through it, on a later candle.
 
 Standard library only; importable in a desk's sandbox (`FLOOR_EXTRAS`).
 """
@@ -83,7 +88,7 @@ DEFAULT_SPEC: dict[str, Any] = {
     "seed": 7,
     # Engine knobs beyond the contract, each with the default the contract implies.
     "min_volume": None,           # settled-market volume floor; None: 500 for the board, 0 for series
-    "max_pages": 20,              # settled listing pages per series (per day for the board)
+    "max_pages": None,            # settled listing pages per window: None is 20 a series-day, 50 a board six hours
     "half_spread_bps": 1.0,       # Coinbase quote = close -/+ this
     "coinbase_maker_fee": 0.0025,
     "coinbase_taker_fee": 0.006,
@@ -128,6 +133,13 @@ VOLUME_LOOKBACK_SECONDS = 24 * 3600
 #: Candle requests are grouped so a batch asks at most this many market-periods.
 BATCH_BUDGET = 9000
 SERIES_LITERAL = re.compile(r"""["'](KX[A-Z0-9]{2,})["']""")
+
+
+#: "conservative": a resting order fills only when the book trades strictly through it (its fills
+#: are the adverse ones, so a maker's P&L reads low). "touch": it also fills when the other side
+#: touches its price or a trade prints at or through it (queue position ignored; reads high).
+#: The two bracket a maker strategy; takers fill the same way under both.
+FILL_MODELS = ("conservative", "touch")
 
 
 class Unsupported(RuntimeError):
@@ -208,11 +220,34 @@ def kalshi_taker_fee(price: float) -> float:
 # -------------------------------------------------------------------------- markets
 
 
+def listed_close(row: Mapping[str, Any], close_ts: float) -> float:
+    """The close time an open listing showed for a market that has since settled.
+
+    A settled row's `close_time` is when trading actually stopped. A market that may close early
+    (a game market closes when a winner is declared) listed its latest expiration as its close
+    while it was open -- a baseball game on Sept 16, 2026 showed a close six days out -- and only
+    the settled row shows the moment the outcome was known. Showing that moment to a strategy
+    would tell it when every game ends. An early close is recognised by its time (a scheduled
+    close falls on a whole minute; a declared result almost never does); the listing then showed
+    `latest_expiration_time`. Trading and settlement still stop at the real close."""
+    if not row.get("can_close_early") or int(close_ts) % 60 == 0:
+        return close_ts
+    for key in ("latest_expiration_time", "scheduled_close_time"):
+        try:
+            value = parse_time(row.get(key)) if row.get(key) else None
+        except ValueError:
+            value = None
+        if value is not None and value > close_ts:
+            return value
+    return close_ts
+
+
+
 class Market:
     """One settled Kalshi market, replayable at any moment of its life."""
 
     __slots__ = (
-        "ticker", "series", "event", "open_ts", "close_ts", "payout_yes", "static", "volume",
+        "ticker", "series", "event", "open_ts", "close_ts", "listed_close_ts", "payout_yes", "static", "volume",
         "ends", "periods", "candles", "_volume_prefix", "_last", "_decimals", "fine_from",
     )
 
@@ -222,6 +257,7 @@ class Market:
         self.series = self.ticker.split("-")[0]
         self.open_ts = parse_time(row.get("open_time"))
         self.close_ts = parse_time(row.get("close_time"))
+        self.listed_close_ts = listed_close(row, self.close_ts)
         self.volume = _num(row.get("volume"), 0.0) or 0.0
         result = str(row.get("result") or "").lower()
         if result == "yes":
@@ -240,7 +276,7 @@ class Market:
             "status": "active",
             "result": None,
             "open_time": iso(self.open_ts),
-            "close_time": iso(self.close_ts),
+            "close_time": iso(self.listed_close_ts),
             "expiration_time": row.get("expiration_time"),
             "can_close_early": bool(row.get("can_close_early")),
             "price_ranges": row.get("price_ranges") or [],
@@ -400,10 +436,13 @@ class DataSet:
     # ------------------------------------------------------------------ kalshi
     def load_kalshi(self, *, series: list[str] | None, board: bool, max_markets: int, min_volume: float | None, max_pages: int) -> None:
         rows: list[dict[str, Any]] = []
+        truncated_before = int(getattr(self.history, "truncated_listings", 0) or 0)
         if board:
             self.board = True
             floor = 500.0 if min_volume is None else float(min_volume)
-            for lo, hi in self._days():
+            # The whole board closes more than 20,000 markets on a busy day (Sept 2026), so it is
+            # listed six hours at a time.
+            for lo, hi in self._days(hours=6):
                 try:
                     rows.extend(self.history.kalshi_settled(None, start_ts=lo, end_ts=hi, max_pages=max_pages, min_volume=floor))
                 except Exception as exc:
@@ -441,6 +480,9 @@ class DataSet:
                 ranked.sort(key=lambda x: (x[0], x[1], x[2]))
                 self.notes.append(f"series capped at {max_markets} of {len(chosen)} settled markets (the most traded strikes of every event)")
                 chosen = [x[3] for x in ranked[:max_markets]]
+        truncated = int(getattr(self.history, "truncated_listings", 0) or 0) - truncated_before
+        if truncated:
+            self.notes.append(f"{truncated} settled listing(s) stopped at max_pages ({max_pages}) with more markets left; raise max_pages for the whole window")
         for row in chosen:
             try:
                 market = Market(row)
@@ -460,12 +502,13 @@ class DataSet:
         self.say(f"{len(self.markets)} settled markets loaded ({'board' if board else ', '.join(series or [])})")
         self._load_candles()
 
-    def _days(self) -> list[tuple[int, int]]:
-        """The window as day-long listing windows on a fixed UTC grid (so they cache)."""
+    def _days(self, hours: int = 24) -> list[tuple[int, int]]:
+        """The window as listing windows of `hours` on a fixed UTC grid (so they cache)."""
         out = []
+        size = int(hours) * 3600
         lo = int(self.start_ts)
         while lo <= self.end_ts:
-            hi = min(int(self.end_ts), (lo // 86400 + 1) * 86400 - 1)
+            hi = min(int(self.end_ts), (lo // size + 1) * size - 1)
             out.append((lo, hi))
             lo = hi + 1
         return out
@@ -627,7 +670,7 @@ class DataSet:
             market = members[index]
             if market.close_ts > stop:
                 break
-            if market.open_ts <= t:
+            if market.open_ts <= t and (max_close is None or market.listed_close_ts <= max_close):
                 out.append(market)
             index += 1
         return out
@@ -824,8 +867,9 @@ class BacktestKit:
 class Simulator:
     """A conservative book: orders, fills, positions, settlements and closed-trade P&L."""
 
-    def __init__(self, data: DataSet, *, strategy: str, learning_usd: float, half_spread: float, maker_fee: float, taker_fee: float):
+    def __init__(self, data: DataSet, *, strategy: str, learning_usd: float, half_spread: float, maker_fee: float, taker_fee: float, fill_model: str = "conservative"):
         self.data = data
+        self.fill_model = fill_model if fill_model in FILL_MODELS else "conservative"
         self.strategy = strategy
         self.learning_usd = float(learning_usd)
         self.half_spread = half_spread
@@ -1140,21 +1184,31 @@ class Simulator:
         horizon = min(t, market.close_ts)
         index = bisect.bisect_right(market.ends, max(order["checked_ts"], order["submitted_ts"]))
         price, right, side = order["price"], order["right"], order["side"]
+        touch = self.fill_model == "touch"
+
+        def below(value: float | None, level: float) -> bool:
+            return value is not None and value > 0.0 and (value <= level + EPS if touch else value < level - EPS)
+
+        def above(value: float | None, level: float) -> bool:
+            return value is not None and value > 0.0 and (value >= level - EPS if touch else value > level + EPS)
+
         while index < len(market.ends) and market.ends[index] <= horizon:
             candle = market.candles[index]
             started = market.ends[index] - market.periods[index]
             whole = started >= order["submitted_ts"] - EPS
             ask_low = candle.get("yes_ask_low" if whole else "yes_ask_close")
             bid_high = candle.get("yes_bid_high" if whole else "yes_bid_close")
-            filled = False
+            # Trade prints count only under "touch", and only from a candle wholly after the order.
+            trade_low = candle.get("price_low") if touch and whole else None
+            trade_high = candle.get("price_high") if touch and whole else None
             if side == "buy" and right == "yes":
-                filled = ask_low is not None and 0.0 < ask_low < price - EPS
+                filled = below(ask_low, price) or below(trade_low, price)
             elif side == "buy":
-                filled = bid_high is not None and 0.0 < bid_high and bid_high > 1.0 - price + EPS
+                filled = above(bid_high, 1.0 - price) or above(trade_high, 1.0 - price)
             elif right == "yes":
-                filled = bid_high is not None and 0.0 < bid_high and bid_high > price + EPS
+                filled = above(bid_high, price) or above(trade_high, price)
             else:
-                filled = ask_low is not None and 0.0 < ask_low < 1.0 - price - EPS
+                filled = below(ask_low, 1.0 - price) or below(trade_low, 1.0 - price)
             index += 1
             if filled:
                 del self.orders[order["order_id"]]
@@ -1400,8 +1454,10 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         if step < 60:
             raise ValueError("step_minutes must be at least 1")
         learning = float(_num(spec.get("learning_usd"), 10.0) or 10.0)
-        if str(spec.get("fill_model") or "conservative") != "conservative":
-            notes.append(f"fill_model {spec.get('fill_model')} is not known; conservative used")
+        fill_model = str(spec.get("fill_model") or "conservative")
+        if fill_model not in FILL_MODELS:
+            notes.append(f"fill_model {fill_model} is not known; conservative used")
+            fill_model = "conservative"
         code = _load_code(spec)
         name = str(spec.get("strategy") or "strategy")
         compiled = compile(code, f"strategy:{name}", "exec")
@@ -1453,7 +1509,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
                 board=(mode == "board"),
                 max_markets=int(spec.get("max_markets") or 3000),
                 min_volume=_num(spec.get("min_volume")),
-                max_pages=int(spec.get("max_pages") or 20),
+                max_pages=int(spec.get("max_pages") or (50 if mode == "board" else 20)),
             )
     except Exception as exc:
         data.errors += 1
@@ -1475,6 +1531,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         half_spread=half_spread,
         maker_fee=float(_num(spec.get("coinbase_maker_fee"), 0.0025)),
         taker_fee=float(_num(spec.get("coinbase_taker_fee"), 0.006)),
+        fill_model=fill_model,
     )
     budget = float(_num(spec.get("max_seconds"), 0.0) or 0.0)
     errors = 0
@@ -1579,7 +1636,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         http_requests=int(getattr(history, "requests", 0) or 0),
         cache_hits=int(getattr(history, "cache_hits", 0) or 0),
         runtime_seconds=round(time.monotonic() - began, 1),
-        fill_model="conservative",
+        fill_model=fill_model,
     )
     for text in first_errors:
         notes.append(_clean("strategy error " + text))

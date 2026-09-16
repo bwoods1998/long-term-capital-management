@@ -47,6 +47,8 @@ Design rules, inherited from the first generation and kept on purpose:
 | `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. A child is born with its parent's playbook; the model's rewrite runs on the service's worker thread and lands as a versioned `desk.playbook_updated` on a later tick (`evolution.deferred_rewrites`, default on), so a spawn never stalls the loop. |
 | `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
 | `sandbox.py` | One forked Sailbox per desk for the code it writes (`run_code`): the lab image, a toolbox that persists, a daily fuse, data-only egress. |
+| `history.py` | Public venue history for backtests: settled Kalshi markets, Kalshi candlesticks (batched), Coinbase candles; throttled, byte-capped disk cache. |
+| `backtest.py` | Replays a strategy's `decide(kit, params)` over past days against a conservative simulator; `python3 -m ltcm.backtest --spec` prints one `BACKTEST-RESULT` line. |
 | `runclock.py` | The public run clock: how long the desks have worked, sessions and decisions, Sail spend, profit per Sail dollar. |
 | `exits.py` | The exit plans the floor keeps: stops, targets and time stops enforced every tick as exposure-reducing orders; Coinbase brackets ride on the order. |
 | `watch.py` | The night desk: triggers over held markets, fills, new markets and headlines, one flash-model verdict on whether to wake a desk. |
@@ -326,10 +328,11 @@ bootstrap CI, and `split_report` cuts it in and out of sample. Weather is unsupp
 forecast history). Run it here with `python3 scripts/backtest.py --strategy kalshi_favorites
 --days 3`, or in a desk's sandbox with `python3 -m ltcm.backtest --spec spec.json` (one
 `BACKTEST-RESULT` line; both modules ship in `FLOOR_EXTRAS`). History reads use Kalshi's batch
-candlestick endpoint, back off on 429s, and cache settled responses under a 128 MB cap. Known
-biases: hourly candles judge fills coarsely (a requote inside the hour is under-filled), the
-board is the markets that had settled by `end` ranked by lifetime volume, and queue position is
-ignored (a trade-through is assumed to reach the order).
+candlestick endpoint (minute candles are fetched for a market once an order rests on it), back
+off on 429s, and cache settled responses under a 128 MB cap. Known biases: a maker bid fills only
+when the book trades through it (a lifted offer that did not move the quote is missed), the
+board is the markets that had settled by `end` ranked by lifetime volume, and a series capped at
+`max_markets` keeps each event's most traded strikes.
 
 ### The floor board
 
