@@ -534,3 +534,12 @@ are rewarded and punished. Shipped, in order:
   loop to compare); the fitness factor follows net P&L per Sail dollar, open book included
   (Scholes had earned triple compute on ten settled winners while its book was down more).
   Both repositories are pushed to GitHub.
+- **08:00 settlement and what followed** (8c09438, next commit): Scholes's maker quotes lost
+  the hour, -26.96 net on eight legs (three winners of +2.5 to +10.9, five losers of about
+  -9.9: a NO bought at 0.80 wins 0.20 or loses 0.80). Across three hours: +17.8, -19.0, -27.0.
+  The losing legs were filled late in the hour, when the outcome was nearly known, so the
+  live default stops quoting twenty minutes out (was twelve) and a shadow variant tries
+  thirty-five minutes; the promotion loop decides. Scholes's daily-loss breaker holds it to
+  risk-reducing orders for the rest of the day. Also wired: `Gateway.reconcile` had never
+  been called; the tick now reconciles every live venue against the ledgers hourly (armed on
+  the first tick so a restart never doubles the venue calls).
