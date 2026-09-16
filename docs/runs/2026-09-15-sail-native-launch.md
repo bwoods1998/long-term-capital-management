@@ -606,3 +606,13 @@ a taker model, filling a resting order when the venue prints a trade at or throu
 live desk in rotation and score each variant's real record. Until then the live maker's
 protection is what it was tonight: learning size, the 15 percent position cap, the daily-loss
 breaker, and settings that leave the last twenty minutes alone.
+- **The shadow book can score a maker** (6a009a2, 11:05 UTC): the Kalshi feed subscribes
+  to the public `trade` channel beside the ticker and the Coinbase market feed to
+  `market_trades`; `FeedHub.on_trade` keeps the prints, the tick drains them
+  (`_drain_feeds`) to every shadow book, and `ShadowBook.on_trade` fills, at its own limit
+  and as a maker, every resting order the print would have hit, up to the printed size
+  (partial fills and a weighted average price are new). Every `hourly_quotes` and
+  `spot_quotes` variant now earns a record the promotion loop can compare. Kalshi's trade
+  message is parsed defensively (`yes_price_dollars`/`yes_price`, `count_fp`/`count`,
+  `taker_side`); if the field names differ, the feed log will show no prints and the shadow
+  fills will stay at zero, which the next check reads.
