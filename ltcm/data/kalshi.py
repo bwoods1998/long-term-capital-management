@@ -199,8 +199,15 @@ class KalshiMarketData:
         cursor: "str | None" = None,
         min_close_ts: "int | None" = None,
         max_close_ts: "int | None" = None,
+        mve_filter: "str | None" = None,
     ) -> dict[str, Any]:
-        """A page of markets: `{"markets": [...], "cursor": "..."}`."""
+        """A page of markets: `{"markets": [...], "cursor": "..."}`.
+
+        `mve_filter` is `"exclude"` or `"only"`: Kalshi's multivariate combo markets
+        (`KXMVE...`) are thousands of near-empty rows that otherwise fill every page.
+        """
+        if mve_filter is not None and mve_filter not in ("exclude", "only"):
+            raise DataError(f"kalshi: unknown mve_filter {mve_filter!r}")
         if status is not None and status not in MARKET_STATUSES:
             raise DataError(f"kalshi: unknown market status {status!r}")
         params: dict[str, Any] = {
@@ -211,6 +218,7 @@ class KalshiMarketData:
             "cursor": cursor,
             "min_close_ts": min_close_ts,
             "max_close_ts": max_close_ts,
+            "mve_filter": mve_filter,
         }
         if tickers:
             params["tickers"] = ",".join(str(t).strip().upper() for t in tickers)
@@ -256,6 +264,13 @@ class KalshiMarketData:
             "yes_bid": yes_bid,
             "yes_ask": yes_ask,
         }
+
+    def series(self, ticker: str) -> dict[str, Any]:
+        """One series (`ticker`, `title`, `category`, `frequency`, ...), unwrapped."""
+        payload = self._get(f"/series/{_ticker(ticker)}", what=f"kalshi series {ticker}")
+        row = payload.get("series")
+        require(isinstance(row, dict), f"kalshi series {ticker}: no series object")
+        return row
 
     def price_ranges(self, ticker: str) -> list[dict[str, Decimal]]:
         """The market's valid order price bands in dollars, or `[]` when it publishes none."""

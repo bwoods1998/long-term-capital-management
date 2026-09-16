@@ -107,6 +107,19 @@
   },
   "seed_interval_seconds": 3600,
   "seed_batch": 1,
+  "founding": {
+    "enabled": true,
+    "founding_time": "21:30",
+    "max_per_day": 1,
+    "max_founded_families": 8,
+    "capital_usd": "150",
+    "min_days": 4,
+    "min_decisions": 20,
+    "retire_below": "-5",
+    "profile": "k3",
+    "reasoning_effort": "high",
+    "budget_usd_per_day": "3.00"
+  },
   "sandbox": {
     "enabled": true,
     "image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
