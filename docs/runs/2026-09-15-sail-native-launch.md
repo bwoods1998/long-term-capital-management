@@ -543,3 +543,7 @@ are rewarded and punished. Shipped, in order:
   risk-reducing orders for the rest of the day. Also wired: `Gateway.reconcile` had never
   been called; the tick now reconciles every live venue against the ledgers hourly (armed on
   the first tick so a restart never doubles the venue calls).
+- **Strategy rows carry their note and settings** (site d0237e3 / version ac7a815c, runtime
+  b0f92c5): the desk page says why a strategy runs as it does ("promoted from scholes-3: 14
+  settled, +0.120 per $", "lab experiment exp-…", "house starter") and shows its parameters,
+  so a visitor can watch the settings move as the record decides them.
