@@ -343,7 +343,8 @@ class TakerPrintTests(HubCase):
         kalshi.handle(None, {"type": "trade", "sid": 4, "msg": {"market_ticker": "KXFED-26SEP-T3.75", "yes_price": 88, "count": 3, "taker_side": "yes"}})
         coinbase = CoinbaseMarketFeed.__new__(CoinbaseMarketFeed)
         coinbase.hub, coinbase.venue = self.hub, "coinbase"
+        # Coinbase's side is the maker's: a maker SELL means the taker bought.
         coinbase.handle(None, "market_trades", {"events": [{"trades": [{"product_id": "BTC-USD", "price": "76795.1", "size": "0.002", "side": "SELL"}]}]})
         trades = self.hub.drain_trades()
         self.assertEqual([(t["venue"], t["symbol"], str(t["price"]), str(t["size"]), t["taker_side"]) for t in trades],
-                         [("kalshi", "KXFED-26SEP-T3.75", "0.8900", "12.00", "no"), ("kalshi", "KXFED-26SEP-T3.75", "0.88", "3", "yes"), ("coinbase", "BTC-USD", "76795.1", "0.002", "sell")])
+                         [("kalshi", "KXFED-26SEP-T3.75", "0.8900", "12.00", "no"), ("kalshi", "KXFED-26SEP-T3.75", "0.88", "3", "yes"), ("coinbase", "BTC-USD", "76795.1", "0.002", "buy")])

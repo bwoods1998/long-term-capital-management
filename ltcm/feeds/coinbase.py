@@ -123,7 +123,9 @@ class CoinbaseMarketFeed(_CoinbaseFeed):
 
     def handle(self, sock: Any, channel: str, envelope: Mapping[str, Any]) -> None:
         if channel == "market_trades":
-            # Public prints; `side` is the taker's side. The shadow books fill against them.
+            # Public prints. Coinbase's `side` is the MAKER's side ("each market trade belongs
+            # to a side, which refers to the maker's side"), so a BUY print is a taker selling
+            # into a resting bid. The hub wants the taker's side.
             for event in envelope.get("events") or []:
                 if not isinstance(event, dict):
                     continue
@@ -131,8 +133,10 @@ class CoinbaseMarketFeed(_CoinbaseFeed):
                     if not isinstance(row, dict):
                         continue
                     product = str(row.get("product_id") or "").upper()
-                    if product:
-                        self.hub.on_trade(self.venue, product, price=row.get("price"), size=row.get("size"), taker_side=str(row.get("side") or ""))
+                    maker = str(row.get("side") or "").upper()
+                    taker = "sell" if maker == "BUY" else "buy" if maker == "SELL" else ""
+                    if product and taker:
+                        self.hub.on_trade(self.venue, product, price=row.get("price"), size=row.get("size"), taker_side=taker)
             return
         if channel != "ticker":
             return
