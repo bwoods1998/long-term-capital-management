@@ -547,3 +547,8 @@ are rewarded and punished. Shipped, in order:
   b0f92c5): the desk page says why a strategy runs as it does ("promoted from scholes-3: 14
   settled, +0.120 per $", "lab experiment exp-…", "house starter") and shows its parameters,
   so a visitor can watch the settings move as the record decides them.
+- **Offers refused as shorts** (9aac89d, 08:17 UTC): Hilibrand's `spot_quotes` offered the
+  coins it held and the risk engine refused "sell exceeds position and shorting is not
+  permitted": the Coinbase fill's instrument carries `market_id` (the product id) and the
+  intent's did not, so the position sat under a different key. `tools.instrument_from` now
+  sets `market_id` for crypto. The Coinbase universe drops stablecoins (USDT-USD had a z-score).
