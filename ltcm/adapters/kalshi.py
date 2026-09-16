@@ -721,15 +721,22 @@ def _action_of(row: dict[str, Any], intent: "OrderIntent | None", leg: "str | No
     NO order rests on the ask, and a fill of it with `book_side: "ask"` is a *buy* of NO. Read
     without the leg, every NO buy on Sept 16, 2026 was recorded as a sell, and the desks'
     books went short contracts they had bought."""
-    action = str(row.get("action") or "").lower()
-    if action in ("buy", "sell"):
-        return action
+    leg = (leg or str(row.get("outcome_side") or row.get("side") or "yes")).lower()
     book_side = str(row.get("book_side") or "").lower()
     if book_side in ("bid", "ask"):
-        leg = (leg or str(row.get("outcome_side") or row.get("side") or "yes")).lower()
         if leg == "no":
             return "buy" if book_side == "ask" else "sell"
         return "buy" if book_side == "bid" else "sell"
+    action = str(row.get("action") or "").lower()
+    if action in ("buy", "sell"):
+        # `action` is written on the YES book: a fill of our resting NO bid comes back as
+        # `side: no, action: sell, book_side: ask` while the venue's position shows the NO
+        # contracts bought (Sept 16, 2026, the DEN high market: 40 NO held, 40 "sells" on
+        # the tape). Read `action` verbatim for YES and inverted for NO; the book side above,
+        # which needs no such reading, is preferred whenever the row carries it.
+        if leg == "no":
+            return "buy" if action == "sell" else "sell"
+        return action
     return intent.side if intent else "buy"
 
 

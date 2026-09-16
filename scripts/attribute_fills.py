@@ -75,7 +75,8 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if p.get("fill_id") in have_copy:
             continue
-        ours = venue_to_ours.get(str(p.get("order_id") or ""))
+        named = str(p.get("order_id") or "")
+        ours = venue_to_ours.get(named) or (named if named in orders else None)  # a fill may already name the floor order
         if ours is None:
             print("  no floor order for venue order", str(p.get("order_id"))[:24], "fill", p.get("fill_id"))
             continue

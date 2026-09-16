@@ -657,3 +657,17 @@ class SettlementTests(unittest.TestCase):
         self.assertEqual(
             signer.last_message, MILLIS + "GET" + "/trade-api/v2/portfolio/settlements"
         )
+
+
+class ActionOnTheYesBookTests(unittest.TestCase):
+    def test_a_resting_no_bid_that_fills_is_a_buy_however_kalshi_labels_it(self):
+        from ltcm.adapters.kalshi import _action_of
+
+        # The row Kalshi returned for a NO contract the floor bought (Sept 16, 2026).
+        row = {"side": "no", "action": "sell", "book_side": "ask", "is_taker": False}
+        self.assertEqual(_action_of(row, None, "no"), "buy")
+        self.assertEqual(_action_of({"side": "no", "action": "sell"}, None, "no"), "buy", "without the book side, action reads on the YES book")
+        self.assertEqual(_action_of({"side": "no", "action": "buy"}, None, "no"), "sell", "selling NO is buying YES")
+        self.assertEqual(_action_of({"side": "yes", "action": "buy", "book_side": "bid"}, None, "yes"), "buy")
+        self.assertEqual(_action_of({"side": "yes", "action": "sell"}, None, "yes"), "sell")
+        self.assertEqual(_action_of({}, None, "no"), "buy", "nothing on the row: the intent's side, else buy")
