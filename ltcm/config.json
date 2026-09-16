@@ -208,6 +208,14 @@
     }
   },
   "calibration_interval_seconds": 600,
+  "mind": {
+    "enabled": true,
+    "interval_minutes": 60,
+    "profile": "k3",
+    "budget_usd_per_day": "8",
+    "min_n": 15,
+    "max_rules": 12
+  },
   "committee": {
     "bandit_enabled": true,
     "bandit_prior_sd_pct": "5",

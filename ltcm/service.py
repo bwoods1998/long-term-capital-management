@@ -794,6 +794,14 @@ class DeskContext:
     def calibration_brief(self) -> str:
         return self.service.calibration.brief(self.desk_id, self.service.now())
 
+    def firm_rules(self) -> list[dict[str, Any]]:
+        """The Firm Mind's active rules that apply to this desk (its family, its venues), strongest
+        first, each with its evidence: what every desk's settled trades taught the floor."""
+        mind = getattr(self.service, "mind", None)
+        if mind is None:
+            return []
+        return mind.rules_for(family=self.manifest.family, venues=self.manifest.venues)
+
     # -- orders ------------------------------------------------------------
     def propose_order(self, intent: Any) -> dict[str, Any]:
         if not isinstance(intent, OrderIntent):
@@ -967,6 +975,12 @@ class Service:
             calibration=self.calibration,
             strategies=getattr(self, "strategies", None),
         )
+        # The Firm Mind: every desk's settled outcomes scored into rules that every session and
+        # the lab read (`ltcm/mind.py`, config `mind`). None when switched off.
+        from .mind import build as build_mind
+
+        self.mind = build_mind(self)
+        self.lab.mind = self.mind
         # Whatever credential the box holds is redacted from every published string, so a
         # model that echoes one back cannot put it on the site.
         try:
@@ -3129,6 +3143,12 @@ class Service:
                 if not self.lab.pending(at):
                     self._save_state(last_lab_day=day, lab_pending_day=None)
                 result["experiments"] = list(done.get("experiments") or [])
+        # The Firm Mind's hourly pass: re-score and retire rules, ask the scientist when there is
+        # new evidence and credit to spare. Off the tick; a pass never raises (`ltcm/mind.py`).
+        self._tick_phase("mind")
+        mind = getattr(self, "mind", None)
+        if mind is not None and not stopped and mind.due(at):
+            self._off_tick("mind", lambda at=at, ask=not live_only: mind.run(at, ask=ask))
         self._tick_phase("committee")
         if stopped:
             pass  # the memo and the evolution loop both ask the model; they wait for credit

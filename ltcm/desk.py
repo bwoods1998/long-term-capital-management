@@ -33,6 +33,7 @@ from typing import Any, Callable, Iterable, Mapping
 from . import tools as tools_module
 from .events import EventConflict, EventLog, canonical, now_iso
 from .manifest import DeskManifest
+from .mind import render_rules
 from .provider import BudgetExceeded, Provider, ProviderError
 from .tools import ToolContext, ToolSession
 
@@ -607,6 +608,11 @@ class Desk:
         standings = self._safe(lambda: list(getattr(self.ctx, "standings")()), [])
         if standings:
             parts.append("\n# Standings\n" + _standings_block(standings, self.manifest.id))
+        # The Firm Mind: rules measured across every desk's settled trades (`ltcm/mind.py`).
+        rules = self._safe(lambda: list(getattr(self.ctx, "firm_rules")()), [])
+        learned = self._safe(lambda: render_rules(rules), "") if rules else ""
+        if learned:
+            parts.append("\n# What the firm has learned\n" + learned)
         calls = self._safe(lambda: list(getattr(self.ctx, "floor_calls")(12)), [])
         if calls:
             parts.append("\n# The floor's calls\n" + _calls_block(calls))
@@ -1017,8 +1023,9 @@ def _calls_block(rows: Iterable[Any]) -> str:
 
 
 def _outcomes_block(outcomes: Iterable[Any]) -> str:
-    """One line per scored outcome, whole. A `desk.outcome` carries nine fields and the last
-    of them is the desk's own rationale, which is the field a post-mortem most needs."""
+    """One line per scored outcome, whole. A `desk.outcome` carries up to thirteen fields (the
+    entry fees and the open joined them on Sept 16, 2026) and one of them is the desk's own
+    rationale, which is the field a post-mortem most needs."""
     lines = []
     for outcome in _rows(outcomes, "outcomes", "fills", "trades"):
         if not isinstance(outcome, dict):
@@ -1027,7 +1034,7 @@ def _outcomes_block(outcomes: Iterable[Any]) -> str:
             "- "
             + ", ".join(
                 f"{key}: {value}"
-                for key, value in list(outcome.items())[:12]
+                for key, value in list(outcome.items())[:16]
                 if not str(key).startswith("_")
             )
         )

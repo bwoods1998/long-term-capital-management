@@ -330,6 +330,8 @@ class Lab:
         self.results = results
         self.calibration = calibration
         self.strategies = strategies  # leap: lab -- the runner, for the family's records and sources
+        #: The Firm Mind (`ltcm/mind.py`), set by the service: the family's rules ride the packet.
+        self.mind: Any = None
         #: Work the night has asked for but not yet done, so a tick can do one unit at a time:
         #: (family, parent, best sibling, proposal). Families already asked today, by day.
         self._queue: list[tuple[str, DeskManifest, DeskManifest, dict[str, Any]]] = []
@@ -635,6 +637,9 @@ class Lab:
         strategies = self._strategies_block(family, parent, siblings)
         if strategies:
             parts.append(strategies)
+        learned = self.mind.block_for(family) if self.mind is not None else ""
+        if learned:
+            parts.append("## What the firm has learned\n" + learned)
         parts.append("## Last lab reports\n" + self._reports_block())
         if self.calibration is not None:
             try:
@@ -718,7 +723,13 @@ class Lab:
         return "\n".join(rows) if rows else "(no activity in the window)"
 
     def _reports_block(self) -> str:
-        events = self.log.read(kind="lab.result", limit=10_000, newest=True)[-3:]
+        """The newest three lab reports. The Firm Mind publishes a `lab.result` every time its book
+        changes (`mind:result:<at>`); three of those in a day had pushed the daily report out of
+        the lab's own packet, so they are not lab reports here."""
+        events = [
+            e for e in self.log.read(kind="lab.result", limit=10_000, newest=True)
+            if not str(e.id).startswith("mind:")
+        ][-3:]
         if not events:
             return "(none yet)"
         return "\n".join(f"- {e.at[:10]}: {str(e.payload.get('verdict'))[:400]}" for e in events)

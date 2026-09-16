@@ -25,7 +25,7 @@ import threading
 from dataclasses import dataclass, field
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 from .broker import Instrument, Position, Quote, money, text
 from .events import EventLog, Event
@@ -590,3 +590,69 @@ def floor_totals(
         daily += state.daily_pnl
         deposits += state.net_deposits
     return {"equity": equity, "cash": cash, "daily_pnl": daily, "net_deposits": deposits}
+
+
+def position_walk(fills: Iterable[Mapping[str, Any]], *, shorts: bool = False) -> Iterator[dict[str, Any]]:
+    """One desk's fills in one instrument, walked in log order the way the ledger folds them: for
+    each fill, when the position it touched was opened and what share of the opening fills' fees
+    the quantity it closed carries.
+
+    A position opens with the first fill after it was flat, so a round trip four days after the
+    last one is its own position, not a 97-hour hold. Fees are pooled at average cost, like the
+    price: a reducing fill takes pool x closed / held, whatever order the adds and partial sells
+    came in, so the shares of one position's partial sells add up to its entry fees. A reducing
+    fill's own fee is not in `entry_fees`: it is the exit's fee, which the gateway already charges
+    to the outcome's P&L. With `shorts=False` (the floor holds no shorts) a sell closes at most
+    what is held and a sell with nothing held is passed over, so a window of the tape that begins
+    mid-position cannot invent one.
+
+    Each row carries `fill_id`, `at`, `side`, `quantity`, `opened_at` (of the position the fill
+    added to or closed), `closed` (quantity closed, zero for an add), `entry_fees` (the closed
+    quantity's share) and `held` (after the fill), as Decimals where they are amounts.
+    """
+    held = ZERO
+    pool = ZERO
+    opened_at: str | None = None
+    for fill in fills:
+        try:
+            quantity = Decimal(str(fill["quantity"]))
+            fee = Decimal(str(fill.get("fee") or "0"))
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            continue
+        side = fill.get("side")
+        if side not in ("buy", "sell") or not quantity.is_finite() or quantity <= 0 or not fee.is_finite() or fee < 0:
+            continue
+        at = str(fill.get("at") or "")
+        row: dict[str, Any] = {
+            "fill_id": str(fill.get("fill_id") or fill.get("id") or ""),
+            "at": at,
+            "side": side,
+            "quantity": quantity,
+            "opened_at": opened_at,
+            "closed": ZERO,
+            "entry_fees": ZERO,
+            "held": held,
+        }
+        signed = quantity if side == "buy" else -quantity
+        if held == 0 and signed < 0 and not shorts:
+            yield row  # nothing held to sell
+            continue
+        if held == 0 or (held > 0) == (signed > 0):
+            if held == 0:
+                opened_at, pool = at, ZERO
+            held += signed
+            pool += fee
+            row.update(opened_at=opened_at, held=held)
+            yield row
+            continue
+        closing = min(abs(signed), abs(held))
+        share = pool * closing / abs(held)
+        pool -= share
+        before = held
+        held = held + signed if shorts or abs(signed) <= abs(held) else ZERO
+        row.update(opened_at=opened_at, closed=closing, entry_fees=share, held=held)
+        if held == 0:
+            pool = ZERO
+        elif (held > 0) != (before > 0):  # flipped: the remainder opens a new position here
+            opened_at, pool = at, fee * abs(held) / quantity
+        yield row

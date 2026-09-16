@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ltcm.broker import Instrument
 from ltcm.events import EventLog
-from ltcm.ledger import DeskLedger, floor_totals, quote_prices
+from ltcm.ledger import DeskLedger, floor_totals, position_walk, quote_prices
 
 AAPL = Instrument("equity", "AAPL", "alpaca")
 MSFT = Instrument("equity", "MSFT", "alpaca")
@@ -363,6 +363,38 @@ class ConcurrentFoldTests(unittest.TestCase):
         self.assertEqual(shared.max_drawdown_pct, fresh.max_drawdown_pct)
         self.assertEqual(shared.cash, fresh.cash)
         self.assertEqual(shared.max_drawdown_pct, Decimal("0"), "capital moves are never drawdowns")
+
+
+class PositionWalkTests(unittest.TestCase):
+    """When a position opened and what its entry paid, fill by fill (the outcome's record)."""
+
+    def walk(self, *fills, shorts=False):
+        rows = [
+            {"fill_id": f"f{i}", "side": side, "quantity": quantity, "fee": fee, "at": at}
+            for i, (side, quantity, fee, at) in enumerate(fills)
+        ]
+        return list(position_walk(rows, shorts=shorts))
+
+    def test_adds_and_partial_sells_pool_the_fees_at_average_cost(self):
+        rows = self.walk(
+            ("buy", "10", "0.30", "t1"), ("sell", "5", "0.01", "t2"), ("buy", "5", "0.20", "t3"),
+            ("sell", "10", "0.02", "t4"), ("buy", "4", "0.08", "t5"), ("sell", "4", "0", "t6"),
+        )
+        self.assertEqual([r["closed"] for r in rows], [0, 5, 0, 10, 0, 4])
+        self.assertEqual(rows[1]["entry_fees"], Decimal("0.15"))
+        self.assertEqual(rows[3]["entry_fees"], Decimal("0.35"))  # what is left of the pool: all of it
+        self.assertEqual([r["opened_at"] for r in rows], ["t1", "t1", "t1", "t1", "t5", "t5"])
+        self.assertEqual(rows[5]["entry_fees"], Decimal("0.08"))
+        self.assertEqual(rows[-1]["held"], 0)
+
+    def test_a_sell_with_nothing_held_is_passed_over_unless_shorts_are_allowed(self):
+        rows = self.walk(("sell", "3", "0.01", "t1"), ("buy", "3", "0.03", "t2"), ("sell", "5", "0", "t3"))
+        self.assertEqual([r["closed"] for r in rows], [0, 0, 3])
+        self.assertEqual((rows[2]["held"], rows[2]["opened_at"]), (0, "t2"))
+        flipped = self.walk(("buy", "3", "0.03", "t1"), ("sell", "5", "0.05", "t2"), ("buy", "2", "0", "t3"), shorts=True)
+        self.assertEqual((flipped[1]["closed"], flipped[1]["held"], flipped[1]["opened_at"]), (3, -2, "t1"))
+        self.assertEqual((flipped[2]["closed"], flipped[2]["entry_fees"], flipped[2]["opened_at"]), (2, Decimal("0.02"), "t2"))
+        self.assertEqual(self.walk(("buy", "x", "0", "t1"), ("hold", "1", "0", "t2")), [])
 
 
 if __name__ == "__main__":  # pragma: no cover

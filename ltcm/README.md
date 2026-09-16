@@ -57,6 +57,7 @@ Design rules, inherited from the first generation and kept on purpose:
 | `sailbox.py` | The Sailbox API client the operator scripts and the sandboxes use: create, fork, exec, egress, checkpoints. |
 | `hostinfo.py` | What machine the floor runs on and for how long, for the checkpoint's infra block. |
 | `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
+| `mind.py` | The Firm Mind: every desk's closed positions scored into evidence-gated rules, proposed hourly by one model call from the older part of the tape and admitted only on the newest part it never read, retired in code, read as evidence by every session prompt and strategy generator. |
 | `founding.py` | The firm hires itself: one model call a night proposes a new family from what the venues list and the floor does not trade, validated in code and born shadow; founded families that fail are wound down whole. |
 | `publish.py` | Batches public events and leaderboard rows to the site API. |
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
@@ -491,6 +492,40 @@ then what the live desk runs):
    `promotion.foundry_hold_hours` (72).
 Tape: a `lab.hypothesis` per cycle (`foundry-<n>`), a `desk.code_run` per deployment or adoption, an
 `ops.alert` per adoption. `health.json` carries `last_foundry`.
+
+### The Firm Mind
+
+What one desk learns, every desk inherits (`ltcm/mind.py`, config `mind`). A rule is a filter
+(series prefix, family, strategy, leg, entry band, held hours, real money, venue) and a direction
+(avoid or prefer), scored in code on the newest 10,000 `desk.outcome` events of every desk: n counts
+independent positions (every desk, leg and strike of one Kalshi event is one draw; the partial sells
+of one spot position are one), each position's return is its P&L net of entry fees per dollar of
+entry, and the score is their mean with a seeded bootstrap interval (normal above 300 positions) plus,
+for settled contracts, an exact binomial test of wins against the break-even count. A score needs
+n >= `min_n` (15), 3 winning and 3 losing positions and an interval with width that excludes zero in
+the rule's direction.
+
+Every hour, on the `mind` worker and under `mind.json.lock`, a pass splits the tape by log order. It
+re-scores each book rule on the outcomes newer than what its proposer read, retiring it when that
+interval no longer excludes zero or when 15 positions closed since its admission average the wrong
+side of zero. When the tape moved and the held-out part could admit anything, one `k3` call (budget
+desk `mind`, $8 a day held by the mind's own tally, which books the estimate before the call and keeps
+it if the call fails; the provider's per-desk figure is the floor's desk fuse, not this) reads a packet
+built from the older 70% only (the aggregate table, the book, retirements, lessons written before the
+held-out outcomes) and proposes up to eight rules. Each is admitted only on the newest 30% alone, at
+99.375% (the eight share 5%), with the older part agreeing in sign; a near-duplicate of an active rule
+(80% the same trades) is refused, and a retired filter is tested only on outcomes after its
+retirement. The book keeps `max_rules` (12), ranked by the interval's bound nearest zero x sqrt(n).
+Every session prompt carries the rules that apply to the desk under "# What the firm has learned"
+(`DeskContext.firm_rules`), the lab's packet carries the family's, and
+`mind.rules_for_family(family)` renders the same block for any strategy generator: evidence, not
+instructions, one line per rule written by code from its filter and numbers (the model's statement
+stays on the public record only). Each pass publishes a `lab.hypothesis`; a changed book publishes a
+`lab.result` with the evidence. By hand, on the box (`cd /workspace`):
+`.venv/bin/python scripts/mind_pass.py --dry-run` prints the table and the book re-scored, read-only;
+`--dry-run --ask` adds one model call and scores its proposals without writing rules or the log (its
+cost joins the book's spend tally); `--apply` runs a full pass now: writes the book, publishes, and the
+floor reads it next session. `--ask` and `--apply` refuse while the floor's pass holds the lock.
 
 ## The checkpoint
 
