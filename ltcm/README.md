@@ -312,6 +312,25 @@ A promotion is a `desk.code_run` on the live desk ("strategy X promoted: Y's set
 the live desk") and an `ops.alert`. `bootstrap` never overwrites a promoted or dealt setting
 (`promoted_at`); only an untouched house row follows the house params.
 
+### Backtests
+
+`ltcm/backtest.py` replays a strategy's `decide(kit, params)` over past days in minutes instead
+of waiting for settlements: `run_backtest(spec)` steps a clock every `step_minutes`, answers every
+`Kit` call from `ltcm/history.py` as of that moment (settled Kalshi markets open then, priced from
+the last candlestick that had ended; Coinbase bars that had closed), and books intents in a
+conservative simulator: takers pay the ask and Kalshi's fee, resting bids fill at their limit
+only on a later candle that trades strictly through them, post-only crossings are refused,
+positions settle at close on the result, notional is capped at 10x learning size. The report
+carries trades, P&L, fees, return on notional, drawdown, daily P&L, per-trade P&L with a seeded
+bootstrap CI, and `split_report` cuts it in and out of sample. Weather is unsupported (no
+forecast history). Run it here with `python3 scripts/backtest.py --strategy kalshi_favorites
+--days 3`, or in a desk's sandbox with `python3 -m ltcm.backtest --spec spec.json` (one
+`BACKTEST-RESULT` line; both modules ship in `FLOOR_EXTRAS`). History reads use Kalshi's batch
+candlestick endpoint, back off on 429s, and cache settled responses under a 128 MB cap. Known
+biases: hourly candles judge fills coarsely (a requote inside the hour is under-filled), the
+board is the markets that had settled by `end` ranked by lifetime volume, and queue position is
+ignored (a trade-through is assumed to reach the order).
+
 ### The floor board
 
 Every session's user turn carries `# The floor board`: the newest memo of every other desk

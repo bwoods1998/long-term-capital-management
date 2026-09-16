@@ -142,6 +142,8 @@ class RunTests(SandboxCase):
         self.assertIn("/lab/floor/ltcm/data/weather.py", paths, "the weather source predates the image")
         for module in ("broker.py", "data/__init__.py", "data/kalshi.py", "data/coinbase.py"):
             self.assertIn(f"/lab/floor/ltcm/{module}", paths, "the kit's whole data layer is the floor's, not the image's")
+        for module in ("history.py", "backtest.py"):
+            self.assertIn(f"/lab/floor/ltcm/{module}", paths, "a desk can backtest in its own sandbox")
         before = len([c for c in self.client.calls if c[0] == "upload" and c[2].startswith("/lab/floor/")])
         manager.run("mullins", "print(1)", purpose="again", timeout=40)
         after = len([c for c in self.client.calls if c[0] == "upload" and c[2].startswith("/lab/floor/")])
