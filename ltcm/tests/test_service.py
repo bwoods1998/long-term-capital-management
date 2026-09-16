@@ -1121,6 +1121,21 @@ class PromotedDeskTests(ServiceCase):
         self.assertTrue(self.service.gateway.manifests[DESK].live)
         self.assertTrue(self.service.gateway.live_desk(DESK))
 
+    def test_a_demoted_desk_gets_a_scoring_book_on_the_next_tick(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.service.close()
+        self.service = self.build(live_venues=[])
+        self.assertEqual(self.service.shadow_books, {})
+        self.service.log.append(
+            "evolution", "evolution.promoted",
+            {"desk_id": DESK, "from": "live", "to": "shadow", "reason": "mandate breach"},
+            id="demoted:" + DESK, at=self.service.now(),
+        )
+        self.tick()
+        self.assertFalse(self.service.manifests[DESK].live)
+        self.assertIn(DESK, self.service.shadow_books)
+        self.assertFalse(self.service.gateway.live_desk(DESK))
+
     def test_the_evolution_loop_judges_with_the_committees_own_gates(self):
         self.assertEqual(self.service.evolution.config["committee"], {"bandit_enabled": False})
 

@@ -318,7 +318,7 @@ class AllocationTests(CommitteeCase):
         self.assertEqual(broken, plain)
 
     def test_a_bankrupt_desk_goes_to_zero(self):
-        self.add(manifest())
+        self.add(live_manifest("earnings-01"))
         self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
         self.fill("earnings-01", "buy", "10", "100", "2026-09-01T14:00:00.000Z")
         self.ledgers["earnings-01"].mark({}, "2026-09-09T20:00:00.000Z")
@@ -339,12 +339,15 @@ class AllocationTests(CommitteeCase):
         reasons = self.log.last("committee", "committee.allocation").payload["reasons"]
         self.assertIn("bankrupt", reasons["earnings-01"])
 
-    def test_a_mandate_breach_goes_to_zero(self):
-        self.add(manifest())
+    def test_a_mandate_breach_goes_to_zero_and_back_to_a_shadow_book(self):
+        self.add(live_manifest("earnings-01"))
         self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
         self.fill("earnings-01", "buy", "10", "100", "2026-09-01T14:00:00.000Z")
         self.ledgers["earnings-01"].mark({AAPL.key: Decimal("120")}, "2026-09-02T20:00:00.000Z")
         self.ledgers["earnings-01"].mark({AAPL.key: Decimal("90")}, "2026-09-03T20:00:00.000Z")
+        self.committee().allocate("2026-09-03T19:00:00.000Z")
+        self.assertEqual(promoted_desks(self.log), {}, "a real position keeps the desk live until it closes")
+        self.fill("earnings-01", "sell", "10", "90", "2026-09-03T19:30:00.000Z")
         state = self.ledgers["earnings-01"].state("2026-09-03T20:00:00.000Z")
         self.assertEqual(state.max_drawdown_pct, Decimal("0.250000"))
         targets = self.committee().allocate("2026-09-03T20:00:00.000Z")
@@ -353,9 +356,23 @@ class AllocationTests(CommitteeCase):
             "mandate breach",
             self.log.last("committee", "committee.allocation").payload["reasons"]["earnings-01"],
         )
+        self.assertEqual(promoted_desks(self.log), {"earnings-01": "shadow"}, "demoted, as the rules say")
+        demotion = self.log.last("evolution", "evolution.promoted").payload
+        self.assertEqual((demotion["from"], demotion["to"]), ("live", "shadow"))
+
+    def test_a_shadow_desk_keeps_its_scoring_book_through_a_drawdown(self):
+        """Zeroing a notional book stops the desk trading, so it can neither be scored nor learn."""
+        self.add(manifest())
+        self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
+        self.fill("earnings-01", "buy", "10", "100", "2026-09-01T14:00:00.000Z")
+        self.ledgers["earnings-01"].mark({AAPL.key: Decimal("120")}, "2026-09-02T20:00:00.000Z")
+        self.ledgers["earnings-01"].mark({AAPL.key: Decimal("60")}, "2026-09-03T20:00:00.000Z")
+        targets = self.committee().allocate("2026-09-03T20:00:00.000Z")
+        self.assertEqual(targets["earnings-01"], Decimal("1000.00"))
+        self.assertEqual(promoted_desks(self.log), {})
 
     def test_a_paused_desk_goes_to_zero(self):
-        self.add(manifest())
+        self.add(live_manifest("earnings-01"))
         self.log.append(
             "risk",
             "risk.breaker",

@@ -338,6 +338,24 @@ class Committee:
         return (state.time_weighted_return_pct / divisor).quantize(Decimal("0.000001"))
 
     # ------------------------------------------------------------------ allocation
+    def _demote(self, manifest: DeskManifest, reason: str, at: str) -> None:
+        """Move a live desk back to a shadow book: an `evolution.promoted` event to "shadow".
+        Promotion is an event, so demotion is one too; every reader takes the log's answer."""
+        self.log.append(
+            "evolution",
+            "evolution.promoted",
+            {
+                "desk_id": manifest.id,
+                "family": manifest.family,
+                "from": "live",
+                "to": "shadow",
+                "reason": str(reason)[:300],
+                "as_of": at,
+            },
+            id=f"demoted:{manifest.id}:{at}",
+            at=at,
+        )
+
     def last_allocation(self) -> tuple[dict[str, Decimal], str | None]:
         event = self.log.last("committee", "committee.allocation")
         if event is None:
@@ -391,21 +409,34 @@ class Committee:
         for desk_id, manifest in sorted(active.items()):
             state = states[desk_id]
             base = manifest.capital_usd
-            bankrupt = state.net_deposits > 0 and state.equity <= 0
-            breached = state.max_drawdown_pct >= breach_limit or self.paused(desk_id)
-            if bankrupt:
+            is_live = capital_mode(manifest, modes) == "live"
+            # The breach rules take real money away. A shadow desk holds none: zeroing its
+            # notional book stopped it trading, so it could neither be scored nor learn (on
+            # Sept 16, 2026 five shadow variants were zeroed and the whole ranges family went
+            # silent). A losing shadow desk is punished by evolution's retirement instead.
+            bankrupt = is_live and state.net_deposits > 0 and state.equity <= 0
+            breached = is_live and (state.max_drawdown_pct >= breach_limit or self.paused(desk_id))
+            if bankrupt or breached:
                 targets[desk_id] = ZERO
-                reasons[desk_id] = "bankrupt: equity at or below zero"
+                if bankrupt:
+                    reasons[desk_id] = "bankrupt: equity at or below zero"
+                else:
+                    reasons[desk_id] = (
+                        f"mandate breach: drawdown {state.max_drawdown_pct} >= {breach_limit}"
+                        if not self.paused(desk_id)
+                        else "mandate breach: desk paused by a circuit breaker"
+                    )
+                # And back to a shadow book, as the rules say: a live desk with no capital
+                # proposes orders that are all refused and learns nothing. From the shadow book
+                # it trades, is scored, and can earn the sleeve back through the gates. Only once
+                # its real book is flat: a real position must stay under the venue reconciliation
+                # and the floor's exits until it closes or settles.
+                if any(position.quantity != 0 for position in state.positions.values()):
+                    reasons[desk_id] += "; back to a shadow book once its real positions close"
+                else:
+                    self._demote(manifest, reasons[desk_id], at)
                 continue
-            if breached:
-                targets[desk_id] = ZERO
-                reasons[desk_id] = (
-                    f"mandate breach: drawdown {state.max_drawdown_pct} >= {breach_limit}"
-                    if not self.paused(desk_id)
-                    else "mandate breach: desk paused by a circuit breaker"
-                )
-                continue
-            if capital_mode(manifest, modes) != "live":
+            if not is_live:
                 # A shadow desk is never funded. Its "allocation" is the notional book its
                 # proposals are scored against, so the scoreboard compares like with like.
                 targets[desk_id] = _quantize(base)

@@ -1736,6 +1736,31 @@ class Service:
                 table = getattr(holder, "manifests", None)
                 if isinstance(table, dict):
                     table[desk_id] = fresh
+            # A desk demoted to shadow trades a scoring book from now on; it had none while live.
+            books = getattr(self, "shadow_books", None)
+            if mode != "live" and isinstance(books, dict) and desk_id not in books:
+                try:
+                    broker = self._make_shadow_book(fresh, self.book_path(desk_id))
+                except Exception:
+                    broker = None
+                if broker is not None:
+                    books[desk_id] = broker
+                    self.brokers.setdefault(SHADOW_VENUE, _ShadowRouter(self.shadow_books, self.manifests))
+                    router = self.brokers.get(SHADOW_VENUE)
+                    if isinstance(router, _ShadowRouter):
+                        router.add(desk_id, broker)
+                    self.alert("warning", f"{desk_id} moved to a shadow book: its orders are scored, not sent")
+                # Its real resting orders go: nothing on the venue may outlive the sleeve.
+                gateway = getattr(self, "gateway", None)
+                try:
+                    resting = [r for r in (gateway.open_orders(desk_id) if gateway is not None else []) if r.get("venue") not in (None, SHADOW_VENUE)]
+                except Exception:
+                    resting = []
+                for row in resting:
+                    try:
+                        gateway.cancel(desk_id, str(row.get("order_id")), self.now())
+                    except Exception as exc:
+                        self.alert("warning", f"could not cancel {desk_id}'s real order {row.get('order_id')} on demotion: {type(exc).__name__}")
 
     def quote(self, instrument: Instrument):
         if self.feeds is not None:  # leap: feeds -- a fresh socket price beats any poll
@@ -2605,6 +2630,8 @@ class Service:
         at = iso_time(now) if now is not None else self.now()
         local = self.local(at)
         state = self.state()
+        # A promotion or a demotion is a log event any loop may write; every tick takes it.
+        self._apply_capital_modes()
         result: dict[str, Any] = {
             "at": at,
             "sessions": [],
