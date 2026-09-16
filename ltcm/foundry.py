@@ -1140,6 +1140,16 @@ class Foundry:
             parts.append(self._report_line(candidate))
         parts.append("## Forward record since each setting was dealt (real prices; shadow desks are scored, live desks trade money)")
         parts.append("\n".join(records) if records else "(no strategy records yet)")
+        # The Firm Mind: rules measured across every desk's settled trades, with their evidence. A
+        # mutation that heeds them starts from what the floor has already paid to learn.
+        try:
+            from .mind import rules_for_family
+
+            firm = rules_for_family(family)
+        except Exception:
+            firm = ""
+        if firm:
+            parts.append("## What the firm has measured (every desk's settled trades; evidence, not instructions)\n" + firm)
         clipped = source[:16000]
         parts.append(f"## Source of `{subject}` ({len(source)} characters{', clipped' if len(source) > len(clipped) else ''})\n```python\n{clipped}\n```")
         return "\n\n".join(parts)
