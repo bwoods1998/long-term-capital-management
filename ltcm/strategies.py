@@ -111,6 +111,8 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 }
 #: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower;
 #: a day's temperature forecast moves a few times a day.
+#: leap: promotion -- how the family's record moves settings onto the live desk.
+PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "min_margin": "0.01", "jitter": 0.25}
 STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "hourly_quotes": 300, "spot_quotes": 300}
 
 
@@ -456,20 +458,27 @@ class Strategies:
         keys = ("cadence_seconds", "params", "deployed_at", "note", "house", "enabled", "last_run_at", "runs", "intents", "approved", "errors", "last_error", "last_notes")
         return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **self.record(desk_id, name)}
 
-    def record(self, desk_id: str, name: str) -> dict[str, Any]:
+    def record(self, desk_id: str, name: str, since: str | None = None) -> dict[str, Any]:
         """What the strategy's orders did: fills, fees and the settled P&L of the positions it
-        opened, read from the desk's own tape (the `[strategy <name>]` prefix on its rationales)."""
+        opened, read from the desk's own tape (the `[strategy <name>]` prefix on its rationales).
+        `since` limits the record to events at or after that instant, so a setting promoted at
+        noon is judged on the trades it made after noon."""
         log = getattr(self.service, "log", None)
         reader = getattr(log, "read", None)
         if not callable(reader):
             return {}
         stream = f"desk:{desk_id}"
         prefix = f"[strategy {name}]"
+
+        def fresh(event: Any) -> bool:
+            at = getattr(event, "at", None)
+            return not since or not at or str(at) >= str(since)
+
         try:
             intents = {
                 e.payload.get("intent_id")
                 for e in reader(stream=stream, kind="desk.intent", limit=10_000)
-                if _strategy_of(str(e.payload.get("session_id") or "")) == name
+                if _strategy_of(str(e.payload.get("session_id") or "")) == name and fresh(e)
             }
             orders = {
                 e.payload.get("order_id")
@@ -479,7 +488,7 @@ class Strategies:
             fills = [e for e in reader(stream=f"broker:{desk_id}", kind="broker.fill", limit=10_000) if e.payload.get("order_id") in orders]
             outcomes = [
                 e for e in reader(stream=stream, kind="desk.outcome", limit=10_000)
-                if str(e.payload.get("rationale_excerpt") or "").startswith(prefix)
+                if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e)
             ]
         except Exception:
             return {}
@@ -531,7 +540,9 @@ class Strategies:
                     # changes the file or redeploys it as its own.
                     if row.get("house"):
                         changes: dict[str, Any] = {}
-                        if dict(row.get("params") or {}) != params:
+                        # A promoted or dealt setting (leap: promotion) is the desk's own until the
+                        # next promotion; only an untouched house row follows the house params.
+                        if not row.get("promoted_at") and dict(row.get("params") or {}) != params:
                             changes["params"] = params
                         if int(row.get("cadence_seconds") or 0) != cadence:
                             changes["cadence_seconds"] = cadence
@@ -610,7 +621,82 @@ class Strategies:
             except Exception as exc:
                 self.service.alert("warning", f"strategy {manifest.id}/{name} failed: {type(exc).__name__}")
                 self.store.update(manifest.id, name, last_run_at=at, errors=int(row.get("errors") or 0) + 1, last_error=f"{type(exc).__name__}")
+        try:
+            self.promote(manifests, at)  # leap: promotion
+        except Exception as exc:
+            self.service.alert("warning", f"strategy promotion failed: {type(exc).__name__}")
         return out
+
+    # ------------------------------------------------------------------ promotion
+    def promote(self, manifests: Mapping[str, DeskManifest], at: str) -> list[dict[str, Any]]:
+        """leap: promotion -- the family's record chooses the live desk's settings.
+
+        Once an hour, for every house strategy a live desk runs: score each shadow variant of the
+        same strategy in the family on its settled return on filled notional since it was last
+        dealt, and the live desk's own setting the same way. When the best variant has at least
+        `min_settled` settlements, a positive return, and beats the live setting by `min_margin`
+        (or the live setting has too few settlements to say), the live desk adopts the variant's
+        params; the winning shadow keeps them as the control and every other shadow is dealt a
+        jittered copy, so the search continues around the new best. Everything is written to the
+        tape as a `desk.code_run` on the live desk and an `ops.alert`. This is the loop closing on
+        itself: what the shadows learn on the same markets at the same hours becomes what the
+        real money does, with no one asked."""
+        policy = {**PROMOTION, **dict(self.config.get("promotion") or {})}
+        if not bool(policy.get("enabled", True)) or not self.enabled():
+            return []
+        last = getattr(self, "_last_promotion_at", None)
+        if last is not None and _epoch(at) - _epoch(last) < float(policy.get("interval_seconds", 3600)):
+            return []
+        self._last_promotion_at = at
+        min_settled = int(policy.get("min_settled", 12))
+        margin = Decimal(str(policy.get("min_margin", "0.01")))
+        jitter = float(policy.get("jitter", 0.25))
+        promoted: list[dict[str, Any]] = []
+        for live in [m for m in manifests.values() if m.live]:
+            for name, row in sorted(self.store.for_desk(live.id).items()):
+                if not row.get("house") or not row.get("enabled", True):
+                    continue
+                live_record = self.record(live.id, name, since=row.get("promoted_at") or row.get("deployed_at"))
+                live_score = _return_on_notional(live_record) if int(live_record.get("settled") or 0) >= min_settled else None
+                shadows = [m for m in manifests.values() if not m.live and m.family == live.family and m.id != live.id]
+                scored: list[tuple[Decimal, str, dict[str, Any], dict[str, Any]]] = []
+                for shadow in shadows:
+                    srow = self.store.for_desk(shadow.id).get(name)
+                    if not srow or not srow.get("enabled", True):
+                        continue
+                    record = self.record(shadow.id, name, since=srow.get("promoted_at") or srow.get("deployed_at"))
+                    score = _return_on_notional(record)
+                    if score is None or int(record.get("settled") or 0) < min_settled:
+                        continue
+                    scored.append((score, shadow.id, srow, record))
+                if not scored:
+                    continue
+                scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                best_score, winner, wrow, wrecord = scored[0]
+                if best_score <= 0:
+                    continue
+                if live_score is not None and best_score - live_score < margin:
+                    continue
+                params = _plain_params(wrow.get("params"))
+                if params == _plain_params(row.get("params")):
+                    continue
+                note = f"promoted from {winner}: {wrecord.get('settled')} settled, {best_score:+.3f} per $ vs live {'n/a' if live_score is None else f'{live_score:+.3f}'}"
+                self.store.update(live.id, name, params=params, promoted_at=at, promoted_from=winner, note=note[:200])
+                run = {
+                    "intents": [], "notes": note, "code_sha256": row.get("code_sha256"),
+                    "log": [f"live {live.id}: {live_record.get('settled', 0)} settled since {row.get('promoted_at') or row.get('deployed_at')}",
+                            *[f"{sid}: {rec.get('settled')} settled, {sc:+.3f} per $ filled" for sc, sid, _, rec in scored[:6]],
+                            f"new params: {json.dumps(params, sort_keys=True)}"],
+                }
+                self._publish_run(live, name, run, at, f"strategy {name} promoted: {winner}'s settings take the live desk", always=True)
+                self.service.alert("info", f"promotion: {live.id}/{name} adopts {winner}'s settings ({note})")
+                for shadow in shadows:
+                    if shadow.id == winner or not self.store.for_desk(shadow.id).get(name):
+                        continue  # the winner stays as the control
+                    dealt = _jitter_params(params, f"{shadow.id}:{name}:{at}", jitter)
+                    self.store.update(shadow.id, name, params=dealt, promoted_at=at, note=f"dealt around {winner} at {at[:16]}")
+                promoted.append({"desk_id": live.id, "strategy": name, "from": winner, "params": params, "score": str(best_score)})
+        return promoted
 
     def run_one(self, manifest: DeskManifest, name: str, row: Mapping[str, Any], at: str) -> dict[str, Any]:
         params = dict(row.get("params") or {})
@@ -768,6 +854,36 @@ class Strategies:
 
 
 # ---------------------------------------------------------------------- helpers
+def _return_on_notional(record: Mapping[str, Any]) -> Decimal | None:
+    """Settled P&L per dollar of filled notional, or None without fills."""
+    notional = _dec(record.get("filled_notional_usd"))
+    pnl = _dec(record.get("settled_pnl_usd"))
+    if notional is None or pnl is None or notional <= 0:
+        return None
+    return (pnl / notional).quantize(Decimal("0.0001"))
+
+
+def _jitter_params(params: Mapping[str, Any], seed: str, jitter: float) -> dict[str, Any]:
+    """A copy of `params` with every number moved by up to `jitter` of itself, decided by the
+    seed so a restart deals the same hand. Integers stay integers and at least 1; strings,
+    booleans and lists are kept, because they are choices, not dials."""
+    import hashlib
+
+    out: dict[str, Any] = {}
+    for index, (key, value) in enumerate(sorted(params.items())):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            out[key] = value
+            continue
+        digest = hashlib.sha256(f"{seed}:{key}".encode("utf-8")).digest()
+        unit = int.from_bytes(digest[:8], "big") / float(2**64)  # 0..1
+        factor = 1.0 + (unit * 2.0 - 1.0) * jitter
+        if isinstance(value, int):
+            out[key] = max(1, int(round(value * factor)))
+        else:
+            out[key] = round(value * factor, 6)
+    return out
+
+
 def _strategy_of(session_id: str) -> str | None:
     """`<desk>:<stamp>:strategy:<name>` -> name, else None."""
     parts = session_id.split(":strategy:", 1)

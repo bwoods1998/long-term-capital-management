@@ -2336,6 +2336,7 @@ class Service:
             "watch": [],  # leap: watch
         }
         self._disk_check(at)  # leap: ops -- before anything else writes
+        self._fund_kalshi_shards(at)  # leap: venues -- collateral follows the markets
 
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
         # leap: feeds -- what the sockets saw since the last tick, confirmed by REST before it counts
@@ -2524,6 +2525,58 @@ class Service:
         except Exception as exc:
             self.alert("warning", f"rate card check failed: {type(exc).__name__}: {exc}")
             return None
+
+    def _fund_kalshi_shards(self, at: str) -> None:
+        """leap: venues -- keep collateral on every Kalshi exchange shard the floor trades.
+
+        Kalshi runs several exchange shards (crypto and commodities on 2, exotics on 1, some
+        sports on 3, everything else on 0) and an order on a shard with no cash fails with
+        `insufficient_shard_balance`. Once an hour: read the cash per shard and, for every shard
+        in `kalshi_shards.shards` under `floor_usd`, move `top_up_usd` from the richest other
+        shard that keeps at least `keep_usd` after the move. Every move is an `ops.alert` on the
+        tape. Never raises."""
+        try:
+            policy = dict(self.config.get("kalshi_shards") or {})
+            if not bool(policy.get("enabled", True)) or "kalshi" not in (self.config.get("live_venues") or []):
+                return
+            last = getattr(self, "_shards_checked_at", None)
+            if last is not None and (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 3600)):
+                return
+            self._shards_checked_at = at
+            broker = self.gateway.brokers.get("kalshi")
+            reader = getattr(broker, "shard_balances", None)
+            mover = getattr(broker, "transfer_between_shards", None)
+            if not callable(reader) or not callable(mover):
+                return
+            balances = dict(reader())
+            if not balances:
+                return
+            wanted = [int(s) for s in (policy.get("shards") or [0, 2])]
+            floor = Decimal(str(policy.get("floor_usd", "40")))
+            top_up = Decimal(str(policy.get("top_up_usd", "60")))
+            keep = Decimal(str(policy.get("keep_usd", "60")))
+            minimum = Decimal(str(policy.get("min_move_usd", "10")))
+            for shard in wanted:
+                cash = balances.get(shard, Decimal(0))
+                if cash >= floor:
+                    continue
+                donors = sorted(((v, k) for k, v in balances.items() if k != shard), reverse=True)
+                if not donors:
+                    continue
+                donor_cash, donor = donors[0]
+                amount = min(top_up, donor_cash - keep)
+                if amount < minimum:
+                    self.alert("warning", f"kalshi shard {shard} holds {cash:.2f} and no other shard can spare {minimum:.0f}; the markets on it will refuse orders")
+                    continue
+                transfer_id = mover(amount, donor, shard)
+                balances[donor] = donor_cash - amount
+                balances[shard] = cash + amount
+                self.alert("info", f"kalshi collateral: moved {amount:.2f} from shard {donor} to shard {shard} (it held {cash:.2f}; transfer {transfer_id or 'unconfirmed'})")
+        except Exception as exc:
+            try:
+                self.alert("warning", f"kalshi shard funding failed: {type(exc).__name__}")
+            except Exception:
+                pass
 
     def _disk_check(self, at: str) -> None:
         """leap: ops -- once every ten minutes, read the free space under the floor's root.

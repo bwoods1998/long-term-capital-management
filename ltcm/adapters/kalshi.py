@@ -297,6 +297,45 @@ class KalshiBroker:
             as_of=iso(self.clock()),
         )
 
+    # ------------------------------------------------------------------ exchange shards
+    def shard_balances(self) -> dict[int, Decimal]:
+        """Cash per exchange shard from `GET /portfolio/balance`'s `balance_breakdown`: crypto and
+        commodities markets settle on shard 2, exotics on 1, some sports on 3, the rest on 0, and
+        an order fails with `insufficient_shard_balance` when its shard holds no collateral."""
+        row = self._call("GET", "/portfolio/balance", what="kalshi balance", ok=(200,))
+        out: dict[int, Decimal] = {}
+        for item in (row.get("balance_breakdown") or []) if isinstance(row, dict) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("exchange_index"))
+            except (TypeError, ValueError):
+                continue
+            cash = dec(item.get("balance_dollars")) if item.get("balance_dollars") is not None else None
+            if cash is None:
+                raw = item.get("balance")
+                cash = dec(raw) if isinstance(raw, str) else dollars_from_cents(raw)
+            if cash is not None:
+                out[index] = cash
+        return out
+
+    def transfer_between_shards(self, usd: Decimal, source: int, destination: int) -> str | None:
+        """`POST /portfolio/intra_exchange_instance_transfer`: move collateral between shards.
+        The amount is in hundredths of a cent. A cross-shard move runs in up to three steps that
+        are not undone on failure, so the caller reads `shard_balances` again afterwards."""
+        amount = Decimal(str(usd))
+        if amount <= 0 or source == destination:
+            raise ValueError("a shard transfer needs a positive amount and two different shards")
+        body = {
+            "source": "event_contract",
+            "destination": "event_contract",
+            "amount": int((amount * 10_000).to_integral_value()),
+            "source_exchange_shard": int(source),
+            "destination_exchange_shard": int(destination),
+        }
+        payload = self._call("POST", "/portfolio/intra_exchange_instance_transfer", body=body, what="kalshi shard transfer", ok=(200, 201))
+        return str(payload.get("transfer_id")) if isinstance(payload, dict) and payload.get("transfer_id") else None
+
     def positions(self) -> list[Position]:
         """`GET /portfolio/positions`. `position` is signed: positive yes, negative no."""
         payload = self._call(

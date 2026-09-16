@@ -558,3 +558,80 @@ class StarterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PromotionTests(StrategyCase):
+    def setUp(self):
+        super().setUp()
+        self.log_events = []
+
+        class Event:
+            def __init__(self, payload, at=None):
+                self.payload, self.at = payload, at
+
+        def read(stream=None, kind=None, limit=None):
+            return [Event(p, *rest) for s, k, p, *rest in self.log_events if s == stream and k == kind]
+
+        self.service.log.read = read
+        self.service.gateway = type("G", (), {"open_orders": lambda g, desk_id: []})()
+        self.live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
+        self.other = manifest(id="scholes-3")
+        for m in (self.live, self.other):
+            self.service.manifests[m.id] = m
+            self.manager.files[m.id] = {"edge.py": "def decide(kit, params):\n    return []\n"}
+        self.strategies.deploy(self.live, "edge", 600, {"min_edge": 0.02, "vol_bars": 24, "window": "1h"}, house=True)
+        self.strategies.deploy(self.manifest, "edge", 600, {"min_edge": 0.0, "vol_bars": 36, "window": "5m"}, house=True)
+        self.strategies.deploy(self.other, "edge", 600, {"min_edge": 0.01, "vol_bars": 32, "window": "15m"}, house=True)
+
+    def trades(self, desk, pnl_each, count, at="2026-09-16T05:00:00.000Z"):
+        for n in range(count):
+            self.log_events += [
+                (f"desk:{desk}", "desk.intent", {"intent_id": f"oi-{desk}-{n}", "session_id": f"{desk}:20260916-0400:strategy:edge"}, at),
+                (f"broker:{desk}", "broker.order", {"order_id": f"ord-{desk}-{n}", "intent_id": f"oi-{desk}-{n}"}, at),
+                (f"broker:{desk}", "broker.fill", {"order_id": f"ord-{desk}-{n}", "quantity": "10", "price": "0.50", "fee": "0"}, at),
+                (f"desk:{desk}", "desk.outcome", {"pnl": pnl_each, "rationale_excerpt": "[strategy edge] x"}, at),
+            ]
+
+    def test_the_best_shadow_variant_takes_the_live_desk_and_the_others_are_dealt_around_it(self):
+        self.trades("scholes-2", "1.00", 12)   # +12 on 60 of notional: +0.20 per dollar
+        self.trades("scholes-3", "0.10", 12)   # +0.02 per dollar
+        self.trades("scholes", "-0.50", 12)    # the live setting loses
+        out = self.strategies.promote(self.service.manifests, LATER)
+        self.assertEqual([(p["desk_id"], p["strategy"], p["from"]) for p in out], [("scholes", "edge", "scholes-2")])
+        live_row = self.strategies.store.for_desk("scholes")["edge"]
+        self.assertEqual(live_row["params"], {"min_edge": 0.0, "vol_bars": 36, "window": "5m"})
+        self.assertEqual((live_row["promoted_at"], live_row["promoted_from"]), (LATER, "scholes-2"))
+        self.assertEqual(self.strategies.store.for_desk("scholes-2")["edge"]["params"], {"min_edge": 0.0, "vol_bars": 36, "window": "5m"}, "the winner stays as the control")
+        dealt = self.strategies.store.for_desk("scholes-3")["edge"]
+        self.assertEqual(dealt["params"]["window"], "5m", "choices are copied")
+        self.assertTrue(27 <= dealt["params"]["vol_bars"] <= 45 and dealt["params"]["vol_bars"] != 36 or dealt["params"]["vol_bars"] == 36, "dials move by up to a quarter")
+        self.assertEqual(dealt["promoted_at"], LATER)
+        kinds = [(s, k, p.get("purpose")) for s, k, p, *_ in self.service.log.events if k == "desk.code_run" and "promoted" in str(p.get("purpose"))]
+        self.assertEqual(kinds, [("desk:scholes", "desk.code_run", "strategy edge promoted: scholes-2's settings take the live desk")])
+        self.assertTrue(any("promotion: scholes/edge adopts scholes-2" in text for _, text in self.service.alerts))
+        # The next hour: nothing changed, the live record is measured since the promotion, so no second promotion.
+        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [], "once an hour")
+        self.strategies._last_promotion_at = None
+        self.assertEqual(self.strategies.promote(self.service.manifests, "2026-09-16T06:30:00.000Z"), [], "the live setting is now the winner's")
+
+    def test_no_promotion_without_enough_settlements_a_positive_return_and_a_margin(self):
+        self.trades("scholes-2", "1.00", 11)
+        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [], "eleven settlements are not twelve")
+        self.strategies._last_promotion_at = None
+        self.trades("scholes-3", "-0.10", 12)
+        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [], "a losing variant never promotes")
+        self.strategies._last_promotion_at = None
+        self.trades("scholes-2", "1.00", 1)
+        self.trades("scholes", "0.99", 12)  # live earns +0.198 per dollar, the shadow +0.20: inside the margin
+        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [])
+        self.strategies._last_promotion_at = None
+        self.trades("scholes-2", "3.00", 12)  # now clearly better
+        self.assertEqual(len(self.strategies.promote(self.service.manifests, LATER)), 1)
+
+    def test_bootstrap_leaves_a_promoted_setting_alone(self):
+        from ltcm.strategies import STARTERS_DIR
+        self.strategies.config["starters"] = True
+        self.strategies.store.update("scholes", "hourly_ranges", house=True, enabled=True, params={"min_edge": 0.0, "vol_bars": 36}, cadence_seconds=300, promoted_at=LATER, runs=3)
+        self.manager.files["scholes"]["hourly_ranges.py"] = (STARTERS_DIR / "hourly_ranges.py").read_text()
+        self.strategies.bootstrap({"scholes": self.live})
+        self.assertEqual(self.strategies.store.for_desk("scholes")["hourly_ranges"]["params"], {"min_edge": 0.0, "vol_bars": 36}, "the house params do not overwrite a promotion")

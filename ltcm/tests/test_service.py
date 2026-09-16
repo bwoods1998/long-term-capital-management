@@ -1951,3 +1951,38 @@ class DiskCheckTests(ServiceCase):
         self.tick()
         health = json.loads(self.service.health_path.read_text(encoding="utf-8"))
         self.assertIsInstance(health.get("disk_free_gb"), float)
+
+
+class ShardFundingTests(ServiceCase):
+    def test_a_shard_under_the_floor_is_topped_up_from_the_richest_other_shard_once_an_hour(self):
+        moves = []
+
+        class Kalshi:
+            balances = {0: Decimal("360.51"), 1: Decimal("0"), 2: Decimal("12.30"), 3: Decimal("0")}
+
+            def shard_balances(self):
+                return dict(self.balances)
+
+            def transfer_between_shards(self, usd, source, destination):
+                moves.append((Decimal(usd), source, destination))
+                self.balances[source] -= Decimal(usd)
+                self.balances[destination] += Decimal(usd)
+                return "tr-1"
+
+        self.service.close()
+        self.service = self.build(live_venues=["kalshi"])
+        broker = Kalshi()
+        self.service.gateway.brokers["kalshi"] = broker
+        self.service._fund_kalshi_shards(moment_iso(2026, 9, 14, 19, 5))
+        self.assertEqual(moves, [(Decimal("60"), 0, 2)])
+        alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert") if "kalshi collateral" in e.payload.get("text", "")]
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("moved 60.00 from shard 0 to shard 2", alerts[0])
+        self.service._fund_kalshi_shards(moment_iso(2026, 9, 14, 19, 30))
+        self.assertEqual(len(moves), 1, "once an hour")
+        broker.balances[0] = Decimal("65")
+        broker.balances[2] = Decimal("5")
+        self.service._fund_kalshi_shards(moment_iso(2026, 9, 14, 20, 6))
+        self.assertEqual(len(moves), 1, "the donor keeps its floor: 65 - 60 keep leaves 5, under the 10 minimum move")
+        warnings = [e.payload for e in self.service.log.read(kind="ops.alert") if "no other shard can spare" in e.payload.get("text", "")]
+        self.assertEqual(len(warnings), 1)

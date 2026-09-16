@@ -37,6 +37,18 @@
     "warn_gb": 4,
     "stop_gb": 2
   },
+  "kalshi_shards": {
+    "enabled": true,
+    "interval_seconds": 3600,
+    "shards": [
+      0,
+      2
+    ],
+    "floor_usd": "40",
+    "top_up_usd": "60",
+    "keep_usd": "60",
+    "min_move_usd": "10"
+  },
   "strategies": {
     "enabled": true,
     "max_per_desk": 3,
