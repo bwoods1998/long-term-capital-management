@@ -579,3 +579,16 @@ are rewarded and punished. Shipped, in order:
   carry `pnl_usd` = equity less net capital flows; the partners table had read equity minus
   the current allocation, so the morning's resize showed as a gain. The 10:13 reconciliation:
   Kalshi 7 of 7 instruments match, Coinbase 2 of 2.
+
+## Where the night left the floor (10:30 UTC Sept 16)
+
+Live desks on the site with lifetime P&L: Scholes -53.93 (allocation cut to 86.75, compute
+x0.25, behind its daily-loss breaker until the day turns), Haghani -9.76 (104.93, x0.25,
+seven weather positions matching Kalshi one for one), Hilibrand -0.13 (368.80, two Coinbase
+holdings with offers resting 0.4% over cost), Mullins 0.00 (300.59, no position). Account
+equity 949 against 979 at launch. Sail runway 29 days at $9 a day. Reconciliation clean on both
+venues. What the loop can now do without anyone asking: move settings from the best shadow
+variant to the live desk (hourly), move capital between desks (daily), scale each desk's
+compute with its results (hourly), write and trial new strategy code (nightly, from 20:00
+New York), keep collateral on every Kalshi shard, hear the other partners at every session,
+and trade any USD pair Coinbase lists.
