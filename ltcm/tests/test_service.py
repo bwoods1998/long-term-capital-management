@@ -952,6 +952,15 @@ class ContextTests(ServiceCase):
         self.assertEqual([c["market"] for c in calls], ["KXOPEN"], "not my own, not a resolved market")
         self.assertEqual(calls[0]["probability"], "0.30")
 
+    def test_size_today_fits_the_learning_order_under_the_desks_limits(self):
+        self.service.committee.allocate(self.service.now())
+        size = self.context().size_today()
+        limits = self.service.manifests[DESK].limits
+        cap = (Decimal(size["equity"]) * min(limits.max_order_notional_pct, limits.max_position_pct) * Decimal("0.9")).quantize(Decimal("0.01"))
+        self.assertEqual(Decimal(size["max_order_usd"]), cap)
+        base = Decimal(str((self.service.config.get("learning") or {}).get("shadow_notional_usd") or "15"))
+        self.assertEqual(Decimal(size["learning_usd"]), min(base, cap))
+
     def test_memo_emits_a_desk_memo_event(self):
         ctx = self.context()
         result = ctx.memo("Monday note", "The beat was cash, not accruals.")

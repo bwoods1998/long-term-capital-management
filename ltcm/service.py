@@ -700,6 +700,24 @@ class DeskContext:
         rows.sort(key=lambda row: row["at"], reverse=True)
         return rows[: max(1, min(20, int(limit)))]
 
+    def size_today(self) -> dict[str, Any]:
+        """The largest order the desk's own limits allow at its equity now, and the learning size
+        that fits under it. A desk that has lost money must hear the smaller number: on Sept 16,
+        2026 the shadow Scholes children kept proposing the $15 learning order from the rules at
+        $60 of equity, and the engine refused every one."""
+        state = self.service.ledgers[self.desk_id].state(self.service.now())
+        limits = self.manifest.limits
+        cap = (state.equity * min(limits.max_order_notional_pct, limits.max_position_pct) * Decimal("0.9")).quantize(Decimal("0.01"))
+        policy = dict(self.service.config.get("learning") or {})
+        if capital_mode(self.manifest, promoted_desks(self.service.log)) == "live":
+            key = "live_coinbase_usd" if self.manifest.market_venue == "coinbase" else "live_kalshi_usd"
+            base = Decimal(str(policy.get(key) or "10"))
+        else:
+            base = Decimal(str(policy.get("shadow_notional_usd") or "15"))
+        if cap <= 0:
+            return {}
+        return {"equity": format(state.equity.quantize(Decimal("0.01")), "f"), "max_order_usd": format(cap, "f"), "learning_usd": format(min(base, cap), "f")}
+
     def standings(self) -> list[dict[str, Any]]:
         """leap: incentives -- every active partner ranked by lifetime P&L, with the compute
         share it earns and its calibration. Read every session: a desk that can see the scores

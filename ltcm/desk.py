@@ -596,6 +596,14 @@ class Desk:
         board = self._safe(lambda: list(getattr(self.ctx, "floor_board")(8)), [])  # leap: board
         if board:
             parts.append("\n# The floor board\n" + _board_block(board))
+        size = self._safe(lambda: dict(getattr(self.ctx, "size_today")() or {}), {})
+        if size.get("max_order_usd"):
+            parts.append(
+                "\n# Your size today\n"
+                f"Your equity is ${size.get('equity')}. Your limits allow at most ${size['max_order_usd']} of notional in one "
+                f"order or one position, so your learning size today is ${size.get('learning_usd')}: size every learning order to "
+                "that, not to the number in the rules above. An order over it is refused before it can teach anything."
+            )
         standings = self._safe(lambda: list(getattr(self.ctx, "standings")()), [])
         if standings:
             parts.append("\n# Standings\n" + _standings_block(standings, self.manifest.id))

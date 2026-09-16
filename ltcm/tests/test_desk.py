@@ -656,6 +656,15 @@ class FloorBoardTests(DeskCase):
         self.assertIn("KXHIGHNY-26SEP16-B81.5: Haghani (live, Brier 0.21) says P(YES)=0.18 vs market 0.04", text)
         self.assertIn("How the floor pays you", str(provider.calls[0]))
 
+    def test_a_shrunken_desk_is_told_its_size_today(self):
+        provider = FakeProvider(provider_response(calls=[tool_call("end_session", summary="done")], request_id="req-1"))
+        self.ctx.size_today = lambda: {"equity": "33.00", "max_order_usd": "4.45", "learning_usd": "4.45"}
+        desk = self.desk(provider)
+        desk.run_session("market_close")
+        text = str(provider.calls[0]["items"])
+        self.assertIn("# Your size today", text)
+        self.assertIn("learning size today is $4.45", text)
+
     def test_a_context_without_a_board_leaves_the_prompt_alone(self):
         provider = FakeProvider(provider_response(calls=[tool_call("end_session", summary="done")], request_id="req-1"))
         desk = self.desk(provider)
