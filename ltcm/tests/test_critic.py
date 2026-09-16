@@ -286,3 +286,20 @@ class BuildTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class StrategyPacketTests(unittest.TestCase):
+    def test_a_strategy_order_tells_the_critic_its_rules_live_in_code(self):
+        from ltcm.critic import _strategy_lines
+
+        class Intent:
+            session_id = "hilibrand:20260916-0658:strategy:spot_quotes"
+
+        lines = _strategy_lines(Intent())
+        self.assertIn("spot_quotes", lines[0])
+        self.assertIn("does not veto", lines[1])
+
+        class Plain:
+            session_id = "hilibrand:20260916-0658:market_open"
+
+        self.assertEqual(_strategy_lines(Plain()), [])

@@ -66,11 +66,11 @@ def decide(kit, params):
             quantity, cost = held[symbol]
             offer = max(cost * (1.0 + float(p["spread"])), mid * (1.0 + float(p["spread"]) / 2.0))
             offer = max(offer, ask + 0.01)  # never cross: an offer at or under the ask would take
-            targets[(symbol, "sell")] = (offer, quantity, f"offer {quantity:.6f} {symbol} at {offer:,.2f}: cost {cost:,.2f}, mid {mid:,.2f}; a fill closes the round trip {float(p['spread']) * 100:.1f}% over cost at the maker rate")
+            targets[(symbol, "sell")] = (offer, quantity, f"offer {quantity:.6f} {symbol} at {offer:,.2f}: cost {cost:,.2f}, mid {mid:,.2f}; a fill closes the round trip {float(p['spread']) * 100:.1f}% over cost at the maker rate. Exit rule: this offer is the exit; it is replaced when mid drifts {float(p['drift']) * 100:.1f}% or after {int(p['requote_seconds']) // 60} min")
         else:
             bid_price = min(mid * (1.0 - float(p["spread"])), bid - 0.01)  # never cross
             quantity = notional / bid_price
-            targets[(symbol, "buy")] = (bid_price, quantity, f"bid {quantity:.6f} {symbol} at {bid_price:,.2f}, {float(p['spread']) * 100:.1f}% under mid {mid:,.2f}, post-only at the maker rate; the offer follows a fill")
+            targets[(symbol, "buy")] = (bid_price, quantity, f"bid {quantity:.6f} {symbol} at {bid_price:,.2f}, {float(p['spread']) * 100:.1f}% under mid {mid:,.2f}, post-only at the maker rate. Setup: market making, not a directional call; the edge is the spread and the maker rebate. Exit: an offer {float(p['spread']) * 100:.1f}% over cost is posted the run after a fill; the bid is cancelled if mid drifts {float(p['drift']) * 100:.1f}% or after {int(p['requote_seconds']) // 60} min; 48h time stop on the inventory")
     for order in resting:
         key = (str(order.get("symbol")), str(order.get("side")))
         price = _num(order.get("limit_price"))

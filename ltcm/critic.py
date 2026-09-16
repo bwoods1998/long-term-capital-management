@@ -111,6 +111,25 @@ def _instrument_label(instrument: Any) -> str:
     return label
 
 
+def _strategy_lines(intent: OrderIntent) -> list[str]:
+    """When a deployed strategy placed the order, say so: its exit and requote rules live in
+    code and run every few minutes, and the desk's memo (written for its own discretionary
+    trades) does not veto it. On Sept 16, 2026 the critic blocked the first live Coinbase
+    maker quotes because the memo said 'no orders warranted' and a quote names no catalyst."""
+    session = str(getattr(intent, "session_id", "") or "")
+    if ":strategy:" not in session:
+        return []
+    name = session.rsplit(":strategy:", 1)[1]
+    return [
+        f"This order was placed by the desk's deployed strategy `{name}`, code the desk runs between sessions.",
+        "Its exit, requote and cancel rules are in that code and run on every cycle; a quote is not a "
+        "directional thesis and needs no catalyst. The memo describes the desk's discretionary plan and does "
+        "not veto its strategies. Judge only the four error checks: side vs rationale, size and price vs the "
+        "rationale's plan, an unnamed instrument, or adding beyond the mandate.",
+        "",
+    ]
+
+
 def _side_line(intent: OrderIntent) -> str:
     if intent.instrument.asset_class == "event" and intent.instrument.right:
         leg = str(intent.instrument.right).upper()
@@ -174,6 +193,7 @@ def packet(
             "Rationale the desk published with this order:",
             _clip(intent.rationale, RATIONALE_CHARS),
             "",
+            *_strategy_lines(intent),
             "The desk's latest memo:",
             _clip(memo, MEMO_CHARS) or "(none)",
             "",
