@@ -68,7 +68,7 @@ DEFAULTS: dict[str, Any] = {
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 #: Family -> starter module name. A desk of the family with no strategy of its own gets the
 #: house starter deployed under this name, exactly as a bred desk gets the house playbook.
-STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": "daily_temps"}
+STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": "daily_temps", "kalshi": "kalshi_favorites"}
 #: A second house strategy for a family: the ranges family also quotes the hourly buckets on
 #: both legs at a spread, the maker side of the same market its starter takes.
 SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
@@ -88,6 +88,14 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
         {"z_entry": 1.5, "symbols": "top:20"},
         {"z_entry": 2.0, "lookback": 48, "symbols": "top:30"},
         {"z_entry": 1.25, "lookback": 12, "holding_hours": 6},
+    ],
+    "kalshi": [
+        # The experiment is the band and the side of the spread: how cheap a longshot is overpriced.
+        {"yes_max": 0.05},
+        {"yes_min": 0.05, "yes_max": 0.15},
+        {"maker": False, "yes_max": 0.08},
+        {"max_hours": 12, "min_volume_24h": 5000},
+        {"yes_min": 0.10, "yes_max": 0.25, "max_hours": 24},
     ],
     "weather": [
         {"min_edge": 0.0},
@@ -118,7 +126,7 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: a day's temperature forecast moves a few times a day.
 #: leap: promotion -- how the family's record moves settings onto the live desk.
 PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "min_margin": "0.01", "jitter": 0.25}
-STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "hourly_quotes": 300, "spot_quotes": 300}
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300}
 
 
 def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:
@@ -229,6 +237,28 @@ class Kit:
             except (TypeError, ValueError):
                 continue
         out.sort(key=lambda r: (r["expiry"] or "9999", -r["volume_usd"]))
+        return out
+    def kalshi_markets(self, max_close_hours=36, pages=5):
+        """Every open single market (combos excluded) settling within `max_close_hours`, across all
+        of Kalshi's categories, prices in dollars: the whole board, a page of 1,000 at a time."""
+        import time as _time
+        src = self._event_source()
+        if src is None:
+            return []
+        until = int(_time.time() + float(max_close_hours) * 3600)
+        out, cursor = [], None
+        for _ in range(max(1, int(pages))):
+            try:
+                page = src.markets(status="open", limit=1000, cursor=cursor, max_close_ts=until, mve_filter="exclude")
+            except TypeError:
+                page = src.markets(status="open", limit=1000, cursor=cursor, max_close_ts=until)
+            rows = page.get("markets", []) if isinstance(page, dict) else []
+            for row in rows:
+                if not str(row.get("ticker") or "").startswith("KXMVE"):
+                    out.append(row)
+            cursor = page.get("cursor") if isinstance(page, dict) else None
+            if not cursor or not rows:
+                break
         return out
     def kalshi_market(self, ticker):
         src = self._event_source()

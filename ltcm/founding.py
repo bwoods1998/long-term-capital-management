@@ -446,13 +446,23 @@ class Founding:
         read = 0
         cursor = None
         for _ in range(int(self.config["kalshi_market_pages"])):
-            try:
+            page = None
+            for attempt in range(3):
                 try:
-                    page = source.markets(status="open", limit=1000, cursor=cursor, mve_filter="exclude")
-                except TypeError:  # a source that cannot filter; the combos are skipped in the fold
-                    page = source.markets(status="open", limit=1000, cursor=cursor)
-            except Exception as exc:
-                errors.append(f"kalshi markets: {type(exc).__name__}")
+                    try:
+                        page = source.markets(status="open", limit=1000, cursor=cursor, mve_filter="exclude")
+                    except TypeError:  # a source that cannot filter; the combos are skipped in the fold
+                        page = source.markets(status="open", limit=1000, cursor=cursor)
+                    break
+                except Exception as exc:
+                    # A page refused mid-sweep (the floor's own index sweep shares Kalshi's rate
+                    # limit) is asked again after a pause; a sweep cut short leaves the model a
+                    # partial board and the validator a partial listing.
+                    if attempt == 2:
+                        errors.append(f"kalshi markets: {type(exc).__name__}")
+                    else:
+                        time.sleep(float(self.config.get("sweep_retry_pause_seconds", 2.0)) * (attempt + 1))
+            if page is None:
                 break
             rows = [r for r in (page.get("markets") or []) if isinstance(r, Mapping)]
             read += len(rows)
@@ -1060,8 +1070,11 @@ class Founding:
         if universe is not None:
             known = set().union(*(listed[v] for v in venues if v in listed))
             missing = [t for t in targets if t not in known]
-            if missing:
+            if len(missing) == len(targets):
                 raise FoundingError(f"targets not listed on {', '.join(venues)} tonight: {', '.join(missing[:5])}")
+            # Some listed, some not: the family trades what is listed. A partial listing or a
+            # series with no open market tonight is not a reason to lose a sound proposal.
+            targets = [t for t in targets if t in known]
         return targets
 
     def _check_cadence(self, cadence: Any) -> None:

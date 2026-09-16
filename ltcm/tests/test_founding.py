@@ -181,7 +181,7 @@ class FoundingCase(unittest.TestCase):
             self.log,
             self.evolution,
             provider=self.provider,
-            config={"live_venues": ["kalshi", "coinbase"], "hard_limits": HARD, **config},
+            config={"live_venues": ["kalshi", "coinbase"], "hard_limits": HARD, "sweep_retry_pause_seconds": 0, **config},
             kalshi=self.kalshi,
             coinbase=self.coinbase,
         )
@@ -423,6 +423,8 @@ class ValidationTests(FoundingCase):
 
     def test_targets_must_be_listed_and_untouched_by_the_floor(self):
         self.refused(proposal(targets=["KXNOTLISTED"]), "not listed on kalshi tonight")
+        kept = self.validate(proposal(targets=["KXNOTLISTED", "KXNFLGAME"]))
+        self.assertEqual(kept["targets"], ["KXNFLGAME"], "a partly listed proposal trades what is listed")
         self.refused(proposal(targets=[]), "targets must list")
         fed = Instrument("event", "KXFED-26OCT-H25", "kalshi", market_id="KXFED-26OCT-H25")
         self.fill("mullins", "buy", 5, "0.20", "2026-09-16T12:00:00.000Z", fed)

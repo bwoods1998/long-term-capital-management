@@ -239,18 +239,18 @@ class BootstrapTests(StrategyCase):
         deployed = self.strategies.bootstrap(self.service.manifests)
         self.assertEqual(
             deployed,
-            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "hilibrand-2/spot_quotes", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
+            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "hilibrand-2/spot_quotes", "mullins/kalshi_favorites", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
         )
         self.assertIn("hourly_ranges.py", self.manager.toolbox_files("scholes-2"))
         self.assertTrue(self.strategies.report(self.manifest, "hourly_ranges")["house"])
         self.assertEqual(self.strategies.report(self.manifest, "hourly_quotes")["cadence_seconds"], 300)
         self.assertEqual(self.strategies.report(weather, "daily_temps")["cadence_seconds"], 1800)
         self.assertEqual(self.strategies.bootstrap(self.service.manifests), [], "never twice")
-        self.assertEqual(self.strategies.report(events)["strategies"], [])
+        self.assertEqual([s["name"] for s in self.strategies.report(events)["strategies"]], ["kalshi_favorites"])
         # The first tick bootstraps on its own.
         fresh = Strategies(self.service, path=Path(self.temp.name) / "s2.json", config={"starters": True})
         fresh.tick(self.service.manifests, NOW)
-        self.assertEqual(sorted(fresh.store.read()), ["haghani-2", "hilibrand-2", "scholes-2"])
+        self.assertEqual(sorted(fresh.store.read()), ["haghani-2", "hilibrand-2", "mullins", "scholes-2"])
 
     def test_shadow_desks_are_dealt_different_variants_and_the_live_desk_keeps_the_defaults(self):
         from ltcm.strategies import STARTER_VARIANTS, starter_params
@@ -617,6 +617,27 @@ class StarterTests(unittest.TestCase):
         kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.00049996", "average_cost": "75000"}]
         offer = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})["intents"][0]
         self.assertEqual((offer["side"], offer["quantity"]), ("sell", "0.000499"), "rounded down, never above the holding")
+
+    def test_the_favorites_starter_rests_no_bids_on_liquid_longshots_one_per_event(self):
+        kit = FakeKit()
+        board = [
+            {"ticker": "KXFEDMENTION-26SEP16-TARIFF", "title": "Powell says tariff", "status": "active", "close_time": "2026-09-16T20:00:00Z", "yes_bid": "0.04", "yes_ask": "0.06", "volume_24h": "25000"},
+            {"ticker": "KXFEDMENTION-26SEP16-RECESSION", "title": "Powell says recession", "status": "active", "close_time": "2026-09-16T20:00:00Z", "yes_bid": "0.03", "yes_ask": "0.05", "volume_24h": "20000"},
+            {"ticker": "KXRAIN-26SEP16-PVD", "title": "Rain in Providence", "status": "active", "close_time": "2026-09-17T04:00:00Z", "yes_bid": "0.07", "yes_ask": "0.08", "volume_24h": "9000"},
+            {"ticker": "KXMLBGAME-26SEP16NYYBOS-NYY", "title": "Yankees", "status": "active", "close_time": "2026-09-17T02:00:00Z", "yes_bid": "0.55", "yes_ask": "0.57", "volume_24h": "90000"},
+            {"ticker": "KXTHIN-26SEP16-X", "title": "thin", "status": "active", "close_time": "2026-09-16T20:00:00Z", "yes_bid": "0.02", "yes_ask": "0.05", "volume_24h": "10"},
+        ]
+        kit.kalshi_markets = lambda max_close_hours=36, pages=5: list(board)
+        out = load_starter("kalshi_favorites").decide(kit, {})
+        bids = out["intents"]
+        self.assertEqual([b["instrument"]["market_id"] for b in bids], ["KXFEDMENTION-26SEP16-TARIFF", "KXRAIN-26SEP16-PVD"], "one per event; the favorite game and the thin market are skipped")
+        self.assertEqual(bids[1]["limit_price"], "0.92", "a one-cent spread joins the best NO bid rather than taking")
+        bid = bids[0]
+        self.assertEqual((bid["instrument"]["right"], bid["side"], bid["limit_price"], bid["post_only"]), ("no", "buy", "0.95", True))
+        self.assertIn("longshots resolve YES less often", bid["rationale"])
+        kit.context["open_orders"] = [{"order_id": "ord-old", "strategy": "kalshi_favorites", "market_id": "KXFEDMENTION-26SEP16-TARIFF", "submitted_at": "2026-09-16T02:00:00Z"}]
+        again = load_starter("kalshi_favorites").decide(kit, {})
+        self.assertEqual(again["cancels"], ["ord-old"], "a stale bid is requoted")
 
     def test_the_reversion_starter_buys_the_crash_and_leaves_the_rest(self):
         kit = FakeKit()
