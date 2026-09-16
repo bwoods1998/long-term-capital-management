@@ -157,11 +157,16 @@ class ForecastTests(WeatherCase):
 class TableTests(unittest.TestCase):
     def test_the_cities_kalshi_lists_are_known_with_their_stations(self):
         for name in ("New York", "Chicago", "Miami", "Austin", "Denver", "Los Angeles", "Philadelphia", "Seattle",
-                     "Atlanta", "Houston", "Dallas", "Phoenix", "Boston", "Washington DC", "Las Vegas"):
+                     "Atlanta", "Houston", "Dallas", "Phoenix", "Boston", "Washington DC", "Las Vegas",
+                     "San Francisco", "Minneapolis", "Oklahoma City", "New Orleans", "San Antonio"):
             city = city_for(name)
             self.assertRegex(city.station, r"^K[A-Z]{3}$", name)
             self.assertTrue(-125 < city.longitude < -66 and 24 < city.latitude < 49, name)
-        self.assertEqual({c.station for c in CITIES.values() if c.station_verified}, {"KNYC", "KMDW", "KMIA", "KATT", "KDEN", "KLAX"})
+            self.assertTrue(city.station_verified, name)
+            self.assertRegex(city.series_hint, r"^KXHIGHT?[A-Z]+$", name)
+        # Kalshi's newer cities carry a T: the series without it does not exist.
+        self.assertEqual(city_for("Phoenix").series_hint, "KXHIGHTPHX")
+        self.assertEqual(city_for("New York").series_hint, "KXHIGHNY")
         self.assertEqual(city_for("NYC").station, "KNYC")
         self.assertEqual(city_for("Washington, D.C.").station, "KDCA")
         self.assertEqual(city_for(" los angeles ").name, "Los Angeles")

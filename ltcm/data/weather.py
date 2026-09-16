@@ -98,21 +98,29 @@ def _city(name: str, station: str, lat: str, lon: str, tz: str, hint: str, verif
 CITIES: dict[str, City] = {
     city.key: city
     for city in (
+        # Series and stations as Kalshi's own market rules name them (the CLI report code), read
+        # from the open markets on Sept 16, 2026. Eight hints had been missing the "T" Kalshi
+        # uses for its newer cities (KXHIGHTPHX, not KXHIGHPHX), so those cities never traded.
         _city("New York", "KNYC", "40.7789", "-73.9692", "America/New_York", "KXHIGHNY", True),
         _city("Chicago", "KMDW", "41.7861", "-87.7522", "America/Chicago", "KXHIGHCHI", True),
         _city("Miami", "KMIA", "25.7959", "-80.2870", "America/New_York", "KXHIGHMIA", True),
         _city("Austin", "KATT", "30.3208", "-97.7604", "America/Chicago", "KXHIGHAUS", True),
         _city("Denver", "KDEN", "39.8561", "-104.6737", "America/Denver", "KXHIGHDEN", True),
         _city("Los Angeles", "KLAX", "33.9425", "-118.4081", "America/Los_Angeles", "KXHIGHLAX", True),
-        _city("Philadelphia", "KPHL", "39.8721", "-75.2411", "America/New_York", "KXHIGHPHIL", False),
-        _city("Seattle", "KSEA", "47.4502", "-122.3088", "America/Los_Angeles", "KXHIGHSEA", False),
-        _city("Atlanta", "KATL", "33.6367", "-84.4281", "America/New_York", "KXHIGHATL", False),
-        _city("Houston", "KHOU", "29.6375", "-95.2822", "America/Chicago", "KXHIGHHOU", False),
-        _city("Dallas", "KDFW", "32.8968", "-97.0380", "America/Chicago", "KXHIGHDAL", False),
-        _city("Phoenix", "KPHX", "33.4342", "-112.0117", "America/Phoenix", "KXHIGHPHX", False),
-        _city("Boston", "KBOS", "42.3606", "-71.0097", "America/New_York", "KXHIGHBOS", False),
-        _city("Washington DC", "KDCA", "38.8521", "-77.0377", "America/New_York", "KXHIGHDC", False),
-        _city("Las Vegas", "KLAS", "36.0800", "-115.1522", "America/Los_Angeles", "KXHIGHLV", False),
+        _city("Philadelphia", "KPHL", "39.8721", "-75.2411", "America/New_York", "KXHIGHPHIL", True),
+        _city("Seattle", "KSEA", "47.4502", "-122.3088", "America/Los_Angeles", "KXHIGHTSEA", True),
+        _city("Atlanta", "KATL", "33.6367", "-84.4281", "America/New_York", "KXHIGHTATL", True),
+        _city("Houston", "KHOU", "29.6375", "-95.2822", "America/Chicago", "KXHIGHTHOU", True),
+        _city("Dallas", "KDFW", "32.8968", "-97.0380", "America/Chicago", "KXHIGHTDAL", True),
+        _city("Phoenix", "KPHX", "33.4342", "-112.0117", "America/Phoenix", "KXHIGHTPHX", True),
+        _city("Boston", "KBOS", "42.3606", "-71.0097", "America/New_York", "KXHIGHTBOS", True),
+        _city("Washington DC", "KDCA", "38.8521", "-77.0377", "America/New_York", "KXHIGHTDC", True),
+        _city("Las Vegas", "KLAS", "36.0800", "-115.1522", "America/Los_Angeles", "KXHIGHTLV", True),
+        _city("San Francisco", "KSFO", "37.6190", "-122.3749", "America/Los_Angeles", "KXHIGHTSFO", True),
+        _city("Minneapolis", "KMSP", "44.8848", "-93.2223", "America/Chicago", "KXHIGHTMIN", True),
+        _city("Oklahoma City", "KOKC", "35.3931", "-97.6007", "America/Chicago", "KXHIGHTOKC", True),
+        _city("New Orleans", "KMSY", "29.9934", "-90.2580", "America/Chicago", "KXHIGHTNOLA", True),
+        _city("San Antonio", "KSAT", "29.5337", "-98.4698", "America/Chicago", "KXHIGHTSATX", True),
     )
 }
 ALIASES = {

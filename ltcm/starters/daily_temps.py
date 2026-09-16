@@ -11,8 +11,10 @@ nearest `max_quotes` markets live, and propose the best `max_intents` whose edge
 `min_edge`, at the ask, held to settlement. The floor caps a live desk's size at its learning
 size whatever `notional_usd` says.
 
-Params: cities (names, as Kalshi and the NWS name them), sigma_day_ahead, sigma_per_day,
-min_edge, shrink, notional_usd, max_intents, max_quotes, max_hours.
+Params: cities ("all" for every city the kit knows a series for, or names as Kalshi and the NWS
+name them), sigma_day_ahead, sigma_per_day, min_edge, min_price, shrink, notional_usd,
+max_intents, max_quotes, max_hours. `min_price` skips contracts cheaper than it: a thin tail
+the normal curve overprices is the classic longshot a shadow variant can test against.
 """
 
 import math
@@ -20,14 +22,15 @@ import re
 from datetime import datetime, timezone
 
 DEFAULTS = {
-    "cities": ["New York", "Chicago", "Miami", "Austin", "Denver", "Los Angeles"],
+    "cities": "all",
     "sigma_day_ahead": 2.5,
     "sigma_per_day": 1.0,
     "min_edge": 0.02,
+    "min_price": 0.02,
     "shrink": 0.5,
     "notional_usd": None,
     "max_intents": 2,
-    "max_quotes": 6,
+    "max_quotes": 4,
     "max_hours": 40,
 }
 RANGE = re.compile(r"(-?[0-9]+(?:\.[0-9]+)?)°?\s*(?:to|-|–)\s*(-?[0-9]+(?:\.[0-9]+)?)°")
@@ -99,7 +102,8 @@ def decide(kit, params):
     notional = _num(p.get("notional_usd")) or _num(ctx.get("learning_usd"), 10.0)
     series_of = {c["name"]: c["series"] for c in (kit.weather_cities() or []) if c.get("series")}
     candidates = []
-    for city in p["cities"]:
+    cities = list(series_of) if p["cities"] == "all" else list(p["cities"] or [])
+    for city in cities:
         series = series_of.get(city)
         if not series:
             kit.say(f"{city}: no series")
@@ -153,7 +157,7 @@ def decide(kit, params):
             edge_yes = shrunk - yes_ask - _fee(yes_ask)
             edge_no = (1.0 - shrunk) - no_ask - _fee(no_ask)
             side, price, edge = ("yes", yes_ask, edge_yes) if edge_yes >= edge_no else ("no", no_ask, edge_no)
-            if edge < float(p["min_edge"]) or price < 0.02 or price > 0.98:
+            if edge < float(p["min_edge"]) or price < max(0.02, float(p.get("min_price") or 0)) or price > 0.98:
                 continue
             candidates.append((edge, ticker, side, price, prob, shrunk, market_p, mu, sigma, hours, city, str(market.get("yes_sub_title") or "")))
     candidates.sort(key=lambda c: -c[0])

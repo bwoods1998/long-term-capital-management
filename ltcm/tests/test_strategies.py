@@ -482,6 +482,20 @@ class StarterTests(unittest.TestCase):
         kit.context["positions"] = [{"market_id": "KXBTC-26SEP1600-B75950"}]
         self.assertEqual(load_starter("hourly_ranges").decide(kit, {})["intents"], [])
 
+    def test_the_ranges_starter_prices_thresholds_on_every_crypto_series(self):
+        from ltcm.starters import hourly_ranges as ranges
+
+        spot, sigma = 100.0, 0.01
+        self.assertAlmostEqual(ranges._model_probability(("above", 100.0), spot, sigma), 0.5, places=6)
+        self.assertAlmostEqual(ranges._model_probability(("above", 101.0), spot, sigma) + ranges._model_probability(("below", 101.0), spot, sigma), 1.0, places=9)
+        self.assertLess(ranges._model_probability(("between", 99.0, 101.0), spot, sigma), 1.0)
+        self.assertEqual(ranges._strike({"strike_type": "greater", "floor_strike": "75000"}), ("above", 75000.0))
+        self.assertEqual(ranges._strike({"strike_type": "less", "cap_strike": "2400"}), ("below", 2400.0))
+        self.assertEqual(ranges._strike({"strike_type": "between", "floor_strike": "75900", "cap_strike": "76000"}), ("between", 75900.0, 76000.0))
+        self.assertEqual(ranges._strike({"yes_sub_title": "$75,900 to 75,999.99"}), ("between", 75900.0, 75999.99))
+        self.assertIn("KXBTCD", ranges.CRYPTO_SERIES)
+        self.assertEqual(ranges.DEFAULTS["series"], "all")
+
     def test_the_quoting_starter_rests_both_legs_under_fair_and_replaces_drifted_quotes(self):
         kit = FakeKit()
         out = load_starter("hourly_quotes").decide(kit, {"buckets": 1, "spread": 0.04})

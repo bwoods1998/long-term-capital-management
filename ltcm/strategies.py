@@ -78,8 +78,10 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "ranges": [
         # The experiment is the volatility window: five-minute, fifteen-minute and hourly bars.
         {"min_edge": 0.0, "shrink": 0.5, "vol_interval": "5m", "vol_bars": 36},
-        {"min_edge": 0.01, "shrink": 0.5, "vol_interval": "15m", "vol_bars": 32},
-        {"min_edge": 0.02, "shrink": 0.7, "vol_interval": "1h", "vol_bars": 24},
+        {"min_edge": 0.01, "shrink": 0.5, "vol_interval": "15m", "vol_bars": 32, "min_price": 0.10},
+        {"min_edge": 0.02, "shrink": 0.7, "vol_interval": "1h", "vol_bars": 24, "max_minutes": 240},
+        {"min_edge": 0.01, "shrink": 0.6, "series": ["KXBTCD", "KXETHD", "KXSOLD", "KXXRPD"], "max_minutes": 120},
+        {"min_edge": 0.02, "shrink": 0.5, "min_price": 0.15, "max_minutes": 90},
     ],
     "crypto": [
         {"z_entry": 1.5, "symbols": "top:20"},
@@ -90,6 +92,8 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
         {"min_edge": 0.0},
         {"min_edge": 0.0, "sigma_day_ahead": 3.5},
         {"min_edge": 0.01, "sigma_day_ahead": 2.0},
+        {"min_edge": 0.01, "sigma_day_ahead": 1.5, "min_price": 0.10},
+        {"min_edge": 0.02, "sigma_day_ahead": 2.0, "min_price": 0.20, "shrink": 0.6},
     ],
 }
 QUOTE_VARIANTS: dict[str, list[dict[str, Any]]] = {

@@ -314,6 +314,12 @@ class KalshiMarketData:
             "expiration_time": row.get("expected_expiration_time") or row.get("expiration_time"),
             "can_close_early": bool(row.get("can_close_early")),
             "price_ranges": parse_price_ranges(row.get("price_ranges")),
+            # What the contract pays on: "greater" pays above floor_strike, "less" below
+            # cap_strike, "between" inside both. Strategies price thresholds from these rather
+            # than parsing a subtitle.
+            "strike_type": row.get("strike_type"),
+            "floor_strike": decimal_or_none(row.get("floor_strike")),
+            "cap_strike": decimal_or_none(row.get("cap_strike")),
         }
 
     # ------------------------------------------------------------- MarketData
