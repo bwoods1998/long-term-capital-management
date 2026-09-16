@@ -130,6 +130,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+#: Names the floor's roles and streams already publish under.
+RESERVED_IDS = frozenset({"meriwether", "committee", "evolution", "lab", "risk", "ops", "floor", "shadow", "settlement", "founding", "watch"})
+
+
 class FoundingError(ValueError):
     """A proposal the floor refuses. The message is the reason, and it is safe to publish."""
 
@@ -823,7 +827,10 @@ class Founding:
         # ---- names: never reused, never mistakable for someone else's lineage
         manifests = self._all_manifests()
         records = self.founded_records()
-        taken_ids = set(manifests) | {str(r.get("desk_id")) for r in records.values()}
+        # The floor's own roles publish under these names (Meriwether signs the committee's
+        # memos); a desk called by one would be mistaken for the role on the public tape. The
+        # first K3 dry run on Sept 16, 2026 named its desk "meriwether".
+        taken_ids = set(manifests) | {str(r.get("desk_id")) for r in records.values()} | RESERVED_IDS
         taken_families = {m.family for m in manifests.values()} | set(records)
         if desk_id in taken_ids:
             raise FoundingError(f"desk id {desk_id} is already taken")

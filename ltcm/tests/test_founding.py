@@ -364,6 +364,7 @@ class ValidationTests(FoundingCase):
 
     def test_names_already_taken_are_refused(self):
         self.refused(proposal(id="mullins"), "already taken")
+        self.refused(proposal(id="meriwether"), "already taken")  # the committee signs as Meriwether
         self.refused(proposal(family="weather"), "already exists")
         self.refused(proposal(id="mullins-9"), "lineage")
         parked = self.desks / "pending-alpaca"
