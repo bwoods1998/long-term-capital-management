@@ -93,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wind-down", action="store_true", help="the wind-down rule instead of a founding")
     parser.add_argument("--root", default=str(ROOT), help="the checkout holding .data/ltcm")
     parser.add_argument("--key", default=None, help="the model request key (default founding:<day>:manual)")
+    parser.add_argument("--focus", default=None, help="the area to found in (e.g. 'Kalshi sports game winners'); keys the request by focus")
     args = parser.parse_args(argv)
 
     founding, log, config = build(Path(args.root).resolve(), with_provider=not (args.packet or args.wind_down))
@@ -125,13 +126,13 @@ def main(argv: list[str] | None = None) -> int:
                   f"digest {len(universe['text'])} chars]", file=sys.stderr)
             return 0
 
-        key = args.key or f"founding:{day}:manual"
-        reply = founding.propose(at, context=context, universe=universe, key=key)
+        key = args.key or (f"founding:{day}:focus:{args.focus[:40]}" if args.focus else f"founding:{day}:manual")
+        reply = founding.propose(at, context=context, universe=universe, key=key, focus=args.focus)
         outcome = founding.settle(reply, at, universe=universe, coverage=context["coverage"], apply=args.apply)
         if outcome.get("status") == "refused" and reply.get("proposal"):
             print(f"refused ({outcome.get('reason')}); asking the model to correct it", file=sys.stderr)
             reply = founding.propose(at, context=context, universe=universe, key=f"{key}:retry",
-                                     correction={"text": reply.get("text"), "reason": outcome.get("reason")})
+                                     correction={"text": reply.get("text"), "reason": outcome.get("reason")}, focus=args.focus)
             outcome = founding.settle(reply, at, universe=universe, coverage=context["coverage"], apply=args.apply)
         shown = dict(outcome)
         validated = shown.pop("proposal", None)

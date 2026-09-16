@@ -769,6 +769,7 @@ class Founding:
         universe: Mapping[str, Any] | None = None,
         key: str | None = None,
         correction: Mapping[str, Any] | None = None,
+        focus: str | None = None,
     ) -> dict[str, Any]:
         """One model call. Returns `{"proposal", "decline", "incomplete", "text"}`; raises what the
         provider raises. Blocking: the service reaches it through `step()`'s worker, never the tick.
@@ -780,9 +781,17 @@ class Founding:
         context = context if context is not None else self.prepare(at)
         universe = universe if universe is not None else self.universe(at, coverage=context.get("coverage"))
         day = at[:10]
+        packet = self.packet(at, context, universe)
+        if focus:
+            # A sweep founds several families in one night, one per uncovered area: the focus
+            # names the area so parallel foundings do not all pick the same obvious target.
+            packet += (
+                f"\n\n## Tonight's focus\nFound the family in this area: {str(focus)[:200]}. Pick the targets inside "
+                "it with the most volume and the most testable edge; if nothing there has an edge you can state, decline."
+            )
         items = [
             {"role": "system", "content": str(context.get("instructions") or self.instructions())},
-            {"role": "user", "content": self.packet(at, context, universe)},
+            {"role": "user", "content": packet},
         ]
         if correction:
             items.append({"role": "assistant", "content": str(correction.get("text") or "")[:60_000]})

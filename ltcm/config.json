@@ -118,8 +118,8 @@
   "founding": {
     "enabled": true,
     "founding_time": "21:30",
-    "max_per_day": 2,
-    "max_founded_families": 8,
+    "max_per_day": 8,
+    "max_founded_families": 16,
     "capital_usd": "150",
     "min_days": 4,
     "min_decisions": 20,
