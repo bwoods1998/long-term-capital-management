@@ -1739,6 +1739,30 @@ class Service:
                     router.add(manifest.id, broker)
         self._apply_capital_modes()
 
+    def _tick_phase(self, name: str | None) -> dict[str, float] | None:
+        """Mark the start of a step of the tick. The step in progress is written to
+        `tick-phase.json` as it starts, so a slow tick can be read while it runs; `None` ends the
+        tick and returns the seconds each step took, which the health file keeps."""
+        phases = getattr(self, "_tick_phases", None)
+        if phases is None:
+            phases = self._tick_phases = []
+        now = time.monotonic()
+        if name is not None:
+            phases.append((name, now))
+            try:
+                (self.capital_dir / "tick-phase.json").write_text(
+                    json.dumps({"phase": name, "since": self.now()}) + "\n", encoding="utf-8"
+                )
+            except Exception:
+                pass
+            return None
+        timing: dict[str, float] = {}
+        for index, (phase, started) in enumerate(phases):
+            ended = phases[index + 1][1] if index + 1 < len(phases) else now
+            timing[phase] = round(timing.get(phase, 0.0) + (ended - started), 2)
+        self._tick_phases = []
+        return {k: v for k, v in sorted(timing.items(), key=lambda kv: -kv[1]) if v >= 0.05}
+
     def _off_tick(self, name: str, work: Callable[[], Any]) -> Any:
         """Run slow work (model calls, venue sweeps) on one worker per name, so the tick keeps its
         clock: stops, marks, orders and strategy dispatch every pass. Returns the result of the
@@ -2683,6 +2707,8 @@ class Service:
         local = self.local(at)
         state = self.state()
         # A promotion or a demotion is a log event any loop may write; every tick takes it.
+        self._tick_phases = []
+        self._tick_phase("capital_modes")
         self._apply_capital_modes()
         result: dict[str, Any] = {
             "at": at,
@@ -2702,11 +2728,14 @@ class Service:
             "exits": [],  # leap: exits
             "watch": [],  # leap: watch
         }
+        self._tick_phase("disk_and_shards")
         self._disk_check(at)  # leap: ops -- before anything else writes
         self._fund_kalshi_shards(at)  # leap: venues -- collateral follows the markets
 
+        self._tick_phase("budget")
         result["budget"] = {k: str(v) for k, v in self.apply_budget(at).items()}
         # leap: feeds -- what the sockets saw since the last tick, confirmed by REST before it counts
+        self._tick_phase("feeds")
         result["feeds"] = self._drain_feeds(at)
         self._maybe_upgrade_kalshi_tier(at)
         runway = getattr(self, "_runway", None)
@@ -2715,8 +2744,11 @@ class Service:
         result["spend_mode"] = self.spend_mode()
         # Settlements are swept before the schedule so a market that resolved since the last
         # tick wakes its desk on this tick rather than the next one.
+        self._tick_phase("settlements")
         result["settlements"] = self.sweep_settlements(at)
+        self._tick_phase("reconcile")
         result["reconciled"] = self._reconcile_venues(at)  # leap: venues -- the book against the venue, hourly
+        self._tick_phase("notices")
         try:
             result["notices"] = self.notifier.tick(at)
         except Exception as exc:  # a notice is a courtesy; the tick is the job
@@ -2725,10 +2757,12 @@ class Service:
         # A desk that has never been funded, or a roster change, gets an allocation right away, before any
         # session starts, so a desk never sees an unfunded book;
         # the weekly resize by track record still only happens on the committee's day.
+        self._tick_phase("allocation")
         previous, _ = self.committee.last_allocation()
         if any(desk_id not in previous for desk_id in self.manifests):
             self.committee.allocate(at)
             result["committee"] = True
+        self._tick_phase("sessions")
         if not result["kill_switch"] and not stopped:
             due = self.due_sessions(at)
             if live_only:
@@ -2738,6 +2772,7 @@ class Service:
             self.start_sessions(due)
             result["sessions"] = [f"{m.id}/{trigger}" for m, trigger in due]
 
+        self._tick_phase("shadow_books")
         for broker in self.shadow_books.values():
             ticker = getattr(broker, "tick", None)
             if ticker is not None:
@@ -2745,6 +2780,7 @@ class Service:
                     ticker()
                 except Exception as exc:
                     self.alert("warning", f"shadow book tick failed: {exc}")
+        self._tick_phase("poll_orders")
         try:
             result["orders"] = [row["order_id"] for row in self.gateway.poll_orders(at)]
         except Exception as exc:
@@ -2752,12 +2788,14 @@ class Service:
         # leap: exits. Stops, targets and time stops are the floor's to keep, every tick,
         # whether or not the desk is in session. The kill switch refuses every order, exits
         # included, so nothing is filed while it is engaged.
+        self._tick_phase("exits")
         if self.exits is not None and not result["kill_switch"]:
             try:
                 result["exits"] = self.exits.tick(at)
             except Exception as exc:
                 self.alert("warning", f"exit enforcement failed: {type(exc).__name__}: {exc}")
 
+        self._tick_phase("marks")
         interval = int(self.config["mark_interval_seconds"])
         last_mark = state.get("last_mark_at")
         if last_mark is None or (parse_iso(at) - parse_iso(last_mark)).total_seconds() >= interval:
@@ -2767,6 +2805,7 @@ class Service:
 
         # leap: watch. The night desk looks after the marks are fresh; it costs nothing
         # until something happens, and it is quiet when the floor has stopped for credit.
+        self._tick_phase("watch")
         if self.watch is not None and not result["kill_switch"] and not stopped:
             allow_shadow = not live_only
 
@@ -2792,6 +2831,7 @@ class Service:
 
                 self._off_tick("event_index", warm)
 
+        self._tick_phase("rate_card_and_seeding")
         day = local.date().isoformat()
         if state.get("last_rate_card_day") != day:
             result["rate_card"] = self.check_rate_card()
@@ -2804,7 +2844,9 @@ class Service:
             self._rewrites_resumed = True
             if self.evolution.rewriter is not None:
                 self._resume_rewrites()
+        self._tick_phase("rewrites")
         result["rewrites"] = self.apply_rewrites(at)
+        self._tick_phase("strategies")
         if not result["kill_switch"] and not stopped:  # leap: strategies
             try:
                 result["strategies"] = self.strategies.tick(self.active_manifests(), at)
@@ -2813,11 +2855,13 @@ class Service:
                 result["strategies"] = []
         # leap: lab -- forecasts are checked against the venue on a slow clock and the day's
         # calibration is published once; the lab sits down at its own evening slot.
+        self._tick_phase("calibration")
         if not stopped:
             self._calibration_tick(at, state)
         # The lab's night is spread over ticks, one model call per tick, so the floor keeps
         # marking, exiting and publishing while it thinks: a night that blocked the tick for
         # twenty minutes would have the watchdog restart the box in the middle of it.
+        self._tick_phase("lab")
         lab_pending = state.get("lab_pending_day") == day
         if not stopped and (lab_pending or self._due(local, self.config["lab_time"], state.get("last_lab_day"), day)):
             if not lab_pending:
@@ -2847,6 +2891,7 @@ class Service:
                 if not self.lab.pending(at):
                     self._save_state(last_lab_day=day, lab_pending_day=None)
                 result["experiments"] = list(done.get("experiments") or [])
+        self._tick_phase("committee")
         if stopped:
             pass  # the memo and the evolution loop both ask the model; they wait for credit
         elif self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
@@ -2874,6 +2919,7 @@ class Service:
                 self._off_tick("memo", lambda at=at: bool(self.committee.memo(at)))
                 result["memo"] = True
                 self._save_state(last_committee_day=day)
+        self._tick_phase("evolution_and_founding")
         if not stopped and self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day):
             actions = list(self.evolution.select(at)) + list(self.evolution.promote(at))
             self.reload_manifests()
@@ -2883,12 +2929,15 @@ class Service:
         if not stopped:
             result["founding"] = self._founding_tick(at, local, day, state, allow=not live_only)
 
+        self._tick_phase("results_ledger")
         try:
             event = ResultsLedger.publish_daily(self.log, at, manifests=self.manifests)
             result["lab"] = None if event is None else event.id
         except Exception as exc:  # a scoreboard may never stop the floor
             self.alert("warning", f"lab result failed: {type(exc).__name__}")
+        self._tick_phase("publish")
         result["published"] = self.publish()
+        result["timing"] = self._tick_phase(None)
         self.health(at, result)
         return result
 
@@ -3593,6 +3642,7 @@ class Service:
                 "marked": tick.get("marked"),
                 "breakers": list(tick.get("breakers") or []),
                 "published": tick.get("published"),
+                "timing": tick.get("timing"),
             }
         tmp = self.health_path.with_name(self.health_path.name + f".tmp-{os.getpid()}")
         tmp.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
