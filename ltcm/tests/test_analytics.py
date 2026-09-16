@@ -650,20 +650,30 @@ class DailyResult(AnalyticsCase):
             self.assertEqual(sorted(payload), ["hypothesis_id", "metrics", "verdict"])
             metrics = payload["metrics"]
             self.assertTrue(metrics)
-            for key, value in metrics.items():
-                if key == "by_generation":  # leap: lab -- the one list in the block, per the contract
-                    self.assertIsInstance(value, list)
-                    for row in value:
+            self.assertEqual(sorted(metrics), ["by_generation", "desks", "floor", "profiles", "window"])
+            for group, block in metrics.items():
+                if group == "by_generation":  # leap: lab -- the one list in the block, per the contract
+                    self.assertIsInstance(block, list)
+                    for row in block:
                         self.assertEqual(
                             sorted(row),
                             ["brier", "cost_adjusted_excess_pct", "cost_usd", "decisions", "desks",
                              "generation", "pnl_per_inference_usd", "pnl_usd"],
                         )
                     continue
-                self.assertIsInstance(value, str, key)
-                self.assertNotIn("<", value)
-                self.assertNotIn("<", key)
-                self.assertLess(len(value), 8000)
+                self.assertIsInstance(block, dict, group)
+                leaves = block.values() if group in ("window", "floor") else [
+                    v for inner in block.values() for v in inner.values()
+                ]
+                if group not in ("window", "floor"):
+                    for inner in block.values():
+                        self.assertIsInstance(inner, dict)
+                        self.assertLessEqual(len(inner), 100)
+                self.assertLessEqual(len(block), 100)
+                for value in leaves:
+                    self.assertIsInstance(value, str, group)
+                    self.assertNotIn("<", value)
+                    self.assertLess(len(value), 8000)
             self.assertLessEqual(len(json.dumps(metrics).encode("utf-8")), 20_000)
             self.assertNotIn("<", payload["verdict"])
             self.assertLess(len(payload["verdict"]), 8000)
@@ -675,17 +685,17 @@ class DailyResult(AnalyticsCase):
         with tempfile.TemporaryDirectory() as tmp:
             log = build_log(Path(tmp) / "events.sqlite")
             metrics = self.publish(log).payload["metrics"]
-            self.assertEqual(metrics["window.days"], "1")
-            self.assertEqual(metrics["window.start"], "2026-09-15T00:00:00.000Z")
-            self.assertEqual(metrics["floor.closed_pnl_usd"], "60.0000")
-            self.assertEqual(metrics["floor.sail_cost_usd"], "0.7980")
-            self.assertEqual(metrics["floor.win_rate"], "0.7500")
-            self.assertEqual(metrics["desk.mullins.win_rate"], "0.6667")
-            self.assertEqual(metrics["desk.mullins.brier"], "0.1250")
-            self.assertEqual(metrics["desk.hilibrand.mode"], "shadow")
-            self.assertEqual(metrics["profile.pro_flex.sail_cost_usd"], "0.2600")
+            self.assertEqual(metrics["window"]["days"], "1")
+            self.assertEqual(metrics["window"]["start"], "2026-09-15T00:00:00.000Z")
+            self.assertEqual(metrics["floor"]["closed_pnl_usd"], "60.0000")
+            self.assertEqual(metrics["floor"]["sail_cost_usd"], "0.7980")
+            self.assertEqual(metrics["floor"]["win_rate"], "0.7500")
+            self.assertEqual(metrics["desks"]["mullins"]["win_rate"], "0.6667")
+            self.assertEqual(metrics["desks"]["mullins"]["brier"], "0.1250")
+            self.assertEqual(metrics["desks"]["hilibrand"]["mode"], "shadow")
+            self.assertEqual(metrics["profiles"]["pro_flex"]["sail_cost_usd"], "0.2600")
             # An undefined ratio is absent, not zero.
-            self.assertNotIn("desk.hilibrand.win_rate", metrics)
+            self.assertNotIn("win_rate", metrics["desks"]["hilibrand"])
             log.close()
 
     def test_the_verdict_reads_like_a_sentence(self):
@@ -716,15 +726,39 @@ class DailyResult(AnalyticsCase):
     def test_a_crowded_block_sheds_detail_instead_of_overflowing(self):
         full = metrics_block(self.report)
         self.assertLess(len(json.dumps(full).encode("utf-8")), 20_000)
-        self.assertNotIn("metrics.truncated", full)
+        self.assertNotIn("truncated", full)
 
         small = metrics_block(self.report, limit=1500)
         self.assertLessEqual(len(json.dumps(small).encode("utf-8")), 1500)
-        self.assertEqual(small["metrics.truncated"], "true")
-        self.assertIn("floor.closed_pnl_usd", small)  # the floor is never dropped
-        self.assertIn("desk.mullins.closed_pnl_usd", small)  # nor is the busiest desk
-        self.assertNotIn("desk.mullins.seconds_to_first_order", small)  # detail goes first
-        self.assertNotIn("desk.hilibrand.sessions", small)  # then the quietest desk
+        self.assertEqual(small["truncated"], "true")
+        self.assertIn("closed_pnl_usd", small["floor"])  # the floor is never dropped
+        self.assertIn("closed_pnl_usd", small["desks"]["mullins"])  # nor is the busiest desk
+        self.assertNotIn("seconds_to_first_order", small["desks"]["mullins"])  # detail goes first
+        self.assertNotIn("hilibrand", small["desks"])  # then the quietest desk
+
+    def test_a_roster_wider_than_the_sites_key_cap_keeps_the_busiest_hundred(self):
+        # Thirteen desks overflowed the old flat map at the site's hundred-key cap on Sept 16,
+        # 2026; the grouped block holds a desk per key and sheds the quietest beyond a hundred.
+        row = dict(self.report["desks"]["mullins"])
+        desks = {f"desk-{n:03d}": {**row, "decisions": n} for n in range(130)}
+        report = {**self.report, "desks": desks}
+        roomy = metrics_block(report, limit=10_000_000)  # the key cap alone
+        self.assertEqual(len(roomy["desks"]), 100)
+        self.assertEqual(roomy["truncated"], "true")
+        self.assertIn("desk-129", roomy["desks"])  # the busiest stay
+        self.assertNotIn("desk-000", roomy["desks"])  # the quietest go
+        block = metrics_block(report)  # and the byte cap on top of it
+        self.assertLessEqual(len(block["desks"]), 100)
+        self.assertEqual(block["truncated"], "true")
+        self.assertIn("desk-129", block["desks"])
+        for group, value in block.items():
+            if isinstance(value, dict):
+                self.assertLessEqual(len(value), 100, group)
+                for inner in value.values():
+                    if isinstance(inner, dict):
+                        self.assertLessEqual(len(inner), 100)
+        # The site measures the compact JSON, as `JSON.stringify` writes it.
+        self.assertLessEqual(len(json.dumps(block, separators=(",", ":")).encode("utf-8")), 20_000)
 
 
 class MarkdownReport(AnalyticsCase):

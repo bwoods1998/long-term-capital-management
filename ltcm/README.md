@@ -309,9 +309,11 @@ models, and the report is where that experiment is read.
 ### The daily `lab.result`
 
 Once per UTC day the floor publishes one `lab.result` on the `lab` stream, id `lab:daily:<date>`,
-with `{hypothesis_id: "daily-<date>", metrics, verdict}`. `metrics` is a flat `{dotted key:
-string}` block (`floor.*`, `desk.<id>.*`, `profile.<name>.*`) capped at 20 KB; `verdict` is one
-sentence a human can read without opening it. The service writes it from the tick:
+with `{hypothesis_id: "daily-<date>", metrics, verdict}`. `metrics` is `{window, floor,
+profiles{<name>}, desks{<id>}, by_generation[]}` of string values, capped at 20 KB and at the
+site's hundred keys per object (a day that shed detail says `truncated: "true"`; the quietest
+desks go first); `verdict` is one sentence a human can read without opening it. The service
+writes it from the tick:
 
 ```python
 from .analytics import ResultsLedger          # at the top of service.py

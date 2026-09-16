@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ltcm.events import EventLog
 from ltcm.publish import (
+    payload_problem,
     CHECKPOINT_PATH,
     EVENTS_PATH,
     Publisher,
@@ -479,3 +480,44 @@ class CheckpointTests(PublisherCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class SiteLimitsTests(unittest.TestCase):
+    """The site's payload limits are mirrored here, so an oversized event is a named alert, not a 400."""
+
+    def test_the_limits_match_the_sites_safe_value(self):
+        self.assertIsNone(payload_problem({"a": "b", "n": 1, "list": [1, 2, {"k": None}], "t": True}))
+        self.assertIn("101 keys", payload_problem({f"k{i}": "v" for i in range(101)}))
+        self.assertIsNone(payload_problem({f"k{i}": "v" for i in range(100)}))
+        self.assertIn("501 items", payload_problem({"rows": list(range(501))}))
+        self.assertIn("8001 characters", payload_problem({"text": "x" * 8001}))
+        deep: dict = {"leaf": "x"}
+        for _ in range(9):
+            deep = {"down": deep}
+        self.assertIn("deeper", payload_problem(deep))
+        self.assertIn("not publishable", payload_problem({"bad key!": "x"}))
+        self.assertIn("not publishable", payload_problem({"_private": "x"}))
+        self.assertIn("not finite", payload_problem({"n": float("inf")}))
+        self.assertIn("type", payload_problem({"n": object()}))
+
+    def test_an_oversized_lab_result_is_named_before_it_is_sent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = EventLog(Path(tmp) / "events.sqlite")
+            metrics = {f"desk.d{i}.net_pnl_usd": "0.0000" for i in range(269)}
+            event = log.append(
+                "lab", "lab.result", {"hypothesis_id": "daily-2026-09-15", "metrics": metrics, "verdict": "quiet"},
+                id="lab:daily:2026-09-15", at="2026-09-15T23:59:59.999Z",
+            )
+            self.assertEqual(shape_problem(event), "payload has an object with 269 keys (the site takes 100)")
+            fine = log.append(
+                "lab", "lab.result",
+                {"hypothesis_id": "daily-2026-09-16", "metrics": {"desks": {f"d{i}": {"net_pnl_usd": "0"} for i in range(100)}}, "verdict": "quiet"},
+                id="lab:daily:2026-09-16", at="2026-09-16T23:59:59.999Z",
+            )
+            self.assertIsNone(shape_problem(fine))
+            big = log.append(
+                "desk:mullins", "desk.memo", {"session_id": "s", "text": "y" * 7000, "more": "z" * 7000, "rest": "w" * 7000},
+                id="memo:big", at="2026-09-16T23:59:59.999Z",
+            )
+            self.assertEqual(shape_problem(big), "payload is over 20 KB")
+            log.close()

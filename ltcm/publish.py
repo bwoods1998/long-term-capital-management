@@ -26,6 +26,7 @@ replay a no-op.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -190,6 +191,49 @@ def sanitize_for_site(payload: Any) -> Any:
     return payload
 
 
+#: The site's payload limits (capital/schema.js `safeValue` and `validPayload`), mirrored so a
+#: payload the site would refuse is named here as a bug instead of discovered as a 400.
+SITE_MAX_PAYLOAD_BYTES = 20 * 1024
+SITE_MAX_KEYS = 100
+SITE_MAX_ITEMS = 500
+SITE_MAX_DEPTH = 8
+SITE_MAX_STRING = 8000
+SITE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+
+
+def payload_problem(value: Any, depth: int = 0) -> str | None:
+    """Why the site's `safeValue` would refuse this (already sanitized) payload, or None."""
+    if depth > SITE_MAX_DEPTH:
+        return f"nesting deeper than {SITE_MAX_DEPTH} levels"
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return None if math.isfinite(value) else "a number that is not finite"
+    if isinstance(value, str):
+        if len(value) > SITE_MAX_STRING:
+            return f"a string of {len(value)} characters (the site takes {SITE_MAX_STRING})"
+        return None
+    if isinstance(value, (list, tuple)):
+        if len(value) > SITE_MAX_ITEMS:
+            return f"a list of {len(value)} items (the site takes {SITE_MAX_ITEMS})"
+        for item in value:
+            problem = payload_problem(item, depth + 1)
+            if problem is not None:
+                return problem
+        return None
+    if isinstance(value, Mapping):
+        if len(value) > SITE_MAX_KEYS:
+            return f"an object with {len(value)} keys (the site takes {SITE_MAX_KEYS})"
+        for key, item in value.items():
+            if not isinstance(key, str) or not SITE_KEY.match(key):
+                return f"key {str(key)[:40]!r} is not publishable"
+            problem = payload_problem(item, depth + 1)
+            if problem is not None:
+                return problem
+        return None
+    return f"a value of type {type(value).__name__}"
+
+
 def shape_problem(event: Event) -> str | None:
     """Why the site would refuse this event's shape, or None when it would accept it.
 
@@ -216,6 +260,14 @@ def shape_problem(event: Event) -> str | None:
             return f"stream suffix {event.stream[len(expected):]!r} is not lowercase [a-z0-9-]"
     elif event.stream != expected:
         return f"{kind} belongs on the {expected!r} stream, not {event.stream!r}"
+    wire = sanitize_for_site(public_view(event.payload))
+    if not isinstance(wire, Mapping):
+        return "payload is not an object"
+    problem = payload_problem(wire)
+    if problem is not None:
+        return f"payload has {problem}"
+    if len(json.dumps(wire, separators=(",", ":")).encode("utf-8")) > SITE_MAX_PAYLOAD_BYTES:
+        return f"payload is over {SITE_MAX_PAYLOAD_BYTES // 1024} KB"
     return None
 
 

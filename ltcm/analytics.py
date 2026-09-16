@@ -60,6 +60,8 @@ DEFAULT_WINDOW_DAYS = 7
 #: metrics block small enough that a human can read a day's numbers in one screen.
 MAX_STRING = 8000
 MAX_METRICS_BYTES = 20_000
+#: The site accepts at most this many keys in any one object (capital/schema.js MAX_PAYLOAD_KEYS).
+MAX_METRICS_KEYS = 100
 
 MONEY_PLACES = Decimal("0.0001")
 RATIO_PLACES = Decimal("0.0001")
@@ -996,69 +998,94 @@ PROFILE_METRICS = (
 )
 
 
-def metrics_block(report: Mapping[str, Any], limit: int = MAX_METRICS_BYTES) -> dict[str, Any]:
-    """The report as a flat `{dotted key: string}` block, small enough to publish.
+def metrics_block(
+    report: Mapping[str, Any], limit: int = MAX_METRICS_BYTES, max_keys: int = MAX_METRICS_KEYS
+) -> dict[str, Any]:
+    """The report as `{window, floor, profiles{name}, desks{id}, by_generation[]}` of strings,
+    small enough to publish.
 
-    Flat on purpose: a `lab.result` from a year ago has to be readable by whatever reads it then,
-    and `desk.mullins.win_rate` needs no schema. Undefined ratios are left out rather than
-    published as zero. The one exception is `by_generation`, the improvement curve's rows,
-    which the floor contract carries here as a list.
+    Grouped so that no one object carries more keys than the site accepts however many desks the
+    day had (one flat map overflowed at thirteen desks), and so that a `lab.result` from a year
+    ago reads without a schema: `metrics.desks.mullins.win_rate`. Undefined ratios are left out
+    rather than published as zero. `by_generation`, the improvement curve's rows, is the one list
+    in the block, per the floor contract. A day that had to shed detail says `truncated: "true"`.
     """
-    out: dict[str, str] = {
-        "window.start": str(report["window"]["start"]),
-        "window.end": str(report["window"]["end"]),
-        "window.days": str(report["window_days"]),
+    out: dict[str, Any] = {
+        "window": {
+            "start": _safe(str(report["window"]["start"])),
+            "end": _safe(str(report["window"]["end"])),
+            "days": _safe(str(report["window_days"])),
+        },
+        "floor": {},
+        "profiles": {},
+        "desks": {},
     }
     floor = report["floor"]
     for key in FLOOR_METRICS:
-        _put(out, f"floor.{key}", floor.get(key))
+        _put(out["floor"], key, floor.get(key))
     for profile, row in report["profiles"].items():
+        block: dict[str, str] = {}
         for key in PROFILE_METRICS:
-            _put(out, f"profile.{profile}.{key}", row.get(key))
+            _put(block, key, row.get(key))
+        if block:
+            out["profiles"][_safe(str(profile), 80)] = block
     for desk_id, row in report["desks"].items():
+        block = {}
         for key in DESK_METRICS:
-            _put(out, f"desk.{desk_id}.{key}", row.get(key))
+            _put(block, key, row.get(key))
+        if block:
+            out["desks"][_safe(str(desk_id), 80)] = block
+
+    def size() -> int:
+        return len(canonical(out).encode("utf-8"))
+
+    def quietest_desk() -> str:
+        return min(
+            out["desks"],
+            key=lambda d: (int((report["desks"].get(d) or {}).get("decisions") or 0), d),
+        )
+
     # leap: lab -- the improvement curve rides the daily result as rows, per the floor contract:
-    # the one value in the block that is not a flat string. It is the first thing shed when a
-    # busy day would not fit, because the desk numbers are what a year-old record is read for.
+    # the one value in the block that is not a string. It is the first thing shed when a busy
+    # day would not fit, because the desk numbers are what a year-old record is read for.
     curve = [dict(row) for row in (report.get("by_generation") or [])]
     if curve:
         out["by_generation"] = curve
-        if len(canonical(out).encode("utf-8")) > limit:
+        if size() > limit:
             out.pop("by_generation", None)
-            out["metrics.truncated"] = "true"
-
+            out["truncated"] = "true"
+    # More desks or profiles than the site takes keys in one object: quietest desks go first.
+    while len(out["desks"]) > max_keys:
+        out["desks"].pop(quietest_desk())
+        out["truncated"] = "true"
+    while len(out["profiles"]) > max_keys:
+        out["profiles"].pop(sorted(out["profiles"])[-1])
+        out["truncated"] = "true"
     for optional in DESK_OPTIONAL:  # shed detail before the block can overflow the site's cap
-        if len(canonical(out).encode("utf-8")) <= limit:
+        if size() <= limit:
             break
-        for desk_id in report["desks"]:
-            out.pop(f"desk.{desk_id}.{optional}", None)
-    for profile in sorted(report["profiles"]):  # then the model breakdown
-        if len(canonical(out).encode("utf-8")) <= limit:
+        for block in out["desks"].values():
+            block.pop(optional, None)
+        out["truncated"] = "true"
+    for profile in sorted(out["profiles"]):  # then the model breakdown
+        if size() <= limit:
             break
-        for key in [k for k in out if k.startswith(f"profile.{profile}.")]:
-            out.pop(key, None)
-        out["metrics.truncated"] = "true"
-    while len(canonical(out).encode("utf-8")) > limit and report["desks"]:
+        out["profiles"].pop(profile, None)
+        out["truncated"] = "true"
+    while size() > limit and out["desks"]:
         # Still too big: drop whole desks, quietest first, and say so.
-        quietest = min(
-            report["desks"],
-            key=lambda d: (int(report["desks"][d].get("decisions") or 0), d),
-        )
-        removed = [key for key in out if key.startswith(f"desk.{quietest}.")]
-        if not removed:
-            break
-        for key in removed:
-            out.pop(key, None)
-        out["metrics.truncated"] = "true"
-        report = {**report, "desks": {k: v for k, v in report["desks"].items() if k != quietest}}
+        out["desks"].pop(quietest_desk())
+        out["truncated"] = "true"
+    for group in ("profiles", "desks"):
+        if not out[group]:
+            out.pop(group)
     return out
 
 
 def _put(out: dict[str, str], key: str, value: Any) -> None:
     if value is None or value == "":
         return
-    out[_safe(key, 200)] = _safe(str(value))
+    out[_safe(key, 80)] = _safe(str(value))
 
 
 def verdict_for(report: Mapping[str, Any]) -> str:
