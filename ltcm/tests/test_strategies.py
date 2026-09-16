@@ -238,7 +238,7 @@ class BootstrapTests(StrategyCase):
         deployed = self.strategies.bootstrap(self.service.manifests)
         self.assertEqual(
             deployed,
-            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
+            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "hilibrand-2/spot_quotes", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
         )
         self.assertIn("hourly_ranges.py", self.manager.toolbox_files("scholes-2"))
         self.assertTrue(self.strategies.report(self.manifest, "hourly_ranges")["house"])
@@ -523,6 +523,25 @@ class StarterTests(unittest.TestCase):
         self.assertEqual(best["instrument"]["market_id"], "KXHIGHNY-26SEP16-B81.5")
         self.assertEqual((best["instrument"]["right"], best["limit_price"]), ("yes", "0.15"))
         self.assertIn("forecast high 81F", best["rationale"])
+
+    def test_the_spot_quoting_starter_rests_post_only_and_offers_what_it_holds(self):
+        kit = FakeKit()
+        out = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD", "ETH-USD"]})
+        bids = out["intents"]
+        self.assertEqual([i["instrument"]["symbol"] for i in bids], ["BTC-USD", "ETH-USD"])
+        btc = bids[0]
+        self.assertTrue(btc["post_only"])
+        self.assertEqual(btc["side"], "buy")
+        self.assertLess(Decimal(btc["limit_price"]), Decimal("75935"), "a bid under the touch")
+        self.assertAlmostEqual(float(btc["quantity"]) * float(btc["limit_price"]), 15.0, delta=0.1)
+        # Holding BTC: the bid gives way to a post-only offer over cost for the whole holding.
+        kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.0002", "average_cost": "75000"}]
+        kit.context["open_orders"] = [{"order_id": "ord-bid", "strategy": "spot_quotes", "symbol": "BTC-USD", "side": "buy", "limit_price": btc["limit_price"], "submitted_at": "2026-09-16T04:09:00Z"}]
+        again = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})
+        self.assertEqual(again["cancels"], ["ord-bid"], "the bid no longer belongs")
+        offer = again["intents"][0]
+        self.assertEqual((offer["side"], offer["post_only"], offer["quantity"]), ("sell", True, "0.000200"))
+        self.assertGreater(Decimal(offer["limit_price"]), Decimal("75300"), "over cost by the spread")
 
     def test_the_reversion_starter_buys_the_crash_and_leaves_the_rest(self):
         kit = FakeKit()

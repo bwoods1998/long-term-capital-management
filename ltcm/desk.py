@@ -485,6 +485,7 @@ class Desk:
         clock: Callable[[], float] = time.time,
         repo_root: str | Path = ".",
         learning: Mapping[str, Any] | None = None,
+        budget_factor: Callable[[], Any] | None = None,
     ):
         self.manifest = manifest
         self.provider = provider
@@ -492,9 +493,26 @@ class Desk:
         self.clock = clock
         self.repo_root = Path(repo_root)
         self.learning = dict(learning or {})
+        #: How much of the manifest's daily inference budget the desk earns today (the
+        #: service's fitness factor); None means all of it.
+        self.budget_factor = budget_factor
         self.playbooks = PlaybookStore(repo_root, manifest)
         self.ctx = _PlaybookRouter(ctx, self.playbooks)
         self.tool_schemas = tools_module.schemas_for(manifest)
+
+    def budget_cap(self) -> Decimal:
+        """Today's inference cap: the manifest's budget times the fitness factor, never below a
+        quarter of it, so a losing desk still gets to think about why."""
+        base = Decimal(str(self.manifest.budget_usd_per_day))
+        if self.budget_factor is None:
+            return base
+        try:
+            factor = Decimal(str(self.budget_factor()))
+        except Exception:
+            return base
+        if not factor.is_finite() or factor <= 0:
+            return base
+        return (base * factor).quantize(Decimal("0.01"))
 
     # ------------------------------------------------------------------ identity
     def session_id(self, trigger: str) -> str:
@@ -648,7 +666,7 @@ class Desk:
                     request_key=f"{session_id}:{turn}",
                     reasoning_effort=self.manifest.model.reasoning_effort,
                     max_output_tokens=self.manifest.model.max_output_tokens,
-                    desk_cap_usd_per_day=self.manifest.budget_usd_per_day,
+                    desk_cap_usd_per_day=self.budget_cap(),
                     cache_key=self.manifest.id,
                 )
             except BudgetExceeded as exc:

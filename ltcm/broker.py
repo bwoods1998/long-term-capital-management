@@ -197,8 +197,13 @@ class OrderIntent:
     purpose: str = "entry"  # "entry" | "exit"
     exit_reason: str | None = None  # target | stop | time_stop | desk, on an exit
     exit_of: str | None = None  # the entry intent an exit closes
+    #: A limit that must rest: the venue rejects it rather than let it take. The maker side
+    #: pays no fee on Kalshi and the maker rate on Coinbase, which is the point of quoting.
+    post_only: bool = False
 
     def __post_init__(self):
+        if self.post_only and self.order_type != "limit":
+            raise ValueError("only a limit order can be post-only")
         if self.side not in SIDES:
             raise ValueError("side must be buy or sell")
         if self.purpose not in PURPOSES:
@@ -259,6 +264,7 @@ class OrderIntent:
         purpose: str = "entry",
         exit_reason: str | None = None,
         exit_of: str | None = None,
+        post_only: bool = False,
     ) -> "OrderIntent":
         """Derive a stable id from the desk, session, instrument, side and nonce.
 
@@ -299,6 +305,7 @@ class OrderIntent:
             purpose=purpose,
             exit_reason=exit_reason,
             exit_of=exit_of,
+            post_only=bool(post_only),
         )
 
     @property
@@ -336,6 +343,7 @@ class OrderIntent:
             "purpose": self.purpose,
             "exit_reason": self.exit_reason,
             "exit_of": self.exit_of,
+            **({"post_only": True} if self.post_only else {}),
         }
 
     @classmethod
@@ -358,6 +366,7 @@ class OrderIntent:
             purpose=data.get("purpose") or "entry",
             exit_reason=data.get("exit_reason"),
             exit_of=data.get("exit_of"),
+            post_only=bool(data.get("post_only", False)),
         )
 
 

@@ -348,6 +348,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "order_type": {"type": "string", "enum": ["market", "limit"]},
             "limit_price": {"type": "string", "description": "Decimal string; limit orders only."},
             "time_in_force": {"type": "string", "enum": ["day", "gtc", "ioc"]},
+            "post_only": {
+                "type": "boolean",
+                "description": "A limit that must rest: rejected rather than taking. Makers pay no fee on Kalshi and the maker rate on Coinbase.",
+            },
             "rationale": {"type": "string", "description": "1-2000 characters, published."},
             # leap: exits. The plan is enforced by the floor once the entry fills: a target
             # or a stop becomes an exit order when the mark reaches it, and the time stop
@@ -730,6 +734,7 @@ def _propose(
             # live venue would have kept it, so the shadow record and the live one disagreed.
             time_in_force=arguments.get("time_in_force")
             or ("gtc" if instrument.asset_class in ("event", "crypto") else "day"),
+            post_only=bool(arguments.get("post_only", False)),
             rationale=_text(arguments, "rationale", limit=2000),
             created_at=session.now,
             session_id=session.session_id,

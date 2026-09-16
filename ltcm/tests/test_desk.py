@@ -605,3 +605,17 @@ class GuardrailCopyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BudgetCapTests(DeskCase):
+    def test_the_inference_cap_follows_the_fitness_factor_and_falls_back_to_the_manifest(self):
+        # A desk that earned a 1.5 factor thinks with 1.5x its budget; a broken or absurd factor
+        # leaves the manifest's number alone, so a bug in the ledger never silences a desk.
+        provider = FakeProvider(provider_response(calls=[tool_call("end_session", summary="done")], request_id="req-1"))
+        desk = Desk(manifest(), provider, self.ctx, self.log, clock=lambda: self.time[0], repo_root=self.root, budget_factor=lambda: Decimal("1.5"))
+        self.assertEqual(desk.budget_cap(), Decimal("4.50"))
+        desk.run_session("market_close")
+        self.assertEqual(provider.calls[0]["desk_cap_usd_per_day"], Decimal("4.50"))
+        for broken in (lambda: 0, lambda: Decimal("NaN"), lambda: (_ for _ in ()).throw(RuntimeError("ledger down")), None):
+            desk = Desk(manifest(), FakeProvider(), self.ctx, self.log, clock=lambda: self.time[0], repo_root=self.root, budget_factor=broken)
+            self.assertEqual(desk.budget_cap(), Decimal("3"))

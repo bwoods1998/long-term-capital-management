@@ -24,6 +24,13 @@
     "live_coinbase_usd": "25",
     "live_orders_per_day": 6
   },
+  "fitness": {
+    "enabled": true,
+    "window_days": 3,
+    "min_decisions": 5,
+    "min": "0.25",
+    "max": "3"
+  },
   "strategies": {
     "enabled": true,
     "max_per_desk": 3,

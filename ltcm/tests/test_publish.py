@@ -482,6 +482,24 @@ if __name__ == "__main__":  # pragma: no cover
     unittest.main()
 
 
+class WorkingRowsTests(unittest.TestCase):
+    def test_resting_orders_take_the_sites_shape_and_drop_what_it_would_refuse(self):
+        from ltcm.publish import working_rows
+
+        rows = working_rows([
+            {"order_id": "ord-1", "instrument": {"symbol": "KXBTC-26SEP1602-B75750", "asset_class": "event", "venue": "kalshi", "market_id": "KXBTC-26SEP1602-B75750", "right": "no"},
+             "side": "buy", "quantity": "13", "limit_price": "0.75", "submitted_at": "2026-09-16T05:18:32.000Z", "purpose": "entry", "strategy": "hourly_quotes", "intent_id": "oi-1"},
+            {"order_id": "ord-1", "instrument": {"symbol": "dup", "asset_class": "event", "venue": "kalshi"}, "side": "buy", "quantity": "1"},
+            {"order_id": "ord-2", "instrument": {"symbol": "BTC-USD", "asset_class": "crypto", "venue": "coinbase"}, "side": "sell", "quantity": "0.0002", "limit_price": None, "submitted_at": "bad", "purpose": "weird", "strategy": None},
+            {"order_id": "ord-3", "instrument": {"symbol": "", "asset_class": "event", "venue": "kalshi"}, "side": "buy", "quantity": "1"},
+        ], "2026-09-16T05:20:00.000Z")
+        self.assertEqual([r["order_id"] for r in rows], ["ord-1", "ord-2"])
+        self.assertEqual(rows[0]["instrument"], {"symbol": "KXBTC-26SEP1602-B75750", "asset_class": "event", "venue": "kalshi", "market_id": "KXBTC-26SEP1602-B75750", "right": "no"})
+        self.assertEqual((rows[0]["strategy"], rows[0]["intent_id"], rows[0]["purpose"]), ("hourly_quotes", "oi-1", "entry"))
+        self.assertEqual((rows[1]["limit_price"], rows[1]["submitted_at"], rows[1]["purpose"], rows[1]["strategy"]), (None, None, "entry", None))
+        self.assertEqual(working_rows("nope"), [])
+
+
 class SiteLimitsTests(unittest.TestCase):
     """The site's payload limits are mirrored here, so an oversized event is a named alert, not a 400."""
 

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from ltcm.broker import Instrument, Quote
 from ltcm.tools import ToolError  # leap: lab
 from ltcm.manifest import DeskManifest
+from ltcm.publish import jsonable
 from ltcm.service import DeskContext, Service, load_env
 from ltcm.tests.test_gateway import FakeBroker
 from ltcm.tests.test_manifest import SAMPLE
@@ -1877,3 +1878,32 @@ class LeapLabServiceTests(ServiceCase):
         self.assertEqual(str(rows[DESK]["calibration"]["brier"]), "0.0400")
         self.assertEqual(self.publisher.checkpoints[-1]["lab"]["calibration"]["n"], 1)
 
+
+
+class WorkingOrdersCheckpointTests(ServiceCase):
+    def test_the_desk_row_carries_its_resting_orders_and_its_budget_factor(self):
+        # The site shows the book as it stands, so a visitor never opens Kalshi to see what the
+        # desk is bidding. Both fields ride only when the deployment publishes strategies.
+        self.service.close()
+        self.service = self.build(checkpoint_strategies=True)
+        row = {
+            "order_id": "ord-7", "intent_id": "oi-7", "market_id": "KXBTC-1", "symbol": "KXBTC-1", "right": "no",
+            "asset_class": "event", "venue": "kalshi", "side": "buy", "purpose": "entry", "strategy": "hourly_quotes",
+            "quantity": "13", "limit_price": "0.75", "submitted_at": "2026-09-13T13:00:00.000Z",
+        }
+        self.service.strategies.open_orders_for = lambda manifest: [dict(row)] if manifest.id == DESK else []
+        self.tick()
+        desk = {r["id"]: r for r in self.publisher.checkpoints[-1]["desks"]}[DESK]
+        self.assertEqual(jsonable(desk["working"]), [{
+            "order_id": "ord-7",
+            "instrument": {"symbol": "KXBTC-1", "asset_class": "event", "venue": "kalshi", "market_id": "KXBTC-1", "right": "no"},
+            "side": "buy", "quantity": "13", "limit_price": "0.75", "submitted_at": "2026-09-13T13:00:00.000Z",
+            "purpose": "entry", "strategy": "hourly_quotes", "intent_id": "oi-7",
+        }])
+        self.assertEqual(desk["budget_factor"], "1", "no record yet: the manifest's budget as written")
+        self.service.close()
+        self.service = self.build(checkpoint_strategies=False)
+        self.tick()
+        desk = {r["id"]: r for r in self.publisher.checkpoints[-1]["desks"]}[DESK]
+        self.assertNotIn("working", desk)
+        self.assertNotIn("budget_factor", desk)

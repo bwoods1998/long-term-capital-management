@@ -104,7 +104,8 @@ def order_configuration(intent: OrderIntent) -> dict[str, Any]:
         "limit_limit_gtc": {
             "base_size": size,
             "limit_price": text(intent.limit_price),
-            "post_only": False,
+            # A post-only limit rests or is rejected; it never takes, so it pays the maker rate.
+            "post_only": bool(getattr(intent, "post_only", False)),
         }
     }
 

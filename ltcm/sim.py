@@ -486,6 +486,15 @@ class ShadowBook:
                     return self._reject(order, "quote carries no usable reference price")
                 price = self._with_slippage(reference, intent.side)
                 return self._fill(order, price, stamp)
+            if getattr(intent, "post_only", False) and quote is not None:
+                # A post-only limit that would take is refused, as the venues refuse it.
+                reference = quote.reference(intent.side)
+                crosses = reference is not None and reference > 0 and (
+                    (intent.side == "buy" and reference <= order.limit_price)
+                    or (intent.side == "sell" and reference >= order.limit_price)
+                )
+                if crosses:
+                    return self._reject(order, "post-only order would cross the book")
             filled = self._try_limit(order, quote, stamp, aggressive=True)
             if filled is not None:
                 return filled

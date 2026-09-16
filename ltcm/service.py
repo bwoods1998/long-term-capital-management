@@ -1772,6 +1772,7 @@ class Service:
                 clock=self.clock,
                 repo_root=self.root,
                 learning=self.config.get("learning") or None,
+                budget_factor=lambda desk_id=manifest.id: self.fitness_factor(desk_id),
             )
         except Exception as exc:
             self.alert("warning", f"desk runtime for {manifest.id} unavailable: {exc}")
@@ -2116,6 +2117,70 @@ class Service:
             "persona_trait": str(mutation.get("persona_trait") or "")[:200],
             "model_changed": bool(mutation.get("model_changed")),
         }
+
+    def _working_of(self, manifest: DeskManifest) -> list[dict[str, Any]]:
+        """The desk's resting orders for the checkpoint: what it is bidding and offering now."""
+        runner = getattr(self, "strategies", None)
+        if runner is None:
+            return []
+        try:
+            rows = runner.open_orders_for(manifest)
+        except Exception:
+            return []
+        out: list[dict[str, Any]] = []
+        for row in rows[:20]:
+            out.append(
+                {
+                    "order_id": row.get("order_id"),
+                    "instrument": {
+                        "symbol": row.get("symbol"),
+                        "asset_class": row.get("asset_class"),
+                        "venue": row.get("venue") or (manifest.venues[0] if manifest.venues else None),
+                        **({"market_id": row.get("market_id")} if row.get("market_id") else {}),
+                        **({"right": row.get("right")} if row.get("right") else {}),
+                    },
+                    "side": row.get("side"),
+                    "quantity": row.get("quantity"),
+                    "limit_price": row.get("limit_price") or None,
+                    "submitted_at": row.get("submitted_at"),
+                    "purpose": row.get("purpose") or "entry",
+                    "strategy": row.get("strategy"),
+                    "intent_id": row.get("intent_id"),
+                }
+            )
+        return out
+
+    def fitness_factor(self, desk_id: str) -> Decimal:
+        """How much of its inference budget a desk earns today: 1 with no record, up to `max`
+        when its settled P&L per Sail dollar over `window_days` is positive, down to `min` when
+        it is negative. Capital already follows results through the committee; this makes the
+        model spend follow them too, so a losing desk thinks less and a winning desk more."""
+        policy = dict(self.config.get("fitness") or {})
+        if not bool(policy.get("enabled", True)):
+            return Decimal(1)
+        at = self.now()
+        cache = getattr(self, "_fitness_cache", None)
+        if cache is None or cache.get("hour") != at[:13]:
+            try:
+                from .analytics import ResultsLedger
+
+                report = ResultsLedger(self.log, self.manifests).report(int(policy.get("window_days", 3)), at)
+                cache = {"hour": at[:13], "desks": dict(report.get("desks") or {})}
+            except Exception:
+                cache = {"hour": at[:13], "desks": {}}
+            self._fitness_cache = cache
+        row = cache["desks"].get(desk_id) or {}
+        try:
+            decisions = int(row.get("decisions") or 0)
+            per_dollar = Decimal(str(row.get("pnl_per_inference_dollar") or "0"))
+        except (TypeError, ValueError, ArithmeticError):
+            return Decimal(1)
+        if decisions < int(policy.get("min_decisions", 5)):
+            return Decimal(1)
+        low = Decimal(str(policy.get("min", "0.25")))
+        high = Decimal(str(policy.get("max", "3")))
+        factor = Decimal(1) + per_dollar
+        return max(low, min(high, factor)).quantize(Decimal("0.01"))
 
     def _strategies_of(self, manifest: DeskManifest) -> list[dict[str, Any]]:
         """leap: strategies -- the desk's deployed strategies with their records, for the checkpoint."""
@@ -2645,6 +2710,8 @@ class Service:
                     "calibration": self._calibration_of(desk_id, at),
                     # leap: strategies -- the code trading for the desk, with each one's record.
                     **({"strategies": self._strategies_of(manifest)} if self.config.get("checkpoint_strategies") else {}),
+                    # The desk's resting orders, so the owner sees the book without the venue.
+                    **({"working": self._working_of(manifest), "budget_factor": text(self.fitness_factor(desk_id))} if self.config.get("checkpoint_strategies") else {}),
                 }
             )
         shadow_count = sum(1 for desk_id in self.manifests if desk_id not in live and desk_id not in retired)

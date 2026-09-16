@@ -400,3 +400,36 @@ markets only shadow desks held never settled, because `poll_settlements` reads t
 settlements feed. All four fixed in the commit after 9508900: YES-scale reconciliation, exits and
 shadows past the floor breaker, maker fills free, and `settle_finalized_markets`, which reads the
 market itself once it is past its close.
+
+## Addendum, 06:10 UTC Sept 16: the book on the site, maker orders everywhere, budget follows results
+
+Blake's morning notes: trade mails need the desk's reasoning, the site must show positions and
+the portfolio so he never opens Kalshi or Coinbase, and the deep questions (why no Coinbase
+orders, why crypto on Kalshi, are desks rewarded and punished). This batch ships the plumbing
+those answers need.
+
+- **Working orders on the site.** Each desk row may carry `working`: up to twenty resting
+  orders `{order_id, instrument, side, quantity, limit_price, submitted_at, purpose, strategy,
+  intent_id}`, read from the strategies runner's `open_orders_for` (which now names the
+  asset class, venue, purpose and the strategy that placed each order). The desk page shows
+  "Working orders" under the holdings; the floor page lists every resting order across desks
+  with the partner, live/shadow, side, leg and the strategy. Site validator: `validWorkingOrder`
+  (`capital/schema.js`), deployed as version 7088d907 before the floor sent the field, since an
+  unknown field rejects the whole checkpoint.
+- **Post-only orders.** `OrderIntent.post_only` (limit only) reaches Kalshi (`post_only`) and
+  Coinbase (`limit_limit_gtc.post_only`); the shadow book rejects a crossing post-only order
+  the way the venues do. Makers pay nothing on Kalshi and less on Coinbase, so every quoting
+  strategy now rests instead of crossing.
+- **`spot_quotes` starter (Coinbase).** Post-only bids a little under mid and offers over
+  cost on the crypto desk's pairs, cancel/replace each run. This is the answer to "why no
+  Coinbase orders": the sessions never proposed a Coinbase order that survived the taker fee,
+  so the crypto family bet BTC/ETH ranges on Kalshi where a maker pays $0. Now both venues
+  see the family's flow and the records decide which earns more per dollar.
+- **Inference budget follows results.** `Service.fitness_factor(desk)`: settled P&L per Sail
+  dollar over `fitness.window_days` (3) from the ResultsLedger, 1 with fewer than
+  `min_decisions` (5), clamped to `[0.25, 3]`, cached per hour. `Desk.budget_cap()` multiplies
+  the manifest's daily inference budget by it, so a losing desk thinks a quarter as much and a
+  winning desk three times as much, on top of the committee moving capital. The factor rides
+  each desk row as `budget_factor` so the site can show who earned their compute.
+
+Tests: site 53 pass; runtime suite rerun below.

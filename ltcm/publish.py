@@ -738,6 +738,54 @@ def strategy_rows(value: Any, published_at: str | None = None) -> list[dict[str,
     return out
 
 
+def working_rows(value: Any, published_at: str | None = None) -> list[dict[str, Any]]:
+    """The desk's resting orders in the site's shape: at most twenty of `{order_id, instrument,
+    side, quantity, limit_price, submitted_at, purpose, strategy, intent_id}`."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in value:
+        if not isinstance(row, Mapping):
+            continue
+        order_id = str(row.get("order_id") or "")
+        if not order_id or order_id in seen or len(order_id) > 120:
+            continue
+        instrument = row.get("instrument") if isinstance(row.get("instrument"), Mapping) else {}
+        symbol = str(instrument.get("symbol") or "")
+        asset_class = str(instrument.get("asset_class") or "")
+        venue = str(instrument.get("venue") or "")
+        side = str(row.get("side") or "")
+        if not symbol or not asset_class or not venue or side not in ("buy", "sell"):
+            continue
+        quantity = floor_at_zero(row.get("quantity"))
+        if quantity is None:
+            continue
+        submitted = row.get("submitted_at")
+        submitted = not_after(submitted, published_at) if isinstance(submitted, str) and AT_PATTERN.match(submitted) else None
+        seen.add(order_id)
+        wire_instrument: dict[str, Any] = {"symbol": symbol[:80], "asset_class": asset_class[:24], "venue": venue}
+        for extra in ("market_id", "right"):
+            if instrument.get(extra):
+                wire_instrument[extra] = str(instrument[extra])[:80]
+        out.append(
+            {
+                "order_id": order_id,
+                "instrument": wire_instrument,
+                "side": side,
+                "quantity": quantity,
+                "limit_price": None if row.get("limit_price") in (None, "") else floor_at_zero(row.get("limit_price")),
+                "submitted_at": submitted,
+                "purpose": "exit" if row.get("purpose") == "exit" else "entry",
+                "strategy": (str(row["strategy"])[:40] if row.get("strategy") else None),
+                "intent_id": (str(row["intent_id"])[:120] if row.get("intent_id") else None),
+            }
+        )
+        if len(out) >= 20:
+            break
+    return out
+
+
 def calibration_block(value: Any) -> dict[str, Any] | None:
     """leap: lab -- `{n, brier, since}` when a desk has scored forecasts, else None."""
     if not isinstance(value, Mapping) or not int(value.get("n") or 0):
@@ -860,6 +908,8 @@ def checkpoint_body(
                 **({"calibration": calibration_block(desk["calibration"])} if calibration_block(desk.get("calibration")) else {}),
                 # leap: strategies -- optional; an older floor, or a desk with none, omits it.
                 **({"strategies": strategy_rows(desk["strategies"], published_at)} if strategy_rows(desk.get("strategies"), published_at) else {}),
+                **({"working": working_rows(desk["working"], published_at)} if working_rows(desk.get("working"), published_at) else {}),
+                **({"budget_factor": desk.get("budget_factor")} if desk.get("budget_factor") not in (None, "") else {}),
             }
             for desk in desks
         ],

@@ -393,6 +393,8 @@ class KalshiBroker:
         }
         if intent.side == "sell":
             body["reduce_only"] = True
+        if getattr(intent, "post_only", False):
+            body["post_only"] = True  # rest or be rejected; a maker pays no fee here
         return body
 
     def price_ranges(self, ticker: str) -> tuple[dict[str, Decimal], ...]:

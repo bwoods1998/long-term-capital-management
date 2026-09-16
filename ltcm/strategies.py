@@ -70,7 +70,7 @@ STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": "daily_temps"}
 #: A second house strategy for a family: the ranges family also quotes the hourly buckets on
 #: both legs at a spread, the maker side of the same market its starter takes.
-SECOND_STARTERS = {"ranges": "hourly_quotes"}
+SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
 #: A shadow desk's starter explores, and each shadow desk of a family explores differently:
 #: the variants are dealt round-robin by the desk's id, so the family's record compares
 #: settings on the same markets at the same hours. The live desk keeps the code's defaults.
@@ -92,22 +92,34 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
         {"min_edge": 0.01, "sigma_day_ahead": 2.0},
     ],
 }
-QUOTE_VARIANTS: list[dict[str, Any]] = [
-    {"spread": 0.04, "buckets": 2},
-    {"spread": 0.06, "buckets": 2},
-    {"spread": 0.03, "buckets": 3},
-]
+QUOTE_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "ranges": [
+        {"spread": 0.04, "buckets": 2},
+        {"spread": 0.06, "buckets": 2},
+        {"spread": 0.03, "buckets": 3},
+    ],
+    "crypto": [
+        {"spread": 0.004},
+        {"spread": 0.006, "requote_seconds": 1800},
+        {"spread": 0.003, "symbols": ["BTC-USD", "ETH-USD"]},
+    ],
+}
+#: What the live desk's quoting starter runs with: one bucket on Kalshi, two coins on Coinbase.
+QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
+    "ranges": {"buckets": 1},
+    "crypto": {"symbols": ["BTC-USD", "ETH-USD"]},
+}
 #: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower;
 #: a day's temperature forecast moves a few times a day.
-STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "hourly_quotes": 300}
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "hourly_quotes": 300, "spot_quotes": 300}
 
 
 def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:
     """The house params for one desk: the code's defaults for a live desk, a dealt variant for
     a shadow desk. The deal is stable per desk id, so a restart changes nothing."""
     if manifest.live:
-        return {"buckets": 1} if quotes else {}
-    variants = QUOTE_VARIANTS if quotes else STARTER_VARIANTS.get(family) or [{}]
+        return dict(QUOTE_LIVE_PARAMS.get(family) or {}) if quotes else {}
+    variants = (QUOTE_VARIANTS.get(family) if quotes else STARTER_VARIANTS.get(family)) or [{}]
     index = sum(ord(ch) for ch in manifest.id) % len(variants)
     return dict(variants[index])
 
@@ -363,6 +375,9 @@ class Strategies:
                     "market_id": inst.get("market_id"),
                     "symbol": inst.get("symbol"),
                     "right": inst.get("right"),
+                    "asset_class": inst.get("asset_class"),
+                    "venue": inst.get("venue") or row.get("venue"),
+                    "purpose": row.get("purpose") or "entry",
                     "side": row.get("side"),
                     "quantity": str(row.get("quantity") or ""),
                     "limit_price": str(row.get("limit_price") or ""),
