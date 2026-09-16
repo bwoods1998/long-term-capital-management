@@ -929,6 +929,7 @@ def checkpoint_body(
                 "equity": floor_at_zero(desk.get("equity")),
                 "cash": floor_at_zero(desk.get("cash")),
                 "daily_pnl": desk.get("daily_pnl"),
+                **({"pnl_usd": desk.get("pnl_usd")} if desk.get("pnl_usd") is not None else {}),
                 "return_pct": desk.get("return_pct"),
                 "max_drawdown_pct": unsigned(desk.get("max_drawdown_pct")),
                 "days_live": desk.get("days_live"),

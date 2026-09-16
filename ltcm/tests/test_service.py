@@ -2037,3 +2037,11 @@ class ReconcileTests(ServiceCase):
         self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 19, 30)), [], "once an hour")
         self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 20, 6)), ["kalshi"])
         self.assertFalse(self.service.gateway.reconciliation_mismatch)
+
+
+class LifetimePnlTests(ServiceCase):
+    def test_the_desk_row_carries_equity_less_net_capital_flows(self):
+        self.tick()
+        row = {r["id"]: r for r in self.publisher.checkpoints[-1]["desks"]}[DESK]
+        self.assertIn("pnl_usd", row)
+        self.assertEqual(Decimal(str(row["pnl_usd"])), Decimal(str(row["equity"])) - Decimal(str(row["capital_usd"])), "a fresh desk: equity less its allocation")

@@ -2907,6 +2907,9 @@ class Service:
                     "equity": state.equity,
                     "cash": state.cash,
                     "daily_pnl": state.daily_pnl,
+                    # Lifetime P&L: equity less every capital flow the committee made, so a resized
+                    # sleeve never reads as a gain or a loss on the site.
+                    "pnl_usd": state.equity - state.net_deposits,
                     "return_pct": state.time_weighted_return_pct,
                     "max_drawdown_pct": state.max_drawdown_pct,
                     "days_live": state.days_live,
