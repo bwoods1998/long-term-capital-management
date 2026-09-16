@@ -41,6 +41,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -377,6 +378,9 @@ class Strategies:
         self.clock = clock
         self._bootstrapped = False
         self._bootstrapped_ids: set[str] = set()
+        #: leap: throughput -- desk id -> the run in flight for it, when runs are parallel.
+        self._inflight: dict[str, Future] = {}
+        self._pool: ThreadPoolExecutor | None = None
 
     # ------------------------------------------------------------------ helpers
     def sandboxes(self) -> Any:
@@ -752,17 +756,67 @@ class Strategies:
             except Exception as exc:
                 self.service.alert("warning", f"strategy starters failed: {type(exc).__name__}")
         out: list[dict[str, Any]] = []
-        for manifest, name, row in self.due(manifests, at)[: int(self.config["max_runs_per_tick"])]:
-            try:
-                out.append(self.run_one(manifest, name, row, at))
-            except Exception as exc:
-                self.service.alert("warning", f"strategy {manifest.id}/{name} failed: {type(exc).__name__}")
-                self.store.update(manifest.id, name, last_run_at=at, errors=int(row.get("errors") or 0) + 1, last_error=f"{type(exc).__name__}")
+        workers = int(self.config.get("parallel_runs") or 1)
+        if workers <= 1:
+            for manifest, name, row in self.due(manifests, at)[: int(self.config["max_runs_per_tick"])]:
+                result = self._run_guarded(manifest, name, row, at)
+                if result is not None:
+                    out.append(result)
+        else:
+            # leap: throughput -- each desk has its own sandbox, so desks run side by side, one
+            # run per desk at a time, off the tick. Until Sept 16, 2026 at most four runs a tick
+            # ran one after another (3 to 13 seconds each) and five-minute strategies ran every
+            # 17 to 32 minutes: a third to a sixth of the rules the desks deployed.
+            out.extend(self._collect())
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="strategy")
+            busy = {desk_id for desk_id, future in self._inflight.items() if not future.done()}
+            for manifest, name, row in self.due(manifests, at):
+                if len(busy) >= workers:
+                    break
+                if manifest.id in busy:
+                    continue
+                self._inflight[manifest.id] = self._pool.submit(self._run_guarded, manifest, name, row, at)
+                busy.add(manifest.id)
         try:
             self.promote(manifests, at)  # leap: promotion
         except Exception as exc:
             self.service.alert("warning", f"strategy promotion failed: {type(exc).__name__}")
         return out
+
+    def _run_guarded(self, manifest: DeskManifest, name: str, row: Mapping[str, Any], at: str) -> dict[str, Any] | None:
+        try:
+            return self.run_one(manifest, name, row, at)
+        except Exception as exc:
+            self.service.alert("warning", f"strategy {manifest.id}/{name} failed: {type(exc).__name__}")
+            self.store.update(manifest.id, name, last_run_at=at, errors=int(row.get("errors") or 0) + 1, last_error=f"{type(exc).__name__}")
+            return None
+
+    def _collect(self) -> list[dict[str, Any]]:
+        """The results of the parallel runs that finished since the last tick."""
+        out: list[dict[str, Any]] = []
+        for desk_id, future in list(self._inflight.items()):
+            if not future.done():
+                continue
+            self._inflight.pop(desk_id, None)
+            try:
+                result = future.result()
+            except Exception:
+                result = None
+            if result is not None:
+                out.append(result)
+        return out
+
+    def wait(self, timeout: float = 120.0) -> list[dict[str, Any]]:
+        """Block until the runs in flight finish (tests, shutdown); returns their results."""
+        deadline = time.time() + timeout
+        for future in list(self._inflight.values()):
+            remaining = max(0.0, deadline - time.time())
+            try:
+                future.result(timeout=remaining)
+            except Exception:
+                pass
+        return self._collect()
 
     # ------------------------------------------------------------------ promotion
     def promote(self, manifests: Mapping[str, DeskManifest], at: str) -> list[dict[str, Any]]:

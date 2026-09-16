@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import time
 import tempfile
 import unittest
 from decimal import Decimal
@@ -362,6 +363,39 @@ class CancelAndRecordTests(StrategyCase):
         row = self.strategies.report(self.manifest, "edge")
         self.assertEqual((row["fills"], row["filled_notional_usd"], row["fees_usd"]), (1, "13.00", "0.32"))
         self.assertEqual((row["settled"], row["wins"], row["settled_pnl_usd"]), (2, 1, "2.50"))
+
+
+class ParallelRunTests(StrategyCase):
+    def test_desks_run_side_by_side_one_run_per_desk(self):
+        import threading as _threading
+
+        gate = _threading.Event()
+        started = []
+        other = manifest(id="scholes-3")
+        self.service.manifests[other.id] = other
+        for desk in (self.manifest, other):
+            self.manager.files[desk.id] = {"edge.py": "def decide(kit, params):\n    return []\n", "second.py": "def decide(kit, params):\n    return []\n"}
+            self.strategies.deploy(desk, "edge", 300, {})
+            self.strategies.deploy(desk, "second", 300, {})
+        real = self.strategies.run_one
+
+        def slow(manifest_, name, row, at):
+            started.append((manifest_.id, name))
+            gate.wait(5)
+            return real(manifest_, name, row, at)
+
+        self.strategies.run_one = slow
+        self.strategies.config["parallel_runs"] = 4
+        self.assertEqual(self.strategies.tick(self.service.manifests, NOW), [], "dispatched, not awaited")
+        deadline = time.time() + 5
+        while len(started) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(sorted(d for d, _ in started), ["scholes-2", "scholes-3"], "one run per desk, both desks at once")
+        self.strategies.tick(self.service.manifests, NOW)
+        self.assertEqual(len(started), 2, "a desk with a run in flight is not dispatched again")
+        gate.set()
+        done = self.strategies.wait(10)
+        self.assertEqual(sorted(r["desk_id"] for r in done), ["scholes-2", "scholes-3"])
 
 
 class RetryTests(StrategyCase):
