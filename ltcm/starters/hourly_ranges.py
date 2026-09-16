@@ -21,7 +21,12 @@ from datetime import datetime, timezone
 DEFAULTS = {
     "series": ["KXBTC", "KXETH"],
     "symbols": {"KXBTC": "BTC-USD", "KXETH": "ETH-USD"},
-    "bars_limit": 48,
+    # Volatility from the last three hours of five-minute bars. Two days of hourly bars
+    # overstated sub-hour volatility in the quiet hours on Sept 16, 2026: the model priced the
+    # at-the-money bucket at 0.21-0.28 against a market at 0.33-0.36, bought NO on both BTC
+    # and ETH, and the market was right six times out of seven.
+    "vol_interval": "5m",
+    "vol_bars": 36,
     "min_minutes": 8,
     "max_minutes": 55,
     "min_edge": 0.02,
@@ -29,7 +34,9 @@ DEFAULTS = {
     "notional_usd": None,
     "max_intents": 2,
     "max_quotes": 12,
+    "max_open_per_event": 2,
 }
+SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "60m": 3600}
 RANGE = re.compile(r"\$?([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:to|-|–)\s*\$?([0-9][0-9,]*(?:\.[0-9]+)?)")
 
 
@@ -67,8 +74,9 @@ def _fee(price):
     return math.ceil(0.07 * price * (1.0 - price) * 100.0) / 100.0
 
 
-def _hourly_sigma(kit, symbol, limit):
-    bars = kit.bars(symbol, "1h", limit) or []
+def _hourly_sigma(kit, symbol, limit, interval="1h"):
+    """Realized volatility per hour from `limit` bars of `interval`."""
+    bars = kit.bars(symbol, interval, limit) or []
     closes = [_num(b.get("close")) for b in bars if _num(b.get("close"))]
     if len(closes) < 12:
         return None
@@ -77,7 +85,8 @@ def _hourly_sigma(kit, symbol, limit):
         return None
     mean = sum(rets) / len(rets)
     var = sum((r - mean) ** 2 for r in rets) / max(1, len(rets) - 1)
-    return math.sqrt(var)
+    per_bar = math.sqrt(var)
+    return per_bar * math.sqrt(3600.0 / SECONDS.get(str(interval), 3600))
 
 
 def decide(kit, params):
@@ -92,16 +101,25 @@ def decide(kit, params):
         if not symbol:
             continue
         spot = _num((kit.quote(symbol) or {}).get("last")) or _num((kit.quote(symbol) or {}).get("bid"))
-        sigma_h = _hourly_sigma(kit, symbol, int(p["bars_limit"]))
+        sigma_h = _hourly_sigma(kit, symbol, int(p.get("vol_bars") or p.get("bars_limit") or 36), str(p.get("vol_interval") or "5m"))
         if not spot or not sigma_h:
             kit.say(f"{series}: no spot or volatility ({spot}, {sigma_h})")
             continue
+        kit.say(f"{series}: spot {spot:,.0f}, vol {sigma_h * 100:.2f}%/h from {p.get('vol_bars')} x {p.get('vol_interval')}")
         # The series listing carries the buckets and their bounds but stale or empty prices; the
         # live book is one call per market, so only the buckets nearest spot are quoted.
         buckets = []
+        # No more than a couple of positions on one settlement: six at-the-money NO bets on one
+        # hour cost a shadow desk half its book on Sept 16, 2026.
+        open_by_event = {}
+        for x in ctx.get("positions") or []:
+            code = "-".join(str(x.get("market_id") or "").split("-")[:2])
+            open_by_event[code] = open_by_event.get(code, 0) + 1
         for market in kit.kalshi_series(series):
             ticker = str(market.get("ticker") or "")
             if ticker in held or str(market.get("status") or "open") not in ("open", "active"):
+                continue
+            if open_by_event.get("-".join(ticker.split("-")[:2]), 0) >= int(p["max_open_per_event"]):
                 continue
             close = _when(market.get("close_time"))
             bounds = _bounds(market)

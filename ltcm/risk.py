@@ -80,9 +80,14 @@ def reference_price(intent: OrderIntent, ctx: RiskContext) -> Decimal | None:
 
 
 def notional_of(intent: OrderIntent, ctx: RiskContext) -> Decimal | None:
+    """The cash the order can commit. A limit buy never pays above its limit, so a bid resting
+    under the ask is sized at the bid, not at the ask it does not cross (a $10 resting quote
+    read as $18 against the ask on Sept 16, 2026); a limit sell never gives below its limit."""
     price = reference_price(intent, ctx)
     if price is None:
         return None
+    if intent.order_type == "limit" and intent.limit_price is not None and intent.limit_price > 0:
+        price = min(price, intent.limit_price) if intent.side == "buy" else max(price, intent.limit_price)
     return intent.quantity * price * intent.instrument.multiplier
 
 

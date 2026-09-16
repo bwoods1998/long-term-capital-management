@@ -116,6 +116,14 @@ class RiskEngineTests(unittest.TestCase):
         self.assertFalse([r for r in check("0.07").reasons if "deviates" in r or "through" in r])
         self.assertFalse([r for r in check("0.01").reasons if "through" in r])  # a resting bid
         self.assertIn("limit price is 0.08 through the ask of 0.04", check("0.12").reasons)
+        # A resting bid commits its limit, not the ask it does not cross: 90 x 0.11 is $9.90 of
+        # cash, whatever the ask says.
+        wide = Quote(market, Decimal("0.10"), Decimal("0.20"), Decimal("0.20"), "2026-09-14T14:30:00.000Z", "kalshi", False)
+        ctx = context(manifest=manifest(venues=["kalshi"], instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []}),
+                      quote=wide, venue_capabilities={"event", "limit", "shadow"}, market_open=None, desk_equity=Decimal("87"), desk_cash=Decimal("87"))
+        bid = self.engine.check(intent(instrument=market, quantity="90", order_type="limit", limit_price="0.11"), ctx)
+        self.assertFalse([r for r in bid.reasons if "notional" in r], bid.reasons)
+        self.assertEqual(bid.notional, Decimal("9.90"))
 
     def test_exposure_rules(self):
         decision = self.engine.check(intent(quantity="3"), context(desk_cash=Decimal("100")))

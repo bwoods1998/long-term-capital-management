@@ -387,7 +387,9 @@ class FakeKit:
 
     def bars(self, symbol, interval="1h", limit=60, asset_class="crypto", venue="coinbase"):
         base = 75000.0 if symbol.startswith("BTC") else 2400.0
-        closes = [base * (1 + 0.001 * ((i * 7) % 5 - 2)) for i in range(limit)]  # a quiet tape
+        seconds = {"1m": 60, "5m": 300, "15m": 900}.get(interval, 3600)
+        wiggle = 0.001 * (seconds / 3600) ** 0.5  # a quiet tape at any bar size
+        closes = [base * (1 + wiggle * ((i * 7) % 5 - 2)) for i in range(limit)]
         if symbol.startswith("SOL"):  # a crash: the last close far below the mean
             closes[-1] = base * 0.9
         return [{"close": f"{c:.2f}"} for c in closes]

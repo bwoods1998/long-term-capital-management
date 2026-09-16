@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 DEFAULTS = {
     "series": ["KXBTC", "KXETH"],
     "symbols": {"KXBTC": "BTC-USD", "KXETH": "ETH-USD"},
-    "bars_limit": 48,
+    "vol_interval": "5m",
+    "vol_bars": 36,
     "min_minutes": 12,
     "max_minutes": 58,
     "spread": 0.04,
@@ -63,8 +64,13 @@ def _phi(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
-def _hourly_sigma(kit, symbol, limit):
-    bars = kit.bars(symbol, "1h", limit) or []
+SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "60m": 3600}
+
+
+def _hourly_sigma(kit, symbol, limit, interval="5m"):
+    """Realized volatility per hour from `limit` bars of `interval`; the last three hours of
+    five-minute bars by default, since two days of hourly bars overstated sub-hour volatility."""
+    bars = kit.bars(symbol, interval, limit) or []
     closes = [_num(b.get("close")) for b in bars if _num(b.get("close"))]
     if len(closes) < 12:
         return None
@@ -72,7 +78,8 @@ def _hourly_sigma(kit, symbol, limit):
     if len(rets) < 10:
         return None
     mean = sum(rets) / len(rets)
-    return math.sqrt(sum((r - mean) ** 2 for r in rets) / max(1, len(rets) - 1))
+    per_bar = math.sqrt(sum((r - mean) ** 2 for r in rets) / max(1, len(rets) - 1))
+    return per_bar * math.sqrt(3600.0 / SECONDS.get(str(interval), 3600))
 
 
 def _price(value, low=0.01, high=0.97):
@@ -94,7 +101,7 @@ def decide(kit, params):
             continue
         quote = kit.quote(symbol) or {}
         spot = _num(quote.get("last")) or _num(quote.get("bid"))
-        sigma_h = _hourly_sigma(kit, symbol, int(p["bars_limit"]))
+        sigma_h = _hourly_sigma(kit, symbol, int(p.get("vol_bars") or 36), str(p.get("vol_interval") or "5m"))
         if not spot or not sigma_h:
             kit.say(f"{series}: no spot or volatility")
             continue

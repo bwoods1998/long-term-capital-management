@@ -72,9 +72,10 @@ SECOND_STARTERS = {"ranges": "hourly_quotes"}
 #: settings on the same markets at the same hours. The live desk keeps the code's defaults.
 STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "ranges": [
-        {"min_edge": 0.0, "shrink": 0.3, "max_intents": 3},
-        {"min_edge": 0.01, "shrink": 0.5, "max_intents": 3},
-        {"min_edge": 0.0, "shrink": 0.15, "max_intents": 3, "bars_limit": 24},
+        # The experiment is the volatility window: five-minute, fifteen-minute and hourly bars.
+        {"min_edge": 0.0, "shrink": 0.5, "vol_interval": "5m", "vol_bars": 36},
+        {"min_edge": 0.01, "shrink": 0.5, "vol_interval": "15m", "vol_bars": 32},
+        {"min_edge": 0.02, "shrink": 0.7, "vol_interval": "1h", "vol_bars": 24},
     ],
     "crypto": [
         {"z_entry": 1.5},
