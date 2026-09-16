@@ -723,7 +723,13 @@ class Lab:
         return "\n".join(rows) if rows else "(no activity in the window)"
 
     def _reports_block(self) -> str:
-        events = self.log.read(kind="lab.result", limit=10_000, newest=True)[-3:]
+        """The newest three lab reports. The Firm Mind publishes a `lab.result` every time its book
+        changes (`mind:result:<at>`); three of those in a day had pushed the daily report out of
+        the lab's own packet, so they are not lab reports here."""
+        events = [
+            e for e in self.log.read(kind="lab.result", limit=10_000, newest=True)
+            if not str(e.id).startswith("mind:")
+        ][-3:]
         if not events:
             return "(none yet)"
         return "\n".join(f"- {e.at[:10]}: {str(e.payload.get('verdict'))[:400]}" for e in events)

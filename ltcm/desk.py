@@ -1023,8 +1023,9 @@ def _calls_block(rows: Iterable[Any]) -> str:
 
 
 def _outcomes_block(outcomes: Iterable[Any]) -> str:
-    """One line per scored outcome, whole. A `desk.outcome` carries nine fields and the last
-    of them is the desk's own rationale, which is the field a post-mortem most needs."""
+    """One line per scored outcome, whole. A `desk.outcome` carries up to thirteen fields (the
+    entry fees and the open joined them on Sept 16, 2026) and one of them is the desk's own
+    rationale, which is the field a post-mortem most needs."""
     lines = []
     for outcome in _rows(outcomes, "outcomes", "fills", "trades"):
         if not isinstance(outcome, dict):
@@ -1033,7 +1034,7 @@ def _outcomes_block(outcomes: Iterable[Any]) -> str:
             "- "
             + ", ".join(
                 f"{key}: {value}"
-                for key, value in list(outcome.items())[:12]
+                for key, value in list(outcome.items())[:16]
                 if not str(key).startswith("_")
             )
         )

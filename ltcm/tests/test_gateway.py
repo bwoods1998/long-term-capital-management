@@ -838,6 +838,65 @@ class SpotOutcomeTests(GatewayCase):
         self.gateway.ingest_fills("shadow")
         self.assertEqual(self.outcomes()[0]["rationale_excerpt"], "momentum after the halving, out in a day")
 
+    def record_intent(self, intent_id, said, at, side="buy", purpose="entry", exit_of=None):
+        self.log.append(
+            "desk:" + DESK, "desk.intent",
+            {"intent_id": intent_id, "desk_id": DESK, "instrument": self.BTC.to_dict(), "side": side, "quantity": "0.01",
+             "order_type": "market", "limit_price": None, "time_in_force": "ioc", "rationale": said, "session_id": None,
+             "created_at": at, "purpose": purpose, "exit_of": exit_of},
+            id="intent:" + intent_id, at=at,
+        )
+
+    def test_an_exit_engines_sell_keeps_the_sentence_that_opened_the_position(self):
+        # The exit's own intent is newer, and until Sept 16, 2026 it lent the outcome its "Floor
+        # exit of ..." sentence, so every stopped-out strategy position read as discretionary.
+        self.record_intent("oi-open", "[strategy momo] breakout above the range", "2026-09-14T12:30:00.000Z")
+        self.record_intent("oi-exit", "Floor exit of oi-open: the mark reached the stop at 59000.", "2026-09-14T14:59:00.000Z",
+                           side="sell", purpose="exit", exit_of="oi-open")
+        self.broker._fills = [
+            self.fill("buy", "0.010", "60000", "2026-09-14T13:00:00.000Z", "x1"),
+            self.fill("sell", "0.010", "59000", "2026-09-14T15:00:00.000Z", "x2"),
+        ]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.outcomes()[0]["rationale_excerpt"], "[strategy momo] breakout above the range")
+        # A desk's own closing sell is not the entry either.
+        self.record_intent("oi-open-2", "[strategy momo] second breakout", "2026-09-14T15:30:00.000Z")
+        self.record_intent("oi-sell-2", "taking it off into the close", "2026-09-14T16:59:00.000Z", side="sell")
+        self.broker._fills += [
+            self.fill("buy", "0.010", "60000", "2026-09-14T16:00:00.000Z", "x3"),
+            self.fill("sell", "0.010", "61000", "2026-09-14T17:00:00.000Z", "x4"),
+        ]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.outcomes()[1]["rationale_excerpt"], "[strategy momo] second breakout")
+
+    def test_a_second_round_trip_is_held_from_its_own_open(self):
+        self.broker._fills = [
+            self.fill("buy", "0.010", "60000", "2026-09-10T13:00:00.000Z", "r1"),
+            self.fill("sell", "0.010", "60500", "2026-09-10T14:00:00.000Z", "r2"),
+            self.fill("buy", "0.010", "60000", "2026-09-14T13:00:00.000Z", "r3"),
+            self.fill("sell", "0.010", "60500", "2026-09-14T14:00:00.000Z", "r4"),
+        ]
+        self.gateway.ingest_fills("shadow")
+        outcomes = self.outcomes()
+        self.assertEqual([o["held_for_hours"] for o in outcomes], ["1.0", "1.0"])
+        self.assertEqual([o["opened_at"] for o in outcomes], ["2026-09-10T13:00:00.000Z", "2026-09-14T13:00:00.000Z"])
+        self.assertEqual(self.gateway.entry_of(DESK, self.BTC.key)[0], "2026-09-14T13:00:00.000Z")
+
+    def test_partial_sells_of_one_position_share_its_open_and_its_entry_fees(self):
+        self.broker._fills = [
+            self.fill("buy", "0.020", "60000", "2026-09-14T13:00:00.000Z", "p1"),
+            self.fill("buy", "0.010", "60300", "2026-09-14T13:30:00.000Z", "p2"),
+        ]
+        self.gateway.ingest_fills("shadow")
+        self.broker._fills += [self.fill("sell", "0.010", "59000", f"2026-09-14T15:00:0{k}.000Z", f"p{k + 3}") for k in range(3)]
+        self.gateway.ingest_fills("shadow")
+        outcomes = self.outcomes()
+        self.assertEqual(len(outcomes), 3)
+        self.assertEqual({o["opened_at"] for o in outcomes}, {"2026-09-14T13:00:00.000Z"})
+        # Two opening fills paid 0.20; each third of the position carries a third of it.
+        self.assertEqual([o["entry_fees"] for o in outcomes], ["0.06666667", "0.06666667", "0.06666667"])
+        self.assertEqual(Decimal(outcomes[0]["pnl"]), (Decimal("59000") - Decimal("60100")) * Decimal("0.010") - Decimal("0.10"))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
@@ -1102,6 +1161,38 @@ class BothLegsSettlementTests(SettlementCase):
         )
         self.assertEqual(self.ledger.state("2026-09-16T00:00:00.000Z").positions, {})
         self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+
+
+class EventScoringTests(SettlementCase):
+    """An event leg leaves a ledger by settlement or by a sell; both are scored, net of what the
+    entry paid."""
+
+    def test_a_settlement_carries_the_entry_fees_and_the_open(self):
+        self.hold(CPI_YES, quantity="10", price="0.05")  # the helper's fill pays 0.17
+        self.kalshi.rows = [self.row("yes")]
+        self.gateway.poll_settlements("kalshi")
+        outcome = self.outcomes()[0]
+        self.assertEqual((outcome["pnl"], outcome["entry_fees"]), ("9.50", "0.17"))
+        self.assertEqual(outcome["opened_at"], "2026-09-14T15:00:00.000Z")
+
+    def test_a_leg_sold_before_its_market_settles_is_scored(self):
+        def fill(side, price, at, tag):
+            return Fill(id=tag, order_id="o" + tag, desk_id=DESK, instrument=CPI_YES, side=side,
+                        quantity=Decimal("10"), price=Decimal(price), fee=Decimal("0.02"), at=at)
+
+        self.broker._fills = [fill("buy", "0.40", "2026-09-14T13:00:00.000Z", "e1"), fill("sell", "0.15", "2026-09-14T15:00:00.000Z", "e2")]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.ledger.state("2026-09-14T16:00:00.000Z").positions, {})
+        outcomes = self.outcomes()
+        self.assertEqual(len(outcomes), 1)
+        out = outcomes[0]
+        self.assertEqual((out["result"], out["market_id"], out["instrument"]), ("sold", KALSHI_TICKER, CPI_YES.key))
+        self.assertEqual(Decimal(out["pnl"]), Decimal("-2.52"))
+        self.assertEqual((out["entry_fees"], out["held_for_hours"]), ("0.02", "2.0"))
+        # Nothing left to settle, so the settlement scores nothing twice.
+        self.kalshi.rows = [self.row("no")]
+        self.gateway.poll_settlements("kalshi")
+        self.assertEqual(len(self.outcomes()), 1)
 
 
 class PolledOrderKeepsItsDeskTests(unittest.TestCase):

@@ -4,17 +4,19 @@
 Run ON THE FLOOR BOX (the event log lives there) or in any checkout that holds `.data/ltcm`:
 
     cd /workspace && .venv/bin/python scripts/mind_pass.py --dry-run          # table + book re-scored; read-only
-    cd /workspace && .venv/bin/python scripts/mind_pass.py --dry-run --ask    # also one model call; nothing written
+    cd /workspace && .venv/bin/python scripts/mind_pass.py --dry-run --ask    # also one model call; only its spend is written
     cd /workspace && .venv/bin/python scripts/mind_pass.py --apply            # a real pass: write the book, publish
 
-`--dry-run` opens `.data/ltcm/events.sqlite` read-only, prints the aggregate table the scientist
-reads and the rule book in `.data/ltcm/mind.json` re-scored against the tape now, with the rules
-that would be retired. `--ask` adds the model call (key `mind:<minute>`, budget desk `mind`) and
-prints every proposed rule with its score and verdict, without writing the book or the log (the
-provider still records the request and its cost). `--apply` runs a full pass even when the tape
-has not moved: re-score, retire, ask, admit, write the book and publish the `lab.hypothesis` and
-`lab.result`. A running floor reads the new book on its next session. Nothing here prints a
-credential.
+`--dry-run` opens `.data/ltcm/events.sqlite` read-only, prints the aggregate table of the whole
+tape (a pass shows the scientist only its older part and tests proposals on the newest) and the
+rule book in `.data/ltcm/mind.json` re-scored the way a pass retains it, with the rules that would be
+retired. `--ask` adds the model call (key `mind:<minute>`, budget desk `mind`) and prints every
+proposed rule with its out-of-sample score and verdict, without writing rules or the log; the call's
+cost is added to the book's daily spend tally, because it is money all the same (the provider also
+records the request). `--apply` runs a full pass even when the tape has not moved: re-score, retire,
+ask, admit, write the book and publish the `lab.hypothesis` and `lab.result`. A running floor reads
+the new book on its next session. `--ask` and `--apply` take the book's lock and refuse, exit 1,
+while the floor's own pass holds it. Nothing here prints a credential.
 """
 
 from __future__ import annotations
@@ -33,11 +35,11 @@ from ltcm.events import Event, now_iso  # noqa: E402
 from ltcm.manifest import load_all  # noqa: E402
 from ltcm.mind import (  # noqa: E402
     DEFAULT_CONFIG,
+    LOCKED,
     FirmMind,
     aggregate,
     evidence_text,
     table_text,
-    verdict,
 )
 from ltcm.service import PACKAGE_DIR, default_config  # noqa: E402
 
@@ -79,14 +81,13 @@ def families(config: dict[str, Any]) -> dict[str, str]:
         return {}
 
 
-def print_book(mind: FirmMind, outcomes: list, min_n: int) -> None:
+def print_book(mind: FirmMind, outcomes: list) -> None:
     rules = mind.rules()
-    print(f"\n# The rule book ({len(rules)} rules), re-scored now")
+    print(f"\n# The rule book ({len(rules)} rules), re-scored now on what its proposers never read")
     if not rules:
         print("(empty)")
     for rule in rules:
-        score = mind.score(rule, outcomes)
-        ok, reason = verdict(score, str(rule.get("direction")), min_n)
+        ok, reason, score = mind.retention(rule, outcomes)
         print(f"- {rule['id']} [{rule['direction']}] {evidence_text(score)}: {'holds' if ok else 'would retire: ' + reason}")
         print(f"    {rule['statement']}")
         print(f"    filter {json.dumps(rule['filter'], sort_keys=True)}")
@@ -110,7 +111,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     config = default_config()
     mind_config = {**DEFAULT_CONFIG, **dict(config.get("mind") or {})}
-    min_n = int(mind_config["min_n"])
     at = now_iso()
     roster = families(config)
 
@@ -125,13 +125,19 @@ def main(argv: list[str] | None = None) -> int:
             floor_cap_usd_per_day=config.get("floor_cap_max_usd_per_day", "60"),
             reserve_floor_usd=config.get("reserve_floor_usd", "10"),
         )
-        mind = FirmMind(log, path=capital_dir / "mind.json", provider=provider, config=mind_config, families=lambda: roster, alert=lambda level, text: print(f"[{level}] {text}", file=sys.stderr))
-        summary = mind.run(at, force=True)
-        print(json.dumps(summary, indent=2, sort_keys=True))
-        outcomes, _ = mind.outcomes()
-        print_book(mind, outcomes, min_n)
-        log.close()
-        return 0 if not summary.get("failed") else 1
+        try:
+            mind = FirmMind(log, path=capital_dir / "mind.json", provider=provider, config=mind_config, families=lambda: roster, alert=lambda level, text: print(f"[{level}] {text}", file=sys.stderr))
+            summary = mind.run(at, force=True)
+            if summary.get("skipped") == LOCKED:
+                print(f"refused: {LOCKED} (the floor's pass is running); try again in a minute", file=sys.stderr)
+                return 1
+            print(json.dumps(summary, indent=2, sort_keys=True))
+            outcomes, _ = mind.outcomes()
+            print_book(mind, outcomes)
+            return 0 if not summary.get("failed") else 1
+        finally:
+            provider.close()
+            log.close()
 
     log = ReadOnlyLog(events_path)
     provider = None
@@ -146,13 +152,22 @@ def main(argv: list[str] | None = None) -> int:
     mind = FirmMind(log, path=capital_dir / "mind.json", provider=provider, config=mind_config, families=lambda: roster, alert=lambda level, text: print(f"[{level}] {text}", file=sys.stderr), register=False)
     outcomes, latest = mind.outcomes()
     desks = len({o.desk_id for o in outcomes})
-    print(f"# The Firm Mind, dry run at {at}: {len(outcomes)} scoreable outcomes from {desks} desks (newest outcome seq {latest})")
+    read, held_out, cut = mind.split(outcomes)
+    print(
+        f"# The Firm Mind, dry run at {at}: {len(outcomes)} scoreable outcomes from {desks} desks (newest outcome seq {latest}); "
+        f"a pass would show the scientist {len(read)} and test its proposals on the {len(held_out)} after seq {cut}"
+    )
     cells = aggregate(outcomes, args.cells or int(mind_config["cells"]))
     print(f"\n# Cells (top {len(cells)} by |pnl| and by n)")
     print(table_text(cells))
-    print_book(mind, outcomes, min_n)
+    print_book(mind, outcomes)
     if args.ask:
         summary = mind.run(at, persist=False, publish=False, force=True)
+        provider.close()
+        if summary.get("skipped") == LOCKED:
+            print(f"refused: {LOCKED} (the floor's pass is running); try again in a minute", file=sys.stderr)
+            log.close()
+            return 1
         print("\n# The scientist's proposals")
         for row in summary.get("proposals") or []:
             print(f"- {row.get('id')}: {row.get('status')} ({row.get('evidence') or ''}) {row.get('reason')}")

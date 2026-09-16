@@ -59,7 +59,7 @@ from .broker import (
 )
 from .committee import capital_mode, promoted_desks
 from .events import Event, EventLog, canonical, now_iso
-from .ledger import DeskLedger, floor_totals, iso_time, parse_iso
+from .ledger import DeskLedger, floor_totals, iso_time, parse_iso, position_walk
 from .manifest import DeskManifest
 from .risk import Breaker, Decision, RiskContext, RiskEngine
 
@@ -145,6 +145,11 @@ class GatewayError(RuntimeError):
 
 class DeskBlocked(GatewayError):
     """The desk has an unresolved order of unknown status and must reconcile first."""
+
+
+def _fees(value: Decimal) -> Decimal:
+    """A fee share to the hundred-millionth of a dollar: a third of a cent is not 28 digits."""
+    return value.quantize(Decimal("0.00000001")).normalize() if value else ZERO
 
 
 def _short(value: str) -> str:
@@ -722,10 +727,10 @@ class Gateway:
         return written
 
     def _position_before(self, fill: Fill, extra: "Mapping[str, Any] | None") -> Any:
-        """The desk's position in the fill's instrument before this fill is folded, for a
-        non-event contract; None when there is nothing to score."""
-        if fill.instrument.asset_class == "event":
-            return None
+        """The desk's position in the fill's instrument before this fill is folded; None when
+        there is nothing to score. Event contracts included: until Sept 16, 2026 a Kalshi leg sold
+        before settlement (a stop, a target, a desk's own exit) left no outcome at all, so every
+        score of an event trade counted only the positions held to the end."""
         desk_id = fill.desk_id or str((extra or {}).get("desk_id") or "")
         ledger = self.ledgers.get(desk_id)
         if ledger is None:
@@ -739,7 +744,11 @@ class Gateway:
         """leap: exits -- a spot position leaves the ledger by a sell, never by a settlement, so
         the sell is where its result is scored: entry at the ledger's average cost, exit at the
         fill. Until Sept 16, 2026 only event contracts wrote `desk.outcome`, so no crypto
-        strategy ever had a settled record and none could earn a bigger size or a promotion."""
+        strategy ever had a settled record and none could earn a bigger size or a promotion.
+        An event leg sold before its market settles is scored the same way (`result: "sold"`).
+
+        `pnl` is net of the sell's own fee, as it always was; `entry_fees` is the closed
+        quantity's share of the fees its opening fills paid, so a reader nets both."""
         try:
             if before is None or payload.get("side") != "sell" or money(before.quantity) <= 0:
                 return None
@@ -753,7 +762,9 @@ class Gateway:
             entry = money(before.average_cost)
             pnl = (price - entry) * quantity * instrument.multiplier - fee
             at = _stamp(payload.get("at"), self.now())
-            opened_at, rationale = self._entry_of(desk_id, instrument.key)
+            fill_id = str(payload.get("fill_id") or "")
+            opened_at, entry_fees = self._open_of(desk_id, instrument.key, fill_id=fill_id or None)
+            rationale = self._rationale_of(desk_id, instrument.key, opening_side="buy")
             manifest = self.manifests.get(desk_id)
             stream = manifest.stream if manifest else f"desk:{desk_id}"
             body = {
@@ -765,8 +776,10 @@ class Gateway:
                 "quantity": text(quantity),
                 "pnl": text(pnl),
                 "held_for_hours": _hours_between(opened_at, at),
+                "opened_at": opened_at,
+                "entry_fees": text(_fees(entry_fees)),
                 "rationale_excerpt": rationale,
-                "fill_id": str(payload.get("fill_id") or ""),
+                "fill_id": fill_id,
                 # Whether real money was at stake when it closed: a later demotion must not
                 # turn a real result into practice on the public record.
                 "real_money": self.live_desk(desk_id),
@@ -1040,6 +1053,7 @@ class Gateway:
             result=result,
             exit_price=exit_price,
             settled_at=settled_at,
+            fill_id=fill_id,
         )
         return [payload]
 
@@ -1052,13 +1066,16 @@ class Gateway:
         result: str,
         exit_price: Decimal,
         settled_at: str,
+        fill_id: str | None = None,
     ) -> Event:
-        """The public score for one resolved position: what was thought, and what happened."""
+        """The public score for one resolved position: what was thought, and what happened.
+        `pnl` is the settlement's (it pays no fee); `entry_fees` is what the opening fills paid."""
         instrument = position.instrument
         quantity = money(position.quantity)
         entry = money(position.average_cost)
         pnl = (exit_price - entry) * quantity * instrument.multiplier
-        opened_at, rationale = self._entry_of(desk_id, instrument.key)
+        opened_at, entry_fees = self._open_of(desk_id, instrument.key, fill_id=fill_id)
+        rationale = self._rationale_of(desk_id, instrument.key, opening_side="buy" if quantity > 0 else "sell")
         manifest = self.manifests.get(desk_id)
         stream = manifest.stream if manifest else f"desk:{desk_id}"
         payload = {
@@ -1070,6 +1087,8 @@ class Gateway:
             "quantity": text(abs(quantity)),
             "pnl": text(pnl),
             "held_for_hours": _hours_between(opened_at, settled_at),
+            "opened_at": opened_at,
+            "entry_fees": text(_fees(entry_fees)),
             "rationale_excerpt": rationale,
             "real_money": self.live_desk(desk_id),
         }
@@ -1084,32 +1103,57 @@ class Gateway:
         )
 
     def entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
-        """When this desk first traded the instrument, and the sentence it gave. Public for the
-        positions board (leap: exits)."""
+        """When this desk's position in the instrument opened, and the sentence it gave. Public
+        for the positions board (leap: exits)."""
         return self._entry_of(desk_id, key)
 
     def _entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
-        """When this desk first traded the contract, and the sentence it gave for doing so."""
-        opened_at: str | None = None
+        """When the desk's position in the contract opened, and the sentence it gave for doing so."""
+        opened_at, _ = self._open_of(desk_id, key)
+        return opened_at, self._rationale_of(desk_id, key)
+
+    def _open_of(self, desk_id: str, key: str, *, fill_id: str | None = None) -> tuple[str | None, Decimal]:
+        """When the position opened -- the first fill after the desk was last flat in the
+        instrument, not the first fill ever (two one-hour round trips four days apart were
+        scored as 1 and 97 hours held until Sept 16, 2026) -- and, for the reducing fill
+        `fill_id`, the closed quantity's share of its opening fills' fees. Without `fill_id`
+        (or when it is not on the tape): the position as the newest fill left it, and no fees."""
+        rows = []
         for event in self.log.read(kind="broker.fill", limit=10_000, newest=True):
             payload = event.payload
             if payload.get("desk_id") != desk_id or _key_of(payload.get("instrument")) != key:
                 continue
-            if opened_at is None or event.at < opened_at:
-                opened_at = event.at
+            rows.append({**payload, "at": event.at})
+        last: dict[str, Any] | None = None
+        for row in position_walk(rows):
+            if fill_id is not None and row["fill_id"] == fill_id:
+                return row["opened_at"], row["entry_fees"]
+            last = row
+        return (last["opened_at"] if last is not None else None), ZERO
+
+    def _rationale_of(self, desk_id: str, key: str, *, opening_side: str | None = None) -> str:
+        """The sentence the desk gave for its newest entry in the contract. An exit's intent is
+        not an entry (the exit engine's "Floor exit of ..." had labelled every stopped-out
+        strategy position discretionary), nor is an intent on the closing side when the opening
+        side is known."""
         rationale = ""
         manifest = self.manifests.get(desk_id)
         stream = manifest.stream if manifest else f"desk:{desk_id}"
         self._load()
         for event in self.log.read(stream=stream, kind="desk.intent", limit=10_000, newest=True):
-            if _key_of(event.payload.get("instrument")) != key:
+            payload = event.payload
+            if _key_of(payload.get("instrument")) != key:
                 continue
-            if self._decisions.get(event.payload.get("intent_id")) is False:
+            if payload.get("purpose") == "exit":
+                continue
+            if opening_side is not None and payload.get("side") not in (None, opening_side):
+                continue
+            if self._decisions.get(payload.get("intent_id")) is False:
                 continue  # refused by the engine or the critic: it never opened anything
-            said = event.payload.get("rationale")
+            said = payload.get("rationale")
             if isinstance(said, str) and said.strip():
                 rationale = said.strip()[:400]
-        return opened_at, rationale
+        return rationale
 
     def _settle_shadow(
         self, ticker: str, payout_yes: Decimal, holders: Iterable[tuple[str, Any]], settled_at: str

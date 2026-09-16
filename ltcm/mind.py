@@ -1,14 +1,15 @@
 """The Firm Mind: what one desk learns, every desk inherits.
 
-Every desk writes a `desk.outcome` when a position closes: a Kalshi settlement or a spot sell, with
-the entry, the exit, the size, the P&L, how long it was held, the sentence that opened it and
-whether real money was at stake. Until now each desk read only its own. The Firm Mind reads all of
-them and keeps a small book of *rules*: machine-checkable statements about which trades the floor
-should avoid or prefer, each one scored in code against the whole tape.
+Every desk writes a `desk.outcome` when a position closes: a Kalshi settlement, or a sell of a spot
+position or of an event leg before its market settles, with the entry, the exit, the size, the
+P&L, the fees its opening fills paid, how long it was held, the sentence that opened it and whether
+real money was at stake. Until now each desk read only its own. The Firm Mind reads all of them and
+keeps a small book of *rules*: machine-checkable statements about which trades the floor should
+avoid or prefer, each one scored in code.
 
 A rule is JSON::
 
-    {"id": "weather-no-legs-above-90c", "statement": "one sentence a desk can act on",
+    {"id": "weather-no-legs-above-90c", "statement": "one sentence for the public record",
      "filter": {"series_prefix": ["KXHIGH"], "family": [...], "strategy": [...],
                 "result_side": "no", "entry_price": [0.9, 1.0], "held_hours": [0, 24],
                 "real_money": null, "venue": "kalshi"},
@@ -21,31 +22,50 @@ the `[strategy <name>]` tag at the start of the opening rationale (`discretionar
 desk placed by hand), `result_side` is the leg the desk held, read from the instrument key (not the
 market's result), and the two ranges are inclusive.
 
-`evaluate` selects the matching outcomes from the newest 10,000 of every desk and computes n,
-wins, P&L, P&L per dollar of entry notional (entry price x quantity) per trade, a seeded bootstrap
-95% interval of its mean (1,000 resamples) and when the pattern was first and last seen. Nothing
-about a score is a model's opinion.
+**The score.** `evaluate` selects the matching outcomes and groups them into *positions that are
+one draw of chance*: every desk, leg and strike of one Kalshi event (fifteen bred desks holding one
+settled market are one observation, not fifteen), or the partial sells of one spot position. n
+counts those groups. Each group's return is its P&L net of entry fees per dollar of entry notional;
+the score is their mean with a seeded bootstrap interval (a normal approximation above
+`bootstrap_max_n` groups), and, when every group is one settled contract, an exact binomial test of
+the groups that won against the break-even count (the sum of what each paid per contract, fees
+included). `verdict` refuses an interval with no width and a rule without `min_each_way` winning
+and losing groups: fifteen fairly priced 5-cent longshots all lose 46% of the time, and a bootstrap
+of fifteen identical losses is [-1, -1]. Nothing about a score is a model's opinion.
 
-Once an hour (`mind.interval_minutes`), off the tick, a pass:
+**Out of sample.** A model that reads a table and proposes its most extreme cells will find rules
+in pure noise, and scoring them on the trades it read admits them. So once an hour
+(`mind.interval_minutes`), off the tick, a pass:
 
-1. re-scores every rule in the book and retires the ones whose interval no longer excludes zero
-   in their direction, or that no longer have `min_n` trades -- no model needed;
-2. when there are new outcomes, asks one model (`mind.profile`, reasoning high, budget desk
-   `mind`, `mind.budget_usd_per_day`) to read a compact packet -- the aggregate table (family x
-   strategy x series x price band x leg, computed here, top cells by |P&L| and by n), the book
-   with its scores, recent retirements and the desks' post-mortem lessons -- and propose up to
-   eight new or revised rules and ids to retire;
-3. validates every proposal against the schema, scores it, and admits it only with n >= `min_n`
-   and an interval that excludes zero in its direction (`avoid`: upper bound < 0; `prefer`: lower
-   bound > 0);
-4. keeps at most `max_rules`, ranked by |mean P&L per $| x sqrt(n), in `.data/ltcm/mind.json`
-   (atomic write), and publishes a `lab.hypothesis` summarizing the pass and a `lab.result`
-   whenever the book changed, with the evidence for every rule added or retired.
+1. splits the newest 10,000 outcomes by log order: the older `1 - holdout_fraction` is what the
+   model reads, the newest `holdout_fraction` (less any position the older part already holds) it
+   never sees;
+2. re-scores every rule in the book on the outcomes newer than the tape its proposer read, and
+   retires it when that interval no longer excludes zero in its direction, or when `min_n` groups
+   have arrived since its admission and their mean sits on the wrong side of zero -- no model
+   needed;
+3. when there are new outcomes and the held-out part could admit a rule, asks one model
+   (`mind.profile`, reasoning high, budget desk `mind`, `mind.budget_usd_per_day` held by the mind
+   itself) to read a compact packet built from the older part only -- the aggregate table (family x
+   strategy x series x price band x leg), the book scored on that part, recent retirements and the
+   post-mortem lessons written before the held-out outcomes -- and propose up to eight new or
+   revised rules and ids to retire;
+4. validates every proposal against the schema and admits it only when the held-out outcomes alone
+   give n >= `min_n` and a verdict at the level 1 - `alpha` / `max_proposals` (the pass's proposals
+   share one error rate), and the older part agrees in sign. A proposal that trades on the same
+   outcomes as an active rule (`max_overlap`) is a duplicate, and a filter the book retired is
+   tested only on outcomes newer than its retirement;
+5. keeps at most `max_rules`, ranked by the interval's bound nearest zero x sqrt(n), in
+   `.data/ltcm/mind.json` (atomic write, under `mind.json.lock` for the whole pass, so a pass by
+   hand and the floor's never interleave), and publishes a `lab.hypothesis` summarizing the pass and
+   a `lab.result` whenever the book changed, with the evidence for every rule added or retired.
 
-The book feeds back three ways: `DeskContext.firm_rules()` puts the rules that apply to a desk
-into every session prompt ("# What the firm has learned", after the standings); the lab's packet
-carries the family's rules when it writes a strategy; and `rules_for_family(family)` returns the
-same block for any other strategy generator (the Foundry's code-candidate prompt)::
+The book feeds back three ways, as evidence rather than instructions, each line written by code
+from the rule's filter and score (the model's statement never reaches a desk):
+`DeskContext.firm_rules()` puts the rules that apply to a desk into every session prompt ("# What
+the firm has learned", after the standings); the lab's packet carries the family's rules when it
+writes a strategy; and `rules_for_family(family)` returns the same block for any other strategy
+generator (the Foundry's code-candidate prompt)::
 
     from .mind import rules_for_family
     block = rules_for_family(family)   # "" when the firm has learned nothing that applies
@@ -65,21 +85,33 @@ import random
 import re
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from statistics import NormalDist
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from .events import canonical, now_iso
 
+try:  # the floor runs on Linux; elsewhere a pass simply runs unlocked
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
+
 OUTCOME_KIND = "desk.outcome"
+FILL_KIND = "broker.fill"
 #: The tape a rule is scored on: the newest outcomes of every desk.
 WINDOW = 10_000
 RESAMPLES = 1000
 #: Fixed, so a score is a function of the tape and nothing else.
 BOOTSTRAP_SEED = 20260916
 BOOK_VERSION = 1
+#: The two-sided level of a score kept in the book and of a retention check.
+LEVEL = 0.95
+#: What `run` says when another pass (the floor's, or one by hand) holds the book.
+LOCKED = "another pass holds the book"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
@@ -90,7 +122,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "budget_usd_per_day": "8",
     "min_n": 15,
     "max_rules": 12,
-    #: Rules the model may propose in one pass.
+    #: Rules the model may propose in one pass; they share one error rate (Bonferroni).
     "max_proposals": 8,
     #: Rows of the aggregate table the model reads.
     "cells": 60,
@@ -101,6 +133,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "prompt_rules": 8,
     #: Retired rules remembered in the book (the model reads the newest few).
     "retired_kept": 40,
+    #: The newest share of the tape the model never reads: proposals are scored on it alone.
+    "holdout_fraction": 0.3,
+    #: The two-sided error rate of one retention check; admission divides it by `max_proposals`.
+    "alpha": 0.05,
+    #: Winning and losing positions a rule needs, each way.
+    "min_each_way": 3,
+    #: Above this many positions the interval is the normal approximation, not a bootstrap.
+    "bootstrap_max_n": 300,
+    #: A proposal sharing this share of its outcomes with an active rule of its direction is a duplicate.
+    "max_overlap": 0.8,
 }
 
 FILTER_KEYS = (
@@ -118,6 +160,8 @@ STRATEGY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")  # strategies.NAME
 STRATEGY_TAG = re.compile(r"^\s*\[strategy ([a-z][a-z0-9_]{0,39})\]")
 MIN_STATEMENT, MAX_STATEMENT = 12, 240
 MAX_LIST = 12
+#: Lines a rendered block ever carries, whatever a caller asks for.
+MAX_PROMPT_RULES = 12
 #: Entry-price bands of the aggregate table, for contracts priced in dollars between 0 and 1.
 PRICE_BANDS = ((0.0, 0.10), (0.10, 0.25), (0.25, 0.50), (0.50, 0.75), (0.75, 0.90), (0.90, 1.0))
 #: The public events stay well inside the site's limits.
@@ -136,7 +180,7 @@ class MindError(ValueError):
 
 @dataclass(frozen=True)
 class Outcome:
-    """One settled position, as a rule sees it."""
+    """One closed position, as a rule sees it."""
 
     seq: int
     at: str
@@ -152,14 +196,29 @@ class Outcome:
     pnl: float
     held_hours: float | None
     real_money: bool | None
+    #: The closed quantity's share of its opening fills' fees (`pnl` already nets an exit's fee).
+    fees: float = 0.0
+    #: The market's result for a settlement (`yes`/`no`); `sold` for a position sold before.
+    result: str | None = None
+    asset_class: str = ""
+    #: The draw of chance this outcome belongs to (`cluster_of`); empty means its own.
+    cluster: str = ""
 
     @property
     def notional(self) -> float:
         return self.entry_price * self.quantity
 
     @property
+    def net_pnl(self) -> float:
+        return self.pnl - self.fees
+
+    @property
     def pnl_per_dollar(self) -> float:
-        return self.pnl / self.notional
+        return self.net_pnl / self.notional
+
+    @property
+    def group(self) -> str:
+        return self.cluster or f"outcome:{self.seq}"
 
 
 def _number(value: Any) -> float | None:
@@ -196,9 +255,72 @@ def family_of(desk_id: str, families: Mapping[str, str] | None = None) -> str:
     return desk_id.split("-", 1)[0]
 
 
-def parse_outcome(event: Any, families: Mapping[str, str] | None = None) -> Outcome | None:
+def event_of(ticker: str) -> str:
+    """A Kalshi market's event: `KXHIGHNY-26SEP16-B81.5` is one strike of `KXHIGHNY-26SEP16`, whose
+    strikes all settle on the same day's temperature."""
+    parts = ticker.split("-")
+    return "-".join(parts[:-1]) if len(parts) >= 3 else ticker
+
+
+def cluster_of(
+    *, asset_class: str, venue: str | None, ticker: str, desk_id: str, instrument: str, opened_at: str | None, seq: int
+) -> str:
+    """The draw of chance an outcome belongs to. Every desk's position on one Kalshi event is
+    one draw; the partial sells of one spot position (one desk, one instrument, one open) are one
+    position; an outcome that says too little to place stands alone."""
+    if asset_class == "event" or (not asset_class and venue == "kalshi"):
+        return "event:" + event_of(ticker)
+    if opened_at:
+        return f"position:{desk_id}:{instrument}:{opened_at}"
+    return f"outcome:{seq}"
+
+
+def fill_opens(events: Iterable[Any]) -> dict[str, tuple[str | None, float]]:
+    """(opened_at, entry fees) for every reducing fill on the tape, keyed `fill:<fill id>` and
+    `close:<desk>:<instrument key>:<at>`: what an outcome written before the gateway recorded
+    either (Sept 16, 2026) is scored with, when its fills are still in the window."""
+    from .broker import Instrument
+    from .ledger import position_walk
+
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    keys: dict[str, str | None] = {}
+    for event in events:
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, Mapping):
+            continue
+        desk_id = payload.get("desk_id")
+        instrument = payload.get("instrument")
+        if not isinstance(desk_id, str) or not desk_id or not isinstance(instrument, Mapping):
+            continue
+        marker = canonical(instrument)
+        if marker not in keys:
+            try:
+                keys[marker] = Instrument.from_dict(dict(instrument)).key
+            except Exception:
+                keys[marker] = None
+        key = keys[marker]
+        if key is None:
+            continue
+        at = str(getattr(event, "at", "") or payload.get("at") or "")
+        groups.setdefault((desk_id, key), []).append({**payload, "at": at})
+    out: dict[str, tuple[str | None, float]] = {}
+    for (desk_id, key), rows in groups.items():
+        for row in position_walk(rows):
+            if row["closed"] <= 0:
+                continue
+            value = (row["opened_at"], float(row["entry_fees"]))
+            if row["fill_id"]:
+                out[f"fill:{row['fill_id']}"] = value
+            out[f"close:{desk_id}:{key}:{row['at']}"] = value
+    return out
+
+
+def parse_outcome(
+    event: Any, families: Mapping[str, str] | None = None, opens: Mapping[str, tuple[str | None, float]] | None = None
+) -> Outcome | None:
     """An `Outcome` from a `desk.outcome` event, or None when it cannot be scored (no desk, no
-    size, no entry price: a per-dollar return needs a notional)."""
+    size, no entry price: a per-dollar return needs a notional). `opens` (`fill_opens`) supplies
+    the entry fees and the open of an outcome that does not carry them."""
     stream = str(getattr(event, "stream", "") or "")
     if not stream.startswith("desk:") or len(stream) <= 5:
         return None
@@ -206,11 +328,12 @@ def parse_outcome(event: Any, families: Mapping[str, str] | None = None) -> Outc
     if not isinstance(payload, Mapping):
         return None
     desk_id = stream[5:]
-    parts = str(payload.get("instrument") or "").split(":")
+    instrument = str(payload.get("instrument") or "")
+    parts = instrument.split(":")
     asset_class = parts[0].lower() if parts else ""
     symbol = parts[1] if len(parts) > 1 else ""
     venue = parts[2].lower() if len(parts) > 2 and parts[2] else None
-    leg = next((p for p in parts[3:] if p in SIDES), None)
+    leg = next((p.lower() for p in parts[3:] if p.lower() in SIDES), None)
     if leg is None and asset_class == "event":
         leg = "yes"  # an event key without a stated leg is the YES leg (`Instrument.key`)
     ticker = str(payload.get("market_id") or symbol or "").strip().upper()
@@ -222,10 +345,23 @@ def parse_outcome(event: Any, families: Mapping[str, str] | None = None) -> Outc
     quantity = abs(quantity)
     if entry <= 0 or quantity <= 0:
         return None
+    at = str(getattr(event, "at", "") or "")
+    seq = int(getattr(event, "seq", 0) or 0)
+    fees = _number(payload.get("entry_fees"))
+    opened_at = payload.get("opened_at") if isinstance(payload.get("opened_at"), str) else None
+    if opens and (fees is None or not opened_at):
+        fill_id = payload.get("fill_id")
+        found = opens.get(f"fill:{fill_id}") if fill_id else None
+        if found is None:
+            found = opens.get(f"close:{desk_id}:{instrument}:{at}")
+        if found is not None:
+            fees = found[1] if fees is None else fees
+            opened_at = opened_at or found[0]
     real = payload.get("real_money")
+    result = str(payload.get("result") or "").strip().lower() or None
     return Outcome(
-        seq=int(getattr(event, "seq", 0) or 0),
-        at=str(getattr(event, "at", "") or ""),
+        seq=seq,
+        at=at,
         desk_id=desk_id,
         family=family_of(desk_id, families),
         strategy=strategy_of(payload.get("rationale_excerpt")),
@@ -238,7 +374,30 @@ def parse_outcome(event: Any, families: Mapping[str, str] | None = None) -> Outc
         pnl=pnl,
         held_hours=_number(payload.get("held_for_hours")),
         real_money=real if isinstance(real, bool) else None,
+        fees=max(0.0, fees or 0.0),
+        result=result,
+        asset_class=asset_class,
+        cluster=cluster_of(
+            asset_class=asset_class, venue=venue, ticker=ticker, desk_id=desk_id, instrument=instrument,
+            opened_at=opened_at, seq=seq,
+        ),
     )
+
+
+def split_at(outcomes: Sequence[Outcome], seq: int) -> tuple[list[Outcome], list[Outcome]]:
+    """(older, newer): the outcomes written at or before log position `seq`, and the ones after
+    it. An outcome of a position the older part already holds (another desk's settlement of the
+    same event, the last partial sell of a position) goes with the older part: it is not news."""
+    if seq <= 0:
+        return [], list(outcomes)
+    older = [o for o in outcomes if o.seq <= seq]
+    known = {o.group for o in older}
+    newer: list[Outcome] = []
+    for outcome in outcomes:
+        if outcome.seq <= seq:
+            continue
+        (older if outcome.group in known else newer).append(outcome)
+    return older, newer
 
 
 def matches(rule_filter: Mapping[str, Any], outcome: Outcome) -> bool:
@@ -270,8 +429,34 @@ def matches(rule_filter: Mapping[str, Any], outcome: Outcome) -> bool:
     return True
 
 
+def clusters(hits: Sequence[Outcome]) -> list[dict[str, Any]]:
+    """The draws of chance among some outcomes, in order of first appearance: each group's net
+    P&L, notional and return per dollar, and, when the group is one settled contract (one market,
+    one leg, held to its result), whether it won and the break-even probability it paid for."""
+    groups: dict[str, list[Outcome]] = {}
+    for outcome in hits:
+        groups.setdefault(outcome.group, []).append(outcome)
+    out: list[dict[str, Any]] = []
+    for key, rows in groups.items():
+        pnl = math.fsum(o.net_pnl for o in rows)
+        notional = math.fsum(o.notional for o in rows)
+        binary = None
+        if (
+            len({o.ticker for o in rows}) == 1
+            and len({o.leg for o in rows}) == 1
+            and all(o.asset_class == "event" and o.result in SIDES and o.leg in SIDES and o.entry_price <= 1.0 for o in rows)
+        ):
+            quantity = math.fsum(o.quantity for o in rows)
+            paid = math.fsum(o.entry_price * o.quantity + o.fees for o in rows)
+            binary = {"won": rows[0].leg == rows[0].result, "break_even": min(1.0, paid / quantity)}
+        out.append(
+            {"key": key, "pnl": pnl, "notional": notional, "value": pnl / notional, "trades": len(rows), "binary": binary}
+        )
+    return out
+
+
 def bootstrap_ci(
-    values: Sequence[float], *, resamples: int = RESAMPLES, seed: int = BOOTSTRAP_SEED, level: float = 0.95
+    values: Sequence[float], *, resamples: int = RESAMPLES, seed: int = BOOTSTRAP_SEED, level: float = LEVEL
 ) -> tuple[float, float] | None:
     """Percentile bootstrap interval of the mean. Seeded, so the same values give the same
     interval on every pass and every machine."""
@@ -289,59 +474,145 @@ def bootstrap_ci(
     return (low, high)
 
 
+def normal_ci(values: Sequence[float], *, level: float = LEVEL) -> tuple[float, float] | None:
+    """Mean +/- z x standard error: what a bootstrap of many positions converges to, at a
+    fraction of the CPU (a 10,000-trade bootstrap took 4.9 s of the interpreter lock)."""
+    n = len(values)
+    if n == 0:
+        return None
+    mean = math.fsum(values) / n
+    if n == 1:
+        return (mean, mean)
+    variance = math.fsum((v - mean) ** 2 for v in values) / (n - 1)
+    half = NormalDist().inv_cdf(1.0 - (1.0 - level) / 2.0) * math.sqrt(variance / n)
+    return (mean - half, mean + half)
+
+
+def binomial_tails(wins: int, n: int, p: float) -> tuple[float, float]:
+    """(P(W <= wins), P(W >= wins)) for W ~ Binomial(n, p). With p the mean break-even
+    probability of contracts bought at different prices this is conservative: the count of a
+    Poisson-binomial is more concentrated than the binomial of the same mean (Hoeffding, 1956)."""
+    if n <= 0:
+        return 1.0, 1.0
+    p = min(max(float(p), 0.0), 1.0)
+    if p == 0.0:
+        return 1.0, (1.0 if wins <= 0 else 0.0)
+    if p == 1.0:
+        return (1.0 if wins >= n else 0.0), 1.0
+    log_p, log_q = math.log(p), math.log1p(-p)
+    top = math.lgamma(n + 1)
+    pmf = [math.exp(top - math.lgamma(k + 1) - math.lgamma(n - k + 1) + k * log_p + (n - k) * log_q) for k in range(n + 1)]
+    wins = min(max(int(wins), 0), n)
+    return min(1.0, math.fsum(pmf[: wins + 1])), min(1.0, math.fsum(pmf[wins:]))
+
+
 def evaluate(
-    rule: Mapping[str, Any], outcomes: Iterable[Outcome], *, resamples: int = RESAMPLES, seed: int = BOOTSTRAP_SEED
+    rule: Mapping[str, Any],
+    outcomes: Iterable[Outcome],
+    *,
+    resamples: int = RESAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+    level: float = LEVEL,
+    interval: bool = True,
+    bootstrap_max_n: int = int(DEFAULT_CONFIG["bootstrap_max_n"]),
 ) -> dict[str, Any]:
-    """The score of a rule (or a bare filter) on a tape: n, wins, P&L, notional, the mean P&L per
-    dollar of entry notional with its bootstrap interval, and first/last seen."""
+    """The score of a rule (or a bare filter) on a tape: n independent positions (`clusters`),
+    the trades in them, winning and losing positions, P&L net of entry fees, notional, the mean
+    return per dollar of entry across positions with its interval at `level` (skipped when
+    `interval` is False), the binomial test when every position is one settled contract, and
+    first/last seen."""
     rule_filter = rule.get("filter") if isinstance(rule.get("filter"), Mapping) else rule
     hits = [o for o in outcomes if matches(rule_filter, o)]
-    n = len(hits)
+    groups = clusters(hits)
+    n = len(groups)
+    values = [g["value"] for g in groups]
     score: dict[str, Any] = {
         "n": n,
-        "wins": sum(1 for o in hits if o.pnl > 0),
-        "pnl_usd": round(math.fsum(o.pnl for o in hits), 4),
+        "trades": len(hits),
+        "wins": sum(1 for v in values if v > 0),
+        "losses": sum(1 for v in values if v < 0),
+        "pnl_usd": round(math.fsum(o.net_pnl for o in hits), 4),
+        "fees_usd": round(math.fsum(o.fees for o in hits), 4),
         "notional_usd": round(math.fsum(o.notional for o in hits), 4),
         "mean_pnl_per_dollar": None,
         "ci": None,
+        "level": level,
+        "binomial": None,
         "first_seen": min((o.at for o in hits), default=None),
         "last_seen": max((o.at for o in hits), default=None),
         "real_money_n": sum(1 for o in hits if o.real_money),
         "desks": len({o.desk_id for o in hits}),
     }
-    if n:
-        returns = [o.pnl_per_dollar for o in hits]
-        score["mean_pnl_per_dollar"] = round(math.fsum(returns) / n, 6)
-        low, high = bootstrap_ci(returns, resamples=resamples, seed=seed)  # type: ignore[misc]
-        score["ci"] = [round(low, 6), round(high, 6)]
+    if not n:
+        return score
+    score["mean_pnl_per_dollar"] = round(math.fsum(values) / n, 6)
+    if not interval:
+        return score
+    if n > max(1, int(bootstrap_max_n)):
+        low, high = normal_ci(values, level=level)  # type: ignore[misc]
+    else:
+        low, high = bootstrap_ci(values, resamples=resamples, seed=seed, level=level)  # type: ignore[misc]
+    score["ci"] = [round(low, 6), round(high, 6)]
+    if all(g["binary"] for g in groups):
+        won = sum(1 for g in groups if g["binary"]["won"])
+        break_even = math.fsum(g["binary"]["break_even"] for g in groups)
+        p_low, p_high = binomial_tails(won, n, break_even / n)
+        score["binomial"] = {"won": won, "break_even": round(break_even, 4), "p_low": p_low, "p_high": p_high}
     return score
 
 
-def verdict(score: Mapping[str, Any], direction: str, min_n: int) -> tuple[bool, str]:
+def agrees(score: Mapping[str, Any], direction: str) -> bool:
+    """Whether a score's mean sits on the rule's side of zero."""
+    mean = score.get("mean_pnl_per_dollar")
+    if mean is None:
+        return False
+    return float(mean) < 0 if direction == "avoid" else float(mean) > 0
+
+
+def verdict(
+    score: Mapping[str, Any], direction: str, min_n: int, *, min_each_way: int = int(DEFAULT_CONFIG["min_each_way"])
+) -> tuple[bool, str]:
     """Whether a score earns a rule its place, and why not when it does not."""
     if direction not in DIRECTIONS:
         return False, f"unknown direction {direction!r}"
     n = int(score.get("n") or 0)
     if n < int(min_n):
         return False, f"n={n} is below the {int(min_n)} a rule needs"
+    if "wins" in score and "losses" in score:
+        wins, losses = int(score.get("wins") or 0), int(score.get("losses") or 0)
+        if wins < min_each_way or losses < min_each_way:
+            return False, f"{wins} winning and {losses} losing positions; a rule needs {min_each_way} of each"
     ci = score.get("ci")
     if not ci:
         return False, "no interval"
     low, high = float(ci[0]), float(ci[1])
+    if not high > low:
+        return False, "the interval has no width"
     if direction == "avoid" and not high < 0:
         return False, f"the interval [{_cents(low)}, {_cents(high)}] cents per $ does not sit below zero"
     if direction == "prefer" and not low > 0:
         return False, f"the interval [{_cents(low)}, {_cents(high)}] cents per $ does not sit above zero"
+    binomial = score.get("binomial")
+    if isinstance(binomial, Mapping):
+        tail = (1.0 - float(score.get("level") or LEVEL)) / 2.0
+        won, even = binomial.get("won"), binomial.get("break_even")
+        if direction == "avoid" and not float(binomial.get("p_low", 1.0)) <= tail:
+            return False, f"{won} of {n} settled positions won against {even} to break even: not significantly fewer"
+        if direction == "prefer" and not float(binomial.get("p_high", 1.0)) <= tail:
+            return False, f"{won} of {n} settled positions won against {even} to break even: not significantly more"
     return True, "admitted"
 
 
 def rank_of(score: Mapping[str, Any]) -> float:
-    """|mean P&L per $| x sqrt(n): a big effect on few trades and a small one on many compete."""
-    mean = score.get("mean_pnl_per_dollar")
+    """The interval's bound nearest zero x sqrt(n): the effect the evidence is sure of, on as
+    many positions as carry it. A rule whose interval straddles zero ranks nothing."""
+    ci = score.get("ci")
     n = int(score.get("n") or 0)
-    if mean is None or n <= 0:
+    if not ci or n <= 0:
         return 0.0
-    return abs(float(mean)) * math.sqrt(n)
+    low, high = float(ci[0]), float(ci[1])
+    bound = low if low > 0 else (-high if high < 0 else 0.0)
+    return bound * math.sqrt(n)
 
 
 def _cents(value: Any) -> str:
@@ -349,13 +620,19 @@ def _cents(value: Any) -> str:
 
 
 def evidence_text(score: Mapping[str, Any]) -> str:
-    """`n=47, -6.1 cents per $, CI [-9.0, -3.2]`."""
+    """`n=47, -6.1 cents per $, CI [-9.0, -3.2]`; with the trades a position count stands for,
+    `n=47 positions (63 trades, 12 real money), -6.1 cents per $ net of fees, CI [-9.0, -3.2]`."""
     n = int(score.get("n") or 0)
     mean = score.get("mean_pnl_per_dollar")
     ci = score.get("ci")
+    counted = "trades" in score
+    head = f"n={n}"
+    if counted:
+        head += f" positions ({int(score.get('trades') or 0)} trades, {int(score.get('real_money_n') or 0)} real money)"
     if mean is None or not ci:
-        return f"n={n}"
-    return f"n={n}, {_cents(mean)} cents per $, CI [{_cents(ci[0])}, {_cents(ci[1])}]"
+        return head
+    net = " net of fees" if counted else ""
+    return f"{head}, {_cents(mean)} cents per ${net}, CI [{_cents(ci[0])}, {_cents(ci[1])}]"
 
 
 # --------------------------------------------------------------------------- the schema
@@ -479,16 +756,17 @@ def band_of(outcome: Outcome) -> str:
 
 def aggregate(outcomes: Sequence[Outcome], limit: int = 60) -> list[dict[str, Any]]:
     """Outcome statistics by family x strategy x series x price band x leg, the cells with the
-    largest |P&L| and the largest n first, alternately, up to `limit`. Computed in code: the
-    model reads numbers the floor wrote, never numbers it guessed."""
+    largest |P&L| and the largest n first, alternately, up to `limit`. n counts independent
+    positions and the returns are net of entry fees, exactly as a rule is scored. Computed in
+    code: the model reads numbers the floor wrote, never numbers it guessed."""
     groups: dict[tuple[str, str, str, str, str], list[Outcome]] = {}
     for outcome in outcomes:
         key = (outcome.family, outcome.strategy, outcome.series, band_of(outcome), outcome.leg or "-")
         groups.setdefault(key, []).append(outcome)
     cells: list[dict[str, Any]] = []
     for key, rows in groups.items():
-        n = len(rows)
-        returns = [o.pnl_per_dollar for o in rows]
+        returns = [g["value"] for g in clusters(rows)]
+        n = len(returns)
         mean = math.fsum(returns) / n
         se = None
         if n > 1:
@@ -497,8 +775,8 @@ def aggregate(outcomes: Sequence[Outcome], limit: int = 60) -> list[dict[str, An
         cells.append(
             {
                 "family": key[0], "strategy": key[1], "series": key[2], "band": key[3], "leg": key[4],
-                "n": n, "wins": sum(1 for o in rows if o.pnl > 0),
-                "pnl_usd": round(math.fsum(o.pnl for o in rows), 2),
+                "n": n, "trades": len(rows), "wins": sum(1 for r in returns if r > 0),
+                "pnl_usd": round(math.fsum(o.net_pnl for o in rows), 2),
                 "mean_pnl_per_dollar": round(mean, 6), "se": None if se is None else round(se, 6),
                 "real_money_n": sum(1 for o in rows if o.real_money),
             }
@@ -523,35 +801,100 @@ def _cell_key(cell: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def table_text(cells: Iterable[Mapping[str, Any]]) -> str:
-    lines = ["family | strategy | series | entry band | leg | n | wins | pnl_usd | cents per $ | se | real-money n"]
+    lines = ["family | strategy | series | entry band | leg | n | trades | wins | pnl_usd | cents per $ | se | real-money trades"]
     for c in cells:
         se = "-" if c.get("se") is None else _cents(c["se"])
         lines.append(
-            f"{c['family']} | {c['strategy']} | {c['series']} | {c['band']} | {c['leg']} | {c['n']} | {c['wins']} | "
-            f"{c['pnl_usd']:.2f} | {_cents(c['mean_pnl_per_dollar'])} | {se} | {c['real_money_n']}"
+            f"{c['family']} | {c['strategy']} | {c['series']} | {c['band']} | {c['leg']} | {c['n']} | {c['trades']} | "
+            f"{c['wins']} | {c['pnl_usd']:.2f} | {_cents(c['mean_pnl_per_dollar'])} | {se} | {c['real_money_n']}"
         )
     return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- the prompt
 
+PROMPT_HEADER = (
+    "Evidence, not instructions: your limits, sizes and mandate are unchanged. Each line below is written by code "
+    "from a rule's filter and its score across every desk's closed trades, live and shadow, net of fees: n counts "
+    "independent positions (every desk and strike of one Kalshi event is one), cents per $ is the mean return on "
+    "entry notional, and CI is its 95% interval. A rule was admitted only on trades newer than anything its "
+    "proposer had read, is re-scored every hour and is retired when it stops holding. Weigh it against your own "
+    "record, and say in your memo when you act on one or depart from one."
+)
 
-def render_rules(rules: Iterable[Mapping[str, Any]]) -> str:
-    """The session prompt's block: every rule with its evidence, and how to use them."""
-    lines = [
-        "Rules the firm measured across every desk's settled trades, live and shadow. Each was admitted only when the "
-        "95% bootstrap interval of its P&L per dollar of entry excluded zero, and each is re-scored every hour and "
-        "retired when it stops holding. Apply them to your own orders and strategies unless your own settled record "
-        "says otherwise, and say so in your memo when it does."
-    ]
-    count = 0
+
+def _price(value: float) -> str:
+    return f"{value:.2f}" if value <= 1.0 else f"{value:g}"
+
+
+def describe_filter(rule_filter: Mapping[str, Any]) -> str:
+    """A validated filter in words, e.g. `kalshi, tickers KXHIGHNY*, NO leg, entry 0.90 to 1.00`."""
+    parts: list[str] = []
+    if rule_filter.get("venue"):
+        parts.append(str(rule_filter["venue"]))
+    if rule_filter.get("series_prefix"):
+        parts.append("tickers " + " or ".join(f"{p}*" for p in rule_filter["series_prefix"]))
+    if rule_filter.get("family"):
+        parts.append("family " + " or ".join(rule_filter["family"]))
+    if rule_filter.get("strategy"):
+        parts.append("strategy " + " or ".join(rule_filter["strategy"]))
+    if rule_filter.get("result_side"):
+        parts.append(f"{str(rule_filter['result_side']).upper()} leg")
+    if rule_filter.get("entry_price"):
+        low, high = rule_filter["entry_price"]
+        parts.append(f"entry {_price(low)} to {_price(high)}")
+    if rule_filter.get("held_hours"):
+        low, high = rule_filter["held_hours"]
+        parts.append(f"held {low:g} to {high:g} hours")
+    if rule_filter.get("real_money") is True:
+        parts.append("real-money trades")
+    elif rule_filter.get("real_money") is False:
+        parts.append("shadow trades")
+    return ", ".join(parts)
+
+
+def _clean_score(raw: Any) -> dict[str, Any]:
+    """The numbers of a score and nothing else, in sane ranges: a book edited by hand cannot put
+    words or a 300-digit figure into a prompt through its score."""
+    if not isinstance(raw, Mapping):
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("n", "trades", "real_money_n"):
+        value = _number(raw.get(key))
+        if value is not None and 0 <= value <= 10_000_000:
+            out[key] = int(value)
+    if "n" not in out:
+        return {}
+    mean = _number(raw.get("mean_pnl_per_dollar"))
+    if mean is not None and abs(mean) <= 1000:
+        out["mean_pnl_per_dollar"] = mean
+    ci = raw.get("ci")
+    if isinstance(ci, (list, tuple)) and len(ci) == 2:
+        low, high = _number(ci[0]), _number(ci[1])
+        if low is not None and high is not None and abs(low) <= 1000 and abs(high) <= 1000:
+            out["ci"] = [low, high]
+    return out
+
+
+def render_rules(rules: Iterable[Mapping[str, Any]], *, limit: int = MAX_PROMPT_RULES) -> str:
+    """The prompt's block: one line per rule, written here from its validated filter and its
+    numbers. A rule's statement is the model's sentence and never reaches a desk; a row without a
+    valid filter and direction is left out."""
+    lines = [PROMPT_HEADER]
     for rule in rules:
-        if not isinstance(rule, Mapping) or not rule.get("statement"):
+        if len(lines) > min(max(0, int(limit)), MAX_PROMPT_RULES):
+            break
+        if not isinstance(rule, Mapping) or rule.get("direction") not in DIRECTIONS:
             continue
-        evidence = rule.get("evidence") or evidence_text(rule.get("score") or {})
-        lines.append(f"- {str(rule.get('direction') or '').upper()}: {rule['statement']} ({evidence})")
-        count += 1
-    return "\n".join(lines) if count else ""
+        try:
+            rule_filter = validate_filter(rule.get("filter"))
+        except MindError:
+            continue
+        score = _clean_score(rule.get("score"))
+        if not score:
+            continue
+        lines.append(f"- {str(rule['direction']).upper()}: {describe_filter(rule_filter)}; {evidence_text(score)}")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def applies(rule: Mapping[str, Any], family: str | None = None, venues: Iterable[str] | None = None) -> bool:
@@ -567,17 +910,24 @@ def applies(rule: Mapping[str, Any], family: str | None = None, venues: Iterable
     return True
 
 
-def _prompt_row(rule: Mapping[str, Any]) -> dict[str, Any]:
-    score = rule.get("score") or {}
+def _prompt_row(rule: Any) -> dict[str, Any] | None:
+    """A book rule as a prompt reads it, held to the schema (a hand-edited book is not trusted),
+    or None."""
+    if not isinstance(rule, Mapping):
+        return None
+    try:
+        valid = validate_rule({k: rule.get(k) for k in RULE_KEYS})
+    except MindError:
+        return None
+    score = _clean_score(rule.get("score"))
+    if not score:
+        return None
     return {
-        "id": rule.get("id"),
-        "statement": rule.get("statement"),
-        "direction": rule.get("direction"),
-        "filter": rule.get("filter"),
+        "id": valid["id"],
+        "direction": valid["direction"],
+        "filter": valid["filter"],
+        "score": score,
         "evidence": evidence_text(score),
-        "n": score.get("n"),
-        "mean_pnl_per_dollar": score.get("mean_pnl_per_dollar"),
-        "ci": score.get("ci"),
     }
 
 
@@ -599,8 +949,8 @@ def rules_for_family(family: str, *, path: str | Path | None = None, limit: int 
     if target is None:
         return ""
     try:
-        rules = [r for r in read_book(target).get("rules") or [] if isinstance(r, Mapping)]
-        chosen = [_prompt_row(r) for r in rules if applies(r, family=family)][: max(0, int(limit))]
+        rows = [row for row in (_prompt_row(r) for r in read_book(target).get("rules") or []) if row is not None]
+        chosen = [row for row in rows if applies(row, family=family)][: max(0, int(limit))]
         return render_rules(chosen)
     except Exception:
         return ""
@@ -617,6 +967,11 @@ def _clean(value: Any, limit: int = 240) -> str:
     return " ".join(str(value or "").replace("<", "‹").split())[:limit]
 
 
+def _seq(value: Any) -> int:
+    number = _number(value)
+    return int(number) if number is not None and number > 0 else 0
+
+
 class FirmMind:
     """Score, admit, retire and publish the floor's rules. Reads the log; writes the book file
     and `lab.hypothesis` / `lab.result`; never touches a manifest, an order or a ledger."""
@@ -630,7 +985,7 @@ class FirmMind:
         clock: Callable[[], float] = time.time,
         config: Mapping[str, Any] | None = None,
         families: Callable[[], Mapping[str, str]] | None = None,
-        lessons: Callable[[], Iterable[str]] | None = None,
+        lessons: Callable[[], Iterable[Any]] | None = None,
         alert: Callable[[str, str], None] | None = None,
         register: bool = True,
     ):
@@ -646,12 +1001,26 @@ class FirmMind:
         self._lock = threading.RLock()
         self._book: dict[str, Any] | None = None
         self._stamp: tuple[int, int] | None = None
+        self._matched_cache: dict[str, frozenset[int]] = {}
         if register:
             _ACTIVE_PATH = self.path
 
     @property
     def enabled(self) -> bool:
         return bool(self.config.get("enabled", True))
+
+    @property
+    def min_each_way(self) -> int:
+        return int(self.config["min_each_way"])
+
+    @property
+    def admission_level(self) -> float:
+        """One minus the pass's error rate shared across its proposals."""
+        return 1.0 - float(self.config["alpha"]) / max(1, int(self.config["max_proposals"]))
+
+    @property
+    def retention_level(self) -> float:
+        return 1.0 - float(self.config["alpha"])
 
     def now(self) -> str:
         return now_iso(self.clock)
@@ -678,20 +1047,47 @@ class FirmMind:
                 self._stamp = stamp
             return json.loads(json.dumps(self._book))
 
+    def _write(self, data: Mapping[str, Any]) -> None:
+        """The book on disk, atomically."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(f"{self.path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(self.path)
+        try:
+            stat = self.path.stat()
+            self._stamp = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            self._stamp = None
+
     def _save(self, book: Mapping[str, Any], persist: bool) -> None:
         with self._lock:
             self._book = json.loads(json.dumps(dict(book)))
-            if not persist:
-                return
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_name(f"{self.path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
-            tmp.write_text(json.dumps(self._book, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            tmp.replace(self.path)
+            if persist:
+                self._write(self._book)
+
+    @contextmanager
+    def _pass_lock(self) -> Iterator[bool]:
+        """An exclusive, non-blocking `flock` on `<book>.lock` for a whole pass: the floor's worker
+        and a pass by hand each re-read the book and write it back, so whichever wrote last used
+        to erase the other's rules. Yields False when another pass holds it."""
+        if fcntl is None:  # pragma: no cover
+            yield True
+            return
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(lock_path, "a+")
+        try:
             try:
-                stat = self.path.stat()
-                self._stamp = (stat.st_mtime_ns, stat.st_size)
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
-                self._stamp = None
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
     def rules(self) -> list[dict[str, Any]]:
         return [r for r in self.book().get("rules") or [] if isinstance(r, dict)]
@@ -699,11 +1095,12 @@ class FirmMind:
     def rules_for(
         self, family: str | None = None, venues: Iterable[str] | None = None, limit: int | None = None
     ) -> list[dict[str, Any]]:
-        """The active rules that apply to a desk, strongest first, ready for `render_rules`."""
-        cap = int(self.config["prompt_rules"] if limit is None else limit)
+        """The active rules that apply to a desk, strongest first, ready for `render_rules`. A rule
+        that fails the schema (a book edited by hand) is left out."""
+        cap = min(int(self.config["prompt_rules"] if limit is None else limit), MAX_PROMPT_RULES)
         venue_list = list(venues) if venues is not None else None
-        rows = [_prompt_row(r) for r in self.rules() if applies(r, family=family, venues=venue_list)]
-        return rows[: max(0, cap)]
+        rows = [row for row in (_prompt_row(r) for r in self.rules()) if row is not None]
+        return [row for row in rows if applies(row, family=family, venues=venue_list)][: max(0, cap)]
 
     def block_for(self, family: str) -> str:
         """`rules_for_family` for this mind's own book."""
@@ -714,22 +1111,76 @@ class FirmMind:
 
     # ------------------------------------------------------------------ the evidence
     def outcomes(self) -> tuple[list[Outcome], int]:
-        """Every scoreable outcome in the newest `WINDOW` of the log, oldest first, and the
-        sequence number of the newest outcome event (the evidence fingerprint)."""
+        """Every scoreable outcome in the newest `WINDOW` of the log, in log order, and the
+        sequence number of the newest outcome event (the evidence fingerprint). An outcome written
+        before the gateway recorded its entry fees and its open takes them from the fills."""
         events = self.log.read(kind=OUTCOME_KIND, limit=WINDOW, newest=True)
         try:
             families = dict(self.families()) if self.families is not None else {}
         except Exception:
             families = {}
-        rows = [o for o in (parse_outcome(e, families) for e in events) if o is not None]
-        latest = int(getattr(events[-1], "seq", 0) or 0) if events else 0
+        opens = None
+        if any(isinstance(getattr(e, "payload", None), Mapping) and e.payload.get("entry_fees") is None for e in events):
+            try:
+                opens = fill_opens(self.log.read(kind=FILL_KIND, limit=WINDOW, newest=True))
+            except Exception:
+                opens = None
+        rows = sorted((o for o in (parse_outcome(e, families, opens) for e in events) if o is not None), key=lambda o: o.seq)
+        latest = max((int(getattr(e, "seq", 0) or 0) for e in events), default=0)
         return rows, latest
 
-    def score(self, rule: Mapping[str, Any], outcomes: Sequence[Outcome]) -> dict[str, Any]:
-        return evaluate(rule, outcomes, resamples=int(self.config["resamples"]))
+    def score(
+        self, rule: Mapping[str, Any], outcomes: Sequence[Outcome], *, level: float | None = None, interval: bool = True
+    ) -> dict[str, Any]:
+        return evaluate(
+            rule,
+            outcomes,
+            resamples=int(self.config["resamples"]),
+            level=self.retention_level if level is None else level,
+            interval=interval,
+            bootstrap_max_n=int(self.config["bootstrap_max_n"]),
+        )
 
-    def recent_lessons(self) -> list[str]:
-        """The desks' newest post-mortem lessons, and any lessons the memory store holds."""
+    def split(self, outcomes: Sequence[Outcome]) -> tuple[list[Outcome], list[Outcome], int]:
+        """(read, held out, cut): the older part of the tape the scientist reads, the newest
+        `holdout_fraction` it never sees, and the log position between them."""
+        if not outcomes:
+            return [], [], 0
+        fraction = min(0.9, max(0.1, float(self.config["holdout_fraction"])))
+        keep = min(len(outcomes), max(1, math.ceil(len(outcomes) * (1.0 - fraction))))
+        cut = outcomes[keep - 1].seq
+        read, held_out = split_at(outcomes, cut)
+        return read, held_out, cut
+
+    def retention(self, rule: Mapping[str, Any], outcomes: Sequence[Outcome]) -> tuple[bool, str, dict[str, Any]]:
+        """Whether a book rule keeps its place, why, and its score: on the outcomes newer than the
+        tape its proposer read (all of them for a rule written by hand), and, once `min_n`
+        positions have closed since its admission, their mean must still sit on its side of zero."""
+        direction = str(rule.get("direction"))
+        min_n = int(self.config["min_n"])
+        cut, admitted = _seq(rule.get("holdout_from_seq")), _seq(rule.get("admitted_seq"))
+        _, unseen = split_at(outcomes, cut)
+        score = self.score(rule, unseen)
+        ok, reason = verdict(score, direction, min_n, min_each_way=self.min_each_way)
+        if not ok:
+            return False, reason, score
+        if admitted > cut:
+            _, since = split_at(outcomes, admitted)
+            later = self.score(rule, since, interval=False)
+            score["since_admission"] = {"n": later["n"], "mean_pnl_per_dollar": later["mean_pnl_per_dollar"]}
+            if later["n"] >= min_n and not agrees(later, direction):
+                return (
+                    False,
+                    f"the {later['n']} positions closed since admission average {_cents(later['mean_pnl_per_dollar'])} "
+                    f"cents per $, the wrong side of zero",
+                    score,
+                )
+        return True, "holds", score
+
+    def recent_lessons(self, *, before_seq: int | None = None, before_at: str | None = None) -> list[str]:
+        """The desks' newest post-mortem lessons, and any lessons the memory store holds. With a
+        cutoff, only lessons written before the held-out outcomes: a lesson drawn from them would
+        carry the test's answers into the question."""
         limit = max(0, int(self.config["lessons"]))
         out: list[str] = []
 
@@ -740,6 +1191,8 @@ class FirmMind:
 
         try:
             for event in reversed(self.log.read(kind="desk.postmortem", limit=60, newest=True)):
+                if before_seq is not None and int(getattr(event, "seq", 0) or 0) >= before_seq:
+                    continue
                 desk = str(event.stream).split(":", 1)[-1]
                 for lesson in event.payload.get("lessons") or []:
                     if isinstance(lesson, str):
@@ -749,7 +1202,13 @@ class FirmMind:
         if self.lessons is not None:
             try:
                 for lesson in self.lessons():
-                    add(str(lesson))
+                    if isinstance(lesson, Mapping):
+                        written, text = lesson.get("at"), lesson.get("text")
+                    else:
+                        written, text = None, lesson
+                    if before_at is not None and not (isinstance(written, str) and written < before_at):
+                        continue  # written after the cutoff, or undated: it may know the answers
+                    add(str(text or ""))
             except Exception:
                 pass
         return out
@@ -773,16 +1232,21 @@ class FirmMind:
     def run(
         self, at: str | None = None, *, ask: bool = True, persist: bool = True, publish: bool = True, force: bool = False
     ) -> dict[str, Any]:
-        """One pass. Never raises: a failure is an alert and a summary that says so."""
+        """One pass, under the book's lock. Never raises: a failure is an alert and a summary that
+        says so; a pass that finds the lock held does nothing and says `skipped: LOCKED`."""
         at = at or self.now()
         try:
-            return self._run(at, ask=ask, persist=persist, publish=publish, force=force)
+            with self._pass_lock() as held:
+                if not held:
+                    return {"at": at, "skipped": LOCKED}
+                return self._run(at, ask=ask, persist=persist, publish=publish, force=force)
         except Exception as exc:
             self.alert(f"firm mind pass failed: {type(exc).__name__}: {str(exc)[:200]}")
             return {"at": at, "failed": f"{type(exc).__name__}"}
 
     def _run(self, at: str, *, ask: bool, persist: bool, publish: bool, force: bool) -> dict[str, Any]:
         min_n = int(self.config["min_n"])
+        self._matched_cache = {}
         book = self.book()
         # The attempt is stamped before any work, so a pass that fails waits its interval instead
         # of retrying (and paying) every tick.
@@ -790,9 +1254,10 @@ class FirmMind:
         self._save(book, persist)
 
         outcomes, latest = self.outcomes()
-        fingerprint = {"seq": latest, "n": len(outcomes), "min_n": min_n}
+        fingerprint = {"seq": latest, "n": len(outcomes), "min_n": min_n, "holdout": float(self.config["holdout_fraction"])}
+        read, held_out, cut = self.split(outcomes)
         summary: dict[str, Any] = {
-            "at": at, "outcomes": len(outcomes), "rules": len(book.get("rules") or []),
+            "at": at, "outcomes": len(outcomes), "held_out": len(held_out), "rules": len(book.get("rules") or []),
             "added": [], "revised": [], "retired": [], "proposals": [], "asked": False,
         }
         if not force and book.get("evidence") == fingerprint:
@@ -800,40 +1265,43 @@ class FirmMind:
             return summary
 
         before = {r["id"]: r for r in book.get("rules") or [] if isinstance(r, dict) and r.get("id")}
+        history = [r for r in book.get("retired") or [] if isinstance(r, dict)]
         active: dict[str, dict[str, Any]] = {}
         retired: list[dict[str, Any]] = []
-        # 1. Re-score the book. A rule that stopped holding goes, without asking anyone.
+        # 1. Re-score the book on what its proposers never read. A rule that stopped holding goes,
+        #    without asking anyone.
         for rule_id, rule in before.items():
             try:  # a book edited by hand is held to the same schema as the model
                 rule = {**rule, **validate_rule({k: rule.get(k) for k in RULE_KEYS})}
             except MindError as exc:
-                retired.append(self._retirement(rule, {}, f"invalid in the book: {exc}", at))
+                retired.append(self._retirement(rule, {}, f"invalid in the book: {exc}", at, latest))
                 continue
-            score = self.score(rule, outcomes)
-            ok, reason = verdict(score, str(rule.get("direction")), min_n)
+            ok, reason, score = self.retention(rule, outcomes)
             if ok:
                 active[rule_id] = {**rule, "score": score}
             else:
-                retired.append(self._retirement(rule, score, f"re-scored: {reason}", at))
+                retired.append(self._retirement(rule, score, f"re-scored: {reason}", at, latest))
 
-        # 2. Ask the scientist, when there is evidence it has not read.
-        if ask and self.provider is not None and len(outcomes) >= min_n:
-            reply = self._ask(at, outcomes, list(active.values()), retired + list(book.get("retired") or []), persist=persist)
+        # 2. Ask the scientist, when the held-out outcomes could admit a rule at all.
+        if ask and self.provider is not None and len({o.group for o in held_out}) >= min_n and read:
+            reply = self._ask(at, read, held_out, list(active.values()), retired + history, persist=persist)
             summary["asked"] = reply is not None
             if reply is not None:
                 proposals, retire_ids = reply
                 for rule_id in retire_ids[: int(self.config["max_rules"])]:
                     rule = active.pop(rule_id, None)
                     if rule is not None:
-                        retired.append(self._retirement(rule, rule["score"], "retired by the scientist", at))
+                        retired.append(self._retirement(rule, rule["score"], "retired by the scientist", at, latest))
                 for raw in proposals[: int(self.config["max_proposals"])]:
-                    summary["proposals"].append(self._consider(raw, outcomes, active, before, at, min_n))
+                    summary["proposals"].append(
+                        self._consider(raw, outcomes, read, cut, latest, active, before, retired + history, at)
+                    )
 
         # 3. Rank and cap.
         ordered = sorted(active.values(), key=lambda r: (-rank_of(r["score"]), r["id"]))
         cap = max(0, int(self.config["max_rules"]))
         for rule in ordered[cap:]:
-            retired.append(self._retirement(rule, rule["score"], f"outranked: the book keeps {cap} rules", at))
+            retired.append(self._retirement(rule, rule["score"], f"outranked: the book keeps {cap} rules", at, latest))
         ordered = ordered[:cap]
         kept = {r["id"] for r in ordered}
         retired = [r for r in retired if r["id"] not in kept]  # a revision is not a retirement
@@ -867,13 +1335,17 @@ class FirmMind:
                 "retired": [r["id"] for r in retired],
             }
         )
-        book["last_summary"] = {k: summary[k] for k in ("at", "outcomes", "rules", "added", "revised", "retired", "asked")}
+        book["last_summary"] = {
+            k: summary[k] for k in ("at", "outcomes", "held_out", "rules", "added", "revised", "retired", "asked")
+        }
         self._save(book, persist)
         if publish and (outcomes or added or revised or retired):
             self._publish(at, summary, outcomes, added, revised, retired)
         return summary
 
-    def _retirement(self, rule: Mapping[str, Any], score: Mapping[str, Any], reason: str, at: str) -> dict[str, Any]:
+    def _retirement(
+        self, rule: Mapping[str, Any], score: Mapping[str, Any], reason: str, at: str, latest: int
+    ) -> dict[str, Any]:
         return {
             "id": rule.get("id"),
             "statement": rule.get("statement"),
@@ -883,38 +1355,97 @@ class FirmMind:
             "evidence": evidence_text(score),
             "reason": reason[:240],
             "retired_at": at,
+            # A filter retired here is tested again only on outcomes written after this.
+            "retired_seq": latest,
         }
 
     def _consider(
         self,
         raw: Any,
         outcomes: Sequence[Outcome],
+        read: Sequence[Outcome],
+        cut: int,
+        latest: int,
         active: dict[str, dict[str, Any]],
         before: Mapping[str, Mapping[str, Any]],
+        retired: Sequence[Mapping[str, Any]],
         at: str,
-        min_n: int,
     ) -> dict[str, Any]:
-        """Validate, score and admit (or refuse) one proposed rule, in place in `active`."""
+        """Validate, test out of sample and admit (or refuse) one proposed rule, in place in
+        `active`."""
+        min_n = int(self.config["min_n"])
         try:
             rule = validate_rule(raw)
         except MindError as exc:
             rule_id = raw.get("id") if isinstance(raw, Mapping) and isinstance(raw.get("id"), str) else None
             return {"id": _clean(rule_id, 64) or None, "status": "invalid", "reason": str(exc)}
+        mine = self._matched(rule["filter"], outcomes)
         for other in active.values():
-            if other["id"] != rule["id"] and other["filter"] == rule["filter"] and other["direction"] == rule["direction"]:
+            if other["id"] == rule["id"] or other["direction"] != rule["direction"]:
+                continue
+            if other["filter"] == rule["filter"]:
                 return {"id": rule["id"], "status": "rejected", "reason": f"duplicates {other['id']}"}
-        score = self.score(rule, outcomes)
-        ok, reason = verdict(score, rule["direction"], min_n)
-        row = {"id": rule["id"], "status": "admitted" if ok else "rejected", "reason": reason, "evidence": evidence_text(score)}
+            theirs = self._matched(other["filter"], outcomes)
+            shared = len(mine & theirs)
+            if self._same_trades(mine, theirs):
+                return {
+                    "id": rule["id"], "status": "rejected",
+                    "reason": f"duplicates {other['id']}: {shared} of its {len(theirs)} trades and {len(mine)} of these are the same",
+                }
+        # A filter the book retired -- or one that trades on the same outcomes, whichever way it
+        # points -- is tested only on outcomes written after that retirement, so proposing it
+        # again every hour, or with its hours nudged, until chance admits it gains nothing.
+        since = 0
+        for old in retired:
+            try:
+                old_filter = validate_filter(old.get("filter"))
+            except MindError:
+                continue
+            if old_filter == rule["filter"] or self._same_trades(mine, self._matched(old_filter, outcomes)):
+                since = max(since, _seq(old.get("retired_seq")))
+        test_cut = max(cut, since)
+        _, unseen = split_at(outcomes, test_cut)
+        level = self.admission_level
+        trial = self.score(rule, unseen, level=level)
+        ok, reason = verdict(trial, rule["direction"], min_n, min_each_way=self.min_each_way)
+        if ok:
+            older = self.score(rule, read, interval=False)
+            if not agrees(older, rule["direction"]):
+                ok = False
+                reason = (
+                    f"held on the unseen outcomes, but the {older['n']} positions the scientist read do not sit on "
+                    f"the same side of zero"
+                )
+        row = {
+            "id": rule["id"],
+            "status": "admitted" if ok else "rejected",
+            "reason": reason,
+            "evidence": evidence_text(trial) + f" at {level * 100:.2f}% on unseen outcomes",
+        }
         if ok:
             previous = active.get(rule["id"]) or before.get(rule["id"]) or {}
             active[rule["id"]] = {
                 **rule,
-                "score": score,
+                "score": self.score(rule, unseen),
+                "admission": {"level": round(level, 6), "n": trial["n"], "ci": trial["ci"], "binomial": trial["binomial"]},
+                "holdout_from_seq": test_cut,
+                "admitted_seq": latest,
                 "admitted_at": previous.get("admitted_at") or at,
                 "revised_at": at,
             }
         return row
+
+    def _same_trades(self, mine: frozenset[int], theirs: frozenset[int]) -> bool:
+        """Whether two rules select mostly the same outcomes (`max_overlap` of the larger set)."""
+        return bool(mine and theirs) and len(mine & theirs) >= float(self.config["max_overlap"]) * max(len(mine), len(theirs))
+
+    def _matched(self, rule_filter: Mapping[str, Any], outcomes: Sequence[Outcome]) -> frozenset[int]:
+        """The log positions a filter selects on the pass's tape (the cache is emptied as each
+        pass starts)."""
+        key = canonical(rule_filter)
+        if key not in self._matched_cache:
+            self._matched_cache[key] = frozenset(o.seq for o in outcomes if matches(rule_filter, o))
+        return self._matched_cache[key]
 
     # ------------------------------------------------------------------ the scientist
     def _spent_today(self, book: Mapping[str, Any], day: str) -> Decimal:
@@ -925,6 +1456,19 @@ class FirmMind:
             return Decimal(str(spend.get("usd") or "0"))
         except InvalidOperation:
             return Decimal(0)
+
+    def _add_spend(self, day: str, delta: Decimal) -> None:
+        """Move today's tally by `delta`, on disk whether or not the pass persists its rules: a
+        dry run's model call costs the same money. Read from and written to the file alone, so a
+        dry run's unsaved book never lands with it."""
+        with self._lock:
+            disk = {"version": BOOK_VERSION, "rules": [], "retired": [], **read_book(self.path)}
+            usd = max(self._spent_today(disk, day) + delta, Decimal(0))
+            spend = {"day": day, "usd": format(usd.normalize(), "f")}
+            disk["spend"] = spend
+            self._write(disk)
+            if self._book is not None:
+                self._book["spend"] = spend
 
     def _estimate(self, chars: int) -> Decimal:
         profile = str(self.config["profile"])
@@ -945,13 +1489,18 @@ class FirmMind:
     def _ask(
         self,
         at: str,
-        outcomes: Sequence[Outcome],
+        read: Sequence[Outcome],
+        held_out: Sequence[Outcome],
         rules: Sequence[Mapping[str, Any]],
         retired: Sequence[Mapping[str, Any]],
         *,
         persist: bool = True,
     ) -> tuple[list[Any], list[str]] | None:
-        packet = self.packet(at, outcomes, rules, retired)
+        packet = self.packet(
+            at, read, rules, retired, held_out=len(held_out),
+            before_seq=min((o.seq for o in held_out), default=None),
+            before_at=min((o.at for o in held_out), default=None),
+        )
         instructions = self.instructions()
         day = at[:10]
         budget = Decimal(str(self.config["budget_usd_per_day"]))
@@ -960,6 +1509,10 @@ class FirmMind:
         if spent + estimate > budget:
             self.alert(f"firm mind skipped its model call: ${spent} of ${budget} spent today")
             return None
+        # The provider's own per-desk cap is the floor's desk fuse, not this budget, so the tally
+        # here is the cap: the estimate is booked before the call and stays booked if the call
+        # fails after it was sent.
+        self._add_spend(day, estimate)
         try:
             response = self.provider.respond(
                 self.config["profile"],
@@ -973,6 +1526,8 @@ class FirmMind:
                 desk_cap_usd_per_day=self.config["budget_usd_per_day"],
             )
         except Exception as exc:
+            if any(cls.__name__ == "BudgetExceeded" for cls in type(exc).__mro__):
+                self._add_spend(day, -estimate)  # refused before anything was sent
             self.alert(f"firm mind model call failed: {type(exc).__name__}: {str(exc)[:160]}")
             return None
         cost = getattr(response, "cost_usd", None)
@@ -980,23 +1535,25 @@ class FirmMind:
             cost = Decimal(str(cost)) if cost is not None else estimate
         except InvalidOperation:
             cost = estimate
+        self._add_spend(day, cost - estimate)
         current = self.book()
-        current["spend"] = {"day": day, "usd": format(self._spent_today(current, day) + cost, "f")}
         current["last_asked_at"] = at
         self._save(current, persist)
         return parse_reply(getattr(response, "output_text", "") or "")
 
     def instructions(self) -> str:
         cfg = self.config
+        holdout = min(0.9, max(0.1, float(cfg["holdout_fraction"])))
         return (
-            "You are the Firm Mind of a public, fully automated trading floor: its scientist. Every desk's settled "
+            "You are the Firm Mind of a public, fully automated trading floor: its scientist. Every desk's closed "
             "trades are scored in code; your job is to turn them into a small book of machine-checkable rules that "
-            "every desk session and every strategy generator on the floor reads. You get an aggregate table computed "
-            "in code (family x strategy x series x entry-price band x leg), the current rule book with its scores, "
-            "rules recently retired and why, and the desks' own post-mortem lessons (hypotheses, not evidence).\n"
+            "every desk session and every strategy generator on the floor reads as evidence. You get an aggregate table "
+            "computed in code (family x strategy x series x entry-price band x leg), the current rule book scored on "
+            "the same outcomes, rules recently retired and why, and the desks' own post-mortem lessons (hypotheses, not "
+            "evidence).\n"
             "Reply with JSON only, in this shape: {\"rules\": [...], \"retire\": [\"rule-id\", ...]}. "
             f"At most {cfg['max_proposals']} rules, each new or a revision of an existing id:\n"
-            "{\"id\": \"lowercase-slug\", \"statement\": \"one sentence a desk can act on\", \"filter\": {...}, "
+            "{\"id\": \"lowercase-slug\", \"statement\": \"one sentence for the public record\", \"filter\": {...}, "
             "\"direction\": \"avoid\" or \"prefer\"}\n"
             "Filter keys, all optional but at least one; a trade must satisfy every key given:\n"
             "- series_prefix: list of ticker prefixes; [\"KXHIGH\"] matches KXHIGHNY-... and KXHIGHCHI-...; a Coinbase "
@@ -1008,18 +1565,26 @@ class FirmMind:
             "- held_hours: [lo, hi] inclusive\n"
             "- real_money: true for real-money trades only, false for shadow books only\n"
             "- venue: \"kalshi\" or \"coinbase\"\n"
-            f"How rules are judged, in code, after you answer: the filter runs over the newest {WINDOW} settled outcomes "
-            "of every desk, and the score is the mean P&L per dollar of entry notional per trade with a seeded "
-            f"bootstrap 95% interval. A rule is admitted only with at least {cfg['min_n']} matching trades and an "
-            "interval that excludes zero in its direction: avoid needs the upper bound below zero, prefer needs the "
-            "lower bound above zero. Every rule is re-scored every pass and retired automatically when it stops "
-            f"holding; the book keeps at most {cfg['max_rules']}, ranked by |mean| x sqrt(n).\n"
+            f"How rules are judged, in code, after you answer. The outcomes you read are the older "
+            f"{round((1 - holdout) * 100)}% of the newest {WINDOW}; the newest {round(holdout * 100)}% are held out, and a "
+            "proposal is scored on them alone. n counts independent positions: every desk, leg and strike of one Kalshi "
+            "event is one, and so are the partial sells of one spot position. The score is the mean P&L per dollar of "
+            "entry notional per position, net of entry fees, with a seeded bootstrap interval at "
+            f"{self.admission_level * 100:.2f}% (the pass's proposals share a 5% error rate), and for settled contracts "
+            "an exact binomial test of the positions that won against the break-even count. A rule is admitted only with "
+            f"at least {cfg['min_n']} held-out positions, {cfg['min_each_way']} winning and {cfg['min_each_way']} losing, "
+            "an interval that excludes zero in its direction (avoid: upper bound below zero; prefer: lower bound above "
+            "zero), and a mean on the same side in the outcomes you read. A rule that trades on the same outcomes as an "
+            "active one is a duplicate, and a filter the book retired is tested only on outcomes after its retirement. "
+            "Every rule is re-scored every pass on outcomes newer than what its proposer read and retired automatically "
+            f"when it stops holding; the book keeps at most {cfg['max_rules']}, ranked by the interval's bound nearest "
+            "zero x sqrt(n). Desks read a line written from your filter and the score, never your statement.\n"
             "Write rules narrow enough to act on and broad enough to carry the trades: a cell with a large n and a mean "
             "several standard errors from zero is a candidate, a single outlier trade is not, and neighbouring cells "
-            "that agree can be one rule. The statement says what to do and where, in plain words a desk can apply "
-            "without reading the filter, and claims nothing the filter does not test. Revise a rule by reusing its id; "
-            "retire one only when the table shows it is wrong or superseded. Reply {\"rules\": [], \"retire\": []} when "
-            "the evidence supports nothing new."
+            "that agree can be one rule; expect a cell picked for being extreme to be weaker on newer outcomes. The "
+            "statement says what the rule is and where, in plain words, and claims nothing the filter does not test. "
+            "Revise a rule by reusing its id; retire one only when the table shows it is wrong or superseded. Reply "
+            "{\"rules\": [], \"retire\": []} when the evidence supports nothing new."
         )
 
     def packet(
@@ -1028,50 +1593,71 @@ class FirmMind:
         outcomes: Sequence[Outcome],
         rules: Sequence[Mapping[str, Any]],
         retired: Sequence[Mapping[str, Any]],
+        *,
+        held_out: int = 0,
+        before_seq: int | None = None,
+        before_at: str | None = None,
     ) -> str:
-        """Everything the scientist reads: numbers the floor wrote, and the desks' lessons."""
+        """Everything the scientist reads, from the older part of the tape only: numbers the
+        floor wrote, and the lessons desks wrote before the held-out outcomes."""
         n = len(outcomes)
-        parts = [f"# The floor's settled outcomes, now {at} UTC"]
+        parts = [f"# The floor's closed positions, now {at} UTC"]
         if n:
-            returns = [o.pnl_per_dollar for o in outcomes]
+            groups = clusters(outcomes)
             parts.append(
-                f"{n} outcomes from {len({o.desk_id for o in outcomes})} desks, {min(o.at for o in outcomes)[:16]} to "
-                f"{max(o.at for o in outcomes)[:16]}; {sum(1 for o in outcomes if o.real_money)} with real money; net "
-                f"{math.fsum(o.pnl for o in outcomes):.2f} USD, mean {_cents(math.fsum(returns) / n)} cents per $ of entry."
+                f"{n} outcomes ({len(groups)} independent positions) from {len({o.desk_id for o in outcomes})} desks, "
+                f"{min(o.at for o in outcomes)[:16]} to {max(o.at for o in outcomes)[:16]}; "
+                f"{sum(1 for o in outcomes if o.real_money)} with real money; net of fees "
+                f"{math.fsum(o.net_pnl for o in outcomes):.2f} USD, mean "
+                f"{_cents(math.fsum(g['value'] for g in groups) / len(groups))} cents per $ of entry per position."
             )
+            if held_out:
+                parts.append(
+                    f"The newest {held_out} outcomes are held out: you do not see them, and every rule you propose is "
+                    "scored on them alone."
+                )
             families: dict[str, list[Outcome]] = {}
             for o in outcomes:
                 families.setdefault(o.family, []).append(o)
-            parts.append(
-                "## By family\n"
-                + "\n".join(
-                    f"- {family}: n={len(rows)}, pnl {math.fsum(o.pnl for o in rows):.2f} USD, "
-                    f"{_cents(math.fsum(o.pnl_per_dollar for o in rows) / len(rows))} cents per $"
-                    for family, rows in sorted(families.items())
+            lines = []
+            for family, rows in sorted(families.items()):
+                values = [g["value"] for g in clusters(rows)]
+                lines.append(
+                    f"- {family}: n={len(values)} positions ({len(rows)} trades), pnl {math.fsum(o.net_pnl for o in rows):.2f} "
+                    f"USD, {_cents(math.fsum(values) / len(values))} cents per $"
                 )
-            )
+            parts.append("## By family\n" + "\n".join(lines))
             cells = aggregate(outcomes, int(self.config["cells"]))
-            parts.append(f"## Cells (top {len(cells)} by |pnl| and by n; se is the standard error in cents)\n" + table_text(cells))
+            parts.append(
+                f"## Cells (top {len(cells)} by |pnl| and by n; n is independent positions, se the standard error in "
+                "cents)\n" + table_text(cells)
+            )
         else:
             parts.append("(no settled outcomes yet)")
         if rules:
-            lines = [
-                f"- {r['id']} [{r['direction']}] {r['statement']} | filter {canonical(r['filter'])} | {evidence_text(r['score'])}"
-                for r in sorted(rules, key=lambda r: -rank_of(r["score"]))
-            ]
-            parts.append("## The rule book, re-scored now\n" + "\n".join(lines))
+            lines = []
+            for r in sorted(rules, key=lambda r: -rank_of(r["score"])):
+                here = self.score(r, outcomes, interval=False)
+                lines.append(
+                    f"- {r['id']} [{r['direction']}] {r['statement']} | filter {canonical(r['filter'])} | "
+                    f"on these outcomes: {evidence_text(here)}, {'-' if here['mean_pnl_per_dollar'] is None else _cents(here['mean_pnl_per_dollar'])} cents per $"
+                )
+            parts.append("## The rule book, scored on the outcomes above\n" + "\n".join(lines))
         else:
-            parts.append("## The rule book, re-scored now\n(empty)")
+            parts.append("## The rule book\n(empty)")
         if retired:
             lines = [
                 f"- {r.get('id')} [{r.get('direction')}] {r.get('statement')} | filter {canonical(r.get('filter') or {})} | "
-                f"{r.get('evidence') or ''} | {r.get('reason')}"
+                f"{r.get('reason')}"
                 for r in list(retired)[:8]
             ]
             parts.append("## Retired recently\n" + "\n".join(lines))
-        lessons = self.recent_lessons()
+        lessons = self.recent_lessons(before_seq=before_seq, before_at=before_at)
         if lessons:
-            parts.append("## Post-mortem lessons, newest first (hypotheses to test, not evidence)\n" + "\n".join(f"- {x}" for x in lessons))
+            parts.append(
+                "## Post-mortem lessons written before the held-out outcomes, newest first (hypotheses to test, not "
+                "evidence)\n" + "\n".join(f"- {x}" for x in lessons)
+            )
         return "\n\n".join(parts)
 
     # ------------------------------------------------------------------ the record
@@ -1088,16 +1674,19 @@ class FirmMind:
         proposals = list(summary.get("proposals") or [])
         admitted = sum(1 for p in proposals if p.get("status") == "admitted")
         text = (
-            f"The Firm Mind read {len(outcomes)} settled outcomes from {len({o.desk_id for o in outcomes})} desks"
-            + (f" and scored {len(proposals)} proposed rules, {admitted} admitted" if summary.get("asked") else "")
+            f"The Firm Mind read {len(outcomes)} settled outcomes from {len({o.desk_id for o in outcomes})} desks, "
+            f"{summary.get('held_out')} of them held out"
+            + (f", and tested {len(proposals)} proposed rules on those alone, {admitted} admitted" if summary.get("asked") else "")
             + f"; the book holds {summary.get('rules')} rules ({len(added)} added, {len(revised)} revised, "
             f"{len(retired)} retired)."
         )
         plan = (
-            f"Each rule filters the newest {WINDOW} desk.outcome events of every desk and is scored on mean P&L per "
-            f"dollar of entry with a seeded bootstrap 95% interval; it holds its place only with n >= "
-            f"{self.config['min_n']} and an interval that excludes zero in its direction, re-checked every "
-            f"{self.config['interval_minutes']} minutes."
+            f"A proposal is scored only on the newest {round(float(self.config['holdout_fraction']) * 100)}% of the "
+            f"newest {WINDOW} desk.outcome events, which its proposer never read: mean P&L per dollar of entry net of "
+            f"fees, one observation per Kalshi event or spot position, admitted with n >= {self.config['min_n']}, "
+            f"{self.config['min_each_way']} wins and losses each, an interval at {self.admission_level * 100:.2f}% "
+            f"excluding zero in its direction and a binomial test for settled contracts; re-checked every "
+            f"{self.config['interval_minutes']} minutes on outcomes newer than its admission."
         )
         self._append(
             f"mind:pass:{at}",
@@ -1197,13 +1786,13 @@ def build(service: Any) -> FirmMind | None:
     def families() -> dict[str, str]:
         return {desk_id: m.family for desk_id, m in dict(service.manifests).items()}
 
-    def memory_lessons() -> list[str]:
+    def memory_lessons() -> list[dict[str, Any]]:
         read = getattr(getattr(service, "memory", None), "read", None)
         if not callable(read):
             return []
         rows = read("lesson", 60)
         return [
-            f"{row.get('desk_id')}: {row.get('text')}"
+            {"at": row.get("at"), "text": f"{row.get('desk_id')}: {row.get('text')}"}
             for row in rows or []
             if isinstance(row, Mapping) and row.get("kind") == "lesson" and row.get("text")
         ]
@@ -1224,20 +1813,30 @@ __all__ = [
     "BOOTSTRAP_SEED",
     "DEFAULT_CONFIG",
     "FirmMind",
+    "LOCKED",
     "MindError",
     "Outcome",
     "aggregate",
+    "agrees",
     "applies",
+    "binomial_tails",
     "bootstrap_ci",
     "build",
+    "clusters",
+    "cluster_of",
+    "describe_filter",
     "evaluate",
+    "event_of",
     "evidence_text",
+    "fill_opens",
     "matches",
+    "normal_ci",
     "parse_outcome",
     "parse_reply",
     "rank_of",
     "render_rules",
     "rules_for_family",
+    "split_at",
     "strategy_of",
     "validate_filter",
     "validate_rule",
