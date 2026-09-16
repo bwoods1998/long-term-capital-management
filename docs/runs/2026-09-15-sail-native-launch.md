@@ -575,3 +575,7 @@ are rewarded and punished. Shipped, in order:
   settled P&L from Kalshi's own fills and settlements is -79.58 over seven markets, and its
   ledger cash agrees once the resized allocation is counted. Capital moved today: Scholes and
   Haghani cut, Mullins (300.59) and Hilibrand (368.80) raised. The reward loop is turning.
+- **Lifetime P&L on the site** (b408089, site 987d7fb / version cfb53489, 10:25 UTC): desk rows
+  carry `pnl_usd` = equity less net capital flows; the partners table had read equity minus
+  the current allocation, so the morning's resize showed as a gain. The 10:13 reconciliation:
+  Kalshi 7 of 7 instruments match, Coinbase 2 of 2.
