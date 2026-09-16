@@ -123,6 +123,16 @@ class FeedHubTests(HubCase):
         self.hub.on_price("kalshi", "KXFED-26SEP-T3.75", bid="garbage")
         self.assertEqual(self.hub.quote(Instrument("event", "X", "kalshi", market_id="KXFED-26SEP-T3.75")).bid, Decimal("0.55"))
 
+    def test_the_no_leg_is_quoted_in_no_dollars(self):
+        # The socket carries the YES leg; the REST quote complements it for a NO instrument, and
+        # so must this one, or the risk engine judges a NO bid against the YES ask (Sept 16, 2026).
+        self.hub.on_price("kalshi", "KXETH-26SEP1617-B2390", bid="0.24", ask="0.28", last="0.26")
+        no = self.hub.quote(Instrument("event", "KXETH-26SEP1617-B2390", "kalshi", market_id="KXETH-26SEP1617-B2390", right="no"))
+        self.assertEqual((no.bid, no.ask, no.last), (Decimal("0.72"), Decimal("0.76"), Decimal("0.74")))
+        self.assertEqual(no.reference("buy"), Decimal("0.76"))
+        yes = self.hub.quote(Instrument("event", "KXETH-26SEP1617-B2390", "kalshi", market_id="KXETH-26SEP1617-B2390", right="yes"))
+        self.assertEqual((yes.bid, yes.ask), (Decimal("0.24"), Decimal("0.28")))
+
     def test_drain_hands_the_tick_fill_venues_and_resolutions_once(self):
         self.hub.on_fill_candidate("kalshi", {"order_id": "o1"})
         self.hub.on_fill_candidate("kalshi", {"order_id": "o2"})

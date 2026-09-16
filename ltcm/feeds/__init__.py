@@ -294,11 +294,23 @@ class FeedHub:
         age = float(self.clock()) - float(row["at"])
         if age < 0 or age > self.max_age:
             return None
+        bid, ask, last = row.get("bid"), row.get("ask"), row.get("last")
+        if instrument.asset_class == "event" and str(instrument.right or "").lower() == "no":
+            # The socket carries the YES leg. A NO instrument is priced in NO dollars, exactly
+            # as the REST quote does it: on Sept 16, 2026 the unconverted feed let the risk
+            # engine judge a NO bid against the YES ask and the exit engine stop a NO position
+            # out at the YES mark thirteen seconds after it filled.
+            one = Decimal(1)
+            bid, ask, last = (
+                None if ask is None else one - ask,
+                None if bid is None else one - bid,
+                None if last is None else one - last,
+            )
         return Quote(
             instrument,
-            row.get("bid"),
-            row.get("ask"),
-            row.get("last"),
+            bid,
+            ask,
+            last,
             now_iso(lambda: row["at"]),
             row.get("source") or "ws",
             False,
