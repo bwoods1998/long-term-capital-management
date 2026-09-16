@@ -616,3 +616,7 @@ breaker, and settings that leave the last twenty minutes alone.
   message is parsed defensively (`yes_price_dollars`/`yes_price`, `count_fp`/`count`,
   `taker_side`); if the field names differ, the feed log will show no prints and the shadow
   fills will stay at zero, which the next check reads.
+- **Sporadic provider 400s** (seen 10:48 UTC): haghani-3's 06:45 session ended with
+  `provider_http_400`, the third such since last evening (scholes-2 22:47, haghani-3 01:21),
+  all on bred variants; the alert carries no body. Rare, not new tonight, and the session
+  retries at its next slot. Worth capturing the response body in the alert when it recurs.
