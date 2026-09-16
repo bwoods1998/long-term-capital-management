@@ -29,8 +29,8 @@
     // order, Mullins fifteen percent. A quoting strategy replaces its resting bids as fair
     // moves, so a day holds a few hundred small orders; the dollar caps still bind the risk.
     "MAX_ORDER_USD": "250",
-    "MAX_DAY_USD": "1500",
-    "MAX_DAY_ORDERS": "400",
+    "MAX_DAY_USD": "6000",
+    "MAX_DAY_ORDERS": "1500",
     // The calendar the daily counters roll on: the floor's own trading day.
     "CAP_TIMEZONE": "America/New_York",
 
