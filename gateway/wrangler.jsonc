@@ -26,10 +26,11 @@
     // Hard caps, in US dollars. A cap is only ever lowered by editing this file and redeploying,
     // which is a change the owner makes, not a change the VM can make.
     // Sized so a desk's own limits bind first: Hilibrand may put half its sleeve into one
-    // order, Mullins fifteen percent, and a day holds an entry, an exit and a re-entry apiece.
+    // order, Mullins fifteen percent. A quoting strategy replaces its resting bids as fair
+    // moves, so a day holds a few hundred small orders; the dollar caps still bind the risk.
     "MAX_ORDER_USD": "250",
     "MAX_DAY_USD": "1500",
-    "MAX_DAY_ORDERS": "100",
+    "MAX_DAY_ORDERS": "400",
     // The calendar the daily counters roll on: the floor's own trading day.
     "CAP_TIMEZONE": "America/New_York",
 
