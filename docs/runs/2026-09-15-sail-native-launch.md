@@ -357,3 +357,18 @@ on one settlement, and the risk engine sizes a resting limit buy at its limit ra
 the ask it does not cross (the quoting starter's $10 YES bids had been refused as $18). The
 desks' own event-resolution sessions ran at 05:03 on the outcomes; their memos are the human
 record of the same lesson.
+
+## Addendum: three families live, and capital that follows the record (05:05-05:40 UTC, Sept 16)
+
+By 05:20 all three Kalshi families had real positions from strategies: Haghani's temperature
+starter bought 19 NO on the New York 77-78° bucket at 0.52 (forecast 80°F) and 333 YES on the
+Los Angeles 73-74° bucket at 0.03 (forecast 75°F) on its first run; Scholes's quoting starter
+had its resting NO bids filled at 0.81, 0.79 and 0.77 on the 06:00 buckets and re-quoted after
+the volatility fix moved fair. The owner deployed the site (Strategies panel; version dc81dcff)
+and the gateway (400 orders a day; version 05cb1e1b went through from the agent's shell on the
+third try), and set Claude Code to never ask (`scripts/never_ask.sh`). Two more changes: a live
+strategy's orders stay at learning size until twenty of its positions have settled with a
+positive P&L after fees, then may size to three times learning size, and fall back on a losing
+record (97cadee), which is the floor's capital following the strategies that earn it; and the
+fills of one order in one tick are one trade notice, since a 333-contract order that filled in
+six pieces would have been six emails against a cap of forty a day.
