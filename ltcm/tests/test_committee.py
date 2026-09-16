@@ -295,7 +295,16 @@ class AllocationTests(CommitteeCase):
         self.assertLessEqual(targets["earnings-01"] + targets["earnings-02"], Decimal("1500"))
         self.assertEqual(targets["earnings-01"], targets["earnings-02"])
         event = self.log.last("committee", "committee.allocation")
-        self.assertIn("scaled to alpaca's 1500.00 of equity", event.payload["reasons"]["earnings-01"])
+        self.assertRegex(event.payload["reasons"]["earnings-01"], r"scaled to (the floor's|alpaca's) 1500(\.00)? of (capital|equity)")
+        # Profit compounds: with the venue holding more than the configured floor, the sleeves grow past it.
+        grown = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "1000", "bandit_enabled": False},
+            venue_equity=lambda: {"alpaca": "2500"},
+        ).allocate("2026-09-09T20:02:00.000Z")
+        reasons = " ".join(self.log.last("committee", "committee.allocation").payload["reasons"].values())
+        self.assertNotIn("floor's 1000", reasons, "the configured 1000 no longer caps sleeves the venue can fund")
+        self.assertLessEqual(grown["earnings-01"] + grown["earnings-02"], Decimal("2500"))
         # A venue that cannot be read caps nothing: the allocation is the plain one.
         plain = Committee(
             self.log, self.manifests, self.ledgers, self.provider,

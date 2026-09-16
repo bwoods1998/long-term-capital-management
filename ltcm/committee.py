@@ -431,8 +431,20 @@ class Committee:
                 targets[desk_id] = ZERO
                 reasons[desk_id] = "desk retired or removed from the roster"
 
+        # The floor's real capital is what the venues hold today, so profit compounds into the
+        # next allocation and a loss shrinks it; the configured number is the fallback for a
+        # day the venues do not answer. (Until Sept 16, 2026 the cap was the configured number
+        # alone, so the sleeves could never grow past the day-one deposit.)
+        equity_by_venue: dict[str, Decimal] = {}
+        if self.venue_equity is not None:
+            try:
+                for venue, amount in dict(self.venue_equity() or {}).items():
+                    equity_by_venue[str(venue)] = money(amount)
+            except Exception:
+                equity_by_venue = {}
+        held_total = sum(equity_by_venue.values(), ZERO)
+        cap = held_total if held_total > ZERO else money(self.config["floor_capital_usd"])
         # Only real sleeves compete for the floor's real capital; a notional budget costs nothing.
-        cap = money(self.config["floor_capital_usd"])
         funded = {k: v for k, v in targets.items() if not shadow.get(k)}
         total = sum(funded.values(), ZERO)
         if cap > 0 and total > cap:
@@ -445,13 +457,6 @@ class Committee:
 
         # And no venue's live sleeves may add up to more than that venue actually holds: three
         # desks sharing one Kalshi account cannot each be told they have the whole account.
-        equity_by_venue: dict[str, Decimal] = {}
-        if self.venue_equity is not None:
-            try:
-                for venue, amount in dict(self.venue_equity() or {}).items():
-                    equity_by_venue[str(venue)] = money(amount)
-            except Exception:
-                equity_by_venue = {}
         for venue, held in equity_by_venue.items():
             sleeves = [
                 desk_id for desk_id in funded
