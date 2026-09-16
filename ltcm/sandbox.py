@@ -169,12 +169,16 @@ def sha256_text(text: str) -> str:
 #: and not the lab image's. Until Sept 16, 2026 only the weather source rode along: a probe run
 #: in scholes-4 found /lab/floor/ltcm/data/kalshi.py predating the strike fields, so every
 #: strategy read Kalshi through a stale parser. The set is closed under imports (stdlib only).
+#: The backtest engine rides along too, so a desk can replay a strategy in its own sandbox:
+#: `python3 -m ltcm.backtest --spec spec.json` (the strategy's source travels in the spec).
 FLOOR_EXTRAS = (
     "ltcm/broker.py",
     "ltcm/data/__init__.py",
     "ltcm/data/kalshi.py",
     "ltcm/data/coinbase.py",
     "ltcm/data/weather.py",
+    "ltcm/history.py",
+    "ltcm/backtest.py",
 )
 
 

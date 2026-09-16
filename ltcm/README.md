@@ -47,6 +47,8 @@ Design rules, inherited from the first generation and kept on purpose:
 | `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. A child is born with its parent's playbook; the model's rewrite runs on the service's worker thread and lands as a versioned `desk.playbook_updated` on a later tick (`evolution.deferred_rewrites`, default on), so a spawn never stalls the loop. |
 | `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
 | `sandbox.py` | One forked Sailbox per desk for the code it writes (`run_code`): the lab image, a toolbox that persists, a daily fuse, data-only egress. |
+| `history.py` | Public venue history for backtests: settled Kalshi markets, Kalshi candlesticks (batched), Coinbase candles; throttled, byte-capped disk cache. |
+| `backtest.py` | Replays a strategy's `decide(kit, params)` over past days against a conservative simulator; `python3 -m ltcm.backtest --spec` prints one `BACKTEST-RESULT` line. |
 | `runclock.py` | The public run clock: how long the desks have worked, sessions and decisions, Sail spend, profit per Sail dollar. |
 | `exits.py` | The exit plans the floor keeps: stops, targets and time stops enforced every tick as exposure-reducing orders; Coinbase brackets ride on the order. |
 | `watch.py` | The night desk: triggers over held markets, fills, new markets and headlines, one flash-model verdict on whether to wake a desk. |
@@ -311,6 +313,42 @@ numbers moved by up to a quarter, choices kept) so the search continues around t
 A promotion is a `desk.code_run` on the live desk ("strategy X promoted: Y's settings take
 the live desk") and an `ops.alert`. `bootstrap` never overwrites a promoted or dealt setting
 (`promoted_at`); only an untouched house row follows the house params.
+
+### Backtests
+
+`ltcm/backtest.py` replays a strategy's `decide(kit, params)` over past days in minutes instead
+of waiting for settlements: `run_backtest(spec)` steps a clock every `step_minutes`, answers every
+`Kit` call from `ltcm/history.py` as of that moment (settled Kalshi markets open then, priced from
+the last candlestick that had ended, listed at the close they showed while open; Coinbase bars
+that had closed), and books intents in a conservative simulator: takers pay the ask and Kalshi's
+fee, resting bids fill at their limit only on a later candle that trades strictly through them
+(minute candles are fetched once an order rests), post-only crossings are refused, positions
+settle at close, notional is capped at 10x learning size. `fill_model: "touch"` also fills on a
+touch or a print: the optimistic bracket for a maker. The report carries trades, P&L, fees,
+return on notional, drawdown, daily P&L, per-trade P&L with a seeded bootstrap CI and its
+`split_report` in and out of sample. Weather is unsupported (no forecast history). Run it with
+`python3 scripts/backtest.py --strategy kalshi_favorites --days 3`, or in a desk's sandbox with
+`python3 -m ltcm.backtest --spec spec.json` (one `BACKTEST-RESULT` line, printed whatever the
+strategy raises; `compact` fits the sandbox's 4,000 characters and silences everything else).
+Reads back off on 429s and cache settled data under 128 MB, a cap shared by every process on the
+directory (`flock`).
+
+What keeps the replay honest (the Sept 16 review): nothing picks markets by what a settled row
+knows only after the close; a capped listing (`max_markets`) is a seeded draw spread over events,
+since the winning bucket of a busy event is the one that traded most by its end. Settled markets
+are listed through `end + listing_horizon_hours` (48) and no later than `settle_lag_hours` (24)
+before the run, and one listed to close past that is hidden even if it closed early, so the board
+near `end` does not favour early closes; a window that ends near now thins toward its end, so the
+full board needs a window ending about three days back. A taker is never filled against an hourly
+close more than five minutes old (minute candles are fetched first). The strategy gets a facade
+kit with no path to the history, and its code must pass `check_code` (safe imports, no
+underscore attributes); code a person did not write runs only in a desk's sandbox
+(`run_backtest(..., trusted_code=True)` is for your own). `max_seconds` bounds loading too (540 by
+default in a sandbox, under its 600-second kill); a run cut while loading replays nothing and says
+`incomplete`, and a second run continues from the warm cache. Biases left: trade-through fills are
+the adverse ones (maker P&L reads low, `touch` reads high); a capped board shows each strategy a
+sample, so trade counts scale with the sampled share; an early close is recognised by its
+off-minute timestamp.
 
 ### The floor board
 
