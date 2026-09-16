@@ -592,3 +592,17 @@ variant to the live desk (hourly), move capital between desks (daily), scale eac
 compute with its results (hourly), write and trial new strategy code (nightly, from 20:00
 New York), keep collateral on every Kalshi shard, hear the other partners at every session,
 and trade any USD pair Coinbase lists.
+
+## The next thing to build (found 10:45 UTC)
+
+Scored the way the promotion loop scores, every shadow variant of `hourly_quotes` has zero
+fills and zero settlements while the live Scholes has 90 fills over 19 settlements (-9.4% of
+filled notional). The shadow book only fills a resting quote when the quote crosses it; the
+live venue fills ours when a taker crosses the spread to hit them, which is exactly the
+adverse selection that loses money. So a maker strategy cannot be scored in shadow today, and
+the promotion loop can only move `hourly_ranges` (taker) settings. Next: give the shadow book
+a taker model, filling a resting order when the venue prints a trade at or through its price
+(the Kalshi and Coinbase feeds carry trades), or, failing that, run the maker's variants on the
+live desk in rotation and score each variant's real record. Until then the live maker's
+protection is what it was tonight: learning size, the 15 percent position cap, the daily-loss
+breaker, and settings that leave the last twenty minutes alone.
