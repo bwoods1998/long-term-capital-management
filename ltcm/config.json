@@ -69,8 +69,8 @@
   "evolution": {
     "min_days": 1,
     "min_decisions": 5,
-    "target_variants": 6,
-    "max_variants": 8,
+    "target_variants": 8,
+    "max_variants": 10,
     "playbook_profile": "k3",
     "playbook_reasoning_effort": "high",
     "playbook_budget_usd_per_day": "10.00"
@@ -114,11 +114,11 @@
     "infra_usd_per_day": "0.30"
   },
   "seed_interval_seconds": 3600,
-  "seed_batch": 1,
+  "seed_batch": 2,
   "founding": {
     "enabled": true,
     "founding_time": "21:30",
-    "max_per_day": 1,
+    "max_per_day": 2,
     "max_founded_families": 8,
     "capital_usd": "150",
     "min_days": 4,
