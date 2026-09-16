@@ -26,7 +26,7 @@ import floor_box  # noqa: E402
 FAMILY = "ranges"
 OFFSETS = ("10", "15", "20", "25", "30")  # minutes past the hour, one per child, in id order
 MODEL = {"reasoning_effort": "medium", "max_turns": 24}
-ORDERS_PER_DAY = 60
+ORDERS_PER_DAY = 240  # a quoting strategy replaces its resting bids as fair moves
 
 REMOTE = r'''
 import json, glob, os, sys

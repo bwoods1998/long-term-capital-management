@@ -63,15 +63,48 @@ DEFAULTS: dict[str, Any] = {
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 #: Family -> starter module name. A desk of the family with no strategy of its own gets the
 #: house starter deployed under this name, exactly as a bred desk gets the house playbook.
-STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion"}
-#: A shadow desk's starter explores: a thinner edge and an earlier entry than the live desk's
-#: defaults, so the family's record fills with decisions the post-mortems can learn from.
-STARTER_PARAMS = {
-    ("ranges", "shadow"): {"min_edge": 0.0, "shrink": 0.3, "max_intents": 3},
-    ("crypto", "shadow"): {"z_entry": 1.5},
+STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": "daily_temps"}
+#: A second house strategy for a family: the ranges family also quotes the hourly buckets on
+#: both legs at a spread, the maker side of the same market its starter takes.
+SECOND_STARTERS = {"ranges": "hourly_quotes"}
+#: A shadow desk's starter explores, and each shadow desk of a family explores differently:
+#: the variants are dealt round-robin by the desk's id, so the family's record compares
+#: settings on the same markets at the same hours. The live desk keeps the code's defaults.
+STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "ranges": [
+        {"min_edge": 0.0, "shrink": 0.3, "max_intents": 3},
+        {"min_edge": 0.01, "shrink": 0.5, "max_intents": 3},
+        {"min_edge": 0.0, "shrink": 0.15, "max_intents": 3, "bars_limit": 24},
+    ],
+    "crypto": [
+        {"z_entry": 1.5},
+        {"z_entry": 2.0, "lookback": 48},
+        {"z_entry": 1.25, "lookback": 12, "holding_hours": 6},
+    ],
+    "weather": [
+        {"min_edge": 0.0},
+        {"min_edge": 0.0, "sigma_day_ahead": 3.5},
+        {"min_edge": 0.01, "sigma_day_ahead": 2.0},
+    ],
 }
-#: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower.
-STARTER_CADENCE = {"ranges": 300, "crypto": 600}
+QUOTE_VARIANTS: list[dict[str, Any]] = [
+    {"spread": 0.04, "buckets": 2},
+    {"spread": 0.06, "buckets": 2},
+    {"spread": 0.03, "buckets": 3},
+]
+#: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower;
+#: a day's temperature forecast moves a few times a day.
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "hourly_quotes": 300}
+
+
+def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:
+    """The house params for one desk: the code's defaults for a live desk, a dealt variant for
+    a shadow desk. The deal is stable per desk id, so a restart changes nothing."""
+    if manifest.live:
+        return {"buckets": 1} if quotes else {}
+    variants = QUOTE_VARIANTS if quotes else STARTER_VARIANTS.get(family) or [{}]
+    index = sum(ord(ch) for ch in manifest.id) % len(variants)
+    return dict(variants[index])
 
 #: Uploaded as `/lab/run/main.py` for every strategy run. It builds the kit, imports the
 #: strategy from the toolbox, calls `decide`, and prints one JSON line the floor reads back.
@@ -110,6 +143,15 @@ class Kit:
     def kalshi_market(self, ticker):
         src = self._event_source()
         return src.market(ticker) if src is not None else None
+    def weather(self, city):
+        """The NWS forecast for a Kalshi weather city: days (date, day_high, hourly_max), the
+        settlement station and the latest observation."""
+        from ltcm.data import HttpTransport
+        from ltcm.data.weather import Weather
+        return Weather(transport=HttpTransport(cache_dir="/lab/cache", ttl=600.0, min_interval=0.2)).forecast(city)
+    def weather_cities(self):
+        from ltcm.data.weather import CITIES
+        return [{"name": c.name, "series": c.hint, "station": c.station} for c in CITIES.values()]
     def kalshi_series(self, series, limit=1000, status="open"):
         """Open markets of one series (KXBTC, KXETH, KXHIGHNY...), prices in dollars. An hourly
         series lists dozens of buckets for several hours at once, so ask for them all."""
@@ -143,6 +185,7 @@ try:
     if isinstance(out, dict):
         result["intents"] = list(out.get("intents") or [])
         result["notes"] = str(out.get("notes") or "")[:600]
+        result["cancels"] = [str(c) for c in (out.get("cancels") or []) if isinstance(c, str)][:20]
     elif isinstance(out, (list, tuple)):
         result["intents"] = list(out)
     elif out is not None:
@@ -275,8 +318,52 @@ class Strategies:
             "live": bool(manifest.live),
             "learning_usd": str(self.learning_usd(manifest)),
             "positions": positions,
+            "open_orders": self.open_orders_for(manifest),
             "venues": list(manifest.venues),
         }
+
+    def open_orders_for(self, manifest: DeskManifest) -> list[dict[str, Any]]:
+        """The desk's resting orders, as a strategy sees them: enough to cancel and replace."""
+        gateway = getattr(self.service, "gateway", None)
+        getter = getattr(gateway, "open_orders", None)
+        if not callable(getter):
+            return []
+        out: list[dict[str, Any]] = []
+        try:
+            rows = getter(manifest.id)
+        except Exception:
+            return []
+        if not rows:
+            return []
+        # An order row carries its intent id; the intent event carries the session id that
+        # names the strategy. One read of the desk's intents serves every row.
+        sessions: dict[str, str] = {}
+        reader = getattr(getattr(self.service, "log", None), "read", None)
+        if callable(reader):
+            try:
+                for event in reader(stream=manifest.stream, kind="desk.intent", limit=10_000):
+                    sessions[str(event.payload.get("intent_id"))] = str(event.payload.get("session_id") or "")
+            except Exception:
+                sessions = {}
+        for row in rows[:200]:
+            inst = row.get("instrument") if isinstance(row, Mapping) else None
+            inst = inst if isinstance(inst, Mapping) else {}
+            out.append(
+                {
+                    "order_id": row.get("order_id"),
+                    "intent_id": row.get("intent_id"),
+                    "market_id": inst.get("market_id"),
+                    "symbol": inst.get("symbol"),
+                    "right": inst.get("right"),
+                    "side": row.get("side"),
+                    "quantity": str(row.get("quantity") or ""),
+                    "limit_price": str(row.get("limit_price") or ""),
+                    "submitted_at": row.get("submitted_at"),
+                    "status": row.get("status"),
+                    "strategy": _strategy_of(sessions.get(str(row.get("intent_id")), "") or str(row.get("session_id") or "")),
+                }
+            )
+        return out
 
     # ------------------------------------------------------------------ deployment
     def deploy(self, manifest: DeskManifest, name: str, cadence_seconds: int, params: Mapping[str, Any] | None, *, note: str = "", house: bool = False) -> dict[str, Any]:
@@ -344,7 +431,47 @@ class Strategies:
 
     def describe(self, desk_id: str, name: str, row: Mapping[str, Any]) -> dict[str, Any]:
         keys = ("cadence_seconds", "params", "deployed_at", "note", "house", "enabled", "last_run_at", "runs", "intents", "approved", "errors", "last_error", "last_notes")
-        return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}}
+        return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **self.record(desk_id, name)}
+
+    def record(self, desk_id: str, name: str) -> dict[str, Any]:
+        """What the strategy's orders did: fills, fees and the settled P&L of the positions it
+        opened, read from the desk's own tape (the `[strategy <name>]` prefix on its rationales)."""
+        log = getattr(self.service, "log", None)
+        reader = getattr(log, "read", None)
+        if not callable(reader):
+            return {}
+        stream = f"desk:{desk_id}"
+        prefix = f"[strategy {name}]"
+        try:
+            intents = {
+                e.payload.get("intent_id")
+                for e in reader(stream=stream, kind="desk.intent", limit=10_000)
+                if _strategy_of(str(e.payload.get("session_id") or "")) == name
+            }
+            orders = {
+                e.payload.get("order_id")
+                for e in reader(stream=f"broker:{desk_id}", kind="broker.order", limit=10_000)
+                if e.payload.get("intent_id") in intents
+            }
+            fills = [e for e in reader(stream=f"broker:{desk_id}", kind="broker.fill", limit=10_000) if e.payload.get("order_id") in orders]
+            outcomes = [
+                e for e in reader(stream=stream, kind="desk.outcome", limit=10_000)
+                if str(e.payload.get("rationale_excerpt") or "").startswith(prefix)
+            ]
+        except Exception:
+            return {}
+        notional = sum((_dec(f.payload.get("price")) or Decimal(0)) * (_dec(f.payload.get("quantity")) or Decimal(0)) for f in fills)
+        fees = sum(_dec(f.payload.get("fee") or f.payload.get("fees")) or Decimal(0) for f in fills)
+        pnl = sum(_dec(o.payload.get("pnl")) or Decimal(0) for o in outcomes)
+        wins = sum(1 for o in outcomes if (_dec(o.payload.get("pnl")) or Decimal(0)) > 0)
+        return {
+            "fills": len(fills),
+            "filled_notional_usd": format(notional, "f"),
+            "fees_usd": format(fees, "f"),
+            "settled": len(outcomes),
+            "wins": wins,
+            "settled_pnl_usd": format(pnl, "f"),
+        }
 
     # ------------------------------------------------------------------ the tick
     def bootstrap(self, manifests: Mapping[str, DeskManifest]) -> list[str]:
@@ -354,39 +481,44 @@ class Strategies:
         manager = self.sandboxes()
         deployed: list[str] = []
         for desk_id, manifest in sorted(manifests.items()):
+            wanted: list[tuple[str, dict[str, Any], int]] = []
             starter = STARTERS.get(manifest.family)
-            if not starter:
-                continue
-            params = dict(STARTER_PARAMS.get((manifest.family, "live" if manifest.live else "shadow")) or {})
+            if starter:
+                wanted.append((starter, starter_params(manifest.family, manifest), int(STARTER_CADENCE.get(manifest.family, 600))))
+            second = SECOND_STARTERS.get(manifest.family)
+            if second:
+                wanted.append((second, starter_params(manifest.family, manifest, quotes=True), int(STARTER_CADENCE.get(second, 600))))
             existing = self.store.for_desk(desk_id)
-            if existing:
-                # A house starter follows the house params and the house code until the desk
-                # changes the file or redeploys it as its own.
-                row = existing.get(starter)
-                if row and row.get("house"):
-                    cadence = int(STARTER_CADENCE.get(manifest.family, 600))
-                    changes: dict[str, Any] = {}
-                    if dict(row.get("params") or {}) != params:
-                        changes["params"] = params
-                    if int(row.get("cadence_seconds") or 0) != cadence:
-                        changes["cadence_seconds"] = cadence
-                    if changes:
-                        self.store.update(desk_id, starter, **changes)
-                    self._refresh_house_code(desk_id, starter, row, manager)
-                continue
-            path = STARTERS_DIR / f"{starter}.py"
-            if not path.is_file():
-                continue
-            try:
-                code = path.read_text(encoding="utf-8")
-                if hasattr(manager, "toolbox_save"):
-                    manager.toolbox_save(desk_id, starter, code, f"house starter for the {manifest.family} family")
-                self.deploy(manifest, starter, int(STARTER_CADENCE.get(manifest.family, 600)), params, note="house starter", house=True)
-                deployed.append(f"{desk_id}/{starter}")
-            except Exception as exc:
-                self.service.alert("warning", f"starter strategy for {desk_id} not deployed: {str(exc)[:160]}")
-                # Remember the attempt so a broken starter is not retried every tick.
-                self.store.update(desk_id, starter, enabled=False, last_error=str(exc)[:300], deployed_at=self.service.now(), cadence_seconds=600, params={}, house=True)
+            for name, params, cadence in wanted:
+                row = existing.get(name)
+                if row is not None:
+                    # A house starter follows the house params, cadence and code until the desk
+                    # changes the file or redeploys it as its own.
+                    if row.get("house"):
+                        changes: dict[str, Any] = {}
+                        if dict(row.get("params") or {}) != params:
+                            changes["params"] = params
+                        if int(row.get("cadence_seconds") or 0) != cadence:
+                            changes["cadence_seconds"] = cadence
+                        if changes:
+                            self.store.update(desk_id, name, **changes)
+                        self._refresh_house_code(desk_id, name, row, manager)
+                    continue
+                path = STARTERS_DIR / f"{name}.py"
+                if not path.is_file():
+                    continue
+                if len(self.store.for_desk(desk_id)) >= int(self.config["max_per_desk"]):
+                    continue  # the desk's own strategies come first
+                try:
+                    code = path.read_text(encoding="utf-8")
+                    if hasattr(manager, "toolbox_save"):
+                        manager.toolbox_save(desk_id, name, code, f"house starter for the {manifest.family} family")
+                    self.deploy(manifest, name, cadence, params, note="house starter", house=True)
+                    deployed.append(f"{desk_id}/{name}")
+                except Exception as exc:
+                    self.service.alert("warning", f"starter strategy {name} for {desk_id} not deployed: {str(exc)[:160]}")
+                    # Remember the attempt so a broken starter is not retried every tick.
+                    self.store.update(desk_id, name, enabled=False, last_error=str(exc)[:300], deployed_at=self.service.now(), cadence_seconds=cadence, params=params, house=True)
         return deployed
 
     def _refresh_house_code(self, desk_id: str, starter: str, row: Mapping[str, Any], manager: Any) -> None:
@@ -449,10 +581,14 @@ class Strategies:
         params = dict(row.get("params") or {})
         run = self._execute(manifest, name, params, at)
         intents = run.get("intents") if isinstance(run.get("intents"), list) else []
+        cancels = [str(c) for c in (run.get("cancels") or []) if isinstance(c, str)][:20] if not run.get("error") else []
+        cancelled = self._cancel(manifest, name, cancels, at) if cancels else 0
         decisions: list[dict[str, Any]] = []
         if not run.get("error") and intents:
             decisions = self._propose(manifest, name, intents, at)
         approved = sum(1 for d in decisions if d.get("approved"))
+        if cancelled:
+            run["notes"] = f"{cancelled} cancelled; " + str(run.get("notes") or "")
         self.store.update(
             manifest.id,
             name,
@@ -492,6 +628,22 @@ class Strategies:
         if run.exit_code and not parsed.get("error"):
             result["error"] = f"exit {run.exit_code}"
         return result
+
+    def _cancel(self, manifest: DeskManifest, name: str, order_ids: list[str], at: str) -> int:
+        """Cancel the desk's own resting orders a strategy asked to replace. A strategy may only
+        cancel orders it placed itself, so two strategies on one desk never fight."""
+        mine = {o["order_id"] for o in self.open_orders_for(manifest) if o.get("strategy") == name}
+        ctx = self.service.context(manifest)
+        done = 0
+        for order_id in order_ids:
+            if order_id not in mine:
+                continue
+            try:
+                ctx.cancel_order(order_id)
+                done += 1
+            except Exception as exc:
+                self.service.alert("warning", f"strategy {manifest.id}/{name} could not cancel {order_id}: {type(exc).__name__}")
+        return done
 
     def _propose(self, manifest: DeskManifest, name: str, intents: list[dict[str, Any]], at: str) -> list[dict[str, Any]]:
         """Propose each intent as the desk would: same tools path, same risk engine, same events."""
@@ -563,6 +715,12 @@ class Strategies:
 
 
 # ---------------------------------------------------------------------- helpers
+def _strategy_of(session_id: str) -> str | None:
+    """`<desk>:<stamp>:strategy:<name>` -> name, else None."""
+    parts = session_id.split(":strategy:", 1)
+    return parts[1] if len(parts) == 2 and parts[1] else None
+
+
 def _sha(text: str) -> str:
     import hashlib
 

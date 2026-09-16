@@ -163,6 +163,24 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+#: Floor modules uploaded with every run because the lab image predates them. Data readers
+#: only; nothing here can trade.
+FLOOR_EXTRAS = ("ltcm/data/weather.py",)
+
+
+def floor_extras() -> dict[str, str]:
+    """`{relative path: source}` for the modules in `FLOOR_EXTRAS` that exist in this checkout."""
+    root = Path(__file__).resolve().parent.parent
+    out: dict[str, str] = {}
+    for relative in FLOOR_EXTRAS:
+        path = root / relative
+        try:
+            out[relative] = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return out
+
+
 def bounded(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     text = text or ""
     if len(text) <= limit:
@@ -310,6 +328,16 @@ class SandboxManager:
             box = boxes.get(desk_id)
             if box:
                 self._wake(box)
+                # A box forked before a host joined the data list (api.weather.gov, Sept 16,
+                # 2026) gets the current list once; the list it runs under is recorded.
+                hosts = state.setdefault("hosts", {})
+                if hosts.get(desk_id) != list(SANDBOX_HOSTS):
+                    try:
+                        self.client.set_egress(box, list(SANDBOX_HOSTS))
+                        hosts[desk_id] = list(SANDBOX_HOSTS)
+                        self._save(state)
+                    except Exception:
+                        pass
                 return box
             checkpoint = self.image.get("checkpoint_id")
             if not checkpoint:
@@ -327,6 +355,7 @@ class SandboxManager:
             except Exception:
                 pass  # a box that never sleeps only costs its hourly rate; not worth failing
             boxes[desk_id] = box
+            state.setdefault("hosts", {})[desk_id] = list(SANDBOX_HOSTS)
             state.setdefault("forked_at", {})[desk_id] = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(self.clock()))
             )
@@ -374,8 +403,11 @@ class SandboxManager:
         box: str | None = None
         try:
             box = self.ensure_box(desk_id)
-            # labkit rides along on every run, so a fix reaches every sandbox without a new image.
+            # labkit rides along on every run, so a fix reaches every sandbox without a new image,
+            # and so do floor modules the image predates (the weather source).
             self.client.upload(box, f"{REMOTE_ROOT}/labkit.py", LABKIT.encode("utf-8"), mode=0o644)
+            for relative, body in floor_extras().items():
+                self.client.upload(box, f"{REMOTE_ROOT}/floor/{relative}", body.encode("utf-8"), mode=0o644)
             for name, body in toolbox.files().items():
                 self.client.upload(box, f"{REMOTE_TOOLBOX}/{name}", body.encode("utf-8"), mode=0o644)
             self.client.upload(box, f"{REMOTE_TOOLBOX}/__init__.py", b"", mode=0o644)

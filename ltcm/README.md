@@ -283,6 +283,19 @@ house starters in `ltcm/starters/` (hourly range pricing from realized volatilit
 reversion), exactly as bred desks get the house playbook: the desk owns the file from then on.
 The state lives in `.data/ltcm/strategies.json`.
 
+A strategy may also return `cancels`, a list of its own resting order ids (a strategy can never
+cancel another strategy's or a session's order), and `kit.context["open_orders"]` names each
+resting order's strategy, so a strategy can quote and replace. The ranges family's second house
+starter, `hourly_quotes`, rests a YES bid and a NO bid a spread under fair value on the buckets
+nearest spot and replaces them as fair drifts: the maker side of the market the first starter
+takes. The weather family's starter, `daily_temps`, prices the daily high-temperature markets
+from the NWS forecast through `kit.weather(city)`. Shadow desks of a family are dealt different
+house params round-robin by desk id (`STARTER_VARIANTS`), so siblings compare settings on the
+same markets at the same hours; the live desk keeps the code's defaults. House params, cadence
+and code follow the repo until the desk edits its copy or redeploys it as its own.
+`strategy_report` carries each strategy's record from the tape: fills, fees, and the settled
+P&L of the positions it opened (attributed by the `[strategy <name>]` prefix on its rationales).
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:

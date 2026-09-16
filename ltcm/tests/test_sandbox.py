@@ -139,6 +139,8 @@ class RunTests(SandboxCase):
         self.assertIn("/lab/toolbox/__init__.py", paths)
         self.assertIn("/lab/run/main.py", paths)
         self.assertIn("/lab/labkit.py", paths, "labkit rides along on every run, so a fix needs no new image")
+        self.assertIn("/lab/floor/ltcm/data/weather.py", paths, "the weather source predates the image")
+        self.assertIn(("egress", "sb_lab-mullins", tuple(SANDBOX_HOSTS)), self.client.calls)
         run = [c for c in self.client.calls if c[0] == "exec"][-1]
         self.assertIn("timeout 40 python3 /lab/run/main.py", run[2][2])
         self.assertIn("PYTHONPATH=/lab:/lab/floor", run[2][2])

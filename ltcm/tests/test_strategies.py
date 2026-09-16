@@ -232,18 +232,106 @@ class BootstrapTests(StrategyCase):
     def test_desks_of_a_family_with_a_starter_get_it_once(self):
         self.strategies.config["starters"] = True
         crypto = manifest(id="hilibrand-2", family="crypto", parent_id="hilibrand", venues=["coinbase"], capital={"mode": "shadow", "usd": "487"})
+        weather = manifest(id="haghani-2", family="weather", parent_id="haghani", capital={"mode": "shadow", "usd": "150"})
         events = manifest(id="mullins", family="kalshi", parent_id=None)
-        self.service.manifests = {m.id: m for m in (self.manifest, crypto, events)}
+        self.service.manifests = {m.id: m for m in (self.manifest, crypto, weather, events)}
         deployed = self.strategies.bootstrap(self.service.manifests)
-        self.assertEqual(deployed, ["hilibrand-2/hourly_reversion", "scholes-2/hourly_ranges"])
+        self.assertEqual(
+            deployed,
+            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
+        )
         self.assertIn("hourly_ranges.py", self.manager.toolbox_files("scholes-2"))
         self.assertTrue(self.strategies.report(self.manifest, "hourly_ranges")["house"])
+        self.assertEqual(self.strategies.report(self.manifest, "hourly_quotes")["cadence_seconds"], 300)
+        self.assertEqual(self.strategies.report(weather, "daily_temps")["cadence_seconds"], 1800)
         self.assertEqual(self.strategies.bootstrap(self.service.manifests), [], "never twice")
         self.assertEqual(self.strategies.report(events)["strategies"], [])
         # The first tick bootstraps on its own.
         fresh = Strategies(self.service, path=Path(self.temp.name) / "s2.json", config={"starters": True})
         fresh.tick(self.service.manifests, NOW)
-        self.assertEqual(sorted(fresh.store.read()), ["hilibrand-2", "scholes-2"])
+        self.assertEqual(sorted(fresh.store.read()), ["haghani-2", "hilibrand-2", "scholes-2"])
+
+    def test_shadow_desks_are_dealt_different_variants_and_the_live_desk_keeps_the_defaults(self):
+        from ltcm.strategies import STARTER_VARIANTS, starter_params
+
+        live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
+        self.assertEqual(starter_params("ranges", live), {})
+        self.assertEqual(starter_params("ranges", live, quotes=True), {"buckets": 1})
+        dealt = {starter_params("ranges", manifest(id=f"scholes-{n}"))["shrink"] for n in range(2, 8)}
+        self.assertGreater(len(dealt), 1, "siblings explore different settings")
+        for family, variants in STARTER_VARIANTS.items():
+            for n in range(2, 6):
+                self.assertIn(starter_params(family, manifest(id=f"desk-{n}", family=family)), variants)
+        # The deal is stable: the same desk gets the same variant on every restart.
+        self.assertEqual(starter_params("crypto", manifest(id="hilibrand-3", family="crypto")), starter_params("crypto", manifest(id="hilibrand-3", family="crypto")))
+
+    def test_house_params_and_code_follow_the_repo_until_the_desk_makes_them_its_own(self):
+        self.strategies.config["starters"] = True
+        self.strategies.bootstrap(self.service.manifests)
+        self.strategies.store.update(self.manifest.id, "hourly_ranges", params={"min_edge": 0.9}, cadence_seconds=900)
+        self.strategies.bootstrap(self.service.manifests)
+        row = self.strategies.report(self.manifest, "hourly_ranges")
+        self.assertEqual(row["cadence_seconds"], 300)
+        self.assertNotEqual(row["params"], {"min_edge": 0.9})
+        # A desk that edited its copy keeps it.
+        self.manager.files[self.manifest.id]["hourly_ranges.py"] = "def decide(kit, params):\n    return []  # mine\n"
+        self.strategies.bootstrap(self.service.manifests)
+        self.assertIn("# mine", self.manager.toolbox_files(self.manifest.id)["hourly_ranges.py"])
+        # A desk that redeployed it as its own keeps its params too.
+        self.strategies.store.update(self.manifest.id, "hourly_ranges", house=False, params={"min_edge": 0.9})
+        self.strategies.bootstrap(self.service.manifests)
+        self.assertEqual(self.strategies.report(self.manifest, "hourly_ranges")["params"], {"min_edge": 0.9})
+
+
+class CancelAndRecordTests(StrategyCase):
+    def setUp(self):
+        super().setUp()
+        self.log_events = []
+
+        class Event:
+            def __init__(self, payload):
+                self.payload = payload
+
+        def read(stream=None, kind=None, limit=None):
+            return [Event(p) for s, k, p in self.log_events if s == stream and k == kind]
+
+        self.service.log.read = read
+        self.open_orders = []
+        self.service.gateway = type("G", (), {"open_orders": lambda g, desk_id: list(self.open_orders)})()
+
+    def test_a_strategy_may_cancel_only_its_own_resting_orders(self):
+        self.strategies.deploy(self.manifest, "edge", 600, {})
+        self.log_events.append(("desk:scholes-2", "desk.intent", {"intent_id": "oi-mine", "session_id": "scholes-2:20260916-0400:strategy:edge"}))
+        self.log_events.append(("desk:scholes-2", "desk.intent", {"intent_id": "oi-session", "session_id": "scholes-2:20260916-0405:cadence:04:05"}))
+        self.open_orders = [
+            {"order_id": "ord-mine", "intent_id": "oi-mine", "instrument": {"market_id": "KXBTC-26SEP1600-B75950", "right": "yes"}, "side": "buy", "quantity": "10", "limit_price": "0.20", "status": "accepted", "submitted_at": "2026-09-16T04:00:00.000Z"},
+            {"order_id": "ord-session", "intent_id": "oi-session", "instrument": {"market_id": "KXETH-26SEP1601-B2402", "right": "no"}, "side": "buy", "quantity": "5", "limit_price": "0.60", "status": "accepted", "submitted_at": "2026-09-16T04:05:00.000Z"},
+        ]
+        seen = self.strategies.open_orders_for(self.manifest)
+        self.assertEqual([(o["order_id"], o["strategy"]) for o in seen], [("ord-mine", "edge"), ("ord-session", None)])
+        self.manager.script = lambda d, c: Run("STRATEGY-RESULT " + json.dumps({"intents": [], "cancels": ["ord-mine", "ord-session", "ord-nope"], "notes": "requote"}))
+        out = self.strategies.tick(self.service.manifests, NOW)
+        cancelled = [c for c in self.service.contexts[-1].seen if c[0] == "cancel_order"]
+        self.assertEqual(cancelled, [("cancel_order", ("ord-mine",))])
+        self.assertIn("1 cancelled", self.strategies.report(self.manifest, "edge")["last_notes"])
+        self.assertEqual(out[0]["approved"], 0)
+
+    def test_the_record_attributes_fills_and_settlements_to_the_strategy(self):
+        self.strategies.deploy(self.manifest, "edge", 600, {})
+        self.log_events += [
+            ("desk:scholes-2", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes-2:20260916-0400:strategy:edge"}),
+            ("desk:scholes-2", "desk.intent", {"intent_id": "oi-2", "session_id": "scholes-2:20260916-0405:cadence:04:05"}),
+            ("broker:scholes-2", "broker.order", {"order_id": "ord-1", "intent_id": "oi-1"}),
+            ("broker:scholes-2", "broker.order", {"order_id": "ord-2", "intent_id": "oi-2"}),
+            ("broker:scholes-2", "broker.fill", {"order_id": "ord-1", "quantity": "20", "price": "0.65", "fee": "0.32"}),
+            ("broker:scholes-2", "broker.fill", {"order_id": "ord-2", "quantity": "5", "price": "0.10", "fee": "0.01"}),
+            ("desk:scholes-2", "desk.outcome", {"pnl": "7.00", "rationale_excerpt": "[strategy edge] NO at 0.65 has edge"}),
+            ("desk:scholes-2", "desk.outcome", {"pnl": "-4.50", "rationale_excerpt": "[strategy edge] YES at 0.20"}),
+            ("desk:scholes-2", "desk.outcome", {"pnl": "9.00", "rationale_excerpt": "Exit stale offside long"}),
+        ]
+        row = self.strategies.report(self.manifest, "edge")
+        self.assertEqual((row["fills"], row["filled_notional_usd"], row["fees_usd"]), (1, "13.00", "0.32"))
+        self.assertEqual((row["settled"], row["wins"], row["settled_pnl_usd"]), (2, 1, "2.50"))
 
 
 class HelperTests(unittest.TestCase):
@@ -338,6 +426,66 @@ class StarterTests(unittest.TestCase):
         # A held bucket is never bought again.
         kit.context["positions"] = [{"market_id": "KXBTC-26SEP1600-B75950"}]
         self.assertEqual(load_starter("hourly_ranges").decide(kit, {})["intents"], [])
+
+    def test_the_quoting_starter_rests_both_legs_under_fair_and_replaces_drifted_quotes(self):
+        kit = FakeKit()
+        out = load_starter("hourly_quotes").decide(kit, {"buckets": 1, "spread": 0.04})
+        intents = out["intents"]
+        self.assertEqual([i["instrument"]["right"] for i in intents], ["yes", "no"])
+        yes, no = intents
+        self.assertEqual(yes["instrument"]["market_id"], "KXBTC-26SEP1600-B75950")
+        self.assertLess(Decimal(yes["limit_price"]), Decimal("0.06"), "a resting bid sits under the ask")
+        self.assertLess(Decimal(no["limit_price"]), Decimal("0.97"))
+        self.assertIn("resting YES bid", yes["rationale"])
+        self.assertEqual(out["cancels"], [])
+        # A quote already resting at fair stays; a stale one is cancelled and replaced.
+        kit.context["open_orders"] = [
+            {"order_id": "ord-keep", "strategy": "hourly_quotes", "market_id": "KXBTC-26SEP1600-B75950", "right": "yes", "limit_price": yes["limit_price"], "submitted_at": "2026-09-16T04:08:00Z"},
+            {"order_id": "ord-stale", "strategy": "hourly_quotes", "market_id": "KXBTC-26SEP1600-B75950", "right": "no", "limit_price": no["limit_price"], "submitted_at": "2026-09-16T03:00:00Z"},
+            {"order_id": "ord-other", "strategy": "hourly_ranges", "market_id": "KXBTC-26SEP1600-B75950", "right": "no", "limit_price": "0.50", "submitted_at": "2026-09-16T03:00:00Z"},
+        ]
+        again = load_starter("hourly_quotes").decide(kit, {"buckets": 1, "spread": 0.04})
+        self.assertEqual(again["cancels"], ["ord-stale"])
+        self.assertEqual([i["instrument"]["right"] for i in again["intents"]], ["no"], "only the cancelled leg is re-placed")
+
+    def test_the_temperature_starter_prices_buckets_from_the_forecast(self):
+        from ltcm.starters import daily_temps as _  # noqa: F401 -- importable as a package module too
+
+        class WeatherKit(FakeKit):
+            def weather_cities(self):
+                return [{"name": "New York", "series": "KXHIGHNY", "station": "KNYC"}]
+
+            def weather(self, city):
+                return {"city": city, "days": [{"date": "2026-09-16", "day_high": "81.0"}, {"date": "2026-09-17", "day_high": "77.0"}]}
+
+            def kalshi_series(self, series, limit=200, status="open"):
+                if series != "KXHIGHNY":
+                    return []
+                return [
+                    {"ticker": "KXHIGHNY-26SEP16-B81.5", "yes_sub_title": "81° to 82°", "status": "active", "close_time": "2026-09-17T05:00:00Z", "yes_bid": "0.0010", "yes_ask": "0.0011"},
+                    {"ticker": "KXHIGHNY-26SEP16-T82", "yes_sub_title": "83° or above", "status": "active", "close_time": "2026-09-17T05:00:00Z", "yes_bid": "0.0001", "yes_ask": "0.0002"},
+                    {"ticker": "KXHIGHNY-26SEP16-T75", "yes_sub_title": "74° or below", "status": "active", "close_time": "2026-09-17T05:00:00Z", "yes_bid": "0.0001", "yes_ask": "0.0002"},
+                ]
+
+            def kalshi_market(self, ticker):
+                live = {
+                    "KXHIGHNY-26SEP16-B81.5": {"yes_bid": "0.12", "yes_ask": "0.15"},  # the forecast bucket priced at 15%
+                    "KXHIGHNY-26SEP16-T82": {"yes_bid": "0.30", "yes_ask": "0.33"},
+                    "KXHIGHNY-26SEP16-T75": {"yes_bid": "0.02", "yes_ask": "0.04"},
+                }
+                return live.get(ticker)
+
+        module = load_starter("daily_temps")
+        self.assertEqual(module.settlement_day("KXHIGHNY-26SEP16-B81.5"), "2026-09-16")
+        self.assertAlmostEqual(module.probability({"yes_sub_title": "81° to 82°"}, 81.0, 2.5), 0.31, delta=0.02)
+        kit = WeatherKit()
+        out = module.decide(kit, {"cities": ["New York"]})
+        intents = out["intents"]
+        self.assertTrue(intents, out)
+        best = intents[0]
+        self.assertEqual(best["instrument"]["market_id"], "KXHIGHNY-26SEP16-B81.5")
+        self.assertEqual((best["instrument"]["right"], best["limit_price"]), ("yes", "0.15"))
+        self.assertIn("forecast high 81F", best["rationale"])
 
     def test_the_reversion_starter_buys_the_crash_and_leaves_the_rest(self):
         kit = FakeKit()
