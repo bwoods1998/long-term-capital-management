@@ -2228,7 +2228,15 @@ class Service:
         row = cache["desks"].get(desk_id) or {}
         try:
             decisions = int(row.get("decisions") or 0)
-            per_dollar = Decimal(str(row.get("pnl_per_inference_dollar") or "0"))
+            # Net P&L (realized, fees and the open book at its marks) per Sail dollar, not closed
+            # trades alone: on Sept 16, 2026 a desk earned triple compute on ten settled winners
+            # while its open book was down twice as much.
+            cost = Decimal(str(row.get("sail_cost_usd") or "0"))
+            net = row.get("net_pnl_usd")
+            if net is not None and cost > 0:
+                per_dollar = Decimal(str(net)) / cost
+            else:
+                per_dollar = Decimal(str(row.get("pnl_per_inference_dollar") or "0"))
         except (TypeError, ValueError, ArithmeticError):
             return Decimal(1)
         if decisions < int(policy.get("min_decisions", 5)):

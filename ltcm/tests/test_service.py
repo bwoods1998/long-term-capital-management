@@ -2001,3 +2001,20 @@ class FloorBoardContextTests(ServiceCase):
         self.assertEqual([(r["desk_id"], r["title"]) for r in rows], [("mullins", "Fed hike priced")], "newest per desk, never the desk's own, never a stale one")
         self.assertLessEqual(len(rows[0]["text"]), 400)
         self.assertEqual(rows[0]["mode"], self.service.manifests["mullins"].capital_mode)
+
+
+class FitnessFactorTests(ServiceCase):
+    def test_the_factor_follows_net_pnl_per_sail_dollar_and_is_clamped(self):
+        from unittest import mock
+
+        rows = {"desks": {DESK: {"decisions": 10, "sail_cost_usd": "4", "net_pnl_usd": "-20", "pnl_per_inference_dollar": "7.36"}}}
+        with mock.patch("ltcm.analytics.ResultsLedger.report", return_value=rows):
+            self.assertEqual(self.service.fitness_factor(DESK), Decimal("0.25"), "closed winners do not hide an open book that is down")
+        self.service._fitness_cache = None
+        rows["desks"][DESK].update({"net_pnl_usd": "2"})
+        with mock.patch("ltcm.analytics.ResultsLedger.report", return_value=rows):
+            self.assertEqual(self.service.fitness_factor(DESK), Decimal("1.50"))
+        self.service._fitness_cache = None
+        rows["desks"][DESK].update({"decisions": 2})
+        with mock.patch("ltcm.analytics.ResultsLedger.report", return_value=rows):
+            self.assertEqual(self.service.fitness_factor(DESK), Decimal("1"), "too few decisions: the manifest's budget")
