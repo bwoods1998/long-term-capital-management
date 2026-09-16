@@ -610,6 +610,21 @@ class TakerModelTests(SimTestCase):
         fills = self.broker.fills()
         self.assertEqual(sorted(f.quantity for f in fills), [Decimal("4"), Decimal("6")])
 
+    def test_two_prints_of_the_same_size_in_the_same_second_are_two_fills(self):
+        self.book(self.BTC, bid="100", ask="101", last="100.5")
+        self.broker = self.make_broker("coinbase.db", market_venue="coinbase")
+        self.addCleanup(self.broker.close)
+        bid = self.broker.submit(intent(self.BTC, quantity="1", order_type="limit", limit_price="99"))
+        self.assertEqual(bid.status, "accepted")
+        at = "2026-09-16T13:21:53Z"
+        self.broker.on_trade("coinbase", "BTC-USD", "98.5", "0.25", "sell", now=at)
+        self.broker.on_trade("coinbase", "BTC-USD", "98.5", "0.25", "sell", now=at)
+        self.broker.on_trade("coinbase", "BTC-USD", "98.5", "0.5", "sell", now=at)
+        self.assertEqual(self.broker.get_order(bid.id).status, "filled")
+        fills = [f for f in self.broker.fills() if f.order_id == bid.id]
+        self.assertEqual(sorted(f.quantity for f in fills), [Decimal("0.25"), Decimal("0.25"), Decimal("0.5")])
+        self.assertEqual(sum(f.quantity for f in fills), self.broker.position(self.BTC).quantity, "the fills the ledger folds equal the book's position")
+
     def test_a_crypto_print_by_a_selling_taker_fills_a_resting_bid_and_a_buying_taker_a_resting_offer(self):
         self.book(self.BTC, bid="100", ask="101", last="100.5")
         self.broker = self.make_broker("coinbase.db", market_venue="coinbase")

@@ -595,8 +595,12 @@ class ShadowBook:
                 return self._reject(
                     order, f"insufficient position: hold {held_qty:f}, selling {quantity:f}"
                 )
+        # The id names the fill's place in the order, not only its size: two prints of the same
+        # size in the same second produced the same id until Sept 16, 2026, and the second was
+        # dropped from the fills table while the position and the order still counted it, so the
+        # desk ledger kept a phantom 0.016 AAVE the book had sold.
         fill_id = "fl-" + hashlib.sha256(
-            f"{order.id}|{stamp}|{quantity:f}|{price:f}".encode("utf-8")
+            f"{order.id}|{stamp}|{order.filled_quantity:f}|{quantity:f}|{price:f}".encode("utf-8")
         ).hexdigest()[:32]
         realized = self._apply_to_position(order.instrument, order.side, quantity, price)
         delta = -(notional + fee) if order.side == "buy" else notional - fee

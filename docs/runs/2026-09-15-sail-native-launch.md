@@ -669,3 +669,5 @@ breaker, and settings that leave the last twenty minutes alone.
   gates; event contracts were time-stopped into the spread before settlement; the quoting
   starter re-bought a leg that filled. 1,120 runtime tests and 55 site tests pass.
 
+
+- **Shadow fill id collision** (16:30 UTC): hilibrand-2 sold 0.083935 AAVE in three prints within one second, two of them 0.016; the fill id hashed order, second, size and price, so the second 0.016 was dropped from the fills table while the book position and the order counted it, and the desk ledger kept a phantom 0.016 the exit book tried to stop out every five minutes ("hold 0"). Fixed: the id also carries the filled quantity before the fill. Repaired on the box: one appended `broker.fill` (fill_id `fl-repair-42cef07a1a9e-0.016000`); a scan of every shadow book found no other short order.
