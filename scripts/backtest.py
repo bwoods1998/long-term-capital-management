@@ -5,7 +5,7 @@
     python3 scripts/backtest.py --strategy hourly_ranges --params '{"series": ["KXBTCD", "KXETHD"]}' --days 2 --step-minutes 5
     python3 scripts/backtest.py --strategy mine --code path/to/mine.py --end 2026-09-15T00:00:00Z --days 1
 
-Prints a readable summary, then the report as JSON (and an in-sample/out-of-sample split).
+Prints a readable summary, then the report as JSON (its `split` is in and out of sample).
 Progress goes to stderr. Settled history is cached under `.data/history-cache` (128 MB cap).
 Public market data only; no keys are read.
 """
@@ -102,11 +102,11 @@ def main(argv: list[str] | None = None) -> int:
         spec["products"] = args.products
     history = History(cache_dir=args.cache_dir)
     report = run_backtest(spec, history=history)
-    split = split_report(report)
+    split = report.get("split") or split_report(report)
     if not args.json_only:
         print(summary(report, split))
         print()
-    print(json.dumps({"report": report, "split": split}, default=str))
+    print(json.dumps(report, default=str))
     return 0
 
 

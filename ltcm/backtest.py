@@ -94,6 +94,9 @@ DEFAULT_SPEC: dict[str, Any] = {
     "coinbase_taker_fee": 0.006,
     "max_seconds": 0,             # wall-clock budget; 0 is none. A stopped run reports what it had.
     "verbose": True,              # progress lines on stderr
+    # A desk's sandbox returns at most 4,000 characters of output: "compact" drops the per-trade
+    # lists and the daily rows from the printed line (the in/out-of-sample split stays).
+    "compact": False,
 }
 
 #: Kit interval -> Coinbase granularity (as `ltcm/data/coinbase.py` spells them).
@@ -1644,6 +1647,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None) -> dict[str, A
         top = sorted(sim.reasons.items(), key=lambda kv: -kv[1])[:4]
         notes.append(_clean("rejected intents: " + "; ".join(f"{k} x{v}" for k, v in top)))
     report["notes"] = [_clean(n) for n in notes][:24]
+    report["split"] = split_report(report)
     say(f"done in {report['runtime_seconds']}s: {report['trades']} trades, pnl {report['pnl_usd']}, {report['http_requests']} requests")
     return report
 
@@ -1704,6 +1708,11 @@ def main(argv: list[str] | None = None) -> int:
         report["notes"].append(_clean(f"backtest failed: {type(exc).__name__}: {exc}"))
         tail = traceback.format_exc().strip().splitlines()[-3:]
         report["notes"].extend(_clean(line, 200) for line in tail)
+    if isinstance(spec, dict) and spec.get("compact"):
+        report = {k: v for k, v in report.items() if k not in ("trade_pnls", "trade_notionals", "daily")}
+        report["notes"] = [str(n)[:160] for n in report.get("notes") or []][:8]
+        print(RESULT_PREFIX + json.dumps(report, default=str, separators=(",", ":")), flush=True)
+        return 0
     print(RESULT_PREFIX + json.dumps(report, default=str), flush=True)
     return 0
 

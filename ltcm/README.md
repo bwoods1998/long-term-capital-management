@@ -319,20 +319,20 @@ the live desk") and an `ops.alert`. `bootstrap` never overwrites a promoted or d
 `ltcm/backtest.py` replays a strategy's `decide(kit, params)` over past days in minutes instead
 of waiting for settlements: `run_backtest(spec)` steps a clock every `step_minutes`, answers every
 `Kit` call from `ltcm/history.py` as of that moment (settled Kalshi markets open then, priced from
-the last candlestick that had ended; Coinbase bars that had closed), and books intents in a
-conservative simulator: takers pay the ask and Kalshi's fee, resting bids fill at their limit
-only on a later candle that trades strictly through them, post-only crossings are refused,
-positions settle at close on the result, notional is capped at 10x learning size. The report
-carries trades, P&L, fees, return on notional, drawdown, daily P&L, per-trade P&L with a seeded
-bootstrap CI, and `split_report` cuts it in and out of sample. Weather is unsupported (no
-forecast history). Run it here with `python3 scripts/backtest.py --strategy kalshi_favorites
---days 3`, or in a desk's sandbox with `python3 -m ltcm.backtest --spec spec.json` (one
-`BACKTEST-RESULT` line; both modules ship in `FLOOR_EXTRAS`). History reads use Kalshi's batch
-candlestick endpoint (minute candles are fetched for a market once an order rests on it), back
-off on 429s, and cache settled responses under a 128 MB cap. Known biases: a maker bid fills only
-when the book trades through it (a lifted offer that did not move the quote is missed), the
-board is the markets that had settled by `end` ranked by lifetime volume, and a series capped at
-`max_markets` keeps each event's most traded strikes.
+the last candlestick that had ended, listed at the close they showed while open; Coinbase bars
+that had closed), and books intents in a conservative simulator: takers pay the ask and Kalshi's
+fee, resting bids fill at their limit only on a later candle that trades strictly through them
+(minute candles are fetched once an order rests), post-only crossings are refused, positions
+settle at close, notional is capped at 10x learning size. `fill_model: "touch"` also fills on a
+touch or a print: the optimistic bracket for a maker. The report carries trades, P&L, fees,
+return on notional, drawdown, daily P&L, per-trade P&L with a seeded bootstrap CI and its
+`split_report` in and out of sample. Weather is unsupported (no forecast history). Run it with
+`python3 scripts/backtest.py --strategy kalshi_favorites --days 3`, or in a desk's sandbox with
+`python3 -m ltcm.backtest --spec spec.json` (one `BACKTEST-RESULT` line; `compact` fits the
+sandbox's 4,000 characters). Reads back off on 429s and cache settled data under 128 MB. Biases:
+trade-through fills are the adverse ones (maker P&L reads low, `touch` reads high); the board is
+what had settled by `end`, ranked by lifetime volume; a capped series keeps each event's most
+traded strikes; an early close is recognised by its off-minute timestamp.
 
 ### The floor board
 

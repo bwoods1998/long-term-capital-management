@@ -609,6 +609,11 @@ class CliTests(unittest.TestCase):
         code, stdout = self.run_main([], stdin=json.dumps(spec))
         self.assertEqual(code, 0)
         self.assertEqual(len(stdout.splitlines()), 1)
+        self.assertIn("split", report)
+        code, stdout = self.run_main([], stdin=json.dumps({**spec, "compact": True}))
+        compact = json.loads(stdout.splitlines()[0][len(RESULT_PREFIX):])
+        self.assertNotIn("trade_pnls", compact)
+        self.assertIn("in_sample", compact["split"])
 
     def test_a_bad_spec_is_a_report_not_a_traceback(self):
         for argv, stdin in (([], "not json"), (["--spec", "/nonexistent/spec.json"], ""), (["--bogus"], "")):
