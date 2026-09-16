@@ -508,3 +508,23 @@ are rewarded and punished. Shipped, in order:
   20, 30 and 6.
 - **A faster reward loop**: committee gates at 3 days and 15 decisions, capital resized daily
   (was 14 days, 20, weekly).
+- **Strategy code evolves** (b880754, 08:15 UTC). A lab experiment's change may carry
+  `strategy {name, cadence_seconds, params, code}`; the variant runs the code between
+  sessions, and an adopted experiment puts the strategy in the family's genome, from where
+  `Strategies.bootstrap` installs it on every desk of the family, the live desk included. The
+  lab's instructions carry the kit API and its packet shows the family's strategy records and
+  the house strategy's source. Validation: `decide(kit, params)`, no process or network
+  access, 6000 characters, cadence 5 min to a day. The lab runs at 20:00 New York, so the
+  first strategy proposals can land tonight; the site must accept the `change.strategy` object
+  (checked: the change is free-form under the site's string and size caps).
+- **Caps for a floor that quotes all day** (48a461a, gateway version 392002e5): the gateway
+  day caps are $6,000 and 1,500 orders (it had counted 57 orders and $534 four hours into
+  the New York day, with the maker strategies replacing quotes every fifteen minutes);
+  Hilibrand may place 120 orders a day. The per-order cap and every per-desk risk limit stand.
+  The live crypto desk's reversion works the top fifteen USD pairs by volume.
+- **What the refusal census showed** (08:00 UTC): the shadow Scholes variants lost 25 to 34
+  percent of their hypothetical sleeves on the hourly buckets and sat behind their daily-loss
+  breakers, and their $15 learning orders were refused at the 15 percent-of-equity cap once
+  the sleeve had shrunk (learning size for shadows is $10 now). The live Scholes lost the
+  07:00 hour on both maker legs after winning the 06:00 hour. The promotion loop and the
+  evening retirement will sort the variants; nothing in real money exceeded a limit.
