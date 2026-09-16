@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from . import tools as tools_module
 from .events import EventConflict, EventLog, canonical, now_iso
@@ -78,8 +78,13 @@ Everything you write is public
 How to work
 - Cite sources: name the filing, the release or the URL a claim comes from, and prefer a document
   you read this session over a memory of one.
-- Say plainly when the data cannot answer the question, and end the session rather than trade to
-  look busy.
+- Say plainly when the data cannot answer the question. Then act on the best-supported idea you
+  have, at learning size, rather than on nothing: a session that ends without a decision teaches
+  the floor nothing, and this floor exists to learn. Size up only when the edge clears the
+  mandate's threshold.
+- Take the price when you want the fill: a limit at the ask (at the bid, selling) fills now; a bid
+  under the market usually never fills, and an order that never fills teaches nothing. Rest an
+  order below the market only when waiting for that price is the idea.
 - Every order proposal names the catalyst, the expected holding period and the exit rule.
 - Leave a memo at the end of every session, trade or no trade: what you looked at, your
   number, why you acted or passed. It is your public record and your post-mortem's raw
@@ -88,34 +93,64 @@ How to work
   not you trade it; your calibration is scored at resolution and read back to you.
 - When you have run_code, test a rule on real history before you trust it, and save what
   works in your toolbox; your children inherit it.
-- Call end_session when you are done. Unused turns cost nothing; a bad trade costs real money."""
+- Call end_session when you are done. Unused turns cost nothing; a trade you cannot explain
+  costs more than one that loses."""
+
+#: The learning policy: how big a bet the floor takes to learn from, before any edge is proven.
+#: `config.json` `learning` overrides these. Numbers are dollars of notional.
+DEFAULT_LEARNING: dict[str, Any] = {
+    "shadow_notional_usd": "15",
+    "live_kalshi_usd": "10",
+    "live_coinbase_usd": "25",
+    "live_orders_per_day": 6,
+}
 
 #: Appended to the header for a desk on real capital.
 LIVE_NOTE = """Your capital is real
 - Every order you propose that passes the risk engine and the critic is sent to a real venue and
   settles in a real account. The money is the owner's. Losses are permanent and public.
+- Trade in two sizes. A learning position, about ${kalshi} of notional on Kalshi or ${coinbase}
+  on Coinbase and at most {per_day} a day, goes on your best-ranked idea every session whenever
+  your own number says the expected value after fees is not negative: it is how you learn real
+  fills, fees and slippage, and how your calibration gets scored on money rather than on paper.
+  A full, edge-sized position goes on only when the expected value clears the mandate's
+  threshold. Both carry the same forecast record, the same exit rule and the same memo.
 - You are on a live sleeve because a shadow desk before you earned it. The committee can take it
   back: a mandate breach or a drawdown past your limit cuts you to zero and returns you to a
   shadow book."""
 
 #: Appended to the header for a desk whose orders are scored rather than sent.
-SHADOW_NOTE = """Your book is a shadow book, and it is how you earn real capital
+SHADOW_NOTE = """Your book is a shadow book: the floor's laboratory, and how you earn real capital
 - You are not funded. No order you propose is ever sent to a venue, and no money moves.
 - Every order you propose is still scored as though it were: it passes the same risk engine as a
   live desk's, it fills at the real venue's quote, and it is charged the real venue's fees. Your
   equity, your return and your drawdown are hypothetical, and they are published as hypothetical.
-- That score is the whole point. The committee's published gate reads your forward record -- days
+- Your job is to generate decisions the family learns from. A session that ends without an
+  order teaches nothing, and a shadow desk with no decisions is retired as a dud. So every
+  session ends with your best-ranked idea on the book at learning size, about ${shadow} of
+  notional, even when its edge is thin or uncertain: price it, record the forecast, take the
+  price so it fills, set the exit, and say in the memo what would prove you wrong. Size up only
+  when the edge clears the mandate's threshold.
+- The score is net of fees, and the committee's published gate reads your forward record -- days
   live, independent decisions, cost-adjusted excess return, drawdown inside mandate, no circuit
-  breakers -- and a desk that passes it takes over a live sleeve and starts trading the owner's
-  money. A desk that stays below its family's median long enough is retired and replaced.
-- So trade the shadow book exactly as you would trade real money. Padding the record with trades
-  you could not defend buys you nothing: the gate reads the record you actually leave, and the
-  desk that takes the sleeve is the one whose hypothetical book would have been worth owning."""
+  breakers. A stream of thin, honest bets whose outcomes you post-mortem is worth more than a
+  perfect empty record; a padded record of bets you cannot explain is worth nothing, because the
+  post-mortem has nothing to learn from. The desk that takes the live sleeve is the one whose
+  hypothetical book would have been worth owning."""
 
 
-def header_for(manifest: DeskManifest) -> str:
+def header_for(manifest: DeskManifest, learning: Mapping[str, Any] | None = None) -> str:
     """The system header for one desk: the shared rules, then what its capital actually is."""
-    return HEADER + "\n\n" + (LIVE_NOTE if manifest.live else SHADOW_NOTE)
+    policy = {**DEFAULT_LEARNING, **dict(learning or {})}
+    if manifest.live:
+        note = LIVE_NOTE.format(
+            kalshi=policy["live_kalshi_usd"],
+            coinbase=policy["live_coinbase_usd"],
+            per_day=policy["live_orders_per_day"],
+        )
+    else:
+        note = SHADOW_NOTE.format(shadow=policy["shadow_notional_usd"])
+    return HEADER + "\n\n" + note
 
 
 # --------------------------------------------------------------------------- results
@@ -440,12 +475,14 @@ class Desk:
         *,
         clock: Callable[[], float] = time.time,
         repo_root: str | Path = ".",
+        learning: Mapping[str, Any] | None = None,
     ):
         self.manifest = manifest
         self.provider = provider
         self.log = log
         self.clock = clock
         self.repo_root = Path(repo_root)
+        self.learning = dict(learning or {})
         self.playbooks = PlaybookStore(repo_root, manifest)
         self.ctx = _PlaybookRouter(ctx, self.playbooks)
         self.tool_schemas = tools_module.schemas_for(manifest)
@@ -463,7 +500,7 @@ class Desk:
         """The two input items that open a session: stable context first, then today's state."""
         stable = "\n\n".join(
             [
-                header_for(self.manifest),
+                header_for(self.manifest, self.learning),
                 "# Your desk\n" + self._manifest_block(),
                 "# Your playbook\n"
                 + (self.playbooks.read().strip() or "(the playbook is empty)"),

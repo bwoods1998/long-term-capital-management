@@ -207,10 +207,31 @@ def _fold(value: Any) -> str:
 class ProviderError(RuntimeError):
     """A request could not be completed. `code` is a stable, body-free category."""
 
-    def __init__(self, code: str, *, retry_after: int | None = None):
+    def __init__(self, code: str, *, retry_after: int | None = None, detail: str | None = None):
         super().__init__(code)
         self.code = code
         self.retry_after = retry_after
+        #: The first line of the provider's error body, for the alert; never part of the code.
+        self.detail = detail
+
+
+def _error_detail(raw: bytes) -> str | None:
+    """A provider error body reduced to one printable line of at most 200 characters."""
+    if not raw:
+        return None
+    text = raw.decode("utf-8", "replace")
+    try:
+        body = json.loads(text)
+        if isinstance(body, dict):
+            error = body.get("error")
+            if isinstance(error, dict):
+                text = str(error.get("message") or error.get("code") or error)
+            elif error:
+                text = str(error)
+    except ValueError:
+        pass
+    text = " ".join(text.split())
+    return text[:200] or None
 
 
 class TransportError(ProviderError):
@@ -428,11 +449,17 @@ class Transport:
             hint = _retry_after(error.headers.get("Retry-After")) if error.headers else None
             code = error.code
             try:
+                detail = _error_detail(error.read(2048))
+            except Exception:  # a body we cannot read is no body
+                detail = None
+            try:
                 error.close()
             except Exception:  # pragma: no cover - close() is best effort
                 pass
             raise TransportError(
-                f"provider_http_{code}", retry_after=hint if code in RETRY_STATUSES else None
+                f"provider_http_{code}",
+                retry_after=hint if code in RETRY_STATUSES else None,
+                detail=detail,
             ) from None
         except TimeoutError:
             raise TransportError("provider_transport_timeout") from None

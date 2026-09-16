@@ -380,6 +380,20 @@ class ProposeOrderTests(unittest.TestCase):
         run("propose_order", self.arguments(order_type="market"), ctx)
         self.assertIsNone(ctx.intents[0].limit_price)
 
+    def test_orders_on_round_the_clock_venues_rest_until_cancelled(self):
+        # A shadow "day" order on Kalshi died at UTC midnight while the venue would have kept it.
+        ctx = FakeContext()
+        run("propose_order", self.arguments(), ctx)
+        self.assertEqual(ctx.intents[0].time_in_force, "day")  # an equity order dies at the close
+        events = manifest(
+            venues=["kalshi"], instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []}
+        )
+        contract = {"asset_class": "event", "symbol": "KXBTC-26SEP1520", "market_id": "KXBTC-26SEP1520-B75650", "right": "yes"}
+        run("propose_order", self.arguments(instrument=contract, limit_price="0.30"), ctx, mf=events)
+        self.assertEqual(ctx.intents[1].time_in_force, "gtc")
+        run("propose_order", self.arguments(instrument=contract, limit_price="0.30", time_in_force="ioc"), ctx, mf=events)
+        self.assertEqual(ctx.intents[2].time_in_force, "ioc")
+
 
 class PublicationTests(unittest.TestCase):
     def test_public_arguments_summarize_long_bodies(self):

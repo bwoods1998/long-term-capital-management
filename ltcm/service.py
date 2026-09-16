@@ -1735,6 +1735,7 @@ class Service:
                 self.log,
                 clock=self.clock,
                 repo_root=self.root,
+                learning=self.config.get("learning") or None,
             )
         except Exception as exc:
             self.alert("warning", f"desk runtime for {manifest.id} unavailable: {exc}")

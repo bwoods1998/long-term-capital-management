@@ -18,8 +18,14 @@
   "postmortem_time": "21:30",
   "critic_enabled": true,
   "critic_profile": "glm_asap",
+  "learning": {
+    "shadow_notional_usd": "15",
+    "live_kalshi_usd": "10",
+    "live_coinbase_usd": "25",
+    "live_orders_per_day": 6
+  },
   "evolution": {
-    "min_days": 3,
+    "min_days": 1,
     "min_decisions": 5,
     "target_variants": 4,
     "max_variants": 6,

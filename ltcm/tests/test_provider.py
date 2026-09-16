@@ -613,6 +613,18 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "provider_http_429")
         self.assertEqual(caught.exception.retry_after, 30)
         self.assertNotIn("secret-key", str(caught.exception))
+        self.assertIsNone(caught.exception.detail)
+        # A 4xx body is kept as one short line for the alert, so a refused request says why.
+        import io
+
+        body = io.BytesIO(b'{"error": {"message": "unsupported_asap_request: background", "type": "invalid"}}')
+        opener = _Opener(HTTPError("https://api.sailresearch.com/v1/responses", 400, "bad", email.message.Message(), body))
+        transport = Transport(key_source=lambda: "secret-key", opener=opener)
+        with self.assertRaises(TransportError) as caught:
+            transport("POST", "/v1/responses", {"model": "m"}, "idem-2")
+        self.assertEqual(caught.exception.code, "provider_http_400")
+        self.assertEqual(caught.exception.detail, "unsupported_asap_request: background")
+        self.assertEqual(str(caught.exception), "provider_http_400")
 
     def test_socket_failures_collapse_to_timeout_or_unconfirmed(self):
         cases = {

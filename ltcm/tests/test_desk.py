@@ -578,6 +578,22 @@ class GuardrailCopyTests(unittest.TestCase):
         self.assertIn("Your playbook may not tighten your mandate", HEADER)
         self.assertIn("a post-mortem may not write one", HEADER)
 
+    def test_the_header_asks_for_a_decision_every_session(self):
+        """49 sessions and 3 orders on the first day: a floor that does not decide cannot learn."""
+        from ltcm.desk import header_for
+
+        self.assertNotIn("trade to look busy", HEADER)
+        self.assertIn("a session that ends without a decision teaches", HEADER)
+        self.assertIn("Take the price when you want the fill", HEADER)
+        shadow = header_for(manifest(capital={"mode": "shadow", "usd": "500"}))
+        self.assertIn("retired as a dud", shadow)
+        self.assertIn("about $15 of", shadow)
+        live = header_for(manifest(venues=["kalshi"], capital={"mode": "live", "usd": "500"}), {"live_kalshi_usd": "12"})
+        self.assertIn("Trade in two sizes", live)
+        self.assertIn("about $12 of notional on Kalshi or $25", live)
+        self.assertIn("at most 6 a day", live)
+        self.assertNotIn("{", live.split("Your capital is real", 1)[1])
+
     def test_the_postmortem_asks_for_evidence_from_the_desks_own_record(self):
         import inspect
         from ltcm import desk as desk_module

@@ -244,6 +244,27 @@ passes gate A onto a venue missing from `live_venues` is deferred with a public 
 whose reason is `venue not enabled`; the next run after the venue opens promotes it on the same
 evidence. Children of a live desk are born shadow.
 
+### The learning policy
+
+The first day on the box produced 49 sessions, 80 recorded forecasts and 3 orders: the desks did
+the work and then passed, because a mandate gates full size on an ex-ante edge the models rarely
+see, and a floor that never decides has nothing to post-mortem, calibrate, breed or promote. The
+desk header (`desk.header_for`, numbers from `config.json` `learning`) therefore asks for a
+decision every session:
+
+* A **shadow desk** ends every session with its best-ranked idea on the book at learning size
+  (`shadow_notional_usd`, $15), taking the price so it fills, with the forecast recorded and the
+  exit set. A mature shadow desk with no decisions is retired as a dud (`evolution.min_days`, now
+  one day).
+* A **live desk** trades in two sizes: a learning position (`live_kalshi_usd` $10,
+  `live_coinbase_usd` $25, at most `live_orders_per_day` a day) on its best idea whenever its own
+  number says the expected value after fees is not negative, and a full, edge-sized position only
+  when the mandate's threshold is cleared. The risk engine's limits and the gateway's caps bind
+  either way.
+* Orders on Kalshi and Coinbase rest until filled or cancelled (`gtc`), as they do at the venue; a
+  "day" order used to die at UTC midnight in the shadow book alone. The limit-sanity rule judges an
+  event contract in cents through the touch (five), not as a percentage of a penny reference.
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:

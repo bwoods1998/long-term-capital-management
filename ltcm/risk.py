@@ -176,11 +176,25 @@ def rule_liquidity(intent: OrderIntent, ctx: RiskContext) -> str | None:
     return None
 
 
+#: An event contract pays one dollar. A limit this far through the touch is a typo, not a bid.
+EVENT_LIMIT_TOLERANCE = Decimal("0.05")
+
+
 def rule_limit_sanity(intent: OrderIntent, ctx: RiskContext) -> str | None:
     if intent.order_type != "limit" or ctx.quote is None:
         return None
     reference = ctx.quote.reference(intent.side)
     if reference is None or reference <= 0:
+        return None
+    if intent.instrument.asset_class == "event":
+        # Prices live in cents on a dollar, so a percentage of a four-cent ask means nothing (a
+        # seven-cent bid against it read as "75% away" and was refused). A buy at or under the
+        # ask, or a sell at or over the bid, is a resting order and always sane; through the
+        # touch by more than a few cents is a mistake.
+        through = (intent.limit_price - reference) if intent.side == "buy" else (reference - intent.limit_price)
+        if through > EVENT_LIMIT_TOLERANCE:
+            touch = "ask" if intent.side == "buy" else "bid"
+            return f"limit price is {through:.2f} through the {touch} of {reference:.2f}"
         return None
     deviation = abs(intent.limit_price - reference) / reference
     if deviation > ctx.manifest.limits.max_limit_deviation_pct:

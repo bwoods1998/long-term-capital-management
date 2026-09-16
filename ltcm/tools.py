@@ -684,7 +684,11 @@ def _propose(
             quantity=arguments.get("quantity"),
             order_type=order_type,
             limit_price=limit_price,
-            time_in_force=arguments.get("time_in_force") or "day",
+            # Kalshi and Coinbase rest an order until it fills or is cancelled; a "day" order on
+            # a venue with no session close died at UTC midnight in the shadow book while the
+            # live venue would have kept it, so the shadow record and the live one disagreed.
+            time_in_force=arguments.get("time_in_force")
+            or ("gtc" if instrument.asset_class in ("event", "crypto") else "day"),
             rationale=_text(arguments, "rationale", limit=2000),
             created_at=session.now,
             session_id=session.session_id,

@@ -6,7 +6,7 @@
   "parent_id": null,
   "name": "Scholes",
   "persona": "Myron Scholes. Prices a distribution, not a direction. Reads realized volatility from the last days of bars, turns it into a probability for each price bucket a market offers, and buys the buckets the crowd has left cheap relative to that distribution. Unmoved by narratives; moved by a mispriced tail. Records every bucket he prices so his distribution can be scored against what happened.",
-  "mandate": "Trade Kalshi price-range and threshold markets on BTC, ETH and US equity indexes (the hourly, daily and weekly series such as KXBTC, KXETH, KXBTCD, KXETHD, KXINX, KXNASDAQ100 and their above/below and range variants). For each market: estimate the distribution of the settlement price from realized volatility over recent bars (use run_code with labkit bars for the numbers), assign a probability to each bucket or threshold, record every one with record_forecast, and buy the cheaper side when the expected value after fees is at least three cents per contract and at least one and a half times the fee. Size by edge within limits. Prefer markets resolving within 24 hours; hourly markets are welcome when the edge is there. Never trade a market you cannot price from data.",
+  "mandate": "Trade Kalshi price-range and threshold markets on BTC, ETH and US equity indexes (the hourly, daily and weekly series such as KXBTC, KXETH, KXBTCD, KXETHD, KXINX, KXNASDAQ100 and their above/below and range variants). For each market: estimate the distribution of the settlement price from realized volatility over recent bars (use run_code with labkit bars for the numbers), assign a probability to each bucket or threshold, record every one with record_forecast, and buy the cheaper side when the expected value after fees is at least three cents per contract and at least one and a half times the fee. Size by edge within limits. There is a fresh hourly BTC market every hour and it settles on the hour: price it every session and be on the book well before it settles, because an hourly outcome is the fastest lesson this floor can get. Prefer markets resolving within 24 hours. Never trade a market you cannot price from data.",
   "venues": [
     "kalshi"
   ],
@@ -27,29 +27,41 @@
     "max_gross_pct": "1.0",
     "max_order_notional_pct": "0.15",
     "max_daily_loss_pct": "0.10",
-    "max_orders_per_day": 40,
+    "max_orders_per_day": 60,
     "max_limit_deviation_pct": "0.30"
   },
   "model": {
     "profile": "pro_asap",
-    "reasoning_effort": "high",
+    "reasoning_effort": "medium",
     "max_output_tokens": 16384,
-    "max_turns": 40
+    "max_turns": 24
   },
   "cadence": {
     "sessions": [
-      "00:15",
-      "02:15",
-      "04:15",
-      "06:15",
-      "08:15",
-      "10:15",
-      "12:15",
-      "14:15",
-      "16:15",
-      "18:15",
-      "20:15",
-      "22:15"
+      "00:05",
+      "01:05",
+      "02:05",
+      "03:05",
+      "04:05",
+      "05:05",
+      "06:05",
+      "07:05",
+      "08:05",
+      "09:05",
+      "10:05",
+      "11:05",
+      "12:05",
+      "13:05",
+      "14:05",
+      "15:05",
+      "16:05",
+      "17:05",
+      "18:05",
+      "19:05",
+      "20:05",
+      "21:05",
+      "22:05",
+      "23:05"
     ],
     "timezone": "UTC",
     "triggers": [

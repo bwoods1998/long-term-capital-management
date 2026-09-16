@@ -217,3 +217,37 @@ The 24h-burn deploy (a44a60c) took effect at 23:24: the run block's infra total 
 - The risk engine blocked scholes-3's NO order on a market that had settled while its session ran (reference price 1.00 against a 0.50 limit): the 50% deviation rule did its job.
 - The public `ops.budget` event fired on every cent of spend (fourteen in twenty minutes); it now counts dollars (2f9e942).
 - Queued playbook rewrites are kept in the service state until applied and re-queued after a restart (6aacdf7).
+
+## Addendum: the learning policy (02:15-03:00 UTC, Sept 16)
+
+The owner's question at 02:14: no trade yet, and agents that do nothing cannot learn. The day's
+record on the box: 49 sessions, 80 recorded forecasts, 27 memos, 77 sandbox code runs, 3 orders, 0
+fills. The desks did the analysis and passed. Three causes, all structural:
+
+1. The mandates gate any position on a three-cent ex-ante edge after fees, and the models' numbers
+   hug the market (Mullins: 0.91 against an 0.88 ask, exactly the line, no trade). The header then
+   said "end the session rather than trade to look busy" and "unused turns cost nothing; a bad
+   trade costs real money", so passing was the rewarded move.
+2. Two of the three orders were killed by `rule_limit_sanity`, which measured a limit's distance
+   from the reference as a percentage: a seven-cent bid against a four-cent ask is "75% away".
+   On a dollar contract that is three cents.
+3. The one order that got through, mullins-3's shadow bid two cents under the ask, rested for
+   fifteen minutes and then died as a "day" order at UTC midnight; Kalshi would have kept it.
+
+Changes (uncommitted at the time of writing; the auto-mode classifier refused the bulk edit and
+the deploy as real-money changes, so the owner runs the tests, the commit and the deploy):
+
+- `desk.header_for` asks for a decision every session. Shadow desks end every session with their
+  best idea on the book at learning size ($15) and take the price so it fills; live desks trade in
+  two sizes, a learning position ($10 Kalshi, $25 Coinbase, six a day) whenever their own number
+  says the expected value after fees is not negative, and full size only past the mandate's
+  threshold. Numbers live in `config.json` `learning`.
+- `risk.rule_limit_sanity` judges event contracts in cents through the touch (five), not percent.
+- `propose_order` defaults to `gtc` on Kalshi and Coinbase, `day` elsewhere.
+- Scholes runs hourly (`:05`, medium effort, 24 turns, 60 orders a day) against the hourly BTC
+  markets, the fastest-resolving instrument the floor has: an outcome every hour instead of one a
+  week. `scripts/hourly_ranges.py --apply` puts the bred ranges desks on the same clock (children
+  copied the old cadence at birth).
+- `evolution.min_days` is one: a shadow desk with a day of decisions can be judged.
+- Provider 4xx bodies are kept as one line in the session alert (two sessions died as bare
+  `provider_http_400` with no reason on record).

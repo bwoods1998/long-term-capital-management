@@ -97,6 +97,26 @@ class RiskEngineTests(unittest.TestCase):
         decision = self.engine.check(intent(quantity="1", order_type="limit", limit_price="101"), context())
         self.assertTrue(decision.approved, decision.reasons)
 
+    def test_event_contracts_are_judged_in_cents_not_percent(self):
+        # On Sept 16, 2026 a seven-cent bid against a four-cent ask read as "75% away" and was
+        # refused; on a contract that pays a dollar, the sanity line is cents through the touch.
+        market = Instrument(
+            "event", "KXBTCD-26SEP1521", "kalshi", market_id="KXBTCD-26SEP1521-T75799.99", right="yes"
+        )
+        events = manifest(
+            venues=["kalshi"],
+            instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+        )
+        book = Quote(market, Decimal("0.01"), Decimal("0.04"), Decimal("0.04"), "2026-09-14T14:30:00.000Z", "kalshi", False)
+        ctx = context(manifest=events, quote=book, venue_capabilities={"event", "limit", "shadow"}, market_open=None)
+
+        def check(price):
+            return self.engine.check(intent(instrument=market, quantity="10", order_type="limit", limit_price=price), ctx)
+
+        self.assertFalse([r for r in check("0.07").reasons if "deviates" in r or "through" in r])
+        self.assertFalse([r for r in check("0.01").reasons if "through" in r])  # a resting bid
+        self.assertIn("limit price is 0.08 through the ask of 0.04", check("0.12").reasons)
+
     def test_exposure_rules(self):
         decision = self.engine.check(intent(quantity="3"), context(desk_cash=Decimal("100")))
         self.assertTrue(any("insufficient desk cash" in r for r in decision.reasons))
