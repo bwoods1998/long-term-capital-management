@@ -95,7 +95,7 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
 QUOTE_VARIANTS: dict[str, list[dict[str, Any]]] = {
     "ranges": [
         {"spread": 0.04, "buckets": 2},
-        {"spread": 0.06, "buckets": 2},
+        {"spread": 0.05, "buckets": 2, "min_minutes": 35},  # does leaving the last half hour alone stop the pick-offs?
         {"spread": 0.03, "buckets": 3},
     ],
     "crypto": [

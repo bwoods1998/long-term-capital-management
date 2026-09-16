@@ -2029,6 +2029,7 @@ class ReconcileTests(ServiceCase):
         self.service.close()
         self.service = self.build(live_venues=["kalshi"])
         self.service.gateway.brokers["kalshi"] = Kalshi()
+        self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 18, 0)), [], "the first tick arms the clock")
         self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 19, 5)), ["kalshi"])
         records = self.service.log.read(kind="broker.reconciled")
         self.assertEqual(len(records), 1)

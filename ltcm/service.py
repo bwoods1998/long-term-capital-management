@@ -2596,7 +2596,10 @@ class Service:
         if not bool(policy.get("enabled", True)):
             return []
         last = getattr(self, "_reconciled_at", None)
-        if last is not None and (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 3600)):
+        if last is None:
+            self._reconciled_at = at  # the first tick arms the clock: a restart never doubles the venue calls
+            return []
+        if (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 3600)):
             return []
         self._reconciled_at = at
         done: list[str] = []

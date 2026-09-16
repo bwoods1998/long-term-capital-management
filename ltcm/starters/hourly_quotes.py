@@ -24,7 +24,9 @@ DEFAULTS = {
     "symbols": {"KXBTC": "BTC-USD", "KXETH": "ETH-USD"},
     "vol_interval": "5m",
     "vol_bars": 36,
-    "min_minutes": 12,
+    # No quote rests into the last twenty minutes: three settlements on Sept 16, 2026 showed the
+    # losing legs were the ones filled late in the hour, when the outcome was nearly known.
+    "min_minutes": 20,
     "max_minutes": 58,
     "spread": 0.04,
     "drift": 0.02,
