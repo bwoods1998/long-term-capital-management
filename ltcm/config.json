@@ -29,7 +29,7 @@
     "max_per_desk": 3,
     "min_cadence_seconds": 300,
     "max_intents_per_run": 5,
-    "max_runs_per_tick": 2,
+    "max_runs_per_tick": 4,
     "run_timeout_seconds": 90,
     "idle_publish_seconds": 3600,
     "starters": true
@@ -84,7 +84,7 @@
   "sandbox": {
     "enabled": true,
     "image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
-    "daily_seconds": 1800,
+    "daily_seconds": 7200,
     "timeout_seconds": 120
   },
   "lab_time": "20:00",

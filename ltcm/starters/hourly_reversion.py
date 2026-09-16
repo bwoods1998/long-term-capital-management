@@ -14,7 +14,7 @@ redeploy. Params: symbols, lookback, z_entry, stop_pct, holding_hours, notional_
 import math
 
 DEFAULTS = {
-    "symbols": ["BTC-USD", "ETH-USD", "SOL-USD"],
+    "symbols": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "LINK-USD", "AVAX-USD", "ADA-USD", "LTC-USD", "BCH-USD"],
     "lookback": 24,
     "z_entry": 2.0,
     "stop_pct": 0.02,

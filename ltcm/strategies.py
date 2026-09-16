@@ -70,6 +70,8 @@ STARTER_PARAMS = {
     ("ranges", "shadow"): {"min_edge": 0.0, "shrink": 0.3, "max_intents": 3},
     ("crypto", "shadow"): {"z_entry": 1.5},
 }
+#: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower.
+STARTER_CADENCE = {"ranges": 300, "crypto": 600}
 
 #: Uploaded as `/lab/run/main.py` for every strategy run. It builds the kit, imports the
 #: strategy from the toolbox, calls `decide`, and prints one JSON line the floor reads back.
@@ -362,8 +364,14 @@ class Strategies:
                 # changes the file or redeploys it as its own.
                 row = existing.get(starter)
                 if row and row.get("house"):
+                    cadence = int(STARTER_CADENCE.get(manifest.family, 600))
+                    changes: dict[str, Any] = {}
                     if dict(row.get("params") or {}) != params:
-                        self.store.update(desk_id, starter, params=params)
+                        changes["params"] = params
+                    if int(row.get("cadence_seconds") or 0) != cadence:
+                        changes["cadence_seconds"] = cadence
+                    if changes:
+                        self.store.update(desk_id, starter, **changes)
                     self._refresh_house_code(desk_id, starter, row, manager)
                 continue
             path = STARTERS_DIR / f"{starter}.py"
@@ -373,7 +381,7 @@ class Strategies:
                 code = path.read_text(encoding="utf-8")
                 if hasattr(manager, "toolbox_save"):
                     manager.toolbox_save(desk_id, starter, code, f"house starter for the {manifest.family} family")
-                self.deploy(manifest, starter, 600, params, note="house starter", house=True)
+                self.deploy(manifest, starter, int(STARTER_CADENCE.get(manifest.family, 600)), params, note="house starter", house=True)
                 deployed.append(f"{desk_id}/{starter}")
             except Exception as exc:
                 self.service.alert("warning", f"starter strategy for {desk_id} not deployed: {str(exc)[:160]}")
