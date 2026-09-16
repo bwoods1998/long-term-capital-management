@@ -645,3 +645,9 @@ breaker, and settings that leave the last twenty minutes alone.
   first dip; the promotion loop needs twelve settlements per variant after that.
 - **First shadow maker fills** (13:27 UTC): six resting shadow quotes filled against 27,030
   prints. Maker strategies now earn a record in shadow; the promotion loop has what it needs.
+- **Shadow maker round trips on the tape** (14:05 UTC): 25 shadow fills since 13:00,
+  among them hilibrand-3 buying ETH at 2,393.73 on a print and selling at 2,400.91 on the
+  next, and scholes-4 filling NO bids at 0.14 and 0.17 on the 14:00 buckets. The full path
+  (venue print -> hub -> shadow book -> gateway -> tape -> ledger and strategy record) is
+  live; a check that looked for `"shadow": true` with a space had missed them, since the log
+  stores compact JSON.
