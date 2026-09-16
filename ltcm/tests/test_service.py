@@ -934,6 +934,24 @@ class ContextTests(ServiceCase):
         self.assertNotIsInstance(ctx.positions(), dict)
         self.assertTrue(all(isinstance(p, Position) for p in ctx.positions()))
 
+    def test_standings_rank_every_partner_and_calls_show_only_the_others_open_probabilities(self):
+        self.write_manifest("earnings-02")
+        self.service.reload_manifests()
+        self.service.committee.allocate(self.service.now())
+        rows = self.context().standings()
+        self.assertEqual(sorted(r["desk_id"] for r in rows), [DESK, "earnings-02"])
+        self.assertTrue(all(set(r) >= {"pnl_usd", "budget_factor", "mode", "family"} for r in rows))
+        later = "2026-09-20T00:00:00.000Z"
+        for desk_id, market, due in ((DESK, "KXMINE", later), ("earnings-02", "KXOPEN", later), ("earnings-02", "KXDONE", "2026-09-01T00:00:00.000Z")):
+            self.service.log.append(
+                f"desk:{desk_id}", "desk.forecast",
+                {"session_id": "s", "market": market, "venue": "kalshi", "probability": "0.30", "market_price": "0.20", "side": "yes", "resolves_at": due, "reasoning": "base rate"},
+                at=self.service.now(),
+            )
+        calls = self.context().floor_calls()
+        self.assertEqual([c["market"] for c in calls], ["KXOPEN"], "not my own, not a resolved market")
+        self.assertEqual(calls[0]["probability"], "0.30")
+
     def test_memo_emits_a_desk_memo_event(self):
         ctx = self.context()
         result = ctx.memo("Monday note", "The beat was cash, not accruals.")

@@ -61,6 +61,17 @@ class RiskEngineTests(unittest.TestCase):
         self.assertTrue(any("orders today" in r for r in decision.reasons))
         self.assertTrue(any("order notional" in r for r in decision.reasons))  # 500 > 25% of 1000
 
+    def test_a_refused_sell_says_what_the_desk_holds_on_that_market(self):
+        ticker = "KXHIGHNY-26SEP16-B81.5"
+        yes = Instrument("event", ticker, "kalshi", market_id=ticker, right="yes")
+        no = Instrument("event", ticker, "kalshi", market_id=ticker, right="no")
+        held = {yes.key: Position(yes, Decimal("54"), Decimal("0.1"), Decimal("0.2"))}
+        events = manifest(instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []}, venues=["kalshi"])
+        sell_no = OrderIntent.new(desk_id="earnings-01", instrument=no, side="sell", quantity="54", order_type="limit", limit_price="0.8",
+                                  rationale="close", created_at="2026-09-14T14:30:00.000Z", session_id="s")
+        reasons = self.engine.check(sell_no, context(manifest=events, positions=held)).reasons
+        self.assertTrue(any("you hold 54 YES on this market" in r for r in reasons), reasons)
+
     def test_an_exit_is_never_refused_for_the_days_order_count(self):
         held = {AAPL.key: type("P", (), {"quantity": Decimal("5"), "instrument": AAPL, "average_cost": Decimal("100"), "mark": Decimal("100")})()}
         stop = OrderIntent.new(

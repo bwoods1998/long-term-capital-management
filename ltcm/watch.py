@@ -35,7 +35,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "profile": "flash_asap",
     "reasoning_effort": "low",
-    "max_output_tokens": 300,
+    # A one-line verdict, but the model reasons first: at 300 tokens the reasoning used the whole
+    # budget and 668 of 742 watch calls on Sept 16, 2026 came back incomplete, so the night watch
+    # never woke a desk. The verdict still costs a fraction of a cent at this cap.
+    "max_output_tokens": 2000,
     "cooldown_seconds": 1800,
     "check_seconds": 60,
     "lookback_seconds": 3600,

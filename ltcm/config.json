@@ -7,7 +7,7 @@
   "profit_share": "0.25",
   "reserve_floor_usd": "10",
   "floor_capital_usd": "979",
-  "floor_max_daily_loss_pct": "0.02",
+  "floor_max_daily_loss_pct": "0.15",
   "mark_interval_seconds": 300,
   "sleep_seconds": 30,
   "session_catchup_seconds": 3600,
@@ -62,11 +62,11 @@
   "evolution": {
     "min_days": 1,
     "min_decisions": 5,
-    "target_variants": 4,
-    "max_variants": 6,
-    "playbook_profile": "pro_asap",
+    "target_variants": 6,
+    "max_variants": 8,
+    "playbook_profile": "k3",
     "playbook_reasoning_effort": "high",
-    "playbook_budget_usd_per_day": "5.00"
+    "playbook_budget_usd_per_day": "10.00"
   },
   "sources": {},
   "publish": true,
@@ -115,14 +115,14 @@
   },
   "lab_time": "20:00",
   "lab": {
-    "profile": "pro_asap",
+    "profile": "k3",
     "reasoning_effort": "high",
-    "max_output_tokens": 6144,
-    "budget_usd_per_day": "5.00",
-    "max_experiments_per_family": 2,
-    "max_experiments_per_day": 4,
-    "max_running_per_family": 2,
-    "grace_days": 7,
+    "max_output_tokens": 16384,
+    "budget_usd_per_day": "15.00",
+    "max_experiments_per_family": 3,
+    "max_experiments_per_day": 8,
+    "max_running_per_family": 3,
+    "grace_days": 3,
     "hard_limits": {
       "max_position_pct": [
         "0.01",

@@ -147,10 +147,26 @@ def rule_short(intent: OrderIntent, ctx: RiskContext) -> str | None:
     held_qty = held.quantity if held else ZERO
     if held_qty - intent.quantity < 0:
         if not ctx.manifest.instruments.allow_short:
-            return "sell exceeds position and shorting is not permitted"
+            return f"sell exceeds position and shorting is not permitted ({_held_on_market(intent, ctx, held_qty)})"
         if "short" not in ctx.venue_capabilities:
             return "venue does not support short sales"
     return None
+
+
+def _held_on_market(intent: OrderIntent, ctx: RiskContext, held_qty: Decimal) -> str:
+    """What the desk holds on the market it tried to sell, in words it can act on."""
+    names = {str(n).upper() for n in (intent.instrument.symbol, intent.instrument.market_id) if n}
+    legs = []
+    for position in ctx.positions.values():
+        other = position.instrument
+        if position.quantity == 0 or other.venue != intent.instrument.venue:
+            continue
+        if names & {str(n).upper() for n in (other.symbol, other.market_id) if n}:
+            leg = f" {other.right.upper()}" if other.right else ""
+            legs.append(f"{format(position.quantity.normalize(), 'f')}{leg}")
+    if not legs:
+        return f"you hold {format(held_qty.normalize(), 'f')} of this contract and nothing else on this market"
+    return f"you hold {', '.join(legs)} on this market; sell at most that on the same leg"
 
 
 def rule_price_known(intent: OrderIntent, ctx: RiskContext) -> str | None:

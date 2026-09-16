@@ -119,7 +119,7 @@ class WeatherDeskTests(unittest.TestCase):
         self.assertIn("run_code", manifest.tools)
         self.assertEqual(manifest.cadence.sessions, ("06:00", "09:30", "13:00", "16:30", "20:00"))
         self.assertIn("event_resolution", manifest.cadence.triggers)
-        self.assertEqual(manifest.model.profile, "pro_asap")
+        self.assertEqual(manifest.model.profile, "k3")
 
 
 class FamilyToolTests(unittest.TestCase):

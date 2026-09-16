@@ -530,6 +530,15 @@ def instrument_from(arguments: Any, manifest: DeskManifest) -> Instrument:
     # shorts because the risk engine could not find the position under the intent's key.
     if data.get("asset_class") == "crypto" and not data.get("market_id") and isinstance(data.get("symbol"), str):
         data["market_id"] = data["symbol"]
+    # The same for a Kalshi contract: its ticker is both the symbol and the market id, a fill
+    # always carries the market id, and a position is keyed with it. A desk that named the
+    # contract by one of the two was refused its own exits as shorts (Haghani III spent a whole
+    # session on Sept 16, 2026 guessing how to close a YES position it held).
+    if data.get("asset_class") == "event":
+        if not data.get("market_id") and isinstance(data.get("symbol"), str):
+            data["market_id"] = data["symbol"]
+        if not data.get("symbol") and isinstance(data.get("market_id"), str):
+            data["symbol"] = data["market_id"]
     if "strike" in data:
         data["strike"] = str(data["strike"])
     if data.get("asset_class") == "option" and "multiplier" not in data:
@@ -702,6 +711,40 @@ def _memory_entry(
     }
 
 
+def held_instrument(instrument: Instrument, ctx: Any) -> Instrument:
+    """For a sell: the instrument of the position the desk actually holds on that market.
+
+    A desk names a contract the way it read it (a ticker as symbol, as market id, with or
+    without the leg); the ledger keys the position the way the fill named it. When the named
+    instrument keys no position but exactly one held position is on the same market (same
+    venue and asset class, a shared symbol or market id, and the same leg when one was named),
+    the sell is for that position. Anything ambiguous is left as named, and the risk engine
+    says what is held."""
+    getter = getattr(ctx, "positions", None)
+    if not callable(getter):
+        return instrument
+    try:
+        held = [p for p in getter() if getattr(p, "quantity", 0) and p.quantity > 0]
+    except Exception:
+        return instrument
+    if any(p.instrument.key == instrument.key for p in held):
+        return instrument
+    names = {str(n).upper() for n in (instrument.symbol, instrument.market_id) if n}
+    wanted_leg = (instrument.right or "").lower() or None
+    matches = []
+    for position in held:
+        other = position.instrument
+        if other.venue != instrument.venue or other.asset_class != instrument.asset_class:
+            continue
+        if not names & {str(n).upper() for n in (other.symbol, other.market_id) if n}:
+            continue
+        leg = (other.right or ("yes" if other.asset_class == "event" else "")).lower() or None
+        if wanted_leg is not None and leg != wanted_leg:
+            continue
+        matches.append(other)
+    return matches[0] if len(matches) == 1 else instrument
+
+
 def _propose(
     arguments: dict[str, Any],
     ctx: ToolContext,
@@ -712,6 +755,8 @@ def _propose(
     side = arguments.get("side")
     if side not in ("buy", "sell"):
         raise ToolError("side must be buy or sell")
+    if side == "sell":
+        instrument = held_instrument(instrument, ctx)
     order_type = arguments.get("order_type", "market")
     if order_type not in ("market", "limit"):
         raise ToolError("order_type must be market or limit")

@@ -700,6 +700,78 @@ class DeskContext:
         rows.sort(key=lambda row: row["at"], reverse=True)
         return rows[: max(1, min(20, int(limit)))]
 
+    def standings(self) -> list[dict[str, Any]]:
+        """leap: incentives -- every active partner ranked by lifetime P&L, with the compute
+        share it earns and its calibration. Read every session: a desk that can see the scores
+        and the rule that pays them plays to the score."""
+        at = self.service.now()
+        modes = promoted_desks(self.service.log)
+        rows: list[dict[str, Any]] = []
+        for other in self.service.active_manifests().values():
+            ledger = self.service.ledgers.get(other.id)
+            if ledger is None:
+                continue
+            try:
+                state = ledger.state(at)
+                pnl = (state.equity - state.net_deposits).quantize(Decimal("0.01"))
+            except Exception:
+                continue
+            brier = None
+            try:
+                summary = self.service.calibration.summary("desk", desk_id=other.id, at=at)
+                if summary.get("n"):
+                    brier = summary.get("brier")
+            except Exception:
+                brier = None
+            try:
+                factor = Decimal(str(self.service.fitness_factor(other.id))).quantize(Decimal("0.01"))
+            except Exception:
+                factor = Decimal("1.00")
+            rows.append({
+                "desk_id": other.id, "desk_name": other.name, "family": other.family,
+                "mode": capital_mode(other, modes), "pnl_usd": format(pnl, "f"),
+                "budget_factor": format(factor, "f"), "brier": brier,
+            })
+        rows.sort(key=lambda r: Decimal(r["pnl_usd"]), reverse=True)
+        return rows
+
+    def floor_calls(self, limit: int = 12, *, hours: int = 24) -> list[dict[str, Any]]:
+        """leap: incentives -- the other partners' newest probability per market, on markets
+        that have not resolved yet, from the last `hours`. The floor's shared forecast book."""
+        now = self.service.now()
+        cutoff = (datetime.fromisoformat(now.replace("Z", "+00:00")) - timedelta(hours=int(hours))).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        modes = promoted_desks(self.service.log)
+        active = self.service.active_manifests()
+        newest: dict[tuple[str, str], Any] = {}
+        for event in self.service.log.read(kind="desk.forecast", limit=2000, newest=True):
+            desk_id = str(event.stream or "").split(":", 1)[-1]
+            if desk_id == self.desk_id or desk_id not in active or event.at < cutoff:
+                continue
+            payload = event.payload
+            due = str(payload.get("resolves_at") or "")
+            if due and due < now:
+                continue
+            key = (desk_id, str(payload.get("market") or ""))
+            if key[1] and (key not in newest or event.at > newest[key].at):
+                newest[key] = event
+        briers: dict[str, Any] = {}
+        rows: list[dict[str, Any]] = []
+        for (desk_id, market), event in sorted(newest.items(), key=lambda kv: kv[1].at, reverse=True)[: max(1, min(40, int(limit)))]:
+            if desk_id not in briers:
+                try:
+                    summary = self.service.calibration.summary("desk", desk_id=desk_id, at=now)
+                    briers[desk_id] = summary.get("brier") if summary.get("n") else None
+                except Exception:
+                    briers[desk_id] = None
+            other = active[desk_id]
+            rows.append({
+                "market": market, "desk_id": desk_id, "desk_name": other.name,
+                "mode": capital_mode(other, modes), "probability": event.payload.get("probability"),
+                "market_price": event.payload.get("market_price"), "brier": briers[desk_id],
+                "reasoning": str(event.payload.get("reasoning") or "")[:200], "at": event.at,
+            })
+        return rows
+
     def calibration_brief(self) -> str:
         return self.service.calibration.brief(self.desk_id, self.service.now())
 

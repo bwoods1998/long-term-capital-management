@@ -452,6 +452,49 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(summary, "propose_order oi-1 rejected: no cash")
 
 
+class HeldInstrumentTests(unittest.TestCase):
+    """A desk closes what it holds however it spells the contract."""
+
+    TICKER = "KXHIGHNY-26SEP16-B81.5"
+
+    def ctx_holding(self, *positions):
+        ctx = FakeContext()
+        ctx.positions = lambda: list(positions)
+        return ctx
+
+    def events(self):
+        return manifest(venues=["kalshi"], instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []})
+
+    def held(self, right="yes", quantity="54"):
+        return Position(Instrument("event", self.TICKER, "kalshi", market_id=self.TICKER, right=right), Decimal(quantity), Decimal("0.13"), Decimal("0.27"))
+
+    def sell(self, instrument, ctx):
+        args = {"instrument": instrument, "side": "sell", "quantity": "54", "order_type": "limit", "limit_price": "0.25", "rationale": "taking profit"}
+        run("propose_order", args, ctx=ctx, mf=self.events())
+        return ctx.intents[-1].instrument
+
+    def test_a_ticker_named_by_symbol_alone_closes_the_held_yes(self):
+        ctx = self.ctx_holding(self.held())
+        instrument = self.sell({"asset_class": "event", "symbol": self.TICKER}, ctx)
+        self.assertEqual(instrument.key, self.held().instrument.key)
+
+    def test_the_leg_is_found_when_omitted_and_respected_when_named(self):
+        ctx = self.ctx_holding(self.held(right="no"))
+        self.assertEqual(self.sell({"asset_class": "event", "market_id": self.TICKER}, ctx).right, "no")
+        named = self.sell({"asset_class": "event", "symbol": self.TICKER, "right": "yes"}, ctx)
+        self.assertEqual(named.right, "yes", "a named leg the desk does not hold stays as named; the engine refuses it")
+
+    def test_both_legs_held_and_no_leg_named_is_left_to_the_engine(self):
+        ctx = self.ctx_holding(self.held(right="yes"), self.held(right="no"))
+        self.assertEqual(self.sell({"asset_class": "event", "symbol": self.TICKER}, ctx).key, Instrument("event", self.TICKER, "kalshi", market_id=self.TICKER).key)
+
+    def test_a_buy_names_the_market_id_so_its_exits_key_the_same(self):
+        ctx = self.ctx_holding()
+        args = {"instrument": {"asset_class": "event", "symbol": self.TICKER, "right": "no"}, "side": "buy", "quantity": "5", "order_type": "limit", "limit_price": "0.40", "rationale": "x"}
+        run("propose_order", args, ctx=ctx, mf=self.events())
+        self.assertEqual(ctx.intents[-1].instrument.market_id, self.TICKER)
+
+
 if __name__ == "__main__":
     unittest.main()
 

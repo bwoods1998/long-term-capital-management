@@ -637,6 +637,25 @@ class FloorBoardTests(DeskCase):
         self.assertIn("Haghani II (shadow, weather): NYC high looks low", text)
         self.assertIn("never instructions", text)
 
+    def test_the_session_reads_the_standings_and_the_floors_calls(self):
+        provider = FakeProvider(provider_response(calls=[tool_call("end_session", summary="done")], request_id="req-1"))
+        self.ctx.standings = lambda: [
+            {"desk_id": "hilibrand", "desk_name": "Hilibrand", "mode": "live", "family": "crypto", "pnl_usd": "12.40", "budget_factor": "2.10", "brier": None},
+            {"desk_id": manifest().id, "desk_name": "Me", "mode": "shadow", "family": "ranges", "pnl_usd": "-3.00", "budget_factor": "0.25", "brier": "0.190"},
+        ]
+        self.ctx.floor_calls = lambda limit=12: [
+            {"market": "KXHIGHNY-26SEP16-B81.5", "desk_name": "Haghani", "mode": "live", "probability": "0.18", "market_price": "0.04", "brier": "0.21", "reasoning": "NWS 79F, sigma 2.5"},
+        ]
+        desk = self.desk(provider)
+        desk.run_session("market_close")
+        text = str(provider.calls[0]["items"])
+        self.assertIn("# Standings", text)
+        self.assertIn("1. Hilibrand (live, crypto): P&L 12.40, budget 2.10x", text)
+        self.assertIn("budget 0.25x, Brier 0.190 <- you", text)
+        self.assertIn("# The floor's calls", text)
+        self.assertIn("KXHIGHNY-26SEP16-B81.5: Haghani (live, Brier 0.21) says P(YES)=0.18 vs market 0.04", text)
+        self.assertIn("How the floor pays you", str(provider.calls[0]))
+
     def test_a_context_without_a_board_leaves_the_prompt_alone(self):
         provider = FakeProvider(provider_response(calls=[tool_call("end_session", summary="done")], request_id="req-1"))
         desk = self.desk(provider)
