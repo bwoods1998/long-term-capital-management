@@ -373,6 +373,26 @@ class FeeTests(unittest.TestCase):
                 broker.close()
 
 
+class MakerFeeTests(SimTestCase):
+    def test_a_resting_event_order_that_fills_later_pays_no_fee_and_a_taker_pays_the_formula(self):
+        # Kalshi charges the taker; every maker fill on Sept 16, 2026 came back with fee 0.
+        broker = self.make_broker("kalshi.db", market_venue="kalshi", slippage_bps=0)
+        self.addCleanup(broker.close)
+        self.book(CPI_NO, bid="0.70", ask="0.74", last="0.72")
+        resting = broker.submit(intent(CPI_NO, quantity="10", order_type="limit", limit_price="0.70", time_in_force="gtc"))
+        self.assertEqual(resting.status, "accepted", "a bid under the ask rests")
+        taker = broker.submit(intent(CPI_NO, quantity="10", order_type="limit", limit_price="0.74", time_in_force="gtc"))
+        self.assertEqual(taker.status, "filled")
+        taker_fill = [f for f in broker.fills() if f.order_id == taker.id][0]
+        self.assertEqual(taker_fill.fee, Decimal("0.14"), "0.07 x 10 x 0.74 x 0.26 rounded up to the cent")
+        # The market comes down to the resting bid: it fills at its own price, and pays nothing.
+        self.book(CPI_NO, bid="0.66", ask="0.70", last="0.69")
+        self.clock.advance(60)
+        broker.tick()
+        rested_fill = [f for f in broker.fills() if f.order_id == resting.id][0]
+        self.assertEqual((rested_fill.price, rested_fill.fee), (Decimal("0.70"), Decimal("0")))
+
+
 class SettlementTests(SimTestCase):
     def setUp(self):
         super().setUp()

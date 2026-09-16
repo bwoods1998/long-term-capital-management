@@ -2411,6 +2411,14 @@ class Service:
                 )
             except Exception as exc:
                 self.alert("warning", f"settlement sweep on {venue} failed: {exc}")
+            # Markets only shadow desks held never reach the account's settlements feed; the
+            # market itself says when it has finalized.
+            try:
+                written.extend(
+                    row["fill_id"] for row in self.gateway.settle_finalized_markets(venue, at)
+                )
+            except Exception as exc:
+                self.alert("warning", f"finalized-market sweep on {venue} failed: {type(exc).__name__}")
         return written
 
     def check_rate_card(self) -> dict[str, Any] | None:

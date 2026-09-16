@@ -234,7 +234,11 @@ class FeeModel:
         elif asset == "future":
             charged = self.future_per_contract * quantity
         elif asset == "event":
-            return self.kalshi_fee(quantity, price)
+            # Kalshi charges the taker; a resting order that is filled pays nothing (every
+            # maker fill on Sept 16, 2026 came back with fee 0, every taker fill with the
+            # formula's). A shadow record that charged makers the taker fee would have punished
+            # the quoting strategies for an edge the venue actually pays them.
+            return ZERO if liquidity == "maker" else self.kalshi_fee(quantity, price)
         else:  # pragma: no cover - Instrument already rejects unknown classes
             charged = ZERO
         return quantize_cash(charged) if charged > 0 else ZERO
@@ -547,16 +551,17 @@ class ShadowBook:
         if reference is None or reference <= 0:
             return None
         limit = order.limit_price
+        liquidity = "taker" if aggressive else "maker"
         if order.side == "buy" and reference <= limit:
-            return self._fill(order, quantize_price(reference if aggressive else limit), stamp)
+            return self._fill(order, quantize_price(reference if aggressive else limit), stamp, liquidity=liquidity)
         if order.side == "sell" and reference >= limit:
-            return self._fill(order, quantize_price(reference if aggressive else limit), stamp)
+            return self._fill(order, quantize_price(reference if aggressive else limit), stamp, liquidity=liquidity)
         return None
 
     # -------------------------------------------------------------- execution
-    def _fill(self, order: Order, price: Decimal, stamp: str) -> Order:
+    def _fill(self, order: Order, price: Decimal, stamp: str, *, liquidity: str = "taker") -> Order:
         quantity = order.remaining
-        fee = self.fee_model.fee(order.instrument, order.side, quantity, price)
+        fee = self.fee_model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity)
         notional = quantity * price * order.instrument.multiplier
         account = self._account()
         cash = money(account["cash"])

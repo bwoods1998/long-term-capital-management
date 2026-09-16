@@ -110,6 +110,22 @@ def _key_of(instrument: Any) -> str | None:
         return None
 
 
+def _seconds_between(start: "str | None", end: str) -> float:
+    """Seconds from `start` to `end` (ISO instants); a missing or unreadable start is far past."""
+    if not start:
+        return float("inf")
+    try:
+        from datetime import datetime, timezone
+
+        def parse(text: str) -> datetime:
+            text = text.replace("Z", "+00:00")
+            return datetime.fromisoformat(text).astimezone(timezone.utc)
+
+        return (parse(end) - parse(start)).total_seconds()
+    except (TypeError, ValueError):
+        return float("inf")
+
+
 def _hours_between(start: "str | None", end: str) -> str | None:
     """Hours from `start` to `end` to one decimal, or None when the open is unknown."""
     if not start:
@@ -799,6 +815,77 @@ class Gateway:
         self._settlement_cursor[venue] = cursor
         return written
 
+    def settle_finalized_markets(self, venue: str = "kalshi", now: Any = None, *, limit: int = 10, grace_seconds: int = 180) -> list[dict[str, Any]]:
+        """Close positions on event markets the venue has finalized but that the account's own
+        settlements feed will never name: markets only shadow desks held.
+
+        `poll_settlements` reads `GET /portfolio/settlements`, which lists the account's
+        settlements, so a market the live account never traded never appears there, and on
+        Sept 16, 2026 three shadow lottery tickets on the 05:00 buckets sat unsettled while
+        the exit engine tried to sell them into a closed book. This sweep reads the market
+        itself: past its close by `grace_seconds`, `finalized` or `settled` with a yes/no
+        result, and not among the venue's own open positions."""
+        at = iso_time(now) if now is not None else self.now()
+        source = None
+        getter = getattr(self.data, "_source", None) or getattr(self.data, "source", None)
+        if callable(getter):
+            try:
+                source = getter("event")
+            except Exception:
+                source = None
+        if source is None or not hasattr(source, "market"):
+            return []
+        broker = self.brokers.get(venue)
+        open_tickers: set[str] = set()
+        if broker is not None:
+            try:
+                open_tickers = {
+                    str(p.instrument.market_id or p.instrument.symbol or "").upper()
+                    for p in broker.positions()
+                    if p.quantity != 0
+                }
+            except Exception:
+                return []  # without the venue's book, closing blind is how ledgers drift
+        held: dict[str, list[tuple[str, Any]]] = {}
+        for desk_id, ledger in sorted(self.ledgers.items()):
+            for position in ledger.state(at).positions.values():
+                instrument = position.instrument
+                if instrument.asset_class != "event" or position.quantity == 0 or instrument.venue != venue:
+                    continue
+                ticker = str(instrument.market_id or instrument.symbol or "").upper()
+                if ticker and ticker not in open_tickers:
+                    held.setdefault(ticker, []).append((desk_id, position))
+        written: list[dict[str, Any]] = []
+        checked = 0
+        for ticker in sorted(held):
+            if checked >= limit:
+                break
+            checked += 1
+            try:
+                row = source.market(ticker)
+            except Exception:
+                continue
+            if not isinstance(row, Mapping):
+                continue
+            status = str(row.get("status") or "").lower()
+            result = str(row.get("result") or "").lower()
+            close_time = _log_stamp(row.get("expiration_time") or row.get("close_time"), at)
+            if status not in ("finalized", "settled") or result not in ("yes", "no"):
+                continue
+            if _seconds_between(close_time, at) < grace_seconds:
+                continue
+            payout_yes = ONE if result == "yes" else ZERO
+            holders = held[ticker]
+            for desk_id, position in holders:
+                written.extend(
+                    self._settle_position(
+                        venue, desk_id, position, ticker=ticker, result=result,
+                        payout_yes=payout_yes, settled_at=close_time, suffix=len(holders) > 1,
+                    )
+                )
+            self._settle_shadow(ticker, payout_yes, holders, close_time)
+        return written
+
     def _holders_of(self, ticker: str) -> list[tuple[str, Any]]:
         """(desk_id, position) for every desk holding that event market, whatever the leg."""
         found: list[tuple[str, Any]] = []
@@ -1026,7 +1113,23 @@ class Gateway:
             venue_positions = broker.positions()
         except Exception as exc:
             raise GatewayError(f"{venue} positions unavailable: {exc}") from exc
-        theirs = {p.instrument.key: money(p.quantity) for p in venue_positions if p.quantity != 0}
+        # An event position is compared on the YES scale per market: the venue reports one
+        # signed YES quantity per market (long 20 NO is -20), the ledger holds a leg. Compared
+        # by instrument key, the two never met and every live position read as matched.
+        def scale(position: Position) -> tuple[str, Decimal]:
+            instrument = position.instrument
+            if instrument.asset_class == "event":
+                key = f"event:{instrument.market_id or instrument.symbol}:{instrument.venue}"
+                quantity = money(position.quantity)
+                return key, (-quantity if str(instrument.right or "").lower() == "no" else quantity)
+            return instrument.key, money(position.quantity)
+
+        theirs: dict[str, Decimal] = {}
+        for position in venue_positions:
+            if position.quantity == 0:
+                continue
+            key, quantity = scale(position)
+            theirs[key] = theirs.get(key, ZERO) + quantity
         ours: dict[str, Decimal] = {}
         for desk_id, ledger in self.ledgers.items():
             manifest = self.manifests.get(desk_id)
@@ -1048,7 +1151,8 @@ class Gateway:
                 # belongs to is decided by the desk, not by the instrument.
                 if venue != SHADOW_VENUE and position.instrument.venue != venue:
                     continue
-                ours[key] = ours.get(key, ZERO) + position.quantity
+                scaled_key, quantity = scale(position)
+                ours[scaled_key] = ours.get(scaled_key, ZERO) + quantity
 
         mismatches = []
         for key in sorted(set(theirs) | set(ours)):

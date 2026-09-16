@@ -319,6 +319,12 @@ def rule_daily_loss(intent: OrderIntent, ctx: RiskContext) -> str | None:
 
 
 def rule_floor_loss(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    """The floor's own daily loss halts new risk on the live sleeves. It never refuses an order
+    that reduces exposure (an exit is the point of a bad day), and it does not reach a shadow
+    desk, whose book adds no risk to the floor: on Sept 16, 2026 a 2.5% live loss refused three
+    time-stop exits and froze every shadow explorer."""
+    if not ctx.manifest.live or reduces_exposure(intent, ctx):
+        return None
     if ctx.floor_equity <= 0:
         return None
     start_equity = ctx.floor_equity - ctx.floor_daily_pnl

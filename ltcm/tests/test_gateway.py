@@ -347,6 +347,25 @@ class ReconcileTests(GatewayCase):
         event = self.log.read(kind="broker.reconciled")[-1]
         self.assertTrue(event.public)
 
+    def test_event_positions_reconcile_on_the_yes_scale(self):
+        # The venue reports one signed YES quantity per market (long 20 NO is -20); the ledger
+        # holds a leg. Compared by instrument key the two never met, and on Sept 16, 2026 seven
+        # live positions no ledger held still read as reconciled.
+        market = Instrument("event", "KXHIGHNY-26SEP16-B77.5", "shadow", market_id="KXHIGHNY-26SEP16-B77.5")
+        no_leg = Instrument("event", "KXHIGHNY-26SEP16-B77.5", "shadow", market_id="KXHIGHNY-26SEP16-B77.5", right="no")
+        self.log.append("broker:shadow", "broker.fill", {
+            "fill_id": "f-no", "order_id": "ord-no", "desk_id": DESK, "instrument": no_leg.to_dict(),
+            "side": "buy", "quantity": "20", "price": "0.52", "fee": "0", "shadow": True,
+        }, id="fill:shadow:f-no", at=NOW)
+        self.broker.venue_positions = [Position(market, Decimal("-20"), Decimal("0.52"))]
+        report = self.gateway.reconcile("shadow", NOW)
+        self.assertEqual(report["mismatches"], [], report)
+        self.assertEqual(report["matches"], 1)
+        # A venue that holds 25 against the ledger's 20 is a mismatch on that market.
+        self.broker.venue_positions = [Position(market, Decimal("-25"), Decimal("0.52"))]
+        report = self.gateway.reconcile("shadow", "2026-09-14T14:31:00.000Z")
+        self.assertEqual([m["instrument"] for m in report["mismatches"]], ["event:KXHIGHNY-26SEP16-B77.5:shadow"])
+
     def test_mismatch_trips_the_floor_breaker(self):
         self.gateway.propose(self.intent(), NOW)
         self.broker.venue_positions = [Position(AAPL, Decimal("7"), Decimal("100"))]

@@ -125,6 +125,18 @@ class RiskEngineTests(unittest.TestCase):
         self.assertFalse([r for r in bid.reasons if "notional" in r], bid.reasons)
         self.assertEqual(bid.notional, Decimal("9.90"))
 
+    def test_the_floor_loss_breaker_spares_exits_and_shadow_desks(self):
+        # On Sept 16, 2026 a 2.5% live loss refused three time-stop exits and froze the shadows.
+        live = manifest(venues=["alpaca"], capital={"mode": "live", "usd": "500"})
+        bleeding = dict(manifest=live, floor_equity=Decimal("975"), floor_daily_pnl=Decimal("-25"), floor_max_daily_loss_pct=Decimal("0.02"))
+        held = {AAPL.key: Position(AAPL, "2", "100", mark="100")}
+        entry = self.engine.check(intent(quantity="1"), context(**bleeding))
+        self.assertTrue(any("floor daily loss" in r for r in entry.reasons))
+        exit_ = self.engine.check(intent(side="sell", quantity="2"), context(positions=held, **bleeding))
+        self.assertFalse([r for r in exit_.reasons if "floor daily loss" in r], exit_.reasons)
+        shadow = self.engine.check(intent(quantity="1"), context(**{**bleeding, "manifest": manifest()}))
+        self.assertFalse([r for r in shadow.reasons if "floor daily loss" in r], shadow.reasons)
+
     def test_exposure_rules(self):
         decision = self.engine.check(intent(quantity="3"), context(desk_cash=Decimal("100")))
         self.assertTrue(any("insufficient desk cash" in r for r in decision.reasons))
@@ -150,7 +162,8 @@ class RiskEngineTests(unittest.TestCase):
         ctx = context(desk_equity=Decimal("880"), desk_daily_pnl=Decimal("-120"), positions=held)
         decision = self.engine.check(intent(side="sell", quantity="1"), ctx)
         self.assertTrue(decision.approved, decision.reasons)
-        ctx = context(floor_equity=Decimal("4500"), floor_daily_pnl=Decimal("-500"))
+        live = manifest(venues=["alpaca"], capital={"mode": "live", "usd": "500"})
+        ctx = context(manifest=live, floor_equity=Decimal("4500"), floor_daily_pnl=Decimal("-500"))
         decision = self.engine.check(intent(quantity="1"), ctx)
         self.assertTrue(any("floor daily loss" in r for r in decision.reasons))
 
