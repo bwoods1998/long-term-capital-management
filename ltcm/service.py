@@ -2390,6 +2390,7 @@ class Service:
         # Settlements are swept before the schedule so a market that resolved since the last
         # tick wakes its desk on this tick rather than the next one.
         result["settlements"] = self.sweep_settlements(at)
+        result["reconciled"] = self._reconcile_venues(at)  # leap: venues -- the book against the venue, hourly
         try:
             result["notices"] = self.notifier.tick(at)
         except Exception as exc:  # a notice is a courtesy; the tick is the job
@@ -2585,6 +2586,27 @@ class Service:
                 runner.install(manifest, spec, note=f"lab experiment {action.get('experiment_id')}")
             except Exception as exc:
                 self.alert("warning", f"experiment strategy not deployed on {action.get('variant_desk_id')}: {str(exc)[:200]}")
+
+    def _reconcile_venues(self, at: str) -> list[str]:
+        """Once an hour, compare each live venue's positions with the sum of the desk ledgers on
+        it (`Gateway.reconcile` writes `broker.reconciled` and alerts on a mismatch). The method
+        existed since the first live day and nothing called it until Sept 16, 2026, so the
+        health flag had never been anything but False. Never raises."""
+        policy = dict(self.config.get("reconcile") or {})
+        if not bool(policy.get("enabled", True)):
+            return []
+        last = getattr(self, "_reconciled_at", None)
+        if last is not None and (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 3600)):
+            return []
+        self._reconciled_at = at
+        done: list[str] = []
+        for venue in [v for v in (self.config.get("live_venues") or []) if v in self.gateway.brokers]:
+            try:
+                self.gateway.reconcile(venue, at)
+                done.append(venue)
+            except Exception as exc:
+                self.alert("warning", f"reconciliation of {venue} failed: {type(exc).__name__}")
+        return done
 
     def _fund_kalshi_shards(self, at: str) -> None:
         """leap: venues -- keep collateral on every Kalshi exchange shard the floor trades.

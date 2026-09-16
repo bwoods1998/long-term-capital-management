@@ -2018,3 +2018,21 @@ class FitnessFactorTests(ServiceCase):
         rows["desks"][DESK].update({"decisions": 2})
         with mock.patch("ltcm.analytics.ResultsLedger.report", return_value=rows):
             self.assertEqual(self.service.fitness_factor(DESK), Decimal("1"), "too few decisions: the manifest's budget")
+
+
+class ReconcileTests(ServiceCase):
+    def test_live_venues_are_reconciled_once_an_hour_and_the_record_lands_on_the_tape(self):
+        class Kalshi:
+            def positions(self):
+                return []
+
+        self.service.close()
+        self.service = self.build(live_venues=["kalshi"])
+        self.service.gateway.brokers["kalshi"] = Kalshi()
+        self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 19, 5)), ["kalshi"])
+        records = self.service.log.read(kind="broker.reconciled")
+        self.assertEqual(len(records), 1)
+        self.assertEqual((records[0].payload["venue"], records[0].payload["mismatches"]), ("kalshi", []))
+        self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 19, 30)), [], "once an hour")
+        self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 20, 6)), ["kalshi"])
+        self.assertFalse(self.service.gateway.reconciliation_mismatch)
