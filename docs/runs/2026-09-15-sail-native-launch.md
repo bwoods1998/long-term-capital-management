@@ -632,3 +632,9 @@ breaker, and settings that leave the last twenty minutes alone.
   the variants that earn it. Also: a crypto instrument's key now ignores a market id equal to
   its symbol (a fill carried it, an intent did not, and the shadow crypto desks' sells were
   refused as shorts); event keys are unchanged.
+- **Coinbase prints, corrected** (12:35 UTC): the `market_trades` `side` is the maker's
+  ("each market trade belongs to a side, which refers to the maker's side", Coinbase Advanced
+  Trade WebSocket channels), so a BUY print is a taker selling into a resting bid; the feed
+  now hands the hub the taker's side. Verified the fill path on a copy of hilibrand-2's book:
+  a synthetic print under its SOL bid filled it partially. Its live bids rest 0.4 to 0.6
+  percent under the market, so real fills wait for a dip.
