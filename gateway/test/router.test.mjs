@@ -162,7 +162,8 @@ test('reads and cancels always pass, whatever the counters say', async () => {
   const gate = gateFor({ MAX_DAY_ORDERS: '0' });
   for (const [method, path] of [
     ['GET', '/v1/kalshi/portfolio/balance'],
-    ['DELETE', '/v1/kalshi/portfolio/events/orders/abc-123'],
+    ['DELETE', '/v1/kalshi/portfolio/events/orders/abc-123?market_ticker=KXBTC-26SEP1523-B75950&exchange_index=-1'],
+    ['POST', '/v1/kalshi/portfolio/intra_exchange_instance_transfer'],  // a shard move is not an order
     ['GET', '/v1/coinbase/api/v3/brokerage/orders/historical/batch'],
     ['POST', '/v1/coinbase/api/v3/brokerage/orders/batch_cancel'],
   ]) {

@@ -382,6 +382,10 @@ class KalshiBroker:
             "time_in_force": time_in_force,
             "self_trade_prevention_type": "taker_at_cross",
             "client_order_id": intent.id,
+            # Kalshi runs several exchange shards (crypto and commodities on 2, exotics on 1,
+            # some sports on 3); -1 routes by the ticker and never falls back to shard 0. The
+            # shard must already hold collateral: scripts/kalshi_shard.py moves it.
+            "exchange_index": -1,
         }
         if intent.side == "sell":
             body["reduce_only"] = True
@@ -489,7 +493,12 @@ class KalshiBroker:
             return order
         venue_id = order.broker_order_id or order_id
         path = (ORDERS_PATH if self.order_api == "legacy" else ORDERS_PATH_V2) + "/" + str(venue_id)
-        self._call("DELETE", path, what="kalshi cancel", ok=(200, 201, 204))
+        # An order id alone cannot name its exchange shard; the ticker routes the cancel.
+        params = None
+        if self.order_api != "legacy":
+            ticker = getattr(order.instrument, "market_id", None) or getattr(order.instrument, "symbol", None)
+            params = {"market_ticker": ticker, "exchange_index": -1} if ticker else None
+        self._call("DELETE", path, params=params, what="kalshi cancel", ok=(200, 201, 204))
         order.status = "cancelled"
         order.reason = "cancelled by request"
         order.updated_at = iso(self.clock())

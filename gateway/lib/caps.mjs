@@ -15,13 +15,18 @@ export const ORDER_PATHS = {
 export const normalizePath = path => String(path || '').replace(/^\/+/, '').replace(/\/+$/, '');
 
 // The only venue paths this gateway will sign. Everything the floor does is here; anything
-// else, a batched order, a funds move, a key management call, is refused before signing, so
+// else, a batched order, a withdrawal, a key management call, is refused before signing, so
 // a bug or a compromise on the box can at most do what the floor already does, inside the caps.
+// The one funds move allowed is Kalshi's intra-account shard transfer: money between exchange
+// shards of the owner's own account (crypto markets live on shard 2 and need collateral there),
+// which cannot leave the account.
 const SEGMENT = '[A-Za-z0-9._~%-]+';
 export const VENUE_PATHS = {
   kalshi: [
     ['GET', /^portfolio\/(balance|positions|fills|settlements)$/],
     ['GET', /^portfolio\/orders(\/[A-Za-z0-9._~%-]+)?$/],
+    ['GET', /^portfolio\/intra_exchange_instance_transfers?(\/[A-Za-z0-9._~%-]+)?$/],
+    ['POST', /^portfolio\/intra_exchange_instance_transfer$/],
     ['GET', new RegExp(`^(markets|series|events)(\\/${SEGMENT}(\\/(orderbook|candlesticks|history|markets))?(\\/${SEGMENT})?)?$`)],
     ['GET', /^exchange\/(status|schedule)$/],
     ['POST', /^portfolio\/events\/orders$/],

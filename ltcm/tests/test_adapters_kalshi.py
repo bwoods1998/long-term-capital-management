@@ -246,6 +246,22 @@ class SubmitTests(unittest.TestCase):
         self.assertEqual(body["time_in_force"], "good_till_canceled")
         self.assertEqual(body["self_trade_prevention_type"], "taker_at_cross")
         self.assertNotIn("action", body)
+        # Crypto markets live on exchange shard 2: -1 routes by ticker and never lands on shard 0.
+        self.assertEqual(body["exchange_index"], -1)
+
+    def test_a_v2_cancel_is_routed_by_the_markets_ticker(self):
+        resting = {
+            "order_id": "kx-1", "client_order_id": "oi-1", "ticker": "KXBTC-26SEP1523-B75950",
+            "status": "resting", "side": "yes", "action": "buy", "remaining_count": "10", "yes_price": 40,
+        }
+        client, transport, _ = make(
+            {BASE + ORDERS_PATH + "*": {"orders": [resting]}, ("DELETE", BASE + ORDERS_PATH_V2 + "/kx-1"): {"order": {**resting, "status": "canceled"}}},
+            order_api="v2",
+        )
+        client.cancel("kx-1")
+        self.assertEqual(transport.last["method"], "DELETE")
+        self.assertEqual(transport.last["path"], PREFIX + ORDERS_PATH_V2 + "/kx-1")
+        self.assertEqual(transport.last["query"], {"market_ticker": "KXBTC-26SEP1523-B75950", "exchange_index": "-1"})
 
     def test_an_unknown_order_api_is_refused_at_construction(self):
         with self.assertRaises(ValueError):
