@@ -1743,6 +1743,30 @@ class DeferredRewriteTests(ServiceCase):
         self.assertIn("+memo body", event.payload["diff"])
         # A tick with nothing finished is a no-op, and a failed model call never blocks the tick.
         self.assertEqual(self.service.apply_rewrites(moment(2026, 9, 14, 13, 52)), [])
+        self.assertEqual(self.service.state().get("pending_rewrites"), {})
+
+    def test_a_queued_rewrite_survives_a_restart(self):
+        import time
+
+        jobs = []
+        self.service.evolution.rewriter = jobs.append
+        self.tick()
+        self.service._schedule_rewrite(jobs[0])  # queued, and remembered in the state file
+        self.assertEqual(list(self.service.state()["pending_rewrites"]), ["earnings-01-2"])
+        self.service.close()  # the loop restarts: the queue is gone, the state is not
+        self.service = self.build(evolution={"target_variants": 2}, seed_batch=1)
+        first = self.tick(moment(2026, 9, 14, 13, 51))  # re-queues the job; the fake model is instant
+        deadline = time.monotonic() + 5
+        while (
+            "earnings-01-2" not in first["rewrites"]
+            and self.service._rewrite_done.qsize() == 0
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        second = self.tick(moment(2026, 9, 14, 13, 52))
+        self.assertEqual(first["rewrites"] + second["rewrites"], ["earnings-01-2"])
+        self.assertEqual((self.root / "playbooks" / "earnings-01-2.md").read_text(encoding="utf-8").strip(), "memo body")
+        self.assertEqual(self.service.state().get("pending_rewrites"), {})
 
 
 class LeapLabServiceTests(ServiceCase):

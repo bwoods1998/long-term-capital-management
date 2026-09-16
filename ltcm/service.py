@@ -1892,13 +1892,21 @@ class Service:
         return runway.mode if runway is not None else "capped"
 
     # ------------------------------------------------------------------ playbook rewrites off the tick
-    def _schedule_rewrite(self, job: Mapping[str, Any]) -> None:
-        """Queue a bred desk's playbook rewrite for the worker thread (`Evolution.rewriter`)."""
+    def _schedule_rewrite(self, job: Mapping[str, Any], *, persist: bool = True) -> None:
+        """Queue a bred desk's playbook rewrite for the worker thread (`Evolution.rewriter`).
+
+        The job is also kept in the service state until it is applied, so a restart in the
+        middle of a rewrite re-queues it instead of leaving the child on its parent's playbook
+        with nothing to say so."""
         import queue
 
         if getattr(self, "_rewrite_jobs", None) is None:
             self._rewrite_jobs: Any = queue.Queue()
             self._rewrite_done: Any = queue.Queue()
+        if persist:
+            pending = dict(self.state().get("pending_rewrites") or {})
+            pending[str(job["desk_id"])] = dict(job)
+            self._save_state(pending_rewrites=pending)
         self._rewrite_jobs.put(dict(job))
         worker = getattr(self, "_rewrite_thread", None)
         if worker is None or not worker.is_alive():
@@ -1919,7 +1927,18 @@ class Service:
             except Exception as exc:
                 text = None
                 self.alert("warning", f"playbook rewrite for {job.get('desk_id')} failed: {type(exc).__name__}")
-            self._rewrite_done.put((str(job["desk_id"]), text, list(job.get("notes") or [])))
+            self._rewrite_done.put(
+                (str(job["desk_id"]), text, list(job.get("notes") or []), str(job.get("fallback") or ""))
+            )
+
+    def _resume_rewrites(self) -> None:
+        """Re-queue the rewrites a restart interrupted: the queue lives in memory, the jobs in state."""
+        pending = self.state().get("pending_rewrites") or {}
+        if not isinstance(pending, Mapping):
+            return
+        for desk_id, job in pending.items():
+            if desk_id in self.manifests and isinstance(job, Mapping) and job.get("desk_id") == desk_id:
+                self._schedule_rewrite(job, persist=False)
 
     def apply_rewrites(self, at: str) -> list[str]:
         """Apply finished rewrites on the tick's own thread: versioned, published, no lock games."""
@@ -1927,14 +1946,18 @@ class Service:
         if done is None:
             return []
         applied: list[str] = []
+        finished: list[str] = []
         while True:
             try:
-                desk_id, text, notes = done.get_nowait()
+                desk_id, text, notes, fallback = done.get_nowait()
             except Exception:
                 break
+            finished.append(desk_id)
             manifest = self.manifests.get(desk_id)
             if manifest is None or not text:
                 continue
+            if text.strip() == fallback.strip():
+                continue  # the model gave nothing usable; the child keeps the copy it was born with
             if notes:
                 text = text.rstrip("\n") + "\n\n## House view\n\n" + "\n\n".join(f"- {n}" for n in notes) + "\n"
             try:
@@ -1957,6 +1980,12 @@ class Service:
                 applied.append(desk_id)
             except Exception as exc:
                 self.alert("warning", f"playbook rewrite for {desk_id} not applied: {type(exc).__name__}")
+        if finished:
+            pending = dict(self.state().get("pending_rewrites") or {})
+            if any(desk_id in pending for desk_id in finished):
+                for desk_id in finished:
+                    pending.pop(desk_id, None)
+                self._save_state(pending_rewrites=pending)
         return applied
 
     def seed_population(self, at: str) -> list[dict[str, Any]]:
@@ -2236,6 +2265,10 @@ class Service:
             seeded = self.seed_population(at)
             if seeded:
                 result["evolution"] = list(result.get("evolution") or []) + seeded
+        if not getattr(self, "_rewrites_resumed", False):
+            self._rewrites_resumed = True
+            if self.evolution.rewriter is not None:
+                self._resume_rewrites()
         result["rewrites"] = self.apply_rewrites(at)
         # leap: lab -- forecasts are checked against the venue on a slow clock and the day's
         # calibration is published once; the lab sits down at its own evening slot.
