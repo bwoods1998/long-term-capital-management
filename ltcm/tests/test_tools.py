@@ -542,3 +542,18 @@ class LeapLabToolTests(unittest.TestCase):
         self.assertIn("memo_read", names)
         self.assertNotIn("record_forecast", [s["name"] for s in tools.schemas_for(manifest(tools=["quote"]))])
 
+
+
+class CryptoInstrumentKeyTests(unittest.TestCase):
+    def test_a_crypto_intent_carries_the_product_id_so_it_keys_like_the_venue_fill(self):
+        from ltcm.broker import Instrument
+        from ltcm.manifest import DeskManifest
+        from ltcm.tests.test_manifest import SAMPLE
+        from ltcm.tools import instrument_from
+
+        manifest = DeskManifest.from_dict({**SAMPLE, "venues": ["coinbase"], "instruments": {**SAMPLE["instruments"], "asset_classes": ["crypto"], "allow": [], "deny": []}})
+        intent = instrument_from({"asset_class": "crypto", "symbol": "ETH-USD"}, manifest)
+        fill = Instrument("crypto", "ETH-USD", "coinbase", market_id="ETH-USD")
+        self.assertEqual(intent.key, fill.key)
+        event = instrument_from({"asset_class": "event", "symbol": "KXBTC-1", "market_id": "KXBTC-1", "right": "no"}, DeskManifest.from_dict({**SAMPLE, "venues": ["kalshi"], "instruments": {**SAMPLE["instruments"], "asset_classes": ["event"], "allow": [], "deny": []}}))
+        self.assertEqual(event.market_id, "KXBTC-1")

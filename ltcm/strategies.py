@@ -180,11 +180,14 @@ class Kit:
             rows = lister(product_type="SPOT", limit=None)
         except Exception:
             return []
+        stable = {"USDT", "USDC", "DAI", "PYUSD", "EURC", "USDS", "GUSD", "TUSD", "USDP", "FDUSD", "RLUSD", "USD1"}
         out = []
         for row in rows:
             try:
                 if str(row.get("quote_currency_id") or "").upper() != str(quote).upper():
                     continue
+                if str(row.get("base_currency_id") or "").upper() in stable:
+                    continue  # a stablecoin against the dollar has no move to trade
                 if str(row.get("status") or "online").lower() != "online" or row.get("trading_disabled"):
                     continue
                 price = float(row.get("price") or 0)

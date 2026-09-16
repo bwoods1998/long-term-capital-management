@@ -524,6 +524,12 @@ def instrument_from(arguments: Any, manifest: DeskManifest) -> Instrument:
     if not isinstance(venue, str) or venue not in manifest.venues:
         venue = default_venue(manifest)
     data["venue"] = venue
+    # Coinbase names every product by its id, and the adapter writes it into each fill's
+    # instrument as `market_id`, so a crypto position's key carries it. An intent without it
+    # keyed differently: on Sept 16, 2026 Hilibrand's offers on coins it held were refused as
+    # shorts because the risk engine could not find the position under the intent's key.
+    if data.get("asset_class") == "crypto" and not data.get("market_id") and isinstance(data.get("symbol"), str):
+        data["market_id"] = data["symbol"]
     if "strike" in data:
         data["strike"] = str(data["strike"])
     if data.get("asset_class") == "option" and "multiplier" not in data:
