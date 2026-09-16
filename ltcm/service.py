@@ -43,6 +43,7 @@ from .exits import ExitBook  # leap: exits
 from .watch import NightWatch  # leap: watch
 from .calibration import CalibrationError, CalibrationLedger  # leap: lab
 from .lab import Lab  # leap: lab
+from .founding import Founding  # leap: founding
 from .tools import ToolError  # leap: lab
 from .events import EventLog, canonical, now_iso
 from .evolve import Evolution
@@ -981,6 +982,7 @@ class Service:
             clock=clock,
         )
         self.lab.strategies = self.strategies  # leap: lab -- built after the lab; hand it over
+        self.founding = self._build_founding()  # leap: founding
         notify = dict(self.config.get("notify") or {})
         self.notifier = TradeNotifier(
             self.log,
@@ -1082,6 +1084,9 @@ class Service:
                 from .data.weather import Weather
 
                 built = Weather(self.transport, cache_dir=self.capital_dir / "cache", clock=self.clock)
+            elif name == "crypto":  # leap: founding -- Coinbase's product listing
+                router = getattr(self.market_data, "_source", None)
+                built = router("crypto") if router is not None else None
         except Exception:
             built = None
         self._sources[name] = built
@@ -2263,6 +2268,87 @@ class Service:
             self.reload_manifests()
         return actions
 
+    # ------------------------------------------------------------------ leap: founding
+    def _build_founding(self) -> Founding | None:
+        """The floor founds new families (`ltcm/founding.py`): the floor's live venues, the lab's
+        hard limits, and the venues' public listings through the sources the desks already use."""
+        from .lab import DEFAULT_CONFIG as LAB_DEFAULTS
+
+        def market_rows() -> list[dict[str, Any]]:
+            source = self.source("event")
+            return self.event_index(source) if source is not None else []
+
+        def kalshi() -> Any:
+            # Its own source without the HTTP cache: the nightly sweep reads ~150 MB of listings,
+            # which through the shared cache would evict what the desks read (the disk incident
+            # of Sept 16, 2026 was that cache).
+            if self.source("event") is None:
+                return None
+            if getattr(self, "_founding_kalshi", None) is None:
+                from .data import HttpTransport
+                from .data.kalshi import KalshiMarketData
+
+                self._founding_kalshi = KalshiMarketData(self.transport or HttpTransport(min_interval=0.2))
+            return self._founding_kalshi
+
+        try:
+            lab = dict(self.config.get("lab") or {})
+            return Founding(
+                self.log,
+                self.evolution,
+                provider=self.provider,
+                clock=self.clock,
+                config={
+                    "live_venues": tuple(self.config.get("live_venues") or ()),
+                    "hard_limits": {**LAB_DEFAULTS["hard_limits"], **dict(lab.get("hard_limits") or {})},
+                    **dict(self.config.get("founding") or {}),
+                },
+                kalshi=kalshi,
+                coinbase=lambda: self.source("crypto"),
+                market_rows=market_rows,
+            )
+        except Exception as exc:
+            self.alert("warning", f"founding unavailable: {type(exc).__name__}")
+            return None
+
+    def _founding_tick(self, at: str, local: datetime, day: str, state: Mapping[str, Any], *, allow: bool) -> dict[str, Any] | None:
+        """Once a day after `founding.founding_time`: found at most one family, then wind down
+        the founded families that failed. Spread over ticks like the lab -- the venue listings and
+        the model call run on a worker -- and never raises: a failure is one `ops.alert`."""
+        founding = getattr(self, "founding", None)
+        if founding is None or not founding.enabled():
+            return None
+        pending = state.get("founding_pending_day") == day
+        if not pending and not self._due(local, founding.time(), state.get("last_founding_day"), day):
+            return None
+        if not allow:
+            outcome: dict[str, Any] = {"status": "skipped", "reason": "the runway is short: live desks only"}
+        else:
+            try:
+                if not pending:
+                    self._save_state(founding_pending_day=day)
+                outcome = founding.step(at, day=day)
+            except Exception as exc:
+                outcome = {"status": "failed", "reason": f"{type(exc).__name__}: {str(exc)[:300]}"}
+            if outcome.get("status") == "pending":
+                return outcome
+        if outcome.get("status") == "founded":
+            try:
+                self.reload_manifests()  # the new desk trades from the next tick, no restart
+            except Exception as exc:
+                self.alert("warning", f"founded {outcome.get('desk_id')} but the roster did not reload: {type(exc).__name__}")
+        elif outcome.get("status") in ("failed", "refused"):
+            self.alert("warning", f"founding {outcome['status']}: {str(outcome.get('reason'))[:400]}")
+        try:
+            wound = founding.wind_down(at)
+        except Exception as exc:
+            wound = []
+            self.alert("warning", f"founding wind-down failed: {type(exc).__name__}: {str(exc)[:200]}")
+        outcome["wound_down"] = sorted({str(action.get("family")) for action in wound})
+        summary = {k: outcome.get(k) for k in ("status", "reason", "family", "desk_id", "wound_down") if outcome.get(k)}
+        self._save_state(last_founding_day=day, founding_pending_day=None, last_founding={**summary, "at": at})
+        return outcome
+
     # ------------------------------------------------------------------ leap: lab
     def _calibration_tick(self, at: str, state: Mapping[str, Any]) -> None:
         """Resolve due forecasts against the venue and publish the day's calibration, at most
@@ -2691,6 +2777,9 @@ class Service:
             self.reload_manifests()
             self._save_state(last_evolution_day=day)
             result["evolution"] = actions
+        # leap: founding -- after the evolution run the floor may open a line of business.
+        if not stopped:
+            result["founding"] = self._founding_tick(at, local, day, state, allow=not live_only)
 
         try:
             event = ResultsLedger.publish_daily(self.log, at, manifests=self.manifests)
@@ -3380,6 +3469,7 @@ class Service:
             "last_mark_at": state.get("last_mark_at"),
             "last_committee_day": state.get("last_committee_day"),
             "last_evolution_day": state.get("last_evolution_day"),
+            "last_founding": state.get("last_founding"),  # leap: founding
             "last_error": self.last_error,
         }
 

@@ -79,6 +79,8 @@ KINDS: dict[str, str] = {
     "evolution.spawned": "public",
     "evolution.retired": "public",
     "evolution.promoted": "public",
+    # leap: founding -- the floor opened a new family (`ltcm/founding.py`).
+    "evolution.founded": "public",
     "lab.hypothesis": "public",
     "lab.result": "public",
     # leap: lab -- forecasts and their scoring, and the lab's directed experiments.
