@@ -216,6 +216,7 @@ class ServiceCase(unittest.TestCase):
             "sandbox": {"enabled": False},
             # Slow work inline, so a tick's result is complete when a case reads it.
             "background_work": False,
+            "evolution_interval_hours": 0,
             "settlement_interval_seconds": 0,
             # The ratio allocation rule, so the capital assertions test arithmetic, not a draw;
             # the bandit has its own case in test_committee.
@@ -1157,6 +1158,20 @@ class PromotedDeskTests(ServiceCase):
         self.service._apply_capital_modes()
         self.assertEqual(self.service.live_ids(), set())
         self.assertEqual(self.service._live_pnl(at), Decimal("-100"), "the loss stays on the record")
+
+    def test_capital_and_selection_run_on_an_hours_clock(self):
+        self.service.close()
+        self.service = self.build(evolution_interval_hours=6, committee={"bandit_enabled": False, "resize_interval_hours": 6})
+        calls = {"allocate": 0, "select": 0}
+        real_allocate, real_select = self.service.committee.allocate, self.service.evolution.select
+        self.service.committee.allocate = lambda at=None, **kw: calls.__setitem__("allocate", calls["allocate"] + (1 if kw.get("resize") else 0)) or real_allocate(at, **kw)
+        self.service.evolution.select = lambda at=None: calls.__setitem__("select", calls["select"] + 1) or real_select(at)
+        self.tick(moment(2026, 9, 14, 13, 55))
+        self.assertEqual((calls["allocate"], calls["select"]), (1, 1), "the first tick runs both")
+        self.tick(moment(2026, 9, 14, 16, 0))
+        self.assertEqual((calls["allocate"], calls["select"]), (1, 1), "not again inside six hours")
+        self.tick(moment(2026, 9, 14, 20, 0))
+        self.assertEqual((calls["allocate"], calls["select"]), (2, 2), "six hours on, both again")
 
     def test_slow_work_runs_off_the_tick_one_worker_at_a_time(self):
         import threading as _threading

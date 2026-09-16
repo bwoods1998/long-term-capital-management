@@ -186,10 +186,18 @@ class GateTests(CommitteeCase):
              "mismatches": [{"instrument": AAPL.key, "ledger": "1", "venue": "2"}]},
             at="2026-09-06T20:00:00.000Z",
         )
-        report = self.committee().gates("earnings-01", "2026-09-21T20:00:00.000Z")
+        report = self.committee().gates("earnings-01", "2026-09-10T20:00:00.000Z")
         self.assertIn("breakers", report["failed"])
         self.assertIn("reconciliation", report["failed"])
         self.assertEqual(report["evidence"]["breakers"], 1)
+        # A breaker counts once per day, inside the window only; a later clean reconciliation clears the venue.
+        for minute in range(10):
+            self.log.append("risk", "risk.breaker", {"scope": "desk:earnings-01", "rule": "daily_loss", "detail": "9%", "action": "halt_new_orders"},
+                            at=f"2026-09-05T20:{10 + minute}:00.000Z")
+        self.assertEqual(self.committee().breaker_count("earnings-01", "2026-09-10T20:00:00.000Z"), 1)
+        self.assertEqual(self.committee().breaker_count("earnings-01", "2026-09-21T20:00:00.000Z"), 0, "outside the 7-day window")
+        self.log.append("broker:shadow", "broker.reconciled", {"venue": "alpaca", "matches": 1, "mismatches": []}, at="2026-09-07T20:00:00.000Z")
+        self.assertTrue(self.committee().reconciliation_clean("earnings-01"))
 
 
 class AllocationTests(CommitteeCase):

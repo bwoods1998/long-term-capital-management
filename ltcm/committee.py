@@ -24,6 +24,7 @@ money. A shadow desk earns a live sleeve by passing gate A, and only then does c
 
 from __future__ import annotations
 import hashlib
+import json
 import random
 
 import time
@@ -48,7 +49,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "gate_min_decisions": 20,
     "gate_min_excess_pct": "0",  # cost-adjusted excess must be strictly greater than this
     "gate_max_drawdown_pct": "0.15",
-    "gate_max_breakers": 0,
+    "gate_max_breakers": 0,  # breaker DAYS inside the window, not breaker events
+    "gate_breaker_window_days": 7,
     # Allocation.
     "floor_capital_usd": "5000",
     "resize_interval_days": 7,
@@ -219,13 +221,20 @@ class Committee:
                 continue
         return total
 
-    def breaker_count(self, desk_id: str) -> int:
+    def breaker_count(self, desk_id: str, now: Any = None) -> int:
+        """Days in the gate window on which a breaker tripped for the desk. A tripped daily-loss
+        breaker writes an event on every tick it refuses an order, so counting events turned one
+        bad afternoon into 25 and barred the desk from promotion for life (Sept 16, 2026)."""
         scope = f"desk:{desk_id}"
-        return sum(
-            1
+        at = iso_time(now) if now is not None else self.now()
+        window = int(self.config.get("gate_breaker_window_days", 7))
+        cutoff = (parse_iso(at) - timedelta(days=window)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        days = {
+            event.at[:10]
             for event in self.log.read(kind="risk.breaker", limit=10_000, newest=True)
-            if event.payload.get("scope") == scope
-        )
+            if event.payload.get("scope") == scope and event.at >= cutoff
+        }
+        return len(days)
 
     def paused(self, desk_id: str) -> bool:
         scope = f"desk:{desk_id}"
@@ -235,14 +244,18 @@ class Committee:
         )
 
     def reconciliation_clean(self, desk_id: str) -> bool:
+        """The venue's LATEST reconciliation matched. Any mismatch ever used to fail the gate for
+        every desk on the venue forever: one repaired fill bug on Sept 16, 2026 barred every
+        Kalshi desk from promotion."""
         manifest = self.manifests.get(desk_id)
         venues = set(manifest.venues) if manifest else set()
+        latest: dict[str, Any] = {}
         for event in self.log.read(kind="broker.reconciled", limit=10_000, newest=True):
-            if venues and event.payload.get("venue") not in venues:
+            venue = event.payload.get("venue")
+            if venues and venue not in venues:
                 continue
-            if event.payload.get("mismatches"):
-                return False
-        return True
+            latest[str(venue)] = event  # oldest first: the last one read is the newest
+        return not any(event.payload.get("mismatches") for event in latest.values())
 
     def benchmark_pct(self, start: str | None, end: str) -> Decimal:
         if self.benchmark is None or not start:
@@ -308,7 +321,7 @@ class Committee:
         cost_pct = (cost / capital * 100) if capital > 0 else ZERO
         bench = self.benchmark_pct(state.started_at, at)
         excess = state.time_weighted_return_pct - bench - cost_pct
-        breakers = self.breaker_count(desk_id)
+        breakers = self.breaker_count(desk_id, at)
         clean = self.reconciliation_clean(desk_id)
 
         evidence = {
@@ -535,7 +548,9 @@ class Committee:
                     "floor_capital_usd": text(cap),
                     "as_of": at,
                 },
-                id=f"alloc:{at}",
+                # Two allocations can land on one instant (a roster change and a scheduled
+                # resize in the same tick); the targets name the event so neither conflicts.
+                id=f"alloc:{at}:{hashlib.sha256(json.dumps({k: text(v) for k, v in sorted(targets.items())}, sort_keys=True).encode()).hexdigest()[:10]}",
                 at=at,
             )
         return targets
@@ -585,6 +600,10 @@ class Committee:
     def _publish_gates(self, active: Mapping[str, DeskManifest], at: str) -> None:
         for desk_id in sorted(active):
             report = self.gates(desk_id, at)
+            if self.log.get(f"gate:{desk_id}:{at}") is not None:
+                # A second allocation in the same tick (a roster change and a scheduled resize)
+                # has already published this desk's gate for this instant.
+                continue
             self.log.append(
                 "committee",
                 "committee.gate",

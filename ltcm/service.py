@@ -2910,6 +2910,8 @@ class Service:
                     elapsed = interval
                 resize_day = last_resize is None or elapsed >= interval
             memo_daily = bool(self.config.get("committee_memo_daily", True))
+            if float(self.committee.config.get("resize_interval_hours") or 0) > 0:
+                resize_day = False  # resized on its own clock below
             if resize_day:
                 self.committee.allocate(at, resize=True)
                 self._save_state(last_resize_day=day)
@@ -2919,11 +2921,27 @@ class Service:
                 self._off_tick("memo", lambda at=at: bool(self.committee.memo(at)))
                 result["memo"] = True
                 self._save_state(last_committee_day=day)
+        # Capital and selection on an hours clock (config `committee.resize_interval_hours`,
+        # `evolution_interval_hours`): a generation that waits a day for its next capital move or
+        # its next selection compounds at a day's pace. Zero keeps the daily slots.
+        resize_hours = float(self.committee.config.get("resize_interval_hours") or 0)
+        if not stopped and resize_hours > 0:
+            last = state.get("last_resize_at")
+            if last is None or (_epoch_of(at) - _epoch_of(last)) >= resize_hours * 3600:
+                self.committee.allocate(at, resize=True)
+                self._save_state(last_resize_at=at, last_resize_day=day)
+                result["committee"] = True
         self._tick_phase("evolution_and_founding")
-        if not stopped and self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day):
+        evolution_hours = float(self.config.get("evolution_interval_hours") or 0)
+        if evolution_hours > 0:
+            last_evolution = state.get("last_evolution_at")
+            evolution_due = last_evolution is None or (_epoch_of(at) - _epoch_of(last_evolution)) >= evolution_hours * 3600
+        else:
+            evolution_due = self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day)
+        if not stopped and evolution_due:
             actions = list(self.evolution.select(at)) + list(self.evolution.promote(at))
             self.reload_manifests()
-            self._save_state(last_evolution_day=day)
+            self._save_state(last_evolution_day=day, last_evolution_at=at)
             result["evolution"] = actions
         # leap: founding -- after the evolution run the floor may open a line of business.
         if not stopped:

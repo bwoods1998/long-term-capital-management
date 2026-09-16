@@ -16,6 +16,7 @@
   "committee_time": "18:00",
   "committee_memo_daily": true,
   "evolution_time": "19:00",
+  "evolution_interval_hours": 6,
   "postmortem_time": "21:30",
   "critic_enabled": true,
   "critic_profile": "glm_asap",
@@ -58,6 +59,7 @@
     "max_runs_per_tick": 4,
     "parallel_runs": 12,
     "record_cache_seconds": 60,
+    "promotion": {"min_settled": 6, "interval_seconds": 1800},
     "run_timeout_seconds": 90,
     "idle_publish_seconds": 3600,
     "starters": true
@@ -164,8 +166,10 @@
     "bandit_enabled": true,
     "bandit_prior_sd_pct": "5",
     "bandit_scale_pct": "10",
-    "gate_min_days": 3,
-    "gate_min_decisions": 15,
+    "gate_min_days": 1,
+    "gate_min_decisions": 25,
+    "gate_max_breakers": 1,
+    "resize_interval_hours": 6,
     "resize_interval_days": 1
   }
 }
