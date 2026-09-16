@@ -2272,6 +2272,9 @@ class Service:
                     "settled_pnl_usd": row.get("settled_pnl_usd") or "0",
                     "last_run_at": row.get("last_run_at"),
                     "last_notes": row.get("last_notes") or "",
+                    # Why these settings, and the settings: publish.strategy_rows shapes both for the site.
+                    "note": row.get("note") or "",
+                    "params": row.get("params") or {},
                 }
             )
         return out
