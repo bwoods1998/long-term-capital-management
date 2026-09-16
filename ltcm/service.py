@@ -862,6 +862,7 @@ class Service:
             config=self.config.get("lab") or {},
             results=lambda: ResultsLedger(self.log, self.manifests),
             calibration=self.calibration,
+            strategies=getattr(self, "strategies", None),
         )
         # Whatever credential the box holds is redacted from every published string, so a
         # model that echoes one back cannot put it on the site.
@@ -883,6 +884,7 @@ class Service:
             config=self.config.get("strategies") or {},
             clock=clock,
         )
+        self.lab.strategies = self.strategies  # leap: lab -- built after the lab; hand it over
         notify = dict(self.config.get("notify") or {})
         self.notifier = TradeNotifier(
             self.log,
@@ -2485,6 +2487,7 @@ class Service:
                 self.alert("warning", f"lab run failed: {type(exc).__name__}: {exc}")
                 self._save_state(last_lab_day=day, lab_pending_day=None)
             self.reload_manifests()
+            self._install_experiment_strategies(experiments)  # leap: lab
             if not self.lab.pending(at):
                 self._save_state(last_lab_day=day, lab_pending_day=None)
             result["experiments"] = experiments
@@ -2556,6 +2559,24 @@ class Service:
         except Exception as exc:
             self.alert("warning", f"rate card check failed: {type(exc).__name__}: {exc}")
             return None
+
+    def _install_experiment_strategies(self, actions: list[dict[str, Any]]) -> None:
+        """leap: lab -- a running experiment whose change carries a strategy gets that code
+        deployed on its variant, once the variant's manifest is loaded. Never raises."""
+        runner = getattr(self, "strategies", None)
+        if runner is None:
+            return
+        for action in actions or []:
+            try:
+                if action.get("action") != "experiment" or action.get("status") != "running":
+                    continue
+                spec = (action.get("change") or {}).get("strategy")
+                manifest = self.manifests.get(str(action.get("variant_desk_id") or ""))
+                if not isinstance(spec, Mapping) or manifest is None:
+                    continue
+                runner.install(manifest, spec, note=f"lab experiment {action.get('experiment_id')}")
+            except Exception as exc:
+                self.alert("warning", f"experiment strategy not deployed on {action.get('variant_desk_id')}: {str(exc)[:200]}")
 
     def _fund_kalshi_shards(self, at: str) -> None:
         """leap: venues -- keep collateral on every Kalshi exchange shard the floor trades.

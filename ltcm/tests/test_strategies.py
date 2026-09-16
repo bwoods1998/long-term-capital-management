@@ -635,3 +635,21 @@ class PromotionTests(StrategyCase):
         self.manager.files["scholes"]["hourly_ranges.py"] = (STARTERS_DIR / "hourly_ranges.py").read_text()
         self.strategies.bootstrap({"scholes": self.live})
         self.assertEqual(self.strategies.store.for_desk("scholes")["hourly_ranges"]["params"], {"min_edge": 0.0, "vol_bars": 36}, "the house params do not overwrite a promotion")
+
+
+class GenomeStrategyTests(StrategyCase):
+    def test_install_saves_the_code_and_deploys_it_and_the_genome_reaches_every_desk_of_the_family(self):
+        spec = {"name": "sharper_vol", "cadence_seconds": 600, "params": {"window": "5m"}, "code": "def decide(kit, params):\n    return []\n"}
+        row = self.strategies.install(self.manifest, spec, note="lab experiment exp-1")
+        self.assertEqual((row["name"], row["cadence_seconds"], row["params"], row["note"]), ("sharper_vol", 600, {"window": "5m"}, "lab experiment exp-1"))
+        self.assertIn("sharper_vol.py", self.manager.files["scholes-2"])
+        # An adopted strategy in the genome lands on a desk of the family that lacks it.
+        other = manifest(id="scholes-3")
+        self.service.manifests[other.id] = other
+        self.manager.files["scholes-3"] = {}
+        self.service.evolution = type("E", (), {"genome": lambda self, family: [{"experiment_id": "exp-1", "change": {"strategy": spec}}] if family == "ranges" else []})()
+        self.strategies.config["starters"] = True
+        deployed = self.strategies.bootstrap({other.id: other, self.manifest.id: self.manifest})
+        self.assertIn("scholes-3/sharper_vol", deployed)
+        self.assertNotIn("scholes-2/sharper_vol", deployed, "already there")
+        self.assertEqual(self.strategies.store.for_desk("scholes-3")["sharper_vol"]["note"], "house genome: experiment exp-1")

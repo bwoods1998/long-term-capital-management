@@ -58,6 +58,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # `grace_days` more, a variant that still lacks the decisions is rejected as unproven.
     "evaluate_days": None,
     "grace_days": 7,
+    # leap: lab -- strategy changes: code size and cadence bounds, and how much house source the packet shows.
+    "strategy_code_chars": 6000,
+    "strategy_cadence_seconds": (300, 86400),
+    "strategy_source_chars": 9000,
     # The bounds a proposed limit must stay inside. Anything outside is withdrawn, not clamped.
     "hard_limits": {
         "max_position_pct": ["0.01", "0.50"],
@@ -72,6 +76,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "playbook_note_chars": 1500,
     "window_days": 7,
 }
+
+
+STRATEGY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
+#: What a strategy may call. Shown to the lab so the code it writes runs first time.
+KIT_API = (
+    "kit.context (dict: now, desk_id, live, learning_usd, positions[{symbol, market_id, right, asset_class, quantity, average_cost}], "
+    "open_orders[{order_id, symbol, market_id, right, side, quantity, limit_price, submitted_at, strategy}], venues); "
+    "kit.say(text); kit.bars(symbol, interval='1h', limit=60, asset_class='crypto', venue='coinbase') -> [{time, open, high, low, close, volume}]; "
+    "kit.quote(symbol, asset_class='crypto', venue='coinbase') -> {bid, ask, last}; kit.products(limit=25) -> [{symbol, price, volume_usd}] (Coinbase USD spot by 24h volume); "
+    "kit.kalshi_series(series, limit=1000) -> open markets [{ticker, yes_bid, yes_ask, no_bid, no_ask, close_time, floor_strike, cap_strike, title, ...}]; "
+    "kit.kalshi_market(ticker) -> one market; kit.weather(city) -> {forecast..., hourly..., observation}; kit.weather_cities() -> [names]. "
+    "decide(kit, params) returns a list of intents, or {'intents': [...], 'cancels': [order_id...], 'notes': str}. An intent: "
+    "{'instrument': {'asset_class': 'event'|'crypto', 'symbol': ..., 'market_id': ticker (event), 'right': 'yes'|'no' (event)}, 'side': 'buy'|'sell', "
+    "'quantity': str, 'order_type': 'limit', 'limit_price': str, 'rationale': str (name the setup, the edge and the exit), 'holding_period_hours': int, "
+    "optional 'post_only': true, 'target_price', 'stop_price'}. Sizes are capped by the floor; the risk engine and the critic check every order."
+)
 
 
 class LabError(ValueError):
@@ -211,6 +232,37 @@ def validate_change(
             raise LabError("playbook_note may not contain markup")
         out["playbook_note"] = note.strip()
 
+    if "strategy" in change:  # leap: lab -- code the child trades with, judged like any change
+        spec = change["strategy"]
+        if not isinstance(spec, Mapping):
+            raise LabError("strategy must be an object with name, cadence_seconds, params and code")
+        name = str(spec.get("name") or "")
+        if not STRATEGY_NAME.match(name):
+            raise LabError("strategy.name is lowercase letters, digits and underscores, 40 at most")
+        code = spec.get("code")
+        limit = int(cfg["strategy_code_chars"])
+        if not isinstance(code, str) or "def decide(" not in code:
+            raise LabError("strategy.code must be Python that defines decide(kit, params)")
+        if len(code) > limit:
+            raise LabError(f"strategy.code must be at most {limit} characters")
+        for banned in ("subprocess", "os.system", "socket", "urllib", "requests", "open(", "__import__"):
+            if banned in code:
+                raise LabError(f"strategy.code may not use {banned}: the kit is the only door to data")
+        try:
+            cadence = int(spec.get("cadence_seconds", 600))
+        except (TypeError, ValueError):
+            raise LabError("strategy.cadence_seconds must be an integer") from None
+        low, high = (int(x) for x in cfg["strategy_cadence_seconds"])
+        if not low <= cadence <= high:
+            raise LabError(f"strategy.cadence_seconds must be between {low} and {high}")
+        params = spec.get("params") or {}
+        if not isinstance(params, Mapping) or len(params) > 24:
+            raise LabError("strategy.params must be an object of at most 24 plain values")
+        for key, value in params.items():
+            if not isinstance(key, str) or not isinstance(value, (str, int, float, bool, list)):
+                raise LabError(f"strategy.params.{key} must be a string, number, boolean or list")
+        out["strategy"] = {"name": name, "cadence_seconds": cadence, "params": json.loads(json.dumps(dict(params))), "code": code}
+
     if not out:
         raise LabError("change must name at least one field")
     return out
@@ -267,6 +319,7 @@ class Lab:
         config: Mapping[str, Any] | None = None,
         results: Callable[[], Any] | None = None,
         calibration: Any = None,
+        strategies: Any = None,
     ):
         self.log = log
         self.evolution = evolution
@@ -275,6 +328,7 @@ class Lab:
         self.config = {**DEFAULT_CONFIG, **dict(config or {})}
         self.results = results
         self.calibration = calibration
+        self.strategies = strategies  # leap: lab -- the runner, for the family's records and sources
         #: Work the night has asked for but not yet done, so a tick can do one unit at a time:
         #: (family, parent, best sibling, proposal). Families already asked today, by day.
         self._queue: list[tuple[str, DeskManifest, DeskManifest, dict[str, Any]]] = []
@@ -536,6 +590,11 @@ class Lab:
             + ", ".join(f"{k} ({v[0]} to {v[1]})" for k, v in hard.items())
             + "\n"
             f"- \"playbook_note\": a house-view note of at most {self.config['playbook_note_chars']} characters\n"
+            "- \"strategy\": {\"name\", \"cadence_seconds\", \"params\", \"code\"}: a Python module the variant runs "
+            f"between sessions every cadence_seconds (code at most {self.config['strategy_code_chars']} characters). Use it to "
+            "change how the family trades, not just how it is configured: a sharper pricing model, a new market, a "
+            "different exit. It may reuse a house strategy's name to replace it on the variant. The kit it gets: "
+            f"{KIT_API}\n"
             "A change must differ from the parent's current setting. Prefer one variable per "
             "experiment, so the verdict means something. Never propose anything outside the "
             "vocabulary: it is refused, and the refusal is published. Propose nothing when the "
@@ -572,6 +631,9 @@ class Lab:
                 + "\n".join(f"- {r.get('experiment_id')}: {json.dumps(r.get('change'), sort_keys=True)}" for r in genome)
             )
         parts.append("## Results, last " + str(self.config["window_days"]) + " days\n" + self._results_block(family, at))
+        strategies = self._strategies_block(family, parent, siblings)
+        if strategies:
+            parts.append(strategies)
         parts.append("## Last lab reports\n" + self._reports_block())
         if self.calibration is not None:
             try:
@@ -594,6 +656,38 @@ class Lab:
                 for e in sorted(past, key=lambda e: str(e.get("proposed_at")))[-8:]
             ]
             parts.append("## Earlier experiments\n" + "\n".join(lines))
+        return "\n\n".join(parts)
+
+    def _strategies_block(self, family: str, parent: DeskManifest, siblings: list[DeskManifest]) -> str:
+        """leap: lab -- what the family's strategies did, and the source of its house strategy,
+        so a proposed strategy change starts from the code that runs today."""
+        runner = self.strategies
+        if runner is None:
+            return ""
+        lines = []
+        for m in [parent, *siblings]:
+            try:
+                rows = runner.report(m).get("strategies") or []
+            except Exception:
+                rows = []
+            for row in rows:
+                lines.append(
+                    f"- {m.id}/{row.get('name')}: params {json.dumps(row.get('params') or {}, sort_keys=True)}, "
+                    f"{row.get('runs') or 0} runs, {row.get('intents') or 0} intents, {row.get('approved') or 0} approved, "
+                    f"{row.get('fills') or 0} fills, {row.get('settled') or 0} settled, {row.get('wins') or 0} won, "
+                    f"P&L {row.get('settled_pnl_usd') or '0'}" + (f", last error {str(row.get('last_error'))[:80]}" if row.get("last_error") else "")
+                )
+        parts = []
+        if lines:
+            parts.append("## Strategies running in the family\n" + "\n".join(lines))
+        try:
+            sources = runner.house_sources(family)
+        except Exception:
+            sources = {}
+        budget = int(self.config["strategy_source_chars"])
+        for name, code in list(sources.items())[:2]:
+            clipped = code[:budget]
+            parts.append(f"## House strategy `{name}` (source, {len(code)} chars{', clipped' if len(code) > budget else ''})\n```python\n{clipped}\n```")
         return "\n\n".join(parts)
 
     def _results_block(self, family: str, at: str) -> str:

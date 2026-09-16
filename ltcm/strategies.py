@@ -478,6 +478,46 @@ class Strategies:
         self._publish_run(manifest, name, run, at, f"strategy {name} deployed every {cadence}s" + (" (house starter)" if house else ""), always=True)
         return self.describe(manifest.id, name, row)
 
+    def install(self, manifest: DeskManifest, spec: Mapping[str, Any], *, note: str = "") -> dict[str, Any]:
+        """leap: lab -- save a strategy the lab wrote into the desk's toolbox and deploy it.
+        Raises ValueError with the reason when the dry run refuses it."""
+        manager = self.sandboxes()
+        if manager is None or not hasattr(manager, "toolbox_save"):
+            raise ValueError("no sandbox is available on this floor")
+        name = str(spec.get("name") or "")
+        code = str(spec.get("code") or "")
+        manager.toolbox_save(manifest.id, name, code, (note or "lab strategy")[:200])
+        return self.deploy(manifest, name, int(spec.get("cadence_seconds", 600)), spec.get("params") or {}, note=note)
+
+    def house_sources(self, family: str) -> dict[str, str]:
+        """The source of the family's house starters, by name."""
+        out: dict[str, str] = {}
+        for name in (STARTERS.get(family), SECOND_STARTERS.get(family)):
+            if not name:
+                continue
+            path = STARTERS_DIR / f"{name}.py"
+            if path.is_file():
+                out[name] = path.read_text(encoding="utf-8")
+        return out
+
+    def _genome_strategies(self, family: str) -> list[Mapping[str, Any]]:
+        """Strategies the family's adopted experiments carry (leap: lab), oldest first."""
+        evolution = getattr(self.service, "evolution", None)
+        genome = getattr(evolution, "genome", None)
+        if not callable(genome):
+            return []
+        try:
+            records = genome(family)
+        except Exception:
+            return []
+        out = []
+        for record in records:
+            change = record.get("change") if isinstance(record, Mapping) else None
+            spec = change.get("strategy") if isinstance(change, Mapping) else None
+            if isinstance(spec, Mapping) and spec.get("name") and spec.get("code"):
+                out.append({**spec, "experiment_id": record.get("experiment_id")})
+        return out
+
     def undeploy(self, manifest: DeskManifest, name: str) -> dict[str, Any]:
         if not self.store.remove(manifest.id, name):
             raise ValueError(f"no strategy named {name!r} is deployed")
@@ -558,6 +598,17 @@ class Strategies:
             if second:
                 wanted.append((second, starter_params(manifest.family, manifest, quotes=True), int(STARTER_CADENCE.get(second, 600))))
             existing = self.store.for_desk(desk_id)
+            # leap: lab -- an adopted strategy is house genome: every desk of the family runs it,
+            # the live desk included, until the desk replaces it with its own.
+            for spec in self._genome_strategies(manifest.family):
+                if spec["name"] in existing or len(self.store.for_desk(desk_id)) >= int(self.config["max_per_desk"]):
+                    continue
+                try:
+                    self.install(manifest, spec, note=f"house genome: experiment {spec.get('experiment_id')}")
+                    deployed.append(f"{desk_id}/{spec['name']}")
+                except Exception as exc:
+                    self.service.alert("warning", f"genome strategy {spec['name']} for {desk_id} not deployed: {str(exc)[:160]}")
+                    self.store.update(desk_id, spec["name"], enabled=False, last_error=str(exc)[:300], deployed_at=self.service.now(), cadence_seconds=int(spec.get("cadence_seconds", 600)), params=dict(spec.get("params") or {}))
             for name, params, cadence in wanted:
                 row = existing.get(name)
                 if row is not None and row.get("house") and not row.get("enabled", True) and not int(row.get("runs") or 0):

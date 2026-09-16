@@ -391,3 +391,49 @@ class VerdictTests(LabCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StrategyChangeTests(LabCase):
+    CODE = "def decide(kit, params):\n    q = kit.quote('BTC-USD')\n    return []\n"
+
+    def test_a_strategy_change_validates_and_runs_as_a_variant_that_carries_the_code(self):
+        parent = manifest("earnings-01", capital={"mode": "live", "usd": "1000"})
+        change = validate_change({"strategy": {"name": "sharper_vol", "cadence_seconds": 600, "params": {"window": "5m", "min_edge": 0.01}, "code": self.CODE}}, parent)
+        self.assertEqual(change["strategy"]["name"], "sharper_vol")
+        self.assertEqual(change["strategy"]["params"], {"window": "5m", "min_edge": 0.01})
+        for bad, why in (
+            ({"name": "Sharper Vol", "code": self.CODE}, "name"),
+            ({"name": "x", "code": "print('hi')"}, "decide"),
+            ({"name": "x", "code": self.CODE, "cadence_seconds": 10}, "cadence"),
+            ({"name": "x", "code": "import subprocess\n" + self.CODE}, "subprocess"),
+            ({"name": "x", "code": "def decide(kit, params):\n" + "    pass\n" * 4000}, "characters"),
+        ):
+            with self.assertRaises(LabError, msg=why):
+                validate_change({"strategy": bad}, parent)
+        self.provider.replies = [reply({"hypothesis": "A five-minute vol window prices the hour better.", "change": {"strategy": {"name": "sharper_vol", "cadence_seconds": 600, "params": {"window": "5m"}, "code": self.CODE}}})]
+        lab = self.lab(max_experiments_per_family=2)
+        actions = lab.propose(NIGHT)
+        running = [a for a in actions if a.get("status") == "running"]
+        self.assertEqual(len(running), 1)
+        self.assertEqual(running[0]["change"]["strategy"]["code"], self.CODE)
+        self.assertTrue(running[0]["variant_desk_id"].startswith("earnings-01-"))
+        published = self.log.read(stream="lab", kind="lab.experiment")
+        self.assertTrue(any(e.payload.get("change", {}).get("strategy", {}).get("name") == "sharper_vol" for e in published))
+
+    def test_the_instructions_and_packet_teach_the_kit_and_show_the_familys_strategies(self):
+        class Runner:
+            def report(self, m):
+                return {"strategies": [{"name": "hourly_ranges", "params": {"min_edge": 0.02}, "runs": 19, "intents": 4, "approved": 1, "fills": 1, "settled": 1, "wins": 0, "settled_pnl_usd": "-9.24"}]}
+
+            def house_sources(self, family):
+                return {"hourly_ranges": "def decide(kit, params):\n    return []\n"}
+
+        lab = self.lab()
+        lab.strategies = Runner()
+        self.assertIn('"strategy": {"name", "cadence_seconds", "params", "code"}', lab.instructions())
+        self.assertIn("kit.kalshi_series", lab.instructions())
+        parent = manifest("earnings-01", capital={"mode": "live", "usd": "1000"})
+        packet = lab.packet("earnings", parent, NIGHT)
+        self.assertIn("## Strategies running in the family", packet)
+        self.assertIn("earnings-01/hourly_ranges: params {\"min_edge\": 0.02}, 19 runs", packet)
+        self.assertIn("## House strategy `hourly_ranges` (source", packet)

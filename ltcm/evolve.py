@@ -64,6 +64,7 @@ CHANGE_KEYS = (
     "instruments.allow_add",
     "limits",
     "playbook_note",
+    "strategy",  # leap: lab -- a strategy module the child runs between sessions
 )
 MEMORY_LIMITS = (20, 40, 60, 80)
 SESSION_SHIFTS = (-45, -20, 20, 45)
