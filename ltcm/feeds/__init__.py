@@ -199,6 +199,7 @@ class FeedHub:
         self._fill_venues: set[str] = set()
         self._resolutions: list[dict[str, Any]] = []
         self._trades: list[dict[str, Any]] = []  # leap: taker model -- prints the shadow books fill against
+        self._prints_seen: dict[str, int] = {}  # per venue, since start: says whether the trade channels deliver
         self._status: dict[str, dict[str, Any]] = {}
         self._down_since: dict[str, float] = {}
         self._last_alert_at: dict[str, float] = {}
@@ -276,6 +277,7 @@ class FeedHub:
         row = {"venue": venue, "symbol": str(symbol).upper(), "price": price_d, "size": size_d,
                "taker_side": str(taker_side or "").lower(), "at": float(at if at is not None else self.clock())}
         with self._lock:
+            self._prints_seen[venue] = self._prints_seen.get(venue, 0) + 1
             self._trades.append(row)
             if len(self._trades) > 5000:
                 del self._trades[: len(self._trades) - 5000]
@@ -376,6 +378,7 @@ class FeedHub:
                 "prices": len(self._prices),
                 "pending_fill_venues": sorted(self._fill_venues),
                 "pending_resolutions": len(self._resolutions),
+                "prints_seen": dict(self._prints_seen),
             }
 
 
