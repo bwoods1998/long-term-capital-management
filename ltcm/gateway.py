@@ -767,6 +767,9 @@ class Gateway:
                 "held_for_hours": _hours_between(opened_at, at),
                 "rationale_excerpt": rationale,
                 "fill_id": str(payload.get("fill_id") or ""),
+                # Whether real money was at stake when it closed: a later demotion must not
+                # turn a real result into practice on the public record.
+                "real_money": self.live_desk(desk_id),
             }
             return self.log.append(
                 stream, "desk.outcome", body, id=f"outcome:{desk_id}:{_short(str(payload.get('fill_id') or at))}", at=at
@@ -1068,6 +1071,7 @@ class Gateway:
             "pnl": text(pnl),
             "held_for_hours": _hours_between(opened_at, settled_at),
             "rationale_excerpt": rationale,
+            "real_money": self.live_desk(desk_id),
         }
         return self.log.append(
             stream,

@@ -1406,14 +1406,38 @@ class Service:
             return None
 
     def _live_pnl(self, at: str) -> Decimal:
-        """Profit on the live sleeves since inception: equity less what was deposited."""
+        """Profit on real money since inception: every live sleeve's equity less what was
+        deposited, plus each demoted desk's result frozen at the moment it left real money. A
+        demotion must never improve the record: on Sept 16, 2026 Scholes' -$53.93 dropped out of
+        the headline the minute it moved to a shadow book, and the floor read -$5.90."""
+        from .committee import demoted_desks
+
         total = ZERO
-        for desk_id in self.live_ids():
+        live = self.live_ids()
+        for desk_id in live:
             ledger = self.ledgers.get(desk_id)
             if ledger is None:
                 continue
             state = ledger.state(at)
             total += money(state.equity) - money(state.net_deposits)
+        cache = getattr(self, "_demoted_pnl", None)
+        if cache is None:
+            cache = self._demoted_pnl = {}
+        try:
+            demoted = demoted_desks(self.log)
+        except Exception:
+            demoted = {}
+        for desk_id, left_at in demoted.items():
+            if desk_id in live:
+                continue
+            key = (desk_id, left_at)
+            if key not in cache:
+                try:
+                    state = DeskLedger(self.log, desk_id, until=left_at).state(left_at)
+                    cache[key] = money(state.equity) - money(state.net_deposits)
+                except Exception:
+                    continue
+            total += cache[key]
         return total
 
     def _models_used(self) -> list[str]:

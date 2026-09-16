@@ -1136,6 +1136,25 @@ class PromotedDeskTests(ServiceCase):
         self.assertIn(DESK, self.service.shadow_books)
         self.assertFalse(self.service.gateway.live_desk(DESK))
 
+    def test_a_demotion_never_improves_the_real_money_record(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.service.close()
+        self.service = self.build(live_venues=[])
+        self.service.committee.allocate(self.service.now())
+        log = self.service.log
+        at = self.service.now()
+        log.append("broker:shadow", "broker.fill", {"id": "f1", "fill_id": "f1", "order_id": "o1", "desk_id": DESK,
+                   "instrument": AAPL.to_dict(), "side": "buy", "quantity": "10", "price": "100", "fee": "0", "at": at}, id="fill:x:f1", at=at)
+        log.append("broker:shadow", "broker.fill", {"id": "f2", "fill_id": "f2", "order_id": "o2", "desk_id": DESK,
+                   "instrument": AAPL.to_dict(), "side": "sell", "quantity": "10", "price": "90", "fee": "0", "at": at}, id="fill:x:f2", at=at)
+        before = self.service._live_pnl(at)
+        self.assertEqual(before, Decimal("-100"))
+        log.append("evolution", "evolution.promoted", {"desk_id": DESK, "from": "live", "to": "shadow", "reason": "breach"},
+                   id="demoted:x", at=at)
+        self.service._apply_capital_modes()
+        self.assertEqual(self.service.live_ids(), set())
+        self.assertEqual(self.service._live_pnl(at), Decimal("-100"), "the loss stays on the record")
+
     def test_the_evolution_loop_judges_with_the_committees_own_gates(self):
         self.assertEqual(self.service.evolution.config["committee"], {"bandit_enabled": False})
 

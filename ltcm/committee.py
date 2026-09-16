@@ -107,6 +107,21 @@ def promoted_desks(log: EventLog) -> dict[str, str]:
     return modes
 
 
+def demoted_desks(log: EventLog) -> dict[str, str]:
+    """desk_id -> when it left real money, for every desk whose latest capital move took it from
+    live to a shadow book. Its real-money result is its book as it stood then."""
+    out: dict[str, str] = {}
+    for event in log.read(kind="evolution.promoted", limit=10_000, newest=True):
+        desk_id = event.payload.get("desk_id")
+        if not isinstance(desk_id, str):
+            continue
+        if event.payload.get("to") == "shadow" and event.payload.get("from") == "live":
+            out[desk_id] = event.at
+        else:
+            out.pop(desk_id, None)
+    return out
+
+
 def capital_mode(manifest: DeskManifest, modes: Mapping[str, str]) -> str:
     """"shadow" or "live". The log wins over the manifest: promotion is an event, not an edit."""
     return modes.get(manifest.id, manifest.capital_mode)
