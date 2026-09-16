@@ -14,7 +14,10 @@ redeploy. Params: symbols, lookback, z_entry, stop_pct, holding_hours, notional_
 import math
 
 DEFAULTS = {
-    "symbols": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "LINK-USD", "AVAX-USD", "ADA-USD", "LTC-USD", "BCH-USD"],
+    # "top:N" is the N most traded USD products on Coinbase right now; the list is the fallback
+    # when the venue's listing cannot be read.
+    "symbols": "top:15",
+    "fallback_symbols": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "LINK-USD", "AVAX-USD", "ADA-USD", "LTC-USD", "BCH-USD"],
     "lookback": 24,
     "z_entry": 2.0,
     "stop_pct": 0.02,
@@ -53,7 +56,7 @@ def decide(kit, params):
     notional = _num(p.get("notional_usd")) or _num(ctx.get("learning_usd"), 25.0)
     intents = []
     scores = []
-    for symbol in _symbols(kit, p["symbols"], DEFAULTS["symbols"]):
+    for symbol in _symbols(kit, p["symbols"], DEFAULTS["fallback_symbols"]):
         if symbol in held:
             continue
         bars = kit.bars(symbol, "1h", int(p["lookback"]) + 1) or []
