@@ -357,11 +357,17 @@ class Committee:
         days = (parse_iso(at) - parse_iso(last_at)).days
         return days >= int(self.config["resize_interval_days"])
 
-    def allocate(self, now: Any = None) -> dict[str, Decimal]:
-        """Set each desk's capital target and publish it. Returns `{desk_id: usd}`."""
+    def allocate(self, now: Any = None, *, resize: bool | None = None) -> dict[str, Decimal]:
+        """Set each desk's capital target and publish it. Returns `{desk_id: usd}`.
+
+        `resize=True` moves capital by track record now; None decides from the last allocation's
+        age. The service passes True on its resize schedule: evolution changes the roster most
+        nights, and every roster change writes an allocation, so an age measured from the last
+        allocation of any kind would push a daily resize back forever."""
         at = iso_time(now) if now is not None else self.now()
         previous, last_at = self.last_allocation()
-        resize = self._resize_due(last_at, at)
+        if resize is None:
+            resize = self._resize_due(last_at, at)
         modes = self.modes()
         active = self.active()
         breach_limit = money(

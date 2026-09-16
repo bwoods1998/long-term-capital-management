@@ -61,6 +61,17 @@ class RiskEngineTests(unittest.TestCase):
         self.assertTrue(any("orders today" in r for r in decision.reasons))
         self.assertTrue(any("order notional" in r for r in decision.reasons))  # 500 > 25% of 1000
 
+    def test_an_exit_is_never_refused_for_the_days_order_count(self):
+        held = {AAPL.key: type("P", (), {"quantity": Decimal("5"), "instrument": AAPL, "average_cost": Decimal("100"), "mark": Decimal("100")})()}
+        stop = OrderIntent.new(
+            desk_id="earnings-01", instrument=AAPL, side="sell", quantity="5", order_type="market", rationale="stop",
+            created_at="2026-09-14T14:30:00.000Z", session_id=None, purpose="exit", exit_reason="stop", exit_of="oi-x",
+        )
+        decision = self.engine.check(stop, context(desk_orders_today=500, positions=held))
+        self.assertFalse(any("orders today" in r for r in decision.reasons), decision.reasons)
+        entry = self.engine.check(intent(quantity="1"), context(desk_orders_today=500))
+        self.assertTrue(any("orders today" in r for r in entry.reasons), "the desk's own orders still count")
+
     def test_mandate_rules(self):
         crypto = Instrument("crypto", "BTC-USD", "alpaca")
         decision = self.engine.check(intent(instrument=crypto, quantity="0.001"), context())

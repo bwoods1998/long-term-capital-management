@@ -866,14 +866,38 @@ class Strategies:
         back to learning size on the next run. This is the floor's capital following the
         strategies that earn it, one step at a time."""
         learning = self.learning_usd(manifest)
-        if not manifest.live:
-            return learning
-        record = self.record(manifest.id, name)
-        settled = int(record.get("settled") or 0)
-        pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
-        if settled >= int(self.config.get("earned_settled", 20)) and pnl > 0:
-            return learning * Decimal(str(self.config.get("earned_multiple", 3)))
-        return learning
+        if manifest.live:
+            record = self.record(manifest.id, name)
+            settled = int(record.get("settled") or 0)
+            pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
+            if settled >= int(self.config.get("earned_settled", 20)) and pnl > 0:
+                learning = learning * Decimal(str(self.config.get("earned_multiple", 3)))
+        fit = self.limit_fit_usd(manifest)
+        return min(learning, fit) if fit is not None else learning
+
+    def limit_fit_usd(self, manifest: DeskManifest) -> Decimal | None:
+        """The largest order the desk's own limits allow now: the smaller of the order and the
+        position caps, times desk equity, with a little headroom for the reference moving.
+
+        A fixed learning size is a trap for a desk that loses: on Sept 16, 2026 Scholes fell to
+        $33 and Haghani to $83, a $10 order broke their 15% and 10% caps, and every order was
+        refused, so neither could trade, learn, or earn its way back. Sizing to fit keeps a
+        shrinking desk producing evidence at a size its limits accept; the committee decides
+        how much capital it deserves. None when the desk's equity cannot be read."""
+        ledgers = getattr(self.service, "ledgers", None)
+        ledger = ledgers.get(manifest.id) if isinstance(ledgers, Mapping) else None
+        if ledger is None:
+            return None
+        try:
+            equity = ledger.state(self.service.now()).equity
+        except Exception:
+            return None
+        if equity is None or equity <= 0:
+            return None
+        limits = manifest.limits
+        pct = min(limits.max_order_notional_pct, limits.max_position_pct)
+        headroom = Decimal(str(self.config.get("limit_headroom", "0.9")))
+        return (equity * pct * headroom).quantize(Decimal("0.01"))
 
     def _cancel(self, manifest: DeskManifest, name: str, order_ids: list[str], at: str) -> int:
         """Cancel the desk's own resting orders a strategy asked to replace. A strategy may only
@@ -904,7 +928,10 @@ class Strategies:
             except Exception:
                 pass
         session = tools_module.ToolSession(session_id=session_id, desk_id=manifest.id, now=at)
-        cap = self.size_cap(manifest, name)
+        # A live desk: learning size, earned size, and the desk's own limits. A shadow desk sizes
+        # itself (a variant's params may explore size); only its limits bind, so it is never
+        # refused into silence.
+        cap = self.size_cap(manifest, name) if manifest.live else self.limit_fit_usd(manifest)
         out: list[dict[str, Any]] = []
         for raw in intents[: int(self.config["max_intents_per_run"])]:
             args = dict(raw)
@@ -912,7 +939,7 @@ class Strategies:
             if args.get("order_type") != "limit" or _dec(args.get("limit_price")) is None:
                 out.append({"approved": False, "reasons": ["a strategy proposes limit orders with a limit_price"], "rationale": str(args.get("rationale") or "")[:200]})
                 continue
-            if manifest.live:
+            if cap is not None:
                 args["quantity"] = _capped_quantity(args, cap)
             args["rationale"] = f"[strategy {name}] " + str(args.get("rationale") or "no rationale given")[:1800]
             try:

@@ -668,6 +668,26 @@ class ScheduleTests(ServiceCase):
         self.assertEqual(len(self.service.log.read(kind="committee.memo")), 2)
         self.assertEqual(len(self.service.log.read(kind="committee.allocation")), 1)
 
+    def test_a_daily_interval_resizes_every_evening_whatever_the_roster_did(self):
+        self.service.close()
+        self.service = self.build(committee={"bandit_enabled": False, "resize_interval_days": 1})
+        self.fund()
+        calls = []
+        real = self.service.committee.allocate
+        self.service.committee.allocate = lambda at=None, **kw: calls.append((at, kw)) or real(at, **kw)
+        # A roster change in the small hours writes an allocation; the evening still resizes.
+        self.fund(moment(2026, 9, 14, 6, 0))
+        result = self.tick(moment(2026, 9, 14, 22, 5))  # Monday 18:05 New York
+        self.assertTrue(result["committee"])
+        self.assertEqual(calls[-1][1], {"resize": True})
+        self.assertEqual(self.service.state()["last_resize_day"], "2026-09-14")
+        before = len(calls)
+        self.tick(moment(2026, 9, 14, 22, 40))
+        self.assertEqual(len(calls), before, "once an evening")
+        self.tick(moment(2026, 9, 15, 22, 5))  # Tuesday: resized again
+        self.assertEqual(calls[-1][1], {"resize": True})
+        self.assertEqual(self.service.state()["last_resize_day"], "2026-09-15")
+
     def test_the_daily_memo_can_be_switched_off(self):
         self.service.close()
         self.service = self.build(committee_memo_daily=False)

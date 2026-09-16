@@ -2574,11 +2574,24 @@ class Service:
         if stopped:
             pass  # the memo and the evolution loop both ask the model; they wait for credit
         elif self._due(local, self.config["committee_time"], state.get("last_committee_day"), day):
-            # Meriwether writes every day; capital is only resized on the committee's weekday.
-            resize_day = local.weekday() == int(self.config["committee_weekday"])
+            # Meriwether writes every day. Capital moves every `resize_interval_days` (config
+            # `committee`); a weekly interval keeps the committee's weekday. Until Sept 16, 2026
+            # the resize ran on the weekday alone, so a configured daily resize never happened
+            # and capital could not follow the desks that were earning it for up to a week.
+            interval = int(self.committee.config.get("resize_interval_days", 7))
+            last_resize = state.get("last_resize_day")
+            if interval >= 7:
+                resize_day = local.weekday() == int(self.config["committee_weekday"])
+            else:
+                try:
+                    elapsed = (datetime.fromisoformat(day).date() - datetime.fromisoformat(str(last_resize)).date()).days
+                except (TypeError, ValueError):
+                    elapsed = interval
+                resize_day = last_resize is None or elapsed >= interval
             memo_daily = bool(self.config.get("committee_memo_daily", True))
             if resize_day:
-                self.committee.allocate(at)
+                self.committee.allocate(at, resize=True)
+                self._save_state(last_resize_day=day)
                 result["committee"] = True
             if resize_day or memo_daily:
                 result["memo"] = bool(self.committee.memo(at))

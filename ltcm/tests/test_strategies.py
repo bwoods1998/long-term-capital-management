@@ -328,6 +328,24 @@ class CancelAndRecordTests(StrategyCase):
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "a losing record goes back to learning size")
         self.assertEqual(self.strategies.size_cap(self.manifest, "edge"), Decimal("15"), "a shadow desk keeps its learning size")
 
+    def test_a_shrinking_desk_is_sized_to_fit_its_own_limits(self):
+        """Scholes at $33 with a 15% cap: a $10 learning order is refused forever; $4.45 trades."""
+        live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
+        equity = {"scholes": Decimal("33"), self.manifest.id: Decimal("1000")}
+
+        class Ledger:
+            def __init__(self, value):
+                self.value = value
+
+            def state(self, at):
+                return type("S", (), {"equity": self.value})()
+
+        self.service.ledgers = {k: Ledger(v) for k, v in equity.items()}
+        pct = min(live.limits.max_order_notional_pct, live.limits.max_position_pct)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), (Decimal("33") * pct * Decimal("0.9")).quantize(Decimal("0.01")))
+        self.assertLess(self.strategies.size_cap(live, "edge"), Decimal("10"))
+        self.assertEqual(self.strategies.size_cap(self.manifest, "edge"), Decimal("15"), "a rich desk keeps its learning size")
+
     def test_the_record_attributes_fills_and_settlements_to_the_strategy(self):
         self.strategies.deploy(self.manifest, "edge", 600, {})
         self.log_events += [
@@ -542,6 +560,15 @@ class StarterTests(unittest.TestCase):
         offer = again["intents"][0]
         self.assertEqual((offer["side"], offer["post_only"], offer["quantity"]), ("sell", True, "0.000200"))
         self.assertGreater(Decimal(offer["limit_price"]), Decimal("75300"), "over cost by the spread")
+
+    def test_the_spot_quoting_starter_bids_over_dust_and_never_offers_more_than_it_holds(self):
+        kit = FakeKit()
+        kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.00000164", "average_cost": "75693.78"}]
+        out = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})
+        self.assertEqual([i["side"] for i in out["intents"]], ["buy"], "12 cents of BTC is dust: bid as if flat")
+        kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.00049996", "average_cost": "75000"}]
+        offer = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})["intents"][0]
+        self.assertEqual((offer["side"], offer["quantity"]), ("sell", "0.000499"), "rounded down, never above the holding")
 
     def test_the_reversion_starter_buys_the_crash_and_leaves_the_rest(self):
         kit = FakeKit()

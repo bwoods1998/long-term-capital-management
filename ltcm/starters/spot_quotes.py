@@ -10,9 +10,15 @@ fill closes the round trip above cost. Quotes older than `requote_seconds`, or m
 `drift` away from where they belong now, are cancelled and replaced. A quote that would cross
 the book is refused by the venue and by the shadow book alike, so the desk can never take.
 
-Params: symbols, spread, drift, requote_seconds, notional_usd, max_symbols.
+A holding worth less than `min_inventory_usd` is dust, not inventory: the venue will not take
+an order that small, and on Sept 16, 2026 a few cents of ETH and BTC left by earlier round
+trips kept the live desk offering dust it could not sell instead of bidding. Offer sizes are
+rounded down, so an offer never exceeds the holding.
+
+Params: symbols, spread, drift, requote_seconds, notional_usd, max_symbols, min_inventory_usd.
 """
 
+import math
 from datetime import datetime, timezone
 
 DEFAULTS = {
@@ -22,6 +28,7 @@ DEFAULTS = {
     "requote_seconds": 900,
     "notional_usd": None,
     "max_symbols": 3,
+    "min_inventory_usd": 1.0,
 }
 
 
@@ -41,6 +48,12 @@ def _when(text):
 
 def _price(value):
     return f"{value:.2f}"
+
+
+def _down(quantity, places=6):
+    """Round a size down, never up: a sell rounded up asks for more than the desk holds."""
+    scale = 10 ** places
+    return math.floor(quantity * scale + 1e-9) / scale
 
 
 def _symbols(kit, spec, fallback):
@@ -77,8 +90,12 @@ def decide(kit, params):
             kit.say(f"{symbol}: no quote")
             continue
         mid = (bid + ask) / 2.0
-        if symbol in held:
-            quantity, cost = held[symbol]
+        inventory = held.get(symbol)
+        if inventory is not None and _down(inventory[0]) * mid < float(p.get("min_inventory_usd") or 0):
+            inventory = None  # dust: bid as if flat
+        if inventory is not None:
+            quantity, cost = inventory
+            quantity = _down(quantity)
             offer = max(cost * (1.0 + float(p["spread"])), mid * (1.0 + float(p["spread"]) / 2.0))
             offer = max(offer, ask + 0.01)  # never cross: an offer at or under the ask would take
             targets[(symbol, "sell")] = (offer, quantity, f"offer {quantity:.6f} {symbol} at {offer:,.2f}: cost {cost:,.2f}, mid {mid:,.2f}; a fill closes the round trip {float(p['spread']) * 100:.1f}% over cost at the maker rate. Exit rule: this offer is the exit; it is replaced when mid drifts {float(p['drift']) * 100:.1f}% or after {int(p['requote_seconds']) // 60} min")

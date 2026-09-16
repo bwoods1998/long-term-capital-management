@@ -297,6 +297,12 @@ def rule_gross_limit(intent: OrderIntent, ctx: RiskContext) -> str | None:
 
 
 def rule_order_count(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    """The count throttles a desk's own churn. The floor's exits (stops, targets, time stops)
+    are not churn: on Sept 16, 2026 a shadow desk that had quoted 120 times was refused its
+    stop every five minutes while the position kept falling. They are retried on a slow
+    cadence by the exit book, and the gateway's own daily order cap still binds."""
+    if intent.purpose == "exit":
+        return None
     if ctx.desk_orders_today >= ctx.manifest.limits.max_orders_per_day:
         return f"desk reached {ctx.manifest.limits.max_orders_per_day} orders today"
     return None
