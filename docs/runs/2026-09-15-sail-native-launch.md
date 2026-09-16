@@ -209,3 +209,11 @@ and the README now says so.
 The live watcher measured the cost of an inline playbook rewrite: the checkpoint froze for 6 minutes 15 seconds (23:17:28 to 23:23:43) while scholes-3 was born, and every hourly seeding pass would have repeated it. Commit 879f00a moves the rewrite off the tick: a child is born at once with its parent's playbook (plus the house view), the model's rewrite runs on a worker thread that touches nothing but the provider, and the tick applies finished rewrites through `PlaybookStore` as a versioned `desk.playbook_updated` (reason "bred from <parent>"). `evolution.deferred_rewrites` (default on) switches it off. The gateway watchdog's stale-checkpoint threshold had been raised to 1800 s at 23:20 as a stopgap and stays there.
 
 The 24h-burn deploy (a44a60c) took effect at 23:24: the run block's infra total fell from the 30-day figure (105.14, most of it the earlier paper week) to the floor's own 3.58, runway 53 days at Sail's 24h burn of 5.06 a day.
+
+## Addendum: the lab's first night (00:00-00:30 UTC, Sept 16)
+
+- The lab opened on schedule: three `lab.resolution` rows at 00:00 for the 20:00 BTC hourly markets, `lab_pending_day` set, one model call per tick.
+- The first nightly `lab.result` (`lab:daily:2026-09-15`) was refused by the site (HTTP 400): its `metrics` was one flat map of 269 `desk.<id>.<metric>` keys and `capital/schema.js` caps any object at a hundred keys. The publisher named it in an alert and passed over it, as designed, so the tape never stalled; that one record stays off the site. Commit 9642939 groups the block (`window`, `floor`, `profiles{name}`, `desks{id}`, `by_generation[]`), sheds the quietest desks beyond a hundred and detail beyond 20 KB, and mirrors the site's `safeValue` limits in `publish.shape_problem`, so an oversized payload is a named alert on the box before it is sent.
+- The risk engine blocked scholes-3's NO order on a market that had settled while its session ran (reference price 1.00 against a 0.50 limit): the 50% deviation rule did its job.
+- The public `ops.budget` event fired on every cent of spend (fourteen in twenty minutes); it now counts dollars (2f9e942).
+- Queued playbook rewrites are kept in the service state until applied and re-queued after a restart (6aacdf7).
