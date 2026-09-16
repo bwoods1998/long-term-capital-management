@@ -153,7 +153,8 @@ def decide(kit, params):
         stale = age is not None and age > float(p["requote_seconds"])
         gone = info is None or info[1] < float(p["min_minutes"])
         drifted = info is not None and price is not None and abs(price - target_price(info, leg)) > float(p["drift"])
-        if stale or gone or drifted:
+        if stale or gone or drifted or (ticker, leg) in quoted:
+            # a second quote on the same leg is a duplicate: keep one
             if order.get("order_id"):
                 cancels.append(order["order_id"])
         else:

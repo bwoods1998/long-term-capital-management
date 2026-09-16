@@ -244,20 +244,24 @@ class CoinbaseBroker:
     def balance(self) -> Balance:
         """Cash is the available USD balance; equity adds every crypto holding at its mark."""
         cash = money(0)
+        held = money(0)
         positions = self.positions()
         for row in self.accounts():
             available = row.get("available_balance") or {}
             currency = str(available.get("currency") or row.get("currency") or "")
             if currency.upper() == "USD":
                 cash += dec(available.get("value"), "0")
-        equity = cash
+                # USD behind resting bids sits in `hold`, still ours: without it the floor read a
+                # $25 loss for every maker bid it posted (Sept 16, 2026, the first spot quotes).
+                held += dec((row.get("hold") or {}).get("value"), "0") or money(0)
+        equity = cash + held
         for position in positions:
             value = position.market_value
             if value is not None:
                 equity += value
         return Balance(
             venue=self.venue,
-            cash=cash,
+            cash=cash + held,
             equity=equity,
             buying_power=cash,
             as_of=iso(self.clock()),

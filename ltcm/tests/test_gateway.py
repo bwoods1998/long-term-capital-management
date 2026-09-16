@@ -1038,3 +1038,19 @@ class BothLegsSettlementTests(SettlementCase):
         )
         self.assertEqual(self.ledger.state("2026-09-16T00:00:00.000Z").positions, {})
         self.assertEqual(self.gateway.poll_settlements("kalshi"), [])
+
+
+class PolledOrderKeepsItsDeskTests(unittest.TestCase):
+    def test_an_empty_desk_or_intent_on_a_later_order_event_never_erases_the_known_one(self):
+        from ltcm.gateway import Gateway
+
+        class Row:
+            def __init__(self, payload, seq):
+                self.payload, self.seq, self.kind, self.id, self.public = payload, seq, "broker.order", f"e{seq}", False
+
+        gateway = Gateway.__new__(Gateway)
+        gateway._orders, gateway._intent_orders, gateway._venue_orders, gateway.blocked_desks = {}, {}, {}, {}
+        gateway._absorb_order_event(Row({"order_id": "ord-1", "desk_id": "hilibrand", "intent_id": "oi-1", "status": "accepted", "purpose": "entry", "venue": "coinbase"}, 1))
+        gateway._absorb_order_event(Row({"order_id": "ord-1", "desk_id": "", "intent_id": None, "status": "accepted", "filled_quantity": "0", "venue": "coinbase"}, 2))
+        row = gateway._orders["ord-1"]
+        self.assertEqual((row["desk_id"], row["intent_id"], row["purpose"]), ("hilibrand", "oi-1", "entry"))

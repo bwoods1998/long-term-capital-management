@@ -36,26 +36,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--apply", action="store_true", help="write the corrected copies (default: dry run)")
     parser.add_argument("--log", default=str(ROOT / ".data" / "ltcm" / "events.sqlite"))
+    parser.add_argument("--no-kalshi", action="store_true", help="map from the tape alone, without asking Kalshi")
     args = parser.parse_args(argv)
 
-    broker = kalshi_shard.broker()
-    venue_to_ours: dict[str, str] = {}
-    for status in ("resting", "executed", "canceled"):
-        try:
-            for order in broker.orders(status=status, limit=200):
-                if order.broker_order_id:
-                    venue_to_ours[str(order.broker_order_id)] = order.id
-        except Exception as exc:
-            print(f"could not list {status} orders: {type(exc).__name__}: {exc}", file=sys.stderr)
-    print(f"{len(venue_to_ours)} venue orders mapped to floor orders")
-
     log = EventLog(args.log)
+    # The tape's own order rows name the venue's id for every order the floor placed, on any
+    # venue; Kalshi's listing is a supplement for orders recorded before that field existed.
+    venue_to_ours: dict[str, str] = {}
     orders = {}
     for event in log.read(kind="broker.order", limit=20_000):
         row = orders.setdefault(event.payload.get("order_id"), {})
         for key in ("desk_id", "intent_id"):
             if event.payload.get(key):
                 row[key] = event.payload[key]
+        if event.payload.get("venue_order_id"):
+            venue_to_ours[str(event.payload["venue_order_id"])] = event.payload.get("order_id")
+    if not args.no_kalshi:
+        try:
+            broker = kalshi_shard.broker()
+            for status in ("resting", "executed", "canceled"):
+                for order in broker.orders(status=status, limit=200):
+                    if order.broker_order_id:
+                        venue_to_ours.setdefault(str(order.broker_order_id), order.id)
+        except Exception as exc:
+            print(f"could not list Kalshi orders: {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(f"{len(venue_to_ours)} venue orders mapped to floor orders")
     # The side comes from the intent the desk filed, never from a polled order row: the polls
     # that ran before the fix recorded every NO buy as a sell.
     intent_side = {}

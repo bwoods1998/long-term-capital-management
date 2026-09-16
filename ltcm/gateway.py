@@ -233,7 +233,12 @@ class Gateway:
         if not isinstance(order_id, str):
             return
         row = self._orders.setdefault(order_id, {"order_id": order_id})
-        row.update({k: v for k, v in payload.items() if v is not None})
+        # A polled order row comes back from the venue without the desk, the intent or the
+        # purpose (the venue never knew them). An empty value never erases a known one: for
+        # twelve hours on Sept 16, 2026 every poll blanked `desk_id`, so the desks' own resting
+        # orders vanished from `open_orders`, strategies re-quoted every run, and venue fills
+        # went unattributed.
+        row.update({k: v for k, v in payload.items() if v is not None and not (v == "" and row.get(k))})
         row["status"] = payload.get("status", row.get("status", "new"))
         intent_id = payload.get("intent_id")
         if isinstance(intent_id, str):
@@ -601,10 +606,11 @@ class Gateway:
     def _record_order(
         self, order: Order, *, status: str, at: str, reason: str | None = None
     ) -> dict[str, Any]:
+        known = self._orders.get(order.id) or {}
         payload: dict[str, Any] = {
             "order_id": order.id,
-            "intent_id": order.intent_id,
-            "desk_id": order.desk_id,
+            "intent_id": order.intent_id or known.get("intent_id"),
+            "desk_id": order.desk_id or known.get("desk_id") or "",
             "venue": order.venue,
             "instrument": order.instrument.to_dict(),
             "side": order.side,
@@ -626,10 +632,10 @@ class Gateway:
             # Nothing was sent. The row says so on its face, wherever it is read.
             payload["shadow"] = True
         # leap: exits. What the order was for, and whether the venue holds a bracket for it.
-        payload["purpose"] = order.purpose or "entry"
-        if order.purpose == "exit":
-            payload["exit_reason"] = order.exit_reason
-            payload["exit_of"] = order.exit_of
+        payload["purpose"] = order.purpose or known.get("purpose") or "entry"
+        if payload["purpose"] == "exit":
+            payload["exit_reason"] = order.exit_reason or known.get("exit_reason")
+            payload["exit_of"] = order.exit_of or known.get("exit_of")
         bracket = order._raw.get("bracket") if isinstance(order._raw, dict) else None
         if isinstance(bracket, bool):
             payload["bracket"] = bracket

@@ -80,7 +80,9 @@ def decide(kit, params):
         stale = age is not None and age > float(p["requote_seconds"])
         gone = target is None
         drifted = target is not None and price is not None and abs(price - target[0]) / max(target[0], 1e-9) > float(p["drift"])
-        if stale or gone or drifted:
+        if stale or gone or drifted or key in kept:
+            # `key in kept`: a second order on the same symbol and side is a duplicate (the floor
+            # once lost track of its own quotes and posted a fresh bid every run); keep one.
             if order.get("order_id"):
                 cancels.append(order["order_id"])
         else:
