@@ -238,6 +238,22 @@ class Toolbox:
         self.dir = Path(root) / desk_id
         self.dir.mkdir(parents=True, exist_ok=True)
 
+    def remove(self, name: str) -> bool:
+        """Delete a saved tool (leap: foundry -- a replaced candidate leaves no file behind, so a
+        desk's toolbox, uploaded whole before every run, does not grow with every cycle)."""
+        if not TOOL_NAME.match(name):
+            return False
+        path = self.dir / f"{name}.py"
+        existed = path.exists()
+        try:
+            path.unlink()
+        except OSError:
+            existed = False
+        index = self.index()
+        if index.pop(name, None) is not None:
+            (self.dir / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+        return existed
+
     def save(self, name: str, code: str, purpose: str) -> None:
         if not TOOL_NAME.match(name):
             raise ValueError("a tool name is lowercase letters, digits and underscores, 40 at most")
@@ -288,6 +304,11 @@ class SandboxManager:
         self.clock = clock
         self.daily_seconds = int(daily_seconds)
         self._lock = threading.RLock()
+        #: desk id prefix -> {daily_seconds, max_timeout}: the Foundry's backtest sandboxes run for
+        #: minutes at a time all day, which a desk's fuse (and the ten-minute run cap) would stop.
+        self._prefix_limits: dict[str, dict[str, int]] = {}
+        #: desk id -> the lock one run holds from its uploads to the end of its program.
+        self._run_locks: dict[str, threading.Lock] = {}
 
     # ------------------------------------------------------------------ state
     def state(self) -> dict[str, Any]:
@@ -312,6 +333,28 @@ class SandboxManager:
 
     def toolbox_save(self, desk_id: str, name: str, code: str, purpose: str) -> None:
         Toolbox(self.toolbox_root, desk_id).save(name, code, purpose)
+
+    def toolbox_remove(self, desk_id: str, name: str) -> bool:
+        return Toolbox(self.toolbox_root, desk_id).remove(name)
+
+    def set_limits(self, prefix: str, *, daily_seconds: int | None = None, max_timeout: int | None = None) -> None:
+        """Give the sandboxes whose desk id starts with `prefix` their own daily fuse and run cap
+        (leap: foundry). Every other sandbox keeps the manager's."""
+        limits: dict[str, int] = {}
+        if daily_seconds is not None:
+            limits["daily_seconds"] = max(60, int(daily_seconds))
+        if max_timeout is not None:
+            limits["max_timeout"] = max(5, int(max_timeout))
+        self._prefix_limits[str(prefix)] = limits
+
+    def limits_for(self, desk_id: str) -> tuple[int, int]:
+        """(daily seconds, longest run) for one sandbox."""
+        daily, cap = self.daily_seconds, DEFAULT_TIMEOUT * 5
+        for prefix, limits in getattr(self, "_prefix_limits", {}).items():
+            if prefix and str(desk_id).startswith(prefix):
+                daily = int(limits.get("daily_seconds", daily))
+                cap = int(limits.get("max_timeout", cap))
+        return daily, cap
 
     def box_for(self, desk_id: str) -> str | None:
         return (self.state().get("boxes") or {}).get(desk_id)
@@ -403,10 +446,28 @@ class SandboxManager:
             return CodeRun(desk_id, digest, f"code is over {MAX_CODE_CHARS} characters", 2, zero, None, purpose)
         if not self.available():
             return CodeRun(desk_id, digest, "no sandbox is available on this floor", 3, zero, None, purpose)
-        remaining = self.daily_seconds - self.seconds_today(desk_id)
+        # One run per sandbox at a time. Every run uploads the same `/lab/run/main.py` and the
+        # desk's toolbox before it executes; until Sept 16, 2026 two runs on one desk (a strategy
+        # tick and a dry run from `Strategies.install` on the Foundry's thread, or a session's
+        # run_code) could overwrite each other's program between upload and exec, so one ran the
+        # other's code and its result was read as its own.
+        with self._run_lock(desk_id):
+            return self._run_locked(desk_id, code, digest, purpose=purpose, save_as=save_as, timeout=timeout)
+
+    def _run_lock(self, desk_id: str) -> threading.Lock:
+        with self._lock:
+            locks = getattr(self, "_run_locks", None)
+            if locks is None:
+                locks = self._run_locks = {}
+            return locks.setdefault(str(desk_id), threading.Lock())
+
+    def _run_locked(self, desk_id: str, code: str, digest: str, *, purpose: str, save_as: str | None, timeout: int) -> CodeRun:
+        zero = Decimal("0")
+        daily, longest = self.limits_for(desk_id)
+        remaining = daily - self.seconds_today(desk_id)
         if remaining <= 0:
             return CodeRun(desk_id, digest, "the desk's sandbox time for today is used up", 4, zero, None, purpose)
-        timeout = max(5, min(int(timeout), remaining, DEFAULT_TIMEOUT * 5))
+        timeout = max(5, min(int(timeout), remaining, longest))
         toolbox = Toolbox(self.toolbox_root, desk_id)
         if save_as:
             try:

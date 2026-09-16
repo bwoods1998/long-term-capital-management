@@ -66,6 +66,49 @@
     "idle_publish_seconds": 3600,
     "starters": true
   },
+  "foundry": {
+    "enabled": true,
+    "interval_minutes": 30,
+    "families": [
+      "kalshi",
+      "ranges",
+      "crypto"
+    ],
+    "param_candidates": 10,
+    "code_candidates": 2,
+    "profile": "k3",
+    "reasoning_effort": "high",
+    "max_output_tokens": 16000,
+    "budget_usd_per_day": "25",
+    "sandboxes": 8,
+    "backtest_timeout_seconds": 900,
+    "sandbox_daily_seconds": 43200,
+    "window_days": 5,
+    "step_minutes": 15,
+    "family_step_minutes": {
+      "ranges": 5
+    },
+    "split_fraction": 0.66,
+    "min_oos_trades": 25,
+    "min_trades": 60,
+    "margin": 0.01,
+    "min_ci_lower": 0,
+    "min_forward_settled": 5,
+    "protect_hours": 6,
+    "forward_max_hours": 72,
+    "code_chars": 14000,
+    "frozen_params": [
+      "notional_usd",
+      "no_max",
+      "max_new",
+      "max_intents",
+      "max_quotes",
+      "max_symbols",
+      "max_open_per_series",
+      "max_open_per_event",
+      "pages"
+    ]
+  },
   "evolution": {
     "min_days": 1,
     "min_decisions": 5,

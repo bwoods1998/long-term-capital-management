@@ -770,6 +770,58 @@ class PromotionTests(StrategyCase):
         self.trades("scholes-2", "3.00", 12)  # now clearly better
         self.assertEqual(len(self.strategies.promote(self.service.manifests, LATER)), 1)
 
+    def test_the_forward_record_counts_only_positions_opened_since_a_deployment(self):
+        """leap: foundry -- settlements are dated when they settle; a candidate deployed at 14:20
+        must not be credited with the positions the old settings opened at noon."""
+        from ltcm.broker import Instrument
+
+        since = "2026-09-16T14:20:00.000Z"
+
+        def position(n, opened, settled, held, pnl="0.10", fill_at=None):
+            leg = Instrument(asset_class="event", symbol=f"KXA-{n}", venue="kalshi", right="no", market_id=f"KXA-{n}")
+            self.log_events += [
+                ("desk:scholes-2", "desk.intent", {"intent_id": f"oi-f{n}", "session_id": "scholes-2:20260916-1200:strategy:edge"}, opened),
+                ("broker:shadow", "broker.order", {"order_id": f"ord-f{n}", "intent_id": f"oi-f{n}"}, opened),
+                ("broker:shadow", "broker.fill", {"order_id": f"ord-f{n}", "quantity": "10", "price": "0.90", "fee": "0.01", "instrument": leg.to_dict()}, fill_at or opened),
+                ("desk:scholes-2", "desk.outcome", {"pnl": pnl, "rationale_excerpt": "[strategy edge] NO", "instrument": leg.key, "held_for_hours": held}, settled),
+            ]
+
+        for n in range(5):  # the old settings' positions, opened at noon, settling at three
+            position(n, "2026-09-16T12:00:00.000Z", "2026-09-16T15:00:00.000Z", "3.0")
+        plain = self.strategies.record("scholes-2", "edge", since=since)
+        self.assertEqual(plain["settled"], 5, "dated by settlement, the old positions count in the plain record")
+        forward = self.strategies.record("scholes-2", "edge", since=since, opened_since=True)
+        self.assertEqual((forward["settled"], forward["fills"], float(forward["settled_pnl_usd"])), (0, 0, 0.0))
+        for n in range(5, 8):  # opened after the deployment
+            position(n, "2026-09-16T14:30:00.000Z", "2026-09-16T16:30:00.000Z", "2.0", pnl="0.20")
+        position(8, "2026-09-16T14:22:00.000Z", "2026-09-16T16:22:00.000Z", "2.0")  # rounding could put it before
+        position(9, "2026-09-16T14:30:00.000Z", "2026-09-16T16:30:00.000Z", None)  # its opening is unknown
+        position(10, "2026-09-16T14:40:00.000Z", "2026-09-16T16:40:00.000Z", "2.0", fill_at="2026-09-16T12:00:00.000Z")  # no fill since
+        forward = self.strategies.record("scholes-2", "edge", since=since, opened_since=True)
+        self.assertEqual((forward["settled"], forward["wins"], forward["settled_pnl_usd"]), (3, 3, "0.60"))
+        self.assertEqual((forward["fills"], forward["fees_usd"]), (5, "0.05"))
+
+    def test_promotion_leaves_a_foundry_adoption_and_its_shadow_trials_alone(self):
+        """leap: foundry -- an adoption resets the live evidence; until Sept 16, 2026 the hourly
+        promotion read that as "no live score" and swapped the settings within the hour, and it
+        re-dealt the shadow row the Foundry was still proving."""
+        store = self.strategies.store
+        store.update("scholes", "edge", params={"min_edge": 0.03, "vol_bars": 20, "window": "1h"}, promoted_at="2026-09-16T04:30:00.000Z", foundry_id="fdy-1-live")
+        store.update("scholes-3", "edge", params={"min_edge": 0.05, "vol_bars": 30, "window": "15m"}, promoted_at="2026-09-16T04:30:00.000Z", foundry_id="fdy-2-trial")
+        self.trades("scholes-2", "1.00", 12)
+        self.assertEqual(self.strategies.promote(self.service.manifests, "2026-09-16T06:00:00.000Z"), [], "no live record since the adoption yet")
+        self.assertEqual(store.for_desk("scholes")["edge"]["params"], {"min_edge": 0.03, "vol_bars": 20, "window": "1h"})
+        self.strategies._last_promotion_at = None
+        self.trades("scholes", "-0.50", 12)  # measured, and losing: now the family's record decides
+        out = self.strategies.promote(self.service.manifests, "2026-09-16T07:00:00.000Z")
+        self.assertEqual([p["from"] for p in out], ["scholes-2"])
+        live = store.for_desk("scholes")["edge"]
+        self.assertEqual(live["params"], {"min_edge": 0.0, "vol_bars": 36, "window": "5m"})
+        self.assertIsNone(live["foundry_id"], "a promotion's settings are its own")
+        trial = store.for_desk("scholes-3")["edge"]
+        self.assertEqual(trial["params"], {"min_edge": 0.05, "vol_bars": 30, "window": "15m"}, "the Foundry's trial is not re-dealt")
+        self.assertEqual(trial["promoted_at"], "2026-09-16T04:30:00.000Z")
+
     def test_bootstrap_leaves_a_promoted_setting_alone(self):
         from ltcm.strategies import STARTERS_DIR
         self.strategies.config["starters"] = True

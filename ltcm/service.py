@@ -983,6 +983,7 @@ class Service:
         )
         self.lab.strategies = self.strategies  # leap: lab -- built after the lab; hand it over
         self.founding = self._build_founding()  # leap: founding
+        self.foundry = self._build_foundry()  # leap: foundry
         notify = dict(self.config.get("notify") or {})
         self.notifier = TradeNotifier(
             self.log,
@@ -1357,6 +1358,67 @@ class Service:
         except Exception as exc:
             self.alert("warning", f"sandboxes unavailable: {type(exc).__name__}")
             return None
+
+    def _build_foundry(self) -> Any:
+        """leap: foundry -- the hourly evidence loop (`ltcm/foundry.py`), built once the strategy
+        runner and the sandboxes exist. Its backtest sandboxes get their own fuse and run cap."""
+        settings = dict(self.config.get("foundry") or {})
+        if not bool(settings.get("enabled", True)):
+            return None
+        try:
+            from .foundry import DEFAULTS as FOUNDRY_DEFAULTS, Foundry
+
+            foundry = Foundry(
+                log=self.log,
+                strategies=self.strategies,
+                sandboxes=lambda: self.sandboxes,
+                provider=self.provider,
+                manifests=self.active_manifests,
+                clock=self.clock,
+                alert=self.alert,
+                config=settings,
+                state_path=self.capital_dir / "foundry.json",
+                equity=self._desk_equity,
+                halted=lambda: self.gateway.kill_switch_engaged(),
+            )
+        except Exception as exc:
+            self.alert("warning", f"foundry unavailable: {type(exc).__name__}")
+            return None
+        limiter = getattr(self.sandboxes, "set_limits", None)
+        if callable(limiter):
+            merged = {**FOUNDRY_DEFAULTS, **settings}
+            try:
+                limiter("foundry-", daily_seconds=int(merged["sandbox_daily_seconds"]), max_timeout=int(merged["backtest_timeout_seconds"]))
+            except Exception:
+                pass
+        return foundry
+
+    def _desk_equity(self, desk_id: str) -> Any:
+        ledger = self.ledgers.get(desk_id)
+        if ledger is None:
+            return None
+        try:
+            return ledger.state(self.now()).equity
+        except Exception:
+            return None
+
+    def _foundry_tick(self, at: str, state: Mapping[str, Any]) -> Any:
+        """leap: foundry -- start a cycle off the tick when one is due and none is running. The
+        cycle deploys from its worker; the strategy store is locked and sessions deploy from
+        threads too. Returns the previous cycle's summary once it has finished."""
+        foundry = self.foundry
+        if foundry is None or not foundry.enabled():
+            return None
+        if not foundry.due(at, state.get("last_foundry_at")):
+            return None
+        slot = (getattr(self, "_workers", None) or {}).get("foundry")
+        if (slot is not None and slot["thread"].is_alive()) or foundry.running():
+            return None  # the last cycle is still working; a cycle never runs twice at once
+        self._save_state(last_foundry_at=at)
+        done = self._off_tick("foundry", lambda at=at: foundry.cycle(at))
+        if isinstance(done, Mapping):
+            return {k: v for k, v in done.items() if k != "candidates_detail"}
+        return None
 
     def _feeds_status(self) -> dict[str, Any] | None:
         """The venue sockets as the hub reports them, or None on a floor without feeds."""
@@ -2973,6 +3035,13 @@ class Service:
             except Exception as exc:
                 self.alert("warning", f"strategies failed: {type(exc).__name__}")
                 result["strategies"] = []
+        # leap: foundry -- candidates, backtests, shadow deployments and fast-tracks, off the tick.
+        self._tick_phase("foundry")
+        if not result["kill_switch"] and not stopped and not live_only:
+            try:
+                result["foundry"] = self._foundry_tick(at, state)
+            except Exception as exc:
+                self.alert("warning", f"foundry failed: {type(exc).__name__}")
         # leap: lab -- forecasts are checked against the venue on a slow clock and the day's
         # calibration is published once; the lab sits down at its own evening slot.
         self._tick_phase("calibration")
@@ -3766,6 +3835,7 @@ class Service:
             "last_committee_day": state.get("last_committee_day"),
             "last_evolution_day": state.get("last_evolution_day"),
             "last_founding": state.get("last_founding"),  # leap: founding
+            "last_foundry": self.foundry.summary() if getattr(self, "foundry", None) is not None else None,  # leap: foundry
             "last_error": self.last_error,
         }
 
