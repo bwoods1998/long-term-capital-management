@@ -428,7 +428,9 @@ class ValidationTests(FoundingCase):
         self.refused(proposal(targets=[]), "targets must list")
         fed = Instrument("event", "KXFED-26OCT-H25", "kalshi", market_id="KXFED-26OCT-H25")
         self.fill("mullins", "buy", 5, "0.20", "2026-09-16T12:00:00.000Z", fed)
-        self.refused(proposal(targets=["KXFED", "KXNFLGAME"]), "the floor already trades KXFED")
+        kept = self.validate(proposal(targets=["KXFED", "KXNFLGAME"]))
+        self.assertEqual(kept["targets"], ["KXNFLGAME"], "overlapping targets are dropped, not the family")
+        self.refused(proposal(targets=["KXFED"]), "the floor already trades KXFED")
 
     def test_the_cadence_and_the_model_are_bounded(self):
         data = proposal()

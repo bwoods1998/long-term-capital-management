@@ -1074,8 +1074,12 @@ class Founding:
             for name in covered.get(venue) or ()
         }
         overlap = [t for t in targets if t in owned]
-        if overlap:
+        if overlap and len(overlap) == len(targets):
             raise FoundingError(f"the floor already trades {', '.join(overlap[:5])}")
+        # A few overlaps are not a reason to lose the family: the favorites strategy bids across
+        # every category, so nearly any new area touches a series it has traded once (Sept 16,
+        # 2026: a commodities family was refused over two gold and silver thresholds).
+        targets = [t for t in targets if t not in owned]
         if universe is not None:
             known = set().union(*(listed[v] for v in venues if v in listed))
             missing = [t for t in targets if t not in known]
