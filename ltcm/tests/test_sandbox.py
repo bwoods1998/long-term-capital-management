@@ -138,10 +138,20 @@ class RunTests(SandboxCase):
         self.assertIn("/lab/toolbox/momentum.py", paths)
         self.assertIn("/lab/toolbox/__init__.py", paths)
         self.assertIn("/lab/run/main.py", paths)
+        self.assertIn("/lab/labkit.py", paths, "labkit rides along on every run, so a fix needs no new image")
         run = [c for c in self.client.calls if c[0] == "exec"][-1]
         self.assertIn("timeout 40 python3 /lab/run/main.py", run[2][2])
         self.assertIn("PYTHONPATH=/lab:/lab/floor", run[2][2])
         self.assertEqual(run[3], 70, "the exec waits a little longer than the code may run")
+
+    def test_labkit_compiles_and_reaches_the_event_source_through_the_real_route(self):
+        from ltcm.sandbox import LABKIT
+
+        compile(LABKIT, "labkit.py", "exec")
+        self.assertIn('for attr in ("_source", "source")', LABKIT)
+        self.assertIn("def kalshi_series(", LABKIT)
+        self.assertIn("src.markets(series_ticker=", LABKIT)
+        self.assertNotIn("event_markets", LABKIT, "the service's text index does not exist inside a sandbox")
 
     def test_a_sleeping_box_is_woken_first(self):
         manager = self.manager()

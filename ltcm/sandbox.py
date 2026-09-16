@@ -89,16 +89,52 @@ def quote(symbol, asset_class="crypto", venue="coinbase"):
     return _plain(_data.quote(_inst(symbol, asset_class, venue)))
 
 def _source(name):
-    getter = getattr(_data, "source", None)
-    return getter(name) if callable(getter) else None
+    # The composite routes through `_source`; an older labkit looked for `source` and every
+    # kalshi helper answered nothing. Try both so either image works.
+    for attr in ("_source", "source"):
+        getter = getattr(_data, attr, None)
+        if callable(getter):
+            try:
+                return getter(name)
+            except Exception:
+                return None
+    return None
 
 def kalshi_market(ticker):
+    """One market by ticker, prices in dollars (yes_bid, yes_ask, no_bid, no_ask, last_price)."""
     src = _source("event")
     return src.market(ticker) if src is not None and hasattr(src, "market") else None
 
-def kalshi_markets(query, limit=40):
+def kalshi_series(series, limit=1000, status="open"):
+    """Every open market of one series (KXBTC, KXETH, KXHIGHNY, KXFEDDECISION...) as dicts with
+    ticker, title, yes_sub_title, close_time, yes_bid, yes_ask, no_bid, no_ask, status. An hourly
+    series lists dozens of buckets for several hours at once; filter by close_time."""
     src = _source("event")
-    return src.event_markets(query, limit) if src is not None and hasattr(src, "event_markets") else []
+    if src is None or not hasattr(src, "markets"):
+        return []
+    page = src.markets(series_ticker=str(series).upper().split("-")[0], status=status, limit=limit)
+    rows = page.get("markets", []) if isinstance(page, dict) else []
+    out = []
+    for row in rows:
+        try:
+            out.append(src.parse_market(row))
+        except Exception:
+            continue
+    return out
+
+def kalshi_markets(query, limit=40):
+    """Markets of the series named by the first ticker-like word of the query (KXBTC,
+    KXETH-26SEP1617), narrowed by the other words against ticker, title and subtitle."""
+    import re
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}(?:-[A-Za-z0-9.]+)*", str(query or ""))
+    if not tokens:
+        return []
+    prefix = tokens[0].upper()
+    rows = [r for r in kalshi_series(prefix) if str(r.get("ticker") or "").upper().startswith(prefix)]
+    words = [w.lower() for w in tokens[1:]]
+    if words:
+        rows = [r for r in rows if all(w in " ".join(str(r.get(k) or "") for k in ("ticker", "title", "yes_sub_title")).lower() for w in words)]
+    return rows[:limit]
 
 def kalshi_history(ticker, limit=500):
     src = _source("event")
@@ -338,6 +374,8 @@ class SandboxManager:
         box: str | None = None
         try:
             box = self.ensure_box(desk_id)
+            # labkit rides along on every run, so a fix reaches every sandbox without a new image.
+            self.client.upload(box, f"{REMOTE_ROOT}/labkit.py", LABKIT.encode("utf-8"), mode=0o644)
             for name, body in toolbox.files().items():
                 self.client.upload(box, f"{REMOTE_TOOLBOX}/{name}", body.encode("utf-8"), mode=0o644)
             self.client.upload(box, f"{REMOTE_TOOLBOX}/__init__.py", b"", mode=0o644)
@@ -386,10 +424,11 @@ RUN_CODE_SCHEMA: dict[str, Any] = {
     "type": "function",
     "name": "run_code",
     "description": (
-        "Run Python in your own sandbox: numpy, pandas and labkit (bars, quote, kalshi_market, "
-        "kalshi_markets, kalshi_history, news) over the same public data as your other tools. "
-        "Test a signal on real history or fit a probability before you trade. Print what you want "
-        "back (4000 characters, two minutes). save_as keeps the code as toolbox.<name>."
+        "Run Python in your own sandbox with numpy, pandas and labkit: bars(symbol, interval, "
+        "limit), quote(symbol), kalshi_series(series), kalshi_market(ticker), "
+        "kalshi_markets(query), news(query). Test a signal on real history or fit a probability "
+        "before you trade. Print what you want back (4000 chars, two minutes). save_as keeps the "
+        "code as toolbox.<name>."
     ),
     "parameters": {
         "type": "object",

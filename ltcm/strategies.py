@@ -67,7 +67,7 @@ STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion"}
 #: A shadow desk's starter explores: a thinner edge and an earlier entry than the live desk's
 #: defaults, so the family's record fills with decisions the post-mortems can learn from.
 STARTER_PARAMS = {
-    ("ranges", "shadow"): {"min_edge": 0.005},
+    ("ranges", "shadow"): {"min_edge": 0.0, "shrink": 0.3, "max_intents": 3},
     ("crypto", "shadow"): {"z_entry": 1.5},
 }
 
@@ -358,9 +358,9 @@ class Strategies:
             params = dict(STARTER_PARAMS.get((manifest.family, "live" if manifest.live else "shadow")) or {})
             existing = self.store.for_desk(desk_id)
             if existing:
-                # A house starter deployed with no params before the explorer params existed.
+                # A house starter follows the house params until the desk redeploys it as its own.
                 row = existing.get(starter)
-                if row and row.get("house") and not row.get("params") and params:
+                if row and row.get("house") and dict(row.get("params") or {}) != params:
                     self.store.update(desk_id, starter, params=params)
                 continue
             path = STARTERS_DIR / f"{starter}.py"
@@ -431,7 +431,7 @@ class Strategies:
             approved=int(row.get("approved") or 0) + approved,
             errors=int(row.get("errors") or 0) + (1 if run.get("error") else 0),
             last_error=(str(run["error"])[-300:] if run.get("error") else None),
-            last_notes=str(run.get("notes") or "")[:300],
+            last_notes=(str(run.get("notes") or "") + " | " + " / ".join(str(x) for x in (run.get("log") or [])[-3:]))[:400],
         )
         purpose = f"strategy {name}: " + (
             f"error" if run.get("error") else f"{len(intents)} intent(s), {approved} approved"
