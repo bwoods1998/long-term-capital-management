@@ -25,7 +25,7 @@
     "max_gross_pct": "1.0",
     "max_order_notional_pct": "0.20",
     "max_daily_loss_pct": "0.10",
-    "max_orders_per_day": 30,
+    "max_orders_per_day": 120,
     "max_limit_deviation_pct": "0.30"
   },
   "model": {
