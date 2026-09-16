@@ -624,3 +624,11 @@ breaker, and settings that leave the last twenty minutes alone.
   first three minutes 2,133 Coinbase and 41 Kalshi trades reached the hub, so the taker model
   has its input. Kalshi's public trade message is `{trade_id, market_ticker,
   yes_price_dollars, no_price_dollars, count_fp, taker_side, ts}`, which the parser reads.
+- **Why the shadows were silent** (11:40 UTC): with prints flowing there were no shadow
+  fills because there were almost no resting shadow quotes. The crypto shadows had used their
+  8 orders a day (a bred limit) and the ranges shadows sat behind a 10 percent daily-loss line
+  after the morning's hours. Shadow desks exist to learn, so on the box: hilibrand-2/3/4 may
+  place 120 orders a day and scholes-2/3/4 stop at a 30 percent daily loss; evolution retires
+  the variants that earn it. Also: a crypto instrument's key now ignores a market id equal to
+  its symbol (a fill carried it, an intent did not, and the shadow crypto desks' sells were
+  refused as shorts); event keys are unchanged.
