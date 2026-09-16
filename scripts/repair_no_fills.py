@@ -43,15 +43,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(truth)} venue fills read with the fixed parser")
     log = EventLog(args.log)
     fills = log.read(kind="broker.fill", limit=50_000)
-    corrected = {str(e.payload.get("fill_id")) for e in fills if str(e.id).endswith(":corrected")}
+    # The ledger folds each fill_id once, so a copy needs its own: `<fill_id>:reversal` and
+    # `<fill_id>:corrected`. (A first pass on Sept 16 copied the original fill_id and the
+    # ledgers ignored the copies.)
+    corrected = {str(e.payload.get("fill_id"))[: -len(":corrected")] for e in fills if str(e.payload.get("fill_id", "")).endswith(":corrected")}
     todo = []
     for event in fills:
         p = event.payload
         if p.get("venue") != "kalshi" or p.get("shadow") or p.get("settlement") or not p.get("desk_id"):
             continue  # a fill without a desk folds into no ledger; its attributed copy carries the intent's side
-        if str(event.id).endswith((":corrected", ":reversal")):
-            continue
         fill_id = str(p.get("fill_id") or "")
+        if ":" in fill_id or str(event.id).endswith((":corrected", ":reversal", ":corrected:2", ":reversal:2")):
+            continue
         if fill_id in corrected or fill_id not in truth:
             continue
         right = str((p.get("instrument") or {}).get("right") or "").lower()
@@ -64,10 +67,10 @@ def main(argv: list[str] | None = None) -> int:
         p = event.payload
         print(f"  {event.at} {p.get('desk_id') or '-'} tape {p.get('side')} {right} {p.get('quantity')} {(p.get('instrument') or {}).get('market_id')} @ {p.get('price')} -> {true_side}")
         if args.apply:
-            reversal = {**p, "side": true_side, "fee": "0", "corrected_from": event.id, "note": "reverses a fill recorded on the wrong side"}
-            log.append(event.stream, "broker.fill", reversal, id=f"{event.id}:reversal", at=event.at)
-            fixed = {**p, "side": true_side, "corrected_from": event.id}
-            log.append(event.stream, "broker.fill", fixed, id=f"{event.id}:corrected", at=event.at)
+            reversal = {**p, "fill_id": f"{fill_id}:reversal", "side": true_side, "fee": "0", "corrected_from": event.id, "note": "reverses a fill recorded on the wrong side"}
+            log.append(event.stream, "broker.fill", reversal, id=f"{event.id}:reversal:2", at=event.at)
+            fixed = {**p, "fill_id": f"{fill_id}:corrected", "side": true_side, "corrected_from": event.id}
+            log.append(event.stream, "broker.fill", fixed, id=f"{event.id}:corrected:2", at=event.at)
     print("applied" if args.apply else "dry run", len(todo))
     if args.apply and todo:
         print("restart the loop so the ledgers refold:  python3 scripts/floor_box.py deploy")
