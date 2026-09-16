@@ -296,6 +296,52 @@ and code follow the repo until the desk edits its copy or redeploys it as its ow
 `strategy_report` carries each strategy's record from the tape: fills, fees, and the settled
 P&L of the positions it opened (attributed by the `[strategy <name>]` prefix on its rationales).
 
+### Promotion: the family's record chooses the live desk's settings
+
+`Strategies.promote` runs once an hour (`config.json` `promotion`, defaults in
+`strategies.PROMOTION`). For every house strategy a live desk runs it scores each shadow
+variant of that strategy in the family on settled P&L per dollar of filled notional since the
+variant was last dealt (`record(..., since=)`), and the live desk's own setting the same way.
+When the best variant has at least `min_settled` (12) settlements, a positive return and a
+`min_margin` (0.01) over the live setting, the live desk adopts its params; the winning shadow
+keeps them as the control; every other shadow is dealt a jittered copy (`_jitter_params`,
+numbers moved by up to a quarter, choices kept) so the search continues around the new best.
+A promotion is a `desk.code_run` on the live desk ("strategy X promoted: Y's settings take
+the live desk") and an `ops.alert`. `bootstrap` never overwrites a promoted or dealt setting
+(`promoted_at`); only an untouched house row follows the house params.
+
+### The floor board
+
+Every session's user turn carries `# The floor board`: the newest memo of every other desk
+from the last day (`DeskContext.floor_board`), framed as evidence about their markets, never
+orders. It is how a weather desk hears what the crypto desk sees, and how a shadow child
+hears its parent, without a shared memory that would make them converge.
+
+### The lab writes code
+
+A lab experiment's change may carry `strategy {name, cadence_seconds, params, code}`. The
+lab's instructions describe the strategy kit (`lab.KIT_API`) and its packet shows the family's
+strategy records and the house strategy's source, so a proposal starts from the code that runs
+today. Validation (`validate_change`): `decide(kit, params)` present, no process or network
+access, at most `strategy_code_chars` (6000), cadence inside `strategy_cadence_seconds`. The
+service installs the code on the variant once its manifest is loaded
+(`_install_experiment_strategies` -> `Strategies.install`). An adopted experiment puts the
+strategy in the family's genome, and `bootstrap` installs genome strategies on every desk of
+the family, the live desk included (`_genome_strategies`). The checkpoint carries a strategy
+change as name, cadence, params, code digest and length (`publish.public_change`): the site
+caps a change at 4 KB; the code is on the tape in the `lab.experiment` event.
+
+### Collateral and the disk
+
+`Service._fund_kalshi_shards` (hourly, `config.json` `kalshi_shards`) reads the cash per Kalshi
+exchange shard and moves `top_up_usd` to any traded shard under `floor_usd` from the richest
+shard that keeps `keep_usd`; every move is an `ops.alert`. `Service._disk_check` (every ten
+minutes, `config.json` `disk`) trims the HTTP cache under `warn_gb` and files a warning, and
+under `stop_gb` files an error and posts a `disk_low` notice the gateway mails. The HTTP cache
+(`data.HttpTransport`) is capped at `cache_cap_bytes` (256 MB) and trimmed every fifty stores;
+on Sept 16, 2026 it had filled a 32 GiB disk because the event-index sweep put the raw clock
+in every listing URL.
+
 ## The checkpoint
 
 `publish.checkpoint_body` is the contract with the site:
