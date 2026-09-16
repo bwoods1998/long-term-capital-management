@@ -304,3 +304,18 @@ their own: hourly range pricing from realized volatility (ranges family), hourly
 post-mortems, and shipping a better version. The site shows runs and orders on the tape already;
 a strategies panel on the desk page needs a site deploy (blocked for the agent, the owner's
 `npm run build && npx wrangler deploy` in personal-site once the schema carries it).
+
+What the first hour of strategies found (04:04-04:45 UTC), each fixed and deployed in turn:
+
+- The image's labkit reached the market composite through a `source` attribute that never
+  existed, so every Kalshi helper answered nothing and the desks' own sessions were spending
+  turns probing the API. The manager now uploads the current labkit on every run (f45b49a).
+- Kalshi's series listing carries the buckets and their bounds but prices a hundred times off
+  (0.0027 for a bucket whose book is 0.20 bid, 0.23 ask); the starter quotes the nearest twelve
+  buckets live (47218eb). Its first run on that path priced ten buckets and put three NO
+  positions on scholes-2's shadow book at 04:37, settling at 05:00.
+- The live desk's first two strategy orders passed the risk engine and were blocked by the
+  critic, which read "buy ... at 0.65" as a YES purchase against a rationale arguing for NO;
+  the packet now names the leg on both lines (next commit).
+- The owner deployed the gateway and moved $100 to Kalshi's crypto shard at 04:25, so live
+  crypto orders are no longer refused at the venue.
