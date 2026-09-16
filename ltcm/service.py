@@ -1948,7 +1948,9 @@ class Service:
         committee = getattr(self, "committee", None)
         if committee is not None:
             try:
-                sleeve = committee.allocate(at).get(desk_id)
+                # A promotion is a capital event: every live sleeve is sized afresh from its base
+                # and its evidence, rather than held at a previous value the promotion changes.
+                sleeve = committee.allocate(at, resize=True).get(desk_id)
             except Exception as exc:
                 self.alert("warning", f"{desk_id} promoted but not funded: {type(exc).__name__}")
         self.alert(

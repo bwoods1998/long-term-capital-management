@@ -20,6 +20,8 @@ Folding is incremental: the state is cached against the last sequence number con
 from __future__ import annotations
 
 import datetime as _dt
+import functools
+import threading
 from dataclasses import dataclass, field
 from decimal import Decimal
 from fractions import Fraction
@@ -194,6 +196,20 @@ class LedgerState:
 
 # --------------------------------------------------------------------------- the ledger
 
+def _locked(method):
+    """Run the method under the ledger's lock. The fold is not re-entrant across threads: on
+    Sept 16, 2026 a strategy worker and the tick folded one ledger at once, a pre-allocation
+    mark landed after a capital withdrawal, the return index spiked 90 percent, and the next
+    mark read as a 47 percent drawdown that zeroed every live sleeve."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class DeskLedger:
     """Derived, append-only view of one desk's capital. Never stores anything of its own."""
 
@@ -204,6 +220,7 @@ class DeskLedger:
         #: When set, the fold stops at this timestamp, giving the book as it stood then. Used for
         #: trailing-window measurements (a week of realized profit, say) without a second store.
         self.until = until
+        self._lock = threading.RLock()
         self._reset()
 
     # ------------------------------------------------------------------ fold state
@@ -229,6 +246,7 @@ class DeskLedger:
         self._decisions = 0
         self._fill_ids: set[str] = set()
 
+    @_locked
     def reset(self) -> None:
         """Drop the cache and refold from the beginning on the next read."""
         self._reset()
@@ -250,6 +268,7 @@ class DeskLedger:
         return total
 
     # ------------------------------------------------------------------ folding
+    @_locked
     def _consume(self) -> None:
         while True:
             batch = self.log.read(after=self._seq, limit=2000)
@@ -425,6 +444,7 @@ class DeskLedger:
                 del self._history[0]
 
     # ------------------------------------------------------------------ reads
+    @_locked
     def state(self, now: Any = None) -> LedgerState:
         """Fold every event appended since the last call and return the desk's book."""
         self._consume()
@@ -477,6 +497,7 @@ class DeskLedger:
         return self.state(now).equity
 
     # ------------------------------------------------------------------ writes
+    @_locked
     def mark(self, quotes: Any, now: Any = None, *, shadow: bool = False) -> Event:
         """Append a `ledger.mark` valuation. Idempotent on `mark:<desk>:<as_of>`.
 

@@ -305,5 +305,41 @@ class FloorTests(LedgerCase):
         self.assertEqual(state.gross_exposure, Decimal("1200"))
 
 
+class ConcurrentFoldTests(unittest.TestCase):
+    def test_threads_folding_one_ledger_agree_with_a_single_fold(self):
+        import tempfile, threading
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        log = EventLog(Path(tmp.name) / "events.sqlite")
+        self.addCleanup(log.close)
+        ledger = DeskLedger(log, "d1")
+        log.append("committee", "committee.allocation", {"allocations": {"d1": "1000"}, "reasons": {}}, at="2026-09-16T10:00:00.000Z")
+        errors = []
+
+        def reader():
+            try:
+                for _ in range(200):
+                    ledger.state("2026-09-16T12:00:00.000Z")
+            except Exception as exc:  # pragma: no cover - surfaced below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=reader) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for n in range(150):
+            target = "1000" if n % 2 else "500"
+            log.append("committee", "committee.allocation", {"allocations": {"d1": target}, "reasons": {}}, at=f"2026-09-16T11:{n // 60:02d}:{n % 60:02d}.000Z")
+            log.append("ledger:d1", "ledger.mark", {"equity": target, "cash": target, "positions": [], "daily_pnl": "0", "as_of": f"2026-09-16T11:{n // 60:02d}:{n % 60:02d}.500Z"}, at=f"2026-09-16T11:{n // 60:02d}:{n % 60:02d}.500Z")
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        fresh = DeskLedger(log, "d1").state("2026-09-16T12:00:00.000Z")
+        shared = ledger.state("2026-09-16T12:00:00.000Z")
+        self.assertEqual(shared.max_drawdown_pct, fresh.max_drawdown_pct)
+        self.assertEqual(shared.cash, fresh.cash)
+        self.assertEqual(shared.max_drawdown_pct, Decimal("0"), "capital moves are never drawdowns")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
