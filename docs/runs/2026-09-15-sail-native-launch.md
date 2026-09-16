@@ -339,4 +339,21 @@ per run because the image predates it; shadow siblings are dealt different house
 family compares settings on the same markets; and `strategy_report` reads each strategy's
 fills, fees and settled P&L from the tape. Ranges desks may place 240 orders a day. The
 gateway's `MAX_DAY_ORDERS` (100) is the next cap a quoting live desk will meet; raising it is
-a `wrangler.jsonc` change and the owner's deploy.
+a `wrangler.jsonc` change and the owner's deploy (400 is committed in f978e8b).
+
+## Addendum: the first settlement's lesson (05:00-05:20 UTC, Sept 16)
+
+The 05:00 hourly markets settled inside their at-the-money buckets on both BTC and ETH. Every
+NO position the ranges strategies had bought lost: six of seven shadow outcomes, and the live
+desk's two learning positions ($19 realized). The explorers lost 22-46% of their books in one
+hour and tripped their daily-loss breakers, which is the risk engine doing its job. The cause is
+in the model, not the market: realized volatility from two days of hourly bars (0.4-0.6% an
+hour) overstated sub-hour volatility in the quiet hours, so the model priced the at-the-money
+bucket at 0.21-0.28 against a market at 0.33-0.36 and read the market's higher price as NO being
+cheap. The market was right. Commit after bc99727: the starters read the last three hours of
+five-minute bars, the shadow variants now compare 5m, 15m and 1h windows on the same markets
+at the same hours (this is the experiment the family runs), a desk holds at most two positions
+on one settlement, and the risk engine sizes a resting limit buy at its limit rather than at
+the ask it does not cross (the quoting starter's $10 YES bids had been refused as $18). The
+desks' own event-resolution sessions ran at 05:03 on the outcomes; their memos are the human
+record of the same lesson.
