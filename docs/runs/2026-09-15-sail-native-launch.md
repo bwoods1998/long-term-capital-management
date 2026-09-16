@@ -562,3 +562,10 @@ are rewarded and punished. Shipped, in order:
   fills a ledger folds (the desk-less originals already had attributed copies with the
   intent's side). Settlement fills written against the wrong positions before the repair are
   not undone; `settle_finalized_markets` closes what remains in finalized markets.
+- **Repair result** (09:50 UTC): after the third pass of `repair_no_fills.py` (the first two
+  passes reused fill ids, which the ledger folds once each; their copies stay on the tape as
+  noise) Haghani's ledger matches Kalshi exactly: DEN 40 NO, LAX 77.5 22 NO, MIA 21 NO, CHI
+  17 NO, NY 38 NO, AUS 23 NO, LAX 73.5 333 YES. Scholes's ledger shows residual NO positions in
+  the settled 08:00 buckets that the settlement sweep now closes at the settlement price; the
+  `desk.outcome` records written against the wrong positions before the repair stand as
+  written, and the ledger's realized P&L from fills is the truth.
