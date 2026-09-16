@@ -53,9 +53,14 @@ def main(argv: list[str] | None = None) -> int:
     orders = {}
     for event in log.read(kind="broker.order", limit=20_000):
         row = orders.setdefault(event.payload.get("order_id"), {})
-        for key in ("desk_id", "intent_id", "side"):
+        for key in ("desk_id", "intent_id"):
             if event.payload.get(key):
                 row[key] = event.payload[key]
+    # The side comes from the intent the desk filed, never from a polled order row: the polls
+    # that ran before the fix recorded every NO buy as a sell.
+    intent_side = {}
+    for event in log.read(kind="desk.intent", limit=20_000):
+        intent_side[event.payload.get("intent_id")] = event.payload.get("side")
     fills = log.read(kind="broker.fill", limit=20_000)
     have_copy = {e.payload.get("fill_id") for e in fills if str(e.id).endswith(":attributed")}
     todo = []
@@ -82,9 +87,8 @@ def main(argv: list[str] | None = None) -> int:
             "venue_order_id": event.payload.get("order_id"),
             "desk_id": row["desk_id"],
             "intent_id": row.get("intent_id"),
-            # The floor's orders were all buys of the leg they name; a swept NO buy had been
-            # read as a sell.
-            "side": row.get("side") or p.get("side"),
+            # The side the desk filed with its intent; a swept NO buy had been read as a sell.
+            "side": intent_side.get(row.get("intent_id")) or p.get("side"),
             "attributed_from": event.id,
         })
         print(f"  {event.at} {row['desk_id']} {p['side']} {p.get('quantity')} {p.get('instrument', {}).get('market_id')} {p.get('instrument', {}).get('right')} @ {p.get('price')} <- {ours}")
