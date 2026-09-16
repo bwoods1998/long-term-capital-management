@@ -260,7 +260,7 @@ class AllocationTests(CommitteeCase):
         self.assertEqual(targets["earnings-01"], Decimal("1750.00"))
         self.assertEqual(targets["kalshi-01"], Decimal("1000.00"))
         self.assertIn(
-            "held between weekly resizes",
+            "held until the next resize",
             self.log.last("committee", "committee.allocation").payload["reasons"]["earnings-01"],
         )
 

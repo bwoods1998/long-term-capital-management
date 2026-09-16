@@ -461,7 +461,7 @@ class Committee:
             if not resize:
                 held = previous.get(desk_id, base)
                 targets[desk_id] = _quantize(held)
-                reasons[desk_id] = "held between weekly resizes"
+                reasons[desk_id] = "held until the next resize"
                 continue
             if bool(self.config.get("bandit_enabled", True)):  # leap: lab
                 multiple, why = self._bandit_multiple(desk_id, at, low, high)
