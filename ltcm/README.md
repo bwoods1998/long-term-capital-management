@@ -370,10 +370,14 @@ person, and closed them:
   accepted intent, never a refused one. Kalshi orders carry no `reduce_only`, and a `day`
   time-in-force maps to GTC (the floor's exits bound a resting order).
 
-What still needs a person: code and deploys, credentials and venue deposits, Sail credit,
-the venues, the starter universes (the ranges series and the weather cities), and the
-learning sizes and caps in `config.json`. Everything between a print and a promotion runs
-without one, and so, since the next section, does opening and closing a family.
+What still needs a person (Sept 16, 2026, evening): code and deploys, credentials and venue
+deposits, Sail credit, enabling Coinbase derivatives on the account (`cfm/balance_summary` is
+null), and the four human founders' manifests. Everything else runs without one: the floor
+founds and winds down its own families (`ltcm/founding.py`), the ranges starter prices every
+Kalshi crypto series with a Coinbase reference and the weather starter every Kalshi city,
+strategy orders and session learning sizes fit each desk's limits at its equity, capital is
+resized daily, compute follows P&L per Sail dollar, and every session reads the standings and
+the other partners' open probabilities.
 
 ### The firm founds families
 
