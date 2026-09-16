@@ -269,3 +269,17 @@ account; it cannot withdraw) and adds the script that reads the breakdown and mo
 The classifier refused both deploys as production deploys, so the owner runs them:
 `cd gateway && npx wrangler deploy`, then `python3 scripts/kalshi_shard.py transfer --usd 100 --to 2`,
 then `python3 scripts/floor_box.py deploy`.
+
+## Addendum: the 03:05 hourly round, and the NO leg (03:05-03:45 UTC, Sept 16)
+
+The first full hourly round under the learning policy: four ranges sessions, seven intents,
+four shadow fills, one live learning order (scholes, 90 YES on the ETH daily range at 0.11, $9.90,
+approved by risk and critic, refused by Kalshi for the unfunded shard). Two of the seven intents
+exposed a pricing bug: the socket feed stores Kalshi's YES-side prices per market and served
+them unchanged for a NO-leg instrument. scholes-4's NO bid at 0.78 was first refused as "0.55
+through the ask of 0.23" (the YES ask) and approved seven seconds later against the NO ask of
+0.79; scholes-2's NO position on the ETH central bucket, bought at 0.76 with a stop at 0.60, was
+stopped out thirteen seconds after filling at a mark of 0.24-0.28 (the YES side) and sold at
+0.72, a phantom loss of about $1 on the shadow book. `FeedHub.quote` now complements the NO leg
+exactly as the REST quote does (commit after 11fb194). scholes-2's record carries the phantom
+stop; its post-mortem should not read it as a lesson about stops.
