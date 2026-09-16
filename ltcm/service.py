@@ -1837,6 +1837,124 @@ class Service:
                         gateway.cancel(desk_id, str(row.get("order_id")), self.now())
                     except Exception as exc:
                         self.alert("warning", f"could not cancel {desk_id}'s real order {row.get('order_id')} on demotion: {type(exc).__name__}")
+        # Each promotion to live is set up once: flat book, real sleeve. Keyed by the promotion's
+        # time in service state, so a restart (manifests on disk still say shadow) never repeats it,
+        # and a desk promoted before this existed is set up on the next tick.
+        if getattr(self, "committee", None) is None:
+            return
+        promoted_at: dict[str, str] = {}
+        try:
+            for event in self.log.read(kind="evolution.promoted", limit=10_000, newest=True):
+                desk = event.payload.get("desk_id")
+                if isinstance(desk, str):
+                    if event.payload.get("to") == "live":
+                        promoted_at[desk] = event.at
+                    else:
+                        promoted_at.pop(desk, None)
+        except Exception:
+            return
+        begun = dict(self.state().get("live_begun") or {})
+        for desk_id, when in sorted(promoted_at.items()):
+            manifest = self.manifests.get(desk_id)
+            if manifest is None or not manifest.live or begun.get(desk_id) == when:
+                continue
+            self._begin_live(manifest)
+            begun[desk_id] = when
+            self._save_state(live_begun=begun)
+
+    def _begin_live(self, manifest: DeskManifest) -> None:
+        """A shadow desk promoted to real money starts its live life flat and funded.
+
+        Its ledger holds the shadow book's positions, which the venue has never seen: left
+        alone they would fail the venue reconciliation (and with it every promotion gate on the
+        venue), never settle, and let exits sell real holdings that belong to other desks. So
+        the shadow positions close in the ledger at their marks (a shadow fill, P&L kept), the
+        shadow book's resting orders are cancelled, and the committee funds a real sleeve at
+        once, scaled to what the venue holds, instead of at the next resize (Sept 16, 2026: the
+        first three promotions carried 28 shadow positions onto real money)."""
+        desk_id = manifest.id
+        at = self.now()
+        closed = 0
+        book = self.shadow_books.get(desk_id) if isinstance(getattr(self, "shadow_books", None), dict) else None
+        if book is not None:
+            try:
+                for order in list(book.open_orders()):
+                    try:
+                        book.cancel(order.id)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        ledger = self.ledgers.get(desk_id)
+        try:
+            positions = list(ledger.state(at).positions.values()) if ledger is not None else []
+        except Exception:
+            positions = []
+        # Only what the shadow book filled closes: real fills after the promotion are real
+        # holdings, and the ledger must keep them.
+        from .broker import Instrument as _Instrument
+
+        shadow_net: dict[str, Decimal] = {}
+        try:
+            for event in self.log.read(kind="broker.fill", limit=20_000, newest=True):
+                payload = event.payload
+                if payload.get("desk_id") != desk_id or not payload.get("shadow"):
+                    continue
+                try:
+                    key = _Instrument.from_dict(dict(payload.get("instrument") or {})).key
+                    quantity = money(payload.get("quantity") or 0)
+                except Exception:
+                    continue
+                signed = quantity if payload.get("side") == "buy" else -quantity
+                shadow_net[key] = shadow_net.get(key, ZERO) + signed
+        except Exception:
+            shadow_net = {}
+        for position in positions:
+            held = money(position.quantity)
+            shadow = shadow_net.get(position.instrument.key, ZERO)
+            if held == 0 or shadow == 0 or (held > 0) != (shadow > 0):
+                continue
+            quantity = min(abs(held), abs(shadow)) * (1 if held > 0 else -1)
+            if quantity == 0:
+                continue
+            price = position.mark if position.mark is not None else position.average_cost
+            fill_id = f"promotion-close:{desk_id}:{hashlib.sha256(position.instrument.key.encode('utf-8')).hexdigest()[:10]}:{at}"
+            try:
+                self.log.append(
+                    f"broker:{SHADOW_VENUE}",
+                    "broker.fill",
+                    {
+                        "id": fill_id,
+                        "fill_id": fill_id,
+                        "order_id": fill_id,
+                        "desk_id": desk_id,
+                        "instrument": position.instrument.to_dict(),
+                        "side": "sell" if quantity > 0 else "buy",
+                        "quantity": text(abs(quantity)),
+                        "price": text(money(price)),
+                        "fee": "0",
+                        "at": at,
+                        "venue": SHADOW_VENUE,
+                        "shadow": True,
+                        "promotion_close": True,
+                    },
+                    id=f"fill:{SHADOW_VENUE}:{fill_id}",
+                    at=at,
+                )
+                closed += 1
+            except Exception as exc:
+                self.alert("warning", f"{desk_id}: shadow position {position.instrument.key} not closed on promotion: {type(exc).__name__}")
+        sleeve = None
+        committee = getattr(self, "committee", None)
+        if committee is not None:
+            try:
+                sleeve = committee.allocate(at).get(desk_id)
+            except Exception as exc:
+                self.alert("warning", f"{desk_id} promoted but not funded: {type(exc).__name__}")
+        self.alert(
+            "info",
+            f"{desk_id} promoted to real money: {closed} shadow position(s) closed at their marks, sleeve ${text(sleeve) if sleeve is not None else '?'}",
+        )
 
     def quote(self, instrument: Instrument):
         if self.feeds is not None:  # leap: feeds -- a fresh socket price beats any poll

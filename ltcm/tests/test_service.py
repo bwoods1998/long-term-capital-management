@@ -1125,6 +1125,34 @@ class PromotedDeskTests(ServiceCase):
         self.assertTrue(self.service.gateway.manifests[DESK].live)
         self.assertTrue(self.service.gateway.live_desk(DESK))
 
+    def test_a_promoted_desk_starts_live_flat_and_funded_once(self):
+        self.service.committee.allocate(self.service.now())
+        at = self.service.now()
+        self.service.log.append("broker:shadow", "broker.fill", {"id": "s1", "fill_id": "s1", "order_id": "o1", "desk_id": DESK,
+                                "instrument": AAPL.to_dict(), "side": "buy", "quantity": "3", "price": "100", "fee": "0", "at": at, "shadow": True},
+                                id="fill:shadow:s1", at=at)
+        self.assertEqual(len(self.service.ledgers[DESK].state(at).positions), 1)
+        msft = Instrument("equity", "MSFT", "alpaca")
+        self.service.log.append("broker:alpaca", "broker.fill", {"id": "r1", "fill_id": "r1", "order_id": "o2", "desk_id": DESK,
+                                "instrument": msft.to_dict(), "side": "buy", "quantity": "2", "price": "50", "fee": "0", "at": at, "venue": "alpaca"},
+                                id="fill:alpaca:r1", at=at)
+        self.service.log.append("evolution", "evolution.promoted", {"desk_id": DESK, "from": "shadow", "to": "live", "score": {}},
+                                id="promoted:" + DESK, at=at)
+        self.service._apply_capital_modes()
+        self.assertTrue(self.service.manifests[DESK].live)
+        self.assertEqual(list(self.service.ledgers[DESK].state(at).positions), [msft.key], "the shadow position closes; the real one stays")
+        closes = [e for e in self.service.log.read(kind="broker.fill", limit=50) if e.payload.get("promotion_close")]
+        self.assertEqual(len(closes), 1)
+        self.assertTrue(closes[0].payload["shadow"])
+        alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert", limit=50) if "promoted to real money" in e.payload["text"]]
+        self.assertEqual(len(alerts), 1)
+        self.service._apply_capital_modes()
+        self.service.close()
+        self.service = self.build()
+        self.service._apply_capital_modes()
+        alerts = [e.payload["text"] for e in self.service.log.read(kind="ops.alert", limit=50) if "promoted to real money" in e.payload["text"]]
+        self.assertEqual(len(alerts), 1, "a restart never sets the promotion up again")
+
     def test_a_demoted_desk_gets_a_scoring_book_on_the_next_tick(self):
         self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
         self.service.close()
