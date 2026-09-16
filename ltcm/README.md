@@ -55,6 +55,7 @@ Design rules, inherited from the first generation and kept on purpose:
 | `sailbox.py` | The Sailbox API client the operator scripts and the sandboxes use: create, fork, exec, egress, checkpoints. |
 | `hostinfo.py` | What machine the floor runs on and for how long, for the checkpoint's infra block. |
 | `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
+| `mind.py` | The Firm Mind: every desk's settled outcomes scored into evidence-gated rules (bootstrap CI excluding zero), proposed hourly by one model call, retired in code, read by every session prompt and strategy generator. |
 | `founding.py` | The firm hires itself: one model call a night proposes a new family from what the venues list and the floor does not trade, validated in code and born shadow; founded families that fail are wound down whole. |
 | `publish.py` | Batches public events and leaderboard rows to the site API. |
 | `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
@@ -416,6 +417,25 @@ for `strategies.record_cache_seconds`. Each tick writes the step it is in to
 `.data/ltcm/tick-phase.json` and the seconds each step took to `health.json` `last_tick.timing`,
 so a slow tick names its own culprit. On Sept 16, 2026 this took the tick from 4 to 10 minutes
 to about 30 seconds.
+
+### The Firm Mind
+
+What one desk learns, every desk inherits (`ltcm/mind.py`, config `mind`). Every hour, on the `mind`
+worker, a pass re-scores each rule in `.data/ltcm/mind.json` against the newest 10,000 `desk.outcome`
+events of every desk (n, wins, P&L, mean P&L per dollar of entry with a seeded 1,000-resample
+bootstrap 95% CI) and retires the ones whose interval no longer excludes zero in their direction. When
+the tape moved, one `k3` call (budget desk `mind`, $8 a day, enforced by the mind itself as well as the
+provider) reads the aggregate table (family x strategy x series x price band x leg), the book and the
+post-mortem lessons, and proposes up to eight rules in a JSON schema; each is validated and admitted
+only with n >= `min_n` (15) and an interval excluding zero (`avoid` below, `prefer` above). The book
+keeps `max_rules` (12), ranked by |mean| x sqrt(n). Every session prompt carries the rules that apply
+to the desk under "# What the firm has learned" (`DeskContext.firm_rules`), the lab's packet carries
+the family's, and `mind.rules_for_family(family)` renders the same block for any strategy generator.
+Each pass publishes a `lab.hypothesis`; a changed book publishes a `lab.result` with the evidence.
+By hand, on the box (`cd /workspace`):
+`.venv/bin/python scripts/mind_pass.py --dry-run` prints the table and the book re-scored, read-only;
+`--dry-run --ask` adds one model call and scores its proposals without writing the book or the log;
+`--apply` runs a full pass now: writes the book, publishes, and the floor reads it next session.
 
 ## The checkpoint
 

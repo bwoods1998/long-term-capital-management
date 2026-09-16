@@ -33,6 +33,7 @@ from typing import Any, Callable, Iterable, Mapping
 from . import tools as tools_module
 from .events import EventConflict, EventLog, canonical, now_iso
 from .manifest import DeskManifest
+from .mind import render_rules
 from .provider import BudgetExceeded, Provider, ProviderError
 from .tools import ToolContext, ToolSession
 
@@ -607,6 +608,11 @@ class Desk:
         standings = self._safe(lambda: list(getattr(self.ctx, "standings")()), [])
         if standings:
             parts.append("\n# Standings\n" + _standings_block(standings, self.manifest.id))
+        # The Firm Mind: rules measured across every desk's settled trades (`ltcm/mind.py`).
+        rules = self._safe(lambda: list(getattr(self.ctx, "firm_rules")()), [])
+        learned = self._safe(lambda: render_rules(rules), "") if rules else ""
+        if learned:
+            parts.append("\n# What the firm has learned\n" + learned)
         calls = self._safe(lambda: list(getattr(self.ctx, "floor_calls")(12)), [])
         if calls:
             parts.append("\n# The floor's calls\n" + _calls_block(calls))
