@@ -447,8 +447,9 @@ class MakerFeeTests(SimTestCase):
         position = broker.position(etp)
         self.assertEqual(position.quantity, Decimal("-2"))
         del rates["future_contract"]
-        broker.submit(intent(etp, side="buy", quantity="1", order_type="limit", limit_price="2441", time_in_force="gtc", nonce="cover"))
-        self.assertEqual(broker.fills()[-1].fee, Decimal("0.20"), "without a rate in the tier the venue default applies")
+        cover = broker.submit(intent(etp, side="buy", quantity="1", order_type="limit", limit_price="2441", time_in_force="gtc", nonce="cover"))
+        fee = [f.fee for f in broker.fills() if f.order_id == cover.id][0]
+        self.assertEqual(fee, Decimal("0.20"), "without a rate in the tier the venue default applies")
 
     def test_a_resting_event_order_that_fills_later_pays_no_fee_and_a_taker_pays_the_formula(self):
         # Kalshi charges the taker; every maker fill on Sept 16, 2026 came back with fee 0.
