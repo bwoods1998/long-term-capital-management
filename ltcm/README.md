@@ -350,7 +350,9 @@ output, and 3,000 random boards matched it before the change landed).
   resting bid already inside the window is cancelled by the starter too, since a floor that does
   not send `expires_at` to the venue ignores it.
 * `keep_queue`: a bid older than `requote_seconds` is replaced only once it is no longer the best
-  NO bid; any bid two or more ticks behind is replaced at once. Without a book the age rule stands.
+  NO bid; any bid two or more ticks behind is replaced at once. Without a book the age rule stands,
+  and a stale bid whose market is inside the final `min_hours` is cancelled even when it is the
+  best, as version 1's requote would have pulled it.
 * `band_exit`: a resting bid is cancelled when the book's YES bid reaches yes_max + 0.02, the
   market moving against the favorite.
 
@@ -370,11 +372,14 @@ confidence intervals include zero: the edge is plausible, not proven.
 
 `spot_quotes` (the crypto family's second starter) bids only when `bid` is true and the spread
 clears a round trip: spread >= 2 x `maker_fee` (0.005, the account's real maker rate) +
-`min_margin` (0.002). Otherwise it builds no bid and cancels any resting one. A held coin is
-offered at the highest of cost x (1 + 2 x maker_fee + min_margin), mid x (1 + spread / 2) and the
-ask plus a tick (the product's `quote_increment` when `kit.products` lists it, never under a
-cent, since prices print to the cent), rounded up to the cent. Coins under `min_price_usd` (1.0)
-are skipped. Sept 17, 2026: the live desks quoted a 1% spread with the offer at cost x 1.01,
+`min_margin` (0.002). Otherwise it builds no bid and cancels any resting one. Both are floors: a
+param may raise them and never lower them, and the Foundry freezes them (`frozen_params`). A held
+coin is offered at the highest of cost x (1 + 2 x maker_fee + min_margin), mid x (1 + spread / 2)
+and the ask plus a tick (the product's `quote_increment` when `kit.products` lists it, never under
+a cent, since prices print to the cent), rounded up to the tick; bids round down to it. An offer
+still at its target price and size is kept however old, so an exit-only desk does not spend its
+daily order count re-placing it. Coins under `min_price_usd` (1.0) get no bid; a holding in one is
+still offered. Sept 17, 2026: the live desks quoted a 1% spread with the offer at cost x 1.01,
 which pays both 0.5% maker fees and keeps nothing, and a 90-day replay of one-minute candles for
 BTC, ETH and SOL lost at every spread from 0.4% to 2% at that fee (-$0.64 a day per $100 lot per
 product at 1%, [-1.04, -0.22]). So the live params are exit-only (`QUOTE_LIVE_PARAMS["crypto"]`

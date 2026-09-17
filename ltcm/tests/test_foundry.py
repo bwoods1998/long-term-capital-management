@@ -259,6 +259,21 @@ class CandidateTests(FoundryCase):
         self.assertEqual(len({json.dumps(p, sort_keys=True) for p in full}), 10, "no duplicates")
         self.assertEqual(len({v["id"] for v in variants}), 10)
 
+    def test_spot_quotes_candidates_never_move_the_fee_guard(self):
+        # Sept 17, 2026: maker_fee and min_margin are numbers in spot_quotes' DEFAULTS; jittered,
+        # they set the spread a bid needs below the account's real round trip.
+        foundry = self.foundry()
+        source = (STARTERS_DIR / "spot_quotes.py").read_text(encoding="utf-8")
+        defaults = literal_defaults(source)
+        frozen = foundry.config["frozen_params"]
+        self.assertTrue({"maker_fee", "min_margin"} <= set(frozen))
+        variants = foundry.param_candidates(3, "crypto", "spot_quotes", source, defaults, {"spread": 0.015}, [], frozen)
+        self.assertEqual(len(variants), 10)
+        for variant in variants:
+            params = {**defaults, **variant["params"]}
+            self.assertEqual((params["maker_fee"], params["min_margin"]), (0.005, 0.002), variant["params"])
+        self.assertIn("0.5% maker and 1.2% taker", foundry.instructions("spot_quotes_f3"))
+
     def test_jitter_helpers_keep_integers_fractions_and_frozen_keys(self):
         base = {"count": 3, "fraction": 0.9, "size": 25.0, "mode": "a", "flag": True}
         pool = categorical_pool([{"mode": "b"}, {"flag": False}], {"mode": "a", "flag": True})

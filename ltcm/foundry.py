@@ -99,9 +99,11 @@ DEFAULTS: dict[str, Any] = {
     "forward_max_hours": 72,
     # Size, order counts and price guards are the floor's, never a candidate's: they are neither
     # jittered nor taken from a model's params, and a desk keeps its own values when it adopts.
+    # `maker_fee` and `min_margin` are spot_quotes' fee guard (Sept 17, 2026): jittered, they
+    # moved the spread a bid needs, and a model told a lower fee would set it.
     "frozen_params": [
         "notional_usd", "no_max", "max_new", "max_intents", "max_quotes", "max_symbols",
-        "max_open_per_series", "max_open_per_event", "pages",
+        "max_open_per_series", "max_open_per_event", "pages", "maker_fee", "min_margin",
     ],
 }
 UNBACKTESTABLE_FAMILIES = ("weather",)
@@ -1115,7 +1117,7 @@ class Foundry:
             "kit.bars, kit.quote and kit.products from history at each step; kit.weather is not available.\n"
             f"The kit: {KIT_API}\n"
             "Kalshi charges takers ceil(0.07 * p * (1 - p) * 100) / 100 dollars a contract; makers pay nothing. Coinbase "
-            "charges 0.25% maker and 0.60% taker.\n"
+            "charges this account 0.5% maker and 1.2% taker, and the backtest charges the same.\n"
             f"How it is judged: the closed positions are split in time; on the last third it needs at least "
             f"{int(cfg['min_oos_trades'])} positions ({int(cfg['min_trades'])} trades in all), a return on notional above the "
             f"best baseline's by {cfg['margin']}, and a 95% confidence lower bound on mean P&L per position above "

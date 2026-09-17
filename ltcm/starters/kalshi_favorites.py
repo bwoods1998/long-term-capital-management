@@ -160,7 +160,8 @@ def decide(kit, params):
         if v2 and reason != "duplicate":
             row = rows.get(ticker) or {}
             close, touch, price = _when(row.get("close_time")), _touch(books.get(ticker) or {}), _num(order.get("limit_price"))
-            if expire > 0 and close is not None and (close - now).total_seconds() <= min_hours * 3600.0:
+            # keep_queue must not keep what v1's requote pulled: a stale bid into the final window.
+            if (expire > 0 or keep_queue and reason) and close is not None and (close - now).total_seconds() <= min_hours * 3600.0:
                 reason = "final window"
             elif band_exit and touch and touch[1] is not None and touch[1] >= yes_max + 0.02 - 1e-9:
                 reason = "band exit"

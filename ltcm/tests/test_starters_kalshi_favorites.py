@@ -205,6 +205,23 @@ class RestingOrderTests(unittest.TestCase):
         self.assertEqual(load().decide(kit, {"keep_queue": True})["cancels"], ["o"])
         self.assertIn("cancelled: 1 behind", kit.log[-1])
 
+    def test_keep_queue_never_keeps_a_stale_bid_into_the_final_window(self):
+        # Version 1 pulls a stale bid and does not replace it once its market is inside min_hours;
+        # until the review of Sept 17, 2026 keep_queue kept one that was still the best to the close.
+        closing = dict(BOARD[0], ticker="KXCPI-26SEP17-T3", title="CPI", close_time="2026-09-17T04:40:00Z")
+        books = {"KXCPI-26SEP17-T3": book(no=["0.9400"], yes=["0.0400"])}
+        stale = [resting("ord-cpi", "KXCPI-26SEP17-T3", "0.94", 180)]
+        self.assertEqual(load().decide(FavKit(BOARD + [closing], orders=stale, books=books), {})["cancels"], ["ord-cpi"], "version 1")
+        kit = FavKit(BOARD + [closing], orders=stale, books=books)
+        out = load().decide(kit, {"keep_queue": True})
+        self.assertEqual(out["cancels"], ["ord-cpi"])
+        self.assertIn("cancelled: 1 final window", kit.log[-1])
+        self.assertNotIn("KXCPI-26SEP17-T3", bids(out))
+        young = [resting("ord-cpi", "KXCPI-26SEP17-T3", "0.94", 5)]
+        self.assertEqual(load().decide(FavKit(BOARD + [closing], orders=young, books=books), {"keep_queue": True})["cancels"], [], "a young bid, as in version 1")
+        far = dict(closing, close_time="2026-09-17T20:00:00Z")
+        self.assertEqual(load().decide(FavKit(BOARD + [far], orders=stale, books=books), {"keep_queue": True})["cancels"], [], "outside the window the best bid keeps its place")
+
     def test_keep_queue_without_a_book_falls_back_to_the_age_rule(self):
         self.assertEqual(load().decide(FavKit(orders=[resting("o", RAIN, "0.92", 180)]), {"keep_queue": True})["cancels"], ["o"])
         self.assertEqual(load().decide(FavKit(orders=[resting("o", RAIN, "0.92", 5)]), {"keep_queue": True})["cancels"], [])
