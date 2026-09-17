@@ -100,3 +100,10 @@ forward testing faster—not spending credits or executing orders for their own 
   latency targets, separate from runway throttling. At 14:25 UTC the public event
   stream showed current work while the summary checkpoint was still timestamped
   14:17 UTC; summary freshness is not equivalent to event-stream freshness.
+- The subsequent public checkpoint timestamped **14:22:31.376 UTC / 07:22 PDT**
+  confirmed `mode=open` at 2.9 days of runway, credit $201.94 and spendable
+  credit $191.94. Account equity was $902.63846815 and cumulative recorded Sail
+  spending $78.16, with zero net external flows. Relative to the bedtime checkpoint:
+  **−$11.63 account change, $22.29 additional Sail spending, approximately −$33.92
+  after compute**. This later snapshot includes movements during this review;
+  it does not overwrite the separately bounded overnight audit above.
