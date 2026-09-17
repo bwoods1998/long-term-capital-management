@@ -803,10 +803,32 @@ def strategy_rows(value: Any, published_at: str | None = None) -> list[dict[str,
                 # Why these settings (a promotion, a lab experiment, the house) and the settings.
                 **({"note": sanitize_string(str(row["note"]))[:200]} if row.get("note") else {}),
                 **({"params": _plain_params_for_site(row.get("params"))} if isinstance(row.get("params"), Mapping) and row.get("params") else {}),
+                # leap: pooled evidence -- what the whole family has proved with this code.
+                **({"family": _family_evidence_for_site(row.get("family_evidence"))} if isinstance(row.get("family_evidence"), Mapping) else {}),
             }
         )
         if len(out) >= 8:
             break
+    return out
+
+
+def _family_evidence_for_site(value: Mapping[str, Any]) -> dict[str, Any]:
+    """The family record's headline for a strategy row: settled, real-money settled, desks,
+    P&L, whether the evidence gate passes and its one-line reason."""
+    out: dict[str, Any] = {}
+    for key in ("settled", "real_settled", "desks"):
+        try:
+            out[key] = max(0, int(value.get(key) or 0))
+        except (TypeError, ValueError):
+            out[key] = 0
+    pnl = value.get("settled_pnl_usd")
+    try:
+        out["settled_pnl_usd"] = format(Decimal(str(pnl)).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN), "f") if pnl not in (None, "") else "0.00"
+    except (InvalidOperation, ValueError):
+        out["settled_pnl_usd"] = "0.00"
+    out["passes"] = bool(value.get("passes"))
+    if value.get("reason"):
+        out["reason"] = sanitize_string(str(value["reason"]))[:200]
     return out
 
 

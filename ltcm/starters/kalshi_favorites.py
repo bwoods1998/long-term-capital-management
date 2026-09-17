@@ -32,7 +32,7 @@ DEFAULTS = {
     "min_hours": 1.0,
     "max_hours": 24.0,
     "min_volume_24h": 10000,
-    "max_new": 3,
+    "max_new": 5,
     "max_open_per_series": 2,
     "requote_seconds": 1800,
     "maker": True,
