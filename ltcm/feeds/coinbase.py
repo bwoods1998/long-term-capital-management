@@ -102,7 +102,9 @@ class CoinbaseMarketFeed(_CoinbaseFeed):
         return {p.upper() for p in self.hub.held_symbols(self.venue) | self.hub.allowed_symbols(self.venue)}
 
     def run_once(self, stop: threading.Event) -> None:
-        products = sorted(self.wanted())
+        # CDE futures ids are not subscribed here (their support on the market channels is
+        # unverified and one refused id could cost the spot feed); their quotes come by REST.
+        products = sorted(p for p in self.wanted() if not p.endswith("-CDE"))
         if not products:
             # Nothing to watch: check again shortly rather than hold an idle socket.
             self.sleep(15.0)

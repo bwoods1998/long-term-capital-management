@@ -50,7 +50,7 @@ from ..broker import (
     text,
 )
 from ..data import TransportError, iso
-from ..data.coinbase import HOST, PREFIX, CoinbaseMarketData, product_id
+from ..data.coinbase import HOST, PREFIX, CoinbaseMarketData, expiry_of, is_future, product_id
 from . import (
     CoinbaseCredentials,
     VenueClient,
@@ -66,7 +66,13 @@ VENUE = "coinbase"
 API_HOST = "api.coinbase.com"
 JWT_LIFETIME = 120
 
-CAPABILITIES = {"crypto", "limit", "gtc", "fractional"}
+#: `short` is for the CDE futures only: a spot coin the desk does not hold cannot be sold
+#: (`risk.rule_short` refuses a short on a crypto instrument whatever the venue lists).
+CAPABILITIES = {"crypto", "future", "limit", "gtc", "fractional", "short"}
+#: Sept 17, 2026: Coinbase Financial Markets' nano contracts are charged per contract, not as a
+#: percentage of notional; the schedule is not in the API. UNVERIFIED until the first fill, which
+#: carries the real commission and corrects the record.
+FUTURES_FEE_PER_CONTRACT = Decimal("0.20")
 
 #: Coinbase's ten order states mapped onto this runtime's vocabulary.
 STATUS_MAP: dict[str, str] = {
@@ -270,7 +276,64 @@ class CoinbaseBroker:
             if not value.is_finite() or not 0 <= value <= Decimal("0.1"):
                 raise ValueError("invalid Coinbase fee tier")
             result[side] = str(value)
+        result["future_contract"] = str(FUTURES_FEE_PER_CONTRACT)
         return result
+
+    # ------------------------------------------------------------- futures (CDE)
+    def futures_summary(self) -> dict[str, Any]:
+        """`GET /api/v3/brokerage/cfm/balance_summary`: the futures wallet's USD, unrealized P&L
+        and buying power. Empty when the account has no derivatives access."""
+        payload = self._call("GET", PREFIX + "/cfm/balance_summary", what="coinbase futures balance", ok=(200,))
+        summary = payload.get("balance_summary") if isinstance(payload, dict) else None
+        return summary if isinstance(summary, dict) else {}
+
+    def contract_size(self, product: str) -> Decimal:
+        """A CDE contract's size in its underlying (BIP: 0.01 BTC), from the product listing and
+        cached: the size is the instrument's multiplier everywhere the floor prices it."""
+        cache = getattr(self, "_contract_sizes", None)
+        if cache is None:
+            cache = self._contract_sizes = {}
+        pid = product_id(product)
+        if pid not in cache:
+            row = self.market_data.product(pid)
+            size = row.get("contract_size")
+            if size is None or size <= 0:
+                raise RejectedOrder(f"coinbase: {pid} lists no contract size")
+            cache[pid] = money(size)
+        return cache[pid]
+
+    def futures_positions(self) -> list[Position]:
+        """`GET /api/v3/brokerage/cfm/positions` as positions: contracts signed by side, the
+        venue's average entry as cost, its current price as the mark, the contract size as the
+        multiplier so `market_value` and `cost_basis` are the position's notional."""
+        payload = self._call("GET", PREFIX + "/cfm/positions", what="coinbase futures positions", ok=(200,))
+        rows = payload.get("positions") if isinstance(payload, dict) else None
+        out: list[Position] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or not row.get("product_id"):
+                continue
+            pid = str(row["product_id"])
+            contracts = dec(row.get("number_of_contracts"))
+            if contracts is None or contracts == 0:
+                continue
+            side = str(row.get("side") or "").upper()
+            signed = -abs(contracts) if side in ("SHORT", "SELL", "FUTURES_POSITION_SIDE_SHORT") else abs(contracts)
+            try:
+                size = self.contract_size(pid)
+            except Exception:
+                size = money(1)
+            instrument = Instrument("future", pid, self.venue, multiplier=size, expiry=expiry_of(pid), market_id=pid)
+            mark = dec(row.get("current_price")) or self._mark(instrument)
+            out.append(
+                Position(
+                    instrument=instrument,
+                    quantity=signed,
+                    average_cost=dec(row.get("avg_entry_price")) or (mark if mark is not None else money(0)),
+                    mark=mark,
+                    as_of=iso(self.clock()),
+                )
+            )
+        return out
 
     def balance(self) -> Balance:
         """Cash is the available USD balance; equity adds every crypto holding at its mark."""
@@ -287,14 +350,27 @@ class CoinbaseBroker:
                 held += dec((row.get("hold") or {}).get("value"), "0") or money(0)
         equity = cash + held
         for position in positions:
+            if position.instrument.asset_class == "future":
+                continue  # a future's notional is not equity; its P&L comes with the futures wallet
             value = position.market_value
             if value is not None:
                 equity += value
+        # leap: futures -- the CFM wallet: margin moved there and the unrealized P&L of the
+        # contracts it backs. Unreadable (no derivatives access) means nothing there, not an error.
+        futures_cash = money(0)
+        try:
+            summary = self.futures_summary()
+        except Exception:
+            summary = {}
+        if summary:
+            futures_cash = dec((summary.get("cfm_usd_balance") or {}).get("value"), "0") or money(0)
+            unrealized = dec((summary.get("unrealized_pnl") or {}).get("value"), "0") or money(0)
+            equity += futures_cash + unrealized
         return Balance(
             venue=self.venue,
-            cash=cash + held,
+            cash=cash + held + futures_cash,
             equity=equity,
-            buying_power=cash,
+            buying_power=cash + futures_cash,
             as_of=iso(self.clock()),
         )
 
@@ -329,6 +405,10 @@ class CoinbaseBroker:
                     as_of=iso(self.clock()),
                 )
             )
+        try:
+            out.extend(self.futures_positions())
+        except Exception:
+            pass  # no derivatives access, or the futures endpoint is down: the spot book stands
         return out
 
     def _mark(self, instrument: Instrument) -> "Decimal | None":
@@ -358,8 +438,13 @@ class CoinbaseBroker:
 
     def submit(self, intent: OrderIntent) -> Order:
         """`POST /api/v3/brokerage/orders`. A refusal arrives as `success: false`, not a 4xx."""
-        if intent.instrument.asset_class != "crypto":
-            raise RejectedOrder(f"coinbase trades crypto, not {intent.instrument.asset_class}")
+        if intent.instrument.asset_class == "future":
+            if not is_future(product_id(intent.instrument)):
+                raise RejectedOrder(f"coinbase futures are CDE products, not {intent.instrument.symbol!r}")
+            if intent.quantity != intent.quantity.to_integral_value():
+                raise RejectedOrder("coinbase futures trade in whole contracts")
+        elif intent.instrument.asset_class != "crypto":
+            raise RejectedOrder(f"coinbase trades crypto and its CDE futures, not {intent.instrument.asset_class}")
         body = self.order_body(intent)
         attached = "attached_order_configuration" in body
         try:

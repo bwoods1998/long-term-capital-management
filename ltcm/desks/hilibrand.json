@@ -12,18 +12,19 @@
   ],
   "instruments": {
     "asset_classes": [
-      "crypto"
+      "crypto",
+      "future"
     ],
     "allow": [],
     "deny": [],
     "min_price": "0",
     "min_adv_usd": "0",
-    "allow_short": false
+    "allow_short": true
   },
   "limits": {
-    "max_position_pct": "0.35",
+    "max_position_pct": "0.60",
     "max_gross_pct": "1.0",
-    "max_order_notional_pct": "0.35",
+    "max_order_notional_pct": "0.60",
     "max_daily_loss_pct": "0.08",
     "max_orders_per_day": 240,
     "max_limit_deviation_pct": "0.03"

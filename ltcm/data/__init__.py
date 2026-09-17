@@ -712,8 +712,11 @@ class CompositeMarketData:
         return built
 
     def route(self, instrument: Instrument) -> Any:
-        """The source that answers for this instrument."""
+        """The source that answers for this instrument. A future on Coinbase (a CDE contract,
+        Sept 17, 2026) is quoted by Coinbase's own market data, not the equity source."""
         name = self.ROUTES.get(instrument.asset_class)
+        if instrument.asset_class == "future" and str(instrument.venue).lower() == "coinbase":
+            name = "crypto"
         if name is None:
             raise DataError(f"no market data route for asset class {instrument.asset_class!r}")
         return self._source(name)

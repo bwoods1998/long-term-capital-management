@@ -357,6 +357,10 @@ class ValidationTests(FoundingCase):
     def test_a_coinbase_family_is_held_to_its_targets(self):
         manifest = json.loads((REPO / "ltcm" / "desks" / "hilibrand.json").read_text())
         manifest.update(id="mcentee", family="memes", capital={"mode": "shadow", "usd": "150"})
+        # Hilibrand holds futures at a 60% position cap since Sept 17, 2026; a founded desk is
+        # bound to the lab's limits and to a spot-only, long-only mandate.
+        manifest["limits"] = {**manifest["limits"], "max_position_pct": "0.50", "max_order_notional_pct": "0.50"}
+        manifest["instruments"] = {**manifest["instruments"], "asset_classes": ["crypto"], "allow_short": False}
         data = proposal(family="memes", id="mcentee", name="McEntee", targets=["pepe-usd", "BONK-USD"], manifest=manifest)
         out = self.validate(data)
         self.assertEqual(out["manifest"]["instruments"]["allow"], ["BONK-USD", "PEPE-USD"])

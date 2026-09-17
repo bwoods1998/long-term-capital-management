@@ -246,7 +246,9 @@ class FeeModel:
         if venue == "kalshi":
             return cls(event_fee_rate=Decimal("0.07"), kalshi_series=kalshi_fee_schedule())
         if venue == "coinbase":
-            return cls(crypto_taker_pct=Decimal("0.009"), crypto_maker_pct=Decimal("0.005"))
+            # Spot at the account's Sept 17, 2026 tier; CDE futures per contract (UNVERIFIED
+            # against a fill: `adapters.coinbase.FUTURES_FEE_PER_CONTRACT`).
+            return cls(crypto_taker_pct=Decimal("0.009"), crypto_maker_pct=Decimal("0.005"), future_per_contract=Decimal("0.20"))
         if venue == "kraken":
             return cls(crypto_taker_pct=Decimal("0.012"), crypto_maker_pct=Decimal("0.005"))
         if venue in ("schwab", "tastytrade"):

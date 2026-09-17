@@ -305,7 +305,7 @@ def fill_opens(events: Iterable[Any]) -> dict[str, tuple[str | None, float]]:
         groups.setdefault((desk_id, key), []).append({**payload, "at": at})
     out: dict[str, tuple[str | None, float]] = {}
     for (desk_id, key), rows in groups.items():
-        for row in position_walk(rows):
+        for row in position_walk(rows, shorts=str(key).startswith("future:")):
             if row["closed"] <= 0:
                 continue
             value = (row["opened_at"], float(row["entry_fees"]))

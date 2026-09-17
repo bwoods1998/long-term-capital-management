@@ -340,7 +340,7 @@ class AccountTests(unittest.TestCase):
             calls.append(args)
             return {"fee_tier": {"maker_fee_rate": "0.005", "taker_fee_rate": "0.009"}}
         broker._call = answer
-        self.assertEqual(broker.fee_rates(), {"maker": "0.005", "taker": "0.009"})
+        self.assertEqual(broker.fee_rates(), {"maker": "0.005", "taker": "0.009", "future_contract": "0.20"})
         self.assertEqual(calls[0], ("GET", PREFIX + "/transaction_summary"))
         broker._call = lambda *args, **kwargs: {"fee_tier": {}}
         with self.assertRaises((ValueError, TypeError)):
@@ -459,3 +459,59 @@ class LifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CFM_SUMMARY = {"balance_summary": {"cfm_usd_balance": {"value": "120.00"}, "unrealized_pnl": {"value": "-3.50"}, "futures_buying_power": {"value": "480.00"}}}
+CFM_POSITIONS = {"positions": [
+    {"product_id": "ETP-20DEC30-CDE", "side": "SHORT", "number_of_contracts": "2", "avg_entry_price": "2450", "current_price": "2440", "unrealized_pnl": "2.00"},
+    {"product_id": "BIP-20DEC30-CDE", "side": "LONG", "number_of_contracts": "0"},
+]}
+ETP_PRODUCT = {"product_id": "ETP-20DEC30-CDE", "price": "2440", "product_type": "FUTURE", "quote_increment": "0.5",
+               "future_product_details": {"contract_size": "0.1", "contract_root_unit": "ETH", "contract_expiry": "2089-12-30T16:00:00Z", "perpetual_details": {}}}
+
+
+class FuturesTests(unittest.TestCase):
+    """leap: futures -- CDE contracts as positions with the venue's contract size (Sept 17, 2026)."""
+
+    def routes(self):
+        return {
+            HOST + PREFIX + "/accounts*": ACCOUNTS, HOST + MARKET + "/product_book*": BOOK,
+            HOST + PREFIX + "/cfm/balance_summary": CFM_SUMMARY, HOST + PREFIX + "/cfm/positions": CFM_POSITIONS,
+            HOST + MARKET + "/products/ETP-20DEC30-CDE": ETP_PRODUCT,
+        }
+
+    def test_futures_positions_carry_the_contract_size_and_the_short_sign(self):
+        client, _, _ = make(self.routes())
+        positions = {p.instrument.symbol: p for p in client.positions()}
+        self.assertEqual(set(positions), {"BTC-USD", "ETP-20DEC30-CDE"}, "a zero-contract row is not a position")
+        short = positions["ETP-20DEC30-CDE"]
+        self.assertEqual((short.instrument.asset_class, short.quantity, short.average_cost, short.mark), ("future", Decimal("-2"), Decimal("2450"), Decimal("2440")))
+        self.assertEqual(short.instrument.multiplier, Decimal("0.1"), "the venue's contract size is the multiplier")
+        self.assertEqual(short.instrument.expiry, "2030-12-20")
+        self.assertEqual(short.market_value, Decimal("-2") * Decimal("2440") * Decimal("0.1"))
+
+    def test_balance_adds_the_futures_wallet_and_its_pnl_but_never_a_contracts_notional(self):
+        client, _, _ = make(self.routes())
+        balance = client.balance()
+        spot = Decimal("5000.25") + Decimal("0.30") * Decimal("64050")
+        self.assertEqual(balance.equity, spot + Decimal("120.00") + Decimal("-3.50"))
+        self.assertEqual(balance.cash, Decimal("5000.25") + Decimal("120.00"))
+
+    def test_without_derivatives_access_the_spot_book_stands(self):
+        routes = self.routes()
+        routes[HOST + PREFIX + "/cfm/balance_summary"] = (403, {}, b'{"error":"no access"}')
+        routes[HOST + PREFIX + "/cfm/positions"] = (403, {}, b'{"error":"no access"}')
+        client, _, _ = make(routes)
+        self.assertEqual([p.instrument.symbol for p in client.positions()], ["BTC-USD"])
+        self.assertEqual(client.balance().equity, Decimal("5000.25") + Decimal("0.30") * Decimal("64050"))
+
+    def test_a_futures_order_must_be_a_cde_product_in_whole_contracts(self):
+        client, _, _ = make(self.routes())
+        bad = Instrument("future", "BTC-USD", "coinbase", market_id="BTC-USD")
+        with self.assertRaises(RejectedOrder):
+            client.submit(intent(bad, side="sell", quantity="1", order_type="limit", limit_price="76000", time_in_force="gtc"))
+        etp = Instrument("future", "ETP-20DEC30-CDE", "coinbase", multiplier=Decimal("0.1"), market_id="ETP-20DEC30-CDE")
+        with self.assertRaises(RejectedOrder):
+            client.submit(intent(etp, side="sell", quantity="1.5", order_type="limit", limit_price="2440", time_in_force="gtc"))
+        self.assertIn("short", client.capabilities())
+        self.assertEqual(client.fee_rates.__doc__ is not None, True)

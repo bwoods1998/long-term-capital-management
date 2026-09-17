@@ -566,10 +566,38 @@ def instrument_from(arguments: Any, manifest: DeskManifest) -> Instrument:
         data["strike"] = str(data["strike"])
     if data.get("asset_class") == "option" and "multiplier" not in data:
         data["multiplier"] = format(OPTION_MULTIPLIER, "f")
+    if data.get("asset_class") == "future" and venue == "coinbase":
+        # leap: futures -- a CDE contract's multiplier is the venue's contract size, never the
+        # caller's: a strategy that named 0.0001 would shrink every notional the risk engine sees.
+        from .data.coinbase import expiry_of, is_future
+        from .data.coinbase import product_id as coinbase_product_id
+
+        try:
+            pid = coinbase_product_id(str(data.get("market_id") or data.get("symbol") or ""))
+        except Exception as exc:
+            raise ToolError(f"invalid instrument: {exc}") from None
+        if not is_future(pid):
+            raise ToolError(f"invalid instrument: {pid} is not a CDE futures product")
+        data["symbol"] = pid
+        data["market_id"] = pid
+        data.setdefault("expiry", expiry_of(pid))
+        resolver = contract_size_resolver
+        if resolver is not None:
+            try:
+                data["multiplier"] = format(resolver(pid), "f")
+            except Exception as exc:
+                raise ToolError(f"invalid instrument: contract size of {pid} unavailable ({type(exc).__name__})") from None
+        elif "multiplier" not in data:
+            raise ToolError(f"invalid instrument: contract size of {pid} unavailable")
     try:
         return Instrument.from_dict(data)
     except (KeyError, TypeError, ValueError) as exc:
         raise ToolError(f"invalid instrument: {exc}") from None
+
+
+#: leap: futures -- set by the service to the Coinbase adapter's `contract_size`, so every
+#: futures instrument a tool builds carries the venue's multiplier. None in tests and offline.
+contract_size_resolver = None
 
 
 def default_venue(manifest: DeskManifest) -> str:

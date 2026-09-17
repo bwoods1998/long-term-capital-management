@@ -173,6 +173,10 @@ def rule_short(intent: OrderIntent, ctx: RiskContext) -> str | None:
             return f"sell exceeds position and shorting is not permitted ({_held_on_market(intent, ctx, held_qty)})"
         if "short" not in ctx.venue_capabilities:
             return "venue does not support short sales"
+        if intent.instrument.asset_class in ("crypto", "event"):
+            # A spot coin or an event contract is sold only from a holding; the venue's `short`
+            # capability is its futures (Sept 17, 2026: Coinbase CDE contracts).
+            return f"{intent.instrument.asset_class} cannot be sold short; only futures can ({_held_on_market(intent, ctx, held_qty)})"
     return None
 
 

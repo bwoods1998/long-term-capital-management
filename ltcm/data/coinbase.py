@@ -78,7 +78,27 @@ def _future_fields(details: Any) -> dict[str, Any]:
         "contract_expiry": details.get("contract_expiry"),
         "contract_size": decimal_or_none(details.get("contract_size")),
         "contract_expiry_type": details.get("contract_expiry_type"),
+        "funding_rate": decimal_or_none(details.get("funding_rate")),
+        "perpetual": bool(details.get("perpetual_details")) or str(details.get("contract_expiry") or "").startswith(("2089", "2099")),
     }
+
+
+def is_future(product: str) -> bool:
+    """True for a CDE futures product id (`BIP-20DEC30-CDE`)."""
+    return str(product or "").upper().endswith("-CDE")
+
+
+def expiry_of(product: str) -> "str | None":
+    """`2026-09-25` from `BIT-25SEP26-CDE`; None when the id carries no readable date."""
+    parts = str(product or "").upper().split("-")
+    if len(parts) != 3 or parts[2] != "CDE" or len(parts[1]) != 7:
+        return None
+    months = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6, "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+    try:
+        day, month, year = int(parts[1][:2]), months[parts[1][2:5]], 2000 + int(parts[1][5:])
+    except (KeyError, ValueError):
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
 
 
 def product_id(instrument: "Instrument | str") -> str:
@@ -209,8 +229,8 @@ class CoinbaseMarketData:
     # ------------------------------------------------------------- MarketData
     def quote(self, instrument: Instrument) -> Quote:
         """Top of book for a crypto pair. Real-time and public, so `delayed=False`."""
-        if instrument.asset_class != "crypto":
-            raise DataError(f"coinbase quotes only crypto, not {instrument.asset_class!r}")
+        if instrument.asset_class not in ("crypto", "future"):
+            raise DataError(f"coinbase quotes crypto and its CDE futures, not {instrument.asset_class!r}")
         book = self.product_book(instrument, limit=1)
         bid = book["bids"][0][0] if book["bids"] else None
         ask = book["asks"][0][0] if book["asks"] else None

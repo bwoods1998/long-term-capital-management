@@ -688,3 +688,22 @@ class CryptoInstrumentKeyTests(unittest.TestCase):
         self.assertEqual(intent.key, fill.key)
         event = instrument_from({"asset_class": "event", "symbol": "KXBTC-1", "market_id": "KXBTC-1", "right": "no"}, DeskManifest.from_dict({**SAMPLE, "venues": ["kalshi"], "instruments": {**SAMPLE["instruments"], "asset_classes": ["event"], "allow": [], "deny": []}}))
         self.assertEqual(event.market_id, "KXBTC-1")
+
+
+class FuturesInstrumentTests(unittest.TestCase):
+    """leap: futures -- a CDE contract's multiplier comes from the venue, never the caller."""
+
+    def setUp(self):
+        self.previous = tools.contract_size_resolver
+        self.addCleanup(setattr, tools, "contract_size_resolver", self.previous)
+
+    def test_the_contract_size_is_the_multiplier_and_the_callers_is_ignored(self):
+        tools.contract_size_resolver = lambda pid: Decimal("0.01") if pid == "BIP-20DEC30-CDE" else Decimal("0.1")
+        m = manifest(venues=["coinbase"], instruments={**SAMPLE["instruments"], "asset_classes": ["crypto", "future"]})
+        instrument = tools.instrument_from({"asset_class": "future", "symbol": "bip-20dec30-cde", "multiplier": "0.0001"}, m)
+        self.assertEqual((instrument.symbol, instrument.market_id, str(instrument.multiplier), instrument.expiry), ("BIP-20DEC30-CDE", "BIP-20DEC30-CDE", "0.01", "2030-12-20"))
+        with self.assertRaises(tools.ToolError):
+            tools.instrument_from({"asset_class": "future", "symbol": "BTC-USD"}, m)
+        tools.contract_size_resolver = None
+        with self.assertRaises(tools.ToolError):
+            tools.instrument_from({"asset_class": "future", "symbol": "BIP-20DEC30-CDE"}, m)

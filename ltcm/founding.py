@@ -73,7 +73,7 @@ STABLECOINS = frozenset(
 )
 #: What a desk on each venue may name in `instruments.asset_classes`, and what it must name.
 #: A Kalshi desk may read crypto and index prices as reference (Scholes does); it trades events.
-VENUE_CLASSES = {"kalshi": ("event", "crypto", "equity"), "coinbase": ("crypto",)}
+VENUE_CLASSES = {"kalshi": ("event", "crypto", "equity"), "coinbase": ("crypto", "future")}
 VENUE_PRIMARY = {"kalshi": "event", "coinbase": "crypto"}
 EFFORTS = ("low", "medium", "high")
 LIMIT_KEYS = (
@@ -918,9 +918,11 @@ class Founding:
         for venue in venues:
             if VENUE_PRIMARY.get(venue) not in classes:
                 raise FoundingError(f"a desk on {venue} must name the {VENUE_PRIMARY.get(venue)} asset class")
-        if instruments.get("allow_short"):
-            raise FoundingError("a founded desk may not short")
-        instruments["allow_short"] = False
+        # A founded desk shorts only through futures (Sept 17, 2026: Coinbase CDE contracts);
+        # spot and event contracts are never sold short, whatever the proposal says.
+        if instruments.get("allow_short") and "future" not in classes:
+            raise FoundingError("a founded desk may not short without a futures mandate")
+        instruments["allow_short"] = bool(instruments.get("allow_short")) and "future" in classes
         instruments.setdefault("min_price", "0")
         instruments.setdefault("min_adv_usd", "0")
         if "kalshi" in venues and _number(instruments["min_price"], "instruments.min_price") > 1:

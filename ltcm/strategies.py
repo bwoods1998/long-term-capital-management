@@ -76,6 +76,21 @@ STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": 
 #: A second house strategy for a family: the ranges family also quotes the hourly buckets on
 #: both legs at a spread, the maker side of the same market its starter takes.
 SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
+#: leap: futures -- a third house strategy for the crypto family: mean reversion on Coinbase's
+#: CDE perpetual-style contracts, long and short, where a contract's fee is cents, not percent.
+EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion"]}
+#: What the shadow desks explore on the perps: the signal's window, threshold and holding time.
+#: The live desk runs the code's defaults; each shadow is dealt one of these by its id.
+EXTRA_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "perp_reversion": [
+        {"z_entry": 1.5},
+        {"z_entry": 2.5, "lookback": 48},
+        {"interval": "15m", "lookback": 32, "holding_hours": 8},
+        {"holding_hours": 2, "stop_pct": 0.008},
+        {"z_entry": 2.0, "max_intents": 2, "max_contract_usd": 300},
+        {"interval": "1h", "lookback": 24, "holding_hours": 12, "stop_pct": 0.02},
+    ],
+}
 #: A shadow desk's starter explores, and each shadow desk of a family explores differently:
 #: the variants are dealt round-robin by the desk's id, so the family's record compares
 #: settings on the same markets at the same hours. The live desk keeps the code's defaults.
@@ -145,7 +160,7 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
 #: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
 PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "jitter": 0.25, "foundry_hold_hours": 72}
-STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300}
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300}
 
 
 def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:
@@ -254,7 +269,12 @@ class Kit:
                 price = float(row.get("price") or 0)
                 if price <= 0 or row.get("trading_disabled"):
                     continue
-                out.append({"symbol": str(row.get("product_id")), "root": unit, "expiry": str(row.get("contract_expiry") or ""), "price": price, "volume_usd": float(row.get("volume_24h") or 0) * price})
+                size = float(row.get("contract_size") or 0) or None
+                out.append({"symbol": str(row.get("product_id")), "root": unit, "expiry": str(row.get("contract_expiry") or ""), "price": price,
+                            "volume_usd": float(row.get("volume_24h") or 0) * price * (size or 1.0), "contract_size": size,
+                            "contract_usd": (price * size) if size else None, "perpetual": bool(row.get("perpetual")),
+                            "funding_rate": float(row.get("funding_rate") or 0) if row.get("funding_rate") is not None else None,
+                            "quote_increment": float(row.get("quote_increment") or 0) or None})
             except (TypeError, ValueError):
                 continue
         out.sort(key=lambda r: (r["expiry"] or "9999", -r["volume_usd"]))
@@ -503,11 +523,19 @@ class Strategies:
                 )
         except Exception:
             positions = []
+        equity = None
+        try:
+            ledger = (getattr(self.service, "ledgers", None) or {}).get(manifest.id)
+            state = ledger.state(self.service.now()) if ledger is not None else None
+            equity = str(state.equity) if state is not None and state.equity is not None else None
+        except Exception:
+            equity = None
         return {
             "now": at,
             "desk_id": manifest.id,
             "live": bool(manifest.live),
             "learning_usd": str(self.learning_usd(manifest)),
+            "equity_usd": equity,
             "positions": positions,
             "open_orders": self.open_orders_for(manifest),
             "venues": list(manifest.venues),
@@ -913,6 +941,11 @@ class Strategies:
             second = SECOND_STARTERS.get(manifest.family)
             if second:
                 wanted.append((second, starter_params(manifest.family, manifest, quotes=True), int(STARTER_CADENCE.get(second, 600))))
+            for extra in EXTRA_STARTERS.get(manifest.family, []):
+                if "future" in tuple(getattr(manifest.instruments, "asset_classes", ()) or ()):
+                    variants = EXTRA_VARIANTS.get(extra) or [{}]
+                    dealt = {} if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
+                    wanted.append((extra, dealt, int(STARTER_CADENCE.get(extra, 600))))
             existing = self.store.for_desk(desk_id)
             # leap: lab -- an adopted strategy is house genome: every desk of the family runs it,
             # the live desk included, until the desk replaces it with its own.

@@ -120,3 +120,13 @@ test('funding history is read-only and cannot move money', () => {
     assert.equal(createsOrder(venue, 'GET', path), false);
   }
 });
+
+test('coinbase futures notional is contracts x contract size x price, and never priced without the size', () => {
+  const body = { product_id: 'BIP-20DEC30-CDE', order_configuration: { limit_limit_gtc: { base_size: '2', limit_price: '76000' } } };
+  assert.equal(usd(notional('coinbase', body, { contractSize: '0.01' }).micro), '1520.00');
+  assert.match(notional('coinbase', body).error, /contract size/);
+  assert.match(notional('coinbase', body, { contractSize: '0' }).error, /contract size/);
+  // A spot product ignores a contract size.
+  const spot = { product_id: 'BTC-USD', order_configuration: { limit_limit_gtc: { base_size: '0.5', limit_price: '60' } } };
+  assert.equal(usd(notional('coinbase', spot, { contractSize: '0.01' }).micro), '30.00');
+});

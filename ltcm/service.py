@@ -1151,6 +1151,32 @@ class Service:
             broker = self._make_live_broker(venue)
             if broker is not None:
                 self.brokers[venue] = broker
+        # leap: futures -- every futures instrument a tool builds takes its multiplier from the
+        # venue's contract listing, through the live adapter when there is one and the public
+        # market data otherwise, never from the caller.
+        try:
+            from . import tools as tools_module
+
+            coinbase = self.brokers.get("coinbase")
+            if coinbase is not None and callable(getattr(coinbase, "contract_size", None)):
+                tools_module.contract_size_resolver = coinbase.contract_size
+            else:
+                from .data.coinbase import CoinbaseMarketData
+
+                market = CoinbaseMarketData()
+                sizes: dict[str, Any] = {}
+
+                def public_size(product: str) -> Decimal:
+                    if product not in sizes:
+                        size = market.product(product).get("contract_size")
+                        if size is None or size <= 0:
+                            raise ValueError(f"{product} lists no contract size")
+                        sizes[product] = Decimal(str(size))
+                    return sizes[product]
+
+                tools_module.contract_size_resolver = public_size
+        except Exception as exc:
+            self.alert("warning", f"futures contract sizes unavailable: {type(exc).__name__}")
         # Every shadow desk routes to the one "shadow" key; the router hands each desk its own
         # book, so a bug in one desk's scoring can never touch another's.
         if self.shadow_books:

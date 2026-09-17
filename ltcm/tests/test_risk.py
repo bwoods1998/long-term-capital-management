@@ -496,3 +496,23 @@ class FloorClusterRuleTests(unittest.TestCase):
         reasons = self.reasons(self.buy(self.btc, "16", "0.9375"),
                                self.floor_ctx(self.btc, floor_event_exposure=floor, max_event_market_floor_pct=0, max_event_cluster_floor_pct=0))
         self.assertFalse(any("at risk" in r for r in reasons), reasons)
+
+
+class FuturesShortTests(unittest.TestCase):
+    """leap: futures -- shorts are for futures; a spot coin is never sold short (Sept 17, 2026)."""
+
+    def test_a_short_sale_of_spot_crypto_is_refused_even_when_the_venue_can_short(self):
+        from ltcm.risk import RiskEngine
+        engine = RiskEngine()
+        shorting = manifest(instruments={**SAMPLE["instruments"], "allow_short": True, "asset_classes": ["crypto", "future"]}, venues=["coinbase"])
+        coin = Instrument("crypto", "ETH-USD", "coinbase", market_id="ETH-USD")
+        ctx = context(manifest=shorting, venue_capabilities={"crypto", "future", "limit", "short"}, market_open=None,
+                      quote=Quote(instrument=coin, bid=Decimal("2440"), ask=Decimal("2441"), last=Decimal("2440"), as_of="2026-09-17T00:00:00Z", source="t"))
+        decision = engine.check(intent(side="sell", quantity="1", order_type="limit", limit_price="2441", instrument=coin), ctx)
+        self.assertFalse(decision.approved)
+        self.assertTrue(any("cannot be sold short" in r for r in decision.reasons), decision.reasons)
+        future = Instrument("future", "ETP-20DEC30-CDE", "coinbase", multiplier=Decimal("0.1"), market_id="ETP-20DEC30-CDE")
+        ctx = context(manifest=shorting, venue_capabilities={"crypto", "future", "limit", "short"}, market_open=None,
+                      quote=Quote(instrument=future, bid=Decimal("2440"), ask=Decimal("2441"), last=Decimal("2440"), as_of="2026-09-17T00:00:00Z", source="t"))
+        decision = engine.check(intent(side="sell", quantity="1", order_type="limit", limit_price="2440", instrument=future), ctx)
+        self.assertFalse(any("short" in r for r in decision.reasons), decision.reasons)

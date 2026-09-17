@@ -75,9 +75,14 @@ export function caps(env = {}) {
  * What one order is worth, in micro-dollars.
  * `{ micro }` when it can be priced, `{ error }` when it cannot -- which is a refusal, not a pass.
  */
-export function notional(venue, body, { reference = null } = {}) {
+export function notional(venue, body, { reference = null, contractSize = null } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
-  return venue === 'kalshi' ? kalshiNotional(body) : coinbaseNotional(body, reference);
+  return venue === 'kalshi' ? kalshiNotional(body) : coinbaseNotional(body, reference, contractSize);
+}
+
+/** True for a Coinbase Financial Markets futures product id (`BIP-20DEC30-CDE`). */
+export function isCoinbaseFuture(productId) {
+  return /^[A-Z0-9]{1,12}-[0-9]{2}[A-Z]{3}[0-9]{2}-CDE$/.test(String(productId || '').toUpperCase());
 }
 
 // Kalshi: count x price, in dollars. The v2 surface quotes decimal dollars (`price`); the legacy
@@ -100,8 +105,15 @@ function kalshiNotional(body) {
 
 // Coinbase: a `quote_size` already is the dollar amount. A `base_size` is a quantity of the base
 // asset, so it is priced with the reference the caller sends, falling back to its own limit price.
-function coinbaseNotional(body, reference) {
+// A CDE futures contract's `base_size` counts contracts, each `contractSize` of the underlying
+// (nano BTC: 0.01), so the notional is size x contract size x price. The router reads the size
+// from the venue's own product listing and refuses to price a future without it.
+function coinbaseNotional(body, reference, contractSize = null) {
   const configuration = body.order_configuration;
+  if (isCoinbaseFuture(body.product_id)) {
+    const size = parsePico(contractSize);
+    if (size === null || size <= 0n) return { error: 'Cannot price this futures order: the contract size is unknown.' };
+  }
   if (!configuration || typeof configuration !== 'object') {
     return { error: 'Order configuration is missing.' };
   }
@@ -117,5 +129,7 @@ function coinbaseNotional(body, reference) {
   if (price === null || price <= 0n) {
     return { error: `Cannot price this order: send a ${REFERENCE_HEADER} header or a quote_size.` };
   }
-  return { micro: picoToMicro(mulPico(size, price)) };
+  let units = size;
+  if (isCoinbaseFuture(body.product_id)) units = mulPico(size, parsePico(contractSize));
+  return { micro: picoToMicro(mulPico(units, price)) };
 }

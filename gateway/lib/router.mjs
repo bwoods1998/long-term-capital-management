@@ -18,7 +18,7 @@
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
-import { createsOrder, notional, REFERENCE_HEADER, allowedVenuePath } from './caps.mjs';
+import { createsOrder, notional, isCoinbaseFuture, REFERENCE_HEADER, allowedVenuePath } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as coinbase from './coinbase.mjs';
 
@@ -113,24 +113,31 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       return fail('An order body must be JSON.', 400);
     }
     let reference = request.headers.get(REFERENCE_HEADER);
+    let contractSize = null;
     if (target.venue === 'coinbase') {
       const leg = Object.values(parsed?.order_configuration || {}).find(v => v && typeof v === 'object');
-      if (leg?.base_size && !leg.quote_size && !leg.limit_price) {
+      const product = String(parsed?.product_id || '');
+      const future = isCoinbaseFuture(product);
+      if ((leg?.base_size && !leg.quote_size && !leg.limit_price) || future) {
         // A market order has no enforceable limit. Its reference must come from the venue,
-        // never from the trading VM that is asking us to authorize the spend.
-        const product = String(parsed.product_id || '');
+        // never from the trading VM that is asking us to authorize the spend. A futures order
+        // also needs the venue's contract size, whatever the caller says its notional is.
         if (!/^[A-Z0-9-]{3,80}$/.test(product)) return fail('Invalid product id.', 400);
         try {
           const quote = await fetcher(`https://api.coinbase.com/api/v3/brokerage/market/products/${product}`, {
             method: 'GET', signal: AbortSignal.timeout(5000), redirect: 'error',
           });
           const data = await quote.json();
-          if (!quote.ok || !(Number(data.price) > 0)) return fail('Cannot independently price this market order.', 503);
-          reference = String(Number(data.price) * 1.10);
-        } catch { return fail('Cannot independently price this market order.', 503); }
+          if (!quote.ok || !(Number(data.price) > 0)) return fail('Cannot independently price this order.', 503);
+          if (!leg?.limit_price) reference = String(Number(data.price) * 1.10);
+          if (future) {
+            contractSize = String(data?.future_product_details?.contract_size ?? '');
+            if (!(Number(contractSize) > 0)) return fail('Cannot price this futures order: the venue lists no contract size.', 503);
+          }
+        } catch { return fail('Cannot independently price this order.', 503); }
       }
     }
-    const priced = notional(target.venue, parsed, { reference });
+    const priced = notional(target.venue, parsed, { reference, contractSize });
     if (priced.error) return fail(priced.error, 400);
     const decision = await gate.reserve({ micro: String(priced.micro) });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);

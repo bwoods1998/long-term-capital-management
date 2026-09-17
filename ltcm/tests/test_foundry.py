@@ -32,7 +32,7 @@ from ltcm.tests.test_strategies import FakeService, Run, manifest
 NOW = "2026-09-16T14:20:00.000Z"
 SOURCE = (STARTERS_DIR / "kalshi_favorites.py").read_text(encoding="utf-8")
 #: The house starter's frozen settings, which every candidate of it carries.
-FROZEN_HOUSE = {"max_new": 3, "max_open_per_series": 2, "no_max": 0.96, "notional_usd": None, "pages": 8}
+FROZEN_HOUSE = {"max_new": 5, "max_open_per_series": 2, "no_max": 0.96, "notional_usd": None, "pages": 8}
 GOOD_CODE = 'DEFAULTS = {"yes_max": 0.1}\n\n\ndef decide(kit, params):\n    return []\n'
 
 
@@ -274,7 +274,7 @@ class CandidateTests(FoundryCase):
             self.assertTrue(10000 * 0.5 <= params["min_volume_24h"] <= 10000 * 1.5)
             self.assertIsInstance(params["min_volume_24h"], int)
             self.assertIsNone(params["notional_usd"], "size is never a candidate's")
-            self.assertEqual((params["max_new"], params["no_max"]), (3, 0.96), "nor order counts and price guards")
+            self.assertEqual((params["max_new"], params["no_max"]), (5, 0.96), "nor order counts and price guards")
         self.assertIn(False, [p["maker"] for p in full], "a choice from the family's variants is flipped")
         self.assertTrue(all(p["maker"] in (True, False) for p in full))
         self.assertEqual(len({json.dumps(p, sort_keys=True) for p in full}), 10, "no duplicates")
@@ -1098,7 +1098,7 @@ class ReviewTests(FoundryCase):
             with self.assertRaises(ValueError) as caught:
                 foundry.validate_code({"code": code, "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900, source=SOURCE)
             self.assertIn(reason, str(caught.exception))
-        keep = "DEFAULTS = {'yes_max': 0.2, 'max_new': 3, 'no_max': 0.96}\n\ndef decide(kit, params):\n    return []\n"
+        keep = "DEFAULTS = {'yes_max': 0.2, 'max_new': 5, 'no_max': 0.96}\n\ndef decide(kit, params):\n    return []\n"
         foundry.validate_code({"code": keep, "hypothesis": "h"}, "kalshi_favorites_f9", self.live, 900, source=SOURCE)
 
     def test_an_adoption_never_reverts_the_live_desks_newer_code(self):

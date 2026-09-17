@@ -1564,7 +1564,7 @@ class Gateway:
                 continue
             rows.append({**payload, "at": event.at})
         last: dict[str, Any] | None = None
-        for row in position_walk(rows):
+        for row in position_walk(rows, shorts=str(key).startswith("future:")):
             if fill_id is not None and row["fill_id"] == fill_id:
                 return row["opened_at"], row["entry_fees"]
             last = row
