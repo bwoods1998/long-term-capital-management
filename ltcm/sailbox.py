@@ -789,6 +789,9 @@ class SailboxClient:
                     query=query,
                     timeout=40.0,
                 )
+                if row.get("status") in ("running", "unspecified") and attempt < 2:
+                    time.sleep(0.25 * (2 ** attempt))
+                    continue
                 break
             except (SailboxError, OSError) as exc:
                 status = getattr(exc, "status", None)
@@ -802,7 +805,10 @@ class SailboxClient:
             return
         result.status = str(row.get("status") or result.status)
         code = row.get("return_code")
-        result.return_code = int(code) if isinstance(code, int) else result.return_code
+        terminal = result.status in ("succeeded", "failed", "timed_out")
+        result.return_code = int(code) if terminal and isinstance(code, int) else None
+        if not terminal:
+            result.error_code = "exec_wait_not_terminal"
         for name in ("stdout", "stderr"):
             tail = row.get(name)
             if isinstance(tail, str) and tail:

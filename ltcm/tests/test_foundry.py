@@ -358,6 +358,51 @@ class CandidateTests(FoundryCase):
 
 # --------------------------------------------------------------------------- backtests and selection
 class BacktestTests(FoundryCase):
+    def test_a_slow_repair_does_not_hold_back_another_valid_candidate(self):
+        repair_started, release = threading.Event(), threading.Event()
+        class MixedProvider(Provider):
+            def respond(self, profile, items, **kwargs):
+                key = kwargs["request_key"]
+                if ":repair:" in key:
+                    repair_started.set()
+                    release.wait(4)
+                    text = reply("kalshi_favorites_f1")
+                elif key.endswith(":0"):
+                    text = "broken JSON"
+                else:
+                    repair_started.wait(2)
+                    text = reply("kalshi_favorites_f1_2")
+                return SimpleNamespace(output_text=text, cost_usd=Decimal("0.07"))
+        foundry = self.foundry(MixedProvider(), repair_invalid_code=True)
+        worker = threading.Thread(target=lambda: foundry.cycle(NOW))
+        worker.start()
+        try:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not any(s["strategy"] == "kalshi_favorites_f1_2" for s in self.manager.specs):
+                time.sleep(.01)
+            self.assertTrue(repair_started.is_set())
+            self.assertTrue(any(s["strategy"] == "kalshi_favorites_f1_2" for s in self.manager.specs))
+        finally:
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+
+    def test_pending_model_work_emits_factual_heartbeat_without_invented_thoughts(self):
+        from unittest.mock import patch
+        from concurrent.futures import wait
+        seen = []
+        def heartbeat_once(futures, **kwargs):
+            if kwargs.get("return_when") and not seen:
+                seen.append(True)
+                return set(), set(futures)
+            return wait(futures, **kwargs)
+        provider = Provider()
+        provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_favorites_f1_2")}
+        with patch("ltcm.foundry.wait_futures", side_effect=heartbeat_once):
+            self.foundry(provider).cycle(NOW)
+        messages = [e.payload for e in self.log.kinds("lab.progress")]
+        self.assertTrue(any(p.get("pending_models") and "model jobs still running" in p["message"] for p in messages))
+
     def test_exact_successful_result_survives_restart_without_new_evidence(self):
         import queue
         window = {"start": "2026-09-01T00:00:00Z", "end": "2026-09-06T00:00:00Z", "step_minutes": 15}

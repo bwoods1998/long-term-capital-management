@@ -9,11 +9,15 @@ throughput, execution lifecycle and observability. It does not establish profita
    subscribed markets. Strategies receive fresh top-of-book, depth, imbalance and fee-tier
    context. Depth expires after five seconds and is invalidated on disconnect. Account fills
    and resolutions wake the main loop; market ticks do not cause an uncontrolled wake storm.
-2. **Generate:** Foundry rotates Kimi K3, DeepSeek V4 Pro and GLM 5.3 across six concurrent
+2. **Generate:** Foundry rotates Kimi K3, DeepSeek V4 Flash and GLM 5.3 across six concurrent
    code candidates, alongside eighteen parameter variants. Directions now include inventory
    exits, fee-aware execution and regime adaptation. Normal eligibility is five minutes;
    four new independent outcomes can trigger eligibility after two minutes. These are
    scheduling thresholds, not a guarantee that a long-running cycle finishes that quickly.
+   Kimi retains high reasoning effort; Flash and GLM use medium after live high-effort
+   responses repeatedly exhausted their output budget. Validation/repair has an independent
+   bounded pool so one repair cannot block another completed candidate. Pending model work
+   emits factual thirty-second heartbeats without exposing private reasoning.
 3. **Test:** Twelve isolated Sail research sandboxes, per-desk provisioning locks instead
    of a global network lock, exact successful-result caching, and first-ready candidate
    testing. Cache identity includes source, parameters, historical window, fill model, seed,
@@ -44,6 +48,7 @@ throughput, execution lifecycle and observability. It does not establish profita
   including across floor restarts. A disconnected execution stream is reconciled against
   the same execution with bounded transient retries; commands are not blindly resubmitted.
   The authoritative output tail replaces incomplete streamed output. Errors expose categories.
+  A `running` wait response with a placeholder zero return code is not accepted as completion.
 - Coinbase market-feed frames permit a bounded 16 MiB snapshot; the previous 4 MiB limit
   could reject a full BTC book. User-feed limits are unchanged.
 - Missing retired desks no longer force committee allocation on every tick.
@@ -66,6 +71,10 @@ throughput, execution lifecycle and observability. It does not establish profita
   reported 21 backtests plus five failed runs. No candidate qualified; the best reported
   out-of-sample return was still negative. Subsequent cycles exposed unconfirmed Sail runs
   and partial engine-error reports; this motivated reconciliation and counter fixes.
+- The first ensemble trial used DeepSeek Pro; two calls remained unfinished long enough to
+  obstruct subsequent cycles. The final fast loop uses the existing Flash profile instead.
+  High-effort GLM also produced incomplete responses, motivating its medium-effort setting.
+  These are observed latency/format issues, not a quality ranking of the model families.
 - A clearly labelled notification test was accepted by the mail service. No artificial trade
   was placed to create a notification. The old counter bug is not proof earlier mail never sent.
 - One Kalshi desk's accounting cash was negative after allocation changes under held inventory;
@@ -82,7 +91,7 @@ overfit. No candidate found during this build established an exponential profit 
 
 ## Verification and deployment
 
-- Python: 1,552 tests pass; existing resource/deprecation warnings remain.
+- Python: 1,555 tests pass; existing resource/deprecation warnings remain.
 - Gateway: 78 tests pass; syntax checks pass.
 - Website: 62 tests pass; syntax checks pass, including execution-line presentation.
 - Production event-chain audit checked 59,424 events without a mismatch; deployed Python

@@ -49,7 +49,7 @@ import secrets
 import threading
 import time
 import types
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait as wait_futures
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as wait_futures
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -1277,6 +1277,7 @@ class Foundry:
         if not isinstance(profiles, list) or not profiles or not all(isinstance(p, str) for p in profiles):
             profiles = [cfg["profile"]]
         selected_profiles = [profiles[(cycle + index) % len(profiles)] for index in range(count)]
+        efforts = cfg.get("profile_reasoning_effort") or {}
 
         def ask(index: int) -> tuple[int, Any, str | None]:
             name = names[index]
@@ -1291,7 +1292,7 @@ class Foundry:
                     desk_id=BUDGET_DESK,
                     session_id=f"foundry-{cycle}",
                     request_key=f"foundry:{cycle}:{subject}:{index}",
-                    reasoning_effort=cfg["reasoning_effort"],
+                    reasoning_effort=efforts.get(selected_profiles[index], cfg["reasoning_effort"]),
                     max_output_tokens=int(cfg["max_output_tokens"]),
                     desk_cap_usd_per_day=cfg["budget_usd_per_day"],
                 )
@@ -1301,13 +1302,22 @@ class Foundry:
 
         def answers():
             with ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-model") as pool:
-                futures = [pool.submit(ask, index) for index in range(count)]
-                for future in as_completed(futures):
-                    yield future.result()
+                pending = {pool.submit(ask, index) for index in range(count)}
+                started = time.monotonic()
+                while pending:
+                    done, pending = wait_futures(pending, timeout=30, return_when=FIRST_COMPLETED)
+                    if not done:
+                        self.progress("think", f"{len(pending)}/{count} model jobs still running; {round(time.monotonic() - started)}s elapsed. Completed candidates test independently.",
+                                      cycle=cycle, family=family, strategy=subject, pending_models=len(pending))
+                    for future in done:
+                        yield future.result()
         out: list[dict[str, Any]] = []
         cost = Decimal(0)
-        for index, response, failure in answers():
-            asked["asked"] += 1
+        result_lock = threading.Lock()
+        def consume(index, response, failure):
+            nonlocal cost
+            with result_lock:
+                asked["asked"] += 1
             name = names[index]
             if failure is not None:
                 if "Budget" in failure:
@@ -1315,8 +1325,9 @@ class Foundry:
                 else:
                     problems.append(f"model call for {name} failed: {failure}")
                     asked["rejected"].append(f"{name}: no answer")
-                continue
-            cost += _dec(getattr(response, "cost_usd", None)) or Decimal(0)
+                return
+            with result_lock:
+                cost += _dec(getattr(response, "cost_usd", None)) or Decimal(0)
             try:
                 spec, hypothesis = self.validate_code(parse_reply(getattr(response, "output_text", "") or ""), name, parent, cadence, source=source)
             except LabError as exc:
@@ -1324,7 +1335,7 @@ class Foundry:
                 # faces the identical compiler, sandbox and out-of-sample admission gates.
                 if not cfg.get("repair_invalid_code", False):
                     asked["rejected"].append(f"{name}: {str(exc)[:160]}")
-                    continue
+                    return
                 try:
                     repair = self.provider.respond(
                         selected_profiles[index],
@@ -1333,28 +1344,36 @@ class Foundry:
                           f"Validation error: {str(exc)[:400]}\nOriginal candidate:\n{str(getattr(response, 'output_text', '') or '')[:24000]}"}],
                         tools=None, desk_id=BUDGET_DESK, session_id=f"foundry-{cycle}",
                         request_key=f"foundry:{cycle}:{subject}:repair:{index}",
-                        reasoning_effort=cfg["reasoning_effort"], max_output_tokens=int(cfg["max_output_tokens"]),
+                        reasoning_effort=efforts.get(selected_profiles[index], cfg["reasoning_effort"]), max_output_tokens=int(cfg["max_output_tokens"]),
                         desk_cap_usd_per_day=cfg["budget_usd_per_day"],
                     )
-                    asked["asked"] += 1
-                    cost += _dec(getattr(repair, "cost_usd", None)) or Decimal(0)
+                    with result_lock:
+                        asked["asked"] += 1
+                        cost += _dec(getattr(repair, "cost_usd", None)) or Decimal(0)
                     spec, hypothesis = self.validate_code(parse_reply(getattr(repair, "output_text", "") or ""), name, parent, cadence, source=source)
-                    asked["repaired"] = asked.get("repaired", 0) + 1
+                    with result_lock:
+                        asked["repaired"] = asked.get("repaired", 0) + 1
                 except Exception as repair_error:
                     asked["rejected"].append(f"{name}: repair failed: {str(repair_error)[:160]}")
-                    continue
-            asked["valid"] += 1
-            out.append(
-                self._candidate(cycle, "code", f"model mutation {index + 1}", name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"], profile=selected_profiles[index])
-            )
+                    return
+            candidate = self._candidate(cycle, "code", f"model mutation {index + 1}", name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"], profile=selected_profiles[index])
+            with result_lock:
+                asked["valid"] += 1
+                out.append(candidate)
             if self._result_cache:
                 try:
-                    self._result_cache.remember(out[-1], window)
+                    self._result_cache.remember(candidate, window)
                 except Exception:
                     pass
             self.progress("candidate", f"{name}: validated; queued for an out-of-sample backtest", cycle=cycle, family=family, strategy=name)
             if on_candidate is not None:
-                on_candidate(out[-1])
+                on_candidate(candidate)
+        # Validation/repair is independent per answer. A slow compiler-repair call must not
+        # prevent another already-completed model's valid candidate from reaching the tests.
+        with ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-repair") as consumers:
+            pending = [consumers.submit(consume, *answer) for answer in answers()]
+            for future in pending:
+                future.result()
         asked["cost_usd"] = format(cost, "f")
         return sorted(out, key=lambda candidate: candidate["label"]), asked
 

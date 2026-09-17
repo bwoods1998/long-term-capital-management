@@ -468,6 +468,16 @@ class ExecTests(unittest.TestCase):
         self.assertEqual(sum(path.endswith('/exec') for path in calls), 1)
         self.assertIsNone(result.error_code)
 
+    def test_a_running_wait_response_is_not_mistaken_for_confirmed_exit_zero(self):
+        transport = FakeTransport({
+            ("POST", f"/sailboxes/{BOX}/exec"): event_stream({"type": "started", "exec_request_id": "e1"}),
+            ("POST", f"/sailboxes/{BOX}/exec/e1/wait"): {"status": "running", "return_code": 0},
+        })
+        result = SailboxClient(transport).exec(BOX, ["slow"])
+        self.assertFalse(result.ok)
+        self.assertIsNone(result.return_code)
+        self.assertEqual(result.error_code, "exec_wait_not_terminal")
+
 
 class FileTests(unittest.TestCase):
     def test_upload_sends_bytes_with_the_documented_query(self):
