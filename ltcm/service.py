@@ -1386,6 +1386,11 @@ class Service:
         settings = dict(self.config.get("foundry") or {})
         if not bool(settings.get("enabled", True)):
             return None
+        # One list of retired families for the evolution loop and the Foundry (Sept 17, 2026:
+        # ranges), so a family the floor stopped breeding is not searched and fast-tracked here.
+        retired = (self.config.get("evolution") or {}).get("excluded_families") or ()
+        own = settings.get("excluded_families") or ()
+        settings["excluded_families"] = sorted({str(f) for f in ([retired] if isinstance(retired, str) else retired)} | {str(f) for f in ([own] if isinstance(own, str) else own)})
         try:
             from .foundry import DEFAULTS as FOUNDRY_DEFAULTS, Foundry
 

@@ -1271,3 +1271,79 @@ class SoldYesReportedAsBoughtNoTests(SettlementCase):
                                        quantity=Decimal("10"), price=Decimal("0.90"), fee=Decimal("0"), at="2026-09-14T16:00:00.000Z"))
         written = self.gateway.ingest_fills("kalshi")
         self.assertEqual((written[0]["side"], written[0]["instrument"]["right"], written[0]["price"]), ("buy", "no", "0.90"))
+
+
+class FloorEventExposureTests(GatewayCase):
+    """Sept 17, 2026: `mullins` and `mullins-4` run nearly the same favorites settings and could each
+    put 3.5% of the floor on one market. The gateway now sums every live desk's book for the rule."""
+
+    BTC = "KXBTCD-26SEP1717-T117999.99"
+    ETH = "KXETHD-26SEP1717-T4199.99"
+    CLUSTER = "cluster:crypto:2026-09-17T21"
+
+    def setUp(self):
+        super().setUp()
+        data = copy.deepcopy(SAMPLE)
+        data["venues"] = ["kalshi"]
+        data["instruments"] = {**data["instruments"], "asset_classes": ["event"], "deny": []}
+        data["limits"] = {**data["limits"], "max_order_notional_pct": "1", "max_position_pct": "1", "max_gross_pct": "4"}
+        allocations = {}
+        for desk_id, mode, usd in (("mullins", "live", "500"), ("mullins-4", "live", "479"), ("mullins-2", "shadow", "500")):
+            self.gateway.manifests[desk_id] = DeskManifest.from_dict({**data, "id": desk_id, "family": "kalshi", "capital": {"mode": mode, "usd": usd}})
+            self.gateway.ledgers[desk_id] = DeskLedger(self.log, desk_id)
+            allocations[desk_id] = usd
+        self.log.append("committee", "committee.allocation", {"allocations": allocations, "reasons": {}}, at="2026-09-14T12:00:00.000Z")
+        self.gateway.event_rules = {"min_event_price": Decimal("0.15"), "max_event_market_pct": Decimal("0.15"),
+                                    "max_event_market_floor_pct": Decimal("0.035"), "max_event_cluster_floor_pct": Decimal("0.08")}
+        self.kalshi = FakeBroker(caps={"event", "limit"}, instant_fill=False)
+        self.kalshi.venue = "kalshi"
+        self.gateway.brokers["kalshi"] = self.kalshi
+        self.gateway._quote = lambda instrument, desk_id=None: Quote(instrument, Decimal("0.89"), Decimal("0.91"), Decimal("0.90"), NOW, "kalshi", False)
+
+    def leg(self, ticker, right="no"):
+        return Instrument("event", ticker, "kalshi", market_id=ticker, right=right)
+
+    def hold(self, desk_id, ticker, quantity, price="0.90", right="no"):
+        tag = f"fl-{desk_id}-{ticker}-{right}"
+        self.log.append("broker:kalshi", "broker.fill", {
+            "id": tag, "fill_id": tag, "order_id": "ord-" + tag, "desk_id": desk_id, "instrument": self.leg(ticker, right).to_dict(),
+            "side": "buy", "quantity": quantity, "price": price, "fee": "0", "at": "2026-09-14T13:00:00.000Z", "venue": "kalshi",
+        }, id="fill:kalshi:" + tag, at="2026-09-14T13:00:00.000Z")
+
+    def buy(self, desk_id, ticker, quantity, price="0.90", nonce=None):
+        return OrderIntent.new(desk_id=desk_id, instrument=self.leg(ticker), side="buy", quantity=quantity, order_type="limit",
+                               limit_price=price, rationale="favorite", created_at=NOW, session_id="s", nonce=nonce)
+
+    def rest(self, intent):
+        order = Order.from_intent(intent, venue="kalshi")
+        order.broker_order_id = "vx-" + intent.id[-6:]
+        self.gateway._record_order(order, status="accepted", at=NOW)
+
+    def test_the_context_sums_every_live_desks_held_legs_and_working_buys_and_no_shadow_book(self):
+        self.hold("mullins", self.BTC, "5")                      # $4.50
+        self.hold("mullins-4", self.BTC, "20")                   # $18.00
+        self.hold("mullins-4", self.BTC, "10", "0.10", "yes")    # $1.00, the other leg
+        self.rest(self.buy("mullins-4", self.ETH, "10"))         # $9.00 resting
+        self.hold("mullins-2", self.BTC, "100")                  # shadow: never counted
+        self.rest(self.buy("mullins-2", self.ETH, "50"))
+        ctx = self.gateway.risk_context(self.buy("mullins", self.BTC, "15"), NOW)
+        self.assertEqual(ctx.floor_event_exposure, {self.BTC: Decimal("23.50"), self.ETH: Decimal("9.00"), self.CLUSTER: Decimal("32.50")})
+        self.assertEqual(ctx.max_event_cluster_floor_pct, Decimal("0.08"))
+        self.assertEqual(self.gateway.risk_context(self.buy("mullins-2", self.BTC, "15"), NOW).floor_event_exposure, {}, "a shadow desk's order reads none of it")
+        sell = OrderIntent.new(desk_id="mullins", instrument=self.leg(self.BTC), side="sell", quantity="5", order_type="limit",
+                               limit_price="0.89", rationale="exit", created_at=NOW, session_id="s")
+        self.assertEqual(self.gateway.risk_context(sell, NOW).floor_event_exposure, {}, "nor a sell")
+
+    def test_a_live_desk_is_refused_what_another_live_desk_already_holds_and_a_shadow_desk_is_not(self):
+        self.hold("mullins-4", self.BTC, "25")  # $22.50 on the market
+        result = self.gateway.propose(self.buy("mullins", self.BTC, "15"), NOW)  # $13.50 more: $36 of a $34.26 cap
+        self.assertFalse(result["approved"])
+        self.assertTrue(any("across the live desks" in r for r in result["reasons"]), result["reasons"])
+        self.assertEqual(self.kalshi.submitted, [])
+        small = self.gateway.propose(self.buy("mullins", self.BTC, "10", nonce="small"), NOW)  # $9: $31.50
+        self.assertTrue(small["approved"], small["reasons"])
+        again = self.gateway.propose(self.buy("mullins-4", self.BTC, "5", nonce="after"), NOW)  # the first desk's resting bid counts
+        self.assertFalse(again["approved"])
+        self.assertTrue(any("would put 36.00 at risk across the live desks" in r for r in again["reasons"]), again["reasons"])
+        shadow = self.gateway.propose(self.buy("mullins-2", self.BTC, "15", nonce="shadow"), NOW)
+        self.assertFalse(any("across the live desks" in r for r in shadow["reasons"]), shadow["reasons"])

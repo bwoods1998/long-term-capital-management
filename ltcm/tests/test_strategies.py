@@ -17,6 +17,8 @@ from ltcm.tests.test_tools import FakeContext
 
 NOW = "2026-09-16T04:10:00.000Z"
 LATER = "2026-09-16T04:21:00.000Z"
+#: After three days of settlements: the evidence gate resamples days.
+AFTER = "2026-09-18T06:00:00.000Z"
 
 
 def manifest(**overrides):
@@ -290,15 +292,26 @@ class CancelAndRecordTests(StrategyCase):
         self.log_events = []
 
         class Event:
-            def __init__(self, payload):
-                self.payload = payload
+            def __init__(self, payload, at=None):
+                self.payload, self.at = payload, at
 
         def read(stream=None, kind=None, limit=None, newest=False):
-            return [Event(p) for s, k, p in self.log_events if (stream is None or s == stream) and k == kind]
+            return [Event(p, *rest) for s, k, p, *rest in self.log_events if (stream is None or s == stream) and k == kind]
 
         self.service.log.read = read
         self.open_orders = []
         self.service.gateway = type("G", (), {"open_orders": lambda g, desk_id: list(self.open_orders)})()
+
+    def settled(self, desk, count, pnl="0.50", price="0.50", days=3, name="edge"):
+        """`count` settled positions of 10 contracts at `price`, spread over `days` days."""
+        out = []
+        for n in range(count):
+            ticker = f"KXA-{desk}-{len(self.log_events)}-{n}"
+            out.append((f"desk:{desk}", "desk.outcome", {
+                "pnl": pnl, "rationale_excerpt": f"[strategy {name}] x", "instrument": f"event:{ticker}:kalshi:no:{ticker}",
+                "entry_price": price, "quantity": "10", "entry_fees": "0",
+            }, f"2026-09-{16 + n % days:02d}T05:00:00.000Z"))
+        return out
 
     def test_a_strategy_may_cancel_only_its_own_resting_orders(self):
         self.strategies.deploy(self.manifest, "edge", 600, {})
@@ -317,17 +330,38 @@ class CancelAndRecordTests(StrategyCase):
         self.assertIn("1 cancelled", self.strategies.report(self.manifest, "edge")["last_notes"])
         self.assertEqual(out[0]["approved"], 0)
 
-    def test_a_live_strategy_sizes_up_only_after_it_has_earned_it(self):
+    def test_a_live_strategy_sizes_up_only_after_its_record_passes_the_evidence_gate(self):
         live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
         self.manager.files["scholes"] = {"edge.py": "def decide(kit, params):\n    return []\n"}
         self.strategies.deploy(live, "edge", 600, {})
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"))
-        wins = [("desk:scholes", "desk.outcome", {"pnl": "0.50", "rationale_excerpt": "[strategy edge] x"}) for _ in range(20)]
-        self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})] + wins
-        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("30"), "twenty settled winners: three times learning size")
-        self.log_events.append(("desk:scholes", "desk.outcome", {"pnl": "-40", "rationale_excerpt": "[strategy edge] y"}))
-        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "a losing record goes back to learning size")
+        self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})]
+        self.log_events += self.settled("scholes", 20)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "twenty settled winners were enough before Sept 17, 2026; the gate needs 25")
+        self.log_events += self.settled("scholes", 10)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("30"), "thirty over three days, every day positive: three times learning size")
+        self.log_events.append(("desk:scholes", "desk.outcome", {"pnl": "-40", "rationale_excerpt": "[strategy edge] y", "instrument": "event:KXB:kalshi:no:KXB",
+                                                                 "entry_price": "0.50", "quantity": "10", "entry_fees": "0"}, "2026-09-16T09:00:00.000Z"))
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "a bad day in the record goes back to learning size")
         self.assertEqual(self.strategies.size_cap(self.manifest, "edge"), Decimal("15"), "a shadow desk keeps its learning size")
+        self.assertIn("bootstrap", self.strategies.report(live, "edge")["evidence"]["reason"], "the desk reads the gate's verdict")
+        self.assertNotIn("returns", self.strategies.report(live, "edge"), "not the 500 numbers behind it")
+
+    def test_a_lucky_favorites_record_stays_at_learning_size(self):
+        """Sept 17, 2026: six favorites at 0.93, six wins, lifted the size under the old gate. A
+        breakeven strategy does that 65% of the time."""
+        live = manifest(id="mullins", family="kalshi", parent_id=None, capital={"mode": "live", "usd": "400"})
+        self.manager.files["mullins"] = {"favorites.py": "def decide(kit, params):\n    return []\n"}
+        self.strategies.config["earned_settled"] = 6
+        self.strategies.deploy(live, "favorites", 900, {})
+        self.log_events += [("desk:mullins", "desk.intent", {"intent_id": "oi-f", "session_id": "mullins:20260916-0400:strategy:favorites"})]
+        self.log_events += self.settled("mullins", 6, pnl="0.70", price="0.93", name="favorites")
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("10"), "6 of the 43 settlements a 0.93 favorite needs")
+        verdict = self.strategies.report(live, "favorites")["evidence"]
+        self.assertEqual((verdict["kind"], verdict["passes"], verdict["n_needed"]), ("lopsided", False, 43))
+        self.log_events += self.settled("mullins", 37, pnl="0.70", price="0.93", name="favorites")
+        self.log_events += self.settled("mullins", 1, pnl="-9.30", price="0.93", name="favorites")
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("30"), "44 settled, one loss: the loss rate is under breakeven")
 
     def test_an_earning_strategy_ramps_toward_the_desks_order_limit(self):
         live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "1000"})
@@ -341,11 +375,12 @@ class CancelAndRecordTests(StrategyCase):
         self.service.ledgers = {"scholes": Ledger()}
         fit = (Decimal("1000") * min(live.limits.max_order_notional_pct, live.limits.max_position_pct) * Decimal("0.9")).quantize(Decimal("0.01"))
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "no record: learning size")
-        wins = [("desk:scholes", "desk.outcome", {"pnl": "0.50", "rationale_excerpt": "[strategy edge] x"}) for _ in range(20)]
-        self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})] + wins
-        self.assertEqual(self.strategies.size_cap(live, "edge"), max(Decimal("30"), (fit * Decimal("0.5")).quantize(Decimal("0.01"))), "20 of 40 settlements: half the desk's order limit")
-        self.log_events += wins + wins
-        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "40 or more: the full limit")
+        self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})]
+        self.log_events += self.settled("scholes", 20)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "not yet through the gate: learning size")
+        self.log_events += self.settled("scholes", 10)
+        # The ramp is settled / n_needed, and the gate needs n_needed: a passing record is at full size.
+        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "through the gate: the desk's full order limit")
 
     def test_a_shrinking_desk_is_sized_to_fit_its_own_limits(self):
         """Scholes at $33 with a 15% cap: a $10 learning order is refused forever; $4.45 trades."""
@@ -725,50 +760,83 @@ class PromotionTests(StrategyCase):
         self.strategies.deploy(self.manifest, "edge", 600, {"min_edge": 0.0, "vol_bars": 36, "window": "5m"}, house=True)
         self.strategies.deploy(self.other, "edge", 600, {"min_edge": 0.01, "vol_bars": 32, "window": "15m"}, house=True)
 
-    def trades(self, desk, pnl_each, count, at="2026-09-16T05:00:00.000Z"):
-        for n in range(count):
+    def trades(self, desk, pnl_each, count, *, price="0.50", days=3, first_day=16):
+        """`count` settled positions of 10 contracts at `price`, dealt across `days` days from
+        Sept `first_day`: the evidence gate resamples days, so a record needs more than one."""
+        for n in range(len(self.log_events), len(self.log_events) + count):
+            at = f"2026-09-{first_day + n % days:02d}T05:00:00.000Z"
+            ticker = f"KXA-{desk}-{n}"
             self.log_events += [
                 (f"desk:{desk}", "desk.intent", {"intent_id": f"oi-{desk}-{n}", "session_id": f"{desk}:20260916-0400:strategy:edge"}, at),
                 (f"broker:{desk}", "broker.order", {"order_id": f"ord-{desk}-{n}", "intent_id": f"oi-{desk}-{n}"}, at),
-                (f"broker:{desk}", "broker.fill", {"order_id": f"ord-{desk}-{n}", "quantity": "10", "price": "0.50", "fee": "0"}, at),
-                (f"desk:{desk}", "desk.outcome", {"pnl": pnl_each, "rationale_excerpt": "[strategy edge] x"}, at),
+                (f"broker:{desk}", "broker.fill", {"order_id": f"ord-{desk}-{n}", "quantity": "10", "price": price, "fee": "0"}, at),
+                (f"desk:{desk}", "desk.outcome", {"pnl": pnl_each, "rationale_excerpt": "[strategy edge] x", "instrument": f"event:{ticker}:kalshi:no:{ticker}",
+                                                  "entry_price": price, "quantity": "10", "entry_fees": "0"}, at),
             ]
 
     def test_the_best_shadow_variant_takes_the_live_desk_and_the_others_are_dealt_around_it(self):
-        self.trades("scholes-2", "1.00", 12)   # +12 on 60 of notional: +0.20 per dollar
-        self.trades("scholes-3", "0.10", 12)   # +0.02 per dollar
-        self.trades("scholes", "-0.50", 12)    # the live setting loses
-        out = self.strategies.promote(self.service.manifests, LATER)
+        self.trades("scholes-2", "1.00", 30)   # +1 on 5 of notional, every day: +0.20 per dollar
+        self.trades("scholes-3", "0.10", 30)   # +0.02 per dollar
+        self.trades("scholes", "-0.50", 30)    # the live setting loses
+        out = self.strategies.promote(self.service.manifests, AFTER)
         self.assertEqual([(p["desk_id"], p["strategy"], p["from"]) for p in out], [("scholes", "edge", "scholes-2")])
+        self.assertEqual(Decimal(out[0]["lower_bound"]), Decimal("0.2"))
         live_row = self.strategies.store.for_desk("scholes")["edge"]
         self.assertEqual(live_row["params"], {"min_edge": 0.0, "vol_bars": 36, "window": "5m"})
-        self.assertEqual((live_row["promoted_at"], live_row["promoted_from"]), (LATER, "scholes-2"))
+        self.assertEqual((live_row["promoted_at"], live_row["promoted_from"]), (AFTER, "scholes-2"))
         self.assertEqual(self.strategies.store.for_desk("scholes-2")["edge"]["params"], {"min_edge": 0.0, "vol_bars": 36, "window": "5m"}, "the winner stays as the control")
         dealt = self.strategies.store.for_desk("scholes-3")["edge"]
         self.assertEqual(dealt["params"]["window"], "5m", "choices are copied")
         self.assertTrue(27 <= dealt["params"]["vol_bars"] <= 45 and dealt["params"]["vol_bars"] != 36 or dealt["params"]["vol_bars"] == 36, "dials move by up to a quarter")
-        self.assertEqual(dealt["promoted_at"], LATER)
+        self.assertEqual(dealt["promoted_at"], AFTER)
         kinds = [(s, k, p.get("purpose")) for s, k, p, *_ in self.service.log.events if k == "desk.code_run" and "promoted" in str(p.get("purpose"))]
         self.assertEqual(kinds, [("desk:scholes", "desk.code_run", "strategy edge promoted: scholes-2's settings take the live desk")])
         self.assertTrue(any("promotion: scholes/edge adopts scholes-2" in text for _, text in self.service.alerts))
         # The next hour: nothing changed, the live record is measured since the promotion, so no second promotion.
-        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [], "once an hour")
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [], "once an hour")
         self.strategies._last_promotion_at = None
-        self.assertEqual(self.strategies.promote(self.service.manifests, "2026-09-16T06:30:00.000Z"), [], "the live setting is now the winner's")
+        self.assertEqual(self.strategies.promote(self.service.manifests, "2026-09-18T08:30:00.000Z"), [], "the live setting is now the winner's")
 
-    def test_no_promotion_without_enough_settlements_a_positive_return_and_a_margin(self):
-        self.trades("scholes-2", "1.00", 11)
-        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [], "eleven settlements are not twelve")
+    def test_no_promotion_without_the_evidence_gate_and_a_lower_bound_over_the_live_return(self):
+        self.trades("scholes-2", "1.00", 24)
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [], "24 settlements are not the gate's 25")
         self.strategies._last_promotion_at = None
-        self.trades("scholes-3", "-0.10", 12)
-        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [], "a losing variant never promotes")
+        self.trades("scholes-3", "1.00", 30, days=1)
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [], "thirty winners in one day are one block, not evidence")
         self.strategies._last_promotion_at = None
         self.trades("scholes-2", "1.00", 1)
-        self.trades("scholes", "0.99", 12)  # live earns +0.198 per dollar, the shadow +0.20: inside the margin
-        self.assertEqual(self.strategies.promote(self.service.manifests, LATER), [])
+        self.trades("scholes", "1.50", 12)  # live earns +0.30 per dollar; the shadow's lower bound is +0.20
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [])
         self.strategies._last_promotion_at = None
-        self.trades("scholes-2", "3.00", 12)  # now clearly better
-        self.assertEqual(len(self.strategies.promote(self.service.manifests, LATER)), 1)
+        self.trades("scholes-2", "3.00", 30)  # +0.60 per dollar on top: a lower bound near +0.41
+        out = self.strategies.promote(self.service.manifests, AFTER)
+        self.assertEqual([p["from"] for p in out], ["scholes-2"])
+        self.assertGreater(Decimal(out[0]["lower_bound"]), Decimal("0.30"))
+
+    def test_a_positive_return_with_one_bad_day_is_not_promoted(self):
+        """The old gate read the point estimate: +0.027 per dollar after twelve settlements
+        promoted. Resampling the days finds the bad one in more than a fifth of the draws."""
+        self.trades("scholes-2", "1.00", 20, days=2)                # +0.20 per dollar on Sept 16 and 17
+        self.trades("scholes-2", "-1.60", 10, days=1, first_day=18)  # -0.32 per dollar on Sept 18
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [])
+        record = self.strategies.record("scholes-2", "edge", since=NOW)
+        self.assertGreater(Decimal(record["settled_pnl_usd"]), 0)
+        self.assertEqual(self.strategies.assess(record)["passes"], False)
+
+    def test_a_shadow_favorites_variant_with_six_wins_in_six_is_not_promoted(self):
+        """Sept 17, 2026: the promotion gate on the box was 6 settled with a positive return. At
+        0.93 a breakeven favorite wins six in a row 65% of the time."""
+        self.strategies.config["promotion"] = {"min_settled": 6}
+        self.trades("scholes-2", "0.70", 6, price="0.93")
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [])
+        self.strategies._last_promotion_at = None
+        self.trades("scholes-3", "0.70", 42, price="0.93")
+        self.trades("scholes-3", "-9.30", 3, price="0.93")  # +1.50 in all, three losses in 45: over breakeven's 7%
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [])
+        self.strategies._last_promotion_at = None
+        self.trades("scholes-2", "0.70", 38, price="0.93")
+        self.trades("scholes-2", "-9.30", 1, price="0.93")  # one loss in 45
+        self.assertEqual([p["from"] for p in self.strategies.promote(self.service.manifests, AFTER)], ["scholes-2"])
 
     def test_the_forward_record_counts_only_positions_opened_since_a_deployment(self):
         """leap: foundry -- settlements are dated when they settle; a candidate deployed at 14:20
@@ -808,12 +876,12 @@ class PromotionTests(StrategyCase):
         store = self.strategies.store
         store.update("scholes", "edge", params={"min_edge": 0.03, "vol_bars": 20, "window": "1h"}, promoted_at="2026-09-16T04:30:00.000Z", foundry_id="fdy-1-live")
         store.update("scholes-3", "edge", params={"min_edge": 0.05, "vol_bars": 30, "window": "15m"}, promoted_at="2026-09-16T04:30:00.000Z", foundry_id="fdy-2-trial")
-        self.trades("scholes-2", "1.00", 12)
-        self.assertEqual(self.strategies.promote(self.service.manifests, "2026-09-16T06:00:00.000Z"), [], "no live record since the adoption yet")
+        self.trades("scholes-2", "1.00", 30)
+        self.assertEqual(self.strategies.promote(self.service.manifests, AFTER), [], "no live record since the adoption yet")
         self.assertEqual(store.for_desk("scholes")["edge"]["params"], {"min_edge": 0.03, "vol_bars": 20, "window": "1h"})
         self.strategies._last_promotion_at = None
         self.trades("scholes", "-0.50", 12)  # measured, and losing: now the family's record decides
-        out = self.strategies.promote(self.service.manifests, "2026-09-16T07:00:00.000Z")
+        out = self.strategies.promote(self.service.manifests, "2026-09-18T07:00:00.000Z")
         self.assertEqual([p["from"] for p in out], ["scholes-2"])
         live = store.for_desk("scholes")["edge"]
         self.assertEqual(live["params"], {"min_edge": 0.0, "vol_bars": 36, "window": "5m"})
