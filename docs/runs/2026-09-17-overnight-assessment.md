@@ -95,3 +95,8 @@ forward testing faster—not spending credits or executing orders for their own 
 - Public Foundry progress at 14:22:31–14:22:36 UTC confirmed **cycle 45 resumed**:
   two baselines and 18 parameter variants testing across 12 Sail sandboxes.
   This verifies resumed work, not a newly qualified strategy or a profit claim.
+- The first post-restart tick measured 64.67 seconds in exits, 69.91 seconds in
+  strategy dispatch and 28.36 seconds in order polling. These are additional
+  latency targets, separate from runway throttling. At 14:25 UTC the public event
+  stream showed current work while the summary checkpoint was still timestamped
+  14:17 UTC; summary freshness is not equivalent to event-stream freshness.
