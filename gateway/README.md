@@ -32,7 +32,8 @@ characters.
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
 | `GET`/`POST`/`DELETE` | `/v1/coinbase/<path>` | Mints a CDP JWT bound to `METHOD api.coinbase.com/<path>` and forwards to `https://api.coinbase.com/<path>`. |
 | `GET` | `/v1/health` | Caps, today's counters, kill switch, watchdog record, Sail balance and box state, and when each alert last went out. |
-| `POST` | `/v1/kill` / `/v1/unkill` | Engages or releases the kill switch. Returns the health body. |
+| `POST` | `/v1/kill` | Runtime token may engage the kill switch. |
+| `POST` | `/v1/unkill` | Only the separate owner token may release it. |
 
 Private keys are imported straight into WebCrypto: Kalshi accepts PKCS#8 (`BEGIN PRIVATE KEY`)
 or PKCS#1 (`BEGIN RSA PRIVATE KEY`); Coinbase accepts an Ed25519 secret as base64 (the 32-byte
@@ -112,6 +113,13 @@ npx wrangler secret put COINBASE_API_SECRET
 # Sail, for the watchdog: the API key. Without it the watchdog only reports.
 npx wrangler secret put SAIL_API_KEY
 ```
+
+Provision the separate owner credential with `python3 scripts/gateway_admin.py provision`
+from the repository root. It is stored mode 600 under `.data/ltcm/keys/`, never uploaded to
+the trading VM. Release an external kill explicitly with `python3 scripts/gateway_admin.py unkill`.
+The runtime credential cannot release it. Coinbase base-sized market orders use an independent
+public venue price plus a 10% reservation buffer; caller references cannot lower a limit order's
+notional. A network timeout after dispatch retains its cap reservation because acceptance is unknown.
 
 Then set the box id in `wrangler.jsonc` and redeploy:
 

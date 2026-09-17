@@ -1,5 +1,16 @@
 {
   "schema_version": 1,
+  "segregated_books": true,
+  "event_stream_seconds": 2,
+  "sail_cost": {
+    "app_id": "app_01a0a5c4-c6a0-76d8-be8e-31414562e31b",
+    "since": "2026-09-15T15:52:12Z",
+    "cache_seconds": 300
+  },
+  "strategy_lifecycle": {
+    "retired_families": ["ranges", "weather"],
+    "controls": ["scholes-4", "haghani-4-5"]
+  },
   "site_url": "https://blakewoods.us",
   "timezone": "America/New_York",
   "floor_cap_usd_per_day": "40",
@@ -10,6 +21,7 @@
   "floor_max_daily_loss_pct": "0.15",
   "event_rules": {"min_event_price": "0.15", "max_event_market_pct": "0.15", "max_event_market_floor_pct": "0.035", "max_event_cluster_floor_pct": "0.08"},
   "mark_interval_seconds": 300,
+  "mark_parallelism": 6,
   "sleep_seconds": 30,
   "settlement_interval_seconds": 90,
   "session_catchup_seconds": 3600,
@@ -70,12 +82,15 @@
   "foundry": {
     "enabled": true,
     "interval_minutes": 30,
+    "new_outcomes_trigger": 4,
+    "feedback_min_minutes": 10,
     "families": [
       "kalshi",
       "crypto"
     ],
     "param_candidates": 10,
     "code_candidates": 2,
+    "repair_invalid_code": true,
     "profile": "k3",
     "reasoning_effort": "high",
     "max_output_tokens": 16000,
@@ -107,11 +122,14 @@
       "max_symbols",
       "max_open_per_series",
       "max_open_per_event",
-      "pages"
+      "pages",
+      "maker_fee",
+      "min_margin"
     ]
   },
   "evolution": {
-    "excluded_families": ["ranges"],
+    "excluded_families": ["ranges", "weather"],
+    "protected_desks": ["scholes-4", "haghani-4-5"],
     "min_days": 1,
     "min_decisions": 5,
     "target_variants": 8,
@@ -212,12 +230,16 @@
   "mind": {
     "enabled": true,
     "interval_minutes": 60,
+    "new_outcomes_trigger": 4,
+    "feedback_min_minutes": 5,
     "profile": "k3",
     "budget_usd_per_day": "8",
     "min_n": 15,
     "max_rules": 12
   },
   "committee": {
+    "require_settled_evidence": true,
+    "evidence": {"z": 1.645, "q": 0.05, "min_n": 25, "min_days": 3},
     "bandit_enabled": true,
     "bandit_prior_sd_pct": "5",
     "bandit_scale_pct": "10",

@@ -24,6 +24,8 @@ switch, venue down) is retried on a slow cadence with the same id, never as a se
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -169,6 +171,7 @@ class ExitBook:
         clock: Callable[[], float],
         check_seconds: int = 60,
         retry_seconds: int = 300,
+        quote_parallelism: int = 1,
         alert: Callable[[str, str], None] | None = None,
     ):
         self.log = log
@@ -179,6 +182,8 @@ class ExitBook:
         self.clock = clock
         self.check_seconds = int(check_seconds)
         self.retry_seconds = int(retry_seconds)
+        self.quote_parallelism = max(1, min(16, int(quote_parallelism)))
+        self._fold_lock = threading.RLock()
         self.alert = alert or (lambda level, message: None)
         self._plans: dict[str, ExitPlan] = {}
         self._closed: set[str] = set()
@@ -197,6 +202,10 @@ class ExitBook:
 
     def _fold(self) -> None:
         """Rebuild the open plans from the log, once per new event batch."""
+        with self._fold_lock:
+            self._fold_locked()
+
+    def _fold_locked(self) -> None:
         while True:
             batch = self.log.read(after=self._scan_seq, limit=2000)
             if not batch:
@@ -223,9 +232,9 @@ class ExitBook:
 
     def plans(self) -> dict[str, ExitPlan]:
         """Open plans by entry intent id."""
-        self._fold()
-        # A snapshot: proposing threads add plans (`record_for`) while the tick reads them.
-        return {k: v for k, v in list(self._plans.items()) if k not in self._closed}
+        with self._fold_lock:
+            self._fold_locked()
+            return {k: v for k, v in self._plans.items() if k not in self._closed}
 
     def plan_for_position(self, desk_id: str, key: str) -> ExitPlan | None:
         """The newest open plan this desk holds on that instrument, for the positions board."""
@@ -276,15 +285,16 @@ class ExitBook:
             id=f"exitplan:{intent.id}",
             at=stamp,
         )
-        self._plans[intent.id] = plan
+        with self._fold_lock:
+            self._plans[intent.id] = plan
         return plan
 
     # ------------------------------------------------------------------ enforcement
-    def _mark(self, plan: ExitPlan, position: Any) -> Decimal | None:
+    def _mark(self, plan: ExitPlan, position: Any, quotes: Mapping[str, Any] | None = None) -> Decimal | None:
         """The price the exit would get: the quote's reference for the exit side, else the
         ledger's own mark."""
         try:
-            found = self.quote(plan.instrument)
+            found = self.quote(plan.instrument) if quotes is None else quotes.get(plan.instrument.key)
         except Exception:
             found = None
         if found is not None:
@@ -304,7 +314,31 @@ class ExitBook:
             return []
         self._last_check = at
         outcomes: list[dict[str, Any]] = []
-        for intent_id, plan in sorted(self.plans().items()):
+        plans = self.plans()
+        quotes = None
+        if self.quote_parallelism > 1:
+            instruments = {}
+            books = {}
+            for plan in plans.values():
+                ledger = self.ledgers.get(plan.desk_id)
+                if ledger is None:
+                    continue
+                try:
+                    if plan.desk_id not in books:
+                        books[plan.desk_id] = ledger.state(at).positions
+                    if plan.instrument.key in books[plan.desk_id]:
+                        instruments[plan.instrument.key] = plan.instrument
+                except Exception:
+                    continue
+            def fetch(item):
+                key, instrument = item
+                try:
+                    return key, self.quote(instrument)
+                except Exception:
+                    return key, None
+            with ThreadPoolExecutor(max_workers=self.quote_parallelism, thread_name_prefix="exit-quote") as pool:
+                quotes = dict(pool.map(fetch, instruments.items()))
+        for intent_id, plan in sorted(plans.items()):
             ledger = self.ledgers.get(plan.desk_id)
             if ledger is None:
                 continue
@@ -320,7 +354,7 @@ class ExitBook:
                     continue  # the entry still rests: the plan waits for its fill
                 self._closed.add(intent_id)  # the position is gone; the plan is moot
                 continue
-            reason = plan.due(self._mark(plan, position), at)
+            reason = plan.due(self._mark(plan, position, quotes), at)
             if reason is None:
                 continue
             key = (intent_id, reason)

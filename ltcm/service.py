@@ -26,6 +26,7 @@ import os
 import signal
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -876,6 +877,9 @@ class Service:
         #: Serializes every read-modify-write of `service-state.json`: the lab worker's rewrite
         #: scheduling and the tick both saved it at once and each wiped the other's keys.
         self._state_lock = threading.RLock()
+        self._stream_stop = threading.Event()
+        self._stream_thread: threading.Thread | None = None
+        self._stream_status: dict[str, Any] = {}
         self._last_tick: dict[str, Any] | None = None
         self._budget: dict[str, Any] = {}
         self._sources: dict[str, Any] = {}
@@ -897,7 +901,8 @@ class Service:
         self.manifests: dict[str, DeskManifest] = {m.id: m for m in load_all(self.desks_dir)}
         self._apply_capital_modes()
         self.ledgers: dict[str, DeskLedger] = {
-            desk_id: DeskLedger(self.log, desk_id) for desk_id in self.manifests
+            desk_id: DeskLedger(self.log, desk_id, mode=m.capital_mode if self.config.get("segregated_books") else None)
+            for desk_id, m in self.manifests.items()
         }
         self.brokers: dict[str, Any] = {}
         #: desk_id -> its own scoring book. A shadow desk trades this and nothing else.
@@ -932,6 +937,7 @@ class Service:
         # `_apply_capital_modes` moves each manifest once the desk's sleeve is ready; the gateway
         # routes by that, and refuses a desk whose promotion or demotion is logged but not done.
         self.gateway.manifests_carry_mode = True
+        self.gateway.entry_allowed = self.entry_allowed
         self.committee = Committee(
             self.log,
             self.manifests,
@@ -946,6 +952,7 @@ class Service:
                 "profit_share": self.config["profit_share"],
                 "floor_cap_max_usd_per_day": self.config["floor_cap_max_usd_per_day"],
                 "memo_daily": bool(self.config.get("committee_memo_daily", True)),
+                "segregated_books": bool(self.config.get("segregated_books")),
             },
         )
         self.evolution = Evolution(
@@ -961,8 +968,10 @@ class Service:
                 # Sept 16, 2026 the evolution loop built its committee with the defaults
                 # (14 days, 20 decisions) while the floor's own ran the configured gate.
                 "committee": dict(self.config.get("committee") or {}),
+                "segregated_books": bool(self.config.get("segregated_books")),
             },
         )
+        self.evolution.ledger_provider = lambda desk_id: self.ledgers.get(desk_id)
         # leap: lab -- the forecast record and the research lab share the roster by reference,
         # so a desk bred tonight is scored and judged tomorrow without a restart.
         self.calibration = CalibrationLedger(self.log, self.manifests, clock=clock)
@@ -1041,6 +1050,7 @@ class Service:
                 clock=clock,
                 check_seconds=int(exits_config.get("check_seconds", 60)),
                 retry_seconds=int(exits_config.get("retry_seconds", 300)),
+                quote_parallelism=int(exits_config.get("quote_parallelism", 6)),
                 alert=self.alert,
             )
             self.gateway.exits = self.exits
@@ -1435,12 +1445,23 @@ class Service:
         foundry = self.foundry
         if foundry is None or not foundry.enabled():
             return None
-        if not foundry.due(at, state.get("last_foundry_at")):
-            return None
+        due = foundry.due(at, state.get("last_foundry_at"))
+        if not due:
+            policy = self.config.get("foundry") or {}
+            threshold = int(policy.get("new_outcomes_trigger", 0))
+            last = state.get("last_foundry_at")
+            elapsed = (_epoch_of(at) - _epoch_of(last)) if last else 0
+            if threshold and elapsed >= float(policy.get("feedback_min_minutes", 10)) * 60:
+                from .evidence import fresh_clusters
+                due = fresh_clusters(self.log, int(state.get("last_foundry_evidence_seq") or 0),
+                                     families={k: m.family for k, m in self.manifests.items()},
+                                     allowed_families=policy.get("families", ["kalshi", "crypto"])) >= threshold
+            if not due:
+                return None
         slot = (getattr(self, "_workers", None) or {}).get("foundry")
         if (slot is not None and slot["thread"].is_alive()) or foundry.running():
             return None  # the last cycle is still working; a cycle never runs twice at once
-        self._save_state(last_foundry_at=at)
+        self._save_state(last_foundry_at=at, last_foundry_evidence_seq=self.log.latest_seq())
         done = self._off_tick("foundry", lambda at=at: foundry.cycle(at))
         if isinstance(done, Mapping):
             return {k: v for k, v in done.items() if k != "candidates_detail"}
@@ -1467,31 +1488,30 @@ class Service:
         return out
 
     def _sail_usage(self) -> dict[str, Any] | None:
-        """The infrastructure spend the run clock shows: Sail's own last-day spend less the
-        model ledger's last day (the box, the sandboxes, the image builds), recorded per UTC
-        day in the state file and summed, so the total grows from the floor's own first day
-        and never counts what an earlier project spent."""
-        provider = self.provider
-        period = getattr(provider, "sail_spend_period_usd", None)
-        trailing = getattr(provider, "spent_since", None)
-        if not callable(period) or not callable(trailing):
+        """App-scoped lifetime infrastructure billing, including every research sandbox.
+        Rolling 24-hour windows overlap; summing one per UTC date double-counted costs.
+        Model invoices remain a separate ledger. Active box usage is Sail's estimate."""
+        policy = self.config.get("sail_cost") or {}
+        client = getattr(getattr(self, "sandboxes", None), "client", None)
+        reader = getattr(client, "spend", None)
+        if not policy.get("app_id") or not callable(reader):
             return None
+        state = self.state()
+        previous = state.get("infra_app_spend") or {}
+        same = previous.get("app_id") == policy["app_id"] and previous.get("since") == policy.get("since")
+        checked = _epoch_of(previous.get("checked_at")) if previous.get("checked_at") else 0
+        if same and float(self.clock()) - checked < float(policy.get("cache_seconds", 300)):
+            return {"infra_spend_usd": money(previous["usd"]), "source": "sail-app-billing"}
         try:
-            total = period()
-            if total is None:
-                return None
-            today_infra = max(ZERO, money(total) - money(trailing(24.0)))
-            day = self.now()[:10]
-            state = self.state()
-            by_day = dict(state.get("infra_spend_by_day") or {})
-            by_day[day] = str(today_infra.quantize(Decimal("0.01")))
-            for stale in sorted(by_day)[:-60]:
-                by_day.pop(stale, None)
-            if by_day != (state.get("infra_spend_by_day") or {}):
-                self._save_state(infra_spend_by_day=by_day)
-            return {"infra_spend_usd": sum((money(v) for v in by_day.values()), ZERO)}
+            raw = reader(app=str(policy["app_id"]), since=policy.get("since"))
+            value = Decimal(str(raw["estimated_total_cost_usd_nanos"])) / Decimal(1000000000)
+            if not value.is_finite() or value < 0:
+                raise ValueError("invalid infrastructure billing")
+            self._save_state(infra_app_spend={"app_id": policy["app_id"], "since": policy.get("since"),
+                                              "usd": str(value), "checked_at": self.now()})
+            return {"infra_spend_usd": value, "source": "sail-app-billing"}
         except Exception:
-            return None
+            return {"infra_spend_usd": money(previous["usd"]), "source": "sail-app-billing", "stale": True} if same and previous.get("usd") is not None else None
 
     def _live_pnl(self, at: str) -> Decimal:
         """Profit on real money since inception: every live sleeve's equity less what was
@@ -1500,6 +1520,17 @@ class Service:
         the headline the minute it moved to a shadow book, and the floor read -$5.90."""
         from .committee import demoted_desks
 
+        if self.config.get("segregated_books"):
+            books = getattr(self, "_real_books", None)
+            if books is None:
+                books = self._real_books = {}
+            total = ZERO
+            for desk_id in list(self.manifests):
+                if desk_id not in books:
+                    books[desk_id] = DeskLedger(self.log, desk_id, mode="live")
+                state = books[desk_id].state(at)
+                total += state.equity - state.net_deposits
+            return total
         total = ZERO
         live = self.live_ids()
         for desk_id in live:
@@ -1815,13 +1846,21 @@ class Service:
         retired = retired_desks(self.log)
         return {k: v for k, v in list(self.manifests.items()) if k not in retired}
 
+    def entry_allowed(self, desk_id: str) -> bool:
+        manifest = self.manifests.get(desk_id)
+        if manifest is None:
+            return False
+        policy = self.config.get("strategy_lifecycle") or {}
+        return manifest.family not in policy.get("retired_families", []) or (
+            not manifest.live and desk_id in policy.get("controls", []))
+
     def reload_manifests(self) -> None:
         """Pick up manifests the evolution loop spawned without restarting the process."""
         for manifest in load_all(self.desks_dir):
             if manifest.id in self.manifests:
                 continue
             self.manifests[manifest.id] = manifest
-            self.ledgers[manifest.id] = DeskLedger(self.log, manifest.id)
+            self.ledgers[manifest.id] = DeskLedger(self.log, manifest.id, mode=manifest.capital_mode if self.config.get("segregated_books") else None)
             self.gateway.manifests[manifest.id] = manifest
             self.gateway.ledgers[manifest.id] = self.ledgers[manifest.id]
             self.committee.manifests[manifest.id] = manifest
@@ -1932,6 +1971,8 @@ class Service:
                     table[desk_id] = fresh
             if mode != "live" and gateway is not None:
                 gateway.manifests[desk_id] = fresh
+                if self.config.get("segregated_books") and desk_id in self.ledgers:
+                    self.ledgers[desk_id].set_mode(mode)
             if mode != "live" and isinstance(books, dict):
                 # Its real resting orders go: nothing on the venue may outlive the sleeve, a live
                 # order still in flight when the demotion landed included.
@@ -2074,6 +2115,8 @@ class Service:
             except Exception as exc:
                 self.alert("warning", f"{desk_id}: shadow position {position.instrument.key} not closed on promotion: {type(exc).__name__}")
         sleeve = None
+        if self.config.get("segregated_books") and ledger is not None:
+            ledger.set_mode("live")
         committee = getattr(self, "committee", None)
         if committee is not None:
             try:
@@ -2172,6 +2215,8 @@ class Service:
         catchup = int(self.config["session_catchup_seconds"])
         postmortem_at = _clock_minutes(str(self.config["postmortem_time"]))
         for desk_id, manifest in sorted(self.active_manifests().items()):
+            if not self.entry_allowed(desk_id):
+                continue
             tz = ZoneInfo(manifest.cadence.timezone)
             local = parse_iso(at).astimezone(tz)
             if self.resolution_due(manifest, at):
@@ -2293,6 +2338,8 @@ class Service:
 
     def run_session(self, manifest: DeskManifest, trigger: str) -> Any:
         """Run one desk session to completion. The desk emits its own session events."""
+        if not self.entry_allowed(manifest.id):
+            return None
         context = self.context(manifest, None)
         runner = self.desk(manifest, context)
         if runner is None:
@@ -2818,6 +2865,15 @@ class Service:
 
                 report = ResultsLedger(self.log, self.manifests).report(int(policy.get("window_days", 3)), at)
                 cache = {"hour": at[:13], "desks": dict(report.get("desks") or {})}
+                if self.config.get("segregated_books"):
+                    start = iso_time(parse_iso(at) - timedelta(days=int(policy.get("window_days", 3))))
+                    for key, ledger in self.ledgers.items():
+                        row = cache["desks"].setdefault(key, {})
+                        current = ledger.state(at)
+                        previous = DeskLedger(self.log, key, mode=ledger.mode, until=start).state(start)
+                        trading = (current.equity - current.net_deposits) - (previous.equity - previous.net_deposits)
+                        row["net_pnl_usd"] = str(trading - money(row.get("sail_cost_usd") or "0"))
+                        row["decisions"] = max(0, current.decisions - previous.decisions)
             except Exception:
                 cache = {"hour": at[:13], "desks": {}}
             self._fitness_cache = cache
@@ -2857,6 +2913,7 @@ class Service:
                 {
                     "name": row.get("name"),
                     "house": bool(row.get("house")),
+                    "enabled": bool(row.get("enabled", True)) and runner.family_enabled(manifest),
                     "cadence_seconds": row.get("cadence_seconds"),
                     "runs": row.get("runs") or 0,
                     "intents": row.get("intents") or 0,
@@ -2912,15 +2969,29 @@ class Service:
         """
         marked = 0
         live = self.live_ids()
-        for desk_id, ledger in sorted(self.ledgers.items()):
+        funded = []
+        instruments = {}
+        for desk_id, ledger in sorted(list(self.ledgers.items())):
             state = ledger.state(at)
             if state.net_deposits <= ZERO and not state.positions:
                 continue
-            quotes: dict[str, Any] = {}
+            funded.append((desk_id, ledger))
             for key, position in state.positions.items():
-                found = self.quote(position.instrument)
-                if found is not None:
-                    quotes[key] = found
+                instruments[key] = position.instrument
+        # One quote per instrument for the whole arena, bounded fan-out. Thirty desks holding
+        # the same contract must not make thirty sequential venue requests before risk is marked.
+        quotes: dict[str, Any] = {}
+        def fetch(item):
+            key, instrument = item
+            try:
+                return key, self.quote(instrument)
+            except Exception:
+                return key, None
+        if instruments:
+            workers = max(1, min(16, int(self.config.get("mark_parallelism", 6))))
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mark-quote") as pool:
+                quotes = {key: found for key, found in pool.map(fetch, instruments.items()) if found is not None}
+        for desk_id, ledger in funded:
             ledger.mark(quotes, at, shadow=desk_id not in live)
             marked += 1
         return marked
@@ -3218,7 +3289,7 @@ class Service:
         except Exception as exc:  # a scoreboard may never stop the floor
             self.alert("warning", f"lab result failed: {type(exc).__name__}")
         self._tick_phase("publish")
-        result["published"] = self.publish()
+        result["published"] = self._off_tick("publication", self.publish) if self._stream_thread is not None else self.publish()
         result["timing"] = self._tick_phase(None)
         self.health(at, result)
         return result
@@ -3298,13 +3369,9 @@ class Service:
         policy = dict(self.config.get("reconcile") or {})
         if not bool(policy.get("enabled", True)):
             return []
-        last = getattr(self, "_reconciled_at", None)
-        if last is None:
-            self._reconciled_at = at  # the first tick arms the clock: a restart never doubles the venue calls
+        last = getattr(self, "_reconciled_at", None) or self.state().get("last_reconciled_at")
+        if last is not None and (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 3600)):
             return []
-        if (_epoch_of(at) - _epoch_of(last)) < float(policy.get("interval_seconds", 3600)):
-            return []
-        self._reconciled_at = at
         done: list[str] = []
         for venue in [v for v in (self.config.get("live_venues") or []) if v in self.gateway.brokers]:
             try:
@@ -3312,6 +3379,10 @@ class Service:
                 done.append(venue)
             except Exception as exc:
                 self.alert("warning", f"reconciliation of {venue} failed: {type(exc).__name__}")
+        expected = [v for v in (self.config.get("live_venues") or []) if v in self.gateway.brokers]
+        if done and len(done) == len(expected):
+            self._reconciled_at = at
+            self._save_state(last_reconciled_at=at)
         return done
 
     def _fund_kalshi_shards(self, at: str) -> None:
@@ -3434,8 +3505,11 @@ class Service:
         if self.publisher is None:
             return None
         try:
-            released = self.gateway.release_deferred_events()
-            summary = self.publisher.push_events(released)
+            if self._stream_thread is None:
+                released = self.gateway.release_deferred_events()
+                summary = self.publisher.push_events(released)
+            else:
+                summary = dict(self._stream_status)
             self.publisher.push_checkpoint(self.checkpoint())
             self._checkpoints += 1
             self._save_state(checkpoint_count=self._checkpoints)
@@ -3444,6 +3518,21 @@ class Service:
             self.last_error = f"publish: {exc}"
             self.alert("warning", f"publish failed: {exc}")
             return None
+
+    def _stream_events(self) -> None:
+        """One writer owns the tape cursor. Slow checkpoints never hold the live event stream."""
+        interval = max(1.0, float(self.config.get("event_stream_seconds", 2)))
+        last_error_at = 0.0
+        while not self._stream_stop.is_set():
+            try:
+                released = self.gateway.release_deferred_events()
+                self._stream_status = {**self.publisher.push_events(released), "at": self.now()}
+            except Exception as exc:
+                self._stream_status = {"error": type(exc).__name__, "at": self.now()}
+                if time.monotonic() - last_error_at >= 60:
+                    self.alert("warning", f"live stream: {type(exc).__name__}")
+                    last_error_at = time.monotonic()
+            self._stream_stop.wait(interval)
 
     # ------------------------------------------------- the owner's real account balances
     def venue_brokers(self) -> dict[str, Any]:
@@ -3840,6 +3929,8 @@ class Service:
             return "blocked"
         if self.gateway.kill_switch_engaged():
             return "halted"
+        if not self.entry_allowed(desk_id):
+            return "paused"
         return "active"
 
     # ------------------------------------------------------------------ health
@@ -3911,6 +4002,8 @@ class Service:
             "last_evolution_day": state.get("last_evolution_day"),
             "last_founding": state.get("last_founding"),  # leap: founding
             "last_foundry": self.foundry.summary() if getattr(self, "foundry", None) is not None else None,  # leap: foundry
+            "event_stream": dict(self._stream_status),
+            "last_reconciled_at": state.get("last_reconciled_at"),
             "last_error": self.last_error,
         }
 
@@ -3957,6 +4050,9 @@ class Service:
         return True
 
     def run(self, *, once: bool = False) -> dict[str, Any]:
+        if not once and self.publisher is not None and self.config.get("event_stream_seconds"):
+            self._stream_thread = threading.Thread(target=self._stream_events, name="live-event-stream", daemon=True)
+            self._stream_thread.start()
         previous = {}
         try:
             for sig in (signal.SIGTERM, signal.SIGINT):
@@ -3983,6 +4079,9 @@ class Service:
                     break
                 self.sleeper(float(self.config["sleep_seconds"]))
         finally:
+            self._stream_stop.set()
+            if self._stream_thread is not None:
+                self._stream_thread.join(timeout=5)
             for sig, handler in previous.items():
                 try:
                     signal.signal(sig, handler)
@@ -3999,6 +4098,9 @@ class Service:
             self.last_error = f"health failed: {type(exc).__name__}: {exc}"
 
     def close(self) -> None:
+        self._stream_stop.set()
+        if self._stream_thread is not None:
+            self._stream_thread.join(timeout=5)
         if getattr(self, "sandboxes", None) is not None:  # leap: sandbox
             try:
                 self.sandboxes.sleep_all()

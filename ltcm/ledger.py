@@ -217,13 +217,16 @@ def _locked(method):
 class DeskLedger:
     """Derived, append-only view of one desk's capital. Never stores anything of its own."""
 
-    def __init__(self, log: EventLog, desk_id: str, *, until: str | None = None):
+    def __init__(self, log: EventLog, desk_id: str, *, until: str | None = None, mode: str | None = None):
         self.log = log
         self.desk_id = desk_id
         self.stream = f"ledger:{desk_id}"
         #: When set, the fold stops at this timestamp, giving the book as it stood then. Used for
         #: trailing-window measurements (a week of realized profit, say) without a second store.
         self.until = until
+        if mode not in (None, "live", "shadow"):
+            raise ValueError("ledger mode must be live or shadow")
+        self.mode = mode
         self._lock = threading.RLock()
         self._reset()
 
@@ -256,6 +259,15 @@ class DeskLedger:
         """Drop the cache and refold from the beginning on the next read."""
         self._reset()
 
+    @_locked
+    def set_mode(self, mode: str) -> None:
+        """Select an economic book, replaying it without importing the other book's profits."""
+        if mode not in ("live", "shadow"):
+            raise ValueError("ledger mode must be live or shadow")
+        if self.mode != mode:
+            self.mode = mode
+            self._reset()
+
     # ------------------------------------------------------------------ equity
     def _equity_with(self, marks: Mapping[str, Decimal] | None = None) -> Decimal:
         total = self._cash
@@ -282,7 +294,8 @@ class DeskLedger:
             except (TypeError, ValueError):
                 horizon = self.until
         while True:
-            batch = self.log.read(after=self._seq, limit=2000)
+            reader = getattr(self.log, "read_ledger", None)
+            batch = reader(self.desk_id, after=self._seq, limit=2000) if callable(reader) else self.log.read(after=self._seq, limit=2000)
             if not batch:
                 return
             for event in batch:
@@ -307,8 +320,13 @@ class DeskLedger:
         if event.kind == "committee.allocation":
             self._apply_allocation(event)
         elif event.kind == "broker.fill":
+            shadow = bool(event.payload.get("shadow")) or event.stream in ("broker:shadow", "broker:paper")
+            if self.mode is not None and shadow != (self.mode == "shadow"):
+                return
             self._apply_fill(event)
         elif event.kind == "ledger.mark" and event.stream == self.stream:
+            if self.mode is not None and bool(event.payload.get("shadow")) != (self.mode == "shadow"):
+                return
             self._apply_mark(event)
 
     # -- external flows ------------------------------------------------------
@@ -322,6 +340,10 @@ class DeskLedger:
             return
         if target < 0:
             return
+        if self.mode is not None:
+            shadow = bool((event.payload.get("shadow") or {}).get(self.desk_id))
+            if shadow != (self.mode == "shadow"):
+                target = ZERO
         flow = target - self._allocation
         self._allocation = target
         if flow == 0:
@@ -422,7 +444,9 @@ class DeskLedger:
                     position.mark = mark
                     position.as_of = as_of
         try:
-            equity = money(payload["equity"]) if payload.get("equity") is not None else self._equity_with()
+            # Historical marks may contain profits from the other capital mode. Prices are
+            # observations; their old aggregate equity is not authoritative for a segregated book.
+            equity = money(payload["equity"]) if self.mode is None and payload.get("equity") is not None else self._equity_with()
         except (TypeError, ValueError):
             equity = self._equity_with()
         day = day_of(as_of)

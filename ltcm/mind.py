@@ -1220,11 +1220,18 @@ class FirmMind:
         try:
             if not self.enabled:
                 return False
-            last = self.book().get("last_pass_at")
+            book = self.book()
+            last = book.get("last_pass_at")
             if not last:
                 return True
             elapsed = (_parse_at(at or self.now()) - _parse_at(last)).total_seconds()
-            return elapsed >= float(self.config["interval_minutes"]) * 60 or elapsed < 0
+            if elapsed >= float(self.config["interval_minutes"]) * 60 or elapsed < 0:
+                return True
+            threshold = int(self.config.get("new_outcomes_trigger", 0))
+            if threshold and elapsed >= float(self.config.get("feedback_min_minutes", 5)) * 60:
+                from .evidence import fresh_clusters
+                return fresh_clusters(self.log, int((book.get("evidence") or {}).get("seq") or 0)) >= threshold
+            return False
         except Exception:
             return False
 

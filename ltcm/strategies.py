@@ -45,6 +45,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
 from .events import now_iso
@@ -561,6 +562,8 @@ class Strategies:
     # ------------------------------------------------------------------ deployment
     def deploy(self, manifest: DeskManifest, name: str, cadence_seconds: int, params: Mapping[str, Any] | None, *, note: str = "", house: bool = False) -> dict[str, Any]:
         """Register a toolbox module as a strategy after one dry run. Raises ValueError on refusal."""
+        if not self.family_enabled(manifest):
+            raise ValueError("family retired from execution; only its designated shadow control may run")
         if not isinstance(name, str) or not NAME.match(name):
             raise ValueError("a strategy name is lowercase letters, digits and underscores, 40 at most")
         manager = self.sandboxes()
@@ -786,6 +789,8 @@ class Strategies:
         manager = self.sandboxes()
         deployed: list[str] = []
         for desk_id, manifest in sorted(manifests.items()):
+            if not self.family_enabled(manifest):
+                continue
             wanted: list[tuple[str, dict[str, Any], int]] = []
             starter = STARTERS.get(manifest.family)
             if starter:
@@ -871,12 +876,20 @@ class Strategies:
         except Exception:
             return
 
+    def family_enabled(self, manifest: DeskManifest) -> bool:
+        policy = dict(getattr(self.service, "config", {}).get("strategy_lifecycle") or {})
+        if manifest.family not in policy.get("retired_families", ()):
+            return True
+        return not manifest.live and manifest.id in policy.get("controls", ())
+
     def due(self, manifests: Mapping[str, DeskManifest], at: str) -> list[tuple[DeskManifest, str, dict[str, Any]]]:
         now = _epoch(at)
         found: list[tuple[float, DeskManifest, str, dict[str, Any]]] = []
         for desk_id, rows in self.store.read().items():
             manifest = manifests.get(desk_id)
             if manifest is None:
+                continue
+            if not self.family_enabled(manifest):
                 continue
             for name, row in rows.items():
                 if not row.get("enabled", True):
@@ -892,6 +905,19 @@ class Strategies:
         """Run the strategies that are due, a bounded number per tick. Never raises."""
         if not self.enabled():
             return []
+        for desk_id, manifest in manifests.items():
+            if self.family_enabled(manifest):
+                continue
+            try:
+                for order in self.service.gateway.open_orders(desk_id):
+                    if order.get("purpose") != "exit":
+                        self.service.gateway.cancel(desk_id, str(order["order_id"]), at)
+            except Exception as exc:
+                self.service.alert("warning", f"{desk_id}: lifecycle cancellation will retry: {type(exc).__name__}")
+            for name, row in self.store.for_desk(desk_id).items():
+                if row.get("enabled", True):
+                    self.store.update(desk_id, name, enabled=False, note="retired family: execution disabled by lifecycle policy")
+                    self.service.alert("info", f"{desk_id}/{name}: retired by family lifecycle policy")
         # Every desk is dealt its starters once, the ones bred tonight included: until Sept 16,
         # 2026 this ran once per process, so a child spawned by the evolution loop had no strategy
         # until the next restart and its whole first day was a blank record.
@@ -933,6 +959,8 @@ class Strategies:
         return out
 
     def _run_guarded(self, manifest: DeskManifest, name: str, row: Mapping[str, Any], at: str) -> dict[str, Any] | None:
+        if not self.family_enabled(manifest):
+            return None
         try:
             return self.run_one(manifest, name, row, at)
         except Exception as exc:
@@ -1136,7 +1164,7 @@ class Strategies:
         fit = self.limit_fit_usd(manifest)
         if manifest.live:
             record = self.record(manifest.id, name)
-            settled = int(record.get("settled") or 0)
+            settled = int(record.get("independent_settled", record.get("settled")) or 0)
             gate = self.evidence_config()
             ok, _, needed = evidence.passes(record, **gate) if record else (False, "", 1)
             if settled >= int(self.config.get("earned_settled", 20)) and ok:
@@ -1304,6 +1332,33 @@ def earned_ramp(settled: int, needed: int, full_size_multiple: Any = 3) -> Decim
     return min(Decimal(1), max(Decimal(0), Decimal(int(settled) - needed) / span))
 
 
+def _independent_outcomes(outcomes: list[Any]) -> list[Any]:
+    """Aggregate every leg and partial exit of the same independent outcome, including
+    losing legs. A group is never represented by a cherry-picked first winner."""
+    from .mind import parse_outcome
+    groups: dict[str, list[Any]] = {}
+    for index, event in enumerate(outcomes):
+        parsed = parse_outcome(event)
+        key = parsed.group if parsed is not None and (parsed.asset_class == "event" or getattr(event, "seq", 0) or event.payload.get("opened_at")) else f"row:{index}"
+        groups.setdefault(key, []).append(event)
+    out = []
+    for rows in groups.values():
+        if len(rows) == 1:
+            out.append(rows[0])
+            continue
+        size = sum((_dec(e.payload.get("quantity")) or Decimal(0)) for e in rows)
+        cost = sum((_dec(e.payload.get("entry_price")) or Decimal(0)) * (_dec(e.payload.get("quantity")) or Decimal(0)) for e in rows)
+        payload = dict(rows[0].payload)
+        payload.update(quantity=str(size), entry_price=str(cost / size) if size else "0",
+                       pnl=str(sum((_dec(e.payload.get("pnl")) or Decimal(0)) for e in rows)),
+                       entry_fees=str(sum((_dec(e.payload.get("entry_fees")) or Decimal(0)) for e in rows)))
+        if len({e.payload.get("instrument") for e in rows}) > 1:
+            # A multi-strike payoff is not a binary Bernoulli bet. Use the day-block bootstrap.
+            payload["instrument"] = "mixed:cluster"
+        out.append(SimpleNamespace(payload=payload, at=max(str(e.at) for e in rows)))
+    return out
+
+
 def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
     """What `evidence.passes` reads from a strategy's settled outcomes (Sept 17, 2026: the old
     gate read only the count and the sign of the P&L).
@@ -1319,6 +1374,7 @@ def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
     * `returns`: the newest `RECORD_RETURNS` of `[settle day, P&L after entry fees / (entry price x
       quantity + entry fees)]`, oldest first.
     """
+    outcomes = _independent_outcomes(outcomes)
     losses = 0
     classes: set[str | None] = set()
     quantity_total = Decimal(0)
@@ -1344,6 +1400,7 @@ def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
     known = classes - {None}
     asset_class = None if not known else (next(iter(known)) if len(known) == 1 else "mixed")
     return {
+        "independent_settled": len(outcomes),
         "losses": losses,
         "asset_class": asset_class,
         "avg_entry_price": format((priced / quantity_total).quantize(Decimal("0.0001")), "f") if quantity_total > 0 else None,

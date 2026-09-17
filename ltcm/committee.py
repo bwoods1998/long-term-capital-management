@@ -196,7 +196,9 @@ class Committee:
     def ledger(self, desk_id: str) -> DeskLedger:
         ledger = self.ledgers.get(desk_id)
         if ledger is None:
-            ledger = self.ledgers[desk_id] = DeskLedger(self.log, desk_id)
+            manifest = self.manifests.get(desk_id)
+            mode = capital_mode(manifest, self.modes()) if manifest and self.config.get("segregated_books") else None
+            ledger = self.ledgers[desk_id] = DeskLedger(self.log, desk_id, mode=mode)
         return ledger
 
     def modes(self) -> dict[str, str]:
@@ -348,6 +350,20 @@ class Committee:
             "breakers": breakers <= int(self.config["gate_max_breakers"]),
             "reconciliation": clean,
         }
+        if self.config.get("require_settled_evidence"):
+            from .evidence import assess
+            from .strategies import _evidence_fields
+            outcomes = list(self.log.read(stream=f"desk:{desk_id}", kind="desk.outcome", limit=10000, newest=True))
+            # Every valid outcome contributes P&L, but related strikes and partial exits count
+            # once. The shared strategy evidence fold aggregates the whole cluster, losses too.
+            from .mind import parse_outcome
+            observations = [event for event in outcomes if parse_outcome(event) is not None]
+            fields = _evidence_fields(observations)
+            verdict = assess({"settled": len(observations), **fields},
+                             **dict(self.config.get("evidence") or {}))
+            checks["settled_evidence"] = bool(verdict["passes"])
+            evidence["settled_positions"] = fields["independent_settled"]
+            evidence["settled_evidence"] = verdict["reason"]
         return {
             "desk_id": desk_id,
             "gate": gate,

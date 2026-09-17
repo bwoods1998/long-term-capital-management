@@ -45,7 +45,7 @@ import threading
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .broker import (
     TERMINAL_STATUSES,
@@ -205,6 +205,7 @@ class Gateway:
         self.risk_engine = risk_engine
         #: `critic.LiveOrderCritic` or None. Consulted only for desks on live capital.
         self.critic = critic
+        self.entry_allowed: Callable[[str], bool] | None = None
         self.brokers = dict(brokers)
         self.ledgers = dict(ledgers)
         self.data = data
@@ -655,6 +656,11 @@ class Gateway:
     def propose(self, intent: OrderIntent, now: Any = None) -> dict[str, Any]:
         """Check one intent and, when it passes, send it. Returns the outcome as plain data."""
         at = iso_time(now) if now is not None else self.now()
+        if intent.purpose != "exit" and self.entry_allowed is not None and not self.entry_allowed(intent.desk_id):
+            decision = self._refusal(intent, at, "family lifecycle: new entries disabled; exits remain managed")
+            self._record_intent(intent, at)
+            self._record_decision(decision)
+            return self._outcome(intent, decision, None, [])
         blocked = self.blocked_desks.get(intent.desk_id)
         if blocked:
             return self._blocked_outcome(intent, at, blocked)
@@ -1546,8 +1552,14 @@ class Gateway:
         `fill_id`, the closed quantity's share of its opening fills' fees. Without `fill_id`
         (or when it is not on the tape): the position as the newest fill left it, and no fees."""
         rows = []
-        for event in self.log.read(kind="broker.fill", limit=10_000, newest=True):
+        reader = getattr(self.log, "read_fills", None)
+        fills = reader(desk_id) if callable(reader) else self.log.read(kind="broker.fill", limit=10_000, newest=True)
+        mode = getattr(self.ledgers.get(desk_id), "mode", None)
+        for event in fills:
             payload = event.payload
+            shadow = bool(payload.get("shadow")) or event.stream in ("broker:shadow", "broker:paper")
+            if mode in ("live", "shadow") and shadow != (mode == "shadow"):
+                continue
             if payload.get("desk_id") != desk_id or _key_of(payload.get("instrument")) != key:
                 continue
             rows.append({**payload, "at": event.at})

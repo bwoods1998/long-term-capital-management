@@ -49,7 +49,7 @@ import secrets
 import threading
 import time
 import types
-from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait as wait_futures
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -916,6 +916,15 @@ class Foundry:
             pass
         return summary
 
+    def progress(self, stage: str, message: str, **facts: Any) -> None:
+        """Small factual milestones, streamed while a cycle is still running; never model
+        chain-of-thought, credentials, source code or unexecuted order intentions."""
+        try:
+            self.log.append("lab", "lab.progress", {"component": "foundry", "stage": stage,
+                            "message": str(message)[:600], **facts}, at=self.now())
+        except Exception:
+            pass
+
     def _cycle(self, at: str) -> dict[str, Any]:
         cfg = self.config
         manager = self.sandboxes()
@@ -932,6 +941,7 @@ class Foundry:
             self._report_problems(cycle, problems)
             return {"at": at, "cycle": cycle, "skipped": "no backtestable family has desks", "fast_tracked": fast}
         family, subject, family_index, subject_index = pick
+        self.progress("research", f"Cycle {cycle}: exploring {family}/{subject}", cycle=cycle, family=family, strategy=subject)
         self._save(cycle=cycle, family_index=family_index, subject_index=subject_index)
         live = self.live_desk(family, manifests)
         shadows = self.shadow_desks(family, manifests)
@@ -962,6 +972,7 @@ class Foundry:
         summary["window"] = [window["start"], window["end"], window["step_minutes"]]
 
         workers = max(1, int(cfg["sandboxes"]))
+        self.progress("test", f"Testing {len(baselines)} baselines and {len(variants)} parameter variants across {workers} Sail sandboxes", cycle=cycle, family=family, strategy=subject)
         ids: "queue.Queue[str]" = queue.Queue()
         for index in range(workers):
             ids.put(f"foundry-{index}")
@@ -986,9 +997,9 @@ class Foundry:
                 first = unmeasured[0]
                 asked["skipped"] = f"baseline {first.get('label')} was not measured: {str(first.get('error') or 'no report')[:160]}"
             else:
-                code, asked = self.code_candidates(cycle, family, subject, source, parent, live, baselines, records, window, problems)
-                for candidate in code:
-                    pool.submit(self._backtest, candidate, window, ids)
+                self.progress("think", f"Generating {cfg['code_candidates']} code mutations from measured baselines", cycle=cycle, family=family, strategy=subject)
+                code, asked = self.code_candidates(cycle, family, subject, source, parent, live, baselines, records, window, problems,
+                                                  on_candidate=lambda candidate: pool.submit(self._backtest, candidate, window, ids))
         candidates = baselines + variants + code
         for candidate in candidates:
             if candidate.get("report") is None and not candidate.get("error"):
@@ -1001,6 +1012,9 @@ class Foundry:
         deployment = None
         if winner is not None:
             deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
+        self.progress("learn", f"Cycle {cycle}: {len(candidates)} candidates measured; {len(qualified)} qualified; "
+                      + ("winner deployed for forward testing" if deployment else "no new deployment"),
+                      cycle=cycle, family=family, strategy=subject, candidates=len(candidates), qualified=len(qualified))
         summary.update(
             {
                 "candidates": len(variants) + len(code),
@@ -1013,7 +1027,7 @@ class Foundry:
                 "best": None if best is None else best["id"],
                 "winner": None if deployment is None else deployment["id"],
                 "deployed_to": None if deployment is None else deployment["desk_id"],
-                "code": {k: asked.get(k) for k in ("asked", "valid", "rejected", "skipped")},
+                "code": {k: asked.get(k) for k in ("asked", "valid", "repaired", "rejected", "skipped")},
                 "model_cost_usd": asked.get("cost_usd"),
                 "sandbox_seconds": round(sum(_float(c.get("seconds")) or 0.0 for c in candidates), 1),
                 "candidates_detail": candidates,
@@ -1208,6 +1222,7 @@ class Foundry:
         records: list[str],
         window: Mapping[str, Any],
         problems: list[str],
+        *, on_candidate: Callable[[dict[str, Any]], Any] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Ask the model for `code_candidates` mutations, validated before any backtest."""
         cfg = self.config
@@ -1251,11 +1266,14 @@ class Foundry:
                 return index, None, f"{type(exc).__name__}: {str(exc)[:160]}"
             return index, response, None
 
-        with ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-model") as pool:
-            answers = list(pool.map(ask, range(count)))
+        def answers():
+            with ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-model") as pool:
+                futures = [pool.submit(ask, index) for index in range(count)]
+                for future in as_completed(futures):
+                    yield future.result()
         out: list[dict[str, Any]] = []
         cost = Decimal(0)
-        for index, response, failure in sorted(answers, key=lambda a: a[0]):
+        for index, response, failure in answers():
             asked["asked"] += 1
             name = names[index]
             if failure is not None:
@@ -1269,14 +1287,38 @@ class Foundry:
             try:
                 spec, hypothesis = self.validate_code(parse_reply(getattr(response, "output_text", "") or ""), name, parent, cadence, source=source)
             except LabError as exc:
-                asked["rejected"].append(f"{name}: {str(exc)[:160]}")
-                continue
+                # Repair only the contract, not the measured result: the repaired program still
+                # faces the identical compiler, sandbox and out-of-sample admission gates.
+                if not cfg.get("repair_invalid_code", False):
+                    asked["rejected"].append(f"{name}: {str(exc)[:160]}")
+                    continue
+                try:
+                    repair = self.provider.respond(
+                        cfg["profile"],
+                        [{"role": "system", "content": self.instructions(name)},
+                         {"role": "user", "content": "Repair this rejected candidate. Preserve its hypothesis; return one valid JSON object, no commentary. "
+                          f"Validation error: {str(exc)[:400]}\nOriginal candidate:\n{str(getattr(response, 'output_text', '') or '')[:24000]}"}],
+                        tools=None, desk_id=BUDGET_DESK, session_id=f"foundry-{cycle}",
+                        request_key=f"foundry:{cycle}:{subject}:repair:{index}",
+                        reasoning_effort=cfg["reasoning_effort"], max_output_tokens=int(cfg["max_output_tokens"]),
+                        desk_cap_usd_per_day=cfg["budget_usd_per_day"],
+                    )
+                    asked["asked"] += 1
+                    cost += _dec(getattr(repair, "cost_usd", None)) or Decimal(0)
+                    spec, hypothesis = self.validate_code(parse_reply(getattr(repair, "output_text", "") or ""), name, parent, cadence, source=source)
+                    asked["repaired"] = asked.get("repaired", 0) + 1
+                except Exception as repair_error:
+                    asked["rejected"].append(f"{name}: repair failed: {str(repair_error)[:160]}")
+                    continue
             asked["valid"] += 1
             out.append(
                 self._candidate(cycle, "code", f"model mutation {index + 1}", name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"])
             )
+            self.progress("candidate", f"{name}: validated; queued for an out-of-sample backtest", cycle=cycle, family=family, strategy=name)
+            if on_candidate is not None:
+                on_candidate(out[-1])
         asked["cost_usd"] = format(cost, "f")
-        return out, asked
+        return sorted(out, key=lambda candidate: candidate["label"]), asked
 
     def validate_code(self, data: Any, name: str, parent: Any, cadence: int, *, source: str | None = None) -> tuple[dict[str, Any], str]:
         """The lab's own strategy validation, a compile, `check_strategy_code`, and the frozen
@@ -1367,6 +1409,10 @@ class Foundry:
             candidate["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
         finally:
             ids.put(desk)
+            report = candidate.get("report") or {}
+            self.progress("tested", f"{candidate['strategy']}: " + (str(candidate['error'])[:180] if candidate.get("error") else
+                          f"{report.get('trades', 0)} trades, simulated net P&L {report.get('pnl_usd', 'unknown')}"),
+                          candidate_id=candidate["id"], strategy=candidate["strategy"], seconds=round(float(candidate.get("seconds") or 0), 2))
         return candidate
 
     def evidence(self, report: Mapping[str, Any]) -> dict[str, Any]:

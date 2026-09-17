@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_stream ON events(stream, seq);
 CREATE INDEX IF NOT EXISTS events_kind ON events(kind, seq);
+CREATE INDEX IF NOT EXISTS events_fill_desk ON events(json_extract(payload, '$.desk_id'), seq)
+    WHERE kind = 'broker.fill';
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
     BEGIN SELECT RAISE(ABORT, 'events are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
@@ -83,6 +85,7 @@ KINDS: dict[str, str] = {
     "evolution.founded": "public",
     "lab.hypothesis": "public",
     "lab.result": "public",
+    "lab.progress": "public",
     # leap: lab -- forecasts and their scoring, and the lab's directed experiments.
     "desk.forecast": "public",
     "lab.calibration": "public",
@@ -351,6 +354,24 @@ class EventLog:
         )
         events = [_row_to_event(r) for r in rows]
         return events[::-1] if newest else events
+
+    def read_ledger(self, desk_id: str, *, after: int = 0, limit: int = 2000) -> list[Event]:
+        """Indexed economic tape for one book. Do not deserialize every thought on the floor
+        once per desk, once per mode, on every checkpoint and capital decision."""
+        rows = self._fetchall(
+            "SELECT * FROM ("
+            "SELECT * FROM events WHERE kind='committee.allocation' AND seq>? "
+            "UNION ALL SELECT * FROM events WHERE kind='broker.fill' AND json_extract(payload, '$.desk_id')=? AND seq>? "
+            "UNION ALL SELECT * FROM events WHERE kind='ledger.mark' AND stream=? AND seq>?"
+            ") ORDER BY seq LIMIT ?",
+            (after, desk_id, after, f"ledger:{desk_id}", after, max(1, min(int(limit), 10000))),
+        )
+        return [_row_to_event(r) for r in rows]
+
+    def read_fills(self, desk_id: str, *, limit: int = 10000) -> list[Event]:
+        rows = self._fetchall("SELECT * FROM events WHERE kind='broker.fill' AND json_extract(payload, '$.desk_id')=? ORDER BY seq DESC LIMIT ?",
+                              (desk_id, max(1, min(int(limit), 10000))))
+        return [_row_to_event(r) for r in reversed(rows)]
 
     def iter_all(self) -> Iterator[Event]:
         after = 0

@@ -15,6 +15,7 @@ const keys = { kalshi: await rsaKey(), coinbase: await ed25519Key() };
 
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN,
+  GATEWAY_ADMIN_TOKEN: TOKEN + '-owner',
   KALSHI_KEY_ID: 'a1b2c3',
   KALSHI_PRIVATE_KEY: keys.kalshi.pkcs8,
   COINBASE_KEY_NAME: 'organizations/o/apiKeys/k',
@@ -41,8 +42,37 @@ const call = async (request, { settings, gate = gateFor(settings), reply, fetche
 const KALSHI_ORDER = { ticker: 'KXTEST-26', side: 'bid', count: '3.00', price: '0.6500', client_order_id: 'oi-1' };
 const COINBASE_ORDER = {
   client_order_id: 'oi-2', product_id: 'BTC-USD', side: 'BUY',
-  order_configuration: { market_market_ioc: { base_size: '0.0001' } },
+  order_configuration: { limit_limit_gtc: { base_size: '0.0001', limit_price: '64050.11' } },
 };
+
+test('a caller cannot underprice a limit order with its reference header', async () => {
+  const order = { ...COINBASE_ORDER, order_configuration: { limit_limit_gtc: { base_size: '1', limit_price: '60000' } } };
+  const { response, calls } = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: order, headers: { 'X-LTCM-Reference-Price': '0.01' } }));
+  assert.equal(response.status, 403);
+  assert.equal(calls.length, 0);
+});
+
+test('base-size market orders use an independent buffered venue price', async () => {
+  const order = { ...COINBASE_ORDER, order_configuration: { market_market_ioc: { base_size: '0.0001' } } };
+  const calls = [];
+  const fetcher = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify(options.method === 'GET' ? { price: '60000' } : { success: true }));
+  };
+  const { response, gate } = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: order, headers: { 'X-LTCM-Reference-Price': '0.01' } }), { fetcher });
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /market\/products\/BTC-USD$/);
+  assert.equal((await gate.status()).today.notional_usd, '6.60');
+});
+
+test('market quote failure refuses the order before dispatch or reservation', async () => {
+  const order = { ...COINBASE_ORDER, order_configuration: { market_market_ioc: { base_size: '0.0001' } } };
+  const { response, calls, gate } = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: order }), { reply: { status: 503, body: '{}' } });
+  assert.equal(response.status, 503);
+  assert.equal(calls.length, 1);
+  assert.equal((await gate.status()).today.orders, 0);
+});
 
 test('a request without the right bearer token learns nothing else', async () => {
   for (const token of [null, 'wrong', TOKEN.slice(0, -1), TOKEN + 'x']) {
@@ -144,18 +174,17 @@ test('coinbase orders are priced from the reference header the caller sends', as
   // The same order at a price that puts it over the cap is refused.
   const refused = await call(
     ask('POST', '/v1/coinbase/api/v3/brokerage/orders', {
-      body: { ...COINBASE_ORDER, order_configuration: { market_market_ioc: { base_size: '0.01' } } },
+      body: { ...COINBASE_ORDER, order_configuration: { limit_limit_gtc: { base_size: '0.01', limit_price: '64050.11' } } },
       headers: { 'X-LTCM-Reference-Price': '64050.11' },
     }),
     { gate },
   );
   assert.equal(refused.response.status, 403);
 
-  // With no reference and no quote size there is no way to price it, so it does not go.
+  // A limit supplies its own enforceable ceiling without trusting a header.
   const unpriced = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: COINBASE_ORDER }), { gate });
-  assert.equal(unpriced.response.status, 400);
-  assert.match(unpriced.body.error, /X-LTCM-Reference-Price/);
-  assert.equal(unpriced.calls.length, 0);
+  assert.equal(unpriced.response.status, 200);
+  assert.equal(unpriced.calls.length, 1);
 });
 
 test('reads and cancels always pass, whatever the counters say', async () => {
@@ -189,12 +218,14 @@ test('the kill switch stops orders with 423 and leaves everything else alone', a
   const read = await call(ask('GET', '/v1/kalshi/portfolio/balance'), { gate });
   assert.equal(read.response.status, 200);
 
-  const released = await call(ask('POST', '/v1/unkill'), { gate });
+  const denied = await call(ask('POST', '/v1/unkill'), { gate });
+  assert.equal(denied.response.status, 401, 'the VM cannot release the owner kill switch');
+  const released = await call(ask('POST', '/v1/unkill', { token: TOKEN + '-owner' }), { gate });
   assert.equal(released.body.kill_switch, false);
   assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }), { gate })).response.status, 200);
 });
 
-test('a venue that never answers gives the reservation back', async () => {
+test('an ambiguous venue submission keeps its reservation', async () => {
   const gate = gateFor();
   const { response, body } = await call(
     ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }),
@@ -202,7 +233,7 @@ test('a venue that never answers gives the reservation back', async () => {
   );
   assert.equal(response.status, 502);
   assert.match(body.error, /kalshi API did not answer/);
-  assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' });
+  assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 1, notional_usd: '1.95' });
 });
 
 test('a venue that answers badly keeps its reservation: an unconfirmed write is an order', async () => {

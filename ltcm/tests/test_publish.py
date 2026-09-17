@@ -447,8 +447,8 @@ class CheckpointTests(PublisherCase):
 
     def test_unsigned_fields_are_clamped_and_stamps_are_bounded(self):
         desk = self.body()["desks"][0]
-        self.assertEqual(desk["equity"], Decimal("0"))
-        self.assertEqual(desk["cash"], Decimal("0"))
+        self.assertEqual(desk["equity"], Decimal("-5"), "a signed sub-ledger loss is not erased")
+        self.assertEqual(desk["cash"], Decimal("-5"))
         self.assertEqual(desk["max_drawdown_pct"], Decimal("0.12"))
         self.assertEqual(desk["daily_pnl"], Decimal("-19.75"))  # signed fields keep their sign
         self.assertEqual(desk["return_pct"], Decimal("-0.5"))

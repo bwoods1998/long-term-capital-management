@@ -55,6 +55,21 @@ DEFAULTS: dict[str, Any] = {
 MIN_LOPSIDED_N = 40
 
 
+def fresh_clusters(log: Any, after: int, *, families: Mapping[str, str] | None = None,
+                   allowed_families: Iterable[str] | None = None) -> int:
+    """Count new independent outcomes for scheduling, not partial fills or repeated strikes.
+    This is a wake-up signal only; it never weakens a promotion or statistical gate."""
+    from .mind import parse_outcome
+
+    allowed = None if allowed_families is None else set(allowed_families)
+    groups = set()
+    for event in log.read(kind="desk.outcome", after=max(0, int(after)), limit=10000, newest=True):
+        outcome = parse_outcome(event, families)
+        if outcome is not None and (allowed is None or outcome.family in allowed):
+            groups.add(outcome.group)
+    return len(groups)
+
+
 def settings(config: Mapping[str, Any] | None) -> dict[str, Any]:
     """`strategies.evidence` from config.json merged over the defaults, numbers parsed (the
     config writes prices as strings)."""
@@ -143,7 +158,7 @@ def assess(record: Mapping[str, Any] | None, **config: Any) -> dict[str, Any]:
     bound on the return, None when it cannot be computed) and `kind` (`lopsided` or `bootstrap`)."""
     cfg = settings(config)
     record = dict(record or {})
-    n = int(_float(record.get("settled")) or 0)
+    n = int(_float(record.get("independent_settled", record.get("settled"))) or 0)
     if lopsided(record, cfg["skew_price"]):
         price = min(0.999, float(_float(record.get("avg_entry_price")) or 0.0))
         fee = max(0.0, float(_float(record.get("avg_fee_per_contract")) or 0.0))

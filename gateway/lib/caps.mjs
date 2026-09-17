@@ -109,7 +109,8 @@ function coinbaseNotional(body, reference) {
   const size = parsePico(leg.base_size);
   if (size === null || size <= 0n) return { error: 'Order size is missing or not positive.' };
   let price = parsePico(reference);
-  if (price === null || price <= 0n) price = parsePico(leg.limit_price);
+  const limit = parsePico(leg.limit_price);
+  if (limit !== null && limit > 0n && (price === null || limit > price)) price = limit;
   if (price === null || price <= 0n) {
     return { error: `Cannot price this order: send a ${REFERENCE_HEADER} header or a quote_size.` };
   }

@@ -597,18 +597,18 @@ class RunwayPolicyTests(ServiceCase):
         # not the ledger's 385.
         self.assertEqual(event.payload["runway_days"], "53")
 
-    def test_infrastructure_spend_is_sails_day_less_the_ledgers_day_summed_from_the_floors_own_days(self):
-        self.provider.sail_period = Decimal("4.73")  # Sail's last 24 hours, everything included
-        self.provider.burn = Decimal("0.40")           # the ledger's last 24 hours of model cost
+    def test_infrastructure_spend_uses_nonoverlapping_app_billing_not_rolling_day_sums(self):
+        billed = [4330000000]
+        self.service.sandboxes = SimpleNamespace(client=SimpleNamespace(spend=lambda **kwargs: {'estimated_total_cost_usd_nanos': billed[0]}))
         self.tick()
         run = self.publisher.checkpoints[-1]["run"]
         self.assertEqual(str(run["sail_infra_spend_total_usd"]), "4.33")
-        # The next day adds its own figure; the earlier day is kept, not recomputed away.
-        self.provider.sail_period = Decimal("2.10")
+        # The next API answer already includes all earlier days. It replaces, never adds.
+        billed[0] = 6030000000
         self.tick(moment(2026, 9, 15, 13, 50))
         run = self.publisher.checkpoints[-1]["run"]
         self.assertEqual(str(run["sail_infra_spend_total_usd"]), "6.03")
-        self.assertEqual(sorted(self.service.state()["infra_spend_by_day"]), ["2026-09-14", "2026-09-15"])
+        self.assertEqual(self.service.state()["infra_app_spend"]["usd"], "6.03")
 
     def test_an_unreadable_balance_never_stops_the_floor(self):
         self.provider.balance = None
@@ -1175,9 +1175,9 @@ class PromotedDeskTests(ServiceCase):
         self.service.committee.allocate(self.service.now())
         log = self.service.log
         at = self.service.now()
-        log.append("broker:shadow", "broker.fill", {"id": "f1", "fill_id": "f1", "order_id": "o1", "desk_id": DESK,
+        log.append("broker:alpaca", "broker.fill", {"id": "f1", "fill_id": "f1", "order_id": "o1", "desk_id": DESK,
                    "instrument": AAPL.to_dict(), "side": "buy", "quantity": "10", "price": "100", "fee": "0", "at": at}, id="fill:x:f1", at=at)
-        log.append("broker:shadow", "broker.fill", {"id": "f2", "fill_id": "f2", "order_id": "o2", "desk_id": DESK,
+        log.append("broker:alpaca", "broker.fill", {"id": "f2", "fill_id": "f2", "order_id": "o2", "desk_id": DESK,
                    "instrument": AAPL.to_dict(), "side": "sell", "quantity": "10", "price": "90", "fee": "0", "at": at}, id="fill:x:f2", at=at)
         before = self.service._live_pnl(at)
         self.assertEqual(before, Decimal("-100"))
@@ -1379,6 +1379,7 @@ class SettlementSweepTests(ServiceCase):
         self.write_manifest(
             DESK,
             venues=["kalshi"],
+            capital={"mode": "live", "usd": "1000"},
             instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
             cadence={
                 "sessions": ["09:45"],
@@ -1593,7 +1594,7 @@ class FeedsTests(ServiceCase):
         result = self.tick()
         self.assertEqual(result["feeds"]["fill_venues"], ["kalshi"])
         self.assertEqual(result["feeds"]["fills_confirmed"], ["t-1"])
-        self.assertEqual(venue.fill_calls, 1)
+        self.assertEqual(venue.fill_calls, 2, "socket confirmation plus the startup reconciliation")
         events = service.log.read(stream="broker:kalshi", kind="broker.fill")
         self.assertEqual([e.id for e in events], ["fill:kalshi:t-1"])
         self.assertEqual(service.feeds.health_checks, 1)
@@ -2193,6 +2194,8 @@ class FitnessFactorTests(ServiceCase):
     def test_the_factor_follows_net_pnl_per_sail_dollar_and_is_clamped(self):
         from unittest import mock
 
+        self.service.config["segregated_books"] = False  # exercise the ratio independently of the book reader
+
         rows = {"desks": {DESK: {"decisions": 10, "sail_cost_usd": "4", "net_pnl_usd": "-20", "pnl_per_inference_dollar": "7.36"}}}
         with mock.patch("ltcm.analytics.ResultsLedger.report", return_value=rows):
             self.assertEqual(self.service.fitness_factor(DESK), Decimal("0.25"), "closed winners do not hide an open book that is down")
@@ -2215,10 +2218,10 @@ class ReconcileTests(ServiceCase):
         self.service.close()
         self.service = self.build(live_venues=["kalshi"])
         self.service.gateway.brokers["kalshi"] = Kalshi()
-        self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 18, 0)), [], "the first tick arms the clock")
+        self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 18, 0)), ["kalshi"], "startup reconciles immediately")
         self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 19, 5)), ["kalshi"])
         records = self.service.log.read(kind="broker.reconciled")
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
         self.assertEqual((records[0].payload["venue"], records[0].payload["mismatches"]), ("kalshi", []))
         self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 19, 30)), [], "once an hour")
         self.assertEqual(self.service._reconcile_venues(moment_iso(2026, 9, 14, 20, 6)), ["kalshi"])

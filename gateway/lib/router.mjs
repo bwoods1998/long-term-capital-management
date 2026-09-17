@@ -40,7 +40,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
-  if (!authorized(request, env.GATEWAY_TOKEN)) {
+  const ownerAction = path === '/v1/unkill';
+  if (!authorized(request, ownerAction ? env.GATEWAY_ADMIN_TOKEN : env.GATEWAY_TOKEN)) {
     return fail('Unauthorized.', 401, { 'WWW-Authenticate': 'Bearer' });
   }
 
@@ -109,7 +110,25 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     } catch {
       return fail('An order body must be JSON.', 400);
     }
-    const priced = notional(target.venue, parsed, { reference: request.headers.get(REFERENCE_HEADER) });
+    let reference = request.headers.get(REFERENCE_HEADER);
+    if (target.venue === 'coinbase') {
+      const leg = Object.values(parsed?.order_configuration || {}).find(v => v && typeof v === 'object');
+      if (leg?.base_size && !leg.quote_size && !leg.limit_price) {
+        // A market order has no enforceable limit. Its reference must come from the venue,
+        // never from the trading VM that is asking us to authorize the spend.
+        const product = String(parsed.product_id || '');
+        if (!/^[A-Z0-9-]{3,80}$/.test(product)) return fail('Invalid product id.', 400);
+        try {
+          const quote = await fetcher(`https://api.coinbase.com/api/v3/brokerage/market/products/${product}`, {
+            method: 'GET', signal: AbortSignal.timeout(5000), redirect: 'error',
+          });
+          const data = await quote.json();
+          if (!quote.ok || !(Number(data.price) > 0)) return fail('Cannot independently price this market order.', 503);
+          reference = String(Number(data.price) * 1.10);
+        } catch { return fail('Cannot independently price this market order.', 503); }
+      }
+    }
+    const priced = notional(target.venue, parsed, { reference });
     if (priced.error) return fail(priced.error, 400);
     const decision = await gate.reserve({ micro: String(priced.micro) });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
@@ -142,9 +161,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       },
     });
   } catch (error) {
-    // Nothing reached the venue, so no order exists and the reservation goes back. A venue that
-    // answered at all keeps its reservation, however it answered.
-    if (reservation) await gate.refund(reservation);
+    // A timeout can occur after acceptance. Keep the reservation: absence of a response is
+    // not proof of absence of an order. Only failures before dispatch may refund it.
     return fail(`The ${target.venue} API did not answer.`, 502);
   }
 }

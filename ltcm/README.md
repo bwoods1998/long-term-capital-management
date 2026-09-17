@@ -112,6 +112,7 @@ produces carries `shadow: true`. Nothing marked `shadow` is money.
 | `evolution.founded` | evolution | yes | `desk_id`, `family`, `name`, `rationale`, `venues[]`, `asset_classes[]`, `universe`, `model`, `as_of` |
 | `lab.hypothesis` | lab | yes | `hypothesis_id`, `text`, `test_plan` |
 | `lab.result` | lab | yes | `hypothesis_id`, `metrics{}`, `verdict` |
+| `lab.progress` | lab | yes | `component`, `stage`, `message`, optional factual fields; research/test/candidate/learning milestones, never raw model reasoning or credentials |
 | `ops.alert` | ops | yes | `level`, `text` |
 | `ops.budget` | ops | yes | `scope`, `spent_usd`, `cap_usd` |
 | `provider.request` | ops | no | `request_id`, `desk_id`, `profile`, `cost_usd`, `usage{}` |

@@ -229,6 +229,7 @@ class Evolution:
         self.clock = clock
         self.config = {**DEFAULT_CONFIG, **dict(config or {})}
         self._ledgers: dict[str, DeskLedger] = {}
+        self.ledger_provider: Callable[[str], DeskLedger | None] | None = None
         #: When set, a spawn writes the parent's playbook as a stand-in and hands the model
         #: rewrite to this scheduler instead of waiting on it: the floor's tick must not hold
         #: for a five-minute generation. The service runs the job on a worker and applies the
@@ -240,9 +241,17 @@ class Evolution:
         return now_iso(self.clock)
 
     def ledger(self, desk_id: str) -> DeskLedger:
+        if self.ledger_provider is not None:
+            shared = self.ledger_provider(desk_id)
+            if shared is not None:
+                return shared
         ledger = self._ledgers.get(desk_id)
         if ledger is None:
             ledger = self._ledgers[desk_id] = DeskLedger(self.log, desk_id)
+        if self.config.get("segregated_books"):
+            manifest = self.manifests().get(desk_id)
+            if manifest:
+                ledger.set_mode(capital_mode(manifest, promoted_desks(self.log)))
         return ledger
 
     def manifests(self) -> dict[str, DeskManifest]:
@@ -282,7 +291,7 @@ class Evolution:
             {desk_id: self.ledger(desk_id) for desk_id in roster},
             provider=self.provider,
             clock=self.clock,
-            config=self.config.get("committee") or {},
+            config={**(self.config.get("committee") or {}), "segregated_books": bool(self.config.get("segregated_books"))},
         )
 
     # ------------------------------------------------------------------ scoring
@@ -380,6 +389,7 @@ class Evolution:
                 m
                 for m in mature
                 if capital_mode(m, modes) != "live"
+                and m.id not in self.config.get("protected_desks", ())
                 and states[m.id].decisions >= min_decisions
                 and scores[m.id] < median - margin
             ]
@@ -389,6 +399,7 @@ class Evolution:
                 m
                 for m in mature
                 if capital_mode(m, modes) != "live" and states[m.id].decisions == 0
+                and m.id not in self.config.get("protected_desks", ())
             ]
             if duds and not candidates:
                 worst = min(duds, key=lambda m: m.id)
@@ -412,6 +423,8 @@ class Evolution:
     def retire(
         self, manifest: DeskManifest, at: str, *, median: Decimal, reason: str
     ) -> dict[str, Any]:
+        if manifest.id in self.config.get("protected_desks", []):
+            return {"action": "protected", "desk_id": manifest.id, "reason": "persistent control"}
         payload = {
             "desk_id": manifest.id,
             "family": manifest.family,
