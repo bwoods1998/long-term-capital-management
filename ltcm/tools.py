@@ -845,7 +845,7 @@ def _propose(
             # a venue with no session close died at UTC midnight in the shadow book while the
             # live venue would have kept it, so the shadow record and the live one disagreed.
             time_in_force=arguments.get("time_in_force")
-            or ("gtc" if instrument.asset_class in ("event", "crypto") else "day"),
+            or ("gtc" if instrument.asset_class in ("event", "crypto") or instrument.venue == "coinbase" else "day"),
             post_only=bool(arguments.get("post_only", False)),
             expires_at=expires_at,
             rationale=_text(arguments, "rationale", limit=2000),

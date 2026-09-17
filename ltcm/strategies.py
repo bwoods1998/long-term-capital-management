@@ -1308,6 +1308,12 @@ class Strategies:
         if not run.get("error") and intents:
             decisions = self._propose(manifest, name, intents, at)
         approved = sum(1 for d in decisions if d.get("approved"))
+        refused = [", ".join(str(r) for r in (d.get("reasons") or [])[:2])[:160] for d in decisions if not d.get("approved")]
+        if refused:
+            # The reason an intent went nowhere belongs on the tape next to the intent (Sept 17,
+            # 2026: the first perps intents were refused and nothing recorded why).
+            run["log"] = list(run.get("log") or []) + [f"refused: {why}" for why in refused[:3]]
+            run["notes"] = f"{len(refused)} refused ({refused[0]}); " + str(run.get("notes") or "")
         if cancelled:
             run["notes"] = f"{cancelled} cancelled; " + str(run.get("notes") or "")
         self.store.patch(
