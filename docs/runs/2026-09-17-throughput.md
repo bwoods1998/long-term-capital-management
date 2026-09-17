@@ -111,6 +111,16 @@ overfit. No candidate found during this build established an exponential profit 
   in approximately fourteen seconds, and the public model-work heartbeat appeared at 06:35.
   Interrupted older runs temporarily reduced available research capacity; their leases were
   preserved, not cleared by guesswork.
+- Final restart at 06:38:53 exited its predecessor cleanly. At 06:39:49 health reported no
+  error; all three feeds were connected, seventeen books were present, no desks were blocked,
+  and the last reconciliation reported no mismatch. Cycle 19 selected eight available boxes
+  from the twelve-worker fleet, excluding four quarantined boxes. Both baselines were exact
+  cache hits (zero sandbox seconds); model generation began about one second after the cycle
+  started. Research memory held forty-four experiment records at 06:40.
+- Cycle 18 finished in 191 seconds: eight of twenty-four experiments measured successfully,
+  four valid generated candidates, zero qualifiers, $0.48280502 in recorded model cost.
+  The remaining failures were quarantine refusals, addressed by the final scheduler patch;
+  this is not evidence that all interrupted experiments have since been recovered.
 - Gateway version: `1aa549d0-65cc-477e-8ccc-c00dd2f00376`.
 - Website version: `c8c13e9b-17c8-42e0-8689-e836d3eeb552`.
 
