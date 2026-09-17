@@ -145,6 +145,16 @@ class ArenaServiceTests(ServiceCase):
 
 
 class RepairTests(FoundryCase):
+    def test_paused_family_can_research_without_reenabling_live_parent(self):
+        self.strategies.store.update('mullins', 'kalshi_favorites', enabled=False)
+        foundry = self.foundry(paused_research_families=['kalshi'])
+        self.assertEqual(foundry.subjects('kalshi', self.manifests), ['kalshi_favorites'])
+        self.assertFalse(self.row('mullins')['enabled'])
+        self.assertEqual(self.foundry().subjects('kalshi', self.manifests), [])
+        self.assertEqual(self.foundry(paused_research_families=['kalshi'], excluded_families=['kalshi']).subjects('kalshi', self.manifests), [])
+        self.strategies.store.update('mullins', 'kalshi_favorites_f99', enabled=True)
+        self.assertEqual(foundry.subjects('kalshi', self.manifests), ['kalshi_favorites_f99'])
+
     def test_a_valid_candidate_starts_testing_before_the_slowest_model_finishes(self):
         gate = threading.Event()
         class Staggered(Provider):

@@ -816,6 +816,13 @@ class Foundry:
             for name, row in sorted(rows.items()):
                 if row.get("enabled", True) and name not in names and base_name(name) not in UNBACKTESTABLE_STRATEGIES:
                     names.append(name)
+        # A paused live family can still search for a successor in isolated research. This
+        # never enables its live parent or bypasses adoption/promotion gates. Prefer an active
+        # descendant whenever one exists; never revive a retired/excluded family.
+        recovery = self.config.get("paused_research_families") or []
+        if (not names and family in recovery and family not in self.excluded_families()
+                and house and house not in UNBACKTESTABLE_STRATEGIES):
+            names.append(house)
         return names
 
     def source_of(self, name: str, live: Any) -> str | None:

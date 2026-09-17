@@ -91,6 +91,7 @@
     "param_candidates": 10,
     "code_candidates": 2,
     "repair_invalid_code": true,
+    "paused_research_families": ["crypto"],
     "profile": "k3",
     "reasoning_effort": "high",
     "max_output_tokens": 16000,
