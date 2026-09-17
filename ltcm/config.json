@@ -179,7 +179,7 @@
   "spend_mode": "runway",
   "spend_policy": {
     "reserve_usd": "10",
-    "throttle_days": "3",
+    "throttle_days": "0",
     "stretch_days": "5",
     "desk_fuse_pct": "0.25",
     "desk_fuse_min_usd": "10",

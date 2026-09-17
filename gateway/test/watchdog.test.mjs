@@ -88,7 +88,7 @@ test('Sail reports money in fractional cents, so 3106.14 is $31.06', async () =>
   // $21.06 above the reserve at $4.13 a day is five days of runway: the first, gentle warning.
   assert.equal(sent[0].subject, 'LTCM: 5.1 days of Sail credit left \u2014 top up when you can');
   assert.match(sent[0].text, /credit lasts 5\.1 days, to about 2026-09-20 /);
-  assert.match(sent[0].text, /There is no daily cap/);
+  assert.match(sent[0].text, /no runway-based throttle or floor-wide daily spending cap/);
 });
 
 test('a checkpoint older than fifteen minutes restarts the box, once', async () => {
@@ -166,7 +166,7 @@ test('a paused box under the reserve is left paused and the owner is told', asyn
 });
 
 test('a paused box with credit above the reserve is resumed even when the credit is short', async () => {
-  // The floor throttles itself above the reserve; a stopped box would only forfeit the runway.
+  // Above the reserve the full floor continues; a stopped box would only forfeit the runway.
   const gate = gateWith();
   const { fetcher, calls } = cloud({ ago: 60, status: 'paused', balanceCents: 1500 });
   const result = await runWatchdog({ gate, env: ENV, fetcher, now: NOW });
@@ -251,7 +251,9 @@ test('a balance under the floor warns once, and under the critical line warns di
   await runWatchdog({ gate, env: ENV, fetcher: critical.fetcher, mailer, now: NOW + 3600000 });
   assert.equal(sent.length, 2);
   assert.match(sent[1].subject, /1\.2 days of Sail credit left — top up now/);
-  assert.match(sent[1].text, /last warning before the floor throttles/);
+  assert.match(sent[1].text, /This warning does not slow the floor/);
+  assert.match(sent[1].text, /no runway-based throttle/);
+  assert.doesNotMatch(sent[1].text, /throttle to the live sleeves|floor throttles/);
 });
 
 test('the kill switch and exhausted caps each raise their own alert', async () => {

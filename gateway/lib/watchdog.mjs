@@ -152,7 +152,7 @@ export async function runWatchdog({ gate, env = {}, fetcher = fetch, mailer = nu
     action = 'box_unrecoverable';
   } else if (stopped && balance !== null && balance <= reserve) {
     // Under the reserve the floor itself would refuse every model call, so a resumed box
-    // would only burn its own hourly rate. Above it the floor throttles on its own.
+    // would only burn its own hourly rate. Above it the floor keeps its full research loop.
     action = 'stopped_low_balance';
   } else if (cooling) {
     action = 'cooldown';

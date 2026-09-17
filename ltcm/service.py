@@ -96,7 +96,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "profit_share": "0.25",
     "floor_cap_max_usd_per_day": "60",
     # Spend policy. "runway": no daily cap -- the Sail credit above a reserve is the limit, the
-    # floor throttles when the runway is short and stops at the reserve (`ltcm.runway`).
+    # runway is advisory; the floor only stops at the reserve (`ltcm.runway`).
     # "capped": the older fixed daily cap plus a share of realized profit.
     "spend_mode": "runway",
     "spend_policy": {},
@@ -2493,7 +2493,17 @@ class Service:
         runway = assess_runway(balance, burn, self.config.get("spend_policy") or {})
         if provider is not None:
             if hasattr(provider, "floor_cap"):
-                provider.floor_cap = runway.cap_usd
+                # The provider compares a cumulative daily ledger to this ceiling. Remaining
+                # Sail credit must not count already-paid calls a second time. Pending calls
+                # stay reserved, rather than being added back as new spending capacity.
+                settled = ZERO
+                reader = getattr(provider, "settled_today", None)
+                if runway.mode == "open" and callable(reader):
+                    try:
+                        settled = max(ZERO, money(reader()))
+                    except Exception:
+                        pass  # conservative ceiling if the cost ledger cannot be read
+                provider.floor_cap = runway.cap_usd + settled
             if hasattr(provider, "desk_fuse"):
                 provider.desk_fuse = runway.desk_fuse_usd
         # One public event per change of picture, and the picture *is* the payload: the mode,

@@ -838,6 +838,20 @@ class Provider:
             ).fetchall()
         return sum((Decimal(r["cost_usd"]) for r in rows), ZERO)
 
+    def settled_today(self) -> Decimal:
+        """Today's settled charges, excluding outstanding request reservations.
+
+        A runway budget is remaining credit, whereas floor_cap is compared with cumulative
+        daily spend. Only settled charges can be added back to that ceiling: adding pending
+        reservations would let the same credit fund multiple concurrent requests.
+        """
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT cost_usd FROM requests WHERE substr(created_at, 1, 10) = ? AND cost_usd IS NOT NULL",
+                (self.today(),),
+            ).fetchall()
+        return sum((Decimal(row["cost_usd"]) for row in rows), ZERO)
+
     def _add_spend(self, day: str, desk_id: str, delta: Decimal) -> None:
         row = self._db.execute(
             "SELECT spent_usd FROM budget_days WHERE day = ? AND desk_id = ?", (day, desk_id)

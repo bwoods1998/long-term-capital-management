@@ -4,10 +4,10 @@ The owner's instruction is that infrastructure spend has no ceiling as long as h
 to top up and the floor stops gracefully when he does not. So the only limit on model spend is
 the Sail credit itself, read live, and the policy is about *how* the floor approaches zero:
 
-* **open** -- the balance covers more than `throttle_days` of the trailing burn. No cap: the
-  floor may commit everything above the reserve today if the work calls for it.
-* **throttled** -- the runway is shorter than `throttle_days`. The remaining credit is stretched
-  over `stretch_days`, only live desks keep their sessions, and the owner has already been told.
+* **open** -- credit remains above the reserve. Runway is advisory, not a research throttle:
+  the floor may commit everything above the reserve today if the work calls for it.
+* **throttled** -- legacy opt-in only (`throttle_days > 0`). Disabled by default and in the
+  deployed owner policy. Retained for historical/config compatibility.
 * **stopped** -- the balance is at or under the reserve. No new model call starts; marks, order
   polling, settlements and publication continue, because they cost nothing. Credit added at
   Sail lifts the floor back to `open` on the next tick with no other step.
@@ -36,7 +36,7 @@ MODES = ("open", "throttled", "stopped", "unknown")
 
 DEFAULT_POLICY: dict[str, Any] = {
     "reserve_usd": "10",
-    "throttle_days": "3",
+    "throttle_days": "0",
     "stretch_days": "5",
     "desk_fuse_pct": "0.25",
     "desk_fuse_min_usd": "10",

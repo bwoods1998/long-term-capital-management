@@ -229,6 +229,19 @@ class BodyTests(ProviderCase):
 
 
 class BudgetTests(ProviderCase):
+    def test_settled_today_excludes_pending_reservations_and_previous_days(self):
+        transport = FakeTransport(response(model=FLASH, output=[message("done")]), RuntimeError("unconfirmed POST"))
+        provider = self.provider(transport)
+        first = self.respond(provider, profile="flash_asap")
+        self.assertEqual(provider.settled_today(), first.cost_usd)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="flash_asap", key="pending-call")
+        self.assertGreater(provider.spent_today(), provider.settled_today())
+        self.assertEqual(provider.settled_today(), first.cost_usd)
+        self.time[0] += 86400
+        self.assertEqual(provider.settled_today(), Decimal("0"))
+        provider.close()
+
     def test_desk_cap_refuses_before_dispatch(self):
         transport = FakeTransport()
         provider = self.provider(transport)

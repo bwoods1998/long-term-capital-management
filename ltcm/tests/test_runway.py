@@ -23,11 +23,20 @@ class RunwayTests(unittest.TestCase):
         self.assertEqual(assess("30", "0").desk_fuse_usd, Decimal("10.00"))
 
     def test_a_short_runway_throttles_and_stretches_the_credit(self):
-        r = assess("20", "5")  # $10 above the reserve, burning $5.30 a day: under two days
+        r = assess("20", "5", {"throttle_days": "3"})  # legacy opt-in, never the owner default
         self.assertEqual(r.mode, "throttled")
         self.assertTrue(r.live_only)
         self.assertEqual(r.cap_usd, Decimal("2.00"))  # $10 over five days
         self.assertEqual(r.desk_fuse_usd, Decimal("2.00"))  # the fuse never exceeds the cap
+
+    def test_runway_never_throttles_the_default_owner_policy(self):
+        for balance in ("202.90", "20", "10.01"):
+            for burn in ("64.85", "10000"):
+                with self.subTest(balance=balance, burn=burn):
+                    r = assess(balance, burn)
+                    self.assertEqual(r.mode, "open")
+                    self.assertFalse(r.live_only)
+                    self.assertEqual(r.cap_usd, Decimal(balance) - Decimal("10"))
 
     def test_at_the_reserve_the_floor_stops(self):
         for balance in ("10", "9.99", "0", "-3"):

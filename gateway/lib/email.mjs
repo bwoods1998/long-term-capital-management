@@ -27,8 +27,8 @@ const when = value => (typeof value === 'string' && value ? value.slice(0, 16).r
 const runwayLines = facts => [
   `Sail credit: ${money(facts.balance_usd)}; ${money(facts.spendable_usd)} of it is above the ${money(facts.reserve_usd)} reserve.`,
   `The floor is burning about ${money(facts.burn_usd_per_day)} a day (models and the box), so the credit lasts ${days(facts.runway_days)}, to about ${when(facts.run_out_at)}.`,
-  'There is no daily cap. Under three days of runway the desks throttle to the live sleeves; at the reserve they stop and wait.',
-  'Adding credit at Sail is the only step. The floor opens up again on its own within a minute of the balance changing.',
+  'Runway is advisory: research, shadow testing and live desks continue above the reserve. There is no runway-based throttle or floor-wide daily spending cap.',
+  'At the reserve, new model work pauses; order monitoring and settlements continue. Adding Sail credit resumes model work automatically after the balance refresh.',
 ];
 const signed = value => (Number.isFinite(value) ? `${value < 0 ? '-' : '+'}$${Math.abs(value).toFixed(2)}` : 'unknown');
 const number = value => (Number.isFinite(value) ? String(value) : 'unknown');
@@ -46,7 +46,7 @@ export function compose(kind, facts = {}) {
       subject = `LTCM: ${days(facts.runway_days)} of Sail credit left — top up now`;
       lines.push(
         ...runwayLines(facts),
-        'This is the last warning before the floor throttles and then stops.',
+        'Top up before the reserve is reached to keep model work uninterrupted. This warning does not slow the floor.',
       );
       break;
     case 'floor_stopped':
@@ -54,7 +54,7 @@ export function compose(kind, facts = {}) {
       lines.push(
         `Sail credit is ${money(facts.balance_usd)}, at or under the ${money(facts.reserve_usd)} reserve.`,
         'No new desk session starts. Marks, order polling, settlements and publication continue; open orders rest at the venues.',
-        'Add credit at Sail and the floor resumes on its own within a minute. Nothing else is needed.',
+        'Add credit at Sail and the floor resumes on its own after the balance refresh. Nothing else is needed.',
       );
       break;
     case 'disk_low':

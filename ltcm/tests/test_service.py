@@ -578,7 +578,7 @@ class RunwayPolicyTests(ServiceCase):
         self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
         self.write_manifest("earnings-02", capital={"mode": "shadow", "usd": "1000"})
         self.service.close()
-        self.service = self.build(spend_mode="runway", live_venues=["alpaca"])
+        self.service = self.build(spend_mode="runway", live_venues=["alpaca"], spend_policy={"throttle_days": "3"})
         self.provider.balance = Decimal("20")
         self.provider.burn = Decimal("5")
         result = self.tick()
@@ -588,6 +588,31 @@ class RunwayPolicyTests(ServiceCase):
         self.assertEqual(self.provider.floor_cap, Decimal("2.00"))
         throttled = [e for e in self.service.log.read(kind="ops.alert") if e.payload["text"].startswith("floor throttled")]
         self.assertEqual(len(throttled), 1)
+
+    def test_short_runway_keeps_shadow_sessions_running_under_owner_policy(self):
+        self.write_manifest(DESK, capital={"mode": "live", "usd": "1000"})
+        self.write_manifest("earnings-02", capital={"mode": "shadow", "usd": "1000"})
+        self.service.close()
+        self.service = self.build(spend_mode="runway", live_venues=["alpaca"])
+        self.provider.balance = Decimal("202.90")
+        self.provider.burn = Decimal("64.85")
+        result = self.tick()
+        self.assertEqual(result["spend_mode"], "open")
+        self.assertEqual(self.sessions_started(), ["cadence:09:45"])
+        self.assertEqual(self.sessions_started("earnings-02"), ["cadence:09:45"])
+        self.assertEqual(self.provider.floor_cap, Decimal("192.90"))
+
+    def test_remaining_credit_does_not_double_charge_settled_calls(self):
+        self.provider.balance = Decimal("60")
+        self.provider.burn = Decimal("100")
+        self.provider.settled_today = lambda: Decimal("75")
+        self.provider.spent_today = lambda *args: Decimal("80")  # $5 still pending
+        self.tick()
+        self.assertEqual(self.provider.floor_cap, Decimal("125"))  # $75 paid + $50 remaining
+        self.assertEqual(self.provider.floor_cap - self.provider.spent_today(), Decimal("45"))
+        self.provider.balance = Decimal("10")
+        self.service.apply_budget(self.service.now())
+        self.assertEqual(self.provider.floor_cap, Decimal("0"), "the reserve still stops new work")
 
     def test_sails_own_burn_wins_when_it_is_larger_than_the_ledgers(self):
         self.provider.sail_burn = Decimal("4.73")  # the box, sandboxes and image builds too
