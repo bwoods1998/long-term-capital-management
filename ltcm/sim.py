@@ -712,7 +712,14 @@ class ShadowBook:
             maker, taker = money(rates["maker"]), money(rates["taker"])
             if not all(v.is_finite() and ZERO <= v <= Decimal("0.1") for v in (maker, taker)):
                 raise ValueError("invalid Coinbase shadow fee rates")
-            model = FeeModel(crypto_maker_pct=maker, crypto_taker_pct=taker)
+            # leap: futures -- the per-contract rate rides with the tier when the adapter names
+            # one; else the venue default (Sept 17, 2026: the first shadow perps paid the
+            # dataclass's $2.50 equity-futures default instead of Coinbase's cents).
+            per_contract = rates.get("future_contract")
+            future_fee = money(per_contract) if per_contract not in (None, "") else self.fee_model.future_per_contract
+            if not future_fee.is_finite() or not ZERO <= future_fee <= Decimal("5"):
+                raise ValueError("invalid Coinbase shadow futures fee")
+            model = FeeModel(crypto_maker_pct=maker, crypto_taker_pct=taker, future_per_contract=future_fee)
         fee = model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity, filled_before=filled_before)
         notional = quantity * price * order.instrument.multiplier
         account = self._account()

@@ -433,6 +433,23 @@ class MakerFeeTests(SimTestCase):
             broker.submit(intent(BTC, quantity="1", nonce="invalid"))
         self.assertEqual(len(broker.fills()), 2)
 
+    def test_a_coinbase_future_pays_the_tier_s_contract_fee_and_may_be_sold_short(self):
+        # leap: futures -- the first shadow perps (Sept 17, 2026) paid the dataclass's $2.50.
+        rates = {"maker": "0.005", "taker": "0.009", "future_contract": "0.20"}
+        broker = self.make_broker("futures-fees.db", market_venue="coinbase", slippage_bps=0, fee_reader=lambda: rates, allow_short=True)
+        self.addCleanup(broker.close)
+        etp = Instrument("future", "ETP-20DEC30-CDE", "coinbase", multiplier="0.1", expiry="2030-12-20", market_id="ETP-20DEC30-CDE")
+        self.book(etp, bid="2440", ask="2440.5", last="2440")
+        order = broker.submit(intent(etp, side="sell", quantity="2", order_type="limit", limit_price="2440", time_in_force="gtc", nonce="short"))
+        self.assertEqual(order.status, "filled", "a short opens without a holding")
+        fill = broker.fills()[0]
+        self.assertEqual((fill.fee, fill.quantity, fill.price), (Decimal("0.40"), Decimal("2"), Decimal("2440")))
+        position = broker.position(etp)
+        self.assertEqual(position.quantity, Decimal("-2"))
+        del rates["future_contract"]
+        broker.submit(intent(etp, side="buy", quantity="1", order_type="limit", limit_price="2441", time_in_force="gtc", nonce="cover"))
+        self.assertEqual(broker.fills()[-1].fee, Decimal("0.20"), "without a rate in the tier the venue default applies")
+
     def test_a_resting_event_order_that_fills_later_pays_no_fee_and_a_taker_pays_the_formula(self):
         # Kalshi charges the taker; every maker fill on Sept 16, 2026 came back with fee 0.
         broker = self.make_broker("kalshi.db", market_venue="kalshi", slippage_bps=0)
