@@ -28,7 +28,7 @@ Endpoints and the fields relied on (https://www.weather.gov/documentation/servic
 
 The station table below carries the settlement station where Kalshi's rules name one that
 this module's author could confirm (Central Park KNYC, Midway KMDW, Miami International KMIA,
-Austin Camp Mabry KATT, Denver International KDEN, Los Angeles International KLAX). The other
+Austin-Bergstrom KAUS, Denver International KDEN, Los Angeles International KLAX). The other
 stations are the city's principal NWS reporting station and are UNVERIFIED as Kalshi's
 settlement source; a desk reads the market's own rules before trusting one. Which of these
 cities Kalshi lists on any given day is UNVERIFIED too: the desk searches the market list and
@@ -104,7 +104,9 @@ CITIES: dict[str, City] = {
         _city("New York", "KNYC", "40.7789", "-73.9692", "America/New_York", "KXHIGHNY", True),
         _city("Chicago", "KMDW", "41.7861", "-87.7522", "America/Chicago", "KXHIGHCHI", True),
         _city("Miami", "KMIA", "25.7959", "-80.2870", "America/New_York", "KXHIGHMIA", True),
-        _city("Austin", "KATT", "30.3208", "-97.7604", "America/Chicago", "KXHIGHAUS", True),
+        # Austin settles on Austin-Bergstrom (CLIAUS, KAUS), not Camp Mabry (KATT): Camp Mabry's
+        # high differed from the settled value on 42 of 68 days by up to 2F (Sept 17, 2026 study).
+        _city("Austin", "KAUS", "30.1945", "-97.6699", "America/Chicago", "KXHIGHAUS", True),
         _city("Denver", "KDEN", "39.8561", "-104.6737", "America/Denver", "KXHIGHDEN", True),
         _city("Los Angeles", "KLAX", "33.9425", "-118.4081", "America/Los_Angeles", "KXHIGHLAX", True),
         _city("Philadelphia", "KPHL", "39.8721", "-75.2411", "America/New_York", "KXHIGHPHIL", True),
