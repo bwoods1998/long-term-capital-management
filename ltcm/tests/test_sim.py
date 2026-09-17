@@ -345,7 +345,7 @@ class FeeTests(unittest.TestCase):
             self.fees.kalshi_fee(Decimal("1"), Decimal("1.5"))
 
     def test_per_venue_defaults(self):
-        self.assertEqual(FeeModel.for_venue("coinbase").crypto_maker_pct, Decimal("0.0015"))
+        self.assertEqual(FeeModel.for_venue("coinbase").crypto_maker_pct, Decimal("0.005"))
         self.assertEqual(FeeModel.for_venue("kalshi").event_fee_rate, Decimal("0.07"))
         self.assertEqual(FeeModel.for_venue("unknown").option_per_contract, Decimal("0.65"))
         with self.assertRaises(ValueError):
@@ -390,7 +390,9 @@ class MakerFeeTests(SimTestCase):
         self.clock.advance(60)
         broker.tick()
         rested_fill = [f for f in broker.fills() if f.order_id == resting.id][0]
-        self.assertEqual((rested_fill.price, rested_fill.fee), (Decimal("0.70"), Decimal("0")))
+        # KXCPI is one of the series that charge makers: ceil(0.0175 x 10 x 0.70 x 0.30) = $0.04.
+        # A series that does not (most of the board) charges the resting fill nothing.
+        self.assertEqual((rested_fill.price, rested_fill.fee), (Decimal("0.70"), Decimal("0.04")))
 
 
 class SettlementTests(SimTestCase):
@@ -638,3 +640,28 @@ class TakerModelTests(SimTestCase):
         self.assertEqual(offer.status, "accepted")
         self.assertEqual(self.broker.on_trade("coinbase", "ETH-USD", "104", "1", "buy"), [], "another product")
         self.assertEqual([o.status for o in self.broker.on_trade("coinbase", "BTC-USD", "103.5", "1", "buy")], ["filled"])
+
+
+class KalshiSeriesFeeTests(unittest.TestCase):
+    """Sept 17, 2026: 160 Kalshi series charge makers, and some scale every fee."""
+
+    def test_a_maker_fee_series_charges_the_resting_fill(self):
+        fees = FeeModel.for_venue("kalshi")
+        game = Instrument("event", "KXNHLGAME-26OCT01BOSNYR-BOS", "kalshi", market_id="KXNHLGAME-26OCT01BOSNYR-BOS", right="yes")
+        weather = Instrument("event", "KXHIGHNY-26SEP17-B77.5", "kalshi", market_id="KXHIGHNY-26SEP17-B77.5", right="no")
+        # ceil(0.0175 x 100 x 0.5 x 0.5) = ceil(0.4375) cents -> $0.44
+        self.assertEqual(fees.fee(game, "buy", Decimal("100"), Decimal("0.5"), liquidity="maker"), Decimal("0.44"))
+        self.assertEqual(fees.fee(weather, "buy", Decimal("100"), Decimal("0.5"), liquidity="maker"), Decimal("0"))
+        self.assertEqual(fees.fee(weather, "buy", Decimal("100"), Decimal("0.5"), liquidity="taker"), Decimal("1.75"))
+
+    def test_a_series_multiplier_scales_the_fee(self):
+        schedule = {"KXHALF": {"maker": False, "multiplier": 0.5}}
+        fees = FeeModel(event_fee_rate=Decimal("0.07"), kalshi_series=schedule)
+        half = Instrument("event", "KXHALF-26SEP17-X", "kalshi", market_id="KXHALF-26SEP17-X", right="yes")
+        self.assertEqual(fees.fee(half, "buy", Decimal("100"), Decimal("0.5"), liquidity="taker"), Decimal("0.88"))
+
+    def test_coinbase_fees_are_what_the_account_paid(self):
+        fees = FeeModel.for_venue("coinbase")
+        btc = Instrument("crypto", "BTC-USD", "coinbase")
+        self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="maker"), Decimal("0.13"))
+        self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="taker"), Decimal("0.30"))

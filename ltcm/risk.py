@@ -43,8 +43,17 @@ class RiskContext:
     #: thread) already offer. A position is sold once: an exit and a strategy selling it at the
     #: same moment sold 200 of 100 held (Sept 16, 2026 audit).
     working_sells: dict[str, Decimal] = field(default_factory=dict)
+    #: Kalshi market id -> cash the desk's working buys on that market (either leg) commit.
+    working_event_buys: dict[str, Decimal] = field(default_factory=dict)
+    #: Firm-wide event rules (Sept 17, 2026: the floor's real losses were 1-3 cent longshots and
+    #: single markets holding 8% of the firm). Zero switches a rule off.
+    min_event_price: Decimal = ZERO
+    max_event_market_pct: Decimal = ZERO
+    max_event_market_floor_pct: Decimal = ZERO
 
     def __post_init__(self):
+        for name in ("min_event_price", "max_event_market_pct", "max_event_market_floor_pct"):
+            setattr(self, name, money(getattr(self, name) or 0))
         for name in ("desk_equity", "desk_cash", "desk_daily_pnl", "floor_equity", "floor_daily_pnl"):
             setattr(self, name, money(getattr(self, name)))
 
@@ -262,6 +271,67 @@ def rule_exit_plan(intent: OrderIntent, ctx: RiskContext) -> str | None:
     return None
 
 
+def _event_entry_price(intent: OrderIntent, ctx: RiskContext) -> Decimal | None:
+    """What an event buy pays per contract: its limit when it has one (a resting bid never pays
+    the ask), else the quote's reference."""
+    if intent.order_type == "limit" and intent.limit_price is not None and intent.limit_price > 0:
+        return intent.limit_price
+    return reference_price(intent, ctx)
+
+
+def _opens_event(intent: OrderIntent, ctx: RiskContext) -> bool:
+    return (
+        intent.instrument.asset_class == "event"
+        and intent.side == "buy"
+        and intent.purpose != "exit"
+        and not reduces_exposure(intent, ctx)
+    )
+
+
+def rule_event_longshot(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    """No desk buys an event contract under `min_event_price`. Buyers of Kalshi longshots lose:
+    makers who bought at 10 cents or less lost 0.9 to 6.7 cents a contract across 1,054
+    program-days (Sept 16, 2026 study), and the floor's own 1-3 cent weather tails lost 60% of
+    what they cost in a day. Exits and closing trades are never refused."""
+    if ctx.min_event_price <= 0 or not _opens_event(intent, ctx):
+        return None
+    price = _event_entry_price(intent, ctx)
+    if price is not None and price < ctx.min_event_price:
+        return (
+            f"buying a longshot at {price}: the floor buys no event contract under {ctx.min_event_price} "
+            "(longshot buyers lose on Kalshi; sell the longshot by buying the other side instead)"
+        )
+    return None
+
+
+def rule_event_market_cap(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    """What one Kalshi market can cost the desk: both legs held at cost, its working buys, and
+    this order, at most `max_event_market_pct` of desk equity, and for a desk on real money at
+    most `max_event_market_floor_pct` of the live floor's equity. A single $70 macro position was
+    8% of the firm on Sept 16, 2026."""
+    if not _opens_event(intent, ctx) or (ctx.max_event_market_pct <= 0 and ctx.max_event_market_floor_pct <= 0):
+        return None
+    market = intent.instrument.market_id or intent.instrument.symbol
+    price = _event_entry_price(intent, ctx)
+    if not market or price is None:
+        return None
+    held = ZERO
+    for position in ctx.positions.values():
+        ins = position.instrument
+        if ins.asset_class == "event" and (ins.market_id or ins.symbol) == market and position.quantity > 0:
+            held += position.quantity * position.average_cost * ins.multiplier
+    at_risk = held + ctx.working_event_buys.get(market, ZERO) + intent.quantity * price * intent.instrument.multiplier
+    caps = []
+    if ctx.max_event_market_pct > 0 and ctx.desk_equity > 0:
+        caps.append((ctx.desk_equity * ctx.max_event_market_pct, f"{ctx.max_event_market_pct:.0%} of desk equity"))
+    if ctx.manifest.live and ctx.max_event_market_floor_pct > 0 and ctx.floor_equity > 0:
+        caps.append((ctx.floor_equity * ctx.max_event_market_floor_pct, f"{ctx.max_event_market_floor_pct:.1%} of the live floor"))
+    for cap, label in caps:
+        if at_risk > cap:
+            return f"{market} would put {at_risk:.2f} at risk on one market, cap {cap:.2f} ({label})"
+    return None
+
+
 def rule_order_notional(intent: OrderIntent, ctx: RiskContext) -> str | None:
     if reduces_exposure(intent, ctx):
         return None  # a desk may always exit a position in one order
@@ -378,6 +448,8 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     rule_min_price,
     rule_liquidity,
     rule_limit_sanity,
+    rule_event_longshot,
+    rule_event_market_cap,
     rule_exit_plan,
     rule_order_notional,
     rule_cash,

@@ -191,6 +191,7 @@ class Gateway:
         kill_switch_path: str | Path | None = None,
         floor_max_daily_loss_pct: Any = "0.02",
         critic: Any = None,
+        event_rules: Mapping[str, Any] | None = None,
     ):
         self.log = log
         self.risk_engine = risk_engine
@@ -208,6 +209,10 @@ class Gateway:
         self.clock = clock
         self.kill_switch_path = Path(kill_switch_path) if kill_switch_path else None
         self.floor_max_daily_loss_pct = money(floor_max_daily_loss_pct)
+        #: Firm-wide event rules for the risk context: min_event_price, max_event_market_pct,
+        #: max_event_market_floor_pct (`risk.rule_event_longshot`, `risk.rule_event_market_cap`).
+        self.event_rules = {k: money(v) for k, v in dict(event_rules or {}).items()
+                            if k in ("min_event_price", "max_event_market_pct", "max_event_market_floor_pct") and v is not None}
         # Concurrency (Sept 16, 2026 audit). Strategy workers, sessions, feed threads and the tick
         # all call the gateway at once. `_book_lock` guards the in-memory book below (orders, the
         # venue and intent maps, decisions, seen fills, blocked desks, the scan cursor, what is in
@@ -420,6 +425,7 @@ class Gateway:
             market_open=self.market_open(intent.instrument, at),
             adv_usd=self._adv_usd(intent.instrument),
             venue_capabilities=self._capabilities(venue),
+            **self.event_rules,
             **self._book_fields(intent, at),
         )
 
@@ -451,6 +457,8 @@ class Gateway:
         committed = ZERO
         # Likewise a position already offered by a working sell is not there to sell twice.
         selling: dict[str, Decimal] = {}
+        # And what resting buys on one Kalshi market already put at risk there, either leg.
+        event_buys: dict[str, Decimal] = {}
         open_orders = 0
         orders_today = 0
         for row in rows:
@@ -464,7 +472,13 @@ class Gateway:
                 remaining = max(ZERO, money(row.get("quantity") or 0) - money(row.get("filled_quantity") or 0))
                 if row.get("side") == "buy":
                     price = money(row.get("limit_price") or 0)
-                    committed += remaining * price * money((row.get("instrument") or {}).get("multiplier") or 1)
+                    ins = row.get("instrument") or {}
+                    cost = remaining * price * money(ins.get("multiplier") or 1)
+                    committed += cost
+                    if ins.get("asset_class") == "event":
+                        market = ins.get("market_id") or ins.get("symbol")
+                        if market:
+                            event_buys[market] = event_buys.get(market, ZERO) + cost
                 elif row.get("side") == "sell":
                     key = _key_of(row.get("instrument"))
                     if key is not None:
@@ -476,6 +490,8 @@ class Gateway:
             orders_today += 1
             if entry["side"] == "buy":
                 committed += entry["notional"]
+                if entry.get("market"):
+                    event_buys[entry["market"]] = event_buys.get(entry["market"], ZERO) + entry["notional"]
             else:
                 selling[entry["key"]] = selling.get(entry["key"], ZERO) + entry["quantity"]
         return {
@@ -486,6 +502,7 @@ class Gateway:
             "desk_orders_today": orders_today,
             "open_orders": open_orders,
             "working_sells": selling,
+            "working_event_buys": event_buys,
         }
 
     def _desk_lock(self, desk_id: str) -> threading.Lock:
@@ -611,6 +628,7 @@ class Gateway:
                 "key": intent.instrument.key,
                 "quantity": money(intent.quantity),
                 "notional": money(notional),
+                "market": (intent.instrument.market_id or intent.instrument.symbol) if intent.instrument.asset_class == "event" else None,
             }
 
     def _release(self, intent: OrderIntent) -> None:

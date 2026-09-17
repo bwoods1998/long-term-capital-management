@@ -236,6 +236,12 @@ approved order to the `shadow` book instead of to a venue.
 * The order names the venue it **would** have traded on (`instrument.venue`), and the book prices
   it at that venue's quote and charges that venue's published fees (`ShadowBook.market_venue`), so
   a shadow result and a live result mean the same thing.
+* The fees are the ones the account really pays, not a hopeful tier. Coinbase is 0.5% for a
+  resting fill and 1.2% for a taker fill, what every real fill paid on Sept 16, 2026. The model
+  charged 0.15% and 0.25% before, so quoting strategies that lose money after the real fee
+  scored as winners, and one was promoted. On Kalshi, the 160 series that charge makers (sports
+  games, the Fed, CPI) charge a shadow resting fill too, and a series' fee multiplier scales
+  both sides (`ltcm/data/kalshi_fees.json`, from Kalshi's public series list).
 * `broker.order`, `broker.fill` and `ledger.mark` from a shadow desk carry `shadow: true`.
 * The committee's allocation for a shadow desk is a **notional scoring budget** -- the capital its
   manifest asks for -- listed under `shadow` in the `committee.allocation` payload. It is never
@@ -243,6 +249,18 @@ approved order to the `shadow` book instead of to a venue.
   include=live_ids)` and the checkpoint's `floor` block sum the live sleeves alone.
 * Reconciliation never compares a shadow book against a venue, and the floor's daily-loss breaker
   cannot be tripped by a hypothetical loss.
+
+Two firm rules bind every desk, shadow and live, before any other limit (`event_rules` in
+`ltcm/config.json`, `risk.rule_event_longshot` and `risk.rule_event_market_cap`):
+
+* **No longshots.** No desk opens a position in an event contract priced under 15 cents. People
+  who buy Kalshi longshots lose money: makers who bought at 10 cents or less lost 0.9 to 6.7 cents
+  a contract across 1,054 program-days. The floor's own 1-3 cent weather tails lost most of their
+  cost in a day. The rule tells the desk to take the other side instead. Exits are never refused.
+* **No single market is a big bet.** What one Kalshi market can cost a desk includes both legs
+  held at cost, its resting buys there, and the new order. That total is capped at 15% of the
+  desk's equity. On real money it is also capped at 3.5% of the live floor. On Sept 16, 2026 one
+  discretionary Fed position held 8% of the firm.
 
 Promotion needs two things and publishes both: the gate's evidence, and an open venue. A desk that
 passes gate A onto a venue missing from `live_venues` is deferred with a public `committee.gate`

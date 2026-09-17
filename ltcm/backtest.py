@@ -119,8 +119,8 @@ DEFAULT_SPEC: dict[str, Any] = {
     "listing_horizon_hours": 48,  # settled markets are listed to close this long after `end` (see the docstring)
     "settle_lag_hours": 24,       # ... and not past this long before the run began (settlements still arriving)
     "half_spread_bps": 1.0,       # Coinbase quote = close -/+ this
-    "coinbase_maker_fee": 0.0025,
-    "coinbase_taker_fee": 0.006,
+    "coinbase_maker_fee": 0.005,  # this account's real fills, Sept 16, 2026 (see sim.FeeModel)
+    "coinbase_taker_fee": 0.012,
     "max_seconds": None,          # wall-clock budget, loading included; None: 540 in a sandbox, else none; 0: none
     "verbose": None,              # progress lines on stderr; None: on, except under "compact"
     # A desk's sandbox returns at most 4,000 characters of stdout and stderr together: "compact"
@@ -1950,8 +1950,8 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None, trusted_code: 
         strategy=name,
         learning_usd=learning,
         half_spread=half_spread,
-        maker_fee=float(_num(spec.get("coinbase_maker_fee"), 0.0025)),
-        taker_fee=float(_num(spec.get("coinbase_taker_fee"), 0.006)),
+        maker_fee=float(_num(spec.get("coinbase_maker_fee"), 0.005)),
+        taker_fee=float(_num(spec.get("coinbase_taker_fee"), 0.012)),
         fill_model=fill_model,
     )
     errors = 0

@@ -927,6 +927,7 @@ class Service:
             kill_switch_path=self.kill_switch_path,
             floor_max_daily_loss_pct=self.config["floor_max_daily_loss_pct"],
             critic=self.critic,
+            event_rules=self.config.get("event_rules"),
         )
         # `_apply_capital_modes` moves each manifest once the desk's sleeve is ready; the gateway
         # routes by that, and refuses a desk whose promotion or demotion is logged but not done.

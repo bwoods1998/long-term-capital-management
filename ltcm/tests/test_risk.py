@@ -221,3 +221,71 @@ class BreakerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FirmEventRuleTests(unittest.TestCase):
+    """Sept 17, 2026: the floor's real losses were cheap longshots and single outsized markets."""
+
+    TICKER = "KXHIGHAUS-26SEP17-T102"
+
+    def setUp(self):
+        self.engine = RiskEngine()
+        self.yes = Instrument("event", self.TICKER, "kalshi", market_id=self.TICKER, right="yes")
+        self.no = Instrument("event", self.TICKER, "kalshi", market_id=self.TICKER, right="no")
+        self.events = manifest(venues=["kalshi"], instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+                               limits={**SAMPLE["limits"], "max_order_notional_pct": "1", "max_position_pct": "1", "max_gross_pct": "4"})
+
+    def ctx(self, instrument, bid, ask, **overrides):
+        book = Quote(instrument, Decimal(bid), Decimal(ask), Decimal(ask), "2026-09-14T14:30:00.000Z", "kalshi", False)
+        base = dict(manifest=self.events, quote=book, venue_capabilities={"event", "limit", "shadow"}, market_open=None,
+                    desk_equity=Decimal("200"), desk_cash=Decimal("200"), min_event_price="0.15",
+                    max_event_market_pct="0.15", max_event_market_floor_pct="0.035", floor_equity=Decimal("750"))
+        base.update(overrides)
+        return context(**base)
+
+    def buy(self, instrument, quantity, price, **extra):
+        return OrderIntent.new(desk_id="earnings-01", instrument=instrument, side="buy", quantity=quantity, order_type="limit",
+                               limit_price=price, rationale="t", created_at="2026-09-14T14:30:00.000Z", session_id="s", **extra)
+
+    def reasons(self, intent_, ctx):
+        return self.engine.check(intent_, ctx).reasons
+
+    def test_a_longshot_buy_is_refused_and_the_favorite_is_not(self):
+        longshot = self.reasons(self.buy(self.yes, "100", "0.02"), self.ctx(self.yes, "0.01", "0.02"))
+        self.assertTrue(any("longshot" in r for r in longshot), longshot)
+        favorite = self.reasons(self.buy(self.no, "10", "0.97"), self.ctx(self.no, "0.97", "0.98"))
+        self.assertFalse(any("longshot" in r for r in favorite), favorite)
+
+    def test_a_resting_bid_is_judged_at_its_limit_not_the_ask(self):
+        reasons = self.reasons(self.buy(self.yes, "10", "0.12"), self.ctx(self.yes, "0.10", "0.16"))
+        self.assertTrue(any("longshot" in r for r in reasons), reasons)
+
+    def test_an_exit_buy_is_never_a_longshot(self):
+        exit_buy = self.buy(self.yes, "10", "0.05", purpose="exit", exit_reason="stop", exit_of="oi-x")
+        self.assertFalse(any("longshot" in r for r in self.reasons(exit_buy, self.ctx(self.yes, "0.04", "0.05"))))
+
+    def test_one_market_is_capped_at_its_share_of_desk_equity_across_both_legs(self):
+        held = {self.yes.key: Position(self.yes, Decimal("20"), Decimal("0.60"), Decimal("0.6"))}  # $12 at cost
+        # $12 held + $18.50 more = $30.50 > 15% of $200
+        reasons = self.reasons(self.buy(self.no, "50", "0.37"), self.ctx(self.no, "0.36", "0.37", positions=held))
+        self.assertTrue(any("at risk on one market" in r for r in reasons), reasons)
+        ok = self.reasons(self.buy(self.no, "40", "0.37"), self.ctx(self.no, "0.36", "0.37", positions=held))  # $26.80
+        self.assertFalse(any("at risk on one market" in r for r in ok), ok)
+
+    def test_working_buys_on_the_market_count(self):
+        reasons = self.reasons(self.buy(self.no, "10", "0.95"),
+                               self.ctx(self.no, "0.94", "0.95", working_event_buys={self.TICKER: Decimal("25")}))
+        self.assertTrue(any("at risk on one market" in r for r in reasons), reasons)
+
+    def test_a_live_desk_is_also_capped_by_the_live_floor(self):
+        live = manifest(venues=["kalshi"], capital={"mode": "live", "usd": "400"}, instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []},
+                        limits={**SAMPLE["limits"], "max_order_notional_pct": "1", "max_position_pct": "1", "max_gross_pct": "4"})
+        # $28.50 is under 15% of a $400 desk ($60) but over 3.5% of a $750 floor ($26.25)
+        reasons = self.reasons(self.buy(self.no, "30", "0.95"),
+                               self.ctx(self.no, "0.94", "0.95", manifest=live, desk_equity=Decimal("400"), desk_cash=Decimal("400")))
+        self.assertTrue(any("of the live floor" in r for r in reasons), reasons)
+
+    def test_rules_are_off_when_unset(self):
+        reasons = self.reasons(self.buy(self.yes, "100", "0.02"),
+                               self.ctx(self.yes, "0.01", "0.02", min_event_price=0, max_event_market_pct=0, max_event_market_floor_pct=0))
+        self.assertFalse(any("longshot" in r or "one market" in r for r in reasons), reasons)

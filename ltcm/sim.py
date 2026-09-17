@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .broker import (
     Balance,
@@ -149,6 +149,25 @@ def quantize_cash(value: Decimal) -> Decimal:
     return money(value).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+_KALSHI_FEES: "dict[str, Any] | None" = None
+
+
+def kalshi_fee_schedule() -> "dict[str, Any]":
+    """Series ticker -> {"maker", "multiplier"} from `ltcm/data/kalshi_fees.json`; empty when the
+    file cannot be read (every series then pays the default taker fee and makers pay nothing)."""
+    global _KALSHI_FEES
+    if _KALSHI_FEES is None:
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+
+            data = _json.loads((_Path(__file__).resolve().parent / "data" / "kalshi_fees.json").read_text(encoding="utf-8"))
+            _KALSHI_FEES = dict(data.get("series") or {})
+        except Exception:
+            _KALSHI_FEES = {}
+    return _KALSHI_FEES
+
+
 def ceil_cents(value: Decimal) -> Decimal:
     """Round a charge up to the next whole cent. Venues never round a fee in our favour."""
     return money(value).quantize(CENT, rounding=ROUND_CEILING)
@@ -169,10 +188,16 @@ class FeeModel:
     Defaults as published by the venues the floor uses:
       - US equities: $0 commission (Alpaca, Schwab, most retail brokers since 2019).
       - US options: $0.65 per contract (the common retail rate; Alpaca charges $0).
-      - Crypto: 0.25% taker (the rate this floor budgets for; Coinbase Advanced Trade's
-        actual tier depends on 30-day volume, https://www.coinbase.com/advanced-fees).
+      - Crypto on Coinbase: 0.5% maker, 1.2% taker, what this account's real fills paid on
+        Sept 16, 2026 (every resting fill 0.5000%, every taker fill 1.2000%). The model charged
+        0.15% and 0.25% before, which scored quoting strategies that lose money after the real
+        fee as winners and promoted one. The tier moves with 30-day volume
+        (https://www.coinbase.com/advanced-fees).
       - Kalshi event contracts: ceil(0.07 x contracts x price x (1 - price)) to the next cent,
-        the published trading-fee formula (https://kalshi.com/docs/kalshi-fee-schedule.pdf).
+        the published trading-fee formula (https://kalshi.com/docs/kalshi-fee-schedule.pdf),
+        times the series' fee multiplier; the 160 series whose fee type is
+        `quadratic_with_maker_fees` also charge a resting fill ceil(0.0175 x C x P x (1 - P))
+        (`ltcm/data/kalshi_fees.json`, from Kalshi's series list).
       - Futures: a flat per-contract round-turn placeholder; no floor desk trades futures yet.
     """
 
@@ -199,26 +224,40 @@ class FeeModel:
                 raise ValueError(f"{name} must not be negative")
             object.__setattr__(self, name, value)
 
+    #: series ticker -> {"maker": bool, "multiplier": number}; series not listed are default.
+    kalshi_series: "Mapping[str, Mapping[str, Any]] | None" = None
+    event_maker_fee_rate: Decimal = Decimal("0.0175")
+
     @classmethod
     def for_venue(cls, venue: str) -> "FeeModel":
         """The default model for a venue. Unknown venues get the conservative defaults."""
         if venue == "alpaca":
             return cls(option_per_contract=Decimal("0.65"), crypto_taker_pct=Decimal("0.0025"))
         if venue == "kalshi":
-            return cls(event_fee_rate=Decimal("0.07"))
+            return cls(event_fee_rate=Decimal("0.07"), kalshi_series=kalshi_fee_schedule())
         if venue in ("coinbase", "kraken"):
-            return cls(crypto_taker_pct=Decimal("0.0025"), crypto_maker_pct=Decimal("0.0015"))
+            return cls(crypto_taker_pct=Decimal("0.012"), crypto_maker_pct=Decimal("0.005"))
         if venue in ("schwab", "tastytrade"):
             return cls(option_per_contract=Decimal("0.65"))
         return cls()
 
-    def kalshi_fee(self, count: Decimal, price: Decimal) -> Decimal:
-        """ceil to the cent of 0.07 x C x P x (1 - P), with P the yes price in dollars."""
+    def _series_terms(self, instrument: Any) -> "tuple[bool, Decimal]":
+        """(charges makers, fee multiplier) for the instrument's Kalshi series."""
+        schedule = self.kalshi_series or {}
+        ticker = str(getattr(instrument, "market_id", None) or getattr(instrument, "symbol", "") or "")
+        row = schedule.get(ticker.split("-")[0]) if ticker else None
+        if not isinstance(row, Mapping):
+            return False, ONE
+        multiplier = _dec_or_none(row.get("multiplier"))
+        return bool(row.get("maker")), (ONE if multiplier is None or multiplier < 0 else multiplier)
+
+    def kalshi_fee(self, count: Decimal, price: Decimal, *, rate: "Decimal | None" = None, multiplier: Decimal = ONE) -> Decimal:
+        """ceil to the cent of 0.07 x C x P x (1 - P) x the series multiplier, with P in dollars."""
         count = money(count)
         price = money(price)
         if price < 0 or price > ONE:
             raise ValueError("event contract prices are dollars between 0 and 1")
-        return ceil_cents(self.event_fee_rate * count * price * (ONE - price))
+        return ceil_cents((self.event_fee_rate if rate is None else rate) * money(multiplier) * count * price * (ONE - price))
 
     def fee(
         self,
@@ -243,11 +282,16 @@ class FeeModel:
         elif asset == "future":
             charged = self.future_per_contract * quantity
         elif asset == "event":
-            # Kalshi charges the taker; a resting order that is filled pays nothing (every
-            # maker fill on Sept 16, 2026 came back with fee 0, every taker fill with the
-            # formula's). A shadow record that charged makers the taker fee would have punished
-            # the quoting strategies for an edge the venue actually pays them.
-            return ZERO if liquidity == "maker" else self.kalshi_fee(quantity, price)
+            # Kalshi charges the taker; on most series a resting order that is filled pays
+            # nothing (every maker fill on Sept 16, 2026 came back with fee 0, every taker fill
+            # with the formula's). The series that charge makers (sports games, Fed, CPI) charge
+            # them a quarter of the taker rate, and some series scale both by a multiplier.
+            charges_makers, multiplier = self._series_terms(instrument)
+            if liquidity == "maker":
+                if not charges_makers:
+                    return ZERO
+                return self.kalshi_fee(quantity, price, rate=self.event_maker_fee_rate, multiplier=multiplier)
+            return self.kalshi_fee(quantity, price, multiplier=multiplier)
         else:  # pragma: no cover - Instrument already rejects unknown classes
             charged = ZERO
         return quantize_cash(charged) if charged > 0 else ZERO
