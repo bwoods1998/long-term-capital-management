@@ -111,3 +111,12 @@ test('derivatives state is readable and never an order path', () => {
   assert.equal(allowedVenuePath('coinbase', 'POST', 'api/v3/brokerage/cfm/sweeps/schedule'), false);
   assert.equal(createsOrder('coinbase', 'GET', 'api/v3/brokerage/cfm/balance_summary'), false);
 });
+
+test('funding history is read-only and cannot move money', () => {
+  for (const [venue, path] of [['kalshi', 'portfolio/deposits'], ['kalshi', 'portfolio/withdrawals'],
+    ['coinbase', 'v2/accounts'], ['coinbase', 'v2/accounts/account-id/transactions']]) {
+    assert.equal(allowedVenuePath(venue, 'GET', path), true);
+    for (const method of ['POST', 'PUT', 'DELETE']) assert.equal(allowedVenuePath(venue, method, path), false);
+    assert.equal(createsOrder(venue, 'GET', path), false);
+  }
+});

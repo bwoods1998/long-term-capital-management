@@ -3666,7 +3666,14 @@ class Service:
     def account(self, at: str) -> dict[str, Any]:
         """The portfolio the owner sees: Kalshi plus Coinbase (plus Alpaca when it is live),
         summed. Empty when no venue has ever answered."""
-        return account_block(self.venue_balances(), at)
+        account = account_block(self.venue_balances(), at)
+        config = self.config.get("account_performance")
+        if account and config:
+            from .performance import AccountPerformance
+            if not hasattr(self, "_account_performance"):
+                self._account_performance = AccountPerformance(config, self.venue_brokers(), self.clock)
+            account["performance"] = self._account_performance.read(account, at)
+        return account
 
     def floor_mark(self, account: Mapping[str, Any], at: str) -> Any:
         """Append the floor's own balance mark, the way a desk appends `ledger.mark`.
@@ -3677,6 +3684,10 @@ class Service:
         """
         if not account:
             return None
+        if self.config.get("account_performance"):
+            venues = account.get("venues", [])
+            if {row["venue"] for row in venues} != {"kalshi", "coinbase"} or any(row.get("stale") for row in venues):
+                return None  # A partial/stale account read is not a portfolio loss.
         payload = jsonable(
             {
                 "account_equity": account["account_equity"],

@@ -1780,6 +1780,16 @@ class AccountBalanceTests(ServiceCase):
         )
         self.assertIsNone(shape_problem(event))
 
+    def test_performance_never_archives_partial_or_stale_account_totals(self):
+        service = self.live_floor()
+        service.config["account_performance"] = {"start_at": "2026-09-14T00:00:00.000Z", "start_equity": "979.69"}
+        account = {"account_equity": "492.29", "account_cash": "492.29", "venues": [
+            {"venue": "kalshi", "equity": "492.29", "cash": "492.29", "as_of": service.now()}]}
+        self.assertIsNone(service.floor_mark(account, service.now()))
+        account["venues"].append({"venue": "coinbase", "equity": "487.4", "cash": "487.4", "as_of": service.now(), "stale": True})
+        self.assertIsNone(service.floor_mark(account, service.now()))
+        self.assertEqual(self.marks(), [])
+
     def test_the_health_file_shows_the_venue_balances_and_their_staleness(self):
         service = self.live_floor()
         self.venues["coinbase"].error = RuntimeError("down")

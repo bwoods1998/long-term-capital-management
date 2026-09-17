@@ -977,6 +977,8 @@ def checkpoint_body(
             # the tape. `live_equity` above stays the ledger's number, which is what attributes a
             # gain to a desk; this is what the bank says the account holds.
             **account_block(floor.get("venues"), published_at),
+            **({"performance": {key: floor["performance"].get(key) for key in
+                ("start_at", "start_equity", "net_flows", "verified_at")}} if floor.get("performance") else {}),
         },
         "desks": [
             {

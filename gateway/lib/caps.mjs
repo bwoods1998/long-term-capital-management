@@ -23,7 +23,7 @@ export const normalizePath = path => String(path || '').replace(/^\/+/, '').repl
 const SEGMENT = '[A-Za-z0-9._~%-]+';
 export const VENUE_PATHS = {
   kalshi: [
-    ['GET', /^portfolio\/(balance|positions|fills|settlements)$/],
+    ['GET', /^portfolio\/(balance|positions|fills|settlements|deposits|withdrawals)$/],
     ['GET', /^portfolio\/orders(\/[A-Za-z0-9._~%-]+)?$/],
     ['GET', /^portfolio\/intra_exchange_instance_transfers?(\/[A-Za-z0-9._~%-]+)?$/],
     ['POST', /^portfolio\/intra_exchange_instance_transfer$/],
@@ -35,6 +35,8 @@ export const VENUE_PATHS = {
     ['DELETE', /^portfolio\/(events\/)?orders\/[A-Za-z0-9._~%-]+$/],
   ],
   coinbase: [
+    // Funding reconciliation only; no deposit, withdrawal or transfer creation is exposed.
+    ['GET', /^v2\/accounts(\/[A-Za-z0-9._~%-]+\/transactions)?$/],
     ['GET', /^api\/v3\/brokerage\/transaction_summary$/],
     ['GET', /^api\/v3\/brokerage\/accounts(\/[A-Za-z0-9._~%-]+)?$/],
     // Read-only derivatives state: whether the account can hold futures, and what it holds.
