@@ -108,9 +108,11 @@ DEFAULTS: dict[str, Any] = {
     "forward_max_hours": 72,
     # Size, order counts and price guards are the floor's, never a candidate's: they are neither
     # jittered nor taken from a model's params, and a desk keeps its own values when it adopts.
+    # `maker_fee` and `min_margin` are spot_quotes' fee guard (Sept 17, 2026): jittered, they
+    # moved the spread a bid needs, and a model told a lower fee would set it.
     "frozen_params": [
         "notional_usd", "no_max", "max_new", "max_intents", "max_quotes", "max_symbols",
-        "max_open_per_series", "max_open_per_event", "pages",
+        "max_open_per_series", "max_open_per_event", "pages", "maker_fee", "min_margin",
     ],
 }
 UNBACKTESTABLE_FAMILIES = ("weather",)
@@ -1132,8 +1134,8 @@ class Foundry:
             f"It runs under the strategy name `{name}`: where it "
             f"recognises its own resting orders by kit.context['open_orders'][i]['strategy'], compare with '{name}'. Size from "
             "params.get('notional_usd') or kit.context['learning_usd']; the floor caps size in any case. The backtest replays "
-            "kit.kalshi_markets, kit.kalshi_series, kit.kalshi_market, kit.bars, kit.quote and kit.products from history at "
-            "each step; kit.weather is not available.\n"
+            "kit.kalshi_markets, kit.kalshi_series, kit.kalshi_market, kit.kalshi_orderbooks (top of book only, sizes None), "
+            "kit.bars, kit.quote and kit.products from history at each step; kit.weather is not available.\n"
             f"The kit: {KIT_API}\n"
             "The backtest charges a Kalshi taker fill 0.07 * contracts * p * (1 - p) dollars rounded up to $0.0001 (the venue's "
             "rounding, not to the cent), and a resting fill nothing; Coinbase 0.5% maker and 1.2% taker.\n"

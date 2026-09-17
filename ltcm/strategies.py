@@ -94,11 +94,19 @@ STARTER_VARIANTS: dict[str, list[dict[str, Any]]] = {
     ],
     "kalshi": [
         # The experiment is the band and the side of the spread: how cheap a longshot is overpriced.
+        # Sept 17, 2026: {"yes_min": 0.10, "yes_max": 0.25} was dropped (it bought the NO at 0.76
+        # that lost $9.88); counted one position per market over 596 settled markets (Aug 15 -
+        # Sep 15), maker NO buys at 0.93-0.96 averaged +1.97c [-0.9, +4.5], so NO >= 0.93 gets its
+        # own row, as do a longer final window, the taker side at that price (fee ~0.46c at 0.93)
+        # and one bet per cluster.
         {"yes_max": 0.05},
         {"yes_min": 0.05, "yes_max": 0.15},
         {"maker": False, "yes_max": 0.08},
         {"max_hours": 12, "min_volume_24h": 5000},
-        {"yes_min": 0.10, "yes_max": 0.25, "max_hours": 24},
+        {"yes_max": 0.07},
+        {"min_hours": 3},
+        {"maker": False, "yes_max": 0.07},
+        {"max_open_per_cluster": 1},
     ],
     "weather": [
         {"min_edge": 0.0},
@@ -115,15 +123,20 @@ QUOTE_VARIANTS: dict[str, list[dict[str, Any]]] = {
         {"spread": 0.03, "buckets": 3},
     ],
     "crypto": [
-        {"spread": 0.004, "symbols": "top:6", "max_symbols": 6},
-        {"spread": 0.006, "requote_seconds": 1800},
-        {"spread": 0.003, "symbols": ["BTC-USD", "ETH-USD"]},
+        # Sept 17, 2026: the 0.3-0.6% spreads were retired. At the account's 0.5% maker fee a
+        # round trip needs 2 x 0.5% + a 0.2% margin before `spot_quotes` bids at all, so only
+        # spreads wide enough to clear it are explored.
+        {"spread": 0.015},
+        {"spread": 0.02, "requote_seconds": 1800},
+        {"spread": 0.03},
     ],
 }
-#: What the live desk's quoting starter runs with: one bucket on Kalshi, two coins on Coinbase.
+#: What the live desk's quoting starter runs with: one bucket on Kalshi; on Coinbase, exit-only
+#: on two coins (Sept 17, 2026: a 90-day replay lost at every spread from 0.4% to 2% at the
+#: 0.5% maker fee, so the live desk offers what it holds and bids for nothing).
 QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
     "ranges": {"buckets": 1},
-    "crypto": {"symbols": ["BTC-USD", "ETH-USD"]},
+    "crypto": {"symbols": ["BTC-USD", "ETH-USD"], "bid": False},
 }
 #: How often a house starter runs. Hourly markets reprice by the minute; spot reverts slower;
 #: a day's temperature forecast moves a few times a day.
@@ -159,6 +172,7 @@ class Kit:
         self._lab = labkit
         self.context = CONTEXT
         self.log = []
+        self._book_calls = 0
     def say(self, text):
         self.log.append(str(text)[:300])
     def bars(self, symbol, interval="1h", limit=60, asset_class="crypto", venue="coinbase"):
@@ -212,7 +226,8 @@ class Kit:
                 volume = float(row.get("volume_24h") or 0) * price
                 if price <= 0 or volume < float(min_volume_usd):
                     continue
-                out.append({"symbol": str(row.get("product_id")), "price": price, "volume_usd": volume})
+                increment = float(row.get("quote_increment") or 0) or None
+                out.append({"symbol": str(row.get("product_id")), "price": price, "volume_usd": volume, "quote_increment": increment})
             except (TypeError, ValueError):
                 continue
         out.sort(key=lambda r: -r["volume_usd"])
@@ -268,6 +283,33 @@ class Kit:
     def kalshi_market(self, ticker):
         src = self._event_source()
         return src.market(ticker) if src is not None else None
+    def kalshi_orderbooks(self, tickers):
+        """Live order books for up to 300 markets, read now rather than from the cache:
+        {ticker: {yes, no, yes_bid, yes_ask, no_bid, no_ask}}, prices in dollars, levels
+        [(price, count)] best first. The kalshi_markets rows can be minutes old; price orders
+        from here. At most three calls (100 tickers each) a run; a failed call adds no books,
+        stops further calls and never raises. An unknown ticker comes back with empty sides."""
+        src = self._event_source()
+        reader = getattr(src, "orderbooks", None)
+        if not callable(reader):
+            return {}
+        wanted = []
+        for raw in list(tickers or []):
+            ticker = str(raw or "").strip().upper()
+            if ticker and ticker not in wanted:
+                wanted.append(ticker)
+        out = {}
+        for start in range(0, len(wanted), 100):
+            if self._book_calls >= 3:
+                self.say(f"kalshi_orderbooks: three calls a run; {len(wanted) - start} ticker(s) not read")
+                break
+            self._book_calls += 1
+            try:
+                out.update(reader(wanted[start:start + 100]))
+            except Exception as exc:
+                self.say(f"kalshi_orderbooks failed: {type(exc).__name__}")
+                break
+        return out
     def weather(self, city):
         """The NWS forecast for a Kalshi weather city: days (date, day_high, hourly_max), the
         settlement station and the latest observation."""

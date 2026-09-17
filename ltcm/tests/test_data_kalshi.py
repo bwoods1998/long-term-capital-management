@@ -1,6 +1,8 @@
 """Kalshi public market data: cents-to-dollars conversion, the bid-only book, quotes."""
 
+import json
 import unittest
+import urllib.parse
 from decimal import Decimal
 
 from ltcm.broker import Instrument
@@ -312,3 +314,106 @@ class OrderbookFlagTests(unittest.TestCase):
         source, transport = data({f"{BASE}/markets/{TICKER}/orderbook*": CENTS_BOOK})
         source.orderbook(TICKER)
         self.assertEqual(transport.last["query"]["use_yes_price"], "true")
+
+
+# GET /markets/orderbooks?tickers=KXMLBEXTRAS-26SEP192110SFLAD-EXTRAS&tickers=KXTTELITEMATCH-26SEP170520KKAGPO-KKA,
+# the live public API on Sept 17, 2026 at 01:29 UTC, two of the first five open markets. Unedited:
+# each side arrives worst price first, and a side with no bids is an empty list.
+LIVE_ORDERBOOKS = {
+    "orderbooks": [
+        {
+            "orderbook_fp": {
+                "no_dollars": [["0.0100", "13.00"], ["0.2000", "1.00"], ["0.8600", "20.00"], ["0.8700", "20.00"], ["0.8800", "20.00"], ["0.8900", "20.00"]],
+                "yes_dollars": [["0.0100", "25.00"], ["0.0200", "12.00"], ["0.0300", "8.00"], ["0.0500", "5.00"]],
+            },
+            "ticker": "KXMLBEXTRAS-26SEP192110SFLAD-EXTRAS",
+        },
+        {
+            "orderbook_fp": {
+                "no_dollars": [["0.0100", "64.00"], ["0.0200", "15.00"], ["0.0300", "9.00"], ["0.0500", "5.00"]],
+                "yes_dollars": [],
+            },
+            "ticker": "KXTTELITEMATCH-26SEP170520KKAGPO-KKA",
+        },
+    ]
+}
+GAME = "KXMLBEXTRAS-26SEP192110SFLAD-EXTRAS"
+MATCH = "KXTTELITEMATCH-26SEP170520KKAGPO-KKA"
+
+
+class ManyOrderbooksTests(unittest.TestCase):
+    def test_the_live_response_parses_best_level_first_on_both_legs(self):
+        source, _ = data({f"{BASE}/markets/orderbooks*": LIVE_ORDERBOOKS})
+        books = source.orderbooks([GAME, MATCH])
+        self.assertEqual(set(books), {GAME, MATCH})
+        game = books[GAME]
+        self.assertEqual(game["no"][0], (Decimal("0.8900"), Decimal("20.00")), "the best NO bid, though it arrived last")
+        self.assertEqual([price for price, _ in game["no"]], sorted((price for price, _ in game["no"]), reverse=True))
+        self.assertEqual(game["yes"][0], (Decimal("0.0500"), Decimal("5.00")))
+        self.assertEqual((game["yes_bid"], game["no_bid"]), (Decimal("0.0500"), Decimal("0.8900")))
+        # The listing row for this market read yes_bid 0.05 / yes_ask 0.11 at the same moment.
+        self.assertEqual((game["yes_ask"], game["no_ask"]), (Decimal("0.1100"), Decimal("0.9500")))
+        match = books[MATCH]
+        self.assertEqual((match["yes"], match["yes_bid"], match["no_ask"]), ([], None, None), "no YES bids: no NO ask, not a guess")
+        self.assertEqual(match["yes_ask"], Decimal("0.9500"))
+
+    def test_tickers_are_a_repeated_parameter_never_a_comma_list(self):
+        source, transport = data({f"{BASE}/markets/orderbooks*": LIVE_ORDERBOOKS})
+        source.orderbooks([GAME.lower(), MATCH, GAME])
+        self.assertEqual(len(transport.calls), 1)
+        url = transport.last["url"]
+        self.assertEqual(urllib.parse.urlsplit(url).path, "/trade-api/v2/markets/orderbooks")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertEqual(query, {"tickers": [GAME, MATCH]}, "upper-cased, de-duplicated, one parameter per ticker")
+        self.assertNotIn(",", urllib.parse.unquote(url), "a comma-joined list comes back as one empty book")
+
+    def test_a_long_list_is_read_one_hundred_tickers_a_call(self):
+        tickers = [f"KXTEST-26SEP17-T{n}" for n in range(230)]
+
+        def answer(method, url, body):
+            asked = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["tickers"]
+            return {"orderbooks": [{"ticker": t, "orderbook_fp": {"yes_dollars": [["0.04", "10"]], "no_dollars": [["0.90", "5"], ["0.95", "7"]]}} for t in asked]}
+
+        source, transport = data({f"{BASE}/markets/orderbooks*": answer})
+        books = source.orderbooks(tickers)
+        sizes = [len(urllib.parse.parse_qs(urllib.parse.urlsplit(c["url"]).query)["tickers"]) for c in transport.calls]
+        self.assertEqual(sizes, [100, 100, 30])
+        self.assertEqual(len(books), 230)
+        self.assertEqual(books["KXTEST-26SEP17-T229"]["no_bid"], Decimal("0.95"), "the best of two levels")
+
+    def test_a_book_the_call_did_not_ask_for_is_dropped(self):
+        stray = {"orderbooks": LIVE_ORDERBOOKS["orderbooks"] + [{"ticker": "KXOTHER-1", "orderbook_fp": {"yes_dollars": [], "no_dollars": []}}]}
+        source, _ = data({f"{BASE}/markets/orderbooks*": stray})
+        self.assertEqual(set(source.orderbooks([GAME])), {GAME})
+
+    def test_the_read_skips_the_transport_cache(self):
+        class CachingTransport:
+            def __init__(self):
+                self.requests = []
+
+            def get(self, url, headers=None, timeout=None):
+                raise AssertionError("a cached GET would price an order from a stale book")
+
+            def request(self, method, url, *, headers=None, body=None, timeout=None):
+                self.requests.append((method, url))
+                return 200, {}, json.dumps(LIVE_ORDERBOOKS).encode("utf-8")
+
+        transport = CachingTransport()
+        books = KalshiMarketData(transport).orderbooks([GAME])
+        self.assertEqual(books[GAME]["no_bid"], Decimal("0.8900"))
+        self.assertEqual([method for method, _ in transport.requests], ["GET"])
+
+    def test_a_bad_ticker_or_a_bad_payload_is_a_data_error(self):
+        source, transport = data({f"{BASE}/markets/orderbooks*": {"books": []}})
+        with self.assertRaises(DataError):
+            source.orderbooks(["../portfolio"])
+        self.assertEqual(transport.calls, [])
+        with self.assertRaises(DataError):
+            source.orderbooks([GAME])
+        self.assertEqual(source.orderbooks([]), {})
+
+    def test_the_single_book_reader_keeps_its_shape(self):
+        source, _ = data({f"{BASE}/markets/{TICKER}/orderbook*": FIXED_POINT_BOOK})
+        book = source.orderbook(TICKER)
+        self.assertEqual(set(book), {"ticker", "yes", "no", "yes_bid", "yes_ask"})
+        self.assertEqual((book["yes_bid"], book["yes_ask"]), (Decimal("0.3825"), Decimal("0.4100")))
