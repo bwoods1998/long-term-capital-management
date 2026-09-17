@@ -553,6 +553,45 @@ class FastTrackTests(FoundryCase):
         self.assertIn("takes live desk mullins", runs[0].payload["purpose"])
         self.assertEqual(foundry.fast_track(self.manifests, []), [], "once")
 
+    def test_a_favorites_candidate_needs_the_evidence_gate_on_its_forward_record(self):
+        """Sept 17, 2026: five or six favorites at 0.93 settling at P&L >= 0 is what a strategy
+        with no edge produces about 70% of the time."""
+        foundry, fid = self.deploy_settings()
+        self.clock[0] += 3600
+        key = ("mullins-4", "kalshi_favorites")
+        favorites = {"asset_class": "event", "avg_entry_price": "0.93", "avg_fee_per_contract": "0"}
+        self.strategies.records[key] = {"settled": 6, "fills": 6, "settled_pnl_usd": "4.20", "losses": 0, **favorites}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "six of the 43 settlements a 0.93 favorite needs")
+        self.assertEqual(foundry.state()["deployments"][fid]["status"], "shadow", "still earning its record")
+        self.strategies.records[key] = {"settled": 45, "fills": 45, "settled_pnl_usd": "1.50", "losses": 3, **favorites}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "three losses in 45: the loss rate could be over breakeven")
+        cheap = {"settled": 6, "fills": 6, "settled_pnl_usd": "1.00", "losses": 1, "asset_class": "event", "avg_entry_price": "0.45"}
+        self.strategies.records[key] = cheap
+        self.assertEqual(len(foundry.fast_track(self.manifests, [])), 1, "a payoff that is not lopsided keeps the forward-count rule")
+
+    def test_a_lopsided_candidate_with_the_evidence_goes_live(self):
+        foundry, fid = self.deploy_settings()
+        self.clock[0] += 3600
+        self.strategies.records[("mullins-4", "kalshi_favorites")] = {
+            "settled": 45, "fills": 45, "settled_pnl_usd": "20.40", "losses": 1,
+            "asset_class": "event", "avg_entry_price": "0.93", "avg_fee_per_contract": "0",
+        }
+        self.assertEqual([a["id"] for a in foundry.fast_track(self.manifests, [])], [fid])
+
+    def test_a_retired_family_is_never_picked_and_nothing_of_it_goes_live(self):
+        foundry, fid = self.deploy_settings()
+        self.clock[0] += 3600
+        self.strategies.records[("mullins-4", "kalshi_favorites")] = {"settled": 9, "fills": 9, "settled_pnl_usd": "3"}
+        retired = self.foundry(excluded_families=["kalshi"])
+        self.assertEqual(retired.fast_track(self.manifests, []), [])
+        self.assertEqual(retired.state()["deployments"][fid]["status"], "shadow")
+        specs = len(self.manager.specs)
+        self.clock[0] += 3600
+        summary = retired.cycle()
+        self.assertEqual(summary["skipped"], "no backtestable family has desks")
+        self.assertEqual(len(self.manager.specs), specs, "no backtests for a retired family")
+        self.assertEqual([a["id"] for a in foundry.fast_track(self.manifests, [])], [fid], "the same record goes live for a family still in play")
+
     def test_a_setting_changed_under_the_candidate_is_superseded(self):
         foundry, fid = self.deploy_settings()
         self.strategies.store.update("mullins-4", "kalshi_favorites", params={"yes_max": 0.2}, promoted_at="2026-09-16T15:00:00.000Z")
@@ -1002,6 +1041,20 @@ class ServiceFoundryTests(ServiceCase):
         self.tick(self.START + 1860)
         self.assertEqual(len(calls), 2)
         self.assertIn("last_foundry", self.service.status())
+
+    def test_the_foundry_reads_the_evolution_loops_retired_families(self):
+        self.service.close()
+        self.service = self.build(evolution={"target_variants": 1, "excluded_families": ["ranges"]}, foundry={"excluded_families": ["weather"]})
+        self.assertEqual(self.service.foundry.config["excluded_families"], ["ranges", "weather"])
+        self.assertEqual(self.service.evolution.excluded_families(), {"ranges"})
+
+    def test_the_packaged_config_retires_the_ranges_family(self):
+        from ltcm.strategies import STARTERS_DIR as starters
+
+        config = json.loads((starters.parent / "config.json").read_text(encoding="utf-8"))
+        self.assertNotIn("ranges", config["foundry"]["families"])
+        self.assertIn("ranges", config["evolution"]["excluded_families"])
+        self.assertEqual(config["event_rules"]["max_event_cluster_floor_pct"], "0.08")
 
     def test_a_running_cycle_is_never_started_twice(self):
         self.service.config["background_work"] = True

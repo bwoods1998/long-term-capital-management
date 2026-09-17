@@ -44,7 +44,8 @@ Design rules, inherited from the first generation and kept on purpose:
 | `tools.py` | The research and action tools a desk may call, each with a JSON schema and an executor. |
 | `desk.py` | The desk runtime: builds context, runs the tool-calling loop within budget, emits events, writes memory and memos, proposes orders. |
 | `committee.py` | Meriwether: rules-based capital allocation across desks (weekly), the daily public memo, promotion and demotion by the fixed gates. |
-| `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. A child is born with its parent's playbook; the model's rewrite runs on the service's worker thread and lands as a versioned `desk.playbook_updated` on a later tick (`evolution.deferred_rewrites`, default on), so a spawn never stalls the loop. |
+| `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. A child is born with its parent's playbook; the model's rewrite runs on the service's worker thread and lands as a versioned `desk.playbook_updated` on a later tick (`evolution.deferred_rewrites`, default on), so a spawn never stalls the loop. A family in `evolution.excluded_families` (ranges, since Sept 17, 2026) is never seeded, never replaced and never promoted. |
+| `evidence.py` | The evidence gate on a strategy's settled record: a Wilson bound on the loss rate for lopsided favorites, a day-block bootstrap for everything else. Promotion, earned size and the Foundry's fast-track all read it. |
 | `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
 | `sandbox.py` | One forked Sailbox per desk for the code it writes (`run_code`): the lab image, a toolbox that persists, a daily fuse, data-only egress. |
 | `history.py` | Public venue history for backtests: settled Kalshi markets, Kalshi candlesticks (batched), Coinbase candles; throttled, byte-capped disk cache. |
@@ -267,6 +268,29 @@ Two firm rules bind every desk, shadow and live, before any other limit (`event_
   desk's equity. On real money it is also capped at 3.5% of the live floor. On Sept 16, 2026 one
   discretionary Fed position held 8% of the firm.
 
+A third rule binds the live desks together (`risk.rule_event_floor_cluster`, Sept 17, 2026):
+
+* **The live floor is one book.** The per-market cap above reads one desk's book, and `mullins`
+  and `mullins-4` run nearly the same favorites settings, so each could put 3.5% of the floor on
+  the same market. `Gateway.risk_context` now sums every live desk's event legs held at cost and
+  working buys (`floor_event_exposure`; shadow books never count) by market and by cluster. A
+  live desk's event buy is refused when the market would then hold more than
+  `max_event_market_floor_pct` (3.5%) of the live floor across all live desks, or its cluster
+  more than `max_event_cluster_floor_pct` (8%). A cluster is markets that settle on one move in
+  one hour (`risk.event_cluster`): bitcoin, ether, solana, XRP and dogecoin series are `crypto`,
+  gold, silver, Brent, WTI and copper are `commod`, the daily highs are `weather`, anything else
+  is its own series, and the hour is the close hour in UTC read from the ticker's code
+  (`KXBTCD-26SEP1717` closes at 17:00 New York time, `crypto:2026-09-17T21`). A code with only a
+  date gives the day and a ticker with no readable code gives the group alone; either is a market
+  whose hour is unknown, so it counts against every hour it could close in (`risk.clusters_overlap`:
+  a date meets each UTC hour on that date and the next, no time meets the whole group). Working
+  buys and other live desks' orders still in flight count too. A live desk whose ledger cannot be
+  read is never left out of the sum: every live event buy is refused until it can be. Exits and
+  closing trades are never refused. A live desk's opening event buy holds a floor-wide lock over
+  its check-and-reserve (never over the critic or the venue), so two live desks on two strategy
+  threads cannot both fit under the cap they share; its book is read in one pass for all live
+  desks.
+
 Promotion needs two things and publishes both: the gate's evidence, and an open venue. A desk that
 passes gate A onto a venue missing from `live_venues` is deferred with a public `committee.gate`
 whose reason is `venue not enabled`; the next run after the venue opens promotes it on the same
@@ -337,18 +361,59 @@ house params round-robin by desk id (`STARTER_VARIANTS`), so siblings compare se
 same markets at the same hours; the live desk keeps the code's defaults. House params, cadence
 and code follow the repo until the desk edits its copy or redeploys it as its own.
 `strategy_report` carries each strategy's record from the tape: fills, fees, and the settled
-P&L of the positions it opened (attributed by the `[strategy <name>]` prefix on its rationales).
+P&L of the positions it opened (attributed by the `[strategy <name>]` prefix on its rationales),
+and the evidence gate's verdict on it (`evidence`: passes, reason, settlements needed).
+
+### The evidence gate: luck or edge
+
+A favorite bought at 0.93 wins 7 cents or loses 93, so a run of wins is what a strategy with no
+edge produces most of the time. Until Sept 17, 2026 the floor promoted settings after 6 settled at
+a positive P&L and tripled a live strategy's size after `earned_settled` 6 at P&L above zero; at an
+average price of 0.93 a breakeven favorites variant passed that 65% of the time at 6 settled and
+46% at 40, and one losing 3 cents a contract still passed 53% at 6. `ltcm/evidence.py` is the
+gate every reader of a strategy record now uses (`strategies.evidence` in `config.json`):
+
+* **A lopsided event strategy** (every settled position an event contract, volume-weighted
+  average entry price at or above `skew_price`, 0.80) passes once it has
+  `max(40, ceil(3 / (1 - avg_price)))` settlements (43 at 0.93: three losses expected at
+  breakeven) and the Wilson upper bound of its loss rate at `z` 0.84 is below the breakeven loss
+  rate `1 - avg_price - entry fee per contract`.
+* **Anything else** passes with at least `min_n` (25) settlements over at least `min_days` (3)
+  settlement days and a 20th-percentile day-block bootstrap of return per dollar above zero.
+  Positions settling on one day share a move, so days are resampled, not positions.
+
+`Strategies.record` carries what the gate reads: `losses` (P&L after entry fees below zero),
+`asset_class`, `avg_entry_price`, `avg_fee_per_contract`, and the newest 500 `returns` (settle day,
+P&L after entry fees over cost with fees). The trade-off is deliberate: at 80 to 120 settlements a
+breakeven favorites variant passes about 16-26% of the time and a true +2 cent one about 43-61%.
+Telling +2 cents from breakeven on a 1:13 payoff takes roughly 100 to 300 separate settlements, so a
+real edge earns its size days later than it did.
+
+A live strategy's orders stay at learning size until it has `earned_settled` settlements and a
+record that passes; then `Strategies.size_cap` ramps it linearly from learning size at the gate's
+`n_needed` to the desk's own order limit at `full_size_multiple` (3) times `n_needed`
+(`strategies.evidence.full_size_multiple`; to `earned_multiple` times learning size when the
+desk's limit cannot be read). A favorite at 0.93 is at learning size at 43 settled, halfway at 86
+and at the limit at 129. Passing is not proof (a breakeven favorite passes about a fifth of the
+time), so size follows the evidence as it accumulates; until the Sept 17, 2026 review the ramp was
+`settled / n_needed`, which the gate made a step from learning size to the full limit the run a
+record first passed. The desk's position, daily-loss and floor limits and the firm's event rules
+still bind. A record that stops passing is back at learning size on the next run.
 
 ### Promotion: the family's record chooses the live desk's settings
 
 `Strategies.promote` runs once an hour (`config.json` `promotion`, defaults in
-`strategies.PROMOTION`). For every house strategy a live desk runs it scores each shadow
-variant of that strategy in the family on settled P&L per dollar of filled notional since the
-variant was last dealt (`record(..., since=)`), and the live desk's own setting the same way.
-When the best variant has at least `min_settled` (12) settlements, a positive return and a
-`min_margin` (0.01) over the live setting, the live desk adopts its params; the winning shadow
-keeps them as the control; every other shadow is dealt a jittered copy (`_jitter_params`,
-numbers moved by up to a quarter, choices kept) so the search continues around the new best.
+`strategies.PROMOTION`). For every house strategy a live desk runs it reads each shadow variant
+of that strategy in the family since the variant was last dealt (`record(..., since=)`), and the
+live desk's own setting the same way (settled P&L per dollar of filled notional). A variant is a
+candidate with at least `min_settled` settlements (12; 6 in `config.json`) and a record that passes
+the evidence gate. The candidate with the highest per-dollar lower bound (the bootstrap's 20th
+percentile, or `(breakeven - wilson_upper) / (avg_price + fee)` for favorites) wins when that bound
+is above the live setting's return (or the live setting has too few settlements to say): the live
+desk adopts its params; the winning shadow keeps them as the control; every other shadow is dealt
+a jittered copy (`_jitter_params`, numbers moved by up to a quarter, choices kept) so the search
+continues around the new best. Until Sept 17, 2026 the winner needed only a positive return and a
+0.01 margin on the point estimate.
 A promotion is a `desk.code_run` on the live desk ("strategy X promoted: Y's settings take
 the live desk") and an `ops.alert`. `bootstrap` never overwrites a promoted or dealt setting
 (`promoted_at`); only an untouched house row follows the house params.
@@ -499,8 +564,11 @@ to about 30 seconds.
 `ltcm/foundry.py` replaces days of waiting (twelve settlements, three-day gates, one lab night) with a
 cycle every `foundry.interval_minutes` (30) off the tick (`Service._foundry_tick`, worker `foundry`,
 `last_foundry_at`; state in `.data/ltcm/foundry.json`). A cycle takes the next family of `families`
-(kalshi, ranges, crypto; weather has no forecast history) and the next of its strategies (house starter,
-then what the live desk runs):
+(kalshi, crypto; weather has no forecast history) and the next of its strategies (house starter,
+then what the live desk runs). Ranges is retired (Sept 17, 2026: taking hourly buckets lost at every
+quote lag of a second or more, and its shadow desks were down $43 to $90 each): it left `families`,
+and `evolution.excluded_families`, which the service hands to the Foundry as `excluded_families`,
+keeps any retired family from being picked or fast-tracked:
 1. **Candidates.** Baselines are the live settings and the best shadow's. `param_candidates` (10) jitter
    the best-known settings 10-50%, seeded by the cycle, every other one flipping a `STARTER_VARIANTS`
    choice. `code_candidates` (2) come from `profile` (K3, high, 16,000 tokens, $25 a day on desk
@@ -521,7 +589,12 @@ then what the live desk runs):
    `protect_hours` is spared) gets the params (`promoted_at`, `foundry_id`; only a desk running the
    backtested code) or the code (`Strategies.install`). Never a live desk.
 5. **Live**: a positive backtest bound and `min_forward_settled` (5) positions opened since deployment
-   and settled (`Strategies.record(opened_since=True)`), as many fills, P&L after fees >= 0, and the live
+   and settled (`Strategies.record(opened_since=True)`), as many fills, P&L after fees >= 0, and for a
+   lopsided event strategy (favorites at 0.80 or more) a forward record that passes the evidence gate
+   (Sept 17, 2026: five favorites at 0.93 settling at P&L >= 0 is what no edge produces 70% of the
+   time; 43 settlements rarely fit in `forward_max_hours`, so most favorites candidates expire here,
+   and a settings candidate left on its shadow desk can still reach the live desk through
+   `Strategies.promote` under the same gate), and the live
    desk adopts it (params as `Strategies.promote` does; code installed, its parent and anything else of
    its line paused). Superseded instead when the live desk's code is not what was measured (its own
    strategy, the parent, a snapshot's file) or the parent is already paused. Never under the kill

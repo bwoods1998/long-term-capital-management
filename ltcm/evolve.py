@@ -19,6 +19,10 @@ Three operations, all of them additive:
 
 Manifests are **never edited**. Retirement and promotion are events; a new variant is a new file.
 That is what makes the lineage auditable years later.
+
+A family named in `excluded_families` is retired as a family: `seed()` does not breed it,
+`select()` retires its losers without replacing them, and `promote()` never moves one of its
+variants to real money. Its desks keep running until the owner turns their strategies off.
 """
 
 from __future__ import annotations
@@ -110,6 +114,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "playbook_max_chars": 12_000,
     #: Venues the floor can actually send an order to. A promotion onto anything else is deferred.
     "live_venues": (),
+    #: Families the floor has retired: never bred, never replaced, never promoted to real money.
+    #: Their desks keep running until the owner disables them. The Foundry reads the same list.
+    #: Sept 17, 2026: the ranges family (hourly crypto buckets, taking) lost at every quote lag of
+    #: a second or more in the lag study, and its shadow desks were down $43 to $90 each.
+    "excluded_families": (),
 }
 
 
@@ -250,6 +259,13 @@ class Evolution:
         retired = retired_desks(self.log)
         return {k: v for k, v in self.manifests().items() if k not in retired}
 
+    def excluded_families(self) -> set[str]:
+        """The retired families (`evolution.excluded_families`)."""
+        configured = self.config.get("excluded_families") or ()
+        if isinstance(configured, str):
+            configured = (configured,)
+        return {str(f) for f in configured}
+
     def families(self) -> dict[str, list[DeskManifest]]:
         grouped: dict[str, list[DeskManifest]] = {}
         for manifest in self.active().values():
@@ -309,6 +325,7 @@ class Evolution:
         if target <= 1:
             return []
         modes = promoted_desks(self.log)
+        excluded = self.excluded_families()
         actions: list[dict[str, Any]] = []
         # Round-robin across families, one child per family per round, so a bounded pass
         # gives every family its first sibling before any family gets its third.
@@ -317,6 +334,8 @@ class Evolution:
             for family, variants in sorted(self.families().items()):
                 if limit is not None and len(actions) >= limit:
                     break
+                if family in excluded:
+                    continue  # a retired family is not bred back up
                 if min(target, ceiling) - len(variants) <= 0:
                     continue
                 live = [m for m in variants if capital_mode(m, modes) == "live"]
@@ -346,6 +365,7 @@ class Evolution:
         min_decisions = int(self.config["min_decisions"])
         min_variants = int(self.config["min_variants"])
         margin = Decimal(str(self.config["margin"]))
+        excluded = self.excluded_families()
 
         for family, variants in sorted(self.families().items()):
             if len(variants) < min_variants:
@@ -374,7 +394,8 @@ class Evolution:
                 worst = min(duds, key=lambda m: m.id)
                 best = max(variants, key=lambda m: (self.score(m.id, at), m.id))
                 actions.append(self.retire(worst, at, median=median, reason="no decisions"))
-                spawned = self.spawn(worst, best, at)
+                # A retired family winds down: the loser goes and nothing takes its place.
+                spawned = None if family in excluded else self.spawn(worst, best, at)
                 if spawned is not None:
                     actions.append(spawned)
                 continue
@@ -383,7 +404,7 @@ class Evolution:
             worst = min(candidates, key=lambda m: (scores[m.id], m.id))
             best = max(variants, key=lambda m: (self.score(m.id, at), m.id))
             actions.append(self.retire(worst, at, median=median, reason="below family median"))
-            spawned = self.spawn(worst, best, at)
+            spawned = None if family in excluded else self.spawn(worst, best, at)
             if spawned is not None:
                 actions.append(spawned)
         return actions
@@ -736,8 +757,11 @@ class Evolution:
         active = self.active()
         committee = self.committee(active)
         enabled = self.live_venues()
+        excluded = self.excluded_families()
         promoted: list[dict[str, Any]] = []
         for family, variants in sorted(self.families().items()):
+            if family in excluded:
+                continue  # a retired family's lucky variant never reaches real money
             candidates = [m for m in variants if capital_mode(m, modes) != "live"]
             if not candidates:
                 continue

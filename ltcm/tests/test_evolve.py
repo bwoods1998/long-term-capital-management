@@ -192,6 +192,18 @@ class SeedTests(EvolveCase):
         self.assertEqual(len(actions), 1)
         self.assertEqual(len(evolution.families()["earnings"]), 2)
 
+    def test_a_retired_family_is_not_bred_while_the_others_are(self):
+        """Sept 17, 2026: the ranges family was retired (taking hourly buckets lost at every quote
+        lag of a second or more; its shadow desks were down $43 to $90 each)."""
+        self.write_manifest("scholes", family="ranges", capital={"mode": "shadow", "usd": "142"})
+        evolution = self.evolution(target_variants=3, excluded_families=["ranges"])
+        actions = evolution.seed("2026-09-15T19:00:00.000Z")
+        self.assertEqual({a["family"] for a in actions}, {"earnings"})
+        self.assertEqual(len(evolution.families()["ranges"]), 1, "the retired family keeps its desk and gains none")
+        self.assertEqual(len(evolution.families()["earnings"]), 3)
+        self.assertEqual(self.evolution(target_variants=3, excluded_families="ranges").excluded_families(), {"ranges"}, "one name is a list of one")
+        self.assertEqual(len(self.evolution(target_variants=3).seed("2026-09-15T20:00:00.000Z")), 2, "without the exclusion it breeds")
+
 
 class SelectionTests(EvolveCase):
     def setUp(self):
@@ -244,6 +256,14 @@ class SelectionTests(EvolveCase):
         parent = json.loads((self.desks / "earnings-02.json").read_text())
         self.assertEqual(parent["generation"], 1)
         self.assertEqual(parent["capital"]["mode"], "shadow")
+
+    def test_a_retired_familys_loser_goes_and_nothing_takes_its_place(self):
+        self.run_variant("earnings-01", exit_price="130")
+        self.run_variant("earnings-02", exit_price="90")
+        actions = self.evolution(margin="1", excluded_families=["earnings"]).select("2026-09-30T20:00:00.000Z")
+        self.assertEqual([(a["action"], a["desk_id"]) for a in actions], [("retired", "earnings-02")])
+        self.assertFalse((self.desks / "earnings-02-2.json").exists())
+        self.assertEqual(self.log.read(kind="evolution.spawned"), [])
 
     def test_a_mature_variant_that_never_decided_is_retired_as_a_dud(self):
         # earnings-01 traded; earnings-02 sat for a month and never proposed a thing.
@@ -355,6 +375,17 @@ class PromotionTests(EvolveCase):
         self.assertEqual(load_manifest(self.desks / "earnings-01.json").capital_mode, "shadow")
         # And it does not happen twice.
         self.assertEqual(evolution.promote("2026-09-22T20:00:00.000Z"), [])
+
+    def test_a_retired_familys_best_variant_never_reaches_real_money(self):
+        for n in range(10):
+            day = f"2026-09-{2 + n:02d}"
+            self.fill("earnings-01", "buy", "1", "100", f"{day}T14:00:00.000Z")
+            self.fill("earnings-01", "sell", "1", "101", f"{day}T15:00:00.000Z")
+        evolution = self.evolution(excluded_families=["earnings"])
+        evolution.ledger("earnings-01").mark({}, "2026-09-21T20:00:00.000Z")
+        self.assertEqual(evolution.promote("2026-09-21T20:00:00.000Z"), [])
+        self.assertEqual(self.log.read(kind="evolution.promoted"), [])
+        self.assertEqual(self.log.read(kind="committee.gate"), [], "not even asked")
 
 
 class VenueGateTests(EvolveCase):

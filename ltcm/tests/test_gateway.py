@@ -1435,3 +1435,229 @@ class LapsedExpiryTests(GatewayCase):
         self.assertEqual(self.gateway.poll_orders("2026-09-16T14:52:00.000Z"), [])
         self.assertEqual(self.kalshi.venue_lookups, [])
         self.assertNotIn("expires_at", self.gateway.open_orders(DESK)[0])
+
+
+class FloorEventExposureTests(GatewayCase):
+    """Sept 17, 2026: `mullins` and `mullins-4` run nearly the same favorites settings and could each
+    put 3.5% of the floor on one market. The gateway now sums every live desk's book for the rule."""
+
+    BTC = "KXBTCD-26SEP1717-T117999.99"
+    ETH = "KXETHD-26SEP1717-T4199.99"
+    CLUSTER = "cluster:crypto:2026-09-17T21"
+
+    def setUp(self):
+        super().setUp()
+        data = copy.deepcopy(SAMPLE)
+        data["venues"] = ["kalshi"]
+        data["instruments"] = {**data["instruments"], "asset_classes": ["event"], "deny": []}
+        data["limits"] = {**data["limits"], "max_order_notional_pct": "1", "max_position_pct": "1", "max_gross_pct": "4"}
+        allocations = {}
+        for desk_id, mode, usd in (("mullins", "live", "500"), ("mullins-4", "live", "479"), ("mullins-2", "shadow", "500")):
+            self.gateway.manifests[desk_id] = DeskManifest.from_dict({**data, "id": desk_id, "family": "kalshi", "capital": {"mode": mode, "usd": usd}})
+            self.gateway.ledgers[desk_id] = DeskLedger(self.log, desk_id)
+            allocations[desk_id] = usd
+        self.log.append("committee", "committee.allocation", {"allocations": allocations, "reasons": {}}, at="2026-09-14T12:00:00.000Z")
+        self.gateway.event_rules = {"min_event_price": Decimal("0.15"), "max_event_market_pct": Decimal("0.15"),
+                                    "max_event_market_floor_pct": Decimal("0.035"), "max_event_cluster_floor_pct": Decimal("0.08")}
+        self.kalshi = FakeBroker(caps={"event", "limit"}, instant_fill=False)
+        self.kalshi.venue = "kalshi"
+        self.gateway.brokers["kalshi"] = self.kalshi
+        self.gateway._quote = lambda instrument, desk_id=None: Quote(instrument, Decimal("0.89"), Decimal("0.91"), Decimal("0.90"), NOW, "kalshi", False)
+
+    def leg(self, ticker, right="no"):
+        return Instrument("event", ticker, "kalshi", market_id=ticker, right=right)
+
+    def hold(self, desk_id, ticker, quantity, price="0.90", right="no"):
+        tag = f"fl-{desk_id}-{ticker}-{right}"
+        self.log.append("broker:kalshi", "broker.fill", {
+            "id": tag, "fill_id": tag, "order_id": "ord-" + tag, "desk_id": desk_id, "instrument": self.leg(ticker, right).to_dict(),
+            "side": "buy", "quantity": quantity, "price": price, "fee": "0", "at": "2026-09-14T13:00:00.000Z", "venue": "kalshi",
+        }, id="fill:kalshi:" + tag, at="2026-09-14T13:00:00.000Z")
+
+    def buy(self, desk_id, ticker, quantity, price="0.90", nonce=None):
+        return OrderIntent.new(desk_id=desk_id, instrument=self.leg(ticker), side="buy", quantity=quantity, order_type="limit",
+                               limit_price=price, rationale="favorite", created_at=NOW, session_id="s", nonce=nonce)
+
+    def rest(self, intent):
+        order = Order.from_intent(intent, venue="kalshi")
+        order.broker_order_id = "vx-" + intent.id[-6:]
+        self.gateway._record_order(order, status="accepted", at=NOW)
+
+    def test_the_context_sums_every_live_desks_held_legs_and_working_buys_and_no_shadow_book(self):
+        self.hold("mullins", self.BTC, "5")                      # $4.50
+        self.hold("mullins-4", self.BTC, "20")                   # $18.00
+        self.hold("mullins-4", self.BTC, "10", "0.10", "yes")    # $1.00, the other leg
+        self.rest(self.buy("mullins-4", self.ETH, "10"))         # $9.00 resting
+        self.hold("mullins-2", self.BTC, "100")                  # shadow: never counted
+        self.rest(self.buy("mullins-2", self.ETH, "50"))
+        ctx = self.gateway.risk_context(self.buy("mullins", self.BTC, "15"), NOW)
+        self.assertEqual(ctx.floor_event_exposure, {self.BTC: Decimal("23.50"), self.ETH: Decimal("9.00"), self.CLUSTER: Decimal("32.50")})
+        self.assertEqual(ctx.max_event_cluster_floor_pct, Decimal("0.08"))
+        self.assertEqual(self.gateway.risk_context(self.buy("mullins-2", self.BTC, "15"), NOW).floor_event_exposure, {}, "a shadow desk's order reads none of it")
+        sell = OrderIntent.new(desk_id="mullins", instrument=self.leg(self.BTC), side="sell", quantity="5", order_type="limit",
+                               limit_price="0.89", rationale="exit", created_at=NOW, session_id="s")
+        self.assertEqual(self.gateway.risk_context(sell, NOW).floor_event_exposure, {}, "nor a sell")
+
+    def test_a_live_desk_is_refused_what_another_live_desk_already_holds_and_a_shadow_desk_is_not(self):
+        self.hold("mullins-4", self.BTC, "25")  # $22.50 on the market
+        result = self.gateway.propose(self.buy("mullins", self.BTC, "15"), NOW)  # $13.50 more: $36 of a $34.26 cap
+        self.assertFalse(result["approved"])
+        self.assertTrue(any("across the live desks" in r for r in result["reasons"]), result["reasons"])
+        self.assertEqual(self.kalshi.submitted, [])
+        small = self.gateway.propose(self.buy("mullins", self.BTC, "10", nonce="small"), NOW)  # $9: $31.50
+        self.assertTrue(small["approved"], small["reasons"])
+        again = self.gateway.propose(self.buy("mullins-4", self.BTC, "5", nonce="after"), NOW)  # the first desk's resting bid counts
+        self.assertFalse(again["approved"])
+        self.assertTrue(any("would put 36.00 at risk across the live desks" in r for r in again["reasons"]), again["reasons"])
+        shadow = self.gateway.propose(self.buy("mullins-2", self.BTC, "15", nonce="shadow"), NOW)
+        self.assertFalse(any("across the live desks" in r for r in shadow["reasons"]), shadow["reasons"])
+
+    def test_a_shadow_desks_buy_is_approved_where_a_live_desks_is_refused(self):
+        self.broker.caps.add("event")  # the shadow book prices event contracts
+        self.hold("mullins-4", self.BTC, "25")  # $22.50 of the $34.26 cap
+        refused = self.gateway.propose(self.buy("mullins", self.BTC, "15"), NOW)
+        self.assertFalse(refused["approved"])
+        shadow = self.gateway.propose(self.buy("mullins-2", self.BTC, "15", nonce="shadow"), NOW)
+        self.assertTrue(shadow["approved"], shadow["reasons"])
+
+    def test_another_live_desks_order_in_flight_counts(self):
+        """A reservation made under the floor's lock is what the next live buy reads until the
+        order is on the book: approved, not yet recorded."""
+        from ltcm.risk import Decision
+
+        flying = self.buy("mullins-4", self.BTC, "30")  # $27 in flight, nothing resting, nothing held
+        self.gateway._reserve(flying, Decision(flying.id, "mullins-4", True, (), Decimal("0.90"), Decimal("27.00"), NOW))
+        ctx = self.gateway.risk_context(self.buy("mullins", self.BTC, "10"), NOW)
+        self.assertEqual(ctx.floor_event_exposure[self.BTC], Decimal("27.00"))
+        self.assertEqual(ctx.floor_event_exposure[self.CLUSTER], Decimal("27.00"))
+        result = self.gateway.propose(self.buy("mullins", self.BTC, "10", nonce="after-flight"), NOW)  # $9 more: $36
+        self.assertFalse(result["approved"])
+        self.assertTrue(any("across the live desks" in r for r in result["reasons"]), result["reasons"])
+        self.gateway._release(flying)
+        self.assertTrue(self.gateway.propose(self.buy("mullins", self.BTC, "10", nonce="landed"), NOW)["approved"])
+
+    def test_a_live_desks_unreadable_ledger_refuses_live_event_buys_and_never_an_exit(self):
+        """The floor's totals read every live ledger first and raise; a ledger that fails only for
+        the locked read (between the two) was skipped, and its legs left out of the cap."""
+        self.hold("mullins", self.BTC, "10")
+        ledger = self.gateway.ledgers["mullins-4"]
+        fold = ledger.state
+
+        def broken(at=None):
+            if self.gateway._floor_event_lock.locked() or getattr(self, "always_broken", False):
+                raise RuntimeError("fold failed")
+            return fold(at)
+
+        ledger.state = broken
+        self.assertEqual(self.gateway._floor_event_exposure(self.buy("mullins", self.ETH, "1"), NOW)[self.BTC], Decimal("9.00"))
+        self.always_broken = True
+        exposure = self.gateway._floor_event_exposure(self.buy("mullins", self.ETH, "1"), NOW)
+        self.assertIn("floor:unreadable", exposure, "not silently left out")
+        self.always_broken = False
+        refused = self.gateway.propose(self.buy("mullins", self.ETH, "1"), NOW)
+        self.assertFalse(refused["approved"])
+        self.assertTrue(any("could not be read" in r for r in refused["reasons"]), refused["reasons"])
+        sell = OrderIntent.new(desk_id="mullins", instrument=self.leg(self.BTC), side="sell", quantity="10", order_type="limit",
+                               limit_price="0.89", rationale="exit", created_at=NOW, session_id="s")
+        self.assertTrue(self.gateway.propose(sell, NOW)["approved"], "the exit goes")
+        exit_buy = OrderIntent.new(desk_id="mullins", instrument=self.leg(self.ETH), side="buy", quantity="1", order_type="limit",
+                                   limit_price="0.90", rationale="exit", created_at=NOW, session_id="s", purpose="exit", exit_reason="stop", exit_of="oi-x")
+        self.assertEqual(self.gateway.risk_context(exit_buy, NOW).floor_event_exposure, {}, "an exit reads no floor book")
+
+    def test_one_pass_over_the_order_book_under_the_lock_and_none_before_it(self):
+        seen = []
+        books = self.gateway._desk_books
+
+        def spy(desk_ids, intent_id, at):
+            seen.append(set(desk_ids))
+            return books(desk_ids, intent_id, at)
+
+        self.gateway._desk_books = spy
+        locked = []
+        submit = self.kalshi.submit
+
+        def watch(intent):
+            locked.append(self.gateway._floor_event_lock.locked())
+            return submit(intent)
+
+        self.kalshi.submit = watch
+        self.assertTrue(self.gateway.propose(self.buy("mullins", self.BTC, "10"), NOW)["approved"])
+        self.assertEqual(seen, [{"mullins"}, {"mullins", "mullins-4"}], "the first read skips the floor; the locked read covers every live desk at once")
+        self.assertEqual(locked, [False], "the floor's lock is never held over the venue")
+
+    def test_two_live_desks_racing_for_one_market_cannot_both_fit(self):
+        """Each $18 bid fits the $34.26 cap alone; together they are $36. The check is slowed so
+        both threads are inside it at once: without the floor's lock both were approved."""
+        import time
+
+        check = self.gateway.risk_engine.check
+
+        def slow(intent, ctx):
+            time.sleep(0.2)
+            return check(intent, ctx)
+
+        self.gateway.risk_engine.check = slow
+        results = {}
+
+        def run(desk_id):
+            results[desk_id] = self.gateway.propose(self.buy(desk_id, self.BTC, "20"), NOW)
+
+        threads = [threading.Thread(target=run, args=(d,)) for d in ("mullins", "mullins-4")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        self.assertFalse(any(t.is_alive() for t in threads), "no deadlock")
+        approved = sorted(d for d, r in results.items() if r["approved"])
+        self.assertEqual(len(approved), 1, results)
+        loser = next(r for d, r in results.items() if not r["approved"])
+        self.assertTrue(any("across the live desks" in r for r in loser["reasons"]), loser["reasons"])
+
+    def test_live_event_buys_sweeps_cancels_and_exits_run_together_without_a_deadlock(self):
+        self.hold("mullins", self.BTC, "4")
+        self.hold("mullins-4", self.ETH, "4")
+        errors = []
+        stop = threading.Event()
+
+        def buyer(desk_id, market):
+            try:
+                for n in range(12):
+                    result = self.gateway.propose(self.buy(desk_id, market, "1", nonce=f"{desk_id}-{n}"), NOW)
+                    if result.get("order_id") and n % 3 == 0:
+                        self.gateway.cancel(desk_id, result["order_id"], NOW)
+            except Exception as exc:  # pragma: no cover - reported below
+                errors.append(exc)
+
+        def seller(desk_id, market):
+            try:
+                for n in range(4):
+                    sell = OrderIntent.new(desk_id=desk_id, instrument=self.leg(market), side="sell", quantity="1", order_type="limit",
+                                           limit_price="0.89", rationale="exit", created_at=NOW, session_id="s", nonce=f"sell-{n}")
+                    self.gateway.propose(sell, NOW)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        def sweeper():
+            try:
+                while not stop.is_set():
+                    self.gateway.ingest_fills("kalshi")
+                    self.gateway.open_orders()
+                    self.gateway.settle_inflight("mullins", timeout=0.01)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        workers = [threading.Thread(target=buyer, args=("mullins", self.BTC)), threading.Thread(target=buyer, args=("mullins-4", self.BTC)),
+                   threading.Thread(target=buyer, args=("mullins-4", self.ETH)), threading.Thread(target=seller, args=("mullins", self.BTC)),
+                   threading.Thread(target=seller, args=("mullins-4", self.ETH))]
+        sweep = threading.Thread(target=sweeper)
+        sweep.start()
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(60)
+        stop.set()
+        sweep.join(10)
+        self.assertFalse(any(t.is_alive() for t in [*workers, sweep]), "a thread is stuck: deadlock")
+        self.assertEqual(errors, [])
+        self.assertEqual(self.gateway._inflight, {}, "every reservation released")
+        self.assertFalse(self.gateway._floor_event_lock.locked())

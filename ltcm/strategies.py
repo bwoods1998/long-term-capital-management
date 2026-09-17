@@ -62,7 +62,9 @@ DEFAULTS: dict[str, Any] = {
     "idle_publish_seconds": 3600,
     "starters": True,
     # A live strategy's orders stay at learning size until this many of its positions have
-    # settled with a positive P&L after fees; then it may size to this multiple of learning size.
+    # settled and its record passes the evidence gate (`evidence.passes`); then its size ramps
+    # toward the desk's own order limit (`size_cap`), or to this multiple of learning size when
+    # that limit cannot be read.
     "earned_settled": 20,
     "earned_multiple": 3,
 }
@@ -128,7 +130,7 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: leap: promotion -- how the family's record moves settings onto the live desk.
 #: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
 #: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
-PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "min_margin": "0.01", "jitter": 0.25, "foundry_hold_hours": 72}
+PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "jitter": 0.25, "foundry_hold_hours": 72}
 STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300}
 
 
@@ -620,7 +622,11 @@ class Strategies:
 
     def describe(self, desk_id: str, name: str, row: Mapping[str, Any]) -> dict[str, Any]:
         keys = ("cadence_seconds", "params", "deployed_at", "note", "house", "enabled", "last_run_at", "runs", "intents", "approved", "errors", "last_error", "last_notes")
-        return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **self.record(desk_id, name)}
+        record = self.record(desk_id, name)
+        # The returns feed the gate; a desk reads the gate's verdict, not 500 numbers.
+        verdict = {k: v for k, v in self.assess(record).items() if k in ("passes", "reason", "n_needed", "kind")} if record else {}
+        shown = {k: v for k, v in record.items() if k != "returns"}
+        return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **shown, **({"evidence": verdict} if verdict else {})}
 
     def _broker_index(self, reader: Callable[..., Any]) -> tuple[dict[str, set[str]], dict[str, list[Any]]]:
         """intent id -> its order ids, and order id -> its fills, over the newest 20,000 orders
@@ -715,7 +721,20 @@ class Strategies:
             "settled": len(outcomes),
             "wins": wins,
             "settled_pnl_usd": format(pnl, "f"),
+            **_evidence_fields(outcomes),
         }
+
+    def evidence_config(self) -> dict[str, Any]:
+        """`strategies.evidence` from config.json (z, min_n, skew_price, min_days)."""
+        from . import evidence
+
+        return evidence.settings(self.config.get("evidence"))
+
+    def assess(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        """leap: evidence -- the gate's whole verdict on a record, at the floor's settings."""
+        from . import evidence
+
+        return evidence.assess(record, **self.evidence_config())
 
     # ------------------------------------------------------------------ the tick
     def bootstrap(self, manifests: Mapping[str, DeskManifest]) -> list[str]:
@@ -909,16 +928,21 @@ class Strategies:
     def promote(self, manifests: Mapping[str, DeskManifest], at: str) -> list[dict[str, Any]]:
         """leap: promotion -- the family's record chooses the live desk's settings.
 
-        Once an hour, for every house strategy a live desk runs: score each shadow variant of the
-        same strategy in the family on its settled return on filled notional since it was last
-        dealt, and the live desk's own setting the same way. When the best variant has at least
-        `min_settled` settlements, a positive return, and beats the live setting by `min_margin`
-        (or the live setting has too few settlements to say), the live desk adopts the variant's
-        params; the winning shadow keeps them as the control and every other shadow is dealt a
-        jittered copy, so the search continues around the new best. Everything is written to the
-        tape as a `desk.code_run` on the live desk and an `ops.alert`. This is the loop closing on
-        itself: what the shadows learn on the same markets at the same hours becomes what the
-        real money does, with no one asked."""
+        Once an hour, for every house strategy a live desk runs: read each shadow variant of the
+        same strategy in the family since it was last dealt, and the live desk's own setting the
+        same way. A variant is a candidate when it has at least `min_settled` settlements and its
+        record passes the evidence gate (`evidence.passes`, config `strategies.evidence`). The
+        candidate with the highest per-dollar lower bound wins when that bound beats the live
+        setting's return on notional (or the live setting has too few settlements to say): the
+        live desk adopts the variant's params, the winning shadow keeps them as the control, and
+        every other shadow is dealt a jittered copy, so the search continues around the new best.
+        Everything is written to the tape as a `desk.code_run` on the live desk and an `ops.alert`.
+
+        Sept 17, 2026: the gate was a minimum count with a positive return and a 0.01 margin on the
+        point estimate. At an average price of 0.93 a breakeven favorites variant passed a 6-settled
+        gate 65% of the time, so the live desk followed whichever shadow was luckiest that day."""
+        from . import evidence
+
         policy = {**PROMOTION, **dict(self.config.get("promotion") or {})}
         if not bool(policy.get("enabled", True)) or not self.enabled():
             return []
@@ -927,8 +951,8 @@ class Strategies:
             return []
         self._last_promotion_at = at
         min_settled = int(policy.get("min_settled", 12))
-        margin = Decimal(str(policy.get("min_margin", "0.01")))
         jitter = float(policy.get("jitter", 0.25))
+        gate = self.evidence_config()
         promoted: list[dict[str, Any]] = []
         for live in [m for m in manifests.values() if m.live]:
             for name, row in sorted(self.store.for_desk(live.id).items()):
@@ -942,28 +966,30 @@ class Strategies:
                     # Until Sept 16, 2026 the reset evidence let any shadow take them within the hour.
                     continue
                 shadows = [m for m in manifests.values() if not m.live and m.family == live.family and m.id != live.id]
-                scored: list[tuple[Decimal, str, dict[str, Any], dict[str, Any]]] = []
+                scored: list[tuple[Decimal, Decimal, str, dict[str, Any], dict[str, Any], str]] = []
                 for shadow in shadows:
                     srow = self.store.for_desk(shadow.id).get(name)
                     if not srow or not srow.get("enabled", True):
                         continue
                     record = self.record(shadow.id, name, since=srow.get("promoted_at") or srow.get("deployed_at"))
                     score = _return_on_notional(record)
+                    # `min_settled` stays as a floor under the evidence gate.
                     if score is None or int(record.get("settled") or 0) < min_settled:
                         continue
-                    scored.append((score, shadow.id, srow, record))
+                    verdict = evidence.assess(record, **gate)
+                    if not verdict["passes"] or verdict.get("lower") is None:
+                        continue
+                    scored.append((Decimal(str(verdict["lower"])), score, shadow.id, srow, record, str(verdict["reason"])))
                 if not scored:
                     continue
-                scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-                best_score, winner, wrow, wrecord = scored[0]
-                if best_score <= 0:
-                    continue
-                if live_score is not None and best_score - live_score < margin:
+                scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+                lower, best_score, winner, wrow, wrecord, _ = scored[0]
+                if live_score is not None and lower <= live_score:
                     continue
                 params = _plain_params(wrow.get("params"))
                 if params == _plain_params(row.get("params")):
                     continue
-                note = f"promoted from {winner}: {wrecord.get('settled')} settled, {best_score:+.3f} per $ vs live {'n/a' if live_score is None else f'{live_score:+.3f}'}"
+                note = f"promoted from {winner}: {wrecord.get('settled')} settled, lower bound {lower:+.3f} per $ vs live {'n/a' if live_score is None else f'{live_score:+.3f}'}"
                 # Only onto the house row it scored: a desk that redeployed the strategy as its own
                 # while the record was read keeps its own params.
                 if self.store.patch(live.id, name, {"house": row.get("house"), "deployed_at": row.get("deployed_at"), "params": row.get("params")}, params=params, promoted_at=at, promoted_from=winner, note=note[:200], foundry_id=None) is None:
@@ -971,7 +997,7 @@ class Strategies:
                 run = {
                     "intents": [], "notes": note, "code_sha256": row.get("code_sha256"),
                     "log": [f"live {live.id}: {live_record.get('settled', 0)} settled since {row.get('promoted_at') or row.get('deployed_at')}",
-                            *[f"{sid}: {rec.get('settled')} settled, {sc:+.3f} per $ filled" for sc, sid, _, rec in scored[:6]],
+                            *[f"{sid}: {rec.get('settled')} settled, {sc:+.3f} per $ filled, lower bound {lb:+.3f} ({why})"[:300] for lb, sc, sid, _, rec, why in scored[:6]],
                             f"new params: {json.dumps(params, sort_keys=True)}"],
                 }
                 self._publish_run(live, name, run, at, f"strategy {name} promoted: {winner}'s settings take the live desk", always=True)
@@ -985,7 +1011,7 @@ class Strategies:
                         continue  # a Foundry candidate still earning its forward record keeps its settings
                     dealt = _jitter_params(params, f"{shadow.id}:{name}:{at}", jitter)
                     self.store.update(shadow.id, name, params=dealt, promoted_at=at, note=f"dealt around {winner} at {at[:16]}")
-                promoted.append({"desk_id": live.id, "strategy": name, "from": winner, "params": params, "score": str(best_score)})
+                promoted.append({"desk_id": live.id, "strategy": name, "from": winner, "params": params, "score": str(best_score), "lower_bound": str(lower)})
         return promoted
 
     def run_one(self, manifest: DeskManifest, name: str, row: Mapping[str, Any], at: str) -> dict[str, Any]:
@@ -1048,28 +1074,38 @@ class Strategies:
     def size_cap(self, manifest: DeskManifest, name: str) -> Decimal:
         """How much one of the strategy's orders may commit on a live desk.
 
-        Learning size until the strategy has earned more: `earned_settled` settled positions
-        and a positive settled P&L after fees lift the cap to `earned_multiple` times learning
-        size, and the desk's own limits still bind above that. A strategy that loses money goes
-        back to learning size on the next run. This is the floor's capital following the
-        strategies that earn it, one step at a time."""
+        Learning size until the strategy has earned more: at least `earned_settled` settled
+        positions and a record that passes the evidence gate (`evidence.passes`, config
+        `strategies.evidence`) start a ramp. At the `n_needed` settlements the gate asked for the
+        cap is still learning size; it grows linearly with each settlement after that and reaches
+        the desk's own order limit (`limit_fit_usd`) at `full_size_multiple` (3) times `n_needed`.
+        When the desk's limit cannot be read the ramp's top is `earned_multiple` times learning
+        size. A record that stops passing goes back to learning size on the next run. This is
+        the floor's capital following the strategies that earn it, one settlement at a time.
+
+        Sept 17, 2026: the earned path was 6 settled with a positive P&L. At an average price of
+        0.93 a favorites strategy with no edge cleared that 65% of the time and tripled its size
+        on luck. The gate that replaced it passes a breakeven favorite about a fifth of the time
+        at the settlements it needs, so passing is not proof: size follows the evidence as it
+        accumulates instead of jumping to the desk's full limit the run the gate first passes."""
+        from . import evidence
+
         learning = self.learning_usd(manifest)
         fit = self.limit_fit_usd(manifest)
         if manifest.live:
             record = self.record(manifest.id, name)
             settled = int(record.get("settled") or 0)
-            pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
-            if settled >= int(self.config.get("earned_settled", 20)) and pnl > 0:
-                earned = learning * Decimal(str(self.config.get("earned_multiple", 3)))
+            gate = self.evidence_config()
+            ok, _, needed = evidence.passes(record, **gate) if record else (False, "", 1)
+            if settled >= int(self.config.get("earned_settled", 20)) and ok:
+                top = fit if fit is not None else learning * Decimal(str(self.config.get("earned_multiple", 3)))
+                ramp = earned_ramp(settled, needed, gate.get("full_size_multiple", 3))
                 # Compounding: a strategy that keeps earning ramps toward the desk's own order
-                # limit, a share of the desk's equity, so its bets grow as the book grows. Full
-                # size at `full_size_settled` settlements; the desk's position, daily-loss and
-                # floor limits still bind above it.
-                if fit is not None:
-                    full_at = max(1, int(self.config.get("full_size_settled", 40)))
-                    ramp = min(Decimal(1), Decimal(settled) / Decimal(full_at))
-                    earned = max(earned, (fit * ramp).quantize(Decimal("0.01")))
-                learning = earned
+                # limit, a share of the desk's equity, so its bets grow as the book grows. The
+                # desk's position, daily-loss and floor limits, and the firm's event rules, still
+                # bind above it.
+                earned = (learning + (top - learning) * ramp).quantize(Decimal("0.01"))
+                learning = max(learning, earned)
         return min(learning, fit) if fit is not None else learning
 
     def limit_fit_usd(self, manifest: DeskManifest) -> Decimal | None:
@@ -1205,6 +1241,75 @@ class Strategies:
 
 
 # ---------------------------------------------------------------------- helpers
+#: The newest settled returns a record carries for the day-block bootstrap (leap: evidence).
+RECORD_RETURNS = 500
+
+
+def earned_ramp(settled: int, needed: int, full_size_multiple: Any = 3) -> Decimal:
+    """How far a passing record is along its size ramp, 0 to 1: 0 at the `needed` settlements
+    the evidence gate asked for, 1 at `full_size_multiple` x `needed`, linear between. A multiple
+    of 1 or less is full size as soon as the gate passes (the step this replaced; Sept 17, 2026)."""
+    needed = max(1, int(needed))
+    try:
+        multiple = Decimal(str(full_size_multiple))
+    except (ArithmeticError, ValueError, TypeError):
+        multiple = Decimal(3)
+    if not multiple.is_finite():
+        multiple = Decimal(3)
+    if multiple <= 1:
+        return Decimal(1)
+    span = (multiple - 1) * needed
+    return min(Decimal(1), max(Decimal(0), Decimal(int(settled) - needed) / span))
+
+
+def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
+    """What `evidence.passes` reads from a strategy's settled outcomes (Sept 17, 2026: the old
+    gate read only the count and the sign of the P&L).
+
+    * `losses`: positions whose P&L after their entry fees is below zero. A `desk.outcome`'s `pnl`
+      is net of a selling fill's fee but not of the opening fills' fees (`entry_fees`).
+    * `asset_class`: the one asset class the outcomes that name an instrument traded, "mixed", or
+      None when none does. An outcome with no instrument does not make the record unknown: a
+      favorites record with one such outcome read as None, and None is judged by the bootstrap,
+      a looser test for a lopsided payoff than the loss-rate rule.
+    * `avg_entry_price`, weighted by quantity, and `avg_fee_per_contract`, the entry fees per
+      contract, for the lopsided-payoff rule.
+    * `returns`: the newest `RECORD_RETURNS` of `[settle day, P&L after entry fees / (entry price x
+      quantity + entry fees)]`, oldest first.
+    """
+    losses = 0
+    classes: set[str | None] = set()
+    quantity_total = Decimal(0)
+    priced = Decimal(0)
+    entry_fees_total = Decimal(0)
+    returns: list[list[Any]] = []
+    for event in outcomes:
+        payload = event.payload
+        entry_fees = _dec(payload.get("entry_fees")) or Decimal(0)
+        net = (_dec(payload.get("pnl")) or Decimal(0)) - entry_fees
+        if net < 0:
+            losses += 1
+        key = str(payload.get("instrument") or "")
+        classes.add(key.split(":", 1)[0] if ":" in key else None)
+        price, quantity = _dec(payload.get("entry_price")), _dec(payload.get("quantity"))
+        if price is None or quantity is None or price <= 0 or quantity <= 0:
+            continue
+        quantity_total += quantity
+        priced += price * quantity
+        entry_fees_total += entry_fees
+        cost = price * quantity + entry_fees
+        returns.append([str(getattr(event, "at", None) or "")[:10], float(net / cost)])
+    known = classes - {None}
+    asset_class = None if not known else (next(iter(known)) if len(known) == 1 else "mixed")
+    return {
+        "losses": losses,
+        "asset_class": asset_class,
+        "avg_entry_price": format((priced / quantity_total).quantize(Decimal("0.0001")), "f") if quantity_total > 0 else None,
+        "avg_fee_per_contract": format((entry_fees_total / quantity_total).quantize(Decimal("0.000001")), "f") if quantity_total > 0 else None,
+        "returns": returns[-RECORD_RETURNS:],
+    }
+
+
 def _return_on_notional(record: Mapping[str, Any]) -> Decimal | None:
     """Settled P&L per dollar of filled notional, or None without fills."""
     notional = _dec(record.get("filled_notional_usd"))

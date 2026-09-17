@@ -9,7 +9,10 @@ Rules are ordered from cheapest and most absolute (kill switch) to most data-dep
 
 from __future__ import annotations
 
+import functools
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -50,9 +53,16 @@ class RiskContext:
     min_event_price: Decimal = ZERO
     max_event_market_pct: Decimal = ZERO
     max_event_market_floor_pct: Decimal = ZERO
+    #: Sept 17, 2026: what markets that settle together (one `event_cluster`) may put at risk
+    #: across every live desk, as a share of the live floor. Zero switches it off.
+    max_event_cluster_floor_pct: Decimal = ZERO
+    #: What the live desks together hold at cost and commit in working buys, keyed by Kalshi
+    #: market id and by `cluster_key(event_cluster(market))`. The gateway fills it for a live
+    #: desk's event buy; an empty map means only this desk's own book is known.
+    floor_event_exposure: dict[str, Decimal] = field(default_factory=dict)
 
     def __post_init__(self):
-        for name in ("min_event_price", "max_event_market_pct", "max_event_market_floor_pct"):
+        for name in ("min_event_price", "max_event_market_pct", "max_event_market_floor_pct", "max_event_cluster_floor_pct"):
             setattr(self, name, money(getattr(self, name) or 0))
         for name in ("desk_equity", "desk_cash", "desk_daily_pnl", "floor_equity", "floor_daily_pnl"):
             setattr(self, name, money(getattr(self, name)))
@@ -304,23 +314,30 @@ def rule_event_longshot(intent: OrderIntent, ctx: RiskContext) -> str | None:
     return None
 
 
+def _desk_market_at_risk(intent: OrderIntent, ctx: RiskContext, market: str, price: Decimal) -> Decimal:
+    """This desk's own cost on one market: both legs held at cost, its working buys there, and
+    this order."""
+    held = ZERO
+    for position in ctx.positions.values():
+        ins = position.instrument
+        if ins.asset_class == "event" and (ins.market_id or ins.symbol) == market and position.quantity > 0:
+            held += position.quantity * position.average_cost * ins.multiplier
+    return held + ctx.working_event_buys.get(market, ZERO) + intent.quantity * price * intent.instrument.multiplier
+
+
 def rule_event_market_cap(intent: OrderIntent, ctx: RiskContext) -> str | None:
     """What one Kalshi market can cost the desk: both legs held at cost, its working buys, and
     this order, at most `max_event_market_pct` of desk equity, and for a desk on real money at
     most `max_event_market_floor_pct` of the live floor's equity. A single $70 macro position was
-    8% of the firm on Sept 16, 2026."""
+    8% of the firm on Sept 16, 2026. It reads this desk's book only; what the other live desks
+    hold on the same market is `rule_event_floor_cluster`'s."""
     if not _opens_event(intent, ctx) or (ctx.max_event_market_pct <= 0 and ctx.max_event_market_floor_pct <= 0):
         return None
     market = intent.instrument.market_id or intent.instrument.symbol
     price = _event_entry_price(intent, ctx)
     if not market or price is None:
         return None
-    held = ZERO
-    for position in ctx.positions.values():
-        ins = position.instrument
-        if ins.asset_class == "event" and (ins.market_id or ins.symbol) == market and position.quantity > 0:
-            held += position.quantity * position.average_cost * ins.multiplier
-    at_risk = held + ctx.working_event_buys.get(market, ZERO) + intent.quantity * price * intent.instrument.multiplier
+    at_risk = _desk_market_at_risk(intent, ctx, market, price)
     caps = []
     if ctx.max_event_market_pct > 0 and ctx.desk_equity > 0:
         caps.append((ctx.desk_equity * ctx.max_event_market_pct, f"{ctx.max_event_market_pct:.0%} of desk equity"))
@@ -329,6 +346,184 @@ def rule_event_market_cap(intent: OrderIntent, ctx: RiskContext) -> str | None:
     for cap, label in caps:
         if at_risk > cap:
             return f"{market} would put {at_risk:.2f} at risk on one market, cap {cap:.2f} ({label})"
+    return None
+
+
+#: Series roots whose markets settle on one underlying move, grouped as one cluster. Sept 17, 2026:
+#: bitcoin and ether hourly markets that close in the same hour are one bet on crypto that hour.
+EVENT_CLUSTER_ROOTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("KXBTC", "KXETH", "KXSOL", "KXXRP", "KXDOGE"), "crypto"),
+    (("KXGOLD", "KXSILVER", "KXBRENT", "KXWTI", "KXCOPPER"), "commod"),
+    (("KXHIGH",), "weather"),
+)
+#: A Kalshi event code after the series: `26SEP1717` (Sept 17 2026, 17:00 New York time),
+#: `26SEP17H1600`, `26SEP161910NYYBOS` (19:10), or a date alone, `26SEP17`.
+_TICKER_CODE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})(?:H?(\d{2})(\d{2})?)?")
+_MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), start=1)}
+
+
+def _new_york_to_utc(moment: datetime) -> datetime:
+    """A naive New York wall-clock time as UTC. Kalshi writes a ticker's hour in New York time:
+    KXBTCD-26SEP1017 closes at 21:00 UTC."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return moment.replace(tzinfo=ZoneInfo("America/New_York")).astimezone(timezone.utc)
+    except Exception:  # no tz database: US daylight time runs from March's second Sunday to November's first
+        march = datetime(moment.year, 3, 8)
+        begins = march + timedelta(days=(6 - march.weekday()) % 7, hours=2)
+        november = datetime(moment.year, 11, 1)
+        ends = november + timedelta(days=(6 - november.weekday()) % 7, hours=2)
+        offset = 4 if begins <= moment < ends else 5
+        return (moment + timedelta(hours=offset)).replace(tzinfo=timezone.utc)
+
+
+def event_cluster(ticker: str, close_time: Any = None) -> str:
+    """The cluster a Kalshi market settles with: a group (`crypto`, `commod`, `weather`, else the
+    series) and the hour it closes in UTC, as `crypto:2026-09-17T21`.
+
+    `close_time` (ISO) gives the hour when it is known. Without it the hour comes from the
+    ticker's event code, read as New York time. A code with a date and no hour gives the date
+    (`weather:2026-09-17`: every city's high that day). A ticker with no readable code gives the
+    group alone. A key with less time in it than another is not a different cluster: it is one
+    whose hour is unknown, so `clusters_overlap` counts it with every hour it could be, and
+    `cluster_at_risk` sums a cluster that way (Sept 17, 2026 review: an undated key was counted
+    only against other undated keys, so its exposure never reached an hourly cluster's cap).
+    The gateway keys every position, working buy and order from its ticker."""
+    return _event_cluster(str(ticker or ""), None if not close_time else str(close_time))
+
+
+@functools.lru_cache(maxsize=8192)
+def _event_cluster(ticker: str, close_time: str | None) -> str:
+    """`event_cluster`, cached: the gateway keys every live desk's legs on every live event buy."""
+    parts = ticker.strip().upper().split("-")
+    series = parts[0]
+    group = series
+    for roots, name in EVENT_CLUSTER_ROOTS:
+        if series.startswith(roots):
+            group = name
+            break
+    if close_time:
+        try:
+            moment = datetime.fromisoformat(str(close_time).strip().replace("Z", "+00:00"))
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            return f"{group}:{moment.astimezone(timezone.utc).strftime('%Y-%m-%dT%H')}"
+        except (TypeError, ValueError):
+            pass
+    match = _TICKER_CODE.match(parts[1]) if len(parts) > 1 else None
+    if match is None or match.group(2) not in _MONTHS:
+        return group
+    year, month, day, hour = 2000 + int(match.group(1)), _MONTHS[match.group(2)], int(match.group(3)), match.group(4)
+    try:
+        if hour is not None and int(hour) <= 23:
+            return f"{group}:{_new_york_to_utc(datetime(year, month, day, int(hour))).strftime('%Y-%m-%dT%H')}"
+        return f"{group}:{datetime(year, month, day).strftime('%Y-%m-%d')}"
+    except ValueError:
+        return group
+
+
+CLUSTER_PREFIX = "cluster:"
+#: Set in `floor_event_exposure` when a live desk's book could not be read: its exposure is
+#: unknown, so no live event buy is approved against a total that leaves it out.
+FLOOR_BOOK_UNREADABLE = "floor:unreadable"
+
+
+def cluster_key(cluster: str) -> str:
+    """How a cluster sits in `floor_event_exposure`, beside market ids."""
+    return f"{CLUSTER_PREFIX}{cluster}"
+
+
+def clusters_overlap(a: str, b: str) -> bool:
+    """True when markets keyed `a` and `b` could settle together: the same group, and times that
+    could be the same hour. The same hour or the same date compare equal; a date (a ticker's
+    local day) meets every UTC hour on that date or the next, since a US day ends by 11:00 UTC
+    the day after; a key with no time (an unreadable code) meets every key of its group. Anything
+    this cannot read overlaps: the conservative answer."""
+    group_a, _, when_a = str(a).partition(":")
+    group_b, _, when_b = str(b).partition(":")
+    if group_a != group_b:
+        return False
+    if not when_a or not when_b:
+        return True
+    if len(when_a) == len(when_b):
+        return when_a == when_b
+    day, hour = (when_a, when_b) if len(when_a) < len(when_b) else (when_b, when_a)
+    try:
+        start = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return True
+    return hour[:10] in (day, (start + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+
+def cluster_at_risk(book: dict[str, Decimal], cluster: str) -> Decimal:
+    """What `book` (`floor_event_exposure`'s shape) holds on every cluster that overlaps `cluster`."""
+    total = ZERO
+    for key, amount in book.items():
+        if key.startswith(CLUSTER_PREFIX) and clusters_overlap(key[len(CLUSTER_PREFIX):], cluster):
+            total += amount
+    return total
+
+
+def add_event_exposure(book: dict[str, Decimal], market: str, amount: Decimal) -> None:
+    """Count `amount` at risk on `market` and on its cluster."""
+    if not market or amount <= 0:
+        return
+    for key in (market, cluster_key(event_cluster(market))):
+        book[key] = book.get(key, ZERO) + amount
+
+
+def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    """What every live desk together puts at risk on one market, and on one cluster of markets
+    that settle together: at most `max_event_market_floor_pct` (3.5%) and
+    `max_event_cluster_floor_pct` (8%) of the live floor. Legs held at cost, working buys and this
+    order all count; a leg whose close hour is unknown counts against every hour it could close in
+    (`cluster_at_risk`), and a live desk whose book could not be read refuses the buy. A shadow desk
+    is never checked and never counted, and exits are never refused.
+
+    Sept 17, 2026: `rule_event_market_cap` read only the desk's own book. `mullins` and `mullins-4`
+    run nearly the same favorites settings, so each could put 3.5% of the floor on the same
+    market, and bitcoin and ether markets closing in the same hour counted as unrelated bets."""
+    if not ctx.manifest.live or not _opens_event(intent, ctx) or ctx.floor_equity <= 0:
+        return None
+    if ctx.max_event_market_floor_pct <= 0 and ctx.max_event_cluster_floor_pct <= 0:
+        return None
+    market = intent.instrument.market_id or intent.instrument.symbol
+    price = _event_entry_price(intent, ctx)
+    if not market or price is None:
+        return None
+    exposure = ctx.floor_event_exposure or {}
+    if FLOOR_BOOK_UNREADABLE in exposure:
+        return "a live desk's book could not be read, so what the live desks hold across the floor is unknown: no event buy until it can"
+    cost = intent.quantity * price * intent.instrument.multiplier
+    if ctx.max_event_market_floor_pct > 0:
+        cap = ctx.floor_equity * ctx.max_event_market_floor_pct
+        own = _desk_market_at_risk(intent, ctx, market, price)
+        at_risk = max(own, exposure.get(market, ZERO) + cost)
+        # The desk over the cap on its own is `rule_event_market_cap`'s refusal; one reason will do.
+        if at_risk > cap and own <= cap:
+            return (
+                f"{market} would put {at_risk:.2f} at risk across the live desks, cap {cap:.2f} "
+                f"({ctx.max_event_market_floor_pct:.1%} of the live floor)"
+            )
+    if ctx.max_event_cluster_floor_pct > 0:
+        cluster = event_cluster(market)
+        cap = ctx.floor_equity * ctx.max_event_cluster_floor_pct
+        # This desk's own book counts even when the floor's map is missing.
+        own_book: dict[str, Decimal] = {}
+        for position in ctx.positions.values():
+            ins = position.instrument
+            if ins.asset_class == "event" and position.quantity > 0:
+                add_event_exposure(own_book, ins.market_id or ins.symbol, position.quantity * position.average_cost * ins.multiplier)
+        for working, amount in ctx.working_event_buys.items():
+            add_event_exposure(own_book, working, amount)
+        # Keys with less time in them (a date, or none) are counted with every hour they could be.
+        at_risk = max(cluster_at_risk(own_book, cluster), cluster_at_risk(exposure, cluster)) + cost
+        if at_risk > cap:
+            return (
+                f"{cluster} would put {at_risk:.2f} at risk across the live desks, cap {cap:.2f} "
+                f"({ctx.max_event_cluster_floor_pct:.0%} of the live floor on markets that settle together)"
+            )
     return None
 
 
@@ -450,6 +645,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     rule_limit_sanity,
     rule_event_longshot,
     rule_event_market_cap,
+    rule_event_floor_cluster,
     rule_exit_plan,
     rule_order_notional,
     rule_cash,

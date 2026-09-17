@@ -289,3 +289,194 @@ class FirmEventRuleTests(unittest.TestCase):
         reasons = self.reasons(self.buy(self.yes, "100", "0.02"),
                                self.ctx(self.yes, "0.01", "0.02", min_event_price=0, max_event_market_pct=0, max_event_market_floor_pct=0))
         self.assertFalse(any("longshot" in r or "one market" in r for r in reasons), reasons)
+
+
+class EventClusterTests(unittest.TestCase):
+    """Sept 17, 2026: markets that settle on the same move in the same hour are one bet."""
+
+    def test_crypto_series_closing_in_the_same_hour_share_a_cluster(self):
+        from ltcm.risk import event_cluster
+
+        btc = event_cluster("KXBTCD-26SEP1717-T117999.99")
+        self.assertEqual(btc, "crypto:2026-09-17T21", "17:00 in New York is 21:00 UTC in September")
+        self.assertEqual(event_cluster("KXETHD-26SEP1717-T4199.99"), btc)
+        self.assertEqual(event_cluster("KXSOL-26SEP1717-B240"), btc)
+        self.assertEqual(event_cluster("KXBTCD-26SEP1717-T1", close_time="2026-09-17T21:00:00Z"), btc, "the close time and the ticker agree")
+        self.assertEqual(event_cluster("KXBTCD-26SEP1717-T1", close_time="2026-09-17T21:59:59.000Z"), btc, "truncated to the hour")
+        self.assertNotEqual(event_cluster("KXETHD-26SEP1718-T4199.99"), btc, "the next hour is another bet")
+        self.assertEqual(event_cluster("KXBTC-26DEC0100-B90000"), "crypto:2026-12-01T05", "standard time in December")
+        self.assertEqual(event_cluster("KXBTC-26SEP171715-15"), btc, "a quarter-hour market truncates to its hour")
+
+    def test_other_groups_series_and_the_fallbacks(self):
+        from ltcm.risk import event_cluster
+
+        self.assertEqual(event_cluster("KXHIGHNY-26SEP17-B75.5"), "weather:2026-09-17", "a date with no hour: the day")
+        self.assertEqual(event_cluster("KXHIGHCHI-26SEP17-B70.5"), "weather:2026-09-17")
+        self.assertEqual(event_cluster("KXGOLDD-26SEP1717-T2650"), "commod:2026-09-17T21")
+        self.assertEqual(event_cluster("KXWTI-26SEP1717-T70"), "commod:2026-09-17T21")
+        self.assertEqual(event_cluster("KXINXU-26SEP17H1600-T6500"), "KXINXU:2026-09-17T20", "anything else is its series")
+        self.assertEqual(event_cluster("KXMLBGAME-26SEP161910NYYBOS-NYY"), "KXMLBGAME:2026-09-16T23")
+        self.assertEqual(event_cluster("KXNFLGAME-26SEP20KCBUF-KC"), "KXNFLGAME:2026-09-20")
+        self.assertEqual(event_cluster("KXFED-26OCT-T4.25"), "KXFED", "no day in the code: the series alone, the conservative key")
+        self.assertEqual(event_cluster("KXODD"), "KXODD")
+        self.assertEqual(event_cluster("KXFED-26XYZ01-T4"), "KXFED")
+        self.assertEqual(event_cluster("KXBTCD-26SEP1717-T1", close_time="not a time"), "crypto:2026-09-17T21", "an unreadable close time falls back to the ticker")
+        self.assertEqual(event_cluster("kxbtcd-26sep1717-t1"), "crypto:2026-09-17T21")
+
+    def test_without_a_tz_database_new_york_time_still_converts(self):
+        import sys
+        from unittest import mock
+
+        from ltcm.risk import event_cluster
+
+        with mock.patch.dict(sys.modules, {"zoneinfo": None}):
+            self.assertEqual(event_cluster("KXBTCD-26SEP1717-T1"), "crypto:2026-09-17T21")
+            self.assertEqual(event_cluster("KXBTC-26DEC0100-B90000"), "crypto:2026-12-01T05")
+
+    def test_exposure_counts_the_market_and_its_cluster(self):
+        from ltcm.risk import add_event_exposure
+
+        book = {}
+        add_event_exposure(book, "KXBTCD-26SEP1717-T1", Decimal("30"))
+        add_event_exposure(book, "KXETHD-26SEP1717-T2", Decimal("25"))
+        add_event_exposure(book, "KXETHD-26SEP1717-T2", Decimal("0"))
+        self.assertEqual(book, {"KXBTCD-26SEP1717-T1": Decimal("30"), "KXETHD-26SEP1717-T2": Decimal("25"),
+                                "cluster:crypto:2026-09-17T21": Decimal("55")})
+
+
+class FloorClusterRuleTests(unittest.TestCase):
+    """Sept 17, 2026: `mullins` and `mullins-4` run nearly the same favorites settings, and the
+    per-market cap read only the desk's own book."""
+
+    BTC = "KXBTCD-26SEP1717-T117999.99"
+    ETH = "KXETHD-26SEP1717-T4199.99"
+    TICKER = FirmEventRuleTests.TICKER
+    ctx = FirmEventRuleTests.ctx
+    buy = FirmEventRuleTests.buy
+    reasons = FirmEventRuleTests.reasons
+
+    def setUp(self):
+        FirmEventRuleTests.setUp(self)
+        limits = {**SAMPLE["limits"], "max_order_notional_pct": "1", "max_position_pct": "1", "max_gross_pct": "4"}
+        instruments = {**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []}
+        self.live = manifest(venues=["kalshi"], capital={"mode": "live", "usd": "400"}, instruments=instruments, limits=limits)
+        self.shadow = manifest(venues=["kalshi"], instruments=instruments, limits=limits)
+        self.btc = Instrument("event", self.BTC, "kalshi", market_id=self.BTC, right="no")
+        self.eth = Instrument("event", self.ETH, "kalshi", market_id=self.ETH, right="no")
+
+    def floor_ctx(self, instrument, **overrides):
+        base = dict(manifest=self.live, desk_equity=Decimal("400"), desk_cash=Decimal("400"), floor_equity=Decimal("979"),
+                    max_event_cluster_floor_pct="0.08")
+        base.update(overrides)
+        return self.ctx(instrument, "0.89", "0.90", **base)
+
+    def exposure(self, *holdings):
+        from ltcm.risk import add_event_exposure
+
+        book = {}
+        for market, amount in holdings:
+            add_event_exposure(book, market, Decimal(amount))
+        return book
+
+    def test_two_live_desks_holding_a_market_leave_no_room_for_a_third_order(self):
+        floor = self.exposure((self.BTC, "20"), (self.BTC, "20"))  # $20 on each of two live desks
+        order = self.buy(self.btc, "16", "0.9375")  # $15
+        reasons = self.reasons(order, self.floor_ctx(self.btc, floor_event_exposure=floor))
+        self.assertTrue(any("would put 55.00 at risk across the live desks, cap 34.26" in r for r in reasons), reasons)
+        alone = self.reasons(order, self.floor_ctx(self.btc))
+        self.assertFalse(any("at risk" in r for r in alone), "the desk's own book alone fits")
+
+    def test_one_reason_when_the_desk_alone_is_over_the_floor_share(self):
+        held = {self.btc.key: Position(self.btc, Decimal("30"), Decimal("0.90"), Decimal("0.9"))}  # $27 of its own
+        floor = self.exposure((self.BTC, "27"), (self.BTC, "20"))
+        reasons = self.reasons(self.buy(self.btc, "10", "0.90"), self.floor_ctx(self.btc, positions=held, floor_event_exposure=floor))
+        self.assertEqual(len([r for r in reasons if "at risk" in r]), 1, reasons)
+        self.assertTrue(any("of the live floor" in r and "across" not in r for r in reasons), reasons)
+
+    def test_bitcoin_and_ether_closing_in_the_same_hour_are_summed(self):
+        floor = self.exposure((self.BTC, "30"), (self.ETH, "30"), ("KXBTCD-26SEP1717-T118249.99", "15"))  # $75 in the 21:00 cluster
+        eth_again = Instrument("event", "KXETHD-26SEP1717-T4249.99", "kalshi", market_id="KXETHD-26SEP1717-T4249.99", right="no")
+        reasons = self.reasons(self.buy(eth_again, "5", "0.90"), self.floor_ctx(eth_again, floor_event_exposure=floor))  # $4.50 more
+        self.assertTrue(any("crypto:2026-09-17T21 would put 79.50 at risk across the live desks, cap 78.32" in r for r in reasons), reasons)
+        later = Instrument("event", "KXETHD-26SEP1718-T4249.99", "kalshi", market_id="KXETHD-26SEP1718-T4249.99", right="no")
+        self.assertFalse(any("at risk" in r for r in self.reasons(self.buy(later, "5", "0.90"), self.floor_ctx(later, floor_event_exposure=floor))),
+                         "the next hour's market is another cluster")
+
+    def test_the_desks_own_book_counts_toward_its_cluster_without_the_floor_map(self):
+        held = {self.btc.key: Position(self.btc, Decimal("40"), Decimal("0.90"), Decimal("0.9"))}  # $36 (a legacy position)
+        reasons = self.reasons(self.buy(self.eth, "30", "0.90"),
+                               self.floor_ctx(self.eth, positions=held, working_event_buys={"KXSOLD-26SEP1717-T240": Decimal("20")},
+                                              max_event_market_floor_pct=0))
+        self.assertTrue(any("crypto:2026-09-17T21 would put 83.00" in r for r in reasons), reasons)
+
+    def test_a_shadow_desk_is_never_checked(self):
+        floor = self.exposure((self.BTC, "200"))
+        reasons = self.reasons(self.buy(self.btc, "16", "0.9375"), self.floor_ctx(self.btc, manifest=self.shadow, floor_event_exposure=floor))
+        self.assertFalse(any("across the live desks" in r for r in reasons), reasons)
+
+    def test_exits_are_never_refused(self):
+        floor = self.exposure((self.BTC, "200"), (self.ETH, "200"))
+        held = {self.btc.key: Position(self.btc, Decimal("40"), Decimal("0.90"), Decimal("0.9"))}
+        sell = OrderIntent.new(desk_id="earnings-01", instrument=self.btc, side="sell", quantity="40", order_type="limit", limit_price="0.89",
+                               rationale="t", created_at="2026-09-14T14:30:00.000Z", session_id="s")
+        self.assertFalse(any("at risk" in r for r in self.reasons(sell, self.floor_ctx(self.btc, positions=held, floor_event_exposure=floor))))
+        exit_buy = self.buy(self.eth, "10", "0.90", purpose="exit", exit_reason="stop", exit_of="oi-x")
+        self.assertFalse(any("at risk" in r for r in self.reasons(exit_buy, self.floor_ctx(self.eth, floor_event_exposure=floor))))
+
+    def test_a_held_leg_with_no_close_hour_counts_against_every_hour_it_could_close_in(self):
+        """Sept 17, 2026 review: a ticker with no readable hour was keyed `crypto` or
+        `crypto:2026-09-17`, and only a key spelled the same way was ever summed with it, so an
+        hourly order's cluster cap never saw it."""
+        order = self.buy(self.eth, "5", "0.90")  # $4.50 in crypto:2026-09-17T21
+        for held, why in (("KXBTCMAXY-26SEP17-T120000", "a date and no hour"), ("KXDOGE-ODD", "no readable code at all")):
+            floor = self.exposure((self.BTC, "40"), (held, "35"))
+            reasons = self.reasons(order, self.floor_ctx(self.eth, floor_event_exposure=floor, max_event_market_floor_pct=0))
+            self.assertTrue(any("crypto:2026-09-17T21 would put 79.50 at risk across the live desks" in r for r in reasons), (why, reasons))
+        # The desk's own book is read the same way when the floor's map is missing.
+        dated = Instrument("event", "KXBTCMAXY-26SEP17-T120000", "kalshi", market_id="KXBTCMAXY-26SEP17-T120000", right="no")
+        held = {self.btc.key: Position(self.btc, Decimal("40"), Decimal("1"), Decimal("1")),
+                dated.key: Position(dated, Decimal("35"), Decimal("1"), Decimal("1"))}
+        reasons = self.reasons(order, self.floor_ctx(self.eth, positions=held, max_event_market_floor_pct=0))
+        self.assertTrue(any("crypto:2026-09-17T21 would put 79.50" in r for r in reasons), reasons)
+        # A date-only order sums every hour of its day and the next UTC day, and nothing further.
+        weekly = Instrument("event", "KXETHMAXW-26SEP17-T5000", "kalshi", market_id="KXETHMAXW-26SEP17-T5000", right="no")
+        floor = self.exposure((self.BTC, "40"), ("KXETHD-26SEP1801-T4199.99", "35"))  # 17:00 and 01:00 New York: 21:00 and 05:00 UTC
+        reasons = self.reasons(self.buy(weekly, "5", "0.90"), self.floor_ctx(weekly, floor_event_exposure=floor, max_event_market_floor_pct=0))
+        self.assertTrue(any("crypto:2026-09-17 would put 79.50" in r for r in reasons), reasons)
+        far = self.exposure(("KXBTCD-26SEP2017-T1", "75"))
+        self.assertFalse(any("at risk" in r for r in self.reasons(self.buy(weekly, "5", "0.90"), self.floor_ctx(weekly, floor_event_exposure=far, max_event_market_floor_pct=0))))
+
+    def test_clusters_overlap_when_they_could_be_the_same_hour(self):
+        from ltcm.risk import cluster_at_risk, clusters_overlap
+
+        self.assertTrue(clusters_overlap("crypto:2026-09-17T21", "crypto:2026-09-17T21"))
+        self.assertFalse(clusters_overlap("crypto:2026-09-17T21", "crypto:2026-09-17T22"))
+        self.assertFalse(clusters_overlap("crypto:2026-09-17T21", "commod:2026-09-17T21"))
+        self.assertTrue(clusters_overlap("crypto", "crypto:2026-09-17T21"), "no time: every hour of the group")
+        self.assertTrue(clusters_overlap("crypto:2026-09-17T21", "crypto"))
+        self.assertTrue(clusters_overlap("weather:2026-09-17", "weather:2026-09-17T02"))
+        self.assertTrue(clusters_overlap("weather:2026-09-17", "weather:2026-09-18T10"), "a US day runs into the next UTC date")
+        self.assertFalse(clusters_overlap("weather:2026-09-17", "weather:2026-09-19T01"))
+        self.assertFalse(clusters_overlap("weather:2026-09-17", "weather:2026-09-16T23"))
+        self.assertFalse(clusters_overlap("weather:2026-09-17", "weather:2026-09-18"))
+        self.assertTrue(clusters_overlap("KXFED:26-XX", "KXFED:2026-09-17T21"), "a time it cannot read overlaps")
+        book = {"KXA": Decimal("9"), "cluster:crypto:2026-09-17T21": Decimal("5"), "cluster:crypto": Decimal("2"),
+                "cluster:crypto:2026-09-17": Decimal("3"), "cluster:crypto:2026-09-17T22": Decimal("7"), "floor:unreadable": Decimal("1")}
+        self.assertEqual(cluster_at_risk(book, "crypto:2026-09-17T21"), Decimal("10"))
+
+    def test_a_live_desks_unreadable_book_refuses_a_live_event_buy_and_never_an_exit(self):
+        from ltcm.risk import FLOOR_BOOK_UNREADABLE
+
+        floor = {FLOOR_BOOK_UNREADABLE: Decimal("1")}
+        reasons = self.reasons(self.buy(self.eth, "1", "0.90"), self.floor_ctx(self.eth, floor_event_exposure=floor))
+        self.assertTrue(any("could not be read" in r for r in reasons), reasons)
+        exit_buy = self.buy(self.eth, "1", "0.90", purpose="exit", exit_reason="stop", exit_of="oi-x")
+        self.assertFalse(any("could not be read" in r for r in self.reasons(exit_buy, self.floor_ctx(self.eth, floor_event_exposure=floor))))
+        shadow = self.reasons(self.buy(self.eth, "1", "0.90"), self.floor_ctx(self.eth, manifest=self.shadow, floor_event_exposure=floor))
+        self.assertFalse(any("could not be read" in r for r in shadow))
+
+    def test_the_floor_rule_is_off_at_zero(self):
+        floor = self.exposure((self.BTC, "200"))
+        reasons = self.reasons(self.buy(self.btc, "16", "0.9375"),
+                               self.floor_ctx(self.btc, floor_event_exposure=floor, max_event_market_floor_pct=0, max_event_cluster_floor_pct=0))
+        self.assertFalse(any("at risk" in r for r in reasons), reasons)

@@ -22,7 +22,12 @@ night. The Foundry turns that into an evidence loop that runs around the clock:
 5. **Live.** A deployed candidate whose backtest cleared the confidence bound and whose forward
    shadow record since deployment has `min_forward_settled` (5) settlements at P&L >= 0 is
    adopted by the family's live desk, the way `Strategies.promote` moves settings; its
-   `promoted_at` resets the evidence. Risk limits, sizes, caps and capital never change here.
+   `promoted_at` resets the evidence. A lopsided event strategy (favorites bought at 0.80 or
+   more) also needs its forward record to pass `evidence.passes`. Risk limits, sizes, caps and
+   capital never change here.
+
+A family in `excluded_families` (the evolution loop's retired families, handed over by the
+service) is never picked for a cycle and no candidate on one of its desks goes live.
 
 Everything is on the tape with existing kinds: a `lab.hypothesis` per cycle, a `desk.code_run`
 on every desk that received a deployment or an adoption, an `ops.alert` for an adoption. A
@@ -66,7 +71,11 @@ DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "interval_minutes": 30,
     # Weather is not backtestable: its starter prices from NWS forecasts, which have no history.
-    "families": ["kalshi", "ranges", "crypto"],
+    # Ranges is retired (Sept 17, 2026: taking hourly buckets lost at every quote lag of a second
+    # or more, and its shadow desks were down $43 to $90 each).
+    "families": ["kalshi", "crypto"],
+    #: Retired families, never picked and never fast-tracked (`evolution.excluded_families`).
+    "excluded_families": [],
     "param_candidates": 10,
     "code_candidates": 2,
     "profile": "k3",
@@ -835,8 +844,13 @@ class Foundry:
         row = self.store().for_desk(live.id).get(name) if live is not None else None
         return int((row or {}).get("cadence_seconds") or STARTER_CADENCE.get(base_name(name)) or STARTER_CADENCE.get(family) or 600)
 
+    def excluded_families(self) -> set[str]:
+        configured = self.config.get("excluded_families") or ()
+        return {str(f) for f in ((configured,) if isinstance(configured, str) else configured)}
+
     def _pick(self, manifests: Mapping[str, Any], state: Mapping[str, Any]) -> tuple[str, str, int, dict[str, int]] | None:
-        families = [f for f in (self.config.get("families") or []) if f not in UNBACKTESTABLE_FAMILIES]
+        excluded = self.excluded_families()
+        families = [f for f in (self.config.get("families") or []) if f not in UNBACKTESTABLE_FAMILIES and f not in excluded]
         if not families:
             return None
         start = int(state.get("family_index") or 0) % len(families)
@@ -852,6 +866,13 @@ class Foundry:
             subject_index[family] = index + 1
             return family, names[index], (start + offset + 1) % len(families), subject_index
         return None
+
+    def _evidence_config(self) -> dict[str, Any]:
+        """The evidence gate's settings: the strategy runner's (`strategies.evidence`), so the
+        fast-track and the hourly promotion judge a record the same way."""
+        from . import evidence
+
+        return evidence.settings(dict(getattr(self.strategies, "config", {}) or {}).get("evidence"))
 
     def _record(self, desk_id: str, name: str, since: str | None, **options: Any) -> dict[str, Any]:
         try:
@@ -1575,7 +1596,7 @@ class Foundry:
         ]
         if winner.get("hypothesis"):
             lines.append(f"hypothesis: {winner['hypothesis']}")
-        lines.append(f"live after {self.config['min_forward_settled']} positions opened and settled here at P&L after fees >= 0")
+        lines.append(f"live after {self.config['min_forward_settled']} positions opened and settled here at P&L after fees >= 0, and a favorites record that passes the evidence gate")
         self.publish_desk(desk, name, f"foundry-{fid}-shadow", at, f"foundry {fid}: {name} on shadow desk {desk.id}", lines, code_sha, winner.get("seconds"))
         return record
 
@@ -1596,12 +1617,22 @@ class Foundry:
         (`Strategies.record(opened_since=True)`), needs as many of its own fills as settlements,
         and is judged after fees. Until Sept 16, 2026 it counted settlements dated after the
         deployment, and the old settings' positions settling that afternoon put new settings,
-        taker orders among them, on a live desk."""
+        taker orders among them, on a live desk.
+
+        A lopsided event strategy (every settled position an event contract, average entry price
+        at or above the evidence gate's `skew_price`) must also pass `evidence.passes` on that
+        forward record. Sept 17, 2026: five favorites settled at 0.93 with P&L >= 0 is what a
+        strategy with no edge produces about 70% of the time. A family in `excluded_families`
+        never goes live from here."""
+        from . import evidence
+
         cfg = self.config
         store = self.store()
         manager = self.sandboxes()
         frozen = [str(k) for k in (cfg.get("frozen_params") or [])]
         need = int(cfg["min_forward_settled"])
+        excluded = self.excluded_families()
+        gate = self._evidence_config()
         adopted: list[dict[str, Any]] = []
         if self.halted is not None:
             try:
@@ -1628,6 +1659,8 @@ class Foundry:
             if dep.get("code_sha256") and self._code_sha(manager, desk.id, name, row) != dep.get("code_sha256"):
                 self._deployment(fid, status="superseded", ended_at=at, reason="the shadow desk's code changed under the candidate")
                 continue
+            if str(dep.get("family")) in excluded or desk.family in excluded:
+                continue  # a retired family trades out its shadow record; none of it goes live
             lower = _float(dep.get("oos_ci_lower"))
             if lower is None or lower <= 0 or int(dep.get("oos_trades") or 0) < int(cfg["min_oos_trades"]):
                 continue  # a candidate may trade in shadow, but only a confident backtest goes live
@@ -1637,7 +1670,8 @@ class Foundry:
             pnl = _dec(record.get("settled_pnl_usd")) or Decimal(0)
             fees = _dec(record.get("fees_usd")) or Decimal(0)
             net = pnl - fees
-            if settled < need or fills < need or net < 0:
+            unproven = evidence.lopsided(record, gate["skew_price"]) and not evidence.passes(record, **gate)[0]
+            if settled < need or fills < need or net < 0 or unproven:
                 if _epoch(at) - _epoch(dep.get("deployed_at")) > float(cfg["forward_max_hours"]) * 3600.0:
                     forward = {"settled": settled, "fills": fills, "pnl_usd": format(pnl, "f"), "fees_usd": format(fees, "f")}
                     self._deployment(fid, status="expired", ended_at=at, forward=forward)
