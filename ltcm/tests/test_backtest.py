@@ -399,9 +399,38 @@ class FillTests(unittest.TestCase):
         near = sim.submit(buy(self.ticker, "yes", 0.31, 2, expires_at=iso(t + 5)), t)
         self.assertEqual(sim.orders[far.split(":", 1)[1]]["expires_ts"], t + 48 * HOUR)
         self.assertEqual(sim.orders[near.split(":", 1)[1]]["expires_ts"], t + 120)
+        # A stamp the floor's parser refuses is refused here as well: a bare date, a time without
+        # seconds, the basic form, a number.
         for extra in ({"expire_after_seconds": 60}, {"expire_after_seconds": "600"}, {"expires_at": "soon"},
-                      {"expires_at": iso(t + 600), "expire_after_seconds": 600}):
+                      {"expires_at": iso(t + 600), "expire_after_seconds": 600}, {"expires_at": iso(t + 3600)[:10]},
+                      {"expires_at": iso(t + 3600)[:16] + "Z"}, {"expires_at": iso(t + 3600).replace("-", "").replace(":", "")},
+                      {"expires_at": t + 3600}):
             self.assertTrue(sim.submit(buy(self.ticker, "yes", 0.30, 2, **extra), t).startswith("rejected:"), extra)
+
+    def test_the_backtest_reads_an_expiry_exactly_as_the_floor_does(self):
+        # Sept 17, 2026: a stamp the backtest clamped but the floor refused would make a strategy
+        # that trades in its backtest place nothing once deployed.
+        from ltcm import tools
+        from ltcm.backtest import _expiry_ts
+
+        t = self.open + 2 * MINUTE
+        stamp = iso(t + 3600)
+        stated = [stamp, stamp[:10], stamp[:16] + "Z", stamp[:16], stamp.replace("-", "").replace(":", ""),
+                  stamp[:-1] + ".250Z", stamp[:-1] + "+00:00", stamp[:-1] + "+02:00", stamp.replace("T", " "),
+                  stamp[:-1], stamp.lower(), "soon", "", t + 3600, None]
+        for value in stated:
+            session = tools.ToolSession(session_id="s", desk_id="d", now=iso(t))
+            try:
+                floor = tools._expiry({"expires_at": value}, session)
+            except tools.ToolError:
+                floor = "refused"
+            ours, refusal = _expiry_ts({"expires_at": value}, t)
+            if floor == "refused":
+                self.assertIsNotNone(refusal, value)
+            elif floor is None:
+                self.assertEqual((ours, refusal), (None, None), value)
+            else:
+                self.assertEqual(ours, parse_time(floor), value)
 
     def test_intent_notional_is_capped_at_ten_times_learning(self):
         sim = self.build([candle(self.open + MINUTE, 0.40, 0.50)])

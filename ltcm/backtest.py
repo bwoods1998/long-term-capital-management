@@ -92,7 +92,7 @@ from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from .broker import EXPIRY_MAX_SECONDS, EXPIRY_MIN_SECONDS
+from .broker import EXPIRY_MAX_SECONDS, EXPIRY_MIN_SECONDS, instant
 from .history import HistoryTimeout
 
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
@@ -434,12 +434,13 @@ def _expiry_ts(intent: Mapping[str, Any], t: float) -> tuple[float | None, str |
         return t + seconds, None
     if stated is None:
         return None, None
-    try:
-        if not isinstance(stated, str):
-            raise ValueError("not a stamp")
-        wanted = parse_time(stated) - t
-    except ValueError:
+    # Read with the floor's own parser: a stamp the floor refuses (a bare date, a time with no
+    # seconds) must be refused here too, or a strategy that trades in its backtest places nothing
+    # once it is deployed.
+    moment = instant(stated)
+    if moment is None:
         return None, "expires_at must be an ISO-8601 UTC timestamp"
+    wanted = moment.timestamp() - t
     return t + int(min(max(wanted, EXPIRY_MIN_SECONDS), EXPIRY_MAX_SECONDS)), None
 
 

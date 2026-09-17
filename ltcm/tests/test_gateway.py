@@ -2,6 +2,7 @@ import copy
 import tempfile
 import threading
 import unittest
+from typing import Any
 from decimal import Decimal
 from pathlib import Path
 
@@ -1250,7 +1251,7 @@ class UnreadableAnswerTests(unittest.TestCase):
         gateway = Gateway.__new__(Gateway)
         gateway._orders, gateway._intent_orders, gateway._venue_orders, gateway.blocked_desks, gateway._seen_fills = {}, {}, {}, {}, set()
         gateway._book_lock, gateway._submitting = threading.RLock(), {}
-        gateway._record_order = lambda order, status, at, reason=None: seen.update({"status": status, "reason": reason}) or {"order_id": order.id, "status": status}
+        gateway._record_order = lambda order, status, at, reason=None, **_: seen.update({"status": status, "reason": reason}) or {"order_id": order.id, "status": status}
         gateway._alert = lambda level, text, at: seen.update({"alert": (level, text)})
         gateway.brokers = {"kalshi": Broker()}
         gateway.route = lambda desk_id, venue: "kalshi"
@@ -1294,3 +1295,143 @@ class SoldYesReportedAsBoughtNoTests(SettlementCase):
                                        quantity=Decimal("10"), price=Decimal("0.90"), fee=Decimal("0"), at="2026-09-14T16:00:00.000Z"))
         written = self.gateway.ingest_fills("kalshi")
         self.assertEqual((written[0]["side"], written[0]["instrument"]["right"], written[0]["price"]), ("buy", "no", "0.90"))
+
+
+class ListingBroker(FakeBroker):
+    """Kalshi as the floor sees it: an order is looked up by the floor's id in the venue's first
+    page of resting, executed and cancelled orders, or by the venue's own id on its own path."""
+
+    venue = "kalshi"
+
+    def __init__(self, **kwargs):
+        super().__init__(price="0.50", instant_fill=False, caps={"event", "limit", "gtc", "ioc", "no_leg"}, **kwargs)
+        self.listed = True  # False: the order has dropped off every page the floor reads
+        self.by_venue_id: dict[str, Any] = {}  # venue id -> Order, or an exception to raise
+        self.venue_lookups: list[str] = []
+
+    def get_order(self, order_id):
+        if order_id.startswith("ord-"):
+            if not self.listed:
+                raise RejectedOrder(f"kalshi: no order for {order_id}")
+            return self.orders[order_id]
+        self.venue_lookups.append(order_id)
+        found = self.by_venue_id.get(order_id)
+        if isinstance(found, BaseException):
+            raise found
+        if found is None:
+            raise RejectedOrder(f"kalshi order: HTTP 404 no order {order_id}")
+        return found
+
+
+class LapsedExpiryTests(GatewayCase):
+    """Sept 17, 2026: a resting entry the venue cancelled at its expiry must leave the desk's book
+    even when the venue's order pages no longer show it, or it commits the desk's cash for good."""
+
+    EXPIRES = "2026-09-14T14:50:00.000Z"
+
+    def setUp(self):
+        super().setUp()
+        data = copy.deepcopy(SAMPLE)
+        data["venues"] = ["kalshi"]
+        data["instruments"] = {**data["instruments"], "asset_classes": ["event"], "min_price": "0", "min_adv_usd": "0"}
+        data["capital"] = {"mode": "live", "usd": "1000"}
+        self.manifest = DeskManifest.from_dict(data)
+        self.gateway.manifests[DESK] = self.manifest
+        self.kalshi = ListingBroker()
+        self.gateway.brokers["kalshi"] = self.kalshi
+
+    def bid(self, expires_at=EXPIRES, nonce="bid"):
+        intent = OrderIntent.new(
+            desk_id=DESK, instrument=CPI_NO, side="buy", quantity="10", order_type="limit", limit_price="0.40",
+            time_in_force="gtc", rationale="a favorite's NO bid that should not outlive twenty minutes",
+            created_at=NOW, session_id="s1", nonce=nonce, expires_at=expires_at,
+        )
+        result = self.gateway.propose(intent, NOW)
+        self.assertEqual(result["status"], "accepted", result)
+        return result["order_id"]
+
+    def lapse(self, order_id):
+        """The venue cancels the order at its expiry and it drops off the pages the floor reads."""
+        order = self.kalshi.orders[order_id]
+        order.status = "cancelled"
+        self.kalshi.listed = False
+        return order
+
+    def working(self, at):
+        probe = OrderIntent.new(desk_id=DESK, instrument=CPI_YES, side="buy", quantity="1", order_type="limit",
+                                limit_price="0.50", rationale="probe", created_at=at, session_id="probe")
+        fields = self.gateway._book_fields(probe, at)
+        return fields["open_orders"], fields["working_event_buys"]
+
+    def test_the_order_row_carries_its_expiry(self):
+        order_id = self.bid()
+        self.assertEqual(self.gateway.open_orders(DESK)[0]["expires_at"], self.EXPIRES)
+        rebuilt = Gateway(self.log, RiskEngine(), {"kalshi": self.kalshi}, {DESK: DeskLedger(self.log, DESK)},
+                          manifests={DESK: self.manifest}, kill_switch_path=self.kill)
+        self.assertEqual(rebuilt.open_orders(DESK)[0]["expires_at"], self.EXPIRES, "a restart folds it back from the log")
+        self.assertEqual(rebuilt.open_orders(DESK)[0]["order_id"], order_id)
+
+    def test_an_expired_order_the_venue_lists_nowhere_is_resolved_by_its_venue_id(self):
+        order_id = self.bid()
+        self.assertEqual(self.working(NOW)[0], 1)
+        venue_copy = copy.copy(self.lapse(order_id))
+        venue_copy.desk_id = ""  # the venue never knew the desk
+        self.kalshi.by_venue_id[self.kalshi.orders[order_id].broker_order_id] = venue_copy
+
+        # Before the expiry (and its grace) the floor does not go looking.
+        self.assertEqual(self.gateway.poll_orders("2026-09-14T14:50:30.000Z"), [])
+        self.assertEqual(self.kalshi.venue_lookups, [])
+        self.assertEqual(self.working("2026-09-14T14:50:30.000Z")[0], 1)
+
+        later = "2026-09-14T14:52:00.000Z"
+        changed = self.gateway.poll_orders(later)
+        self.assertEqual([(c["order_id"], c["status"], c["desk_id"]) for c in changed], [(order_id, "cancelled", DESK)])
+        self.assertEqual(self.working(later), (0, {}))
+        self.assertEqual(self.gateway.open_orders(DESK), [])
+
+    def test_an_expired_order_the_venue_has_no_record_of_is_expired(self):
+        order_id = self.bid()
+        self.lapse(order_id)
+        later = "2026-09-14T14:52:00.000Z"
+        changed = self.gateway.poll_orders(later)
+        self.assertEqual([(c["order_id"], c["status"]) for c in changed], [(order_id, "expired")])
+        self.assertIn(self.EXPIRES, changed[0]["reason"])
+        self.assertEqual(changed[0]["venue_order_id"], self.kalshi.orders[order_id].broker_order_id)
+        self.assertEqual(self.working(later), (0, {}))
+        # Terminal once: the next poll does not ask again.
+        self.gateway.poll_orders("2026-09-14T14:53:00.000Z")
+        self.assertEqual(len(self.kalshi.venue_lookups), 1)
+
+    def test_the_venue_still_holding_the_order_or_not_answering_leaves_it_open(self):
+        order_id = self.bid()
+        venue_id = self.kalshi.orders[order_id].broker_order_id
+        later = "2026-09-14T14:52:00.000Z"
+        # Listed as resting past its expiry: the venue's page is the answer, nothing more is asked.
+        self.assertEqual(self.gateway.poll_orders(later), [])
+        self.assertEqual(self.kalshi.venue_lookups, [])
+        self.kalshi.listed = False
+        self.kalshi.by_venue_id[venue_id] = copy.copy(self.kalshi.orders[order_id])  # still resting there
+        self.assertEqual(self.gateway.poll_orders(later), [])
+        self.kalshi.by_venue_id[venue_id] = VenueUnavailable("kalshi order: HTTP 503")
+        self.assertEqual(self.gateway.poll_orders(later), [])
+        self.assertEqual([r["order_id"] for r in self.gateway.open_orders(DESK)], [order_id])
+        self.assertEqual(self.kalshi.venue_lookups, [venue_id, venue_id])
+
+    def test_a_desk_cancelling_a_lapsed_order_resolves_it_instead_of_keeping_it(self):
+        order_id = self.bid()
+        self.lapse(order_id)
+
+        def refuse(order_id):
+            raise RejectedOrder(f"kalshi: no order for {order_id}")
+
+        self.kalshi.cancel = refuse  # the adapter looks the order up by its client id first
+        row = self.gateway.cancel(DESK, order_id, "2026-09-14T14:52:00.000Z")
+        self.assertEqual(row["status"], "expired")
+        self.assertEqual(self.gateway.open_orders(DESK), [])
+
+    def test_an_order_with_no_expiry_is_never_resolved_this_way(self):
+        order_id = self.bid(expires_at=None)
+        self.lapse(order_id)
+        self.assertEqual(self.gateway.poll_orders("2026-09-16T14:52:00.000Z"), [])
+        self.assertEqual(self.kalshi.venue_lookups, [])
+        self.assertNotIn("expires_at", self.gateway.open_orders(DESK)[0])

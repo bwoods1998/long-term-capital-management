@@ -543,6 +543,37 @@ class ExpiryTests(unittest.TestCase):
         client, transport, _ = make({("POST", BASE + ORDERS_PATH): ORDER})
         client.submit(intent(order_type="limit", limit_price="0.40", time_in_force="gtc", expires_at=self.EXPIRES))
         self.assertEqual(transport.last["body"]["expiration_ts"], 1789482000)
+        self.assertEqual(transport.last["body"]["time_in_force"], "good_till_canceled", "the spec's pairing for an expiring order")
+        client.submit(intent(order_type="limit", limit_price="0.40", time_in_force="gtc", nonce="plain"))
+        self.assertNotIn("time_in_force", transport.last["body"], "a legacy body with no expiry is unchanged")
+
+    def test_an_order_is_read_by_the_venues_id_from_its_own_path(self):
+        # The venue reports an order it cancelled at its expiration_time as `canceled`. Read by its
+        # own id it is found even when it is on no page of the order lists.
+        venue_id = ORDER["order"]["order_id"]
+        client, transport, _ = make(
+            {
+                ("GET", BASE + ORDERS_PATH + "/" + venue_id): {"order": dict(ORDER["order"], status="canceled")},
+                BASE + ORDERS_PATH + "*": {"orders": []},
+            },
+            order_api="v2",
+        )
+        order = client.get_order(venue_id)
+        self.assertEqual((order.id, order.status, order.broker_order_id), ("ord-" + "b" * 32, "cancelled", venue_id))
+        self.assertTrue(order.terminal)
+        self.assertEqual(transport.paths(), [PREFIX + ORDERS_PATH + "/" + venue_id], "one read, no page scan")
+
+    def test_an_order_the_venue_has_no_record_of_is_refused(self):
+        client, transport, _ = make(
+            {
+                ("GET", BASE + ORDERS_PATH + "/kx-gone"): (404, {}, b'{"error": {"code": "not_found"}}'),
+                BASE + ORDERS_PATH + "*": {"orders": []},
+            },
+            order_api="v2",
+        )
+        with self.assertRaises(RejectedOrder):
+            client.get_order("kx-gone")
+        self.assertEqual(transport.paths()[0], PREFIX + ORDERS_PATH + "/kx-gone")
 
     def test_an_expired_order_is_terminal(self):
         client, _, _ = make()

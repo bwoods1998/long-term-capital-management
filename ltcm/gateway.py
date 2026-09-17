@@ -56,6 +56,7 @@ from .broker import (
     RejectedOrder,
     UnknownOutcome,
     VenueUnavailable,
+    instant,
     money,
     text,
 )
@@ -88,6 +89,10 @@ def _stamp_minus(stamp: "str | None", seconds: int) -> "str | None":
 
 #: The routing key of the scoring book. A shadow desk's orders go here and no further.
 SHADOW_VENUE = "shadow"
+
+#: How long after an order's own expiry the venue is given to cancel it before the floor goes
+#: looking for it by the venue's order id (see `Gateway._resolve_lapsed`).
+LAPSE_GRACE_SECONDS = 60
 
 #: Asset classes whose orders depend on a regular-hours session.
 SESSION_CLASSES = ("equity", "option")
@@ -815,7 +820,7 @@ class Gateway:
             self._done_submitting(venue)
             order = Order.from_intent(intent, venue=venue)
             order.status = "unknown"
-            row = self._record_order(order, status="unknown", at=at, reason=str(exc))
+            row = self._record_order(order, status="unknown", at=at, reason=str(exc), expires_at=intent.expires_at)
             self.blocked_desks[intent.desk_id] = order.id
             self._alert(
                 "critical",
@@ -830,7 +835,9 @@ class Gateway:
             # Record it, block the desk, say so. Never let it vanish into a traceback.
             order = Order.from_intent(intent, venue=venue)
             order.status = "unknown"
-            row = self._record_order(order, status="unknown", at=at, reason=f"{type(exc).__name__}: {exc}"[:300])
+            row = self._record_order(
+                order, status="unknown", at=at, reason=f"{type(exc).__name__}: {exc}"[:300], expires_at=intent.expires_at
+            )
             self.blocked_desks[intent.desk_id] = order.id
             self._alert(
                 "critical",
@@ -842,7 +849,7 @@ class Gateway:
             self._done_submitting(venue)
             raise
 
-        row = self._record_order(order, status=order.status, at=at, submitting=venue)
+        row = self._record_order(order, status=order.status, at=at, submitting=venue, expires_at=intent.expires_at)
         # Refresh first, then sweep fills: an order that executed inline (an IOC, a marketable
         # limit) shows its fill only once the venue has recorded it.
         row = self._refresh(order.id, venue, at) or row
@@ -871,7 +878,14 @@ class Gateway:
         return self._record_order(fresh, status=fresh.status, at=at, reason=fresh.reason)
 
     def _record_order(
-        self, order: Order, *, status: str, at: str, reason: str | None = None, submitting: str | None = None
+        self,
+        order: Order,
+        *,
+        status: str,
+        at: str,
+        reason: str | None = None,
+        submitting: str | None = None,
+        expires_at: str | None = None,
     ) -> dict[str, Any]:
         with self._book_lock:
             try:
@@ -919,6 +933,12 @@ class Gateway:
         bracket = order._raw.get("bracket") if isinstance(order._raw, dict) else None
         if isinstance(bracket, bool):
             payload["bracket"] = bracket
+        # When the venue itself cancels the entry, from the intent (the venue's copy of the order
+        # never says). Absent for an order with no expiry, so its events keep their ids; kept on
+        # every later state, so a poll is not a new event, and folded back from the log on restart.
+        expiry = expires_at or known.get("expires_at")
+        if expiry:
+            payload["expires_at"] = expiry
         # One event per distinct state of the order. The state is the payload less its clock:
         # a poll that finds the same status and fill with a new `updated_at` is the same event,
         # and one that finds a new average price or fee at the same fill count is a new one
@@ -1510,6 +1530,9 @@ class Gateway:
                 continue
             before = row.get("status"), row.get("filled_quantity")
             fresh = self._refresh(order_id, venue, at)
+            if fresh is None:
+                # The venue's pages did not show it. Past its own expiry, ask by the venue's id.
+                fresh = self._resolve_lapsed(order_id, row, venue, at)
             if fresh is not None and (fresh.get("status"), fresh.get("filled_quantity")) != before:
                 changed.append(fresh)
         # The fill sweep runs after the refresh, for every venue that had a resting order when
@@ -1519,6 +1542,58 @@ class Gateway:
         for venue in sorted(v for v in venues if v):
             self.ingest_fills(venue)
         return changed
+
+    def _resolve_lapsed(self, order_id: str, row: Mapping[str, Any], venue: str, at: str) -> dict[str, Any] | None:
+        """Settle an order past its own expiry that the venue's order lists no longer show.
+
+        The floor finds a Kalshi order by scanning the first page of the venue's resting, executed
+        and cancelled orders for its client id (Coinbase: open, then all). Kalshi reports an order
+        it cancelled at its `expiration_time` as `canceled`, but an order that rested for hours can
+        fall off that page behind newer cancels. No poll then resolved it: it stayed open in the
+        book for good, committing the desk's cash and counting in its working buys. So once the
+        pages miss it and its expiry plus a grace has passed, it is read by the venue's own id
+        (Kalshi `GET portfolio/orders/{id}`, Coinbase `orders/historical/{id}`). A terminal answer
+        is recorded as the venue gives it. A venue that answers it has no such order holds no such
+        order resting, so it is recorded `expired`. A venue still holding it, or not answering,
+        leaves it open for the next poll. An order with no expiry, and the shadow book (which
+        expires its own orders on its tick), are never resolved this way.
+        """
+        expires_at = row.get("expires_at")
+        if not expires_at or venue == SHADOW_VENUE or row.get("status") in TERMINAL_STATUSES or row.get("status") == "unknown":
+            return None
+        expiry, moment = instant(expires_at), instant(at)
+        if expiry is None or moment is None or (moment - expiry).total_seconds() < LAPSE_GRACE_SECONDS:
+            return None
+        broker = self.brokers.get(venue)
+        venue_id = row.get("venue_order_id")
+        if broker is None or not venue_id:
+            return None
+        try:
+            found = broker.get_order(str(venue_id))
+        except (RejectedOrder, LookupError) as exc:
+            found, missing = None, exc
+        except Exception:
+            return None  # the venue did not answer; the next poll asks again
+        if found is not None:
+            if not found.terminal:
+                return None  # the venue still holds it, and the venue is the authority
+            if found.id != order_id:
+                found.id, found.intent_id = order_id, str(row.get("intent_id") or found.intent_id)
+            return self._record_order(found, status=found.status, at=at, reason=found.reason)
+        try:
+            order = self._order_from_row(row)
+            order.order_type = str(row.get("order_type") or "limit")
+            order.time_in_force = str(row.get("time_in_force") or "gtc")
+            order.broker_order_id = str(venue_id)
+            order.filled_quantity = money(row.get("filled_quantity") or 0)
+            order.average_price = money(row["average_price"]) if row.get("average_price") else None
+            order.fees = money(row.get("fees") or 0)
+            order.submitted_at = row.get("submitted_at")
+            order.purpose = str(row.get("purpose") or "entry")
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            return None  # a row too damaged to rebuild is left for reconciliation, not guessed at
+        reason = f"past its expiry at {expires_at} and {venue} has no such order ({missing})"
+        return self._record_order(order, status="expired", at=at, reason=reason[:300])
 
     def cancel(self, desk_id: str, order_id: str, now: Any = None) -> dict[str, Any]:
         """Cancel one of the desk's own orders."""
@@ -1539,7 +1614,8 @@ class Gateway:
         try:
             order = broker.cancel(order_id)
         except RejectedOrder as exc:
-            return self._refresh(order_id, venue, at) or {**row, "reason": str(exc)}
+            fresh = self._refresh(order_id, venue, at) or self._resolve_lapsed(order_id, row, venue, at)
+            return fresh or {**row, "reason": str(exc)}
         except UnknownOutcome as exc:
             self.blocked_desks[desk_id] = order_id
             self._alert("critical", f"cancel of {order_id} unconfirmed: {exc}", at)

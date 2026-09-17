@@ -299,9 +299,14 @@ decision every session:
   `expiration_time` (unix seconds, good-till-canceled only) and Coinbase gets `limit_limit_gtd`
   with an `end_time` and no attached bracket (the floor keeps that entry's stop itself). Only
   a gtc limit entry can expire; an exit never does, and Alpaca, which has no such order, refuses
-  one. The shadow book and the backtest expire the order at the same moment, and an expired
-  order leaves the desk's working buys on the next poll. The gateway's caps price a
-  `limit_limit_gtd` body exactly as the same order sent GTC.
+  one. The shadow book and the backtest expire the order at the same moment (the backtest reads
+  the stamp with the floor's own parser), and an expired order leaves the desk's working buys on
+  the next poll. Kalshi reports an order it expired as `canceled`, and the floor finds orders by
+  scanning one page of each status; an expiring order no page shows a minute after its expiry is
+  read by the venue's own id (`GET portfolio/orders/{id}`, on the gateway's allowlist) and
+  recorded as the venue answers, or `expired` if the venue has no such order, so it cannot commit
+  the desk's cash for good. The gateway's caps price a `limit_limit_gtd` body exactly as the
+  same order sent GTC.
 
 ### Strategies: code that trades between sessions
 

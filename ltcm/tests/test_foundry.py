@@ -228,6 +228,18 @@ class FoundryCase(unittest.TestCase):
 
 # --------------------------------------------------------------------------- candidates
 class CandidateTests(FoundryCase):
+    def test_the_code_generator_is_told_the_fees_the_backtest_charges(self):
+        # Sept 17, 2026: the prompt still said Kalshi rounds to the cent and Coinbase charges
+        # 0.25%/0.60% while the backtest charged $0.0001 rounding and 0.5%/1.2%.
+        from ltcm.backtest import DEFAULT_SPEC, kalshi_taker_fee
+
+        text = self.foundry().instructions("kalshi_favorites_x")
+        self.assertNotIn("ceil(0.07", text)
+        self.assertIn("rounded up to $0.0001", text)
+        self.assertEqual(kalshi_taker_fee(0.02, 1), 0.0014)
+        maker, taker = DEFAULT_SPEC["coinbase_maker_fee"], DEFAULT_SPEC["coinbase_taker_fee"]
+        self.assertIn(f"Coinbase {maker * 100:g}% maker and {taker * 100:g}% taker", text)
+
     def test_candidates_are_deterministic_per_cycle_and_explore_inside_the_bounds(self):
         foundry = self.foundry()
         defaults = literal_defaults(SOURCE)
