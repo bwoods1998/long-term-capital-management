@@ -14,10 +14,11 @@ The contract a strategy honours, in `toolbox/<name>.py`:
 `kit` reads public data (`kit.bars`, `kit.quote`, `kit.kalshi_series`, `kit.kalshi_market`) and
 carries `kit.context` (the clock, the desk's positions, its learning size). Each dict returned is
 a `propose_order` call: `instrument`, `side`, `quantity`, `order_type` (limit only),
-`limit_price`, `rationale`, and optionally `target_price`, `stop_price`,
-`holding_period_hours`. The floor proposes them exactly as the desk would in a session -- the
-same risk engine, the same critic for a live desk, the same public events -- under a session
-id of the form `<desk>:<stamp>:strategy:<name>`, so every strategy decision is attributable.
+`limit_price`, `rationale`, and optionally `post_only`, `target_price`, `stop_price`,
+`holding_period_hours`, and a venue-side expiry as `expires_at` (an ISO-8601 UTC stamp, clamped
+to 120 s..48 h after the run's clock) or `expire_after_seconds`. The floor proposes them exactly
+as the desk would in a session -- the same risk engine, the same critic for a live desk, the
+same public events -- under a session id of the form `<desk>:<stamp>:strategy:<name>`, so every strategy decision is attributable.
 
 What the floor guarantees:
 

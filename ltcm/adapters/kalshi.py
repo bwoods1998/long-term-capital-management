@@ -73,6 +73,7 @@ from ..broker import (
     RejectedOrder,
     UnknownOutcome,
     VenueUnavailable,
+    epoch_seconds,
     money,
 )
 from ..data import TransportError, iso
@@ -117,6 +118,9 @@ STATUS_MAP: dict[str, str] = {
     "canceled": "cancelled",
     "cancelled": "cancelled",
     "executed": "filled",
+    # An order past its `expiration_time` is reported cancelled today; should the venue ever
+    # name it, it is still terminal, so it leaves the desk's open orders and working buys.
+    "expired": "expired",
 }
 
 TIF_V2 = {
@@ -394,6 +398,15 @@ class KalshiBroker:
                 # A market buy must declare the worst it may cost. One contract can never settle
                 # above $1.00, so `count` dollars, in cents, is the true ceiling.
                 body["buy_max_cost"] = count * 100
+            expires_at = getattr(intent, "expires_at", None)
+            if expires_at is not None:
+                if intent.order_type != "limit":
+                    raise RejectedOrder("kalshi: only a resting limit can carry an expiration")
+                # The spec (3.30.0): "To place an expiring order, set `time_in_force` to
+                # `good_till_canceled` and provide this `expiration_ts`." Sent only with one, so a
+                # body without an expiry is unchanged.
+                body["time_in_force"] = "good_till_canceled"
+                body["expiration_ts"] = epoch_seconds(expires_at)
             return body
         # v2: one `side` names the book side, and "bid" is yes, "ask" is no, always
         # (https://docs.kalshi.com/getting_started/order_direction).
@@ -401,6 +414,13 @@ class KalshiBroker:
         if intent.side == "sell":
             book_side = "ask" if side == "yes" else "bid"
         time_in_force = TIF_V2.get(intent.time_in_force, "good_till_canceled")
+        expires_at = getattr(intent, "expires_at", None)
+        if expires_at is not None and (intent.order_type != "limit" or time_in_force != "good_till_canceled"):
+            # `expiration_time` means nothing on an order that cannot rest, and a market order
+            # is sent as immediate-or-cancel; refused here, before a quote is read or a request
+            # is sent for the venue to reject.
+            shown = time_in_force if intent.order_type == "limit" else "immediate_or_cancel"
+            raise RejectedOrder(f"kalshi v2: an expiring order must be a good_till_canceled limit, not {shown}")
         if intent.order_type == "limit":
             # The desk always quotes its own leg, so a NO limit is in NO dollars and crosses to
             # the YES scale exactly once. Buying NO at $0.30 is `side: "ask"`, `price: 0.7000`.
@@ -435,6 +455,10 @@ class KalshiBroker:
         # venue. The risk engine already forbids selling more of a leg than the desk holds.
         if getattr(intent, "post_only", False):
             body["post_only"] = True  # rest or be rejected; a maker pays no fee here
+        if expires_at is not None:
+            # The venue cancels the resting order at this moment even if the floor has stopped.
+            # The v2 OpenAPI spec (3.30.0) types `expiration_time` as unix seconds, an integer.
+            body["expiration_time"] = epoch_seconds(expires_at)
         return body
 
     def price_ranges(self, ticker: str) -> tuple[dict[str, Decimal], ...]:
@@ -516,21 +540,42 @@ class KalshiBroker:
         return None
 
     def get_order(self, order_id: str) -> Order:
+        """An order by the floor's id (`ord-...`, found by its client order id) or by Kalshi's own.
+
+        By Kalshi's id the order is read from `GET /portfolio/orders/{id}` first: the lists below
+        return one page each, and an order that rested for hours before the venue cancelled it
+        (at its `expiration_time`, or at the market's close) can sit behind newer cancels where no
+        page shows it. The pages remain the fallback for a venue answer without an order row."""
         if isinstance(order_id, str) and order_id.startswith("ord-"):
             found = self.order_by_client_id("oi-" + order_id[4:])
         else:
-            found = next(
-                (
-                    order
-                    for status in ("resting", "executed", "canceled")
-                    for order in self.orders(status=status, limit=200)
-                    if order.broker_order_id == order_id
-                ),
-                None,
-            )
+            found = self.order_by_venue_id(order_id)
+            if found is None:
+                found = next(
+                    (
+                        order
+                        for status in ("resting", "executed", "canceled")
+                        for order in self.orders(status=status, limit=200)
+                        if order.broker_order_id == order_id
+                    ),
+                    None,
+                )
         if found is None:
             raise RejectedOrder(f"kalshi: no order for {order_id}")
         return found
+
+    def order_by_venue_id(self, venue_order_id: str) -> "Order | None":
+        """`GET /portfolio/orders/{order_id}`: one order by Kalshi's id, or None when the venue
+        answers that it has none (404) or answers with no order row for that id."""
+        path = ORDERS_PATH + "/" + urllib.parse.quote(str(venue_order_id), safe="")
+        try:
+            payload = self._call("GET", path, what="kalshi order", ok=(200,))
+        except RejectedOrder:
+            return None
+        row = payload.get("order") if isinstance(payload, dict) else None
+        if not isinstance(row, dict) or str(row.get("order_id") or "") != str(venue_order_id):
+            return None
+        return self.parse_order(row)
 
     def cancel(self, order_id: str) -> Order:
         """`DELETE /portfolio/orders/{id}` reduces a resting order to zero."""

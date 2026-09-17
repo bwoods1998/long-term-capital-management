@@ -1,6 +1,7 @@
 """The Kalshi adapter: the signed call shape, cents on the wire, dollars everywhere else."""
 
 import base64
+import copy
 import unittest
 from decimal import Decimal
 
@@ -501,6 +502,85 @@ class V2DefaultTests(unittest.TestCase):
         with self.assertRaises(RejectedOrder):
             client.submit(intent(order_type="limit", limit_price="1.00"))
         self.assertEqual(transport.calls, [])
+
+
+class ExpiryTests(unittest.TestCase):
+    """Sept 17, 2026: a resting entry names when Kalshi itself cancels it."""
+
+    EXPIRES = "2026-09-15T14:20:00.000Z"  # 1789482000 in unix seconds
+
+    def test_a_v2_resting_limit_carries_expiration_time_in_whole_unix_seconds(self):
+        client, transport, _ = make({("POST", BASE + ORDERS_PATH_V2): {"order_id": "x", "remaining_count": "10"}}, order_api="v2")
+        client.submit(intent(NO, order_type="limit", limit_price="0.90", time_in_force="gtc", post_only=True, expires_at=self.EXPIRES))
+        body = transport.last["body"]
+        self.assertEqual(body["time_in_force"], "good_till_canceled")
+        self.assertIsInstance(body["expiration_time"], int)
+        self.assertEqual(body["expiration_time"], 1789482000)
+        self.assertNotIn("expiration_ts", body)
+
+    def test_a_limit_without_an_expiry_sends_none(self):
+        client, transport, _ = make({("POST", BASE + ORDERS_PATH_V2): {"order_id": "x", "remaining_count": "10"}}, order_api="v2")
+        client.submit(intent(order_type="limit", limit_price="0.40", time_in_force="gtc"))
+        self.assertNotIn("expiration_time", transport.last["body"])
+
+    def test_an_immediate_or_cancel_order_with_an_expiry_is_refused_before_anything_is_sent(self):
+        client, transport, _ = make(order_api="v2")
+        # The intent itself refuses the pairing; an intent that got past it is refused here too.
+        with self.assertRaises(ValueError):
+            intent(order_type="limit", limit_price="0.40", time_in_force="ioc", expires_at=self.EXPIRES)
+        forced = copy.copy(intent(order_type="limit", limit_price="0.40", time_in_force="gtc", expires_at=self.EXPIRES))
+        object.__setattr__(forced, "time_in_force", "ioc")
+        with self.assertRaises(RejectedOrder) as caught:
+            client.submit(forced)
+        self.assertIn("good_till_canceled", str(caught.exception))
+        market = copy.copy(intent())
+        object.__setattr__(market, "expires_at", self.EXPIRES)
+        with self.assertRaises(RejectedOrder):
+            client.submit(market)
+        self.assertEqual(transport.calls, [], "no quote read, no order sent")
+
+    def test_the_legacy_body_carries_expiration_ts(self):
+        client, transport, _ = make({("POST", BASE + ORDERS_PATH): ORDER})
+        client.submit(intent(order_type="limit", limit_price="0.40", time_in_force="gtc", expires_at=self.EXPIRES))
+        self.assertEqual(transport.last["body"]["expiration_ts"], 1789482000)
+        self.assertEqual(transport.last["body"]["time_in_force"], "good_till_canceled", "the spec's pairing for an expiring order")
+        client.submit(intent(order_type="limit", limit_price="0.40", time_in_force="gtc", nonce="plain"))
+        self.assertNotIn("time_in_force", transport.last["body"], "a legacy body with no expiry is unchanged")
+
+    def test_an_order_is_read_by_the_venues_id_from_its_own_path(self):
+        # The venue reports an order it cancelled at its expiration_time as `canceled`. Read by its
+        # own id it is found even when it is on no page of the order lists.
+        venue_id = ORDER["order"]["order_id"]
+        client, transport, _ = make(
+            {
+                ("GET", BASE + ORDERS_PATH + "/" + venue_id): {"order": dict(ORDER["order"], status="canceled")},
+                BASE + ORDERS_PATH + "*": {"orders": []},
+            },
+            order_api="v2",
+        )
+        order = client.get_order(venue_id)
+        self.assertEqual((order.id, order.status, order.broker_order_id), ("ord-" + "b" * 32, "cancelled", venue_id))
+        self.assertTrue(order.terminal)
+        self.assertEqual(transport.paths(), [PREFIX + ORDERS_PATH + "/" + venue_id], "one read, no page scan")
+
+    def test_an_order_the_venue_has_no_record_of_is_refused(self):
+        client, transport, _ = make(
+            {
+                ("GET", BASE + ORDERS_PATH + "/kx-gone"): (404, {}, b'{"error": {"code": "not_found"}}'),
+                BASE + ORDERS_PATH + "*": {"orders": []},
+            },
+            order_api="v2",
+        )
+        with self.assertRaises(RejectedOrder):
+            client.get_order("kx-gone")
+        self.assertEqual(transport.paths()[0], PREFIX + ORDERS_PATH + "/kx-gone")
+
+    def test_an_expired_order_is_terminal(self):
+        client, _, _ = make()
+        row = dict(ORDER["order"], status="expired")
+        order = client.parse_order(row)
+        self.assertEqual(order.status, "expired")
+        self.assertTrue(order.terminal)
 
 
 class PriceGridTests(unittest.TestCase):

@@ -395,6 +395,79 @@ class ProposeOrderTests(unittest.TestCase):
         self.assertEqual(ctx.intents[2].time_in_force, "ioc")
 
 
+class OrderExpiryToolTests(unittest.TestCase):
+    """Sept 17, 2026: an entry may ask the venue to cancel it if it has not filled in time."""
+
+    def setUp(self):
+        self.events = manifest(
+            venues=["kalshi"], instruments={**SAMPLE["instruments"], "asset_classes": ["event"], "deny": []}
+        )
+
+    def arguments(self, **overrides):
+        base = {
+            "instrument": {"asset_class": "event", "symbol": "KXHIGHNY-26SEP16-B79.5", "right": "no"},
+            "side": "buy",
+            "quantity": "10",
+            "order_type": "limit",
+            "limit_price": "0.92",
+            "post_only": True,
+            "rationale": "Favorite NO bid; expires before the final hour.",
+        }
+        base.update(overrides)
+        return base
+
+    def test_the_schema_offers_expire_after_seconds_in_range(self):
+        field = tools.TOOL_SCHEMAS["propose_order"]["parameters"]["properties"]["expire_after_seconds"]
+        self.assertEqual((field["type"], field["minimum"], field["maximum"]), ("integer", 120, 172_800))
+
+    def test_expire_after_seconds_is_measured_on_the_session_clock(self):
+        ctx = FakeContext()
+        out = run("propose_order", self.arguments(expire_after_seconds=1200), ctx, mf=self.events)
+        self.assertTrue(out["approved"], out)
+        self.assertEqual(ctx.intents[0].expires_at, "2026-09-15T14:05:00.000Z")  # 13:45 + 20 minutes
+        self.assertEqual(ctx.intents[0].time_in_force, "gtc")
+
+    def test_expire_after_seconds_outside_two_minutes_to_two_days_is_an_error(self):
+        for bad in (119, 172_801, 0, -5, "600", 600.0, True):
+            ctx = FakeContext()
+            out = run("propose_order", self.arguments(expire_after_seconds=bad), ctx, mf=self.events)
+            self.assertIn("error", out, bad)
+            self.assertEqual(ctx.intents, [], bad)
+        for good in (120, 172_800):
+            ctx = FakeContext()
+            self.assertNotIn("error", run("propose_order", self.arguments(expire_after_seconds=good), ctx, mf=self.events))
+
+    def test_a_stated_expires_at_is_clamped_into_the_window(self):
+        cases = {
+            "2026-09-15T14:45:00.000Z": "2026-09-15T14:45:00.000Z",  # inside: kept
+            "2026-09-15T13:45:30Z": "2026-09-15T13:47:00.000Z",  # 30 s out: two minutes
+            "2026-09-15T13:00:00Z": "2026-09-15T13:47:00.000Z",  # already past: two minutes
+            "2026-09-25T00:00:00Z": "2026-09-17T13:45:00.000Z",  # ten days out: two days
+        }
+        for stated, kept in cases.items():
+            ctx = FakeContext()
+            out = run("propose_order", self.arguments(expires_at=stated), ctx, mf=self.events)
+            self.assertNotIn("error", out, stated)
+            self.assertEqual(ctx.intents[0].expires_at, kept, stated)
+
+    def test_an_unreadable_or_doubled_expiry_and_an_expiring_market_order_are_errors(self):
+        for arguments in (
+            self.arguments(expires_at="tomorrow"),
+            self.arguments(expires_at="2026-09-15T14:45:00Z", expire_after_seconds=600),
+            self.arguments(order_type="market", post_only=False, expire_after_seconds=600),
+            self.arguments(time_in_force="ioc", expire_after_seconds=600),
+        ):
+            ctx = FakeContext()
+            out = run("propose_order", arguments, ctx, mf=self.events)
+            self.assertIn("error", out, arguments)
+            self.assertEqual(ctx.intents, [])
+
+    def test_no_expiry_stated_means_none(self):
+        ctx = FakeContext()
+        run("propose_order", self.arguments(), ctx, mf=self.events)
+        self.assertIsNone(ctx.intents[0].expires_at)
+
+
 class PublicationTests(unittest.TestCase):
     def test_public_arguments_summarize_long_bodies(self):
         public = tools.public_arguments("playbook_write", {"text": "x" * 5000, "reason": "learned"})

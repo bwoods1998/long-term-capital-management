@@ -242,6 +242,11 @@ approved order to the `shadow` book instead of to a venue.
   scored as winners, and one was promoted. On Kalshi, the 160 series that charge makers (sports
   games, the Fed, CPI) charge a shadow resting fill too, and a series' fee multiplier scales
   both sides (`ltcm/data/kalshi_fees.json`, from Kalshi's public series list).
+* A Kalshi fee is rounded up to $0.0001, not to the cent, and the rounding is per order: a
+  fill after others pays what the order's rounded fee grows by (`FeeModel.kalshi_fee`). Every
+  live fill that paid a fee on Sept 16, 2026 matches this: a 1-lot at 0.02 paid $0.0014, which
+  the cent rounding had charged as $0.01. The backtest and the house starters' edge
+  arithmetic use the same rounding.
 * `broker.order`, `broker.fill` and `ledger.mark` from a shadow desk carry `shadow: true`.
 * The committee's allocation for a shadow desk is a **notional scoring budget** -- the capital its
   manifest asks for -- listed under `shadow` in the `committee.allocation` payload. It is never
@@ -287,6 +292,21 @@ decision every session:
 * Orders on Kalshi and Coinbase rest until filled or cancelled (`gtc`), as they do at the venue; a
   "day" order used to die at UTC midnight in the shadow book alone. The limit-sanity rule judges an
   event contract in cents through the touch (five), not as a percentage of a penny reference.
+* A resting entry may name when the venue itself cancels it: `propose_order` takes
+  `expire_after_seconds` (120 to 172,800), and a strategy's intent may give `expires_at`
+  instead, clamped into the same window. On Sept 16, 2026 the floor stalled with a full disk
+  while its bids stayed live, so the venue enforces the expiry, not the floor: Kalshi gets
+  `expiration_time` (unix seconds, good-till-canceled only) and Coinbase gets `limit_limit_gtd`
+  with an `end_time` and no attached bracket (the floor keeps that entry's stop itself). Only
+  a gtc limit entry can expire; an exit never does, and Alpaca, which has no such order, refuses
+  one. The shadow book and the backtest expire the order at the same moment (the backtest reads
+  the stamp with the floor's own parser), and an expired order leaves the desk's working buys on
+  the next poll. Kalshi reports an order it expired as `canceled`, and the floor finds orders by
+  scanning one page of each status; an expiring order no page shows a minute after its expiry is
+  read by the venue's own id (`GET portfolio/orders/{id}`, on the gateway's allowlist) and
+  recorded as the venue answers, or `expired` if the venue has no such order, so it cannot commit
+  the desk's cash for good. The gateway's caps price a `limit_limit_gtd` body exactly as the
+  same order sent GTC.
 
 ### Strategies: code that trades between sessions
 
@@ -340,9 +360,9 @@ of waiting for settlements: `run_backtest(spec)` steps a clock every `step_minut
 `Kit` call from `ltcm/history.py` as of that moment (settled Kalshi markets open then, priced from
 the last candlestick that had ended, listed at the close they showed while open; Coinbase bars
 that had closed), and books intents in a conservative simulator: takers pay the ask and Kalshi's
-fee, resting bids fill at their limit only on a later candle that trades strictly through them
-(minute candles are fetched once an order rests), post-only crossings are refused, positions
-settle at close, notional is capped at 10x learning size. `fill_model: "touch"` also fills on a
+fee (to the $0.0001), resting bids fill at their limit only on a later candle that trades
+strictly through them and before their stated expiry (minute candles are fetched once an order
+rests), post-only crossings are refused, positions settle at close, notional is capped at 10x learning size. `fill_model: "touch"` also fills on a
 touch or a print: the optimistic bracket for a maker. The report carries trades, P&L, fees,
 return on notional, drawdown, daily P&L, per-trade P&L with a seeded bootstrap CI and its
 `split_report` in and out of sample. Weather is unsupported (no forecast history). Run it with

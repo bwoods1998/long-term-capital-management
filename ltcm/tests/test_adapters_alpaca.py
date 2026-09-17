@@ -259,6 +259,13 @@ class SubmitTests(unittest.TestCase):
         self.assertTrue(proposal.id.startswith("oi-"))
         self.assertLessEqual(len(proposal.id), 128)
 
+    def test_an_expiring_entry_is_refused_before_anything_is_sent(self):
+        # Alpaca has no good-till-date order; sent as plain gtc it would outlive its expiry.
+        client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): ORDER})
+        with self.assertRaises(RejectedOrder):
+            client.submit(intent(order_type="limit", limit_price="230.50", time_in_force="gtc", expires_at="2026-09-15T15:00:00Z"))
+        self.assertEqual(transport.calls, [])
+
     def test_a_venue_rejection_raises_rejected_order(self):
         client, _ = broker(
             {("POST", PAPER_BASE + "/v2/orders"): (422, {}, b'{"message": "insufficient buying power"}')}

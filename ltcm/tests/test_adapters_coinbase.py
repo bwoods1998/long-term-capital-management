@@ -225,6 +225,39 @@ class OrderConfigurationTests(unittest.TestCase):
                     intent(order_type="limit", limit_price="60000", time_in_force=tif)
                 )
 
+    def test_a_limit_with_an_expiry_becomes_limit_limit_gtd_with_an_rfc3339_end_time(self):
+        # Sept 17, 2026: the venue cancels a resting entry at its end time even if the floor stalls.
+        configuration = order_configuration(
+            intent(order_type="limit", limit_price="60000.50", time_in_force="gtc", post_only=True,
+                   expires_at="2026-09-15T14:20:00.000Z")
+        )
+        self.assertEqual(
+            configuration,
+            {"limit_limit_gtd": {"base_size": "0.01", "limit_price": "60000.50", "end_time": "2026-09-15T14:20:00Z", "post_only": True}},
+        )
+
+    def test_an_expiring_entry_carries_no_attached_bracket(self):
+        client, transport, _ = make({("POST", HOST + PREFIX + "/orders"): CREATED})
+        proposal = intent(order_type="limit", limit_price="60000", time_in_force="gtc", target_price="66000",
+                          stop_price="57000", expires_at="2026-09-15T16:00:00.000Z")
+        order = client.submit(proposal)
+        body = transport.last["body"]
+        self.assertIn("limit_limit_gtd", body["order_configuration"])
+        self.assertNotIn("attached_order_configuration", body, "only a GTC order can carry an attached order")
+        self.assertNotIn("bracket", order._raw, "the floor keeps this entry's stop itself")
+
+    def test_a_market_order_with_an_expiry_is_refused(self):
+        market = intent()
+        object.__setattr__(market, "expires_at", "2026-09-15T14:20:00.000Z")
+        with self.assertRaises(RejectedOrder):
+            order_configuration(market)
+
+    def test_an_expired_order_is_terminal(self):
+        client, _, _ = make()
+        order = client.parse_order(dict(ORDER_ROW, status="EXPIRED"))
+        self.assertEqual(order.status, "expired")
+        self.assertTrue(order.terminal)
+
     def test_capabilities_do_not_claim_day_or_ioc(self):
         client, _, _ = make()
         self.assertEqual(client.capabilities(), CAPABILITIES)
