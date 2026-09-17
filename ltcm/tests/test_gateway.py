@@ -1237,3 +1237,37 @@ class UnreadableAnswerTests(unittest.TestCase):
         self.assertEqual(gateway.blocked_desks.get("scholes"), row["order_id"])
         self.assertEqual(seen["alert"][0], "critical")
         self.assertIn("ValueError", seen["reason"])
+
+
+class SoldYesReportedAsBoughtNoTests(SettlementCase):
+    """Sept 17, 2026: Kalshi reported the floor's stop that sold 34 YES at 15 cents as 34 NO bought
+    at 85. The ledger held both legs, the venue neither, and the stop was re-sent every few minutes."""
+
+    def test_the_fill_lands_on_the_leg_its_order_sold(self):
+        self.hold(CPI_YES, quantity="34", price="0.29")
+        stop = OrderIntent.new(desk_id=DESK, instrument=CPI_YES, side="sell", quantity="34", order_type="market",
+                               rationale="floor exit", created_at=NOW, session_id=None,
+                               purpose="exit", exit_reason="stop", exit_of="oi-entry")
+        order = Order.from_intent(stop, venue="kalshi")
+        order.broker_order_id = "01a0acb0-venue"
+        self.gateway._record_order(order, status="accepted", at=NOW)
+        as_reported = Fill(id="072219b3", order_id="01a0acb0-venue", desk_id="", instrument=CPI_NO, side="buy",
+                           quantity=Decimal("34"), price=Decimal("0.85"), fee=Decimal("0.3035"), at="2026-09-14T16:00:00.000Z")
+        self.kalshi._fills.append(as_reported)
+        written = self.gateway.ingest_fills("kalshi")
+        self.assertEqual(len(written), 1)
+        self.assertEqual((written[0]["side"], written[0]["instrument"]["right"], written[0]["price"]), ("sell", "yes", "0.15"))
+        positions = self.ledger.state("2026-09-14T16:01:00.000Z").positions
+        self.assertNotIn(CPI_NO.key, positions)
+        self.assertEqual(positions.get(CPI_YES.key).quantity if CPI_YES.key in positions else Decimal(0), Decimal(0))
+
+    def test_a_fill_already_on_its_orders_leg_is_untouched(self):
+        buy_no = OrderIntent.new(desk_id=DESK, instrument=CPI_NO, side="buy", quantity="10", order_type="limit",
+                                 limit_price="0.90", rationale="favorite", created_at=NOW, session_id="s")
+        order = Order.from_intent(buy_no, venue="kalshi")
+        order.broker_order_id = "vx-no-bid"
+        self.gateway._record_order(order, status="accepted", at=NOW)
+        self.kalshi._fills.append(Fill(id="f-no", order_id="vx-no-bid", desk_id="", instrument=CPI_NO, side="buy",
+                                       quantity=Decimal("10"), price=Decimal("0.90"), fee=Decimal("0"), at="2026-09-14T16:00:00.000Z"))
+        written = self.gateway.ingest_fills("kalshi")
+        self.assertEqual((written[0]["side"], written[0]["instrument"]["right"], written[0]["price"]), ("buy", "no", "0.90"))

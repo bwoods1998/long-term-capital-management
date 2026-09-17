@@ -973,6 +973,7 @@ class Gateway:
                     if fill.id in self._seen_fills:
                         continue
                     extra = self._attribution(fill)
+                    fill = self._on_order_leg(fill, extra)
                     if not fill.desk_id and "desk_id" not in (extra or {}) and self._submitting.get(venue):
                         # Perhaps the order a worker is still waiting on: leave it, and the cursor
                         # before it, for the next sweep.
@@ -1084,6 +1085,32 @@ class Gateway:
         if row.get("intent_id"):
             extra["intent_id"] = row["intent_id"]
         return extra
+
+    def _on_order_leg(self, fill: Fill, extra: "Mapping[str, Any] | None") -> Fill:
+        """The fill on the leg its order traded. Kalshi reports a sale of YES as a purchase of NO
+        at the complement: the floor's stop that sold 34 YES of a Warsh market at 15 cents came
+        back as 34 NO bought at 85 (Sept 17, 2026), so the ledger held both legs, the venue
+        (which nets them) held neither, and the exit book re-sent the stop every few minutes.
+        The two trades are the same money; the order's own leg is the one its ledger holds."""
+        if not extra or not extra.get("order_id") or fill.instrument.asset_class != "event":
+            return fill
+        with self._book_lock:
+            row = dict(self._orders.get(extra["order_id"]) or {})
+        ins = row.get("instrument") or {}
+        if ins.get("asset_class") != "event":
+            return fill
+        want = str(ins.get("right") or "yes").lower()
+        have = str(fill.instrument.right or "yes").lower()
+        market = str(ins.get("market_id") or ins.get("symbol") or "").upper()
+        mine = str(fill.instrument.market_id or fill.instrument.symbol or "").upper()
+        if want == have or (market and mine and market != mine):
+            return fill
+        return dataclasses.replace(
+            fill,
+            instrument=dataclasses.replace(fill.instrument, right=want),
+            side="sell" if fill.side == "buy" else "buy",
+            price=ONE - fill.price,
+        )
 
     def _say_unattributed(self, venue_id: str) -> None:
         """A fill the floor cannot place is recorded as it came, and said once."""
