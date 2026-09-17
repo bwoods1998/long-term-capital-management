@@ -297,7 +297,9 @@ deployed with the `deploy_strategy` tool, which `ltcm/strategies.py` runs every
 risk engine (and, for a live desk, the same critic) under a session id of the form
 `<desk>:<stamp>:strategy:<name>`. Every run that proposes or fails is a public `desk.code_run`
 (purpose `strategy <name>`), idle runs once an hour; the orders are ordinary intents, decisions,
-orders and fills. `kit` reads bars, quotes, `kalshi_series` and `kalshi_market`, and
+orders and fills. `kit` reads bars, quotes, `kalshi_series`, `kalshi_market`, `kalshi_markets`
+(the whole board, which the sandbox caches for up to five minutes) and `kalshi_orderbooks`
+(live books, never cached, up to 300 tickers in three calls a run), and
 `kit.context` carries the clock, the desk's positions and its learning size. A live desk's
 strategy orders are capped at the learning size; `config.json` `strategies` bounds the rest
 (three per desk, five intents a run, two runs a tick, a 300-second floor on the cadence, the
@@ -319,6 +321,69 @@ and code follow the repo until the desk edits its copy or redeploys it as its ow
 `strategy_report` carries each strategy's record from the tape: fills, fees, and the settled
 P&L of the positions it opened (attributed by the `[strategy <name>]` prefix on its rationales).
 
+#### The favorites starter
+
+`kalshi_favorites` (the kalshi family) rests post-only NO bids on liquid longshots across every
+category. Version 2 (Sept 17, 2026) adds five params, each off until a desk's params set it; with
+none set it places, cancels and logs exactly what version 1 did (a unit test pins version 1's
+output, and 3,000 random boards matched it before the change landed).
+
+* `book_pricing`: the listing still screens the band, then `kit.kalshi_orderbooks` prices the
+  bid from the live book: min(best NO bid + tick, NO ask - tick), where NO ask = 1 - best YES bid,
+  so a one-tick spread joins the best bid. The tick is the market's `price_ranges` step at that
+  price, looked up on the YES scale the adapter checks. The band is checked again on the book's
+  YES ask (1 - best NO bid). A market with no book, or a crossed one, gets no bid: there is no
+  fallback to the cached row. `GET /markets/orderbooks` takes `tickers` repeated, 100 a call; a
+  comma-joined list comes back as one empty book, and each side's levels arrive worst price first
+  (both checked live on Sept 17), so `KalshiMarketData.orderbooks` sorts them best first.
+* `max_open_per_cluster`: positions plus resting bids per cluster, where a cluster is the crypto
+  roots (KXBTC, KXETH, KXSOL, KXXRP, KXDOGE), the commodity roots (KXGOLD, KXSILVER, KXBRENT,
+  KXWTI, KXCOPPER) or KXHIGH weather as one group each, anything else its series, split by the
+  hour the market closes. It is the firm's cluster key, copied into the starter because a
+  sandbox cannot import `ltcm/risk.py`. A held market missing from the listing has its close
+  looked up (ten a run); one whose close still cannot be read counts against every hour of its
+  group.
+* `expire_seconds`: each bid carries `expires_at` = min(now + expire_seconds, close - min_hours),
+  so no bid rests into the final `min_hours`. Counted one position per market over 596 settled
+  LIP markets (Aug 15 - Sep 15), maker buys filled in a market's last hour averaged -0.24c a
+  contract with a 10.2% loss rate. A bid that would live under two minutes is not placed, and a
+  resting bid already inside the window is cancelled by the starter too, since a floor that does
+  not send `expires_at` to the venue ignores it.
+* `keep_queue`: a bid older than `requote_seconds` is replaced only once it is no longer the best
+  NO bid; any bid two or more ticks behind is replaced at once. Without a book the age rule stands.
+* `band_exit`: a resting bid is cancelled when the book's YES bid reaches yes_max + 0.02, the
+  market moving against the favorite.
+
+Each v2 run logs a second line: books read, bids that joined the best NO bid, and why candidates
+were skipped and bids cancelled. The build plan's shadow settings (for `mullins-5`, `-6`, `-8`,
+then live after 24 hours if post-only refusals stay near zero, errors stay at zero and at least
+80% of bids sit at the best NO bid) are `{"book_pricing": true, "keep_queue": true, "band_exit":
+true, "max_open_per_cluster": 2, "expire_seconds": 5400, "yes_min": 0.04, "yes_max": 0.10,
+"min_hours": 1.5, "max_hours": 48, "min_volume_24h": 1000, "max_new": 6, "max_open_per_series": 3,
+"requote_seconds": 3600, "pages": 20}`. The same study put maker NO buys at 0.93-0.96 at +1.97c
+[-0.9, +4.5] and at 0.88-0.90 at -0.28c with 11.8% losses, which is why the band stops at YES
+0.10 and `STARTER_VARIANTS` explores `yes_max` 0.07, `min_hours` 3, the taker side at 0.07 and one
+bet per cluster (the 0.10-0.25 band that bought the NO at 0.76 that lost $9.88 was dropped). The
+confidence intervals include zero: the edge is plausible, not proven.
+
+#### The spot quoting starter's fee guard
+
+`spot_quotes` (the crypto family's second starter) bids only when `bid` is true and the spread
+clears a round trip: spread >= 2 x `maker_fee` (0.005, the account's real maker rate) +
+`min_margin` (0.002). Otherwise it builds no bid and cancels any resting one. A held coin is
+offered at the highest of cost x (1 + 2 x maker_fee + min_margin), mid x (1 + spread / 2) and the
+ask plus a tick (the product's `quote_increment` when `kit.products` lists it, never under a
+cent, since prices print to the cent), rounded up to the cent. Coins under `min_price_usd` (1.0)
+are skipped. Sept 17, 2026: the live desks quoted a 1% spread with the offer at cost x 1.01,
+which pays both 0.5% maker fees and keeps nothing, and a 90-day replay of one-minute candles for
+BTC, ETH and SOL lost at every spread from 0.4% to 2% at that fee (-$0.64 a day per $100 lot per
+product at 1%, [-1.04, -0.22]). So the live params are exit-only (`QUOTE_LIVE_PARAMS["crypto"]`
+sets `bid: false`) and the shadow variants quote 1.5%, 2% and 3%. The guard is code, not a param
+default, so a promotion that copies a shadow's settings onto the live desk cannot turn bids back
+on unless the spread clears the fees. Bids come back on only for a shadow variant with at least
+60 finished round trips whose 90% lower bound of net P&L per round trip is above zero, and a
+30-day `scripts/backtest.py` run at 0.5% / 1.2% that agrees.
+
 ### Promotion: the family's record chooses the live desk's settings
 
 `Strategies.promote` runs once an hour (`config.json` `promotion`, defaults in
@@ -338,8 +403,9 @@ the live desk") and an `ops.alert`. `bootstrap` never overwrites a promoted or d
 `ltcm/backtest.py` replays a strategy's `decide(kit, params)` over past days in minutes instead
 of waiting for settlements: `run_backtest(spec)` steps a clock every `step_minutes`, answers every
 `Kit` call from `ltcm/history.py` as of that moment (settled Kalshi markets open then, priced from
-the last candlestick that had ended, listed at the close they showed while open; Coinbase bars
-that had closed), and books intents in a conservative simulator: takers pay the ask and Kalshi's
+the last candlestick that had ended, listed at the close they showed while open;
+`kalshi_orderbooks` is that candle's bid and ask as one level a side with sizes None, since
+history keeps no depth; Coinbase bars that had closed), and books intents in a conservative simulator: takers pay the ask and Kalshi's
 fee, resting bids fill at their limit only on a later candle that trades strictly through them
 (minute candles are fetched once an order rests), post-only crossings are refused, positions
 settle at close, notional is capped at 10x learning size. `fill_model: "touch"` also fills on a

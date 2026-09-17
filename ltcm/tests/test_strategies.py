@@ -440,6 +440,73 @@ class HelperTests(unittest.TestCase):
         self.assertIn("from toolbox import edge as strategy", code)
         self.assertIn("series_hint", code)
 
+    @staticmethod
+    def runner_kit(event=None, crypto=None):
+        """The RUNNER's Kit class over a fake labkit whose composite routes to the given sources."""
+        import sys
+        import types
+        from unittest import mock
+
+        from ltcm.strategies import RUNNER
+
+        code = RUNNER % {"params": json.dumps("{}"), "context": json.dumps(json.dumps({"now": NOW})), "name": "edge", "max_intents": 5}
+        source = code[code.index("class Kit:") : code.index("def _plain(value):")]
+
+        class Composite:
+            def _source(self, name):
+                return {"event": event, "crypto": crypto}.get(name)
+
+        labkit = types.ModuleType("labkit")
+        labkit._data = Composite()
+        namespace = {"CONTEXT": {"now": NOW}}
+        with mock.patch.dict(sys.modules, {"labkit": labkit}):
+            exec(source, namespace)
+            return namespace["Kit"]()
+
+    def test_the_runner_kit_reads_at_most_three_calls_of_a_hundred_books_a_run(self):
+        calls = []
+
+        class Books:
+            def orderbooks(self, tickers):
+                calls.append(list(tickers))
+                return {t: {"no_bid": "0.93"} for t in tickers}
+
+        kit = self.runner_kit(event=Books())
+        books = kit.kalshi_orderbooks([f"KXT-26SEP17-{n}" for n in range(350)] + ["kxt-26sep17-0", ""])
+        self.assertEqual([len(c) for c in calls], [100, 100, 100])
+        self.assertEqual(calls[0][:2], ["KXT-26SEP17-0", "KXT-26SEP17-1"], "upper-cased and de-duplicated")
+        self.assertEqual(len(books), 300)
+        self.assertIn("kalshi_orderbooks: three calls a run; 50 ticker(s) not read", kit.log)
+        self.assertEqual(kit.kalshi_orderbooks(["KXT-26SEP17-400"]), {}, "the run's three calls are spent")
+        self.assertEqual(len(calls), 3)
+
+    def test_the_runner_kit_keeps_the_books_it_read_when_a_call_fails_and_never_raises(self):
+        calls = []
+
+        class Flaky:
+            def orderbooks(self, tickers):
+                calls.append(list(tickers))
+                if len(calls) == 2:
+                    raise RuntimeError("HTTP 429")
+                return {t: {"no_bid": "0.93"} for t in tickers}
+
+        kit = self.runner_kit(event=Flaky())
+        books = kit.kalshi_orderbooks([f"KXT-26SEP17-{n}" for n in range(250)])
+        self.assertEqual((len(calls), len(books)), (2, 100), "no third call after a failure")
+        self.assertIn("kalshi_orderbooks failed: RuntimeError", kit.log)
+        self.assertEqual(self.runner_kit(event=object()).kalshi_orderbooks(["KXT-26SEP17-1"]), {}, "a source without the reader")
+
+    def test_the_runner_kit_lists_products_with_their_quote_increment(self):
+        class Spot:
+            def products(self, product_type="SPOT", limit=None):
+                return [
+                    {"product_id": "BTC-USD", "quote_currency_id": "USD", "base_currency_id": "BTC", "status": "online", "price": "76000", "volume_24h": "100", "quote_increment": "0.01"},
+                    {"product_id": "ABC-USD", "quote_currency_id": "USD", "base_currency_id": "ABC", "status": "online", "price": "5", "volume_24h": "1000000"},
+                ]
+
+        rows = self.runner_kit(crypto=Spot()).products(limit=5)
+        self.assertEqual([(r["symbol"], r["quote_increment"]) for r in rows], [("BTC-USD", 0.01), ("ABC-USD", None)])
+
     def test_the_result_line_is_the_last_marker_and_bad_lines_are_nothing(self):
         self.assertIsNone(_parse_result(""))
         self.assertIsNone(_parse_result("no marker here"))
@@ -610,7 +677,8 @@ class StarterTests(unittest.TestCase):
 
     def test_the_spot_quoting_starter_rests_post_only_and_offers_what_it_holds(self):
         kit = FakeKit()
-        out = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD", "ETH-USD"]})
+        # Sept 17, 2026: bids need a spread that clears two 0.5% maker fees and a margin.
+        out = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD", "ETH-USD"], "spread": 0.015})
         bids = out["intents"]
         self.assertEqual([i["instrument"]["symbol"] for i in bids], ["BTC-USD", "ETH-USD"])
         btc = bids[0]
@@ -621,19 +689,19 @@ class StarterTests(unittest.TestCase):
         # Holding BTC: the bid gives way to a post-only offer over cost for the whole holding.
         kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.0002", "average_cost": "75000"}]
         kit.context["open_orders"] = [{"order_id": "ord-bid", "strategy": "spot_quotes", "symbol": "BTC-USD", "side": "buy", "limit_price": btc["limit_price"], "submitted_at": "2026-09-16T04:09:00Z"}]
-        again = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})
+        again = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"], "spread": 0.015})
         self.assertEqual(again["cancels"], ["ord-bid"], "the bid no longer belongs")
         offer = again["intents"][0]
         self.assertEqual((offer["side"], offer["post_only"], offer["quantity"]), ("sell", True, "0.000200"))
-        self.assertGreater(Decimal(offer["limit_price"]), Decimal("75300"), "over cost by the spread")
+        self.assertGreater(Decimal(offer["limit_price"]), Decimal("75900"), "over cost by both maker fees and the margin")
 
     def test_the_spot_quoting_starter_bids_over_dust_and_never_offers_more_than_it_holds(self):
         kit = FakeKit()
         kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.00000164", "average_cost": "75693.78"}]
-        out = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})
+        out = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"], "spread": 0.015})
         self.assertEqual([i["side"] for i in out["intents"]], ["buy"], "12 cents of BTC is dust: bid as if flat")
         kit.context["positions"] = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.00049996", "average_cost": "75000"}]
-        offer = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"]})["intents"][0]
+        offer = load_starter("spot_quotes").decide(kit, {"symbols": ["BTC-USD"], "spread": 0.015})["intents"][0]
         self.assertEqual((offer["side"], offer["quantity"]), ("sell", "0.000499"), "rounded down, never above the holding")
 
     def test_the_favorites_starter_rests_no_bids_on_liquid_longshots_one_per_event(self):

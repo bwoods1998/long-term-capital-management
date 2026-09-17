@@ -9,6 +9,7 @@ import math
 import tempfile
 import time
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
@@ -164,6 +165,22 @@ class VisibilityTests(unittest.TestCase):
         kit = self.kit(self.open + 120)
         self.assertEqual(kit.kalshi_markets(max_close_hours=0.5), [])
         self.assertEqual(len(kit.kalshi_markets(max_close_hours=1)), 1)
+
+    def test_kalshi_orderbooks_is_the_candle_top_of_book_in_the_floor_kits_shape(self):
+        self.assertIn("kalshi_orderbooks", KIT_CALLS)
+        books = self.kit(self.open + 90).strategy_kit().kalshi_orderbooks(["kxtest-26sep10-t1", "KXTEST-26SEP10-T1", "KXNOPE-26SEP10-A"])
+        self.assertEqual(set(books), {"KXTEST-26SEP10-T1"}, "one book per open market; an unknown ticker has none")
+        book = books["KXTEST-26SEP10-T1"]
+        self.assertEqual(
+            {key: str(book[key]) for key in ("yes_bid", "yes_ask", "no_bid", "no_ask")},
+            {"yes_bid": "0.4000", "yes_ask": "0.4500", "no_bid": "0.5500", "no_ask": "0.6000"},
+            "the same candle the listing row shows",
+        )
+        self.assertEqual((book["yes"], book["no"]), ([(Decimal("0.4000"), None)], [(Decimal("0.5500"), None)]), "one level a side, no depth")
+        self.assertEqual(self.kit(self.open + 30).kalshi_orderbooks(["KXTEST-26SEP10-T1"]), {}, "no candle had ended: no book")
+        self.assertEqual(self.kit(self.open + HOUR).kalshi_orderbooks(["KXTEST-26SEP10-T1"]), {}, "closed: no book")
+        many = [f"KXNOPE-26SEP10-{n}" for n in range(400)] + ["KXTEST-26SEP10-T1"]
+        self.assertEqual(self.kit(self.open + 90).kalshi_orderbooks(many), {}, "300 tickers a run, as on the floor")
 
     def test_an_early_close_is_listed_at_its_scheduled_close_and_trades_until_the_real_one(self):
         open_ts = T0 + 2 * HOUR
@@ -499,6 +516,16 @@ class EndToEndTests(unittest.TestCase):
         )
         self.assertEqual(again["trade_pnls"], report["trade_pnls"], "deterministic")
         self.assertEqual(again["ci95_mean_pnl"], report["ci95_mean_pnl"])
+
+    def test_kalshi_favorites_v2_replays_from_the_backtest_books(self):
+        v2 = {"book_pricing": True, "keep_queue": True, "band_exit": True, "max_open_per_cluster": 2, "expire_seconds": 5400}
+        report = run_backtest(
+            {"strategy": "kalshi_favorites", "params": v2, "start": iso(FAVORITE_START), "end": iso(FAVORITE_END), "step_minutes": 15, "verbose": False},
+            history=favorites_history(),
+        )
+        self.assertEqual(report["errors"], 0, report["notes"])
+        self.assertGreater(report["fills"], 0, "bids priced from the candle book rest and fill")
+        self.assertEqual(report["maker_fills"], report["fills"])
 
     def test_hourly_ranges_runs_on_synthetic_thresholds_and_takes_the_cheap_side(self):
         start, end = T0 + 12 * HOUR, T0 + 16 * HOUR

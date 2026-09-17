@@ -16,7 +16,8 @@ What the kit sees at simulated time t:
   (t - 24h, t]. Nothing a settled row knows about its future (result, final volume) is shown,
   and nothing chooses which markets load by it: a capped listing is a seeded draw spread over
   events (`sample_markets`), never a ranking by lifetime volume (the winning strike of a busy
-  event is the one that traded most by its end).
+  event is the one that traded most by its end). `kalshi_orderbooks` is the same candle's bid
+  and ask as a one-level book on each side, sizes None: history keeps no depth.
 * Only markets listed to close by the listing horizon: settled markets are listed through
   `end + listing_horizon_hours` (48), and not past `settle_lag_hours` (24) before the run began,
   when later settlements may still be missing. A market listed to close later is hidden even
@@ -998,8 +999,10 @@ class DataSet:
 #: The calls a strategy's `kit` carries, as on the floor (`ltcm/strategies.py` RUNNER).
 KIT_CALLS = (
     "say", "bars", "quote", "products", "futures", "kalshi_markets", "kalshi_market", "kalshi_series",
-    "weather", "weather_cities",
+    "kalshi_orderbooks", "weather", "weather_cities",
 )
+#: The floor's kit reads at most three calls of 100 books a run.
+MAX_ORDERBOOKS = 300
 
 
 class StrategyKit:
@@ -1189,6 +1192,42 @@ class BacktestKit:
             return []
         rows = [m.view(self._t) for m in self._data.open_markets(self._t, series=name)]
         return rows[: max(1, min(int(limit), 1000))]
+
+    def kalshi_orderbooks(self, tickers):
+        """Top of book at t for up to 300 open markets, in the floor kit's shape.
+
+        History has candle bid/ask closes and no depth, so each side is one level whose size is
+        None, from the same candle the listing row shows (minute candles where they were
+        fetched). A market with no candle yet, or one not open, has no book. Sept 17, 2026:
+        kalshi_favorites v2 prices from the live book, and a Foundry candidate built on it must
+        replay rather than crash on a missing call."""
+        out: dict[str, dict[str, Any]] = {}
+        seen: set[str] = set()
+        for raw in list(tickers or []):
+            ticker = str(raw or "").strip().upper()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            if len(seen) > MAX_ORDERBOOKS:
+                break
+            market = self._data.markets.get(ticker)
+            if market is None or not market.is_open(self._t) or market.index_at(self._t) < 0:
+                continue
+            yes_bid, yes_ask = market.book(self._t)
+            # A side at 0 or 1 (or missing) is an empty side: no bid rests there.
+            yes_bid = yes_bid if yes_bid is not None and 0.0 < yes_bid < 1.0 else None
+            yes_ask = yes_ask if yes_ask is not None and 0.0 < yes_ask < 1.0 else None
+            no_bid = None if yes_ask is None else 1.0 - yes_ask
+            out[ticker] = {
+                "ticker": ticker,
+                "yes": [] if yes_bid is None else [(_dollars(yes_bid), None)],
+                "no": [] if no_bid is None else [(_dollars(no_bid), None)],
+                "yes_bid": _dollars(yes_bid),
+                "yes_ask": _dollars(yes_ask),
+                "no_bid": _dollars(no_bid),
+                "no_ask": None if yes_bid is None else _dollars(1.0 - yes_bid),
+            }
+        return out
 
     # ----------------------------------------------------------------- weather
     def weather(self, city):
