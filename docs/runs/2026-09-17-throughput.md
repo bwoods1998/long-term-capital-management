@@ -49,6 +49,8 @@ throughput, execution lifecycle and observability. It does not establish profita
   the same execution with bounded transient retries; commands are not blindly resubmitted.
   The authoritative output tail replaces incomplete streamed output. Errors expose categories.
   A `running` wait response with a placeholder zero return code is not accepted as completion.
+  Scheduling excludes quarantined or budget-exhausted boxes instead of assigning candidates
+  that are certain to be refused; an empty available pool yields without deadlocking.
 - Coinbase market-feed frames permit a bounded 16 MiB snapshot; the previous 4 MiB limit
   could reject a full BTC book. User-feed limits are unchanged.
 - Missing retired desks no longer force committee allocation on every tick.
@@ -91,17 +93,24 @@ overfit. No candidate found during this build established an exponential profit 
 
 ## Verification and deployment
 
-- Python: 1,555 tests pass; existing resource/deprecation warnings remain.
+- Python: 1,556 tests pass; existing resource/deprecation warnings remain.
 - Gateway: 78 tests pass; syntax checks pass.
 - Website: 62 tests pass; syntax checks pass, including execution-line presentation.
 - Production event-chain audit checked 59,424 events without a mismatch; deployed Python
   sources matched local sources at 06:25 UTC. Final runtime health is checked separately.
+  A second audit at 06:38 checked 60,018 events with no mismatch and no deployed-source drift.
 - At 06:27 UTC the restarted floor reported no tick error, all three feeds connected and
   seventeen depth books. Cycle 17 successfully measured both Kalshi baselines and proceeded
   to six model candidates. Research memory held seventeen experiments and the result cache
   fifty-two entries (including earlier engine identities); these counts are not profits.
 - A repeated delivery test returned `sent: true, duplicate: true`. The live public events
   endpoint returned HTTP 200 and the frontend projected its execution heartbeat correctly.
+- A live read-only Sail probe deliberately dropped streamed output and its exit event. The
+  client recovered the authoritative output and exit zero with one dispatch and one wait call.
+- The 06:34 restart restored all feeds and seventeen depth books. Warm crypto replays returned
+  in approximately fourteen seconds, and the public model-work heartbeat appeared at 06:35.
+  Interrupted older runs temporarily reduced available research capacity; their leases were
+  preserved, not cleared by guesswork.
 - Gateway version: `1aa549d0-65cc-477e-8ccc-c00dd2f00376`.
 - Website version: `c8c13e9b-17c8-42e0-8689-e836d3eeb552`.
 

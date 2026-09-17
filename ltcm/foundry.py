@@ -990,10 +990,15 @@ class Foundry:
         summary["window"] = [window["start"], window["end"], window["step_minutes"]]
 
         workers = max(1, int(cfg["sandboxes"]))
+        ready = getattr(manager, "ready_for_run", lambda desk_id: True)
+        available = [f"foundry-{index}" for index in range(workers) if ready(f"foundry-{index}")]
+        if not available:
+            return {**summary, "skipped": "research sandboxes are awaiting execution confirmation or daily capacity"}
+        workers = len(available)
         self.progress("test", f"Testing {len(baselines)} baselines and {len(variants)} parameter variants across {workers} Sail sandboxes", cycle=cycle, family=family, strategy=subject)
         ids: "queue.Queue[str]" = queue.Queue()
-        for index in range(workers):
-            ids.put(f"foundry-{index}")
+        for desk_id in available:
+            ids.put(desk_id)
         code: list[dict[str, Any]] = []
         asked: dict[str, Any] = {"asked": 0, "valid": 0, "rejected": [], "skipped": None, "cost_usd": "0"}
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="foundry") as pool:

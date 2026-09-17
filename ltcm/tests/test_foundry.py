@@ -358,6 +358,16 @@ class CandidateTests(FoundryCase):
 
 # --------------------------------------------------------------------------- backtests and selection
 class BacktestTests(FoundryCase):
+    def test_quarantined_workers_do_not_consume_candidates_or_deadlock_empty_pool(self):
+        self.manager.ready_for_run = lambda desk_id: desk_id == "foundry-1"
+        summary = self.foundry(sandboxes=3, code_candidates=0).cycle(NOW)
+        self.assertTrue(summary["backtested"])
+        self.assertEqual({desk for desk, _, _ in self.manager.backtests}, {"foundry-1"})
+        self.manager.ready_for_run = lambda desk_id: False
+        before = len(self.manager.backtests)
+        self.assertIn("awaiting execution confirmation", self.foundry().cycle(NOW)["skipped"])
+        self.assertEqual(len(self.manager.backtests), before)
+
     def test_a_slow_repair_does_not_hold_back_another_valid_candidate(self):
         repair_started, release = threading.Event(), threading.Event()
         class MixedProvider(Provider):

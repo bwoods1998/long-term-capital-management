@@ -361,6 +361,12 @@ class SandboxManager:
     def box_for(self, desk_id: str) -> str | None:
         return (self.state().get("boxes") or {}).get(desk_id)
 
+    def ready_for_run(self, desk_id: str) -> bool:
+        """Read-only scheduling hint; run() rechecks under its per-desk execution lock."""
+        pending = float((self.state().get("uncertain_until") or {}).get(desk_id) or 0)
+        daily, _ = self.limits_for(desk_id)
+        return float(self.clock()) >= pending and self.seconds_today(desk_id) < daily
+
     def _today(self) -> str:
         return time.strftime("%Y-%m-%d", time.gmtime(float(self.clock())))
 
