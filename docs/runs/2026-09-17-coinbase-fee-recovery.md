@@ -76,5 +76,14 @@ python scripts/backtest.py --strategy hourly_reversion \
 - Public event stream confirmed two enabled live Coinbase strategies, two paused
   entry strategies and sixteen enabled shadow strategies. The summary checkpoint
   was still older; event-stream freshness and summary freshness differ.
-- Final evidence-epoch deployment verification is recorded below when the
-  supervised restart completes.
+- Supervised final restart completed at **15:34:38 UTC**, with no kill switch or
+  stop latch left engaged. At 15:36:06 UTC the live and shadow crypto house rows
+  carried the new code hashes and fresh forward-evidence epochs. All production
+  runtime Python hashes matched the checkout.
+- At **15:36:24.993 UTC**, crypto Foundry cycle 52 published its authenticated
+  **0.5% maker / 0.9% taker** snapshot. It launched two baselines, eighteen parameter
+  candidates and six code-generation jobs; this confirms the repaired research
+  path, not qualification of a winner.
+- As of the 15:37 UTC review the website summary checkpoint still showed the older
+  15:18 state, while the public event stream and private runtime state were current.
+  Summary publication latency is an outstanding separate operational issue.
