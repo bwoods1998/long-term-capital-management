@@ -170,7 +170,8 @@
       "min_margin"
     ],
     "family_window_days": {
-      "kalshi": 10
+      "kalshi": 10,
+      "crypto": 21
     },
     "family_max_markets": {
       "kalshi": 8000

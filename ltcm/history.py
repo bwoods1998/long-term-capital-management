@@ -279,7 +279,10 @@ class History:
         transport: Any = None,
         *,
         cache_dir: str | Path | None = None,
-        cache_cap_bytes: int = 128 * 1024 * 1024,
+        # Sept 17, 2026: a ten-day board replay lists ~40 six-hour chunks of up to 20,000 markets;
+        # at 128 MB the cache evicted the front of the window while reading the back, so every
+        # cycle refetched. Two gigabytes holds a month of the board on a sandbox's 32 GB disk.
+        cache_cap_bytes: int = 2 * 1024 * 1024 * 1024,
         clock: Callable[[], float] = time.time,
         min_interval: float = 0.15,
         sleep: Callable[[float], None] = time.sleep,

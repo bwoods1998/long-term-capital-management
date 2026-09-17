@@ -90,7 +90,7 @@ DEFAULTS: dict[str, Any] = {
     # Sept 17, 2026: five days gave the leading Kalshi candidates 2-8 positions against the 60
     # the gate asks for, so nothing ever qualified. A family may replay a longer window and see
     # more of the board; the sandboxes' history cache keeps the cost to the first cycle.
-    "family_window_days": {"kalshi": 10},
+    "family_window_days": {"kalshi": 10, "crypto": 21},
     "family_max_markets": {"kalshi": 8000},
     "step_minutes": 15,
     "family_step_minutes": {"ranges": 5},
