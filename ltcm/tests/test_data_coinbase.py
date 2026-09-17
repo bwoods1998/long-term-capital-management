@@ -173,3 +173,13 @@ class CandleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FuturesFieldsTests(unittest.TestCase):
+    def test_a_dated_contract_is_not_a_perpetual_even_with_perpetual_details(self):
+        from ltcm.data.coinbase import CoinbaseMarketData
+        dated = CoinbaseMarketData.parse_product({"product_id": "BIT-25SEP26-CDE", "future_product_details": {"contract_size": "0.01", "contract_expiry": "2026-09-25T16:00:00Z", "perpetual_details": {"open_interest": "1"}, "display_name": "BTC 25 SEP 26"}})
+        perp = CoinbaseMarketData.parse_product({"product_id": "BIP-20DEC30-CDE", "future_product_details": {"contract_size": "0.01", "contract_expiry": "2089-12-30T16:00:00Z", "perpetual_details": {}, "display_name": "Bitcoin Perpetual"}})
+        index = CoinbaseMarketData.parse_product({"product_id": "US5-19DEC30-CDE", "future_product_details": {"contract_size": "1", "contract_expiry": "2030-12-19T16:00:00Z", "contract_display_name": "US 500 PERP"}})
+        self.assertEqual((dated["perpetual"], perp["perpetual"], index["perpetual"]), (False, True, True))
+        self.assertEqual(str(dated["contract_size"]), "0.01")

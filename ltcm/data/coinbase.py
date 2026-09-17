@@ -79,7 +79,10 @@ def _future_fields(details: Any) -> dict[str, Any]:
         "contract_size": decimal_or_none(details.get("contract_size")),
         "contract_expiry_type": details.get("contract_expiry_type"),
         "funding_rate": decimal_or_none(details.get("funding_rate")),
-        "perpetual": bool(details.get("perpetual_details")) or str(details.get("contract_expiry") or "").startswith(("2089", "2099")),
+        # Sept 17, 2026: the venue sends `perpetual_details` on dated contracts too, so the name
+        # and the far expiry (2089 for the crypto perps, 2030 for the index ones) tell them apart.
+        "perpetual": "PERP" in str(details.get("display_name") or details.get("contract_display_name") or "").upper()
+        or str(details.get("contract_expiry") or "").startswith(("2089", "2099")),
     }
 
 

@@ -17,7 +17,7 @@ stop, all kept by the floor. The entry must clear the round trip's fees, the spr
 
 Params: contracts, lookback, interval, z_entry, stop_pct, holding_hours, max_intents,
 min_margin, min_contract_usd, max_contract_usd, max_position_pct, fee_per_contract (a floor;
-the context's rate is used when higher), symbols (a list to restrict the universe).
+the context's rate is used when higher), symbols (a list to restrict the universe), min_bars.
 A forecast clearing the hurdle is not proof of edge: the record decides size.
 """
 
@@ -38,6 +38,9 @@ DEFAULTS = {
     "fee_per_contract": 0.20,
     "symbols": None,
     "min_volume_usd": 250000.0,
+    # Thin contracts print fewer candles than the window asks for: judge on what there is once
+    # `min_bars` closes exist, and never on fewer.
+    "min_bars": 12,
 }
 
 
@@ -109,10 +112,10 @@ def decide(kit, params):
             continue
         bars = kit.bars(symbol, str(p["interval"]), lookback + 1, "future") or []
         closes = [_num(b.get("close")) for b in bars if _num(b.get("close"))]
-        if len(closes) < lookback:
+        if len(closes) < max(8, int(_num(p.get("min_bars"), 12) or 12)):
             kit.say(f"{symbol}: only {len(closes)} bars")
             continue
-        window = closes[-lookback:]
+        window = closes[-min(lookback, len(closes)):]
         mean = sum(window) / len(window)
         sd = math.sqrt(sum((c - mean) ** 2 for c in window) / max(1, len(window) - 1))
         if sd <= 0:

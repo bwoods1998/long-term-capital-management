@@ -92,3 +92,12 @@ class PerpReversionTests(unittest.TestCase):
                       quotes={"ETP-20DEC30-CDE": {"bid": "2459.5", "ask": "2460"}})
         self.assertEqual(load().decide(kit, {})["intents"], [])
         check_code((STARTERS_DIR / "perp_reversion.py").read_text(encoding="utf-8"))
+
+
+class ThinContractTests(unittest.TestCase):
+    def test_a_thin_contract_is_judged_on_the_bars_it_has_once_there_are_twelve(self):
+        spike = [2400.0] * 19 + [2460.0]  # 20 closes, under the 36 the window asks for
+        kit = PerpKit({"ETP-20DEC30-CDE": spike, "AVP-20DEC30-CDE": [7.55] * 5}, quotes={"ETP-20DEC30-CDE": {"bid": "2459.5", "ask": "2460"}})
+        out = load().decide(kit, {"max_intents": 2})
+        self.assertEqual([i["instrument"]["symbol"] for i in out["intents"]], ["ETP-20DEC30-CDE"])
+        self.assertTrue(any("AVP-20DEC30-CDE: only 5 bars" in line for line in kit.log), kit.log)
