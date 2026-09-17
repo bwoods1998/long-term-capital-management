@@ -90,6 +90,50 @@ class OrderIntentTests(unittest.TestCase):
         self.assertEqual(limit.notional_hint, Decimal("21.0"))
 
 
+class OrderExpiryTests(unittest.TestCase):
+    """Sept 17, 2026: a resting entry may name when the venue itself cancels it."""
+
+    NOW = "2026-09-17T01:00:00.000Z"
+    BTC = Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD")
+
+    def entry(self, **kwargs):
+        options = dict(desk_id="d", instrument=self.BTC, side="buy", quantity="0.001", order_type="limit",
+                       limit_price="60000", time_in_force="gtc", rationale="r", created_at=self.NOW, session_id="s")
+        options.update(kwargs)
+        return OrderIntent.new(**options)
+
+    def test_an_expiry_round_trips_and_is_not_part_of_the_id(self):
+        expiring = self.entry(expires_at="2026-09-17T01:20:00.000Z")
+        self.assertEqual(expiring.expires_at, "2026-09-17T01:20:00.000Z")
+        self.assertEqual(expiring.to_dict()["expires_at"], "2026-09-17T01:20:00.000Z")
+        self.assertEqual(OrderIntent.from_dict(expiring.to_dict()), expiring)
+        self.assertEqual(expiring.id, self.entry(expires_at="2026-09-17T02:00:00.000Z").id)
+        self.assertEqual(expiring.id, self.entry().id)
+        self.assertNotIn("expires_at", self.entry().to_dict())
+
+    def test_the_window_is_two_minutes_to_two_days_from_created_at(self):
+        self.assertIsNotNone(self.entry(expires_at="2026-09-17T01:02:00.000Z"))
+        self.assertIsNotNone(self.entry(expires_at="2026-09-19T01:00:00Z"))
+        for stamp in ("2026-09-17T01:01:59.999Z", "2026-09-19T01:00:01Z", "2026-09-17T00:59:00Z"):
+            with self.assertRaises(ValueError, msg=stamp):
+                self.entry(expires_at=stamp)
+
+    def test_only_a_resting_gtc_limit_entry_can_expire(self):
+        stamp = "2026-09-17T01:20:00Z"
+        with self.assertRaises(ValueError):
+            self.entry(order_type="market", limit_price=None, expires_at=stamp)
+        for tif in ("day", "ioc"):
+            with self.assertRaises(ValueError, msg=tif):
+                self.entry(time_in_force=tif, expires_at=stamp)
+        with self.assertRaises(ValueError):
+            self.entry(side="sell", purpose="exit", exit_reason="stop", exit_of="oi-x", expires_at=stamp)
+        for bad in ("soon", "2026-09-17", 1789606800):
+            with self.assertRaises(ValueError, msg=bad):
+                self.entry(expires_at=bad)
+        with self.assertRaises(ValueError):
+            self.entry(created_at="t", expires_at=stamp)
+
+
 class OrderAndFillTests(unittest.TestCase):
     def test_order_from_intent(self):
         intent = OrderIntent.new(desk_id="d", instrument=equity(), side="buy", quantity="3", rationale="r", created_at="t")

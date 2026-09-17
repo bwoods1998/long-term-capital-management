@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from ltcm.broker import Instrument, OrderIntent, RejectedOrder
-from ltcm.sim import FeeModel, SHADOW_CAPABILITIES, ShadowBook, ceil_cents
+from ltcm.sim import FeeModel, SHADOW_CAPABILITIES, ShadowBook, ceil_centicents, ceil_cents
 from ltcm.tests.fakes import Clock, ScriptedMarketData
 
 OPEN = "2026-09-15T14:00:00Z"  # inside the 13:30-20:00Z session of Tuesday 15 September 2026
@@ -230,6 +230,44 @@ class LimitOrderTests(SimTestCase):
         )
         self.assertEqual(order._raw["expires_at"], "2026-09-16T00:00:00Z")
 
+    def test_an_entry_with_an_expiry_expires_then_and_stops_committing_cash(self):
+        # Sept 17, 2026: a resting bid names when the venue cancels it, so a stalled floor does not
+        # leave it working. The shadow book honours the same moment.
+        cpi = self.make_broker("expiry.db", market_venue="kalshi")
+        self.addCleanup(cpi.close)
+        self.book(CPI_NO, bid="0.88", ask="0.92", last="0.90")
+        order = cpi.submit(
+            intent(CPI_NO, quantity="10", order_type="limit", limit_price="0.89", time_in_force="gtc",
+                   post_only=True, expires_at="2026-09-15T14:20:00.000Z")
+        )
+        self.assertEqual(order.status, "accepted")
+        self.assertEqual(order._raw["expires_at"], "2026-09-15T14:20:00Z", "stored in the book's own stamp form")
+
+        self.clock.set("2026-09-15T14:19:59Z")
+        self.assertEqual(cpi.tick(), [])
+        self.clock.set("2026-09-15T14:20:00Z")
+        changed = cpi.tick()
+        self.assertEqual([(o.status, o.reason) for o in changed], [("expired", "expired at 2026-09-15T14:20:00Z")])
+        self.assertTrue(cpi.get_order(order.id).terminal)
+        self.assertEqual(cpi.open_orders(), [], "an expired bid is no longer a working buy")
+        self.assertEqual(cpi.cash, Decimal("100000"))
+
+    def test_a_print_after_the_expiry_does_not_fill_the_order(self):
+        cpi = self.make_broker("expiry.db", market_venue="kalshi")
+        self.addCleanup(cpi.close)
+        self.book(CPI_NO, bid="0.88", ask="0.92", last="0.90")
+        order = cpi.submit(
+            intent(CPI_NO, quantity="10", order_type="limit", limit_price="0.89", time_in_force="gtc",
+                   expires_at="2026-09-15T14:20:00.000Z")
+        )
+        # A taker buying YES at 0.12 sells NO at 0.88, through the 0.89 bid. A second after the
+        # expiry the venue has already cancelled the bid, so the print fills nothing.
+        self.assertEqual(cpi.on_trade("shadow", "KXCPI-26SEP-T3.0", "0.12", "10", "yes", now="2026-09-15T14:20:01Z"), [])
+        self.assertEqual(cpi.fills(), [])
+        self.assertEqual(cpi.get_order(order.id).status, "accepted", "the tick's sweep marks it, not the print")
+        self.assertEqual([o.status for o in cpi.tick("2026-09-15T14:20:01Z")], ["expired"])
+        self.assertEqual(cpi.get_order(order.id).filled_quantity, Decimal("0"))
+
     def test_a_gtc_order_survives_days_of_ticks(self):
         self.book(ask="101")
         order = self.broker.submit(
@@ -328,17 +366,22 @@ class FeeTests(unittest.TestCase):
         self.assertEqual(fee, Decimal("80.00"))  # 0.25% of 32000
 
     def test_kalshi_uses_the_published_quadratic(self):
-        # ceil to the cent of 0.07 * C * P * (1 - P)
-        self.assertEqual(self.fees.kalshi_fee(Decimal("10"), Decimal("0.40")), Decimal("0.17"))
-        self.assertEqual(self.fees.kalshi_fee(Decimal("1"), Decimal("0.50")), Decimal("0.02"))
-        self.assertEqual(self.fees.kalshi_fee(Decimal("100"), Decimal("0.99")), Decimal("0.07"))
-        self.assertEqual(self.fees.kalshi_fee(Decimal("10"), Decimal("1")), Decimal("0.00"))
-        self.assertEqual(self.fees.fee(CPI, "buy", Decimal("10"), Decimal("0.40")), Decimal("0.17"))
+        # 0.07 * C * P * (1 - P), rounded up to $0.0001
+        self.assertEqual(self.fees.kalshi_fee(Decimal("10"), Decimal("0.40")), Decimal("0.1680"))
+        self.assertEqual(self.fees.kalshi_fee(Decimal("1"), Decimal("0.50")), Decimal("0.0175"))
+        self.assertEqual(self.fees.kalshi_fee(Decimal("100"), Decimal("0.99")), Decimal("0.0693"))
+        self.assertEqual(self.fees.kalshi_fee(Decimal("10"), Decimal("1")), Decimal("0.0000"))
+        self.assertEqual(self.fees.fee(CPI, "buy", Decimal("10"), Decimal("0.40")), Decimal("0.1680"))
 
     def test_the_fee_always_rounds_up_to_the_next_cent(self):
         self.assertEqual(ceil_cents(Decimal("0.0001")), Decimal("0.01"))
         self.assertEqual(ceil_cents(Decimal("0.17")), Decimal("0.17"))
         self.assertEqual(ceil_cents(Decimal("0.171")), Decimal("0.18"))
+
+    def test_a_kalshi_fee_rounds_up_to_the_next_hundredth_of_a_cent(self):
+        self.assertEqual(ceil_centicents(Decimal("0.001372")), Decimal("0.0014"))
+        self.assertEqual(ceil_centicents(Decimal("0.3849")), Decimal("0.3849"))
+        self.assertEqual(ceil_centicents(Decimal("0.38490001")), Decimal("0.3850"))
 
     def test_a_price_outside_the_dollar_is_refused(self):
         with self.assertRaises(ValueError):
@@ -384,15 +427,15 @@ class MakerFeeTests(SimTestCase):
         taker = broker.submit(intent(CPI_NO, quantity="10", order_type="limit", limit_price="0.74", time_in_force="gtc"))
         self.assertEqual(taker.status, "filled")
         taker_fill = [f for f in broker.fills() if f.order_id == taker.id][0]
-        self.assertEqual(taker_fill.fee, Decimal("0.14"), "0.07 x 10 x 0.74 x 0.26 rounded up to the cent")
+        self.assertEqual(taker_fill.fee, Decimal("0.1347"), "0.07 x 10 x 0.74 x 0.26 rounded up to $0.0001")
         # The market comes down to the resting bid: it fills at its own price, and pays nothing.
         self.book(CPI_NO, bid="0.66", ask="0.70", last="0.69")
         self.clock.advance(60)
         broker.tick()
         rested_fill = [f for f in broker.fills() if f.order_id == resting.id][0]
-        # KXCPI is one of the series that charge makers: ceil(0.0175 x 10 x 0.70 x 0.30) = $0.04.
-        # A series that does not (most of the board) charges the resting fill nothing.
-        self.assertEqual((rested_fill.price, rested_fill.fee), (Decimal("0.70"), Decimal("0.04")))
+        # KXCPI is one of the series that charge makers: 0.0175 x 10 x 0.70 x 0.30 = 0.03675,
+        # $0.0368 rounded up. A series that does not (most of the board) charges nothing.
+        self.assertEqual((rested_fill.price, rested_fill.fee), (Decimal("0.70"), Decimal("0.0368")))
 
 
 class SettlementTests(SimTestCase):
@@ -414,7 +457,7 @@ class SettlementTests(SimTestCase):
         self.assertEqual(settled[0].side, "sell")
         self.assertEqual(self.broker.cash, self.entry + Decimal("10"))
         self.assertEqual(self.broker.positions(), [])
-        self.assertEqual(self.broker.realized_pnl, Decimal("6.00") - Decimal("0.17"))
+        self.assertEqual(self.broker.realized_pnl, Decimal("6.00") - Decimal("0.168"))
 
     def test_a_losing_market_pays_nothing_and_closes_the_position(self):
         self.clock.advance(3600)
@@ -422,7 +465,7 @@ class SettlementTests(SimTestCase):
         self.assertEqual(settled[0].price, Decimal("0"))
         self.assertEqual(self.broker.cash, self.entry)
         self.assertEqual(self.broker.positions(), [])
-        self.assertEqual(self.broker.realized_pnl, Decimal("-4.00") - Decimal("0.17"))
+        self.assertEqual(self.broker.realized_pnl, Decimal("-4.00") - Decimal("0.168"))
 
     def test_settlement_cancels_resting_orders_on_that_market(self):
         resting = self.broker.submit(
@@ -466,14 +509,14 @@ class NoLegSettlementTests(SimTestCase):
         self.assertEqual(settled[0].side, "sell")
         self.assertEqual(self.broker.cash, self.entry + Decimal("10"))
         self.assertEqual(self.broker.positions(), [])
-        self.assertEqual(self.broker.realized_pnl, Decimal("4.00") - Decimal("0.17"))
+        self.assertEqual(self.broker.realized_pnl, Decimal("4.00") - Decimal("0.168"))
 
     def test_a_no_position_is_paid_nothing_when_the_market_resolves_yes(self):
         self.clock.advance(3600)
         settled = self.broker.settle_event("KXCPI-26SEP-T3.0", "1")
         self.assertEqual(settled[0].price, Decimal("0"))
         self.assertEqual(self.broker.cash, self.entry)
-        self.assertEqual(self.broker.realized_pnl, Decimal("-6.00") - Decimal("0.17"))
+        self.assertEqual(self.broker.realized_pnl, Decimal("-6.00") - Decimal("0.168"))
 
     def test_both_legs_of_one_market_settle_to_a_dollar_between_them(self):
         self.book(CPI, bid="0.39", ask="0.40", last="0.40")
@@ -616,7 +659,9 @@ class TakerModelTests(SimTestCase):
         self.book(self.BTC, bid="100", ask="101", last="100.5")
         self.broker = self.make_broker("coinbase.db", market_venue="coinbase")
         self.addCleanup(self.broker.close)
-        bid = self.broker.submit(intent(self.BTC, quantity="1", order_type="limit", limit_price="99"))
+        # gtc, as the floor sends crypto: a day order placed on the 15th ended at midnight, and
+        # a print on the 16th no longer fills it.
+        bid = self.broker.submit(intent(self.BTC, quantity="1", order_type="limit", limit_price="99", time_in_force="gtc"))
         self.assertEqual(bid.status, "accepted")
         at = "2026-09-16T13:21:53Z"
         self.broker.on_trade("coinbase", "BTC-USD", "98.5", "0.25", "sell", now=at)
@@ -649,8 +694,8 @@ class KalshiSeriesFeeTests(unittest.TestCase):
         fees = FeeModel.for_venue("kalshi")
         game = Instrument("event", "KXNHLGAME-26OCT01BOSNYR-BOS", "kalshi", market_id="KXNHLGAME-26OCT01BOSNYR-BOS", right="yes")
         weather = Instrument("event", "KXHIGHNY-26SEP17-B77.5", "kalshi", market_id="KXHIGHNY-26SEP17-B77.5", right="no")
-        # ceil(0.0175 x 100 x 0.5 x 0.5) = ceil(0.4375) cents -> $0.44
-        self.assertEqual(fees.fee(game, "buy", Decimal("100"), Decimal("0.5"), liquidity="maker"), Decimal("0.44"))
+        # 0.0175 x 100 x 0.5 x 0.5 = $0.4375, already on the $0.0001 grid
+        self.assertEqual(fees.fee(game, "buy", Decimal("100"), Decimal("0.5"), liquidity="maker"), Decimal("0.4375"))
         self.assertEqual(fees.fee(weather, "buy", Decimal("100"), Decimal("0.5"), liquidity="maker"), Decimal("0"))
         self.assertEqual(fees.fee(weather, "buy", Decimal("100"), Decimal("0.5"), liquidity="taker"), Decimal("1.75"))
 
@@ -658,10 +703,68 @@ class KalshiSeriesFeeTests(unittest.TestCase):
         schedule = {"KXHALF": {"maker": False, "multiplier": 0.5}}
         fees = FeeModel(event_fee_rate=Decimal("0.07"), kalshi_series=schedule)
         half = Instrument("event", "KXHALF-26SEP17-X", "kalshi", market_id="KXHALF-26SEP17-X", right="yes")
-        self.assertEqual(fees.fee(half, "buy", Decimal("100"), Decimal("0.5"), liquidity="taker"), Decimal("0.88"))
+        self.assertEqual(fees.fee(half, "buy", Decimal("100"), Decimal("0.5"), liquidity="taker"), Decimal("0.8750"))
 
     def test_coinbase_fees_are_what_the_account_paid(self):
         fees = FeeModel.for_venue("coinbase")
         btc = Instrument("crypto", "BTC-USD", "coinbase")
         self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="maker"), Decimal("0.13"))
         self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="taker"), Decimal("0.30"))
+
+
+class KalshiFeeRoundingTests(SimTestCase):
+    """Sept 17, 2026: Kalshi charges its fee to the $0.0001, rounded up per order.
+
+    Every fixture is a live fill from the Sept 16 tape. The shadow book rounded each fee up to
+    the cent, so a 1-lot at 0.02 paid $0.01 in shadow and $0.0014 at the venue."""
+
+    KXFED = Instrument("event", "KXFEDDECISION-26DEC-H25", "kalshi", market_id="KXFEDDECISION-26DEC-H25", right="no")
+    WEATHER = Instrument("event", "KXHIGHAUS-26SEP17-T102", "kalshi", market_id="KXHIGHAUS-26SEP17-T102", right="yes")
+    LAX = Instrument("event", "KXHIGHLAX-26SEP16-B77.5", "kalshi", market_id="KXHIGHLAX-26SEP16-B77.5", right="yes")
+
+    def setUp(self):
+        super().setUp()
+        self.fees = FeeModel.for_venue("kalshi")
+
+    def test_taker_fills_from_the_tape(self):
+        self.assertEqual(self.fees.fee(self.WEATHER, "buy", Decimal("1"), Decimal("0.02")), Decimal("0.0014"))
+        self.assertEqual(self.fees.fee(self.LAX, "buy", Decimal("22"), Decimal("0.51")), Decimal("0.3849"))
+        self.assertEqual(self.fees.fee(self.KXFED, "buy", Decimal("60"), Decimal("0.31")), Decimal("0.8984"))
+
+    def test_a_kxfed_maker_fill_pays_what_its_order_rounded_total_grows_by(self):
+        # Order oi-...3a43d1a1 took 17.64 and 9 contracts at 0.30, then rested and filled as a
+        # maker in four pieces. Each fill paid ceil(running fee) less what the order had paid.
+        price, maker = Decimal("0.30"), self.fees.event_maker_fee_rate
+        fills = [("17.64", None, "0.2594"), ("9", None, "0.1323"), ("34.97", maker, "0.1285"),
+                 ("1.39", maker, "0.0051"), ("4.15", maker, "0.0152"), ("72.85", maker, "0.2678")]
+        accrued = Decimal(0)
+        for count, rate, paid in fills:
+            fee = self.fees.kalshi_fee(Decimal(count), price, rate=rate, accrued=accrued)
+            self.assertEqual(fee, Decimal(paid), count)
+            accrued += self.fees.kalshi_raw_fee(Decimal(count), price, rate=rate)
+        # The same 34.97 filled alone rounds to one more hundredth of a cent.
+        self.assertEqual(self.fees.fee(self.KXFED, "buy", Decimal("34.97"), price, liquidity="maker"), Decimal("0.1286"))
+
+    def test_a_sweep_in_pieces_pays_the_rounded_total_of_its_order(self):
+        # Order oi-...ae317d26: 161 YES at 0.02 in nine pieces paid $0.2209 in all.
+        pieces, accrued, paid = ("4", "25", "10", "4", "5", "1", "2", "100", "10"), Decimal(0), Decimal(0)
+        for count in pieces:
+            paid += self.fees.kalshi_fee(Decimal(count), Decimal("0.02"), accrued=accrued)
+            accrued += self.fees.kalshi_raw_fee(Decimal(count), Decimal("0.02"))
+        self.assertEqual(paid, Decimal("0.2209"))
+        rounded_each = sum(self.fees.kalshi_fee(Decimal(count), Decimal("0.02")) for count in pieces)
+        self.assertEqual(rounded_each, Decimal("0.2212"))
+
+    def test_the_shadow_books_resting_order_filled_in_pieces_pays_its_orders_rounded_fee(self):
+        broker = self.make_broker("kalshi.db", market_venue="kalshi")
+        self.addCleanup(broker.close)
+        self.book(self.KXFED, bid="0.29", ask="0.32", last="0.30")
+        order = broker.submit(intent(self.KXFED, quantity="4", order_type="limit", limit_price="0.30", time_in_force="gtc", post_only=True))
+        self.assertEqual(order.status, "accepted")
+        for _ in range(4):  # a taker buying YES at 0.70 sells NO at 0.30, one contract a print
+            broker.on_trade("kalshi", "KXFEDDECISION-26DEC-H25", "0.70", "1", "yes")
+        fees = [f.fee for f in broker.fills() if f.order_id == order.id]
+        # 0.0175 x 0.30 x 0.70 = $0.003675 a contract: $0.0147 for four, where rounding each
+        # print alone would charge $0.0148.
+        self.assertEqual(sorted(fees), [Decimal("0.0036"), Decimal("0.0037"), Decimal("0.0037"), Decimal("0.0037")])
+        self.assertEqual(broker.get_order(order.id).fees, Decimal("0.0147"))

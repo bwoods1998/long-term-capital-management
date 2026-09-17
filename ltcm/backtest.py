@@ -35,10 +35,10 @@ caller passes `trusted_code=True`.
 The simulator (fill_model "conservative"):
 
 * Kalshi buy of leg L at p, not post-only: fills at once at the leg's ask if p >= ask (YES ask
-  = yes_ask, NO ask = 1 - yes_bid), paying the taker fee ceil(0.07 p (1 - p) x 100) / 100 per
-  contract; else it rests. The book it is judged on is never an hourly close more than five
-  minutes old: such a market's minute candles are fetched first, and an order that would cross
-  a stale book with no minute history behind it is refused. Post-only orders that would cross are rejected, as the venue does.
+  = yes_ask, NO ask = 1 - yes_bid), paying the taker fee 0.07 x C x p x (1 - p) rounded up to
+  $0.0001 for the fill, as the venue charges it; else it rests. The book it is judged on is
+  never an hourly close more than five minutes old: such a market's minute candles are fetched
+  first, and an order that would cross a stale book with no minute history behind it is refused. Post-only orders that would cross are rejected, as the venue does.
   A resting bid fills at its limit, fee 0, only on a candle that ended after it was placed and
   shows the other side trading strictly through it (YES bid p: yes_ask_low < p; NO bid q:
   yes_bid_high > 1 - q). A candle that began before the order existed is judged on its close,
@@ -49,6 +49,9 @@ The simulator (fill_model "conservative"):
 * Coinbase: marketable non-post-only limits take at the quote with the taker fee (0.60%);
   otherwise the order rests and fills at its limit on a later five-minute candle whose low
   (buy) / high (sell) trades strictly through it, with the maker fee (0.25%). Spot is long only.
+* An intent's venue-side expiry (`expire_after_seconds`, or `expires_at` clamped to 120 s..48 h,
+  read as the floor reads it) cancels a resting order on either venue at that moment; a candle
+  that ended after it cannot fill the order.
 * The floor's exit plans are honoured at step resolution: a stop or target on the exit-side
   mark, and for crypto the holding-period time stop, close the position at the bid as a taker.
 * Each intent's notional is capped at 10x `learning_usd`; at most 5 intents and 20 cancels a
@@ -85,10 +88,11 @@ import time
 import traceback
 import types
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from .broker import EXPIRY_MAX_SECONDS, EXPIRY_MIN_SECONDS
 from .history import HistoryTimeout
 
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
@@ -405,9 +409,38 @@ def _clean(text: Any, limit: int = 300) -> str:
     return str(text).replace("<", "(").replace(">", ")")[:limit]
 
 
-def kalshi_taker_fee(price: float) -> float:
-    """Kalshi's taker fee per contract: ceil(0.07 x p x (1 - p) x 100) / 100 dollars."""
-    return math.ceil(round(0.07 * price * (1.0 - price) * 100.0, 9)) / 100.0
+def kalshi_taker_fee(price: float, contracts: float = 1) -> float:
+    """Kalshi's taker fee for one fill: 0.07 x contracts x p x (1 - p), rounded up to $0.0001.
+
+    Sept 17, 2026: every live Kalshi fill that paid a fee on Sept 16 was charged to the $0.0001.
+    This rounded each contract's fee up to the cent before, so a 1-lot at 0.02 cost $0.01 here
+    and $0.0014 at the venue, seven times the real fee. Computed in decimal so a float product
+    never rounds a fee that is already a whole hundredth of a cent up again."""
+    raw = Decimal("0.07") * Decimal(repr(float(contracts))) * Decimal(repr(float(price))) * (1 - Decimal(repr(float(price))))
+    return float(raw.quantize(Decimal("0.0001"), rounding=ROUND_CEILING))
+
+
+def _expiry_ts(intent: Mapping[str, Any], t: float) -> tuple[float | None, str | None]:
+    """The venue-side expiry an intent states, as simulated epoch seconds, the way the floor reads
+    it (`ltcm/tools.py`): `expire_after_seconds` must be 120 to 172,800, and an `expires_at`
+    stamp is clamped into that window after t. Returns (expiry or None, refusal or None)."""
+    seconds = intent.get("expire_after_seconds")
+    stated = intent.get("expires_at")
+    if seconds is not None and stated is not None:
+        return None, "give expire_after_seconds or expires_at, not both"
+    if seconds is not None:
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or not EXPIRY_MIN_SECONDS <= seconds <= EXPIRY_MAX_SECONDS:
+            return None, f"expire_after_seconds must be an integer from {EXPIRY_MIN_SECONDS} to {EXPIRY_MAX_SECONDS}"
+        return t + seconds, None
+    if stated is None:
+        return None, None
+    try:
+        if not isinstance(stated, str):
+            raise ValueError("not a stamp")
+        wanted = parse_time(stated) - t
+    except ValueError:
+        return None, "expires_at must be an ISO-8601 UTC timestamp"
+    return t + int(min(max(wanted, EXPIRY_MIN_SECONDS), EXPIRY_MAX_SECONDS)), None
 
 
 # -------------------------------------------------------------------------- markets
@@ -1311,11 +1344,19 @@ class Simulator:
             return self._refuse("no usable quantity")
         post_only = bool(intent.get("post_only"))
         plan = self._plan(intent, t)
+        expires_ts, refusal = _expiry_ts(intent, t)
+        if refusal is not None:
+            return self._refuse(refusal)
         if asset_class == "event":
-            return self._submit_event(instrument, side, price, quantity, post_only, plan, t)
-        if asset_class == "crypto":
-            return self._submit_crypto(instrument, side, price, quantity, post_only, plan, t)
-        return self._refuse(f"asset class {asset_class or 'missing'} is not simulated")
+            status = self._submit_event(instrument, side, price, quantity, post_only, plan, t)
+        elif asset_class == "crypto":
+            status = self._submit_crypto(instrument, side, price, quantity, post_only, plan, t)
+        else:
+            return self._refuse(f"asset class {asset_class or 'missing'} is not simulated")
+        if expires_ts is not None and status.startswith("resting:"):
+            # The venue cancels the resting order at its expiry; a taker fill never rests.
+            self.orders[status.split(":", 1)[1]]["expires_ts"] = expires_ts
+        return status
 
     def _refuse(self, reason: str) -> str:
         self._reject(reason)
@@ -1377,7 +1418,7 @@ class Simulator:
         self.data.request_refine(market, t)
         if crosses:
             fill_price = round(touch, 4)
-            self._fill_event(market, right, side, contracts, fill_price, kalshi_taker_fee(fill_price) * contracts, False, t, plan)
+            self._fill_event(market, right, side, contracts, fill_price, kalshi_taker_fee(fill_price, contracts), False, t, plan)
             return "filled"
         order = self.add_order(
             {
@@ -1521,13 +1562,17 @@ class Simulator:
             if market is None or t >= market.close_ts:
                 del self.orders[order_id]
                 self.counts["expired"] += 1
+        for order_id in [o["order_id"] for o in self.orders.values() if o.get("expires_ts") is not None and t >= o["expires_ts"]]:
+            del self.orders[order_id]
+            self.counts["expired"] += 1
         self._exits(t)
 
     def _check_event_order(self, order: dict[str, Any], t: float) -> None:
         market = self.data.markets.get(order["market_id"])
         if market is None:
             return
-        horizon = min(t, market.close_ts)
+        # A candle that ended after the order's own expiry cannot fill it: the venue had cancelled it.
+        horizon = min(t, market.close_ts, order.get("expires_ts") or math.inf)
         index = bisect.bisect_right(market.ends, max(order["checked_ts"], order["submitted_ts"]))
         price, right, side = order["price"], order["right"], order["side"]
         touch = self.fill_model == "touch"
@@ -1573,7 +1618,8 @@ class Simulator:
         if series is None:
             return
         index = bisect.bisect_left(series.starts, order["next_start"])
-        while index < len(series.starts) and series.starts[index] + series.seconds <= t:
+        horizon = min(t, order.get("expires_ts") or math.inf)
+        while index < len(series.starts) and series.starts[index] + series.seconds <= horizon:
             candle = series.candles[index]
             order["next_start"] = series.starts[index] + series.seconds
             if self.fill_model == "touch":
@@ -1642,7 +1688,7 @@ class Simulator:
             quantity = position["quantity"]
             if key[0] == "event":
                 market = self.data.markets[key[1]]
-                self._fill_event(market, key[2], "sell", int(round(quantity)), round(mark, 4), kalshi_taker_fee(round(mark, 4)) * int(round(quantity)), False, t, None)
+                self._fill_event(market, key[2], "sell", int(round(quantity)), round(mark, 4), kalshi_taker_fee(round(mark, 4), int(round(quantity))), False, t, None)
             else:
                 self._fill_crypto(key[1], "sell", quantity, mark, self.taker_fee, False, t, None)
 

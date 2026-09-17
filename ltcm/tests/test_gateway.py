@@ -189,6 +189,7 @@ class ApprovalTests(GatewayCase):
         for event in self.log.read(limit=1000):
             by_kind.setdefault(event.kind, []).append(event)
         self.assertEqual(len(by_kind["desk.intent"]), 1)
+        self.assertNotIn("expires_at", by_kind["desk.intent"][0].payload, "an intent with no expiry keeps its old body")
         self.assertEqual(len(by_kind["risk.decision"]), 1)
         self.assertEqual(len(by_kind["broker.fill"]), 1)
         # This venue fills on submission, so the first order event is already the terminal one.
@@ -407,6 +408,28 @@ class LifecycleTests(GatewayCase):
         released_kinds = sorted({self.log.get(i).kind for i in released})
         self.assertEqual(released_kinds, ["broker.order", "desk.intent"])
         self.assertEqual(len(released), 3)  # the intent plus both order states
+
+    def test_an_order_the_venue_expired_stops_committing_the_desks_cash_on_the_next_poll(self):
+        # Sept 17, 2026: a resting entry names its expiry; once the venue reports it expired,
+        # the desk's cash and order count no longer carry it.
+        resting = OrderIntent.new(
+            desk_id=DESK, instrument=AAPL, side="buy", quantity="2", order_type="limit", limit_price="99",
+            time_in_force="gtc", rationale="a bid that should not outlive the hour", created_at=NOW,
+            session_id="s1", expires_at="2026-09-14T15:30:00.000Z",
+        )
+        result = self.gateway.propose(resting, NOW)
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(self.log.get(f"intent:{resting.id}").payload["expires_at"], "2026-09-14T15:30:00.000Z")
+        probe = self.intent(order_type="limit", limit_price="99", quantity="1", nonce="probe")
+        before = self.gateway._book_fields(probe, NOW)
+        self.assertEqual((before["desk_cash"], before["open_orders"]), (Decimal("802"), 1))
+
+        order = self.broker.orders[result["order_id"]]
+        order.status, order.reason = "expired", "expired at 2026-09-14T15:30:00Z"
+        later = "2026-09-14T15:31:00.000Z"
+        self.assertEqual([c["status"] for c in self.gateway.poll_orders(later)], ["expired"])
+        after = self.gateway._book_fields(probe, later)
+        self.assertEqual((after["desk_cash"], after["open_orders"]), (Decimal("1000"), 0))
 
     def test_a_swept_fill_naming_the_venues_order_id_reaches_the_desks_ledger(self):
         # Kalshi's fills carry Kalshi's order id and no desk. On Sept 16, 2026 seven live

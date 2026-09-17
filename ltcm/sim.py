@@ -16,7 +16,8 @@ What is modelled
   - Market orders fill immediately at `Quote.reference(side)` moved by `slippage_bps`.
   - Limit orders rest and fill at the limit price when the reference crosses it on `tick()`.
   - `ioc` cancels at once when it is not marketable, `day` expires at the session close of the day
-    it was submitted, `gtc` persists until cancelled or filled.
+    it was submitted, `gtc` persists until cancelled or filled, or until the entry's own
+    `expires_at`, where the live venue would cancel it too.
   - Cash, average cost, realized profit, fees and equity marks.
   - Event contracts settle at $1 or $0 per contract through `settle_event()`.
   - Options through `Instrument.multiplier`; crypto fractionally.
@@ -57,6 +58,7 @@ from .data import MarketData, next_session, to_datetime, iso, us_equity_session
 ZERO = Decimal(0)
 ONE = Decimal(1)
 CENT = Decimal("0.01")
+CENTICENT = Decimal("0.0001")
 PRICE_PLACES = Decimal("0.00000001")
 BPS = Decimal(10_000)
 
@@ -173,6 +175,11 @@ def ceil_cents(value: Decimal) -> Decimal:
     return money(value).quantize(CENT, rounding=ROUND_CEILING)
 
 
+def ceil_centicents(value: Decimal) -> Decimal:
+    """Round a charge up to the next $0.0001, the precision Kalshi charges its fees at."""
+    return money(value).quantize(CENTICENT, rounding=ROUND_CEILING)
+
+
 def _dec_or_none(value: Any) -> "Decimal | None":
     try:
         d = Decimal(str(value))
@@ -193,11 +200,14 @@ class FeeModel:
         0.15% and 0.25% before, which scored quoting strategies that lose money after the real
         fee as winners and promoted one. The tier moves with 30-day volume
         (https://www.coinbase.com/advanced-fees).
-      - Kalshi event contracts: ceil(0.07 x contracts x price x (1 - price)) to the next cent,
-        the published trading-fee formula (https://kalshi.com/docs/kalshi-fee-schedule.pdf),
-        times the series' fee multiplier; the 160 series whose fee type is
-        `quadratic_with_maker_fees` also charge a resting fill ceil(0.0175 x C x P x (1 - P))
-        (`ltcm/data/kalshi_fees.json`, from Kalshi's series list).
+      - Kalshi event contracts: 0.07 x contracts x price x (1 - price), the published
+        trading-fee formula (https://kalshi.com/docs/kalshi-fee-schedule.pdf), times the
+        series' fee multiplier, rounded up to $0.0001; the 160 series whose fee type is
+        `quadratic_with_maker_fees` also charge a resting fill 0.0175 x C x P x (1 - P)
+        (`ltcm/data/kalshi_fees.json`, from Kalshi's series list). Every one of the 42 live
+        fills that paid a fee on Sept 16, 2026 matches that to the $0.0001, not to the cent:
+        1 contract at 0.02 paid $0.0014 where a cent rounding charged $0.01, and 22 at 0.51
+        paid $0.3849. The rounding is per order, not per fill (see `kalshi_fee`).
       - Futures: a flat per-contract round-turn placeholder; no floor desk trades futures yet.
     """
 
@@ -251,13 +261,36 @@ class FeeModel:
         multiplier = _dec_or_none(row.get("multiplier"))
         return bool(row.get("maker")), (ONE if multiplier is None or multiplier < 0 else multiplier)
 
-    def kalshi_fee(self, count: Decimal, price: Decimal, *, rate: "Decimal | None" = None, multiplier: Decimal = ONE) -> Decimal:
-        """ceil to the cent of 0.07 x C x P x (1 - P) x the series multiplier, with P in dollars."""
+    def kalshi_fee(
+        self,
+        count: Decimal,
+        price: Decimal,
+        *,
+        rate: "Decimal | None" = None,
+        multiplier: Decimal = ONE,
+        accrued: Decimal = ZERO,
+    ) -> Decimal:
+        """One fill's fee: rate x C x P x (1 - P) x the series multiplier, P in dollars, rounded
+        up to $0.0001.
+
+        Kalshi rounds an order's running fee, not each fill's. `accrued` is the unrounded fee
+        the order's earlier fills already ran up, and this fill pays ceil(accrued + its own)
+        less ceil(accrued). On Sept 16, 2026 a 161-contract YES buy at 0.02 filled in nine
+        pieces that paid $0.2209 together, ceil(0.07 x 161 x 0.02 x 0.98), where rounding each
+        piece would have charged $0.2212; and a KXFED NO order that took 26.64 contracts
+        (accruing $0.391608) paid $0.1285 for its next 34.97 filled as a maker at 0.30, where
+        the fill alone rounds to $0.1286. Every multi-fill order on the tape that day sums to
+        its order's rounded total.
+        """
+        return ceil_centicents(accrued + self.kalshi_raw_fee(count, price, rate=rate, multiplier=multiplier)) - ceil_centicents(accrued)
+
+    def kalshi_raw_fee(self, count: Decimal, price: Decimal, *, rate: "Decimal | None" = None, multiplier: Decimal = ONE) -> Decimal:
+        """rate x C x P x (1 - P) x the series multiplier, unrounded."""
         count = money(count)
         price = money(price)
         if price < 0 or price > ONE:
             raise ValueError("event contract prices are dollars between 0 and 1")
-        return ceil_cents((self.event_fee_rate if rate is None else rate) * money(multiplier) * count * price * (ONE - price))
+        return (self.event_fee_rate if rate is None else rate) * money(multiplier) * count * price * (ONE - price)
 
     def fee(
         self,
@@ -267,8 +300,14 @@ class FeeModel:
         price: Decimal,
         *,
         liquidity: str = "taker",
+        filled_before: Decimal = ZERO,
     ) -> Decimal:
-        """Commission for one fill. Always non-negative and quantized to the cent."""
+        """Commission for one fill. Always non-negative; a Kalshi fee is quantized to $0.0001,
+        every other fee to the cent.
+
+        `filled_before` is how much of the same order already filled at this price and
+        liquidity. Kalshi rounds the order's running fee, so a fill after others pays only what
+        the order's rounded total grows by."""
         quantity = money(quantity)
         price = money(price)
         asset = instrument.asset_class
@@ -287,11 +326,15 @@ class FeeModel:
             # with the formula's). The series that charge makers (sports games, Fed, CPI) charge
             # them a quarter of the taker rate, and some series scale both by a multiplier.
             charges_makers, multiplier = self._series_terms(instrument)
+            rate = self.event_fee_rate
             if liquidity == "maker":
                 if not charges_makers:
                     return ZERO
-                return self.kalshi_fee(quantity, price, rate=self.event_maker_fee_rate, multiplier=multiplier)
-            return self.kalshi_fee(quantity, price, multiplier=multiplier)
+                rate = self.event_maker_fee_rate
+            accrued = ZERO
+            if filled_before and money(filled_before) > 0:
+                accrued = self.kalshi_raw_fee(money(filled_before), price, rate=rate, multiplier=multiplier)
+            return self.kalshi_fee(quantity, price, rate=rate, multiplier=multiplier, accrued=accrued)
         else:  # pragma: no cover - Instrument already rejects unknown classes
             charged = ZERO
         return quantize_cash(charged) if charged > 0 else ZERO
@@ -585,12 +628,18 @@ class ShadowBook:
             )
 
     def _expiry_for(self, intent: OrderIntent, stamp: str) -> "str | None":
-        """When a `day` order dies. `ioc` and `gtc` never expire on the clock.
+        """When a resting order dies on the clock: at the entry's own `expires_at`, which the
+        live venue enforces too (Kalshi `expiration_time`, Coinbase `limit_limit_gtd`), or at
+        the end of a `day` order's session. `ioc` and plain `gtc` never expire.
 
         For equities and options that is the close of the session the order lives in: the one
         already under way, or - when the order arrives outside hours, at a weekend or on a
         holiday - the close of the next session, which is the first one that can fill it.
         """
+        if getattr(intent, "expires_at", None) is not None:
+            # Stored in the book's own seconds form: the sweep compares stamps as text, and a
+            # millisecond stamp beside a seconds stamp does not sort as the moments they name.
+            return iso(intent.expires_at)
         if intent.time_in_force != "day":
             return None
         moment = to_datetime(stamp)
@@ -647,7 +696,11 @@ class ShadowBook:
         quantity = order.remaining if quantity is None else min(order.remaining, quantity)
         if quantity <= 0:
             return order
-        fee = self.fee_model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity)
+        # A resting order fills piece by piece only as a maker at its own limit (the taker model
+        # below), so its earlier fills share this fill's price and fee terms: what they accrued
+        # is what `filled_before` recomputes, and the pieces pay the order's rounded fee.
+        filled_before = order.filled_quantity if liquidity == "maker" and order.average_price == price else ZERO
+        fee = self.fee_model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity, filled_before=filled_before)
         notional = quantity * price * order.instrument.multiplier
         account = self._account()
         cash = money(account["cash"])
@@ -732,6 +785,11 @@ class ShadowBook:
             for order in self.open_orders():
                 inst = order.instrument
                 if order.order_type != "limit" or inst.venue != venue:
+                    continue
+                if self._expired(order, stamp):
+                    # A print after the expiry cannot fill an order the venue already cancelled.
+                    # The next tick's sweep marks it expired; the callers count what this returns
+                    # as fills, so it is not returned here.
                     continue
                 if inst.asset_class == "event":
                     if str(inst.market_id or inst.symbol).upper() != wanted:
@@ -852,9 +910,20 @@ class ShadowBook:
                 return order
             return self._cancel(order, "cancelled by request")
 
+    @staticmethod
+    def _expired(order: Order, stamp: str) -> bool:
+        expires_at = order._raw.get("expires_at")
+        return expires_at is not None and stamp >= expires_at
+
+    def _expire(self, order: Order) -> Order:
+        if order.time_in_force == "day":
+            return self._cancel(order, "day order expired", status="expired")
+        return self._cancel(order, f"expired at {order._raw.get('expires_at')}", status="expired")
+
     # -------------------------------------------------------------------- tick
     def tick(self, now: Any = None) -> list[Order]:
-        """Advance the simulation: cross resting limits, expire day orders.
+        """Advance the simulation: cross resting limits, expire day orders and orders past their
+        stated expiry.
 
         Returns every order whose status changed, in submission order.
         """
@@ -862,9 +931,8 @@ class ShadowBook:
             stamp = iso(now) if now is not None else self.now()
             changed: list[Order] = []
             for order in self.open_orders():
-                expires_at = order._raw.get("expires_at")
-                if expires_at is not None and stamp >= expires_at:
-                    changed.append(self._cancel(order, "day order expired", status="expired"))
+                if self._expired(order, stamp):
+                    changed.append(self._expire(order))
                     continue
                 if order.order_type != "limit":  # market orders never rest here
                     continue
@@ -1088,6 +1156,7 @@ __all__ = [
     "SHADOW_CAPABILITIES",
     "SHADOW_VENUE",
     "ceil_cents",
+    "ceil_centicents",
     "quantize_cash",
     "quantize_price",
 ]

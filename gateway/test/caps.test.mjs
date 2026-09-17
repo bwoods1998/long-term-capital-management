@@ -59,6 +59,23 @@ test('coinbase uses quote_size directly and falls back to a limit price', () => 
   );
 });
 
+// Sept 17, 2026: a resting entry the venue should cancel at a stated time is sent as
+// limit_limit_gtd with an end_time. The caps must price it exactly as the same order sent GTC.
+test('coinbase prices a limit_limit_gtd order the same as the same order GTC', () => {
+  const gtc = { order_configuration: { limit_limit_gtc: { base_size: '0.0003', limit_price: '76000', post_only: true } } };
+  const gtd = {
+    order_configuration: {
+      limit_limit_gtd: { base_size: '0.0003', limit_price: '76000', end_time: '2026-09-17T01:20:00Z', post_only: true },
+    },
+  };
+  assert.equal(usd(notional('coinbase', gtd).micro), '22.80');
+  assert.equal(notional('coinbase', gtd).micro, notional('coinbase', gtc).micro);
+  assert.equal(
+    notional('coinbase', gtd, { reference: '75000' }).micro,
+    notional('coinbase', gtc, { reference: '75000' }).micro,
+  );
+});
+
 test('coinbase refuses a configuration it cannot read', () => {
   assert.match(notional('coinbase', {}).error, /configuration/);
   assert.match(notional('coinbase', { order_configuration: {} }).error, /empty/);

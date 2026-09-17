@@ -117,8 +117,11 @@ def _phi(x):
 
 
 def _fee(price):
-    """Kalshi: 0.07 x P x (1 - P) per contract, rounded up to the cent."""
-    return math.ceil(0.07 * price * (1.0 - price) * 100.0) / 100.0
+    """Kalshi: 0.07 x P x (1 - P) per contract, rounded up to $0.0001.
+
+    Sept 17, 2026: the venue charges fees to the $0.0001, not the cent; rounded to the cent this
+    took up to a cent of edge a contract that the fee never charged."""
+    return math.ceil(round(0.07 * price * (1.0 - price) * 10000.0, 6)) / 10000.0
 
 
 def _hourly_sigma(kit, symbol, limit, interval="1h"):

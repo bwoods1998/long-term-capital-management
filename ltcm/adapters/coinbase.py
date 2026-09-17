@@ -20,9 +20,9 @@ Endpoints:
 
 Order configuration is the one place the venue's vocabulary really differs:
 a market order is `market_market_ioc` with a `base_size` (or `quote_size` to spend a dollar
-amount), and a resting limit is `limit_limit_gtc` with `base_size` and `limit_price`. Coinbase
-has no day order and no immediate-or-cancel *limit* in this adapter, so `capabilities()` does not
-claim them.
+amount), and a resting limit is `limit_limit_gtc` with `base_size` and `limit_price`, or
+`limit_limit_gtd` with an `end_time` when the entry states an expiry. Coinbase has no day order
+and no immediate-or-cancel *limit* in this adapter, so `capabilities()` does not claim them.
 
 The create-order response carries **no top-level `order_id`**: it is
 `success_response.order_id`, and `success: false` means the order was refused, with the reason in
@@ -46,6 +46,7 @@ from ..broker import (
     RejectedOrder,
     UnknownOutcome,
     money,
+    rfc3339,
     text,
 )
 from ..data import TransportError, iso
@@ -88,10 +89,14 @@ def order_configuration(intent: OrderIntent) -> dict[str, Any]:
     Market orders become `market_market_ioc` with a `base_size`: the desk's quantity is always a
     quantity of the base asset, never a dollar amount, so `quote_size` is deliberately not used.
     Limit orders become `limit_limit_gtc`; Coinbase has no `day` order, so a day limit would
-    silently outlive its session and is refused instead.
+    silently outlive its session and is refused instead. A limit with an `expires_at` becomes
+    `limit_limit_gtd`, which the venue cancels at `end_time` whether or not the floor is running.
     """
     size = text(intent.quantity)
+    expires_at = getattr(intent, "expires_at", None)
     if intent.order_type == "market":
+        if expires_at is not None:
+            raise RejectedOrder("coinbase: only a resting limit can carry an end time")
         if intent.time_in_force not in ("ioc", "day", "gtc"):
             raise RejectedOrder(f"coinbase: unsupported time in force {intent.time_in_force!r}")
         return {"market_market_ioc": {"base_size": size}}
@@ -100,6 +105,15 @@ def order_configuration(intent: OrderIntent) -> dict[str, Any]:
             "coinbase limit orders are good-till-cancelled only; "
             f"{intent.time_in_force!r} would not expire when this desk expects"
         )
+    if expires_at is not None:
+        return {
+            "limit_limit_gtd": {
+                "base_size": size,
+                "limit_price": text(intent.limit_price),
+                "end_time": rfc3339(expires_at),
+                "post_only": bool(getattr(intent, "post_only", False)),
+            }
+        }
     return {
         "limit_limit_gtc": {
             "base_size": size,
@@ -126,8 +140,13 @@ def attached_bracket(intent: OrderIntent) -> dict[str, Any] | None:
     are eligible, and the stop is a stop-*limit* with a hard-coded five percent cushion, so a
     gap larger than that can leave it unfilled -- which is why the floor also keeps its own
     stop in `ltcm/exits.py`. UNVERIFIED against a live order: the shape is from the spec.
+
+    An entry with an end time carries no bracket. Only GTC orders can carry an attached order,
+    and the edit docs list end-time failures for them; the floor keeps that entry's plan itself.
     """
     if intent.purpose != "entry" or intent.target_price is None or intent.stop_price is None:
+        return None
+    if getattr(intent, "expires_at", None) is not None:
         return None
     return {
         "trigger_bracket_gtc": {

@@ -58,7 +58,11 @@ def _when(text):
 
 
 def _fee(price):
-    return math.ceil(0.07 * price * (1.0 - price) * 100.0) / 100.0
+    """Kalshi's taker fee on one contract: 0.07 x P x (1 - P), rounded up to $0.0001.
+
+    Sept 17, 2026: the venue charges fees to the $0.0001, not the cent. Rounded to the cent this
+    said a NO taken at 0.93 cost a full cent a contract when it costs $0.0046."""
+    return math.ceil(round(0.07 * price * (1.0 - price) * 10000.0, 6)) / 10000.0
 
 
 def _event(ticker):
@@ -138,7 +142,7 @@ def decide(kit, params):
             price = round(no_ask, 2)
             if price >= 0.99:
                 continue
-            how = f"taking the NO ask at {price:.2f} (fee {_fee(price):.2f})"
+            how = f"taking the NO ask at {price:.2f} (fee {_fee(price):.4f} a contract)"
         if price > float(p.get("no_max") or 0.98):
             continue
         quantity = max(1, int(notional / price))

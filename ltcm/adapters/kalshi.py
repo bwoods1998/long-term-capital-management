@@ -73,6 +73,7 @@ from ..broker import (
     RejectedOrder,
     UnknownOutcome,
     VenueUnavailable,
+    epoch_seconds,
     money,
 )
 from ..data import TransportError, iso
@@ -117,6 +118,9 @@ STATUS_MAP: dict[str, str] = {
     "canceled": "cancelled",
     "cancelled": "cancelled",
     "executed": "filled",
+    # An order past its `expiration_time` is reported cancelled today; should the venue ever
+    # name it, it is still terminal, so it leaves the desk's open orders and working buys.
+    "expired": "expired",
 }
 
 TIF_V2 = {
@@ -394,6 +398,11 @@ class KalshiBroker:
                 # A market buy must declare the worst it may cost. One contract can never settle
                 # above $1.00, so `count` dollars, in cents, is the true ceiling.
                 body["buy_max_cost"] = count * 100
+            expires_at = getattr(intent, "expires_at", None)
+            if expires_at is not None:
+                if intent.order_type != "limit":
+                    raise RejectedOrder("kalshi: only a resting limit can carry an expiration")
+                body["expiration_ts"] = epoch_seconds(expires_at)
             return body
         # v2: one `side` names the book side, and "bid" is yes, "ask" is no, always
         # (https://docs.kalshi.com/getting_started/order_direction).
@@ -401,6 +410,13 @@ class KalshiBroker:
         if intent.side == "sell":
             book_side = "ask" if side == "yes" else "bid"
         time_in_force = TIF_V2.get(intent.time_in_force, "good_till_canceled")
+        expires_at = getattr(intent, "expires_at", None)
+        if expires_at is not None and (intent.order_type != "limit" or time_in_force != "good_till_canceled"):
+            # `expiration_time` means nothing on an order that cannot rest, and a market order
+            # is sent as immediate-or-cancel; refused here, before a quote is read or a request
+            # is sent for the venue to reject.
+            shown = time_in_force if intent.order_type == "limit" else "immediate_or_cancel"
+            raise RejectedOrder(f"kalshi v2: an expiring order must be a good_till_canceled limit, not {shown}")
         if intent.order_type == "limit":
             # The desk always quotes its own leg, so a NO limit is in NO dollars and crosses to
             # the YES scale exactly once. Buying NO at $0.30 is `side: "ask"`, `price: 0.7000`.
@@ -435,6 +451,10 @@ class KalshiBroker:
         # venue. The risk engine already forbids selling more of a leg than the desk holds.
         if getattr(intent, "post_only", False):
             body["post_only"] = True  # rest or be rejected; a maker pays no fee here
+        if expires_at is not None:
+            # The venue cancels the resting order at this moment even if the floor has stopped.
+            # The v2 OpenAPI spec (3.30.0) types `expiration_time` as unix seconds, an integer.
+            body["expiration_time"] = epoch_seconds(expires_at)
         return body
 
     def price_ranges(self, ticker: str) -> tuple[dict[str, Decimal], ...]:

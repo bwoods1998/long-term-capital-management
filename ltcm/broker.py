@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, runtime_checkable
 
@@ -34,6 +35,14 @@ ORDER_STATUSES = (
 TERMINAL_STATUSES = ("filled", "cancelled", "rejected", "expired")
 
 MONEY_PLACES = Decimal("0.00000001")
+
+#: The window a resting entry's venue-side expiry may name, measured from the intent's
+#: `created_at`. On Sept 16, 2026 the floor stalled (its disk filled) while its resting bids
+#: stayed live at the venues with nobody watching the markets move. An expiry the venue enforces
+#: cancels them without the floor. Two minutes is about the shortest a strategy run can act on;
+#: two days is longer than any strategy waits before it re-quotes.
+EXPIRY_MIN_SECONDS = 120
+EXPIRY_MAX_SECONDS = 48 * 3600
 
 
 class BrokerError(RuntimeError):
@@ -67,6 +76,36 @@ def money(value: Any) -> Decimal:
 
 def text(value: Decimal | None) -> str | None:
     return None if value is None else format(value, "f")
+
+
+def instant(value: Any) -> "datetime | None":
+    """An ISO-8601 stamp as an aware UTC datetime (a trailing Z or no zone reads as UTC), or None."""
+    if not isinstance(value, str) or len(value.strip()) < 19:
+        return None
+    raw = value.strip()
+    if raw[-1] in "Zz":
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def epoch_seconds(value: Any) -> int:
+    """An ISO-8601 stamp as whole unix seconds, the unit of Kalshi's `expiration_time`."""
+    moment = instant(value)
+    if moment is None:
+        raise ValueError(f"not an ISO-8601 timestamp: {value!r}")
+    return int(moment.timestamp())
+
+
+def rfc3339(value: Any) -> str:
+    """An ISO-8601 stamp as `YYYY-MM-DDTHH:MM:SSZ`, the form of Coinbase's `end_time`."""
+    moment = instant(value)
+    if moment is None:
+        raise ValueError(f"not an ISO-8601 timestamp: {value!r}")
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass(frozen=True)
@@ -208,6 +247,11 @@ class OrderIntent:
     #: A limit that must rest: the venue rejects it rather than let it take. The maker side
     #: pays no fee on Kalshi and the maker rate on Coinbase, which is the point of quoting.
     post_only: bool = False
+    #: When the venue itself cancels this entry if it has not filled (ISO-8601 UTC): Kalshi's
+    #: `expiration_time`, Coinbase's `limit_limit_gtd`. Only a gtc limit entry can carry one, and
+    #: only 120 s to 48 h after `created_at`. It is not part of the id: a retry that computed a
+    #: slightly different expiry is still the same order.
+    expires_at: str | None = None
 
     def __post_init__(self):
         if self.post_only and self.order_type != "limit":
@@ -250,6 +294,31 @@ class OrderIntent:
             raise ValueError("rationale must be 1-2000 characters")
         if not isinstance(self.desk_id, str) or not self.desk_id:
             raise ValueError("desk_id required")
+        if self.expires_at is not None:
+            self._check_expiry()
+
+    def _check_expiry(self) -> None:
+        """An expiry is only for an entry that rests. A market or ioc order never rests, and a
+        `day` order already has an end. An exit must keep working until the floor stops it: a
+        stop that quietly expired would leave the position with no stop."""
+        if self.order_type != "limit":
+            raise ValueError("only a limit order can carry an expiry")
+        if self.time_in_force != "gtc":
+            raise ValueError("an expiring order must be gtc; the venue cancels it at expires_at")
+        if self.purpose != "entry":
+            raise ValueError("an exit never expires")
+        expires = instant(self.expires_at)
+        if expires is None:
+            raise ValueError("expires_at must be an ISO-8601 UTC timestamp")
+        created = instant(self.created_at)
+        if created is None:
+            raise ValueError("an expiry is measured from created_at, which must be an ISO-8601 UTC timestamp")
+        seconds = (expires - created).total_seconds()
+        if not EXPIRY_MIN_SECONDS <= seconds <= EXPIRY_MAX_SECONDS:
+            raise ValueError(
+                f"expires_at must be {EXPIRY_MIN_SECONDS} seconds to {EXPIRY_MAX_SECONDS // 3600} hours "
+                f"after created_at, not {seconds:g} seconds"
+            )
 
     @classmethod
     def new(
@@ -273,6 +342,7 @@ class OrderIntent:
         exit_reason: str | None = None,
         exit_of: str | None = None,
         post_only: bool = False,
+        expires_at: str | None = None,
     ) -> "OrderIntent":
         """Derive a stable id from the desk, session, instrument, side and nonce.
 
@@ -314,6 +384,7 @@ class OrderIntent:
             exit_reason=exit_reason,
             exit_of=exit_of,
             post_only=bool(post_only),
+            expires_at=expires_at,
         )
 
     @property
@@ -352,6 +423,7 @@ class OrderIntent:
             "exit_reason": self.exit_reason,
             "exit_of": self.exit_of,
             **({"post_only": True} if self.post_only else {}),
+            **({"expires_at": self.expires_at} if self.expires_at is not None else {}),
         }
 
     @classmethod
@@ -375,6 +447,7 @@ class OrderIntent:
             exit_reason=data.get("exit_reason"),
             exit_of=data.get("exit_of"),
             post_only=bool(data.get("post_only", False)),
+            expires_at=data.get("expires_at"),
         )
 
 

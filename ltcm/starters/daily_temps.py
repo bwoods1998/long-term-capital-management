@@ -58,7 +58,11 @@ def _phi(x):
 
 
 def _fee(price):
-    return math.ceil(0.07 * price * (1.0 - price) * 100.0) / 100.0
+    """Kalshi's taker fee on one contract: 0.07 x P x (1 - P), rounded up to $0.0001.
+
+    Sept 17, 2026: the venue charges fees to the $0.0001, not the cent. Rounded to the cent this
+    charged a 0.10 bucket a full cent of edge when the fee is $0.0063."""
+    return math.ceil(round(0.07 * price * (1.0 - price) * 10000.0, 6)) / 10000.0
 
 
 def settlement_day(ticker):

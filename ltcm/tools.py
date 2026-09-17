@@ -27,7 +27,17 @@ from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 
 from .sandbox import RUN_CODE_SCHEMA  # leap: sandbox
-from .broker import ASSET_CLASSES, Balance, Instrument, OrderIntent, Position, Quote
+from .broker import (
+    ASSET_CLASSES,
+    EXPIRY_MAX_SECONDS,
+    EXPIRY_MIN_SECONDS,
+    Balance,
+    Instrument,
+    OrderIntent,
+    Position,
+    Quote,
+    instant,
+)
 from .manifest import TOOLS, DeskManifest
 
 MAX_RESULT_CHARS = 120_000
@@ -351,6 +361,15 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "post_only": {
                 "type": "boolean",
                 "description": "A limit that must rest: rejected rather than taking. Makers pay no fee on Kalshi and the maker rate on Coinbase.",
+            },
+            "expire_after_seconds": {
+                "type": "integer",
+                "minimum": EXPIRY_MIN_SECONDS,
+                "maximum": EXPIRY_MAX_SECONDS,
+                "description": (
+                    "120-172800. The venue itself cancels this resting limit if it has not filled "
+                    "by then, even if the floor has stopped. gtc limit entries only."
+                ),
             },
             "rationale": {"type": "string", "description": "1-2000 characters, published."},
             # leap: exits. The plan is enforced by the floor once the entry fills: a target
@@ -772,6 +791,7 @@ def _propose(
         if isinstance(holding, bool) or not isinstance(holding, int) or not 1 <= holding <= 720:
             raise ToolError("holding_period_hours must be an integer from 1 to 720")
         time_stop_at = _hours_after(session.now, holding)
+    expires_at = _expiry(arguments, session)
     try:
         intent = OrderIntent.new(
             desk_id=manifest.id,
@@ -786,6 +806,7 @@ def _propose(
             time_in_force=arguments.get("time_in_force")
             or ("gtc" if instrument.asset_class in ("event", "crypto") else "day"),
             post_only=bool(arguments.get("post_only", False)),
+            expires_at=expires_at,
             rationale=_text(arguments, "rationale", limit=2000),
             created_at=session.now,
             session_id=session.session_id,
@@ -824,8 +845,47 @@ def _propose(
     return out
 
 
+def _expiry(arguments: dict[str, Any], session: ToolSession) -> str | None:
+    """The venue-side expiry an entry asks for, measured on the session clock.
+
+    A model states `expire_after_seconds` and is told when it is out of range, as it is told
+    about a holding period. A strategy may state `expires_at` instead, since its code already
+    works in timestamps (a bid that must be gone before a market's final hour). That stamp is
+    clamped into 120 s to 48 h rather than refused, so a run that computed an expiry a few
+    seconds short of the floor's minimum still places its bid."""
+    seconds = arguments.get("expire_after_seconds")
+    stated = arguments.get("expires_at")
+    if seconds is not None and stated is not None:
+        raise ToolError("give expire_after_seconds or expires_at, not both")
+    if seconds is not None:
+        if (
+            isinstance(seconds, bool)
+            or not isinstance(seconds, int)
+            or not EXPIRY_MIN_SECONDS <= seconds <= EXPIRY_MAX_SECONDS
+        ):
+            raise ToolError(
+                f"expire_after_seconds must be an integer from {EXPIRY_MIN_SECONDS} to {EXPIRY_MAX_SECONDS}"
+            )
+        return _seconds_after(session.now, seconds)
+    if stated is None:
+        return None
+    moment = instant(stated)
+    if moment is None:
+        raise ToolError("expires_at must be an ISO-8601 UTC timestamp")
+    now = instant(session.now)
+    if now is None:
+        raise ToolError("session clock is unreadable")
+    wanted = (moment - now).total_seconds()
+    return _seconds_after(session.now, int(min(max(wanted, EXPIRY_MIN_SECONDS), EXPIRY_MAX_SECONDS)))
+
+
 def _hours_after(stamp: str, hours: int) -> str:
     """`stamp` plus `hours`, as the same ISO-8601 UTC shape the desk stamps its turns with."""
+    return _seconds_after(stamp, int(hours) * 3600)
+
+
+def _seconds_after(stamp: str, seconds: int) -> str:
+    """`stamp` plus `seconds`, as the same ISO-8601 UTC shape the desk stamps its turns with."""
     from datetime import datetime, timedelta, timezone
 
     text_stamp = str(stamp or "").strip()
@@ -835,7 +895,7 @@ def _hours_after(stamp: str, hours: int) -> str:
         raise ToolError(f"session clock is unreadable: {exc}") from None
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
-    later = (moment + timedelta(hours=int(hours))).astimezone(timezone.utc)
+    later = (moment + timedelta(seconds=int(seconds))).astimezone(timezone.utc)
     return later.strftime("%Y-%m-%dT%H:%M:%S.") + f"{later.microsecond // 1000:03d}Z"
 
 

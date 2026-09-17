@@ -186,6 +186,19 @@ class TickTests(StrategyCase):
         self.assertEqual(self.strategies.tick(self.service.manifests, "2026-09-16T04:15:00.000Z"), [])
         self.assertEqual(len(self.strategies.tick(self.service.manifests, LATER)), 1)
 
+    def test_a_strategys_stated_expiry_reaches_the_intent_clamped_to_the_window(self):
+        # Sept 17, 2026: a strategy states when the venue should cancel its bid, as a timestamp.
+        self.strategies.deploy(self.manifest, "edge", 600, {})
+        intents = [
+            {**INTENT, "expires_at": "2026-09-16T05:40:00Z"},
+            {**INTENT, "quantity": "41", "expires_at": "2026-09-30T00:00:00Z"},
+            {**INTENT, "quantity": "42", "expires_at": "2026-09-16T04:10:30Z"},
+        ]
+        self.manager.script = lambda d, c: Run("STRATEGY-RESULT " + json.dumps({"intents": intents}))
+        self.strategies.tick(self.service.manifests, NOW)
+        stated = [intent.expires_at for intent in self.service.contexts[-1].intents]
+        self.assertEqual(stated, ["2026-09-16T05:40:00.000Z", "2026-09-18T04:10:00.000Z", "2026-09-16T04:12:00.000Z"])
+
     def test_a_live_desks_strategy_is_capped_at_learning_size(self):
         live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
         self.manager.files["scholes"] = {"edge.py": "def decide(kit, params):\n    return []\n"}
@@ -517,6 +530,16 @@ class StarterTests(unittest.TestCase):
         for family, name in STARTERS.items():
             module = load_starter(name)
             self.assertTrue(callable(getattr(module, "decide", None)), family)
+
+    def test_the_starters_price_kalshis_fee_to_the_hundredth_of_a_cent(self):
+        # Sept 17, 2026: the venue charged a 1-lot at 0.02 $0.0014; rounded to the cent it was $0.01.
+        from ltcm.backtest import kalshi_taker_fee
+
+        for name in ("kalshi_favorites", "daily_temps", "hourly_ranges"):
+            fee = load_starter(name)._fee
+            self.assertEqual((fee(0.02), fee(0.93), fee(0.50)), (0.0014, 0.0046, 0.0175), name)
+            for cents in range(1, 100):
+                self.assertEqual(fee(cents / 100), kalshi_taker_fee(cents / 100, 1), (name, cents))
 
     def test_the_ranges_starter_buys_the_cheap_at_the_money_bucket(self):
         kit = FakeKit()

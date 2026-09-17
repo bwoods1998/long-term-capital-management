@@ -218,8 +218,10 @@ class FillTests(unittest.TestCase):
         self.assertEqual(sim.submit(buy(self.ticker, "yes", 0.60, 5), t), "filled")
         fill = sim.fills[-1]
         self.assertAlmostEqual(fill["price"], 0.55)
-        self.assertAlmostEqual(fill["fee"], kalshi_taker_fee(0.55) * 5)
-        self.assertAlmostEqual(kalshi_taker_fee(0.55), 0.02)
+        # 0.07 x 5 x 0.55 x 0.45 = 0.086625, charged to the $0.0001 for the whole fill.
+        self.assertAlmostEqual(fill["fee"], kalshi_taker_fee(0.55, 5))
+        self.assertEqual(kalshi_taker_fee(0.55, 5), 0.0867)
+        self.assertEqual(kalshi_taker_fee(0.55), 0.0174)
         self.assertFalse(fill["maker"])
         self.assertEqual(sim.submit(buy(self.ticker, "no", 0.50, 3), t), "filled", "NO ask = 1 - yes_bid = 0.48")
         self.assertAlmostEqual(sim.fills[-1]["price"], 0.48)
@@ -354,7 +356,7 @@ class FillTests(unittest.TestCase):
         sim.advance(self.open + HOUR)
         self.assertEqual(len(sim.closed), 1)
         self.assertEqual(sim.positions, {})
-        self.assertAlmostEqual(sim.closed[0]["pnl"], 10 * (1.0 - 0.55) - 10 * kalshi_taker_fee(0.55))
+        self.assertAlmostEqual(sim.closed[0]["pnl"], 10 * (1.0 - 0.55) - kalshi_taker_fee(0.55, 10))
         self.assertEqual(sim.closed[0]["ts"], self.open + HOUR)
 
     def test_resting_orders_expire_at_close(self):
@@ -363,6 +365,43 @@ class FillTests(unittest.TestCase):
         sim.advance(self.open + HOUR)
         self.assertEqual(sim.orders, {})
         self.assertEqual(sim.counts["expired"], 1)
+
+    def test_the_kalshi_fee_is_charged_to_the_hundredth_of_a_cent_as_on_the_tape(self):
+        # Sept 16, 2026 live fills: 1 @ 0.02, 22 @ 0.51, 60 @ 0.31.
+        self.assertEqual(kalshi_taker_fee(0.02, 1), 0.0014)
+        self.assertEqual(kalshi_taker_fee(0.51, 22), 0.3849)
+        self.assertEqual(kalshi_taker_fee(0.31, 60), 0.8984)
+        self.assertEqual(kalshi_taker_fee(0.50, 4), 0.07, "exactly on the grid is not rounded up again")
+
+    def test_a_resting_order_expires_at_its_stated_expiry_and_a_later_candle_cannot_fill_it(self):
+        sub = self.open + 10 * MINUTE
+        minutes = [
+            candle(self.open + 10 * MINUTE, 0.40, 0.50),
+            candle(self.open + 11 * MINUTE, 0.40, 0.50),
+            candle(self.open + 13 * MINUTE, 0.40, 0.50, ask_low=0.40),  # trades through after the expiry
+        ]
+        sim = self.build(minutes)
+        status = sim.submit(buy(self.ticker, "yes", 0.45, 4, expire_after_seconds=120), sub)
+        self.assertTrue(status.startswith("resting:"), status)
+        self.assertEqual(sim.orders[status.split(":", 1)[1]]["expires_ts"], sub + 120)
+        sim.advance(self.open + 13 * MINUTE)
+        self.assertEqual((sim.fills, sim.orders, sim.counts["expired"]), ([], {}, 1))
+        # The same bid with no expiry fills on that candle.
+        control = self.build(minutes)
+        control.submit(buy(self.ticker, "yes", 0.45, 4), sub)
+        control.advance(self.open + 13 * MINUTE)
+        self.assertEqual(len(control.fills), 1)
+
+    def test_a_stated_expires_at_is_clamped_and_a_bad_expiry_is_refused(self):
+        sim = self.build([candle(self.open + MINUTE, 0.40, 0.50)])
+        t = self.open + 2 * MINUTE
+        far = sim.submit(buy(self.ticker, "yes", 0.30, 2, expires_at=iso(t + 30 * 24 * HOUR)), t)
+        near = sim.submit(buy(self.ticker, "yes", 0.31, 2, expires_at=iso(t + 5)), t)
+        self.assertEqual(sim.orders[far.split(":", 1)[1]]["expires_ts"], t + 48 * HOUR)
+        self.assertEqual(sim.orders[near.split(":", 1)[1]]["expires_ts"], t + 120)
+        for extra in ({"expire_after_seconds": 60}, {"expire_after_seconds": "600"}, {"expires_at": "soon"},
+                      {"expires_at": iso(t + 600), "expire_after_seconds": 600}):
+            self.assertTrue(sim.submit(buy(self.ticker, "yes", 0.30, 2, **extra), t).startswith("rejected:"), extra)
 
     def test_intent_notional_is_capped_at_ten_times_learning(self):
         sim = self.build([candle(self.open + MINUTE, 0.40, 0.50)])
@@ -416,6 +455,13 @@ class CryptoTests(unittest.TestCase):
         self.assertEqual(len(self.sim.fills), 2)
         self.assertAlmostEqual(self.sim.fills[-1]["price"], 99.5)
         self.assertAlmostEqual(self.sim.fills[-1]["fee"], 0.05 * 99.5 * 0.0025)
+
+    def test_a_resting_bid_that_expires_before_the_dip_never_fills(self):
+        # The dip below 99.5 is in the candle starting at T0 + 1h; the bid expires at T0 + 50m.
+        status = self.sim.submit(self.intent("buy", 99.5, 0.05, post_only=True, expire_after_seconds=20 * 60), T0 + 30 * MINUTE)
+        self.assertTrue(status.startswith("resting:"), status)
+        self.sim.advance(T0 + HOUR + 5 * MINUTE)
+        self.assertEqual((self.sim.fills, self.sim.orders, self.sim.counts["expired"]), ([], {}, 1))
 
     def test_open_positions_are_marked_at_the_end_and_the_time_stop_closes(self):
         self.sim.submit(self.intent("buy", 101, 0.05, holding_period_hours=2), T0)

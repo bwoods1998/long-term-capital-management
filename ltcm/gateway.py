@@ -763,6 +763,10 @@ class Gateway:
             "exit_reason": intent.exit_reason,
             "exit_of": intent.exit_of,
         }
+        if intent.expires_at is not None:
+            # When the venue cancels the entry if it has not filled, so the tape can be checked
+            # against the venue's own order. Absent otherwise, so earlier intents keep their body.
+            payload["expires_at"] = intent.expires_at
         return self.log.append(stream, "desk.intent", payload, id=f"intent:{intent.id}", at=at)
 
     def _record_decision(self, decision: Decision) -> Event:

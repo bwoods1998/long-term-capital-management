@@ -270,6 +270,10 @@ class AlpacaBroker:
         `qty` and `notional` are mutually exclusive and this adapter always sends `qty`, so a
         desk's quantity is never reinterpreted as dollars.
         """
+        if getattr(intent, "expires_at", None) is not None:
+            # Alpaca has no good-till-date order. Sent as plain gtc, the order would outlive the
+            # expiry the desk relied on, so it is refused before anything is sent.
+            raise RejectedOrder("alpaca has no order that expires at a stated time; drop expires_at")
         body: dict[str, Any] = {
             "symbol": alpaca_symbol(intent.instrument),
             "qty": text(intent.quantity),
