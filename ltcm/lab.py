@@ -85,7 +85,7 @@ KIT_API = (
     "kit.context (dict: now, desk_id, live, learning_usd, positions[{symbol, market_id, right, asset_class, quantity, average_cost}], "
     "open_orders[{order_id, symbol, market_id, right, side, quantity, limit_price, submitted_at, strategy}], venues, "
     "market_depth (forward-only, may be empty: symbol -> {bid, ask, spread_bps, bid_depth_usd, ask_depth_usd, imbalance, age_seconds, bids, asks}; NEVER assume this exists in historical replay), "
-    "fee_rates (forward-only, may be empty: venue -> {maker, taker, age_seconds}, decimal fractions; absent is UNKNOWN, never zero)); "
+    "fee_rates (venue -> {maker, taker, age_seconds}, decimal fractions; authenticated current tier forward, fixed fee scenario in replay; absent is UNKNOWN, never zero)); "
     "kit.say(text); kit.bars(symbol, interval='1h', limit=60, asset_class='crypto', venue='coinbase') -> [{time, open, high, low, close, volume}]; "
     "kit.quote(symbol, asset_class='crypto', venue='coinbase') -> {bid, ask, last}; kit.products(limit=25) -> [{symbol, price, volume_usd, quote_increment}] (Coinbase USD spot by 24h volume); "
     "kit.kalshi_series(series, limit=1000) -> open markets [{ticker, yes_bid, yes_ask, no_bid, no_ask, close_time, floor_strike, cap_strike, title, ...}]; "

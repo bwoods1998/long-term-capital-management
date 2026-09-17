@@ -683,6 +683,7 @@ class Foundry:
         #: backtests but moves nothing onto a live desk.
         self.halted = halted
         self._running = threading.Lock()
+        self._cycle_fees: dict[str, Any] | None = None
         self._state_lock = threading.RLock()
         self._result_cache = None
         if self.config.get("result_cache", False):
@@ -831,9 +832,10 @@ class Foundry:
         # never enables its live parent or bypasses adoption/promotion gates. Prefer an active
         # descendant whenever one exists; never revive a retired/excluded family.
         recovery = self.config.get("paused_research_families") or []
-        if (not names and family in recovery and family not in self.excluded_families()
-                and house and house not in UNBACKTESTABLE_STRATEGIES):
-            names.append(house)
+        if (family in recovery and family not in self.excluded_families()
+                and house and house not in UNBACKTESTABLE_STRATEGIES
+                and not any(base_name(name) == house for name in names)):
+            names.insert(0, house)
         return names
 
     def source_of(self, name: str, live: Any) -> str | None:
@@ -971,6 +973,20 @@ class Foundry:
             self._report_problems(cycle, problems)
             return summary
 
+        self._cycle_fees = None
+        if family == "crypto":
+            try:
+                self._cycle_fees = self.coinbase_fees()
+            except ValueError as exc:
+                self.progress("fees_unavailable", str(exc), cycle=cycle, family=family)
+                return {**summary, "skipped": str(exc)}
+        else:
+            # Coinbase availability must never block another venue's research.
+            self._cycle_fees = {"maker": "0.005", "taker": "0.009", "source": "unused crypto snapshot"}
+        summary["coinbase_fees"] = dict(self._cycle_fees)
+        if family == "crypto":
+            self.progress("fees", f"Coinbase replay uses authenticated tier: {float(self._cycle_fees['maker']) * 100:g}% maker / {float(self._cycle_fees['taker']) * 100:g}% taker; same snapshot for all candidates", cycle=cycle, family=family)
+
         defaults = literal_defaults(source)
         frozen = [str(k) for k in (cfg.get("frozen_params") or [])]
         baselines, best_known, records = self.baselines(cycle, family, subject, source, live, shadows, defaults, frozen)
@@ -986,6 +1002,7 @@ class Foundry:
             "start": _iso(end - float(cfg["window_days"]) * 86400.0),
             "end": _iso(end),
             "step_minutes": int(dict(cfg.get("family_step_minutes") or {}).get(family, cfg["step_minutes"])),
+            "coinbase_fees": dict(self._cycle_fees),
         }
         summary["window"] = [window["start"], window["end"], window["step_minutes"]]
 
@@ -1158,6 +1175,7 @@ class Foundry:
 
     def instructions(self, name: str) -> str:
         cfg = self.config
+        fees = self._cycle_fees or self.coinbase_fees()
         return (
             f"You are the Foundry of a public, fully automated trading floor: a research loop scheduled every {cfg['interval_minutes']} minutes, "
             "mutates a strategy's code, backtests every mutation on the last days of real Kalshi and Coinbase history, "
@@ -1177,7 +1195,10 @@ class Foundry:
             "kit.bars, kit.quote and kit.products from history at each step; kit.weather is not available.\n"
             f"The kit: {KIT_API}\n"
             "The backtest charges a Kalshi taker fill 0.07 * contracts * p * (1 - p) dollars rounded up to $0.0001 (the venue's "
-            "rounding, not to the cent), and a resting fill nothing; Coinbase 0.5% maker and 1.2% taker.\n"
+            "rounding, not to the cent); some Kalshi series also charge maker fees. "
+            f"Coinbase {float(fees['maker']) * 100:g}% maker and {float(fees['taker']) * 100:g}% taker. "
+            "Read kit.context['fee_rates']['coinbase'] for the exact rates used by this replay. "
+            "Require the target move to exceed both entry and exit fees plus spread/slippage; a dip alone is not an edge.\n"
             f"How it is judged: the closed positions are split in time; on the last third it needs at least "
             f"{int(cfg['min_oos_trades'])} positions ({int(cfg['min_trades'])} trades in all), a return on notional above the "
             f"best baseline's by {cfg['margin']}, and a 95% confidence lower bound on mean P&L per position above "
@@ -1430,6 +1451,7 @@ class Foundry:
 
     def spec_for(self, candidate: Mapping[str, Any], window: Mapping[str, Any]) -> dict[str, Any]:
         cfg = self.config
+        fees = window.get("coinbase_fees") or self.coinbase_fees()
         return {
             "strategy": candidate["strategy"],
             "code": candidate["code"],
@@ -1441,7 +1463,25 @@ class Foundry:
             "fill_model": cfg["fill_model"],
             "max_markets": int(cfg["max_markets"]),
             "seed": int(cfg["seed"]),
+            "coinbase_maker_fee": float(fees["maker"]),
+            "coinbase_taker_fee": float(fees["taker"]),
         }
+
+    def coinbase_fees(self) -> dict[str, Any]:
+        """Authenticated current rates in production; explicit snapshot for offline research.
+
+        Rates belong in the spec/cache key, never in candidate-editable params. A production
+        lookup failure must not silently price experiments using an obsolete cheaper tier.
+        """
+        reader = getattr(getattr(self.strategies, "service", None), "venue_fee_rates", None)
+        if not callable(reader):
+            return {"maker": "0.005", "taker": "0.009", "source": "offline snapshot 2026-09-17"}
+        rates = (reader() or {}).get("coinbase") or {}
+        values = {side: _float(rates.get(side)) for side in ("maker", "taker")}
+        age = _float(rates.get("age_seconds"))
+        if age is None or not 0 <= age <= 900 or any(v is None or not 0 <= v <= 0.1 for v in values.values()):
+            raise ValueError("current Coinbase fees unavailable; crypto research cannot be scored")
+        return {**values, "source": "authenticated account tier"}
 
     def _backtest(self, candidate: dict[str, Any], window: Mapping[str, Any], ids: "queue.Queue[str]") -> dict[str, Any]:
         """One backtest in one free sandbox. Fills in the candidate's report and evidence."""

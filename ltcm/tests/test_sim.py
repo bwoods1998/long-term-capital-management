@@ -417,6 +417,22 @@ class FeeTests(unittest.TestCase):
 
 
 class MakerFeeTests(SimTestCase):
+    def test_coinbase_shadow_fill_reads_current_tier_without_rewriting_history(self):
+        rates = {"maker": "0.005", "taker": "0.009"}
+        broker = self.make_broker("dynamic-fees.db", market_venue="coinbase", slippage_bps=0,
+                                  fee_reader=lambda: rates)
+        self.addCleanup(broker.close)
+        self.book(BTC, bid="100", ask="100", last="100")
+        broker.submit(intent(BTC, quantity="1", nonce="first"))
+        self.assertEqual(broker.fills()[0].fee, Decimal("0.90"))
+        rates["taker"] = "0.006"
+        broker.submit(intent(BTC, quantity="1", nonce="second"))
+        self.assertEqual(sorted(f.fee for f in broker.fills()), [Decimal("0.60"), Decimal("0.90")])
+        rates["taker"] = "NaN"
+        with self.assertRaises(ValueError):
+            broker.submit(intent(BTC, quantity="1", nonce="invalid"))
+        self.assertEqual(len(broker.fills()), 2)
+
     def test_a_resting_event_order_that_fills_later_pays_no_fee_and_a_taker_pays_the_formula(self):
         # Kalshi charges the taker; every maker fill on Sept 16, 2026 came back with fee 0.
         broker = self.make_broker("kalshi.db", market_venue="kalshi", slippage_bps=0)
@@ -709,7 +725,7 @@ class KalshiSeriesFeeTests(unittest.TestCase):
         fees = FeeModel.for_venue("coinbase")
         btc = Instrument("crypto", "BTC-USD", "coinbase")
         self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="maker"), Decimal("0.13"))
-        self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="taker"), Decimal("0.30"))
+        self.assertEqual(fees.fee(btc, "buy", Decimal("0.001"), Decimal("25000"), liquidity="taker"), Decimal("0.23"))
 
 
 class KalshiFeeRoundingTests(SimTestCase):

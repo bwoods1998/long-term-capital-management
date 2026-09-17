@@ -3,7 +3,7 @@ Coinbase mid, and when a coin is held, rest a post-only offer over cost that cle
 
 Every run, for each symbol: read the quote; when the desk holds none of the coin, rest a
 post-only bid at mid x (1 - spread) sized to the learning notional; when it holds some, rest a
-post-only offer for the whole holding at the highest of cost x (1 + 2 x maker_fee + min_margin),
+post-only offer for the whole holding at the highest of cost x (1 + maker_fee) x (1 + min_margin) / (1 - maker_fee),
 mid x (1 + spread / 2) and one tick over the ask, rounded up to the tick, so a fill closes the
 round trip above cost after both maker fees. A round trip captures about `spread` measured from
 cost (a bid `spread` under mid, an offer over cost), not twice the spread. Quotes older than
@@ -13,18 +13,19 @@ would re-place each offer every 15 minutes, some 96 orders a day a coin against 
 limit). A quote that would cross the book is refused by the venue and by the shadow book alike,
 so the desk can never take.
 
-The fee guard (Sept 17, 2026). This account pays 0.5% as a maker and 1.2% as a taker on its real
-fills, so a round trip pays 1% in fees before it earns anything. The live desks quoted at a 1%
+The fee guard (Sept 17, 2026). Rates come from the authenticated account tier in kit.context;
+unknown or stale rates block new bids, not inventory exits. The account paid 0.5% maker and
+1.2% taker on Sept 16; its Sept 17 tier is 0.5% / 0.9%. The live desks quoted at a 1%
 spread with the offer at cost x 1.01: a clean round trip netted about nothing, and a lot that hit
 the 48-hour time stop paid the taker fee on top. A 90-day replay on one-minute candles for BTC,
 ETH and SOL (June 19 - Sept 17) lost at every spread from 0.4% to 2% at a 0.5% maker fee:
 -$0.64 a day per $100 lot per product at 1% [-1.04, -0.22], through a +21% BTC rally that
 flattered long inventory. So bids are placed only when `bid` is true and the spread clears the
-round trip: spread >= 2 x maker_fee + min_margin. Otherwise no bid target is built, and any
+round trip, including exact fee compounding and the minimum margin. Otherwise no bid target is built, and any
 resting bid is cancelled because it no longer has one. The guard lives in code on purpose: a
 promotion that copies a shadow's params onto the live desk cannot turn bids back on unless the
 spread clears the fees, and `maker_fee` and `min_margin` only ever raise the bar -- the guard
-never uses less than the values in DEFAULTS, which the Foundry may not change. Offers for held
+never uses less than the authenticated fee or the default minimum margin. Offers for held
 inventory are always quoted, so a desk with bids off exits what it holds.
 
 A holding worth less than `min_inventory_usd` is dust, not inventory: the venue will not take
@@ -33,6 +34,7 @@ trips kept the live desk offering dust it could not sell instead of bidding. Off
 rounded down, so an offer never exceeds the holding. A coin whose mid is under `min_price_usd`
 gets no bid: prices print to the cent, and a one-cent step under a sub-dollar bid can go to zero.
 A holding in such a coin is still offered, so it is never stranded.
+The fee-aware revision must earn a new forward record before promotion.
 
 Params: symbols, spread, drift, requote_seconds, notional_usd, max_symbols, min_inventory_usd,
 maker_fee, min_margin, bid, min_price_usd.
@@ -60,7 +62,8 @@ DEFAULTS = {
 
 def _num(value, default=None):
     try:
-        return float(str(value).replace(",", ""))
+        number = float(str(value).replace(",", ""))
+        return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
 
@@ -121,14 +124,20 @@ def decide(kit, params):
     spread = float(p["spread"])
     # The account's real maker rate and the margin are floors: a param may raise them, never lower
     # them, so no promoted or Foundry-made setting can quote a spread the fees eat.
-    fee = max(DEFAULTS["maker_fee"], _num(p.get("maker_fee"), 0.0) or 0.0)
+    rates = (ctx.get("fee_rates") or {}).get("coinbase") or {}
+    current_fee, age = _num(rates.get("maker")), _num(rates.get("age_seconds"))
+    fee_known = (current_fee is not None and math.isfinite(current_fee) and 0 <= current_fee <= 0.1
+                 and age is not None and math.isfinite(age) and 0 <= age <= 900)
+    fee = max(current_fee if fee_known else DEFAULTS["maker_fee"], _num((params or {}).get("maker_fee"), 0.0) or 0.0)
     margin = max(DEFAULTS["min_margin"], _num(p.get("min_margin"), 0.0) or 0.0)
-    round_trip = 2.0 * fee + margin
-    bids_on = bool(p.get("bid", True)) and spread + 1e-12 >= round_trip
-    if not p.get("bid", True):
+    round_trip = (1.0 + fee) * (1.0 + margin) / (1.0 - fee) - 1.0
+    bids_on = fee_known and bool(p.get("bid", True)) and spread + 1e-12 >= round_trip
+    if not fee_known:
+        kit.say("bids off: current Coinbase fee tier unavailable; inventory exits remain available")
+    elif not p.get("bid", True):
         kit.say("bids off: params")
     elif not bids_on:
-        kit.say(f"bids off: spread {spread * 100:.2f}% < 2*fee+margin {round_trip * 100:.2f}%")
+        kit.say(f"bids off: spread {spread * 100:.2f}% < fee-adjusted hurdle {round_trip * 100:.2f}%")
     held = {}
     for x in ctx.get("positions") or []:
         if str(x.get("asset_class") or "") == "crypto" and _num(x.get("quantity"), 0) > 0:
@@ -137,7 +146,10 @@ def decide(kit, params):
     cancels, intents, kept = [], [], {}
     targets = {}
     increments = {}
-    for symbol in _symbols(kit, p["symbols"], DEFAULTS["symbols"], increments)[: int(p["max_symbols"])]:
+    symbols = _symbols(kit, p["symbols"], DEFAULTS["symbols"], increments)[: int(p["max_symbols"])]
+    # Universe limits constrain entries, never strand an existing position's exit.
+    symbols = list(dict.fromkeys(symbols + list(held)))
+    for symbol in symbols:
         quote = kit.quote(symbol) or {}
         bid, ask = _num(quote.get("bid")), _num(quote.get("ask"))
         if not bid or not ask or ask <= 0:
@@ -196,6 +208,7 @@ def decide(kit, params):
                 "order_type": "limit",
                 "limit_price": _price(price),
                 "post_only": True,
+                **({"reduce_only": True} if side == "sell" else {}),
                 "rationale": "Quote: " + why,
                 **({"holding_period_hours": 48} if side == "buy" else {}),
             }

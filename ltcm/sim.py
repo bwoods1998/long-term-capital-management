@@ -195,8 +195,8 @@ class FeeModel:
     Defaults as published by the venues the floor uses:
       - US equities: $0 commission (Alpaca, Schwab, most retail brokers since 2019).
       - US options: $0.65 per contract (the common retail rate; Alpaca charges $0).
-      - Crypto on Coinbase: 0.5% maker, 1.2% taker, what this account's real fills paid on
-        Sept 16, 2026 (every resting fill 0.5000%, every taker fill 1.2000%). The model charged
+      - Crypto on Coinbase: offline snapshot 0.5% maker, 0.9% taker, authenticated Sept 17,
+        2026. Live shadow books use the service's current fee reader at each fill. The model charged
         0.15% and 0.25% before, which scored quoting strategies that lose money after the real
         fee as winners and promoted one. The tier moves with 30-day volume
         (https://www.coinbase.com/advanced-fees).
@@ -245,7 +245,9 @@ class FeeModel:
             return cls(option_per_contract=Decimal("0.65"), crypto_taker_pct=Decimal("0.0025"))
         if venue == "kalshi":
             return cls(event_fee_rate=Decimal("0.07"), kalshi_series=kalshi_fee_schedule())
-        if venue in ("coinbase", "kraken"):
+        if venue == "coinbase":
+            return cls(crypto_taker_pct=Decimal("0.009"), crypto_maker_pct=Decimal("0.005"))
+        if venue == "kraken":
             return cls(crypto_taker_pct=Decimal("0.012"), crypto_maker_pct=Decimal("0.005"))
         if venue in ("schwab", "tastytrade"):
             return cls(option_per_contract=Decimal("0.65"))
@@ -378,6 +380,7 @@ class ShadowBook:
         clock: Callable[[], Any],
         initial_cash: Any = Decimal("100000"),
         fee_model: "FeeModel | None" = None,
+        fee_reader: "Callable[[], Mapping[str, Any]] | None" = None,
         slippage_bps: Any = Decimal(5),
         allow_short: bool = False,
         currency: str = "USD",
@@ -390,6 +393,7 @@ class ShadowBook:
         self.data = data
         self.clock = clock
         self.fee_model = fee_model or FeeModel.for_venue(self.market_venue)
+        self.fee_reader = fee_reader
         self.slippage_bps = money(slippage_bps)
         if self.slippage_bps < 0:
             raise ValueError("slippage_bps must not be negative")
@@ -700,7 +704,14 @@ class ShadowBook:
         # below), so its earlier fills share this fill's price and fee terms: what they accrued
         # is what `filled_before` recomputes, and the pieces pay the order's rounded fee.
         filled_before = order.filled_quantity if liquidity == "maker" and order.average_price == price else ZERO
-        fee = self.fee_model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity, filled_before=filled_before)
+        model = self.fee_model
+        if self.market_venue == "coinbase" and self.fee_reader is not None:
+            rates = self.fee_reader()
+            maker, taker = money(rates["maker"]), money(rates["taker"])
+            if not all(v.is_finite() and ZERO <= v <= Decimal("0.1") for v in (maker, taker)):
+                raise ValueError("invalid Coinbase shadow fee rates")
+            model = FeeModel(crypto_maker_pct=maker, crypto_taker_pct=taker)
+        fee = model.fee(order.instrument, order.side, quantity, price, liquidity=liquidity, filled_before=filled_before)
         notional = quantity * price * order.instrument.multiplier
         account = self._account()
         cash = money(account["cash"])

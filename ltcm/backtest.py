@@ -125,7 +125,7 @@ DEFAULT_SPEC: dict[str, Any] = {
     "settle_lag_hours": 24,       # ... and not past this long before the run began (settlements still arriving)
     "half_spread_bps": 1.0,       # Coinbase quote = close -/+ this
     "coinbase_maker_fee": 0.005,  # this account's real fills, Sept 16, 2026 (see sim.FeeModel)
-    "coinbase_taker_fee": 0.012,
+    "coinbase_taker_fee": 0.009,  # offline snapshot Sept 17; Foundry supplies authenticated rates
     "max_seconds": None,          # wall-clock budget, loading included; None: 540 in a sandbox, else none; 0: none
     "verbose": None,              # progress lines on stderr; None: on, except under "compact"
     # A desk's sandbox returns at most 4,000 characters of stdout and stderr together: "compact"
@@ -1340,6 +1340,7 @@ class Simulator:
             "venues": ["kalshi", "coinbase"],
             "dry_run": False,
             "backtest": True,
+            "fee_rates": {"coinbase": {"maker": str(self.maker_fee), "taker": str(self.taker_fee), "age_seconds": 0}},
         }
 
     def _reject(self, reason: str) -> None:
@@ -2037,7 +2038,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None, trusted_code: 
         learning_usd=learning,
         half_spread=half_spread,
         maker_fee=float(_num(spec.get("coinbase_maker_fee"), 0.005)),
-        taker_fee=float(_num(spec.get("coinbase_taker_fee"), 0.012)),
+        taker_fee=float(_num(spec.get("coinbase_taker_fee"), 0.009)),
         fill_model=fill_model,
     )
     errors = 0

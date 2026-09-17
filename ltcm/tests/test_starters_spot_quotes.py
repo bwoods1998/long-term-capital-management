@@ -32,6 +32,7 @@ class QuoteKit:
 
     def __init__(self, *, positions=(), orders=(), products=()):
         self.context = {"now": NOW, "positions": list(positions), "open_orders": list(orders), "learning_usd": "25", "live": True}
+        self.context["fee_rates"] = {"coinbase": {"maker": "0.005", "taker": "0.009", "age_seconds": 0}}
         self.rows = list(products)
         self.log = []
 
@@ -57,7 +58,7 @@ class FeeGuardTests(unittest.TestCase):
         out = load().decide(kit, {"symbols": ["BTC-USD", "ETH-USD"], "spread": 0.01, "maker_fee": 0.005})
         self.assertEqual(out["intents"], [], "1% does not clear two 0.5% maker fees and a 0.2% margin")
         self.assertEqual(out["cancels"], ["ord-bid"], "a bid with no target is gone")
-        self.assertIn("bids off: spread 1.00% < 2*fee+margin 1.20%", kit.log)
+        self.assertIn("bids off: spread 1.00% < fee-adjusted hurdle 1.21%", kit.log)
 
     def test_a_held_coin_is_offered_over_cost_by_both_fees_and_the_margin(self):
         kit = QuoteKit(positions=[{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.001", "average_cost": "76000"}])
@@ -65,29 +66,30 @@ class FeeGuardTests(unittest.TestCase):
         self.assertEqual(sides(out), [("BTC-USD", "sell")])
         offer = out["intents"][0]
         self.assertGreaterEqual(Decimal(offer["limit_price"]), Decimal("76000") * Decimal("1.012"))
-        self.assertEqual(offer["limit_price"], "76912.00", "cost x 1.012 is above mid x 1.005 and the ask")
+        self.assertEqual(offer["limit_price"], "76917.35", "exact fee compounding leaves a 0.2% net margin")
         self.assertTrue(offer["post_only"])
+        self.assertTrue(offer["reduce_only"], "inventory exits are not capped like new entries")
         self.assertEqual(offer["quantity"], "0.001000")
 
     def test_the_offer_never_prints_under_its_floor(self):
         kit = QuoteKit(positions=[{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.001", "average_cost": "75500.01"}])
         offer = load().decide(kit, {"symbols": ["BTC-USD"], "spread": 0.004})["intents"][0]
         self.assertGreaterEqual(Decimal(offer["limit_price"]), Decimal("75500.01") * Decimal("1.012"), "76406.01012 rounds up to the cent")
-        self.assertEqual(offer["limit_price"], "76406.02")
+        self.assertEqual(offer["limit_price"], "76411.33")
 
     def test_an_offer_still_at_its_target_is_kept_however_old(self):
         # Exit-only (Sept 17, 2026): re-placing an unchanged offer every requote_seconds (900)
         # was ~96 orders a day a coin against hilibrand's 120, and a replacement more than 3%
         # over the bid is refused by the risk engine after the cancel has already gone out.
         positions = [{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.001", "average_cost": "76000"}]
-        def offer(price="76912.00", quantity="0.001000", minutes_old=60):
+        def offer(price="76917.35", quantity="0.001000", minutes_old=60):
             return {"order_id": "ord-offer", "strategy": "spot_quotes", "symbol": "BTC-USD", "side": "sell", "quantity": quantity, "limit_price": price, "submitted_at": f"2026-09-17T{4 - minutes_old // 60:02d}:{(10 - minutes_old % 60) % 60:02d}:00Z"}
         live = {"symbols": ["BTC-USD"], "bid": False, "spread": 0.01}
         out = load().decide(QuoteKit(positions=positions, orders=[offer(minutes_old=60)]), live)
         self.assertEqual((out["cancels"], out["intents"]), ([], []), "an hour old, same price and size: kept")
         out = load().decide(QuoteKit(positions=positions, orders=[offer(price="76950.00", minutes_old=60)]), live)
         self.assertEqual(out["cancels"], ["ord-offer"], "stale and off its target by less than the drift: requoted as before")
-        self.assertEqual([i["limit_price"] for i in out["intents"]], ["76912.00"])
+        self.assertEqual([i["limit_price"] for i in out["intents"]], ["76917.35"])
         out = load().decide(QuoteKit(positions=positions, orders=[offer(quantity="0.000500", minutes_old=60)]), live)
         self.assertEqual(out["cancels"], ["ord-offer"], "the holding grew: the whole of it is offered again")
         bid = {"order_id": "ord-bid", "strategy": "spot_quotes", "symbol": "BTC-USD", "side": "buy", "quantity": "0.000339", "limit_price": "73720.00", "submitted_at": "2026-09-17T02:00:00Z"}
@@ -103,7 +105,8 @@ class FeeGuardTests(unittest.TestCase):
         self.assertFalse([line for line in kit.log if line.startswith("bids off")])
 
     def test_a_spread_exactly_at_the_round_trip_bids(self):
-        self.assertEqual(sides(load().decide(QuoteKit(), {"symbols": ["BTC-USD"], "spread": 0.012})), [("BTC-USD", "buy")])
+        hurdle = 1.005 * 1.002 / 0.995 - 1
+        self.assertEqual(sides(load().decide(QuoteKit(), {"symbols": ["BTC-USD"], "spread": hurdle})), [("BTC-USD", "buy")])
 
     def test_bid_false_places_no_bid_at_any_spread_but_still_offers_inventory(self):
         positions = [{"symbol": "ETH-USD", "asset_class": "crypto", "quantity": "0.01", "average_cost": "2300"}]
@@ -140,13 +143,27 @@ class FeeGuardTests(unittest.TestCase):
             kit = QuoteKit()
             out = load().decide(kit, {"symbols": ["BTC-USD"], "spread": 0.008, **params})
             self.assertEqual(out["intents"], [], params)
-            self.assertIn("bids off: spread 0.80% < 2*fee+margin 1.20%", kit.log)
+            self.assertIn("bids off: spread 0.80% < fee-adjusted hurdle 1.21%", kit.log)
         kit = QuoteKit()
         self.assertEqual(sides(load().decide(kit, {"symbols": ["BTC-USD"], "spread": 0.015, "maker_fee": 0.007})), [], "a param may raise the bar")
-        self.assertIn("bids off: spread 1.50% < 2*fee+margin 1.60%", kit.log)
+        self.assertIn("bids off: spread 1.50% < fee-adjusted hurdle 1.61%", kit.log)
         held = QuoteKit(positions=[{"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.001", "average_cost": "76000"}])
         offer = load().decide(held, {"symbols": ["BTC-USD"], "spread": 0.01, "maker_fee": 0.001, "min_margin": 0})["intents"][0]
-        self.assertEqual(offer["limit_price"], "76912.00", "the offer floor keeps both real fees and the margin")
+        self.assertEqual(offer["limit_price"], "76917.35", "the offer floor keeps both real fees and the margin")
+
+    def test_current_tier_controls_guard_and_unknown_fees_only_block_entries(self):
+        kit = QuoteKit()
+        kit.context["fee_rates"]["coinbase"]["maker"] = "0.01"
+        self.assertEqual(load().decide(kit, {"symbols": ["BTC-USD"], "spread": 0.02})["intents"], [])
+        kit.context["fee_rates"]["coinbase"]["maker"] = "0.001"
+        self.assertEqual(sides(load().decide(kit, {"symbols": ["BTC-USD"], "spread": 0.006})), [("BTC-USD", "buy")])
+        held = {"symbol": "BTC-USD", "asset_class": "crypto", "quantity": "0.001", "average_cost": "76000"}
+        for fees in ({}, {"coinbase": {"maker": "0.005", "age_seconds": 901}},
+                     {"coinbase": {"maker": "NaN", "age_seconds": 0}}):
+            kit = QuoteKit(positions=[held])
+            kit.context["fee_rates"] = fees
+            out = load().decide(kit, {"symbols": ["ETH-USD"], "spread": 0.03})
+            self.assertEqual(sides(out), [("BTC-USD", "sell")], "held assets outside entry universe remain manageable")
 
     def test_a_listed_quote_increment_coarser_than_a_cent_is_the_tick(self):
         positions = [{"symbol": "BIG-USD", "asset_class": "crypto", "quantity": "1", "average_cost": "50"}]

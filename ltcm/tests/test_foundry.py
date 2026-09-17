@@ -228,6 +228,15 @@ class FoundryCase(unittest.TestCase):
 
 # --------------------------------------------------------------------------- candidates
 class CandidateTests(FoundryCase):
+    def test_exit_only_strategy_does_not_starve_paused_entry_research(self):
+        self.manifests["hilibrand"] = SimpleNamespace(id="hilibrand", family="crypto", live=True)
+        self.strategies.store.update("hilibrand", "hourly_reversion", enabled=False, house=True)
+        self.strategies.store.update("hilibrand", "spot_quotes", enabled=True, house=True, params={"bid": False})
+        foundry = self.foundry(paused_research_families=["crypto"])
+        self.assertEqual(foundry.subjects("crypto", self.manifests), ["hourly_reversion", "spot_quotes"])
+        self.strategies.store.update("hilibrand", "hourly_reversion_f90", enabled=True)
+        self.assertEqual(foundry.subjects("crypto", self.manifests), ["hourly_reversion_f90", "spot_quotes"])
+
     def test_the_code_generator_is_told_the_fees_the_backtest_charges(self):
         # Sept 17, 2026: the prompt still said Kalshi rounds to the cent and Coinbase charges
         # 0.25%/0.60% while the backtest charged $0.0001 rounding and 0.5%/1.2%.
@@ -284,7 +293,26 @@ class CandidateTests(FoundryCase):
         for variant in variants:
             params = {**defaults, **variant["params"]}
             self.assertEqual((params["maker_fee"], params["min_margin"]), (0.005, 0.002), variant["params"])
-        self.assertIn("0.5% maker and 1.2% taker", foundry.instructions("spot_quotes_f3"))
+        self.assertIn("0.5% maker and 0.9% taker", foundry.instructions("spot_quotes_f3"))
+
+    def test_authenticated_fees_reach_prompt_spec_and_cache_key(self):
+        foundry = self.foundry()
+        rates = {"maker": "0.003", "taker": "0.007", "age_seconds": 1}
+        self.strategies.service = SimpleNamespace(venue_fee_rates=lambda: {"coinbase": rates})
+        self.assertIn("Coinbase 0.3% maker and 0.7% taker", foundry.instructions("hourly_reversion_f3"))
+        candidate = {"strategy": "hourly_reversion", "code": GOOD_CODE}
+        window = {"start": NOW, "end": NOW, "step_minutes": 15, "coinbase_fees": foundry.coinbase_fees()}
+        rates["taker"] = "0.008"
+        first = foundry.spec_for(candidate, window)
+        self.assertEqual((first["coinbase_maker_fee"], first["coinbase_taker_fee"]), (0.003, 0.007), "one tier snapshot for all candidates in a cycle")
+        second = foundry.spec_for(candidate, {**window, "coinbase_fees": foundry.coinbase_fees()})
+        self.assertNotEqual(first, second, "fee changes invalidate result cache specs")
+        rates["age_seconds"] = 901
+        with self.assertRaisesRegex(ValueError, "fees unavailable"):
+            foundry.coinbase_fees()
+        rates.update(age_seconds=0, maker="NaN")
+        with self.assertRaises(ValueError):
+            foundry.coinbase_fees()
 
     def test_jitter_helpers_keep_integers_fractions_and_frozen_keys(self):
         base = {"count": 3, "fraction": 0.9, "size": 25.0, "mode": "a", "flag": True}

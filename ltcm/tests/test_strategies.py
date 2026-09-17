@@ -298,6 +298,19 @@ class BootstrapTests(StrategyCase):
         self.strategies.bootstrap(self.service.manifests)
         self.assertEqual(self.strategies.report(self.manifest, "hourly_ranges")["params"], {"min_edge": 0.9})
 
+    def test_house_code_refresh_resets_forward_evidence_and_inflight_identity(self):
+        import hashlib
+        self.strategies.config["starters"] = True
+        self.strategies.bootstrap(self.service.manifests)
+        old = "def decide(kit, params):\n    return []  # previous house\n"
+        self.manager.files[self.manifest.id]["hourly_ranges.py"] = old
+        self.strategies.store.update(self.manifest.id, "hourly_ranges", code_sha256=hashlib.sha256(old.encode()).hexdigest())
+        self.service.clock[0] = AFTER
+        self.strategies.bootstrap(self.service.manifests)
+        row = self.strategies.store.for_desk(self.manifest.id)["hourly_ranges"]
+        self.assertEqual((row["deployed_at"], row["promoted_at"]), (AFTER, AFTER))
+        self.assertEqual(row["promoted_from"], "house code refresh")
+
 
 class CancelAndRecordTests(StrategyCase):
     def setUp(self):
@@ -651,6 +664,7 @@ class FakeKit:
 
     def __init__(self, now="2026-09-16T04:10:00.000Z", spot=75936.0):
         self.context = {"now": now, "positions": [], "learning_usd": "15", "live": False}
+        self.context["fee_rates"] = {"coinbase": {"maker": "0.005", "taker": "0.009", "age_seconds": 0}}
         self.log = []
         self.spot = spot
 

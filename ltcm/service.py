@@ -1195,6 +1195,7 @@ class Service:
                 data=self.market_data,
                 clock=self.clock,
                 initial_cash=manifest.capital_usd,
+                fee_reader=(lambda: self.venue_fee_rates()["coinbase"]) if manifest.market_venue == "coinbase" else None,
                 slippage_bps=int(
                     self.config.get("shadow_slippage_bps")
                     or self.config.get("paper_slippage_bps")

@@ -875,7 +875,11 @@ class Strategies:
             return  # the desk edited its copy; it is the desk's now
         try:
             manager.toolbox_save(desk_id, starter, house, "house starter (updated)")
-            self.store.update(desk_id, starter, code_sha256=_sha(house))
+            # New code must earn its own forward record; the previous version's fills are
+            # not evidence for it. Also invalidate any old-version run still in flight.
+            at = self.service.now()
+            self.store.update(desk_id, starter, code_sha256=_sha(house), deployed_at=at,
+                              promoted_at=at, promoted_from="house code refresh")
         except Exception:
             return
 
