@@ -1026,6 +1026,12 @@ class Service:
             clock=clock,
         )
         self.lab.strategies = self.strategies  # leap: lab -- built after the lab; hand it over
+        try:
+            # leap: throughput -- strategies dispatch on their own clock, not the tick's.
+            if self.strategies.start_dispatcher(lambda: self.active_manifests(), self.now):
+                self.alert("info", f"strategy dispatcher running every {self.strategies.config.get('dispatch_seconds')}s")
+        except Exception as exc:
+            self.alert("warning", f"strategy dispatcher did not start: {type(exc).__name__}")
         self.founding = self._build_founding()  # leap: founding
         self.foundry = self._build_foundry()  # leap: foundry
         notify = dict(self.config.get("notify") or {})
@@ -1742,8 +1748,33 @@ class Service:
             except Exception as exc:
                 self.alert("warning", f"trade drain failed: {type(exc).__name__}")
         filled = 0
+        # Sept 17, 2026: every print was offered to every shadow book (a SELECT per print per
+        # book; 70 books x thousands of prints held the tick for two minutes). Each book's
+        # resting quotes are read once per drain, and a print goes only to the books quoting
+        # its market. A book whose orders cannot be read still sees every print.
+        quoted: dict[str, set[tuple[str, str]] | None] = {}
+        for desk_id, book in list(self.shadow_books.items()):
+            reader = getattr(book, "open_orders", None)
+            try:
+                orders = reader() if callable(reader) else None
+            except Exception:
+                orders = None
+            if orders is None:
+                quoted[desk_id] = None
+                continue
+            keys: set[tuple[str, str]] = set()
+            for order in orders:
+                inst = getattr(order, "instrument", None)
+                if inst is None or getattr(order, "order_type", "limit") != "limit":
+                    continue
+                keys.add((str(inst.venue), str(inst.market_id or inst.symbol).upper()))
+            quoted[desk_id] = keys
         for trade in trades:
+            key = (str(trade["venue"]), str(trade["symbol"]).upper())
             for desk_id, book in list(self.shadow_books.items()):
+                wanted = quoted.get(desk_id)
+                if wanted is not None and key not in wanted:
+                    continue
                 on_trade = getattr(book, "on_trade", None)
                 if not callable(on_trade):
                     continue
@@ -4205,6 +4236,12 @@ class Service:
         self._stream_stop.set()
         if self._stream_thread is not None:
             self._stream_thread.join(timeout=5)
+        stopper = getattr(getattr(self, "strategies", None), "stop_dispatcher", None)
+        if callable(stopper):
+            try:
+                stopper()
+            except Exception:
+                pass
         if getattr(self, "sandboxes", None) is not None:  # leap: sandbox
             try:
                 self.sandboxes.sleep_all()

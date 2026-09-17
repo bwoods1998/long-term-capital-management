@@ -85,7 +85,7 @@
     "min_cadence_seconds": 300,
     "max_intents_per_run": 5,
     "max_runs_per_tick": 8,
-    "parallel_runs": 24,
+    "parallel_runs": 48,
     "record_cache_seconds": 120,
     "earned_settled": 6,
     "promotion": {
@@ -103,7 +103,8 @@
     "idle_publish_seconds": 3600,
     "starters": true,
     "pooled_evidence": true,
-    "pooled_min_real": 5
+    "pooled_min_real": 5,
+    "dispatch_seconds": 15
   },
   "foundry": {
     "enabled": true,

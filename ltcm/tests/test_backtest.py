@@ -1219,3 +1219,66 @@ class CompactSplitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FuturesSimulatorTests(unittest.TestCase):
+    """leap: futures -- CDE contracts in the simulator: whole contracts, a multiplier, shorts,
+    per-contract fees, exits on the right side (Sept 17, 2026)."""
+
+    def setUp(self):
+        self.start = T0
+        self.end = T0 + 6 * HOUR
+        bars = coinbase_series(T0 - 30 * HOUR, 36 * 12, 300, base=2400.0)  # a 2,400-dollar underlying
+        # After T0 + 1h the price falls 2% and stays there.
+        for bar in bars:
+            if bar["ts"] >= T0 + HOUR:
+                for k in ("open", "high", "low", "close"):
+                    bar[k] = bar[k] * 0.98
+        self.history = FakeHistory(coinbase={("ETP-20DEC30-CDE", "FIVE_MINUTE"): bars})
+        self.data = DataSet(self.history, self.start, self.end, say=lambda text: None, notes=[])
+        self.sim = simulator(self.data)
+
+    def intent(self, side, price, quantity, **extra):
+        return {"instrument": {"asset_class": "future", "symbol": "ETP-20DEC30-CDE", "venue": "coinbase"}, "side": side, "quantity": str(quantity), "order_type": "limit", "limit_price": str(price), **extra}
+
+    def test_a_short_opens_without_a_holding_and_covers_with_the_contract_fee(self):
+        self.assertEqual(self.sim.submit(self.intent("sell", 2300, 1), T0), "filled", "a marketable sell opens a short")
+        position = self.sim.positions[("future", "ETP-20DEC30-CDE", "")]
+        self.assertEqual(position["quantity"], -1)
+        self.assertAlmostEqual(position["mult"], 0.1)
+        self.assertAlmostEqual(self.sim.fills[-1]["fee"], 0.20, msg="a contract fee, not a percentage")
+        ctx = self.sim.context(T0 + MINUTE)
+        self.assertEqual(ctx["positions"][0]["quantity"], "-1")
+        self.assertAlmostEqual(float(ctx["positions"][0]["average_cost"]), 2400.0 * 0.9999, places=2)
+        self.assertEqual(self.sim.submit(self.intent("sell", 2300, 0.5), T0 + MINUTE), "rejected:under one contract")
+        # Cover after the 2% fall: a buy at the ask closes the short at a profit of ~48 x 0.1 less two fees.
+        self.assertEqual(self.sim.submit(self.intent("buy", 2500, 1), T0 + 2 * HOUR), "filled")
+        self.assertEqual(len(self.sim.closed), 1)
+        closed = self.sim.closed[0]
+        self.assertEqual((closed["asset_class"], closed["how"]), ("future", "covered"))
+        self.assertAlmostEqual(closed["pnl"], (2400 * 0.9999 - 2400 * 0.98 * 1.0001) * 0.1 - 0.40, places=3)
+
+    def test_a_shorts_stop_and_target_sit_on_the_right_side_and_a_buy_never_flips(self):
+        self.assertEqual(self.sim.submit(self.intent("sell", 2300, 2, stop_price="2500", target_price="2360", holding_period_hours=5), T0), "filled")
+        self.sim.advance(T0 + 30 * MINUTE)
+        self.assertEqual(self.sim.closed, [], "no move yet")
+        self.sim.advance(T0 + HOUR + 10 * MINUTE)
+        self.assertEqual(len(self.sim.closed), 1, "the 2% fall reached the target; a short's target is below entry")
+        self.assertEqual(self.sim.closed[0]["how"], "covered")
+        self.assertGreater(self.sim.closed[0]["pnl"], 0)
+        # Long 1 then a sell of 3: the reducing order is capped at the holding, never a flip.
+        self.assertEqual(self.sim.submit(self.intent("buy", 2500, 1), T0 + 2 * HOUR), "filled")
+        self.assertEqual(self.sim.submit(self.intent("sell", 2200, 3), T0 + 2 * HOUR + MINUTE), "filled")
+        self.assertNotIn(("future", "ETP-20DEC30-CDE", ""), self.sim.positions)
+        self.assertEqual(self.sim.closed[-1]["how"], "sold")
+
+    def test_the_kit_lists_perps_from_history_and_quotes_them(self):
+        kit = BacktestKit(self.data, self.sim, T0 + 7 * MINUTE, products=None, half_spread=0.0001)
+        rows = kit.futures()
+        self.assertEqual([r["symbol"] for r in rows], ["ETP-20DEC30-CDE"], "only contracts with history")
+        self.assertEqual((rows[0]["contract_size"], rows[0]["perpetual"]), (0.1, True))
+        self.assertAlmostEqual(rows[0]["contract_usd"], 240.0, delta=1.0)
+        quote = kit.quote("ETP-20DEC30-CDE", "future")
+        self.assertEqual(quote["instrument"]["asset_class"], "future")
+        self.assertEqual(len(kit.bars("ETP-20DEC30-CDE", "5m", 3, "future")), 3)
+        self.assertEqual(self.sim.submit({**self.intent("sell", 2300, 1), "instrument": {"asset_class": "future", "symbol": "XYZ-20DEC30-CDE"}}, T0), "rejected:futures contract not in the simulator's table")

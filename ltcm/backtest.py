@@ -103,6 +103,24 @@ RESULT_PREFIX = "BACKTEST-RESULT "
 MAX_INTENTS_PER_RUN = 5
 MAX_CANCELS_PER_RUN = 20
 NOTIONAL_CAP_MULTIPLE = 10
+#: leap: futures -- Coinbase's CDE perpetual contracts and their sizes in the underlying (from the
+#: venue listing, Sept 17, 2026). A backtest has no listing, so the kit's `futures()` answers from
+#: this table with prices from history; a contract not here cannot be simulated.
+PERPS: dict[str, dict[str, Any]] = {
+    "BIP-20DEC30-CDE": {"root": "BTC", "size": 0.01, "tick": 5.0}, "ETP-20DEC30-CDE": {"root": "ETH", "size": 0.1, "tick": 0.5},
+    "SLP-20DEC30-CDE": {"root": "SOL", "size": 5.0, "tick": 0.01}, "XPP-20DEC30-CDE": {"root": "XRP", "size": 500.0, "tick": 0.0001},
+    "AVP-20DEC30-CDE": {"root": "AVAX", "size": 10.0, "tick": 0.01}, "ADP-20DEC30-CDE": {"root": "ADA", "size": 1000.0, "tick": 0.0001},
+    "POP-20DEC30-CDE": {"root": "DOT", "size": 100.0, "tick": 0.001}, "LNP-20DEC30-CDE": {"root": "LINK", "size": 50.0, "tick": 0.001},
+    "LCP-20DEC30-CDE": {"root": "LTC", "size": 5.0, "tick": 0.01}, "BCP-20DEC30-CDE": {"root": "BCH", "size": 1.0, "tick": 0.1},
+    "DOP-20DEC30-CDE": {"root": "DOGE", "size": 5000.0, "tick": 0.00001}, "HYP-20DEC30-CDE": {"root": "HYPE", "size": 10.0, "tick": 0.01},
+    "SUP-20DEC30-CDE": {"root": "SUI", "size": 500.0, "tick": 0.0001}, "NER-20DEC30-CDE": {"root": "NEAR", "size": 500.0, "tick": 0.0001},
+    "OND-20DEC30-CDE": {"root": "ONDO", "size": 1000.0, "tick": 0.0001}, "XLP-20DEC30-CDE": {"root": "XLM", "size": 5000.0, "tick": 0.00001},
+    "HEP-20DEC30-CDE": {"root": "HBAR", "size": 5000.0, "tick": 0.00001}, "ENA-20DEC30-CDE": {"root": "ENA", "size": 5000.0, "tick": 0.00001},
+    "ZEC-20DEC30-CDE": {"root": "ZEC", "size": 1.0, "tick": 0.1}, "BNB-20DEC30-CDE": {"root": "BNB", "size": 1.0, "tick": 0.05},
+    "AVE-20DEC30-CDE": {"root": "AAVE", "size": 5.0, "tick": 0.01}, "PAU-20DEC30-CDE": {"root": "PAXG", "size": 1.0, "tick": 0.1},
+}
+#: Per-contract fee on CDE futures (UNVERIFIED until a live fill; `adapters.coinbase.FUTURES_FEE_PER_CONTRACT`).
+FUTURES_FEE_PER_CONTRACT = 0.20
 BOOTSTRAP_RESAMPLES = 2000
 EPS = 1e-9
 
@@ -350,7 +368,9 @@ def product_id(symbol: Any) -> str | None:
     if "-" not in raw and raw.endswith("USD") and len(raw) > 3:
         raw = raw[:-3] + "-USD"
     parts = raw.split("-")
-    if len(parts) != 2 or not all(part and part.isalnum() for part in parts):
+    # A CDE futures contract is `ROOT-DDMONYY-CDE` (BIP-20DEC30-CDE); leap: futures.
+    shaped = len(parts) == 2 or (len(parts) == 3 and parts[2] == "CDE")
+    if not shaped or not all(part and part.isalnum() for part in parts):
         return None
     return raw
 
@@ -1102,7 +1122,7 @@ class BacktestKit:
         return None if index < 0 else series.candles[index]["close"]
 
     def bars(self, symbol, interval="1h", limit=60, asset_class="crypto", venue="coinbase"):
-        if str(asset_class) != "crypto":
+        if str(asset_class) not in ("crypto", "future"):
             return []
         granularity = INTERVALS.get(str(interval))
         if granularity is None:
@@ -1151,14 +1171,14 @@ class BacktestKit:
                 "source": "backtest:kalshi",
                 "delayed": False,
             }
-        if str(asset_class) != "crypto":
+        if str(asset_class) not in ("crypto", "future"):
             return None
         product = self._product(symbol)
         close = self._last_close(product) if product else None
         if close is None:
             return None
         return {
-            "instrument": {"asset_class": "crypto", "symbol": product, "venue": "coinbase"},
+            "instrument": {"asset_class": str(asset_class), "symbol": product, "venue": "coinbase"},
             "bid": _text_number(close * (1.0 - self._half_spread)),
             "ask": _text_number(close * (1.0 + self._half_spread)),
             "last": _text_number(close),
@@ -1193,8 +1213,33 @@ class BacktestKit:
         return out[: int(limit)]
 
     def futures(self, root=None):
-        self._data.note_once("futures", "kit.futures() has no history here and returned no contracts")
-        return []
+        """The CDE perpetual contracts in `PERPS`, priced from history as of now, with a day's
+        dollar volume from the candles; the shape `Kit.futures` gives a live strategy."""
+        out = []
+        for product, spec in PERPS.items():
+            if root and str(spec["root"]).upper() != str(root).upper():
+                continue
+            seconds = GRANULARITY_SECONDS[QUOTE_GRANULARITY]
+            series = self._data.crypto_series(product, QUOTE_GRANULARITY, self._t - 86400 - 2 * seconds)
+            if series is None:
+                continue
+            index = series.closed_index(self._t)
+            if index < 0:
+                continue
+            price = series.candles[index]["close"]
+            volume = 0.0
+            back = index
+            while back >= 0 and series.starts[back] + seconds > self._t - 86400:
+                candle = series.candles[back]
+                volume += (candle.get("volume") or 0.0) * candle["close"] * float(spec["size"])
+                back -= 1
+            if price <= 0:
+                continue
+            out.append({"symbol": product, "root": spec["root"], "expiry": "2089-12-30T16:00:00Z", "price": price, "volume_usd": volume,
+                        "contract_size": float(spec["size"]), "contract_usd": price * float(spec["size"]), "perpetual": True,
+                        "funding_rate": None, "quote_increment": float(spec["tick"])})
+        out.sort(key=lambda r: -r["volume_usd"])
+        return out
 
     # ------------------------------------------------------------------ kalshi
     def kalshi_markets(self, max_close_hours=36, pages=5):
@@ -1307,7 +1352,7 @@ class Simulator:
                     "right": position["right"],
                     "asset_class": position["asset_class"],
                     "quantity": str(int(round(quantity))) if position["asset_class"] == "event" else _text_number(round(quantity, 8)),
-                    "average_cost": _text_number(round(position["cost"] / quantity, 8)) if quantity > 0 else "",
+                    "average_cost": _text_number(round(position["cost"] / (quantity * float(position.get("mult") or 1.0)), 8)) if quantity != 0 else "",
                 }
             )
         orders = []
@@ -1390,8 +1435,8 @@ class Simulator:
             return self._refuse(refusal)
         if asset_class == "event":
             status = self._submit_event(instrument, side, price, quantity, post_only, plan, t)
-        elif asset_class == "crypto":
-            status = self._submit_crypto(instrument, side, price, quantity, post_only, plan, t)
+        elif asset_class in ("crypto", "future"):
+            status = self._submit_crypto(instrument, side, price, quantity, post_only, plan, t, future=asset_class == "future")
         else:
             return self._refuse(f"asset class {asset_class or 'missing'} is not simulated")
         if expires_ts is not None and status.startswith("resting:"):
@@ -1480,24 +1525,42 @@ class Simulator:
         )
         return "resting:" + order["order_id"]
 
-    def _submit_crypto(self, instrument, side, price, quantity, post_only, plan, t) -> str:
+    def _submit_crypto(self, instrument, side, price, quantity, post_only, plan, t, *, future: bool = False) -> str:
         product = product_id(instrument.get("symbol") or instrument.get("market_id"))
         if product is None:
             return self._refuse("not a product id")
+        # leap: futures -- a CDE contract trades in whole contracts of `size` underlying; a sell
+        # with nothing held opens a short, and a reducing order never flips the position.
+        asset = "future" if future or product.endswith("-CDE") else "crypto"
+        mult = 1.0
+        if asset == "future":
+            spec = PERPS.get(product)
+            if spec is None:
+                return self._refuse("futures contract not in the simulator's table")
+            mult = float(spec["size"])
+            quantity = math.floor(quantity + EPS)
+            if quantity < 1:
+                return self._refuse("under one contract")
         series = self.data.crypto_series(product, QUOTE_GRANULARITY, t - 3 * GRANULARITY_SECONDS[QUOTE_GRANULARITY])
         index = series.closed_index(t) if series is not None else -1
         if series is None or index < 0:
             return self._refuse("no price for the product")
         close = series.candles[index]["close"]
-        cap = NOTIONAL_CAP_MULTIPLE * self.learning_usd / price
-        quantity = min(quantity, cap)
-        key = ("crypto", product, "")
-        if side == "sell":
-            held = self.positions.get(key, {}).get("quantity", 0.0)
-            resting = sum(o["quantity"] for o in self.orders.values() if o["asset_class"] == "crypto" and o["symbol"] == product and o["side"] == "sell")
-            quantity = min(quantity, held - resting)
+        if asset == "crypto":
+            cap = NOTIONAL_CAP_MULTIPLE * self.learning_usd / price
+            quantity = min(quantity, cap)
+        key = (asset, product, "")
+        held = self.positions.get(key, {}).get("quantity", 0.0)
+        resting_same = sum(o["quantity"] for o in self.orders.values() if o["asset_class"] == asset and o["symbol"] == product and o["side"] == side)
+        if side == "sell" and asset == "crypto":
+            quantity = min(quantity, held - resting_same)
             if quantity <= EPS:
                 return self._refuse("sell of a coin not held")
+        elif asset == "future" and ((side == "sell" and held > EPS) or (side == "buy" and held < -EPS)):
+            quantity = min(quantity, abs(held) - resting_same)
+            if quantity < 1 - EPS:
+                return self._refuse("a reducing order never flips a futures position")
+            quantity = math.floor(quantity + EPS)
         bid, ask = close * (1.0 - self.half_spread), close * (1.0 + self.half_spread)
         crosses = price >= ask - EPS if side == "buy" else price <= bid + EPS
         if crosses and post_only:
@@ -1505,12 +1568,13 @@ class Simulator:
         self.counts["orders"] += 1
         if crosses:
             fill_price = ask if side == "buy" else bid
-            self._fill_crypto(product, side, quantity, fill_price, self.taker_fee, False, t, plan)
+            self._fill_crypto(product, side, quantity, fill_price, self.taker_fee, False, t, plan, asset_class=asset, mult=mult)
             return "filled"
         order = self.add_order(
             {
                 "strategy": self.strategy,
-                "asset_class": "crypto",
+                "asset_class": asset,
+                "multiplier": mult,
                 "market_id": None,
                 "symbol": product,
                 "right": None,
@@ -1546,30 +1610,37 @@ class Simulator:
         self._apply(key, position, side, float(contracts), price, fee, t, plan)
         self._record_fill(ts=t, asset_class="event", symbol=market.ticker, right=right, side=side, quantity=float(contracts), price=price, fee=fee, maker=maker)
 
-    def _fill_crypto(self, product: str, side: str, quantity: float, price: float, fee_rate: float, maker: bool, t: float, plan) -> None:
-        key = ("crypto", product, "")
-        position = self._position(key, symbol=product, market_id=None, right=None, asset_class="crypto", t=t)
-        fee = quantity * price * fee_rate
+    def _fill_crypto(self, product: str, side: str, quantity: float, price: float, fee_rate: float, maker: bool, t: float, plan, *, asset_class: str = "crypto", mult: float = 1.0) -> None:
+        key = (asset_class, product, "")
+        position = self._position(key, symbol=product, market_id=None, right=None, asset_class=asset_class, t=t)
+        position["mult"] = mult
+        fee = FUTURES_FEE_PER_CONTRACT * quantity if asset_class == "future" else quantity * price * fee_rate
         self._apply(key, position, side, quantity, price, fee, t, plan)
-        self._record_fill(ts=t, asset_class="crypto", symbol=product, right=None, side=side, quantity=quantity, price=price, fee=fee, maker=maker)
+        self._record_fill(ts=t, asset_class=asset_class, symbol=product, right=None, side=side, quantity=quantity, price=price, fee=fee, maker=maker)
 
     def _apply(self, key, position, side, quantity, price, fee, t, plan) -> None:
+        """Fold a fill into the position. Quantities are signed (a short is negative; leap:
+        futures), `cost` is the signed entry notional (price x quantity x multiplier), and a
+        reducing fill realizes against the average entry. An event or spot position is long only."""
         position["fees"] += fee
-        if side == "buy":
-            position["quantity"] += quantity
-            position["cost"] += quantity * price
-            position["notional"] += quantity * price
+        mult = float(position.get("mult") or 1.0)
+        held = position["quantity"]
+        signed = quantity if side == "buy" else -quantity
+        if held == 0 or (held > 0) == (signed > 0):  # opening or adding
+            position["quantity"] += signed
+            position["cost"] += signed * price * mult
+            position["notional"] += quantity * price * mult
             if plan is not None:
                 position["plan"] = plan
             return
-        held = position["quantity"]
-        quantity = min(quantity, held)
-        average = position["cost"] / held if held > 0 else 0.0
-        position["realized"] += quantity * (price - average)
-        position["cost"] -= quantity * average
-        position["quantity"] -= quantity
-        if position["quantity"] <= max(EPS, held * 1e-9):
-            self._close(key, t, "sold")
+        closing = min(quantity, abs(held))
+        average = position["cost"] / (held * mult)  # the entry price, positive for either side
+        direction = 1.0 if held > 0 else -1.0
+        position["realized"] += closing * (price - average) * mult * direction
+        position["quantity"] = held - closing * direction
+        position["cost"] = position["quantity"] * average * mult
+        if abs(position["quantity"]) <= max(EPS, abs(held) * 1e-9):
+            self._close(key, t, "sold" if direction > 0 else "covered")
 
     def _close(self, key, t: float, how: str) -> None:
         position = self.positions.pop(key, None)
@@ -1580,7 +1651,8 @@ class Simulator:
             {"ts": t, "symbol": position["symbol"], "right": position["right"], "asset_class": position["asset_class"],
              "pnl": pnl, "notional": position["notional"], "how": how}
         )
-        for order_id in [o["order_id"] for o in self.orders.values() if o["side"] == "sell" and o["symbol"] == position["symbol"] and o["right"] == position["right"]]:
+        for order_id in [o["order_id"] for o in self.orders.values() if o["symbol"] == position["symbol"] and o["right"] == position["right"]
+                         and (o["side"] == "sell" or o["asset_class"] == "future")]:
             self.orders.pop(order_id, None)
 
     # ------------------------------------------------------------------ clock
@@ -1670,11 +1742,18 @@ class Simulator:
             if touched:
                 del self.orders[order["order_id"]]
                 quantity = order["quantity"]
-                if order["side"] == "sell":
-                    quantity = min(quantity, self.positions.get(("crypto", order["symbol"], ""), {}).get("quantity", 0.0))
+                asset = order.get("asset_class") or "crypto"
+                held = self.positions.get((asset, order["symbol"], ""), {}).get("quantity", 0.0)
+                if order["side"] == "sell" and asset == "crypto":
+                    quantity = min(quantity, held)
                     if quantity <= EPS:
                         return
-                self._fill_crypto(order["symbol"], order["side"], quantity, order["price"], self.maker_fee, True, float(series.starts[index] + series.seconds), order.get("plan"))
+                elif asset == "future" and ((order["side"] == "sell" and held > EPS) or (order["side"] == "buy" and held < -EPS)):
+                    quantity = min(quantity, abs(held))  # reducing, never flipping
+                    if quantity < 1 - EPS:
+                        return
+                self._fill_crypto(order["symbol"], order["side"], quantity, order["price"], self.maker_fee, True, float(series.starts[index] + series.seconds), order.get("plan"),
+                                  asset_class=asset, mult=float(order.get("multiplier") or 1.0))
                 return
             index += 1
 
@@ -1715,23 +1794,33 @@ class Simulator:
                 market = self.data.markets.get(key[1])
                 if market is None or not market.is_open(t) or not self.data.fresh_book(market, t):
                     continue  # a stop or target fills as a taker, never against a stale hourly close
+            short = position["quantity"] < 0
             mark = self.mark(key, position, t)
             reason = None
-            if mark is not None and plan.get("stop") is not None and mark <= plan["stop"] + EPS:
+            if short:
+                # A short exits at the ask; its stop is above entry and its target below.
+                if mark is not None:
+                    mark = mark / (1.0 - self.half_spread) * (1.0 + self.half_spread)
+                if mark is not None and plan.get("stop") is not None and mark >= plan["stop"] - EPS:
+                    reason = "stop"
+                elif mark is not None and plan.get("target") is not None and mark <= plan["target"] + EPS:
+                    reason = "target"
+            elif mark is not None and plan.get("stop") is not None and mark <= plan["stop"] + EPS:
                 reason = "stop"
             elif mark is not None and plan.get("target") is not None and mark >= plan["target"] - EPS:
                 reason = "target"
-            elif key[0] != "event" and plan.get("time_stop") is not None and t >= plan["time_stop"]:
+            if reason is None and key[0] != "event" and plan.get("time_stop") is not None and t >= plan["time_stop"]:
                 reason = "time_stop"
             if reason is None or mark is None:
                 continue
             self.counts["exits"] += 1
-            quantity = position["quantity"]
+            quantity = abs(position["quantity"])
             if key[0] == "event":
                 market = self.data.markets[key[1]]
                 self._fill_event(market, key[2], "sell", int(round(quantity)), round(mark, 4), kalshi_taker_fee(round(mark, 4), int(round(quantity))), False, t, None)
             else:
-                self._fill_crypto(key[1], "sell", quantity, mark, self.taker_fee, False, t, None)
+                self._fill_crypto(key[1], "buy" if short else "sell", quantity, mark, self.taker_fee, False, t, None,
+                                  asset_class=key[0], mult=float(position.get("mult") or 1.0))
 
     def finish(self, t: float) -> dict[str, float]:
         """Settle what closed by t and mark the rest at its bid. Returns the unrealized P&L."""
@@ -1740,9 +1829,12 @@ class Simulator:
         marked = 0
         for key, position in list(self.positions.items()):
             mark = self.mark(key, position, t)
+            mult = float(position.get("mult") or 1.0)
             if mark is None:
-                mark = position["cost"] / position["quantity"] if position["quantity"] > 0 else 0.0
-            unrealized += position["quantity"] * mark - position["cost"] + position["realized"] - position["fees"]
+                mark = position["cost"] / (position["quantity"] * mult) if position["quantity"] != 0 else 0.0
+            elif position["quantity"] < 0:
+                mark = mark / (1.0 - self.half_spread) * (1.0 + self.half_spread)  # a short covers at the ask
+            unrealized += position["quantity"] * mark * mult - position["cost"] + position["realized"] - position["fees"]
             marked += 1
         return {"unrealized": unrealized, "open_positions": marked}
 

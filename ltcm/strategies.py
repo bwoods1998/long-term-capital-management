@@ -68,6 +68,11 @@ DEFAULTS: dict[str, Any] = {
     # that limit cannot be read.
     "earned_settled": 20,
     "earned_multiple": 3,
+    # leap: throughput -- with `dispatch_seconds` > 0 a dispatcher thread runs the due strategies
+    # every that many seconds, off the floor's tick; the tick only collects results. Sept 17,
+    # 2026: dispatch happened once a tick, 24 desks at a time, and a tick took four minutes, so
+    # a five-minute strategy on one of 76 desks ran every 25 minutes or more.
+    "dispatch_seconds": 0,
 }
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
 #: Family -> starter module name. A desk of the family with no strategy of its own gets the
@@ -1083,6 +1088,15 @@ class Strategies:
                 self.service.alert("warning", f"strategy starters failed: {type(exc).__name__}")
         out: list[dict[str, Any]] = []
         workers = int(self.config.get("parallel_runs") or 1)
+        dispatcher = getattr(self, "_dispatcher", None)
+        if dispatcher is not None and dispatcher.is_alive() and threading.current_thread() is not dispatcher:
+            # The dispatcher thread runs the due strategies; the tick collects and promotes.
+            out.extend(self._collect())
+            try:
+                self.promote(manifests, at)  # leap: promotion
+            except Exception as exc:
+                self.service.alert("warning", f"strategy promotion failed: {type(exc).__name__}")
+            return out
         if workers <= 1:
             for manifest, name, row in self.due(manifests, at)[: int(self.config["max_runs_per_tick"])]:
                 result = self._run_guarded(manifest, name, row, at)
@@ -1109,6 +1123,40 @@ class Strategies:
         except Exception as exc:
             self.service.alert("warning", f"strategy promotion failed: {type(exc).__name__}")
         return out
+
+    # ------------------------------------------------------------------ the dispatcher
+    def start_dispatcher(self, manifests: Callable[[], Mapping[str, DeskManifest]], now: Callable[[], str]) -> bool:
+        """Run the due strategies every `dispatch_seconds` on a thread of their own (leap:
+        throughput). False when the config keeps dispatch on the tick."""
+        seconds = float(self.config.get("dispatch_seconds") or 0)
+        if seconds <= 0 or int(self.config.get("parallel_runs") or 1) <= 1:
+            return False
+        if getattr(self, "_dispatcher", None) is not None and self._dispatcher.is_alive():
+            return True
+        self._dispatch_stop = threading.Event()
+
+        def loop() -> None:
+            while not self._dispatch_stop.is_set():
+                try:
+                    self.tick(manifests(), now())
+                except Exception as exc:
+                    try:
+                        self.service.alert("warning", f"strategy dispatcher: {type(exc).__name__}: {str(exc)[:120]}")
+                    except Exception:
+                        pass
+                self._dispatch_stop.wait(seconds)
+
+        self._dispatcher = threading.Thread(target=loop, name="strategy-dispatcher", daemon=True)
+        self._dispatcher.start()
+        return True
+
+    def stop_dispatcher(self) -> None:
+        stop = getattr(self, "_dispatch_stop", None)
+        if stop is not None:
+            stop.set()
+        thread = getattr(self, "_dispatcher", None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5.0)
 
     def _run_guarded(self, manifest: DeskManifest, name: str, row: Mapping[str, Any], at: str) -> dict[str, Any] | None:
         if not self.family_enabled(manifest):

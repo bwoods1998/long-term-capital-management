@@ -1168,3 +1168,27 @@ class PooledEvidenceTests(StrategyCase):
         self.log_events += self.favorites("mullins-4", 8, pnl="-9.30")
         self.log_events += self.favorites("mullins", 6, real=True)
         self.assertEqual(self.strategies.size_cap(self.live, "kalshi_favorites"), Decimal("10"))
+
+
+class DispatcherTests(StrategyCase):
+    """leap: throughput -- strategies run on their own clock, the tick only collects."""
+
+    def test_the_dispatcher_runs_due_strategies_between_ticks_and_the_tick_collects(self):
+        self.strategies.config.update({"parallel_runs": 4, "dispatch_seconds": 0.05})
+        self.strategies.deploy(self.manifest, "edge", 600, {})
+        self.strategies.store.update(self.manifest.id, "edge", last_run_at="2026-09-16T03:00:00.000Z")
+        self.manager.script = lambda d, c: Run("STRATEGY-RESULT " + json.dumps({"intents": [INTENT], "notes": "one"}))
+        self.assertTrue(self.strategies.start_dispatcher(lambda: self.service.manifests, lambda: NOW))
+        self.addCleanup(self.strategies.stop_dispatcher)
+        deadline = time.time() + 5
+        while time.time() < deadline and int(self.strategies.store.for_desk(self.manifest.id)["edge"].get("runs") or 0) < 1:
+            time.sleep(0.05)
+        self.assertGreaterEqual(int(self.strategies.store.for_desk(self.manifest.id)["edge"]["runs"]), 1, "the dispatcher ran it without a tick")
+        collected = self.strategies.tick(self.service.manifests, LATER)
+        self.assertTrue(all(r["strategy"] == "edge" for r in collected))
+        self.strategies.stop_dispatcher()
+        self.assertFalse(self.strategies._dispatcher.is_alive())
+
+    def test_no_dispatcher_without_the_setting(self):
+        self.strategies.config.update({"parallel_runs": 4, "dispatch_seconds": 0})
+        self.assertFalse(self.strategies.start_dispatcher(lambda: self.service.manifests, lambda: NOW))
