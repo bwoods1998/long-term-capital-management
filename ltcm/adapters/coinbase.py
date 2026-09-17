@@ -260,6 +260,18 @@ class CoinbaseBroker:
                 break
         return rows
 
+    def fee_rates(self) -> dict[str, str]:
+        """The account's actual current tier; read-only, no default invented on failure."""
+        payload = self._call("GET", PREFIX + "/transaction_summary", what="coinbase fee tier", ok=(200,))
+        tier = payload.get("fee_tier") or {}
+        result = {}
+        for side in ("maker", "taker"):
+            value = money(tier.get(side + "_fee_rate"))
+            if not value.is_finite() or not 0 <= value <= Decimal("0.1"):
+                raise ValueError("invalid Coinbase fee tier")
+            result[side] = str(value)
+        return result
+
     def balance(self) -> Balance:
         """Cash is the available USD balance; equity adds every crypto holding at its mark."""
         cash = money(0)

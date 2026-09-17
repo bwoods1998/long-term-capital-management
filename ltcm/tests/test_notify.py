@@ -64,6 +64,19 @@ class NotifierCase(unittest.TestCase):
 
 
 class NotifierTests(NotifierCase):
+    def test_missing_mail_binding_retries_without_claiming_delivery(self):
+        answers = iter([{"sent": False}, {"sent": True}])
+        notifier = self.notifier(poster=lambda *args: next(answers))
+        notifier.tick(T0)
+        fill = self.trade(at=T1)
+        self.assertEqual(notifier.tick(T2), [])
+        self.assertLess(self.state["notify_seq"], fill.seq)
+        self.assertEqual(self.state["notify_failed_seq"], fill.seq)
+        self.assertEqual(self.state["notify_sent_total"], 0)
+        self.assertEqual(notifier.tick(T2), [fill.id])
+        self.assertIsNone(self.state["notify_failed_seq"])
+        self.assertEqual(self.state["notify_sent_total"], 1)
+
     def test_the_first_tick_sets_the_floor_and_mails_nothing_old(self):
         self.trade(at=T0)
         notifier = self.notifier()

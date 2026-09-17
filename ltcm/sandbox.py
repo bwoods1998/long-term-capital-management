@@ -23,6 +23,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -309,6 +310,7 @@ class SandboxManager:
         self._prefix_limits: dict[str, dict[str, int]] = {}
         #: desk id -> the lock one run holds from its uploads to the end of its program.
         self._run_locks: dict[str, threading.Lock] = {}
+        self._box_locks: dict[str, threading.Lock] = {}
 
     # ------------------------------------------------------------------ state
     def state(self) -> dict[str, Any]:
@@ -379,10 +381,14 @@ class SandboxManager:
     # ------------------------------------------------------------------ boxes
     def ensure_box(self, desk_id: str) -> str:
         """The desk's sandbox id, forking the lab image on first use and waking it otherwise."""
+        # Serialize only the same desk. Slow network calls for unrelated sandboxes must not
+        # hold the state lock: a cold fleet can fork/wake concurrently, and running workers
+        # can still record usage. Reload under the state lock when merging each update.
         with self._lock:
+            lock = self._box_locks.setdefault(desk_id, threading.Lock())
+        with lock:
             state = self.state()
-            boxes = state.setdefault("boxes", {})
-            box = boxes.get(desk_id)
+            box = (state.get("boxes") or {}).get(desk_id)
             if box:
                 self._wake(box)
                 # A box forked before a host joined the data list (api.weather.gov, Sept 16,
@@ -391,8 +397,10 @@ class SandboxManager:
                 if hosts.get(desk_id) != list(SANDBOX_HOSTS):
                     try:
                         self.client.set_egress(box, list(SANDBOX_HOSTS))
-                        hosts[desk_id] = list(SANDBOX_HOSTS)
-                        self._save(state)
+                        with self._lock:
+                            current = self.state()
+                            current.setdefault("hosts", {})[desk_id] = list(SANDBOX_HOSTS)
+                            self._save(current)
                     except Exception:
                         pass
                 return box
@@ -411,12 +419,14 @@ class SandboxManager:
                 self.client.set_auto_sleep(box, automatic=True, min_seconds_before_sleep=300)
             except Exception:
                 pass  # a box that never sleeps only costs its hourly rate; not worth failing
-            boxes[desk_id] = box
-            state.setdefault("hosts", {})[desk_id] = list(SANDBOX_HOSTS)
-            state.setdefault("forked_at", {})[desk_id] = time.strftime(
-                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(self.clock()))
-            )
-            self._save(state)
+            with self._lock:
+                state = self.state()
+                state.setdefault("boxes", {})[desk_id] = box
+                state.setdefault("hosts", {})[desk_id] = list(SANDBOX_HOSTS)
+                state.setdefault("forked_at", {})[desk_id] = time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(self.clock()))
+                )
+                self._save(state)
             return box
 
     def _wake(self, box: str) -> None:
@@ -465,6 +475,9 @@ class SandboxManager:
         zero = Decimal("0")
         daily, longest = self.limits_for(desk_id)
         remaining = daily - self.seconds_today(desk_id)
+        pending_until = float((self.state().get("uncertain_until") or {}).get(desk_id) or 0)
+        if float(self.clock()) < pending_until:
+            return CodeRun(desk_id, digest, "prior sandbox execution is unconfirmed; waiting for its hard timeout before reusing this box", 5, zero, self.box_for(desk_id), purpose)
         if remaining <= 0:
             return CodeRun(desk_id, digest, "the desk's sandbox time for today is used up", 4, zero, None, purpose)
         timeout = max(5, min(int(timeout), remaining, longest))
@@ -482,15 +495,15 @@ class SandboxManager:
             # and so do floor modules the image predates (the weather source).
             self.client.upload(box, f"{REMOTE_ROOT}/labkit.py", LABKIT.encode("utf-8"), mode=0o644)
             extras = floor_extras()
-            digest = sha256_text("\n".join(f"{k}:{sha256_text(v)}" for k, v in sorted(extras.items())))
+            extras_digest = sha256_text("\n".join(f"{k}:{sha256_text(v)}" for k, v in sorted(extras.items())))
             sent = getattr(self, "_extras_sent", None)
             if sent is None:
                 sent = self._extras_sent = {}
-            if sent.get(box) != digest:
+            if sent.get(box) != extras_digest:
                 # Once per sandbox per change (and once after a restart), not on every run.
                 for relative, body in extras.items():
                     self.client.upload(box, f"{REMOTE_ROOT}/floor/{relative}", body.encode("utf-8"), mode=0o644)
-                sent[box] = digest
+                sent[box] = extras_digest
             for name, body in toolbox.files().items():
                 self.client.upload(box, f"{REMOTE_TOOLBOX}/{name}", body.encode("utf-8"), mode=0o644)
             self.client.upload(box, f"{REMOTE_TOOLBOX}/__init__.py", b"", mode=0o644)
@@ -499,9 +512,23 @@ class SandboxManager:
                 f"cd {REMOTE_ROOT} && PYTHONPATH={REMOTE_ROOT}:{REMOTE_ROOT}/floor "
                 f"timeout {timeout} python3 {REMOTE_RUN}/main.py"
             )
+            execution_started = float(self.clock())
+            # Persist before dispatch. A broken response or a floor restart must not let
+            # another run overwrite the files of an execution whose completion is unknown.
+            with self._lock:
+                state = self.state()
+                state.setdefault("uncertain_until", {})[desk_id] = execution_started + timeout + 60
+                self._save(state)
             result = self.client.exec(box, ["sh", "-c", command], timeout=timeout + 30)
             output = result.output or (result.stdout + result.stderr)
             code_out = result.return_code if result.return_code is not None else (0 if result.ok else 1)
+            if result.return_code is not None:
+                with self._lock:
+                    state = self.state()
+                    state.setdefault("uncertain_until", {}).pop(desk_id, None)
+                    self._save(state)
+            if not result.ok and not output:
+                output = f"sandbox execution status={getattr(result, 'status', 'unknown')}, error={getattr(result, 'error_code', None) or 'not supplied'}, return_code={result.return_code}"
         except SailboxError as exc:
             output, code_out = f"sandbox error: {exc}", 5
             box = box or self.box_for(desk_id)
@@ -523,14 +550,15 @@ class SandboxManager:
 
     def sleep_all(self) -> int:
         """Put every sandbox to sleep; free while asleep. Returns how many were told to."""
-        count = 0
-        for _desk_id, box in sorted((self.state().get("boxes") or {}).items()):
+        boxes = sorted(set((self.state().get("boxes") or {}).values()))
+        def sleep(box: str) -> int:
             try:
                 self.client.sleep(box)
-                count += 1
+                return 1
             except Exception:
-                continue
-        return count
+                return 0
+        with ThreadPoolExecutor(max_workers=8, thread_name_prefix="sandbox-sleep") as pool:
+            return sum(pool.map(sleep, boxes))
 
 
 #: The `run_code` tool as the model sees it. Registered in `ltcm/tools.py`; kept here so the

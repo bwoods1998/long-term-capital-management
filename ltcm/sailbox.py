@@ -733,7 +733,16 @@ class SailboxClient:
             timeout=float(timeout or 600) + 120.0,
         )
         chunks: list[str] = []
-        for event in events:
+        events = iter(events)
+        while True:
+            try:
+                event = next(events)
+            except StopIteration:
+                break
+            except (SailboxError, OSError, EOFError):
+                # Reconcile the SAME execution; never redispatch a possibly running command.
+                result.error_code = "exec_stream_interrupted"
+                break
             kind = event.get("type")
             if kind == "started":
                 result.exec_id = event.get("exec_request_id")
@@ -771,15 +780,24 @@ class SailboxClient:
         segment, query = quote(exec_id, safe=""), None
         if not exec_id or len(exec_id) > 200 or "/" in exec_id:
             segment, query = "-", {"exec_request_id": exec_id}
-        try:
-            row = self.transport(
-                "POST",
-                f"/sailboxes/{box_id(sailbox)}/exec/{segment}/wait",
-                {},
-                query=query,
-                timeout=120.0,
-            )
-        except SailboxError:
+        row = None
+        for attempt in range(3):
+            try:
+                row = self.transport(
+                    "POST",
+                    f"/sailboxes/{box_id(sailbox)}/exec/{segment}/wait",
+                    query=query,
+                    timeout=40.0,
+                )
+                break
+            except (SailboxError, OSError) as exc:
+                status = getattr(exc, "status", None)
+                result.error_code = f"exec_wait_http_{status}" if status else "exec_wait_transport"
+                if status is not None and status not in (408, 429, 500, 502, 503, 504):
+                    break
+                if attempt < 2:
+                    time.sleep(0.25 * (2 ** attempt))
+        if row is None:
             result.status = "unconfirmed" if result.status == "unknown" else result.status
             return
         result.status = str(row.get("status") or result.status)
@@ -787,8 +805,12 @@ class SailboxClient:
         result.return_code = int(code) if isinstance(code, int) else result.return_code
         for name in ("stdout", "stderr"):
             tail = row.get(name)
-            if isinstance(tail, str) and tail and not getattr(result, name):
+            if isinstance(tail, str) and tail:
                 setattr(result, name, tail)
+        # The authoritative tail contains output missed when the stream disconnected.
+        result.output = result.stdout + result.stderr
+        if result.return_code is not None:
+            result.error_code = None
 
     # ------------------------------------------------------------------ usage
     def spend(

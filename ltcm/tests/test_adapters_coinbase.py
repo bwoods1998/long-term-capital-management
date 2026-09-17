@@ -333,6 +333,19 @@ class UnknownOutcomeTests(unittest.TestCase):
 
 
 class AccountTests(unittest.TestCase):
+    def test_fee_tier_is_read_only_and_never_defaults_missing_rates_to_zero(self):
+        broker = CoinbaseBroker.__new__(CoinbaseBroker)
+        calls = []
+        def answer(*args, **kwargs):
+            calls.append(args)
+            return {"fee_tier": {"maker_fee_rate": "0.005", "taker_fee_rate": "0.009"}}
+        broker._call = answer
+        self.assertEqual(broker.fee_rates(), {"maker": "0.005", "taker": "0.009"})
+        self.assertEqual(calls[0], ("GET", PREFIX + "/transaction_summary"))
+        broker._call = lambda *args, **kwargs: {"fee_tier": {}}
+        with self.assertRaises((ValueError, TypeError)):
+            broker.fee_rates()
+
     def test_balance_is_usd_cash_plus_marked_crypto(self):
         client, _, _ = make(
             {HOST + PREFIX + "/accounts*": ACCOUNTS, HOST + MARKET + "/product_book*": BOOK}

@@ -44,6 +44,9 @@ export class Gate extends DurableObject {
 
   status() { return this.gate.status(); }
   setKill(on) { return this.gate.setKill(on === true); }
+  noticesToday(at) { return this.gate.noticesToday(at); }
+  noticeDelivered(id, at) { return this.gate.noticeDelivered(id, at); }
+  recordNotice(at, id) { return this.gate.recordNotice(at, id); }
 
   // One transaction, no await inside it: the check and the spend are the same step.
   reserve(request) { return this.ctx.storage.transactionSync(() => this.gate.reserve(request)); }

@@ -59,6 +59,14 @@ What you are
 What you may do
 - Read market data, filings, news and your own memory; write memory entries and public memos;
   edit your playbook; propose orders; cancel your own working orders; end the session.
+- Manage the whole position lifecycle. Before looking for entries, reassess existing holdings,
+  stops, targets and resting orders. Use propose_order with reduce_only=true to trim or close
+  a held position; it cannot open or reverse one. Cancel conflicting resting sells first.
+  A paused entry strategy does not remove your responsibility to manage its existing positions.
+- Read your execution context: current fee tier, fresh order-book depth and which strategies
+  are enabled or paused. Fees are costs, not alpha: compare the expected move after both entry
+  and exit fees and slippage. A useful cancellation, exit, forecast or tested rejection is
+  learning too; extra turnover alone is not evidence of progress.
 
 What you may not do
 - You may not exceed your mandate, your instrument rules or your limits. They are enforced in
@@ -594,6 +602,9 @@ class Desk:
         parts.append("\n# Recent outcomes\n" + _outcomes_block(
             self._safe(lambda: self.ctx.outcomes(10), [])
         ))
+        execution = self._safe(lambda: getattr(self.ctx, "execution_context")(), {})
+        if execution:
+            parts.append("\n# Execution context (current account data, not a profit forecast)\n" + json.dumps(execution, default=str)[:10000])
         board = self._safe(lambda: list(getattr(self.ctx, "floor_board")(8)), [])  # leap: board
         if board:
             parts.append("\n# The floor board\n" + _board_block(board))

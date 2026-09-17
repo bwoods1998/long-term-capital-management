@@ -71,14 +71,16 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     const message = composeNotice(facts);
     if (!message) return fail('The notice could not be composed.', 400);
     const cap = Number(env.NOTIFY_MAX_PER_DAY || 40);
-    if (gate.noticesToday(now()) >= cap) return fail('The day\'s notice cap is reached.', 429, { 'Retry-After': '3600' });
+    const noticeId = typeof facts.notice_id === 'string' && /^[a-zA-Z0-9:_-]{1,160}$/.test(facts.notice_id) ? facts.notice_id : null;
+    if (noticeId && await gate.noticeDelivered(noticeId, now())) return json({ sent: true, duplicate: true });
+    if (await gate.noticesToday(now()) >= cap) return fail('The day\'s notice cap is reached.', 429, { 'Retry-After': '3600' });
     if (!mailer) return json({ sent: false, reason: 'no mail binding', subject: message.subject });
     try {
       await mailer({ from: env.ALERT_FROM || FROM, to: env.ALERT_TO || TO, ...message, at: now() });
     } catch (error) {
       return fail(`The mail could not be sent: ${error?.name || 'send_failed'}.`, 502);
     }
-    const count = gate.recordNotice(now());
+    const count = await gate.recordNotice(now(), noticeId);
     return json({ sent: true, subject: message.subject, notices_today: count });
   }
 

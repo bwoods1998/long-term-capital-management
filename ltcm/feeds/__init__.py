@@ -183,9 +183,11 @@ class FeedHub:
         max_age: float = DEFAULT_MAX_AGE_SECONDS,
         disconnect_alert_after: float = DISCONNECT_ALERT_AFTER_SECONDS,
         alert_every: float = ALERT_EVERY_SECONDS,
+        wake: Callable[[], None] | None = None,
     ):
         self.clock = clock
         self.alert = alert
+        self._wake = wake or (lambda: None)
         self._held = held or (lambda: {})
         self._allowed = allowed or (lambda: {})
         self.max_age = float(max_age)
@@ -196,6 +198,7 @@ class FeedHub:
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._prices: dict[tuple[str, str], dict[str, Any]] = {}
+        self._depth: dict[tuple[str, str], dict[str, Any]] = {}
         self._fill_venues: set[str] = set()
         self._resolutions: list[dict[str, Any]] = []
         self._trades: list[dict[str, Any]] = []  # leap: taker model -- prints the shadow books fill against
@@ -287,13 +290,33 @@ class FeedHub:
             trades, self._trades = self._trades, []
         return trades
 
+    def on_depth(self, venue: str, symbol: str, summary: Mapping[str, Any]) -> None:
+        with self._lock:
+            self._depth[(venue, symbol)] = {**summary, "at": float(self.clock())}
+        self.on_price(venue, symbol, bid=summary.get("bid"), ask=summary.get("ask"), source=str(summary.get("source")))
+
+    def invalidate_depth(self, venue: str) -> None:
+        with self._lock:
+            for key in [key for key in self._depth if key[0] == venue]:
+                self._depth.pop(key, None)
+                if (self._prices.get(key) or {}).get("source") == "coinbase:level2":
+                    self._prices.pop(key, None)
+
+    def depth(self, venue: str) -> dict[str, Any]:
+        now = float(self.clock())
+        with self._lock:
+            return {symbol: {**row, "age_seconds": round(now - row["at"], 3)}
+                    for (v, symbol), row in self._depth.items() if v == venue and 0 <= now - row["at"] <= min(5, self.max_age)}
+
     def on_fill_candidate(self, venue: str, payload: Mapping[str, Any]) -> None:
         with self._lock:
             self._fill_venues.add(venue)
+        self._wake()
 
     def on_resolution(self, venue: str, payload: Mapping[str, Any]) -> None:
         with self._lock:
             self._resolutions.append({"venue": venue, **dict(payload)})
+        self._wake()
 
     def on_status(self, feed: Feed, *, connected: bool, detail: str | None) -> None:
         now = float(self.clock())
@@ -379,6 +402,7 @@ class FeedHub:
                 "pending_fill_venues": sorted(self._fill_venues),
                 "pending_resolutions": len(self._resolutions),
                 "prints_seen": dict(self._prints_seen),
+                "depth_books": len(self._depth),
             }
 
 

@@ -310,6 +310,21 @@ class ExecutionTests(unittest.TestCase):
 
 
 class ProposeOrderTests(unittest.TestCase):
+    def test_reduce_only_routes_a_verified_trim_as_an_exit(self):
+        ctx = FakeContext()
+        out = run("propose_order", self.arguments(side="sell", quantity="3", reduce_only=True), ctx)
+        self.assertTrue(out["approved"])
+        self.assertEqual(ctx.intents[0].purpose, "exit")
+        self.assertEqual(ctx.intents[0].exit_reason, "desk")
+        self.assertEqual(ctx.intents[0].quantity, Decimal("3"))
+
+    def test_reduce_only_cannot_open_or_reverse(self):
+        for args in [dict(side="buy"), dict(side="sell", quantity="4"), dict(side="sell", quantity="NaN")]:
+            ctx = FakeContext()
+            out = run("propose_order", self.arguments(reduce_only=True, **args), ctx)
+            self.assertIn("error", out)
+            self.assertEqual(ctx.intents, [])
+
     def arguments(self, **overrides):
         base = {
             "instrument": {"asset_class": "equity", "symbol": "AAPL"},

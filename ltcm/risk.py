@@ -249,8 +249,8 @@ def rule_limit_sanity(intent: OrderIntent, ctx: RiskContext) -> str | None:
 def reduces_exposure(intent: OrderIntent, ctx: RiskContext) -> bool:
     held = ctx.positions.get(intent.instrument.key)
     held_qty = held.quantity if held else ZERO
-    after = held_qty + signed_quantity(intent)
-    return abs(after) <= abs(held_qty)
+    return bool(held_qty and 0 < intent.quantity <= abs(held_qty)
+                and (intent.side == "sell") == (held_qty > 0))
 
 
 def rule_exit_plan(intent: OrderIntent, ctx: RiskContext) -> str | None:
@@ -262,6 +262,10 @@ def rule_exit_plan(intent: OrderIntent, ctx: RiskContext) -> str | None:
     it, the engine does not. An inverted level would fire the moment the entry filled.
     """
     if intent.purpose != "entry":
+        held = ctx.positions.get(intent.instrument.key)
+        if (held is None or held.quantity == 0 or intent.quantity > abs(held.quantity)
+                or (intent.side == "sell") != (held.quantity > 0)):
+            return "an exit must reduce an existing position without reversing it"
         return None
     if intent.target_price is None and intent.stop_price is None:
         return None
@@ -594,6 +598,10 @@ def rule_order_count(intent: OrderIntent, ctx: RiskContext) -> str | None:
 
 
 def rule_daily_loss(intent: OrderIntent, ctx: RiskContext) -> str | None:
+    # Withdrawing a sleeve while inventory winds down can leave its accounting equity at
+    # zero or below. That must block new risk, not trap the inventory by refusing its exit.
+    if reduces_exposure(intent, ctx):
+        return None
     if ctx.desk_equity <= 0:
         return "desk has no equity"
     start_equity = ctx.desk_equity - ctx.desk_daily_pnl

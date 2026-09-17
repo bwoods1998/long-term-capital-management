@@ -131,6 +131,9 @@ DIRECTIONS = (
     "the pricing or selection model: which markets it trades and what it believes they are worth",
     "entries and exits: the price it pays, when it steps back, and what it declines to trade",
     "a filter that removes the kind of trade that loses out of sample",
+    "fee-aware inventory management: trim or close existing holdings when the thesis decays; compare the cost of exiting now against holding, and cancel stale orders",
+    "regime adaptation: distinguish persistent trends from mean reversion with past-only volatility and trend features, without increasing risk or size",
+    "execution quality: maker-first entries, spread and fee hurdles, stale-order expiry, and selective fills rather than high turnover",
 )
 
 
@@ -681,6 +684,14 @@ class Foundry:
         self.halted = halted
         self._running = threading.Lock()
         self._state_lock = threading.RLock()
+        self._result_cache = None
+        if self.config.get("result_cache", False):
+            from .research_cache import ResearchCache
+            from .sandbox import floor_extras
+            engine = _sha(json.dumps(floor_extras(), sort_keys=True) + RUNNER
+                          + inspect.getsource(runner_code) + inspect.getsource(split_evidence))
+            self._result_cache = ResearchCache(self.state_path.with_name("research-cache.sqlite"), engine=engine,
+                                               ttl_seconds=float(self.config.get("result_cache_seconds", 3600)), clock=clock)
 
     # ------------------------------------------------------------------ handles
     def sandboxes(self) -> Any:
@@ -772,7 +783,7 @@ class Foundry:
         last = self.state().get("last")
         if not isinstance(last, Mapping):
             return None
-        keys = ("at", "cycle", "family", "strategy", "candidates", "backtested", "qualified", "best_oos_return", "winner", "deployed_to", "fast_tracked", "seconds", "sandbox_seconds", "model_cost_usd", "skipped", "failed")
+        keys = ("at", "cycle", "family", "strategy", "candidates", "backtested", "cache_hits", "fresh_backtests", "qualified", "best_oos_return", "winner", "deployed_to", "fast_tracked", "seconds", "sandbox_seconds", "model_cost_usd", "skipped", "failed")
         return {k: last.get(k) for k in keys if k in last}
 
     def _next_cycle(self, state: Mapping[str, Any]) -> int:
@@ -1019,14 +1030,16 @@ class Foundry:
         deployment = None
         if winner is not None:
             deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
-        self.progress("learn", f"Cycle {cycle}: {len(candidates)} candidates measured; {len(qualified)} qualified; "
+        self.progress("learn", f"Cycle {cycle}: {sum(1 for c in candidates if self.measured(c))}/{len(candidates)} candidates measured successfully; {len(qualified)} qualified; "
                       + ("winner deployed for forward testing" if deployment else "no new deployment"),
                       cycle=cycle, family=family, strategy=subject, candidates=len(candidates), qualified=len(qualified))
         summary.update(
             {
                 "candidates": len(variants) + len(code),
                 "baselines": len(baselines),
-                "backtested": sum(1 for c in candidates if c.get("evidence")),
+                "backtested": sum(1 for c in candidates if self.measured(c)),
+                "cache_hits": sum(1 for c in candidates if c.get("cache_hit")),
+                "fresh_backtests": sum(1 for c in candidates if self.measured(c) and not c.get("cache_hit")),
                 "failed_backtests": sum(1 for c in candidates if c.get("error")),
                 "qualified": len(qualified),
                 "reference_oos_return": reference,
@@ -1141,7 +1154,7 @@ class Foundry:
     def instructions(self, name: str) -> str:
         cfg = self.config
         return (
-            "You are the Foundry of a public, fully automated trading floor: a research loop that runs every half hour, "
+            f"You are the Foundry of a public, fully automated trading floor: a research loop scheduled every {cfg['interval_minutes']} minutes, "
             "mutates a strategy's code, backtests every mutation on the last days of real Kalshi and Coinbase history, "
             "deploys the out-of-sample winner to a shadow desk and moves it to real money when its forward record holds.\n"
             "Write ONE mutation of the strategy below that you expect to earn more per dollar out of sample. Change how it "
@@ -1184,6 +1197,15 @@ class Foundry:
             parts.append(self._report_line(candidate))
         parts.append("## Forward record since each setting was dealt (real prices; shadow desks are scored, live desks trade money)")
         parts.append("\n".join(records) if records else "(no strategy records yet)")
+        if self._result_cache:
+            try:
+                lessons = self._result_cache.lessons(subject)
+            except Exception:
+                lessons = []
+            if lessons:
+                parts.append("## Persistent research memory\nThese are prior search results, NOT independent validation. "
+                             "Avoid repeating failed ideas without a concrete causal correction. Explain what your hypothesis learns from this record. "
+                             "Only fresh forward outcomes can establish that an adaptive search generalizes.\n" + json.dumps(lessons, default=str)[:10000])
         # The Firm Mind: rules measured across every desk's settled trades, with their evidence. A
         # mutation that heeds them starts from what the floor has already paid to learn.
         try:
@@ -1251,12 +1273,16 @@ class Foundry:
         root = base_name(subject)[: 40 - len(f"_f{cycle}_{count}")]
         cadence = self.cadence_of(family, subject, live)
         names = [f"{root}_f{cycle}" if k == 0 else f"{root}_f{cycle}_{k + 1}" for k in range(count)]
+        profiles = cfg.get("code_profiles") or [cfg["profile"]]
+        if not isinstance(profiles, list) or not profiles or not all(isinstance(p, str) for p in profiles):
+            profiles = [cfg["profile"]]
+        selected_profiles = [profiles[(cycle + index) % len(profiles)] for index in range(count)]
 
         def ask(index: int) -> tuple[int, Any, str | None]:
             name = names[index]
             try:
                 response = self.provider.respond(
-                    cfg["profile"],
+                    selected_profiles[index],
                     [
                         {"role": "system", "content": self.instructions(name)},
                         {"role": "user", "content": self.packet(family=family, subject=subject, name=name, source=source, window=window, baselines=baselines, records=records, index=index, count=count)},
@@ -1301,7 +1327,7 @@ class Foundry:
                     continue
                 try:
                     repair = self.provider.respond(
-                        cfg["profile"],
+                        selected_profiles[index],
                         [{"role": "system", "content": self.instructions(name)},
                          {"role": "user", "content": "Repair this rejected candidate. Preserve its hypothesis; return one valid JSON object, no commentary. "
                           f"Validation error: {str(exc)[:400]}\nOriginal candidate:\n{str(getattr(response, 'output_text', '') or '')[:24000]}"}],
@@ -1319,8 +1345,13 @@ class Foundry:
                     continue
             asked["valid"] += 1
             out.append(
-                self._candidate(cycle, "code", f"model mutation {index + 1}", name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"])
+                self._candidate(cycle, "code", f"model mutation {index + 1}", name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"], profile=selected_profiles[index])
             )
+            if self._result_cache:
+                try:
+                    self._result_cache.remember(out[-1], window)
+                except Exception:
+                    pass
             self.progress("candidate", f"{name}: validated; queued for an out-of-sample backtest", cycle=cycle, family=family, strategy=name)
             if on_candidate is not None:
                 on_candidate(out[-1])
@@ -1390,11 +1421,24 @@ class Foundry:
 
     def _backtest(self, candidate: dict[str, Any], window: Mapping[str, Any], ids: "queue.Queue[str]") -> dict[str, Any]:
         """One backtest in one free sandbox. Fills in the candidate's report and evidence."""
-        desk = ids.get()
+        desk = None
         try:
+            spec = self.spec_for(candidate, window)
+            cache = self._result_cache
+            cache_key = cache.key(spec, float(self.config["split_fraction"])) if cache else None
+            cached = None
+            if cache:
+                try:
+                    cached = cache.get(cache_key)
+                except Exception:
+                    pass  # A cache failure never prevents a fresh experiment.
+            if cached is not None:
+                candidate.update(report=cached, evidence=self.evidence(cached), cache_hit=True, seconds=0.0)
+                return candidate
+            desk = ids.get()
             manager = self.sandboxes()
             token = secrets.token_hex(16)
-            code = runner_code(self.spec_for(candidate, window), fraction=float(self.config["split_fraction"]), token=token, min_interval=self.min_interval())
+            code = runner_code(spec, fraction=float(self.config["split_fraction"]), token=token, min_interval=self.min_interval())
             run = manager.run(desk, code, purpose=f"foundry backtest {candidate['id']} ({candidate['strategy']})", timeout=int(self.config["backtest_timeout_seconds"]))
             candidate["sandbox"] = desk
             candidate["seconds"] = _float(getattr(run, "seconds", 0)) or 0.0
@@ -1405,21 +1449,34 @@ class Foundry:
             candidate["report"] = report
             candidate["evidence"] = self.evidence(report)
             errors = _int(report.get("errors"))
-            if report.get("unsupported"):
+            if getattr(run, "exit_code", 0) != 0:
+                candidate["error"] = f"sandbox exit {getattr(run, 'exit_code', '?')}; report is not a confirmed successful run"
+            elif report.get("unsupported"):
                 candidate["error"] = f"unsupported: {str(report['unsupported'])[:200]}"
             elif errors is None or errors > 0:
                 # A failed history request leaves markets unpriced, so the run did not see the
                 # data its rivals saw; a strategy that raised did not run the whole window.
                 notes = "; ".join(str(n)[:120] for n in (report.get("notes") or [])[:2])
                 candidate["error"] = f"{'unknown' if errors is None else errors} engine errors" + (f": {notes}" if notes else "")
+            if cache and not candidate.get("error") and getattr(run, "exit_code", 0) == 0:
+                try:
+                    cache.put(cache_key, report)
+                except Exception:
+                    pass
         except Exception as exc:
             candidate["error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
         finally:
-            ids.put(desk)
+            if desk is not None:
+                ids.put(desk)
+            if self._result_cache:
+                try:
+                    self._result_cache.remember(candidate, window)
+                except Exception:
+                    pass
             report = candidate.get("report") or {}
             self.progress("tested", f"{candidate['strategy']}: " + (str(candidate['error'])[:180] if candidate.get("error") else
                           f"{report.get('trades', 0)} trades, simulated net P&L {report.get('pnl_usd', 'unknown')}"),
-                          candidate_id=candidate["id"], strategy=candidate["strategy"], seconds=round(float(candidate.get("seconds") or 0), 2))
+                          candidate_id=candidate["id"], strategy=candidate["strategy"], cache_hit=bool(candidate.get("cache_hit")), seconds=round(float(candidate.get("seconds") or 0), 2))
         return candidate
 
     def evidence(self, report: Mapping[str, Any]) -> dict[str, Any]:
@@ -1778,10 +1835,24 @@ class Foundry:
                 return None
             parent = live_rows.get(subject)
             if subject != name and parent is not None and not parent.get("enabled", True):
-                # Another candidate already replaced the code this one was measured against; two
-                # mutations of one parent never trade live side by side.
-                supersede(f"{subject} is paused on {live.id}: a later candidate replaced it")
-                return None
+                # A disabled house baseline is not a permanent dead end for recovery research.
+                # Only a new code challenger with strong independent forward evidence can
+                # replace it. A replaced lineage, changed code, retired family or kill switch
+                # still blocks adoption; the old strategy itself is never re-enabled.
+                from . import evidence
+                recovery = (live.family in (self.config.get("paused_replacement_families") or [])
+                            and parent.get("house") and not parent.get("foundry_id")
+                            and not any(r.get("enabled", True) and base_name(n) == base_name(subject) for n, r in live_rows.items()))
+                if not recovery:
+                    supersede(f"{subject} is paused on {live.id}: no eligible recovery lineage")
+                    return None
+                if int(record.get("independent_settled") or 0) < 25:
+                    self._deployment(fid, recovery_wait="25 independently grouped forward outcomes required")
+                    return None
+                passed, reason, _ = evidence.passes(record, z=1.645, q=0.05, min_n=25, min_days=3)
+                if not passed:
+                    self._deployment(fid, recovery_wait=reason[:300])
+                    return None
             if subject != name and parent is not None and dep.get("subject_sha256") and self._code_sha(manager, live.id, subject, parent) != dep.get("subject_sha256"):
                 supersede(f"{live.id} changed {subject} since the candidate was measured against it")
                 return None

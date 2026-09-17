@@ -650,6 +650,17 @@ class DeskContext:
         except ValueError as exc:
             raise RuntimeError(str(exc)) from None
 
+    def execution_context(self) -> dict[str, Any]:
+        venue = self.manifest.market_venue
+        strategies = self.service.strategies.store.for_desk(self.desk_id)
+        hub = getattr(self.service, "feeds", None)
+        return {"venue": venue, "fee_rates": self.service.venue_fee_rates().get(venue),
+                "depth": hub.depth(venue) if hub is not None else {},
+                "strategies": {name: {"enabled": row.get("enabled", True), "note": row.get("note"), "last_error": row.get("last_error")}
+                               for name, row in strategies.items()},
+                "working_orders": self.service.strategies.open_orders_for(self.manifest),
+                "entry_allowed": self.service.entry_allowed(self.desk_id)}
+
     def memo_read(self, desk_id: str, limit: int) -> list[dict[str, Any]]:
         """Another desk's published memos, newest first. Its words are evidence, never orders."""
         target = self.service.manifests.get(str(desk_id))
@@ -877,7 +888,10 @@ class Service:
         #: Serializes every read-modify-write of `service-state.json`: the lab worker's rewrite
         #: scheduling and the tick both saved it at once and each wiped the other's keys.
         self._state_lock = threading.RLock()
+        self._fee_lock = threading.Lock()
+        self._venue_fees: dict[str, Any] = {}
         self._stream_stop = threading.Event()
+        self._tick_wake = threading.Event()
         self._stream_thread: threading.Thread | None = None
         self._stream_status: dict[str, Any] = {}
         self._last_tick: dict[str, Any] | None = None
@@ -1477,6 +1491,18 @@ class Service:
         except Exception:
             return {"error": "status unavailable"}
 
+    def _arena_pulse(self, at: str) -> None:
+        if float(self.clock()) - getattr(self, "_arena_pulse_at", -1e30) < 300:
+            return
+        from .arena import execution_pulse
+        try:
+            payload = execution_pulse(self.log, self.active_manifests(), self.strategies.store, at)
+            self.log.append("lab", "lab.progress", payload, at=at)
+            self._execution_pulse = payload
+            self._arena_pulse_at = float(self.clock())
+        except Exception as exc:
+            self.alert("warning", f"execution telemetry failed: {type(exc).__name__}")
+
     def _venue_equity(self) -> dict[str, Decimal]:
         """Each live venue's equity as the venue reports it, for the committee's sleeve caps."""
         out: dict[str, Decimal] = {}
@@ -1601,6 +1627,7 @@ class Service:
                 alert=self.alert,
                 held=self._held_symbols,
                 allowed=self._allowed_symbols,
+                wake=self._tick_wake.set,
                 max_age=float(settings.get("max_age_seconds", feeds_module.DEFAULT_MAX_AGE_SECONDS)),
             )
             if "kalshi" in live:
@@ -3081,7 +3108,7 @@ class Service:
         # the weekly resize by track record still only happens on the committee's day.
         self._tick_phase("allocation")
         previous, _ = self.committee.last_allocation()
-        if any(desk_id not in previous for desk_id in self.manifests):
+        if any(desk_id not in previous for desk_id in self.active_manifests()):
             self.committee.allocate(at)
             result["committee"] = True
         self._tick_phase("sessions")
@@ -3177,6 +3204,7 @@ class Service:
                 result["strategies"] = []
         # leap: foundry -- candidates, backtests, shadow deployments and fast-tracks, off the tick.
         self._tick_phase("foundry")
+        self._arena_pulse(at)
         if not result["kill_switch"] and not stopped and not live_only:
             try:
                 result["foundry"] = self._foundry_tick(at, state)
@@ -3543,6 +3571,23 @@ class Service:
             if venue != SHADOW_VENUE and hasattr(broker, "balance")
         }
         return {venue: found[venue] for venue in sorted(found, key=_venue_rank)}
+
+    def venue_fee_rates(self) -> dict[str, Any]:
+        """Current execution costs for strategies. Missing/stale data is not a zero fee."""
+        with self._fee_lock:
+            now = float(self.clock())
+            for venue, broker in self.venue_brokers().items():
+                reader = getattr(broker, "fee_rates", None)
+                if not callable(reader):
+                    continue
+                previous = self._venue_fees.get(venue) or {}
+                if now - previous.get("checked_at", -1e30) >= (900 if previous.get("rates") else 60):
+                    try:
+                        self._venue_fees[venue] = {"checked_at": now, "rates": reader()}
+                    except Exception:
+                        self._venue_fees[venue] = {"checked_at": now, "rates": None}
+            return {venue: {**row["rates"], "age_seconds": round(now - row["checked_at"], 1)}
+                    for venue, row in self._venue_fees.items() if row.get("rates") and 0 <= now - row["checked_at"] <= 900}
 
     def _read_balances(self, brokers: Mapping[str, Any], timeout: float) -> dict[str, Any]:
         """Ask every venue at once and give up on the slow ones. Never raises and never blocks
@@ -4003,6 +4048,10 @@ class Service:
             "last_founding": state.get("last_founding"),  # leap: founding
             "last_foundry": self.foundry.summary() if getattr(self, "foundry", None) is not None else None,  # leap: foundry
             "event_stream": dict(self._stream_status),
+            "execution": getattr(self, "_execution_pulse", None),
+            "notifications": {"enabled": self.notifier.enabled, "checked_at": state.get("notify_checked_at"),
+                              "last_sent_at": state.get("notify_last_sent_at"), "sent_total": state.get("notify_sent_total", 0),
+                              "failed_seq": state.get("notify_failed_seq"), "cursor": state.get("notify_seq")},
             "last_reconciled_at": state.get("last_reconciled_at"),
             "last_error": self.last_error,
         }
@@ -4057,7 +4106,10 @@ class Service:
         try:
             for sig in (signal.SIGTERM, signal.SIGINT):
                 previous[sig] = signal.getsignal(sig)
-                signal.signal(sig, lambda *_: setattr(self, "stopping", True))
+                def stop(*_):
+                    self.stopping = True
+                    self._tick_wake.set()
+                signal.signal(sig, stop)
         except ValueError:  # not the main thread
             previous = {}
         result: dict[str, Any] = {}
@@ -4068,6 +4120,7 @@ class Service:
                 self.alert("warning", f"feeds did not start: {type(exc).__name__}")
         try:
             while not self.stopping:
+                self._tick_wake.clear()
                 try:
                     result = self.tick()
                     self.last_error = None
@@ -4077,7 +4130,10 @@ class Service:
                     self._health_guarded()
                 if once or self.stopping:
                     break
-                self.sleeper(float(self.config["sleep_seconds"]))
+                if self.sleeper is time.sleep:
+                    self._tick_wake.wait(float(self.config["sleep_seconds"]))
+                else:
+                    self.sleeper(float(self.config["sleep_seconds"]))
         finally:
             self._stream_stop.set()
             if self._stream_thread is not None:

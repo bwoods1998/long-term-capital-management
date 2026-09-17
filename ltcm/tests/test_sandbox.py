@@ -114,6 +114,19 @@ class SandboxCase(unittest.TestCase):
 
 
 class RunTests(SandboxCase):
+    def test_program_hash_is_not_replaced_by_uploaded_engine_hash(self):
+        import hashlib
+        source = "print('candidate')"
+        self.assertEqual(self.manager().run("a", source).code_sha256, hashlib.sha256(source.encode()).hexdigest())
+
+    def test_unknown_execution_is_not_overwritten_after_restart(self):
+        manager = self.manager()
+        self.client.exec = lambda *args, **kwargs: Exec("", code=None, status="unconfirmed")
+        manager.run("a", "print(1)", timeout=60)
+        result = self.manager().run("a", "print(2)", timeout=60)
+        self.assertEqual(result.exit_code, 5)
+        self.assertIn("prior sandbox execution", result.stdout)
+
     def test_the_first_run_forks_the_image_and_later_runs_reuse_the_box(self):
         manager = self.manager()
         first = manager.run("mullins", "print('hello')", purpose="probe")
@@ -234,7 +247,7 @@ class RunTests(SandboxCase):
         manager.run("mullins", "print(1)")
         manager.run("hilibrand", "print(1)")
         self.assertEqual(manager.sleep_all(), 2)
-        self.assertEqual([c for c in self.client.calls if c[0] == "sleep"], [("sleep", "sb_lab-hilibrand"), ("sleep", "sb_lab-mullins")])
+        self.assertEqual(sorted(c for c in self.client.calls if c[0] == "sleep"), [("sleep", "sb_lab-hilibrand"), ("sleep", "sb_lab-mullins")])
 
     def test_state_holds_only_box_ids_and_usage(self):
         manager = self.manager()
@@ -249,6 +262,31 @@ class RunTests(SandboxCase):
 
 
 class SameDeskRunTests(SandboxCase):
+    def test_unrelated_boxes_start_concurrently_and_merge_state(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        manager = self.manager()
+        rendezvous = threading.Barrier(3)
+        original = self.client.from_checkpoint
+        def fork(*args, **kwargs):
+            rendezvous.wait(timeout=3)
+            manager._charge(kwargs["name"][4:], 7)
+            return original(*args, **kwargs)
+        self.client.from_checkpoint = fork
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            boxes = list(pool.map(manager.ensure_box, ["a", "b", "c"]))
+        self.assertEqual(len(set(boxes)), 3)
+        self.assertEqual(set(manager.state()["boxes"]), {"a", "b", "c"})
+        self.assertEqual([manager.seconds_today(d) for d in ["a", "b", "c"]], [7, 7, 7])
+
+    def test_same_box_is_forked_once_under_concurrency(self):
+        from concurrent.futures import ThreadPoolExecutor
+        manager = self.manager()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            boxes = list(pool.map(manager.ensure_box, ["a"] * 8))
+        self.assertEqual(len(set(boxes)), 1)
+        self.assertEqual(self.client.forks, 1)
+
     def test_two_runs_on_one_desk_never_swap_programs(self):
         """A strategy tick and a Foundry dry run on one desk at once: each executes its own
         `/lab/run/main.py`. Until Sept 16, 2026 the second upload could land between the first

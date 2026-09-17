@@ -146,9 +146,20 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return row.day === tradingDay(at, limits.timezone) ? Number(row.count) || 0 : 0;
     },
 
-    recordNotice(at = now()) {
+    noticeDelivered(id, at = now()) {
+      if (!id) return false;
+      const row = read(store, NOTICES_KEY, {});
+      const sent = row.delivered?.[id];
+      return Number.isFinite(sent) && at - sent >= 0 && at - sent < 48 * 3600000;
+    },
+
+    recordNotice(at = now(), id = null) {
+      if (this.noticeDelivered(id, at)) return this.noticesToday(at);
       const count = this.noticesToday(at) + 1;
-      write(store, NOTICES_KEY, { day: tradingDay(at, limits.timezone), count });
+      const row = read(store, NOTICES_KEY, {});
+      const delivered = Object.fromEntries(Object.entries(row.delivered || {}).filter(([, stamp]) => at - stamp < 48 * 3600000).slice(-2000));
+      if (id) delivered[id] = at;
+      write(store, NOTICES_KEY, { day: tradingDay(at, limits.timezone), count, delivered });
       return count;
     },
 
@@ -179,6 +190,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
         ok: true,
         kill_switch: killed(),
         today: { day: row.day, orders: row.orders, notional_usd: formatUsd(row.notional) },
+        notices_today: this.noticesToday(at),
         caps: {
           max_order_usd: formatUsd(limits.maxOrderMicro),
           max_day_usd: formatUsd(limits.maxDayMicro),

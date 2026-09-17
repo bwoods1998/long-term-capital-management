@@ -334,6 +334,24 @@ test('only the documented routes and methods exist', async () => {
   assert.equal((await call(ask('POST', '/v1/health'))).response.status, 405);
 });
 
+test('notice RPC methods are awaited and retries of a delivered notice are deduplicated', async () => {
+  const local = gateFor();
+  const gate = Object.fromEntries(['noticesToday', 'noticeDelivered', 'recordNotice'].map(name => [name, async (...args) => local[name](...args)]));
+  let sent = 0;
+  const options = { gate, now: () => NOW, mailer: async () => { sent += 1; } };
+  const facts = { kind: 'test', notice_id: 'notice:stable-id' };
+  assert.equal((await (await route(ask('POST', '/v1/notify', { body: facts }), env({ NOTIFY_MAX_PER_DAY: '1' }), options)).json()).notices_today, 1);
+  assert.equal((await (await route(ask('POST', '/v1/notify', { body: facts }), env({ NOTIFY_MAX_PER_DAY: '1' }), options)).json()).duplicate, true);
+  assert.equal((await route(ask('POST', '/v1/notify', { body: { ...facts, notice_id: 'notice:second' } }), env({ NOTIFY_MAX_PER_DAY: '1' }), options)).status, 429);
+  assert.equal(sent, 1);
+});
+
+test('the Durable Object exposes every notification RPC method', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../worker.mjs', import.meta.url), 'utf8');
+  for (const name of ['noticesToday', 'noticeDelivered', 'recordNotice']) assert.match(source, new RegExp(`\\b${name}\\([^)]*\\) \\{ return this\\.gate\\.${name}\\(`));
+});
+
 test('a trade notice is composed from the floor\'s facts, mailed once, and counted against the day', async () => {
   const sent = [];
   const mailer = async message => void sent.push(message);

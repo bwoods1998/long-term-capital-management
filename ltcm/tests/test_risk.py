@@ -43,6 +43,22 @@ def context(**overrides):
 
 
 class RiskEngineTests(unittest.TestCase):
+    def test_zero_equity_does_not_trap_existing_inventory(self):
+        from dataclasses import replace
+        order = replace(intent(side="sell", quantity="2"), purpose="exit", exit_of="desk:position", exit_reason="desk")
+        ctx = context(desk_equity=Decimal("-10"), positions={AAPL.key: Position(AAPL, Decimal("3"), Decimal("100"), Decimal("100"))})
+        self.assertTrue(RiskEngine().check(order, ctx).approved)
+        self.assertFalse(RiskEngine().check(intent(quantity="1"), ctx).approved)
+        ctx.kill_switch = True
+        self.assertFalse(RiskEngine().check(order, ctx).approved)
+
+    def test_exit_label_cannot_open_or_reverse_a_position(self):
+        from dataclasses import replace
+        order = replace(intent(side="sell", quantity="3"), purpose="exit", exit_of="desk:position", exit_reason="desk")
+        for held in [None, Position(AAPL, Decimal("2"), Decimal("100"), Decimal("100"))]:
+            ctx = context(positions={} if held is None else {AAPL.key: held})
+            self.assertTrue(any("exit must reduce" in r for r in RiskEngine().check(order, ctx).reasons))
+
     def setUp(self):
         self.engine = RiskEngine()
 

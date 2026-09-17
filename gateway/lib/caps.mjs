@@ -35,6 +35,7 @@ export const VENUE_PATHS = {
     ['DELETE', /^portfolio\/(events\/)?orders\/[A-Za-z0-9._~%-]+$/],
   ],
   coinbase: [
+    ['GET', /^api\/v3\/brokerage\/transaction_summary$/],
     ['GET', /^api\/v3\/brokerage\/accounts(\/[A-Za-z0-9._~%-]+)?$/],
     // Read-only derivatives state: whether the account can hold futures, and what it holds.
     ['GET', /^api\/v3\/brokerage\/cfm\/(balance_summary|positions(\/[A-Za-z0-9._~%-]+)?|intraday\/margin_setting)$/],

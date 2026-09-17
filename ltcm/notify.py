@@ -14,6 +14,7 @@ a day old, and never stops the tick. Nothing here decides anything; it reports.
 from __future__ import annotations
 
 import json
+import hashlib
 import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation
@@ -235,6 +236,8 @@ class TradeNotifier:
             return []
         cursor = int(cursor)
         sent: list[str] = []
+        delivered = list(state.get("notify_delivered") or [])
+        delivered_set = set(delivered)
         pending: list[tuple[list[Any], Callable[[list[Any]], dict[str, Any] | None]]] = []
         by_order: dict[str, list[Any]] = {}
         highest = cursor
@@ -246,6 +249,8 @@ class TradeNotifier:
                 batch = [e for e in self.log.read(kind=kind, after=after, limit=2000) if e.seq <= latest]
                 for event in batch:
                     after = event.seq
+                    if event.id in delivered_set:
+                        continue
                     if _age_seconds(event.at, at) > MAX_AGE_SECONDS:
                         continue  # too old to be news
                     if kind == "broker.fill":
@@ -270,6 +275,7 @@ class TradeNotifier:
                 continue
             if facts is None:
                 continue
+            facts["notice_id"] = "notice:" + hashlib.sha256("|".join(sorted(e.id for e in events)).encode()).hexdigest()
             try:
                 answer = self.poster(f"{self.gateway_url}/v1/notify", self.token, facts)
             except urllib.error.HTTPError as exc:
@@ -285,12 +291,21 @@ class TradeNotifier:
                 break
             if isinstance(answer, Mapping) and answer.get("sent") is False:
                 self.alert("warning", "trade notice not sent: the gateway has no mail binding")
+                failed_at = events[0].seq
+                break
             sent.extend(e.id for e in events)
+            delivered.extend(e.id for e in events)
+            # A grouped order can contain fills after a later failed notice's sequence. Keep
+            # the successfully delivered ids as well as the cursor so retries don't remail it.
+            self.save_state(notify_delivered=delivered[-2000:])
         # Everything up to the log's end is handled, unless a notice failed: then the cursor stops
         # just before it, and the next tick tries it again (the ones before it are not re-sent,
         # because the cursor only ever covers what was folded or sent).
         highest = latest if failed_at is None else max(cursor, failed_at - 1)
-        self.save_state(notify_seq=highest, notify_floor=state.get("notify_floor") or at)
+        self.save_state(notify_seq=highest, notify_floor=state.get("notify_floor") or at,
+                        notify_checked_at=at, notify_failed_seq=failed_at,
+                        notify_sent_total=int(state.get("notify_sent_total") or 0) + len(sent),
+                        notify_last_sent_at=at if sent else state.get("notify_last_sent_at"))
         return sent
 
 

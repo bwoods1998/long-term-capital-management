@@ -449,6 +449,25 @@ class ExecTests(unittest.TestCase):
         self.assertEqual(result.error_code, "permission_denied")
         self.assertFalse(result.ok)
 
+    def test_reconciliation_recovers_complete_output_without_resubmitting_command(self):
+        calls = []
+        def transport(method, path, *args, **kwargs):
+            calls.append(path)
+            if path.endswith('/exec'):
+                def interrupted():
+                    yield {"type": "started", "exec_request_id": "e1"}
+                    yield {"type": "stdout", "data": out("partial")}
+                    raise OSError("stream lost")
+                return interrupted()
+            if len(calls) == 2:
+                raise SailboxError("temporary", status=503)
+            return {"status": "succeeded", "return_code": 0, "stdout": "partial and final result", "stderr": ""}
+        result = SailboxClient(transport).exec(BOX, ["x"])
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, "partial and final result")
+        self.assertEqual(sum(path.endswith('/exec') for path in calls), 1)
+        self.assertIsNone(result.error_code)
+
 
 class FileTests(unittest.TestCase):
     def test_upload_sends_bytes_with_the_documented_query(self):

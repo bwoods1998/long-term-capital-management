@@ -358,6 +358,24 @@ class CandidateTests(FoundryCase):
 
 # --------------------------------------------------------------------------- backtests and selection
 class BacktestTests(FoundryCase):
+    def test_exact_successful_result_survives_restart_without_new_evidence(self):
+        import queue
+        window = {"start": "2026-09-01T00:00:00Z", "end": "2026-09-06T00:00:00Z", "step_minutes": 15}
+        ids = queue.Queue()
+        ids.put("foundry-0")
+        def candidate(foundry, cycle):
+            return foundry._candidate(cycle, "baseline", "house", "kalshi_favorites", "kalshi_favorites", {}, SOURCE)
+        first = self.foundry(result_cache=True)
+        first._backtest(candidate(first, 1), window, ids)
+        restarted = self.foundry(result_cache=True)
+        cached = restarted._backtest(candidate(restarted, 2), window, ids)
+        self.assertTrue(cached["cache_hit"])
+        self.assertEqual(cached["seconds"], 0)
+        self.assertEqual(len(self.manager.backtests), 1)
+        self.assertEqual(ids.qsize(), 1)
+        restarted._backtest(candidate(restarted, 3), dict(window, end="2026-09-07T00:00:00Z"), ids)
+        self.assertEqual(len(self.manager.backtests), 2)
+
     def test_every_candidate_runs_in_its_own_sandbox_side_by_side(self):
         self.manager.delay = 0.02
         summary = self.foundry(sandboxes=3).cycle(NOW)
@@ -384,6 +402,7 @@ class BacktestTests(FoundryCase):
         self.assertEqual(provider.calls, [], "no model is paid for a strategy the engine cannot replay")
         self.assertIn("cannot backtest", summary["code"]["skipped"])
         self.assertEqual(summary["qualified"], 0)
+        self.assertEqual(summary["backtested"], 0, "unsupported reports are not successful measurements")
         self.assertLess(len(self.manager.specs), 12)
 
     def test_selection_reads_only_out_of_sample_evidence(self):
@@ -631,6 +650,23 @@ class FastTrackTests(FoundryCase):
         self.assertEqual((row["foundry_id"], row["promoted_from"]), (fid, "mullins-4"))
         self.assertEqual(self.manager.files["mullins"]["kalshi_favorites_f1.py"], GOOD_CODE)
         self.assertFalse(self.row("mullins")["enabled"], "the parent strategy is paused, never doubled")
+
+    def test_paused_house_can_only_be_replaced_by_strong_new_forward_code(self):
+        provider = Provider()
+        provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_favorites_f1_2")}
+        self.manager.script = code_winner
+        foundry = self.foundry(provider, paused_replacement_families=["kalshi"])
+        summary = foundry.cycle(NOW)
+        self.strategies.store.update("mullins", "kalshi_favorites", enabled=False)
+        key = ("mullins-4", "kalshi_favorites_f1")
+        self.strategies.records[key] = {"settled": 6, "fills": 6, "settled_pnl_usd": "1.2"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [])
+        self.assertEqual(foundry.state()["deployments"][summary["winner"]]["status"], "shadow")
+        self.strategies.records[key] = {"settled": 30, "independent_settled": 30, "fills": 30, "settled_pnl_usd": "6", "fees_usd": "1",
+                                      "returns": [[f"2026-09-{14 + i % 3}", 0.02] for i in range(30)]}
+        self.assertEqual(len(foundry.fast_track(self.manifests, [])), 1)
+        self.assertFalse(self.row("mullins")["enabled"])
+        self.assertTrue(self.row("mullins", "kalshi_favorites_f1")["enabled"])
 
     def test_settings_for_a_strategy_no_shadow_runs_travel_with_the_live_code(self):
         from ltcm.strategies import _sha
@@ -1044,16 +1080,16 @@ class ServiceFoundryTests(ServiceCase):
         foundry = self.service.foundry
         self.assertIsNotNone(foundry)
         self.assertFalse(foundry.enabled(), "no sandboxes, no cycles")
-        self.assertEqual(foundry.config["interval_minutes"], 30)
+        self.assertEqual(foundry.config["interval_minutes"], 5)
         calls = []
         foundry.enabled = lambda: True
         foundry.cycle = lambda at=None: calls.append(at) or {"at": at, "cycle": len(calls)}
         self.tick()
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.service.state()["last_foundry_at"], calls[0])
-        self.tick(self.START + 600)
+        self.tick(self.START + 120)
         self.assertEqual(len(calls), 1, "not before the interval")
-        self.tick(self.START + 1860)
+        self.tick(self.START + 360)
         self.assertEqual(len(calls), 2)
         self.assertIn("last_foundry", self.service.status())
 

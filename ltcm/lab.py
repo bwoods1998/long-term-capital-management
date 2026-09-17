@@ -83,7 +83,9 @@ STRATEGY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 #: What a strategy may call. Shown to the lab so the code it writes runs first time.
 KIT_API = (
     "kit.context (dict: now, desk_id, live, learning_usd, positions[{symbol, market_id, right, asset_class, quantity, average_cost}], "
-    "open_orders[{order_id, symbol, market_id, right, side, quantity, limit_price, submitted_at, strategy}], venues); "
+    "open_orders[{order_id, symbol, market_id, right, side, quantity, limit_price, submitted_at, strategy}], venues, "
+    "market_depth (forward-only, may be empty: symbol -> {bid, ask, spread_bps, bid_depth_usd, ask_depth_usd, imbalance, age_seconds, bids, asks}; NEVER assume this exists in historical replay), "
+    "fee_rates (forward-only, may be empty: venue -> {maker, taker, age_seconds}, decimal fractions; absent is UNKNOWN, never zero)); "
     "kit.say(text); kit.bars(symbol, interval='1h', limit=60, asset_class='crypto', venue='coinbase') -> [{time, open, high, low, close, volume}]; "
     "kit.quote(symbol, asset_class='crypto', venue='coinbase') -> {bid, ask, last}; kit.products(limit=25) -> [{symbol, price, volume_usd, quote_increment}] (Coinbase USD spot by 24h volume); "
     "kit.kalshi_series(series, limit=1000) -> open markets [{ticker, yes_bid, yes_ask, no_bid, no_ask, close_time, floor_strike, cap_strike, title, ...}]; "
@@ -92,7 +94,7 @@ KIT_API = (
     "decide(kit, params) returns a list of intents, or {'intents': [...], 'cancels': [order_id...], 'notes': str}. An intent: "
     "{'instrument': {'asset_class': 'event'|'crypto', 'symbol': ..., 'market_id': ticker (event), 'right': 'yes'|'no' (event)}, 'side': 'buy'|'sell', "
     "'quantity': str, 'order_type': 'limit', 'limit_price': str, 'rationale': str (name the setup, the edge and the exit), 'holding_period_hours': int, "
-    "optional 'post_only': true, 'target_price', 'stop_price'}. Sizes are capped by the floor; the risk engine and the critic check every order."
+    "optional 'post_only': true, 'target_price', 'stop_price', 'reduce_only': true to close or trim an existing position without reversing it}. Entry sizes are capped by the floor; verified exits may close the whole holding. Cancel conflicting resting orders before replacing them; the risk engine checks every order."
 )
 
 

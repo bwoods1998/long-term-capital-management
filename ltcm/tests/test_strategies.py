@@ -343,6 +343,21 @@ class CancelAndRecordTests(StrategyCase):
         self.assertIn("1 cancelled", self.strategies.report(self.manifest, "edge")["last_notes"])
         self.assertEqual(out[0]["approved"], 0)
 
+    def test_replacement_waits_for_confirmed_cancel_and_fresh_inventory_after_racing_fill(self):
+        self.strategies.deploy(self.manifest, "edge", 600, {})
+        self.log_events.append(("desk:scholes-2", "desk.intent", {"intent_id": "oi-mine", "session_id": "scholes-2:20260916-0400:strategy:edge"}))
+        self.open_orders = [{"order_id": "ord-mine", "intent_id": "oi-mine", "instrument": INTENT["instrument"],
+                            "side": "buy", "quantity": "10", "limit_price": "0.20", "status": "accepted"}]
+        self.manager.script = lambda d, c: Run("STRATEGY-RESULT " + json.dumps({"intents": [INTENT], "cancels": ["ord-mine"]}))
+        for status in ("pending_cancel", "accepted", "filled"):
+            ctx = FakeContext()
+            ctx.cancel_order = lambda order_id, status=status: {"order_id": order_id, "status": status}
+            self.service.context = lambda *a, **kw: ctx
+            row = self.strategies.store.for_desk(self.manifest.id)["edge"]
+            self.strategies.run_one(self.manifest, "edge", row, NOW)
+            self.assertEqual(ctx.intents, [], status)
+            self.assertIn("Replacement deferred", self.strategies.report(self.manifest, "edge")["last_notes"])
+
     def test_a_live_strategy_sizes_up_only_after_its_record_passes_the_evidence_gate(self):
         live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
         self.manager.files["scholes"] = {"edge.py": "def decide(kit, params):\n    return []\n"}

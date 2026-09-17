@@ -511,6 +511,9 @@ class Strategies:
             "positions": positions,
             "open_orders": self.open_orders_for(manifest),
             "venues": list(manifest.venues),
+            # Live microstructure is forward-only; historical tests must tolerate its absence.
+            "market_depth": self.service.feeds.depth("coinbase") if getattr(self.service, "feeds", None) is not None else {},
+            "fee_rates": self.service.venue_fee_rates() if callable(getattr(self.service, "venue_fee_rates", None)) else {},
         }
 
     def open_orders_for(self, manifest: DeskManifest) -> list[dict[str, Any]]:
@@ -1089,12 +1092,22 @@ class Strategies:
         run = self._execute(manifest, name, params, at)
         intents = run.get("intents") if isinstance(run.get("intents"), list) else []
         cancels = [str(c) for c in (run.get("cancels") or []) if isinstance(c, str)][:20] if not run.get("error") else []
-        cancelled = self._cancel(manifest, name, cancels, at) if cancels else 0
         decisions: list[dict[str, Any]] = []
         # The desk may have undeployed or redeployed the strategy while this run was in the sandbox.
         current = self.store.for_desk(manifest.id).get(name)
         if current is None or current.get("deployed_at") != row.get("deployed_at"):
             intents = []
+            cancels = []
+        elif not current.get("enabled", True):
+            intents = [intent for intent in intents if intent.get("reduce_only") is True]
+        requested_cancels = {o["order_id"] for o in self.open_orders_for(manifest)
+                             if o.get("strategy") == name and o["order_id"] in cancels} if cancels else set()
+        cancelled = self._cancel(manifest, name, list(requested_cancels), at) if requested_cancels else 0
+        if cancelled < len(requested_cancels):
+            # A cancellation request is not a cancelled order. It may still be working or
+            # have filled in the race; rerun with fresh inventory before any replacement.
+            intents = []
+            run["notes"] = "Replacement deferred: cancellation not confirmed; refresh orders and inventory. " + str(run.get("notes") or "")
         if not run.get("error") and intents:
             decisions = self._propose(manifest, name, intents, at)
         approved = sum(1 for d in decisions if d.get("approved"))
@@ -1212,8 +1225,9 @@ class Strategies:
             if order_id not in mine:
                 continue
             try:
-                ctx.cancel_order(order_id)
-                done += 1
+                result = ctx.cancel_order(order_id)
+                if isinstance(result, Mapping) and result.get("status") == "cancelled":
+                    done += 1
             except Exception as exc:
                 self.service.alert("warning", f"strategy {manifest.id}/{name} could not cancel {order_id}: {type(exc).__name__}")
         return done
@@ -1248,7 +1262,7 @@ class Strategies:
             if args.get("order_type") != "limit" or _dec(args.get("limit_price")) is None:
                 out.append({"approved": False, "reasons": ["a strategy proposes limit orders with a limit_price"], "rationale": str(args.get("rationale") or "")[:200]})
                 continue
-            if cap is not None:
+            if cap is not None and not args.get("reduce_only"):
                 args["quantity"] = _capped_quantity(args, cap)
             args["rationale"] = f"[strategy {name}] " + str(args.get("rationale") or "no rationale given")[:1800]
             try:

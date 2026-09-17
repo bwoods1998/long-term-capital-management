@@ -362,6 +362,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "type": "boolean",
                 "description": "A limit that must rest: rejected rather than taking. Makers pay no fee on Kalshi and the maker rate on Coinbase.",
             },
+            "reduce_only": {
+                "type": "boolean",
+                "description": "Close or partially reduce a held position, never open or reverse it. True routes a verified reduction as an exit; cancel conflicting resting orders first. Works even when new entries are paused.",
+            },
             "expire_after_seconds": {
                 "type": "integer",
                 "minimum": EXPIRY_MIN_SECONDS,
@@ -776,6 +780,15 @@ def _propose(
         raise ToolError("side must be buy or sell")
     if side == "sell":
         instrument = held_instrument(instrument, ctx)
+    reduce_only = arguments.get("reduce_only", False)
+    if not isinstance(reduce_only, bool):
+        raise ToolError("reduce_only must be a boolean")
+    if reduce_only:
+        held = next((p for p in ctx.positions() if p.instrument.key == instrument.key), None)
+        quantity = Decimal(str(arguments.get("quantity")))
+        if (held is None or not quantity.is_finite() or quantity <= 0 or quantity > abs(held.quantity)
+                or (side == "sell") != (held.quantity > 0)):
+            raise ToolError("reduce_only must reduce an existing position without reversing it")
     order_type = arguments.get("order_type", "market")
     if order_type not in ("market", "limit"):
         raise ToolError("order_type must be market or limit")
@@ -814,6 +827,9 @@ def _propose(
             target_price=arguments.get("target_price"),
             stop_price=arguments.get("stop_price"),
             time_stop_at=time_stop_at,
+            purpose="exit" if reduce_only else "entry",
+            exit_reason="desk" if reduce_only else None,
+            exit_of=f"desk:{manifest.id}:{instrument.key}" if reduce_only else None,
         )
     except ToolError:
         raise
