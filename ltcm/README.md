@@ -276,10 +276,15 @@ A third rule binds the live desks together (`risk.rule_event_floor_cluster`, Sep
   gold, silver, Brent, WTI and copper are `commod`, the daily highs are `weather`, anything else
   is its own series, and the hour is the close hour in UTC read from the ticker's code
   (`KXBTCD-26SEP1717` closes at 17:00 New York time, `crypto:2026-09-17T21`). A code with only a
-  date gives the day; a ticker with no readable code gives the series alone, which lumps all of
-  it together. Exits and closing trades are never refused. A live event buy's check-and-reserve
-  holds a floor-wide lock, so two live desks on two strategy threads cannot both fit under the
-  cap they share.
+  date gives the day and a ticker with no readable code gives the group alone; either is a market
+  whose hour is unknown, so it counts against every hour it could close in (`risk.clusters_overlap`:
+  a date meets each UTC hour on that date and the next, no time meets the whole group). Working
+  buys and other live desks' orders still in flight count too. A live desk whose ledger cannot be
+  read is never left out of the sum: every live event buy is refused until it can be. Exits and
+  closing trades are never refused. A live desk's opening event buy holds a floor-wide lock over
+  its check-and-reserve (never over the critic or the venue), so two live desks on two strategy
+  threads cannot both fit under the cap they share; its book is read in one pass for all live
+  desks.
 
 Promotion needs two things and publishes both: the gate's evidence, and an open venue. A desk that
 passes gate A onto a venue missing from `live_venues` is deferred with a public `committee.gate`
@@ -365,11 +370,15 @@ Telling +2 cents from breakeven on a 1:13 payoff takes roughly 100 to 300 separa
 real edge earns its size days later than it did.
 
 A live strategy's orders stay at learning size until it has `earned_settled` settlements and a
-record that passes; then `Strategies.size_cap` lets it size to `earned_multiple` times learning
-size and toward the desk's own order limit by `settled / n_needed`. The gate needs `n_needed`
-settlements, so a record that passes is at the desk's full order limit; the desk's position,
-daily-loss and floor limits and the firm's event rules still bind. A record that stops passing is
-back at learning size on the next run.
+record that passes; then `Strategies.size_cap` ramps it linearly from learning size at the gate's
+`n_needed` to the desk's own order limit at `full_size_multiple` (3) times `n_needed`
+(`strategies.evidence.full_size_multiple`; to `earned_multiple` times learning size when the
+desk's limit cannot be read). A favorite at 0.93 is at learning size at 43 settled, halfway at 86
+and at the limit at 129. Passing is not proof (a breakeven favorite passes about a fifth of the
+time), so size follows the evidence as it accumulates; until the Sept 17, 2026 review the ramp was
+`settled / n_needed`, which the gate made a step from learning size to the full limit the run a
+record first passed. The desk's position, daily-loss and floor limits and the firm's event rules
+still bind. A record that stops passing is back at learning size on the next run.
 
 ### Promotion: the family's record chooses the live desk's settings
 

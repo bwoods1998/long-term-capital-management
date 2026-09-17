@@ -338,8 +338,15 @@ class CancelAndRecordTests(StrategyCase):
         self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})]
         self.log_events += self.settled("scholes", 20)
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "twenty settled winners were enough before Sept 17, 2026; the gate needs 25")
-        self.log_events += self.settled("scholes", 10)
-        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("30"), "thirty over three days, every day positive: three times learning size")
+        self.log_events += self.settled("scholes", 5)
+        self.assertEqual(self.strategies.report(live, "edge")["evidence"]["passes"], True, "25 over three days, every day positive")
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "passing at the 25 the gate needs is the start of the ramp, not a step")
+        self.log_events += self.settled("scholes", 25)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("20"), "50 of the 75 (3 x 25) that reach the top: halfway")
+        self.log_events += self.settled("scholes", 25)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("30"), "75: the top, three times learning size while the desk's limit cannot be read")
+        self.log_events += self.settled("scholes", 25)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("30"), "and no further")
         self.log_events.append(("desk:scholes", "desk.outcome", {"pnl": "-40", "rationale_excerpt": "[strategy edge] y", "instrument": "event:KXB:kalshi:no:KXB",
                                                                  "entry_price": "0.50", "quantity": "10", "entry_fees": "0"}, "2026-09-16T09:00:00.000Z"))
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "a bad day in the record goes back to learning size")
@@ -359,9 +366,17 @@ class CancelAndRecordTests(StrategyCase):
         self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("10"), "6 of the 43 settlements a 0.93 favorite needs")
         verdict = self.strategies.report(live, "favorites")["evidence"]
         self.assertEqual((verdict["kind"], verdict["passes"], verdict["n_needed"]), ("lopsided", False, 43))
-        self.log_events += self.settled("mullins", 37, pnl="0.70", price="0.93", name="favorites")
+        self.log_events += self.settled("mullins", 36, pnl="0.70", price="0.93", name="favorites")
         self.log_events += self.settled("mullins", 1, pnl="-9.30", price="0.93", name="favorites")
-        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("30"), "44 settled, one loss: the loss rate is under breakeven")
+        verdict = self.strategies.report(live, "favorites")["evidence"]
+        self.assertEqual((verdict["passes"], verdict["n_needed"]), (True, 43), "43 settled, one loss: the loss rate is under breakeven")
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("10"), "a breakeven favorite passes here about a fifth of the time: still learning size")
+        self.log_events += self.settled("mullins", 43, pnl="0.70", price="0.93", name="favorites")
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("20"), "86 of the 129 that reach the top")
+        self.log_events += self.settled("mullins", 43, pnl="0.70", price="0.93", name="favorites")
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("30"))
+        self.log_events += self.settled("mullins", 6, pnl="-9.30", price="0.93", name="favorites")
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("10"), "7 losses in 135 is over what breakeven allows at this count: back to learning size")
 
     def test_an_earning_strategy_ramps_toward_the_desks_order_limit(self):
         live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "1000"})
@@ -378,9 +393,54 @@ class CancelAndRecordTests(StrategyCase):
         self.log_events += [("desk:scholes", "desk.intent", {"intent_id": "oi-1", "session_id": "scholes:20260916-0400:strategy:edge"})]
         self.log_events += self.settled("scholes", 20)
         self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "not yet through the gate: learning size")
-        self.log_events += self.settled("scholes", 10)
-        # The ramp is settled / n_needed, and the gate needs n_needed: a passing record is at full size.
-        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "through the gate: the desk's full order limit")
+        self.log_events += self.settled("scholes", 5)
+        self.assertEqual(fit, Decimal("225.00"))
+        # Sept 17, 2026 review: the ramp was settled / n_needed, and the gate needs n_needed, so the
+        # run a record first passed took the desk from $10 to its $225 limit. Now it is linear from
+        # learning size at n_needed (25) to the limit at full_size_multiple x n_needed (75).
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("10"), "through the gate at 25: still learning size")
+        self.log_events += self.settled("scholes", 1)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("14.30"), "one more settlement: a fiftieth of the way")
+        self.log_events += self.settled("scholes", 24)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("117.50"), "50: halfway to the limit")
+        self.log_events += self.settled("scholes", 25)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "75: the desk's full order limit")
+        self.log_events += self.settled("scholes", 30)
+        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "never above it")
+        self.strategies.config["evidence"] = {"full_size_multiple": 5}
+        self.assertEqual(self.strategies.size_cap(live, "edge"), Decimal("182.00"), "105 settled at a multiple of 5: (105 - 25) / 100 of the way")
+        self.strategies.config["evidence"] = {"full_size_multiple": 1}
+        self.assertEqual(self.strategies.size_cap(live, "edge"), fit, "a multiple of 1 is the old step, on purpose only")
+
+    def test_an_outcome_without_an_instrument_does_not_take_a_favorites_record_off_the_loss_rate_rule(self):
+        """Sept 17, 2026 review: one outcome naming no instrument made the record's asset class
+        unknown, and an unknown record is judged by the bootstrap. Thirty favorites at 0.93 over
+        three days, every day positive, pass the bootstrap; the loss-rate rule needs 43."""
+        live = manifest(id="mullins", family="kalshi", parent_id=None, capital={"mode": "live", "usd": "400"})
+        self.manager.files["mullins"] = {"favorites.py": "def decide(kit, params):\n    return []\n"}
+        self.strategies.deploy(live, "favorites", 900, {})
+        self.log_events += [("desk:mullins", "desk.intent", {"intent_id": "oi-f", "session_id": "mullins:20260916-0400:strategy:favorites"})]
+        self.log_events += self.settled("mullins", 30, pnl="0.70", price="0.93", name="favorites")
+        self.log_events.append(("desk:mullins", "desk.outcome", {"pnl": "0.70", "rationale_excerpt": "[strategy favorites] x", "entry_price": "0.93",
+                                                                 "quantity": "10", "entry_fees": "0"}, "2026-09-17T05:00:00.000Z"))
+        record = self.strategies.record("mullins", "favorites")
+        self.assertEqual(record["asset_class"], "event")
+        verdict = self.strategies.assess(record)
+        self.assertEqual((verdict["kind"], verdict["passes"]), ("lopsided", False))
+        self.assertEqual(self.strategies.size_cap(live, "favorites"), Decimal("10"))
+
+    def test_the_ramp_runs_from_n_needed_to_its_multiple(self):
+        from ltcm.strategies import earned_ramp
+
+        self.assertEqual(earned_ramp(43, 43), Decimal(0))
+        self.assertEqual(earned_ramp(86, 43), Decimal("0.5"))
+        self.assertEqual(earned_ramp(129, 43), Decimal(1))
+        self.assertEqual(earned_ramp(500, 43), Decimal(1))
+        self.assertEqual(earned_ramp(10, 43), Decimal(0), "under n_needed is never negative")
+        self.assertEqual(earned_ramp(50, 25, "2"), Decimal(1))
+        self.assertEqual(earned_ramp(25, 25, 1), Decimal(1))
+        self.assertEqual(earned_ramp(2, 0, 3), Decimal("0.5"), "n_needed is at least one")
+        self.assertEqual(earned_ramp(50, 25, "nonsense"), Decimal("0.5"), "an unreadable multiple is 3")
 
     def test_a_shrinking_desk_is_sized_to_fit_its_own_limits(self):
         """Scholes at $33 with a 15% cap: a $10 learning order is refused forever; $4.45 trades."""

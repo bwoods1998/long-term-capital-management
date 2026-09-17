@@ -61,8 +61,9 @@ DEFAULTS: dict[str, Any] = {
     "idle_publish_seconds": 3600,
     "starters": True,
     # A live strategy's orders stay at learning size until this many of its positions have
-    # settled and its record passes the evidence gate (`evidence.passes`); then it may size to
-    # this multiple of learning size, and up to the desk's own order limit.
+    # settled and its record passes the evidence gate (`evidence.passes`); then its size ramps
+    # toward the desk's own order limit (`size_cap`), or to this multiple of learning size when
+    # that limit cannot be read.
     "earned_settled": 20,
     "earned_multiple": 3,
 }
@@ -1074,14 +1075,18 @@ class Strategies:
 
         Learning size until the strategy has earned more: at least `earned_settled` settled
         positions and a record that passes the evidence gate (`evidence.passes`, config
-        `strategies.evidence`) lift the cap to `earned_multiple` times learning size, and the
-        desk's own limits still bind above that. A record that stops passing goes back to
-        learning size on the next run. This is the floor's capital following the strategies that
-        earn it.
+        `strategies.evidence`) start a ramp. At the `n_needed` settlements the gate asked for the
+        cap is still learning size; it grows linearly with each settlement after that and reaches
+        the desk's own order limit (`limit_fit_usd`) at `full_size_multiple` (3) times `n_needed`.
+        When the desk's limit cannot be read the ramp's top is `earned_multiple` times learning
+        size. A record that stops passing goes back to learning size on the next run. This is
+        the floor's capital following the strategies that earn it, one settlement at a time.
 
         Sept 17, 2026: the earned path was 6 settled with a positive P&L. At an average price of
         0.93 a favorites strategy with no edge cleared that 65% of the time and tripled its size
-        on luck."""
+        on luck. The gate that replaced it passes a breakeven favorite about a fifth of the time
+        at the settlements it needs, so passing is not proof: size follows the evidence as it
+        accumulates instead of jumping to the desk's full limit the run the gate first passes."""
         from . import evidence
 
         learning = self.learning_usd(manifest)
@@ -1089,18 +1094,17 @@ class Strategies:
         if manifest.live:
             record = self.record(manifest.id, name)
             settled = int(record.get("settled") or 0)
-            ok, _, needed = evidence.passes(record, **self.evidence_config()) if record else (False, "", 1)
+            gate = self.evidence_config()
+            ok, _, needed = evidence.passes(record, **gate) if record else (False, "", 1)
             if settled >= int(self.config.get("earned_settled", 20)) and ok:
-                earned = learning * Decimal(str(self.config.get("earned_multiple", 3)))
+                top = fit if fit is not None else learning * Decimal(str(self.config.get("earned_multiple", 3)))
+                ramp = earned_ramp(settled, needed, gate.get("full_size_multiple", 3))
                 # Compounding: a strategy that keeps earning ramps toward the desk's own order
-                # limit, a share of the desk's equity, so its bets grow as the book grows. The ramp
-                # is measured against the settlements the gate needed (`n_needed`); the gate itself
-                # needs that many, so a passing record is at full size. The desk's position,
-                # daily-loss and floor limits, and the firm's event rules, still bind above it.
-                if fit is not None:
-                    ramp = min(Decimal(1), Decimal(settled) / Decimal(max(1, needed)))
-                    earned = max(earned, (fit * ramp).quantize(Decimal("0.01")))
-                learning = earned
+                # limit, a share of the desk's equity, so its bets grow as the book grows. The
+                # desk's position, daily-loss and floor limits, and the firm's event rules, still
+                # bind above it.
+                earned = (learning + (top - learning) * ramp).quantize(Decimal("0.01"))
+                learning = max(learning, earned)
         return min(learning, fit) if fit is not None else learning
 
     def limit_fit_usd(self, manifest: DeskManifest) -> Decimal | None:
@@ -1240,13 +1244,33 @@ class Strategies:
 RECORD_RETURNS = 500
 
 
+def earned_ramp(settled: int, needed: int, full_size_multiple: Any = 3) -> Decimal:
+    """How far a passing record is along its size ramp, 0 to 1: 0 at the `needed` settlements
+    the evidence gate asked for, 1 at `full_size_multiple` x `needed`, linear between. A multiple
+    of 1 or less is full size as soon as the gate passes (the step this replaced; Sept 17, 2026)."""
+    needed = max(1, int(needed))
+    try:
+        multiple = Decimal(str(full_size_multiple))
+    except (ArithmeticError, ValueError, TypeError):
+        multiple = Decimal(3)
+    if not multiple.is_finite():
+        multiple = Decimal(3)
+    if multiple <= 1:
+        return Decimal(1)
+    span = (multiple - 1) * needed
+    return min(Decimal(1), max(Decimal(0), Decimal(int(settled) - needed) / span))
+
+
 def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
     """What `evidence.passes` reads from a strategy's settled outcomes (Sept 17, 2026: the old
     gate read only the count and the sign of the P&L).
 
     * `losses`: positions whose P&L after their entry fees is below zero. A `desk.outcome`'s `pnl`
       is net of a selling fill's fee but not of the opening fills' fees (`entry_fees`).
-    * `asset_class`: the one asset class every outcome traded, "mixed", or None when unknown.
+    * `asset_class`: the one asset class the outcomes that name an instrument traded, "mixed", or
+      None when none does. An outcome with no instrument does not make the record unknown: a
+      favorites record with one such outcome read as None, and None is judged by the bootstrap,
+      a looser test for a lopsided payoff than the loss-rate rule.
     * `avg_entry_price`, weighted by quantity, and `avg_fee_per_contract`, the entry fees per
       contract, for the lopsided-payoff rule.
     * `returns`: the newest `RECORD_RETURNS` of `[settle day, P&L after entry fees / (entry price x
@@ -1275,7 +1299,7 @@ def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
         cost = price * quantity + entry_fees
         returns.append([str(getattr(event, "at", None) or "")[:10], float(net / cost)])
     known = classes - {None}
-    asset_class = None if not known or None in classes else (known.pop() if len(known) == 1 else "mixed")
+    asset_class = None if not known else (next(iter(known)) if len(known) == 1 else "mixed")
     return {
         "losses": losses,
         "asset_class": asset_class,

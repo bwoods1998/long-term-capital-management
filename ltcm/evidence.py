@@ -8,7 +8,8 @@ favorites variant passed the old gate with probability 0.65 at 6 settled and 0.4
 variant losing 3 cents a contract still passed 0.53 at 6.
 
 `passes(record)` is the gate every reader of a strategy record now uses (`Strategies.promote`,
-`Strategies.size_cap`, the Foundry's fast-track):
+`Strategies.size_cap`, the Foundry's fast-track). Passing starts a live strategy's size ramp; it
+does not jump to full size (`full_size_multiple`, `strategies.earned_ramp`):
 
 * **A lopsided event strategy** (every settled position an event contract, volume-weighted
   average entry price at or above `skew_price`, 0.80) passes when it has settled at least
@@ -46,6 +47,9 @@ DEFAULTS: dict[str, Any] = {
     "q": 0.20,
     "resamples": 1000,
     "seed": 17,
+    # Earned size is a ramp, not a step (`Strategies.size_cap`): learning size at `n_needed`
+    # settlements, the desk's full order limit at `full_size_multiple` x `n_needed`, linear between.
+    "full_size_multiple": 3.0,
 }
 #: The smallest lopsided sample: fewer than 40 settlements says nothing about a loss rate.
 MIN_LOPSIDED_N = 40

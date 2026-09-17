@@ -9,6 +9,7 @@ Rules are ordered from cheapest and most absolute (kill switch) to most data-dep
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -384,10 +385,18 @@ def event_cluster(ticker: str, close_time: Any = None) -> str:
     `close_time` (ISO) gives the hour when it is known. Without it the hour comes from the
     ticker's event code, read as New York time. A code with a date and no hour gives the date
     (`weather:2026-09-17`: every city's high that day). A ticker with no readable code gives the
-    group alone, which lumps every market of the series together: the conservative answer.
-    Keys only compare when they are derived the same way, so the gateway keys every position,
-    working buy and order from its ticker."""
-    parts = str(ticker or "").strip().upper().split("-")
+    group alone. A key with less time in it than another is not a different cluster: it is one
+    whose hour is unknown, so `clusters_overlap` counts it with every hour it could be, and
+    `cluster_at_risk` sums a cluster that way (Sept 17, 2026 review: an undated key was counted
+    only against other undated keys, so its exposure never reached an hourly cluster's cap).
+    The gateway keys every position, working buy and order from its ticker."""
+    return _event_cluster(str(ticker or ""), None if not close_time else str(close_time))
+
+
+@functools.lru_cache(maxsize=8192)
+def _event_cluster(ticker: str, close_time: str | None) -> str:
+    """`event_cluster`, cached: the gateway keys every live desk's legs on every live event buy."""
+    parts = ticker.strip().upper().split("-")
     series = parts[0]
     group = series
     for roots, name in EVENT_CLUSTER_ROOTS:
@@ -414,9 +423,46 @@ def event_cluster(ticker: str, close_time: Any = None) -> str:
         return group
 
 
+CLUSTER_PREFIX = "cluster:"
+#: Set in `floor_event_exposure` when a live desk's book could not be read: its exposure is
+#: unknown, so no live event buy is approved against a total that leaves it out.
+FLOOR_BOOK_UNREADABLE = "floor:unreadable"
+
+
 def cluster_key(cluster: str) -> str:
     """How a cluster sits in `floor_event_exposure`, beside market ids."""
-    return f"cluster:{cluster}"
+    return f"{CLUSTER_PREFIX}{cluster}"
+
+
+def clusters_overlap(a: str, b: str) -> bool:
+    """True when markets keyed `a` and `b` could settle together: the same group, and times that
+    could be the same hour. The same hour or the same date compare equal; a date (a ticker's
+    local day) meets every UTC hour on that date or the next, since a US day ends by 11:00 UTC
+    the day after; a key with no time (an unreadable code) meets every key of its group. Anything
+    this cannot read overlaps: the conservative answer."""
+    group_a, _, when_a = str(a).partition(":")
+    group_b, _, when_b = str(b).partition(":")
+    if group_a != group_b:
+        return False
+    if not when_a or not when_b:
+        return True
+    if len(when_a) == len(when_b):
+        return when_a == when_b
+    day, hour = (when_a, when_b) if len(when_a) < len(when_b) else (when_b, when_a)
+    try:
+        start = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return True
+    return hour[:10] in (day, (start + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+
+def cluster_at_risk(book: dict[str, Decimal], cluster: str) -> Decimal:
+    """What `book` (`floor_event_exposure`'s shape) holds on every cluster that overlaps `cluster`."""
+    total = ZERO
+    for key, amount in book.items():
+        if key.startswith(CLUSTER_PREFIX) and clusters_overlap(key[len(CLUSTER_PREFIX):], cluster):
+            total += amount
+    return total
 
 
 def add_event_exposure(book: dict[str, Decimal], market: str, amount: Decimal) -> None:
@@ -431,7 +477,9 @@ def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | Non
     """What every live desk together puts at risk on one market, and on one cluster of markets
     that settle together: at most `max_event_market_floor_pct` (3.5%) and
     `max_event_cluster_floor_pct` (8%) of the live floor. Legs held at cost, working buys and this
-    order all count. A shadow desk is never checked and never counted, and exits are never refused.
+    order all count; a leg whose close hour is unknown counts against every hour it could close in
+    (`cluster_at_risk`), and a live desk whose book could not be read refuses the buy. A shadow desk
+    is never checked and never counted, and exits are never refused.
 
     Sept 17, 2026: `rule_event_market_cap` read only the desk's own book. `mullins` and `mullins-4`
     run nearly the same favorites settings, so each could put 3.5% of the floor on the same
@@ -445,6 +493,8 @@ def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | Non
     if not market or price is None:
         return None
     exposure = ctx.floor_event_exposure or {}
+    if FLOOR_BOOK_UNREADABLE in exposure:
+        return "a live desk's book could not be read, so what the live desks hold across the floor is unknown: no event buy until it can"
     cost = intent.quantity * price * intent.instrument.multiplier
     if ctx.max_event_market_floor_pct > 0:
         cap = ctx.floor_equity * ctx.max_event_market_floor_pct
@@ -467,7 +517,8 @@ def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | Non
                 add_event_exposure(own_book, ins.market_id or ins.symbol, position.quantity * position.average_cost * ins.multiplier)
         for working, amount in ctx.working_event_buys.items():
             add_event_exposure(own_book, working, amount)
-        at_risk = max(own_book.get(cluster_key(cluster), ZERO), exposure.get(cluster_key(cluster), ZERO)) + cost
+        # Keys with less time in them (a date, or none) are counted with every hour they could be.
+        at_risk = max(cluster_at_risk(own_book, cluster), cluster_at_risk(exposure, cluster)) + cost
         if at_risk > cap:
             return (
                 f"{cluster} would put {at_risk:.2f} at risk across the live desks, cap {cap:.2f} "

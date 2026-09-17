@@ -1347,3 +1347,153 @@ class FloorEventExposureTests(GatewayCase):
         self.assertTrue(any("would put 36.00 at risk across the live desks" in r for r in again["reasons"]), again["reasons"])
         shadow = self.gateway.propose(self.buy("mullins-2", self.BTC, "15", nonce="shadow"), NOW)
         self.assertFalse(any("across the live desks" in r for r in shadow["reasons"]), shadow["reasons"])
+
+    def test_a_shadow_desks_buy_is_approved_where_a_live_desks_is_refused(self):
+        self.broker.caps.add("event")  # the shadow book prices event contracts
+        self.hold("mullins-4", self.BTC, "25")  # $22.50 of the $34.26 cap
+        refused = self.gateway.propose(self.buy("mullins", self.BTC, "15"), NOW)
+        self.assertFalse(refused["approved"])
+        shadow = self.gateway.propose(self.buy("mullins-2", self.BTC, "15", nonce="shadow"), NOW)
+        self.assertTrue(shadow["approved"], shadow["reasons"])
+
+    def test_another_live_desks_order_in_flight_counts(self):
+        """A reservation made under the floor's lock is what the next live buy reads until the
+        order is on the book: approved, not yet recorded."""
+        from ltcm.risk import Decision
+
+        flying = self.buy("mullins-4", self.BTC, "30")  # $27 in flight, nothing resting, nothing held
+        self.gateway._reserve(flying, Decision(flying.id, "mullins-4", True, (), Decimal("0.90"), Decimal("27.00"), NOW))
+        ctx = self.gateway.risk_context(self.buy("mullins", self.BTC, "10"), NOW)
+        self.assertEqual(ctx.floor_event_exposure[self.BTC], Decimal("27.00"))
+        self.assertEqual(ctx.floor_event_exposure[self.CLUSTER], Decimal("27.00"))
+        result = self.gateway.propose(self.buy("mullins", self.BTC, "10", nonce="after-flight"), NOW)  # $9 more: $36
+        self.assertFalse(result["approved"])
+        self.assertTrue(any("across the live desks" in r for r in result["reasons"]), result["reasons"])
+        self.gateway._release(flying)
+        self.assertTrue(self.gateway.propose(self.buy("mullins", self.BTC, "10", nonce="landed"), NOW)["approved"])
+
+    def test_a_live_desks_unreadable_ledger_refuses_live_event_buys_and_never_an_exit(self):
+        """The floor's totals read every live ledger first and raise; a ledger that fails only for
+        the locked read (between the two) was skipped, and its legs left out of the cap."""
+        self.hold("mullins", self.BTC, "10")
+        ledger = self.gateway.ledgers["mullins-4"]
+        fold = ledger.state
+
+        def broken(at=None):
+            if self.gateway._floor_event_lock.locked() or getattr(self, "always_broken", False):
+                raise RuntimeError("fold failed")
+            return fold(at)
+
+        ledger.state = broken
+        self.assertEqual(self.gateway._floor_event_exposure(self.buy("mullins", self.ETH, "1"), NOW)[self.BTC], Decimal("9.00"))
+        self.always_broken = True
+        exposure = self.gateway._floor_event_exposure(self.buy("mullins", self.ETH, "1"), NOW)
+        self.assertIn("floor:unreadable", exposure, "not silently left out")
+        self.always_broken = False
+        refused = self.gateway.propose(self.buy("mullins", self.ETH, "1"), NOW)
+        self.assertFalse(refused["approved"])
+        self.assertTrue(any("could not be read" in r for r in refused["reasons"]), refused["reasons"])
+        sell = OrderIntent.new(desk_id="mullins", instrument=self.leg(self.BTC), side="sell", quantity="10", order_type="limit",
+                               limit_price="0.89", rationale="exit", created_at=NOW, session_id="s")
+        self.assertTrue(self.gateway.propose(sell, NOW)["approved"], "the exit goes")
+        exit_buy = OrderIntent.new(desk_id="mullins", instrument=self.leg(self.ETH), side="buy", quantity="1", order_type="limit",
+                                   limit_price="0.90", rationale="exit", created_at=NOW, session_id="s", purpose="exit", exit_reason="stop", exit_of="oi-x")
+        self.assertEqual(self.gateway.risk_context(exit_buy, NOW).floor_event_exposure, {}, "an exit reads no floor book")
+
+    def test_one_pass_over_the_order_book_under_the_lock_and_none_before_it(self):
+        seen = []
+        books = self.gateway._desk_books
+
+        def spy(desk_ids, intent_id, at):
+            seen.append(set(desk_ids))
+            return books(desk_ids, intent_id, at)
+
+        self.gateway._desk_books = spy
+        locked = []
+        submit = self.kalshi.submit
+
+        def watch(intent):
+            locked.append(self.gateway._floor_event_lock.locked())
+            return submit(intent)
+
+        self.kalshi.submit = watch
+        self.assertTrue(self.gateway.propose(self.buy("mullins", self.BTC, "10"), NOW)["approved"])
+        self.assertEqual(seen, [{"mullins"}, {"mullins", "mullins-4"}], "the first read skips the floor; the locked read covers every live desk at once")
+        self.assertEqual(locked, [False], "the floor's lock is never held over the venue")
+
+    def test_two_live_desks_racing_for_one_market_cannot_both_fit(self):
+        """Each $18 bid fits the $34.26 cap alone; together they are $36. The check is slowed so
+        both threads are inside it at once: without the floor's lock both were approved."""
+        import time
+
+        check = self.gateway.risk_engine.check
+
+        def slow(intent, ctx):
+            time.sleep(0.2)
+            return check(intent, ctx)
+
+        self.gateway.risk_engine.check = slow
+        results = {}
+
+        def run(desk_id):
+            results[desk_id] = self.gateway.propose(self.buy(desk_id, self.BTC, "20"), NOW)
+
+        threads = [threading.Thread(target=run, args=(d,)) for d in ("mullins", "mullins-4")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        self.assertFalse(any(t.is_alive() for t in threads), "no deadlock")
+        approved = sorted(d for d, r in results.items() if r["approved"])
+        self.assertEqual(len(approved), 1, results)
+        loser = next(r for d, r in results.items() if not r["approved"])
+        self.assertTrue(any("across the live desks" in r for r in loser["reasons"]), loser["reasons"])
+
+    def test_live_event_buys_sweeps_cancels_and_exits_run_together_without_a_deadlock(self):
+        self.hold("mullins", self.BTC, "4")
+        self.hold("mullins-4", self.ETH, "4")
+        errors = []
+        stop = threading.Event()
+
+        def buyer(desk_id, market):
+            try:
+                for n in range(12):
+                    result = self.gateway.propose(self.buy(desk_id, market, "1", nonce=f"{desk_id}-{n}"), NOW)
+                    if result.get("order_id") and n % 3 == 0:
+                        self.gateway.cancel(desk_id, result["order_id"], NOW)
+            except Exception as exc:  # pragma: no cover - reported below
+                errors.append(exc)
+
+        def seller(desk_id, market):
+            try:
+                for n in range(4):
+                    sell = OrderIntent.new(desk_id=desk_id, instrument=self.leg(market), side="sell", quantity="1", order_type="limit",
+                                           limit_price="0.89", rationale="exit", created_at=NOW, session_id="s", nonce=f"sell-{n}")
+                    self.gateway.propose(sell, NOW)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        def sweeper():
+            try:
+                while not stop.is_set():
+                    self.gateway.ingest_fills("kalshi")
+                    self.gateway.open_orders()
+                    self.gateway.settle_inflight("mullins", timeout=0.01)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        workers = [threading.Thread(target=buyer, args=("mullins", self.BTC)), threading.Thread(target=buyer, args=("mullins-4", self.BTC)),
+                   threading.Thread(target=buyer, args=("mullins-4", self.ETH)), threading.Thread(target=seller, args=("mullins", self.BTC)),
+                   threading.Thread(target=seller, args=("mullins-4", self.ETH))]
+        sweep = threading.Thread(target=sweeper)
+        sweep.start()
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(60)
+        stop.set()
+        sweep.join(10)
+        self.assertFalse(any(t.is_alive() for t in [*workers, sweep]), "a thread is stuck: deadlock")
+        self.assertEqual(errors, [])
+        self.assertEqual(self.gateway._inflight, {}, "every reservation released")
+        self.assertFalse(self.gateway._floor_event_lock.locked())

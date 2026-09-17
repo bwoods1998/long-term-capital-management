@@ -423,6 +423,58 @@ class FloorClusterRuleTests(unittest.TestCase):
         exit_buy = self.buy(self.eth, "10", "0.90", purpose="exit", exit_reason="stop", exit_of="oi-x")
         self.assertFalse(any("at risk" in r for r in self.reasons(exit_buy, self.floor_ctx(self.eth, floor_event_exposure=floor))))
 
+    def test_a_held_leg_with_no_close_hour_counts_against_every_hour_it_could_close_in(self):
+        """Sept 17, 2026 review: a ticker with no readable hour was keyed `crypto` or
+        `crypto:2026-09-17`, and only a key spelled the same way was ever summed with it, so an
+        hourly order's cluster cap never saw it."""
+        order = self.buy(self.eth, "5", "0.90")  # $4.50 in crypto:2026-09-17T21
+        for held, why in (("KXBTCMAXY-26SEP17-T120000", "a date and no hour"), ("KXDOGE-ODD", "no readable code at all")):
+            floor = self.exposure((self.BTC, "40"), (held, "35"))
+            reasons = self.reasons(order, self.floor_ctx(self.eth, floor_event_exposure=floor, max_event_market_floor_pct=0))
+            self.assertTrue(any("crypto:2026-09-17T21 would put 79.50 at risk across the live desks" in r for r in reasons), (why, reasons))
+        # The desk's own book is read the same way when the floor's map is missing.
+        dated = Instrument("event", "KXBTCMAXY-26SEP17-T120000", "kalshi", market_id="KXBTCMAXY-26SEP17-T120000", right="no")
+        held = {self.btc.key: Position(self.btc, Decimal("40"), Decimal("1"), Decimal("1")),
+                dated.key: Position(dated, Decimal("35"), Decimal("1"), Decimal("1"))}
+        reasons = self.reasons(order, self.floor_ctx(self.eth, positions=held, max_event_market_floor_pct=0))
+        self.assertTrue(any("crypto:2026-09-17T21 would put 79.50" in r for r in reasons), reasons)
+        # A date-only order sums every hour of its day and the next UTC day, and nothing further.
+        weekly = Instrument("event", "KXETHMAXW-26SEP17-T5000", "kalshi", market_id="KXETHMAXW-26SEP17-T5000", right="no")
+        floor = self.exposure((self.BTC, "40"), ("KXETHD-26SEP1801-T4199.99", "35"))  # 17:00 and 01:00 New York: 21:00 and 05:00 UTC
+        reasons = self.reasons(self.buy(weekly, "5", "0.90"), self.floor_ctx(weekly, floor_event_exposure=floor, max_event_market_floor_pct=0))
+        self.assertTrue(any("crypto:2026-09-17 would put 79.50" in r for r in reasons), reasons)
+        far = self.exposure(("KXBTCD-26SEP2017-T1", "75"))
+        self.assertFalse(any("at risk" in r for r in self.reasons(self.buy(weekly, "5", "0.90"), self.floor_ctx(weekly, floor_event_exposure=far, max_event_market_floor_pct=0))))
+
+    def test_clusters_overlap_when_they_could_be_the_same_hour(self):
+        from ltcm.risk import cluster_at_risk, clusters_overlap
+
+        self.assertTrue(clusters_overlap("crypto:2026-09-17T21", "crypto:2026-09-17T21"))
+        self.assertFalse(clusters_overlap("crypto:2026-09-17T21", "crypto:2026-09-17T22"))
+        self.assertFalse(clusters_overlap("crypto:2026-09-17T21", "commod:2026-09-17T21"))
+        self.assertTrue(clusters_overlap("crypto", "crypto:2026-09-17T21"), "no time: every hour of the group")
+        self.assertTrue(clusters_overlap("crypto:2026-09-17T21", "crypto"))
+        self.assertTrue(clusters_overlap("weather:2026-09-17", "weather:2026-09-17T02"))
+        self.assertTrue(clusters_overlap("weather:2026-09-17", "weather:2026-09-18T10"), "a US day runs into the next UTC date")
+        self.assertFalse(clusters_overlap("weather:2026-09-17", "weather:2026-09-19T01"))
+        self.assertFalse(clusters_overlap("weather:2026-09-17", "weather:2026-09-16T23"))
+        self.assertFalse(clusters_overlap("weather:2026-09-17", "weather:2026-09-18"))
+        self.assertTrue(clusters_overlap("KXFED:26-XX", "KXFED:2026-09-17T21"), "a time it cannot read overlaps")
+        book = {"KXA": Decimal("9"), "cluster:crypto:2026-09-17T21": Decimal("5"), "cluster:crypto": Decimal("2"),
+                "cluster:crypto:2026-09-17": Decimal("3"), "cluster:crypto:2026-09-17T22": Decimal("7"), "floor:unreadable": Decimal("1")}
+        self.assertEqual(cluster_at_risk(book, "crypto:2026-09-17T21"), Decimal("10"))
+
+    def test_a_live_desks_unreadable_book_refuses_a_live_event_buy_and_never_an_exit(self):
+        from ltcm.risk import FLOOR_BOOK_UNREADABLE
+
+        floor = {FLOOR_BOOK_UNREADABLE: Decimal("1")}
+        reasons = self.reasons(self.buy(self.eth, "1", "0.90"), self.floor_ctx(self.eth, floor_event_exposure=floor))
+        self.assertTrue(any("could not be read" in r for r in reasons), reasons)
+        exit_buy = self.buy(self.eth, "1", "0.90", purpose="exit", exit_reason="stop", exit_of="oi-x")
+        self.assertFalse(any("could not be read" in r for r in self.reasons(exit_buy, self.floor_ctx(self.eth, floor_event_exposure=floor))))
+        shadow = self.reasons(self.buy(self.eth, "1", "0.90"), self.floor_ctx(self.eth, manifest=self.shadow, floor_event_exposure=floor))
+        self.assertFalse(any("could not be read" in r for r in shadow))
+
     def test_the_floor_rule_is_off_at_zero(self):
         floor = self.exposure((self.BTC, "200"))
         reasons = self.reasons(self.buy(self.btc, "16", "0.9375"),

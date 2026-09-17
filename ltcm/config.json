@@ -62,7 +62,7 @@
     "record_cache_seconds": 60,
     "earned_settled": 6,
     "promotion": {"min_settled": 6, "interval_seconds": 1800},
-    "evidence": {"z": 0.84, "min_n": 25, "skew_price": "0.80", "min_days": 3},
+    "evidence": {"z": 0.84, "min_n": 25, "skew_price": "0.80", "min_days": 3, "full_size_multiple": 3},
     "run_timeout_seconds": 90,
     "idle_publish_seconds": 3600,
     "starters": true

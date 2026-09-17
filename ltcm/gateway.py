@@ -64,7 +64,7 @@ from .committee import capital_mode, promoted_desks
 from .events import Event, EventLog, canonical, now_iso
 from .ledger import DeskLedger, floor_totals, iso_time, parse_iso, position_walk
 from .manifest import DeskManifest
-from .risk import Breaker, Decision, RiskContext, RiskEngine, add_event_exposure
+from .risk import FLOOR_BOOK_UNREADABLE, Breaker, Decision, RiskContext, RiskEngine, add_event_exposure
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -227,7 +227,7 @@ class Gateway:
         # flight) and is held over memory and the local log only, never over a venue call. A
         # desk's lock makes one proposal's check-and-reserve atomic against another's; a venue's
         # ingest lock does the same for fetch-attribute-append-cursor. Lock order, outermost
-        # first: desk or ingest lock -> `_floor_event_lock` (a live event buy only) -> `_book_lock`
+        # first: desk or ingest lock -> `_floor_event_lock` (a live opening event buy only) -> `_book_lock`
         # -> a DeskLedger's lock -> the EventLog's.
         self._book_lock = threading.RLock()
         self._desk_locks: dict[str, threading.Lock] = {}
@@ -412,7 +412,10 @@ class Gateway:
         return len(seen)
 
     # ------------------------------------------------------------------ risk context
-    def risk_context(self, intent: OrderIntent, now: Any = None, *, venue: str | None = None) -> RiskContext:
+    def risk_context(self, intent: OrderIntent, now: Any = None, *, venue: str | None = None, floor_book: bool = True) -> RiskContext:
+        """The snapshot the risk engine checks `intent` against. `floor_book=False` leaves out
+        `floor_event_exposure` (every live desk's book): `propose` reads the book fields again
+        under the desk's lock before it checks, so its first read skips the costly part."""
         self._load()
         at = iso_time(now) if now is not None else self.now()
         manifest = self.manifests.get(intent.desk_id)
@@ -435,10 +438,10 @@ class Gateway:
             adv_usd=self._adv_usd(intent.instrument),
             venue_capabilities=self._capabilities(venue),
             **self.event_rules,
-            **self._book_fields(intent, at),
+            **self._book_fields(intent, at, floor_book=floor_book),
         )
 
-    def _book_fields(self, intent: OrderIntent, at: str) -> dict[str, Any]:
+    def _book_fields(self, intent: OrderIntent, at: str, *, floor_book: bool = True) -> dict[str, Any]:
         """The parts of the risk context the desk's own book decides: its ledger, what its
         resting orders commit, and what its other proposals in flight will commit. Read again
         under the desk's lock just before a proposal reserves, so two proposals of one desk
@@ -449,7 +452,10 @@ class Gateway:
         if ledger is None:
             raise GatewayError(f"no ledger for desk {desk_id}")
         state = ledger.state(at)
-        book = self._desk_book(desk_id, intent.id, at)
+        floor_ids = self._floor_desks(intent) if floor_book else set()
+        # One pass over the order book for this desk and every live desk the floor caps read.
+        books = self._desk_books({desk_id} | floor_ids, intent.id, at)
+        book = books[desk_id]
         return {
             "desk_equity": state.equity,
             "desk_cash": state.cash - book["committed"],
@@ -459,104 +465,131 @@ class Gateway:
             "open_orders": book["open_orders"],
             "working_sells": book["selling"],
             "working_event_buys": book["event_buys"],
-            "floor_event_exposure": self._floor_event_exposure(intent, at),
+            "floor_event_exposure": self._floor_event_exposure(intent, at, floor_ids=floor_ids, books=books, own=state) if floor_ids else {},
         }
 
-    def _floor_event_exposure(self, intent: OrderIntent, at: str) -> dict[str, Decimal]:
-        """What every live desk holds at cost and commits in working buys on Kalshi, keyed by
-        market id and by `risk.cluster_key(event_cluster(market))`, for `risk.rule_event_floor_cluster`.
-        Read only for a live desk's event buy while a floor-wide cap is on; shadow books are never
-        counted (Sept 17, 2026: `mullins` and `mullins-4` could each put 3.5% of the floor on one
-        market). The proposing intent itself is left out; the rule adds it."""
-        if intent.instrument.asset_class != "event" or intent.side != "buy":
-            return {}
+    def _floor_desks(self, intent: OrderIntent) -> set[str]:
+        """The live desks whose books `floor_event_exposure` sums for this intent: every live desk
+        for a live desk's opening event buy while a floor-wide cap is on, else none."""
+        if intent.instrument.asset_class != "event" or intent.side != "buy" or intent.purpose == "exit":
+            return set()
         if self.event_rules.get("max_event_market_floor_pct", ZERO) <= 0 and self.event_rules.get("max_event_cluster_floor_pct", ZERO) <= 0:
-            return {}
+            return set()
         live = self.live_ids()
-        if intent.desk_id not in live:
+        return live if intent.desk_id in live else set()
+
+    def _floor_event_exposure(
+        self,
+        intent: OrderIntent,
+        at: str,
+        *,
+        floor_ids: "set[str] | None" = None,
+        books: "Mapping[str, Mapping[str, Any]] | None" = None,
+        own: Any = None,
+    ) -> dict[str, Decimal]:
+        """What every live desk holds at cost and commits in working buys and in-flight
+        reservations on Kalshi, keyed by market id and by `risk.cluster_key(event_cluster(market))`,
+        for `risk.rule_event_floor_cluster`. Read only for a live desk's opening event buy while a
+        floor-wide cap is on; shadow books are never counted (Sept 17, 2026: `mullins` and
+        `mullins-4` could each put 3.5% of the floor on one market). The proposing intent itself is
+        left out; the rule adds it. A live desk whose ledger cannot be read is not left out
+        silently: the map carries `FLOOR_BOOK_UNREADABLE` and the rule refuses."""
+        live = self._floor_desks(intent) if floor_ids is None else set(floor_ids)
+        if not live:
             return {}
+        if books is None or not live <= set(books):
+            books = self._desk_books(live, intent.id, at)
         exposure: dict[str, Decimal] = {}
         for desk_id in sorted(live):
             ledger = self.ledgers.get(desk_id)
-            if ledger is None:
-                continue
             try:
-                positions = ledger.state(at).positions
+                if ledger is None:
+                    raise GatewayError(f"no ledger for live desk {desk_id}")
+                positions = (own if desk_id == intent.desk_id and own is not None else ledger.state(at)).positions
             except Exception:
+                exposure[FLOOR_BOOK_UNREADABLE] = exposure.get(FLOOR_BOOK_UNREADABLE, ZERO) + ONE
                 continue
             for position in positions.values():
                 ins = position.instrument
                 if ins.asset_class == "event" and position.quantity > 0:
                     add_event_exposure(exposure, ins.market_id or ins.symbol, position.quantity * position.average_cost * ins.multiplier)
-            for market, cost in self._desk_book(desk_id, intent.id, at)["event_buys"].items():
+            for market, cost in books[desk_id]["event_buys"].items():
                 add_event_exposure(exposure, market, cost)
         return exposure
 
     def _desk_book(self, desk_id: str, intent_id: str, at: str) -> dict[str, Any]:
-        """One desk's working orders, the proposing intent left out: the cash its resting buys
-        commit, what its working sells already offer, what its buys commit on each Kalshi market,
-        its open orders and today's order count."""
+        """One desk's working orders, the proposing intent left out (`_desk_books`)."""
+        return self._desk_books({desk_id}, intent_id, at)[desk_id]
+
+    def _desk_books(self, desk_ids: Iterable[str], intent_id: str, at: str) -> dict[str, dict[str, Any]]:
+        """Each desk's working orders, the proposing intent left out: the cash its resting buys
+        commit, what its working sells already offer, what its buys commit on each Kalshi market
+        (in-flight reservations included), its open orders and today's order count. One pass over
+        the order book however many desks are asked for: a live event buy reads every live desk's."""
+        wanted = {str(d) for d in desk_ids}
         with self._book_lock:
             self._load_locked()
             flying = {
-                other: dict(entry)
-                for other, entry in (self._inflight.get(desk_id) or {}).items()
-                if other != intent_id
+                desk_id: {
+                    other: dict(entry)
+                    for other, entry in (self._inflight.get(desk_id) or {}).items()
+                    if other != intent_id
+                }
+                for desk_id in wanted
             }
             rows = [
                 dict(row)
                 for row in self._orders.values()
-                if row.get("desk_id") == desk_id and row.get("intent_id") not in flying and row.get("intent_id") != intent_id
+                if isinstance(owner := row.get("desk_id"), str)
+                and owner in wanted
+                and row.get("intent_id") != intent_id
+                and row.get("intent_id") not in flying[owner]
             ]
-        # Cash already committed to the desk's resting buys is not free to spend again: ten
-        # resting bids that each pass the cash rule alone can fill together (audit, Sept 16).
-        committed = ZERO
-        # Likewise a position already offered by a working sell is not there to sell twice.
-        selling: dict[str, Decimal] = {}
-        # And what resting buys on one Kalshi market already put at risk there, either leg.
-        event_buys: dict[str, Decimal] = {}
-        open_orders = 0
-        orders_today = 0
+        books: dict[str, dict[str, Any]] = {
+            # Cash already committed to the desk's resting buys is not free to spend again: ten
+            # resting bids that each pass the cash rule alone can fill together (audit, Sept 16).
+            # Likewise a position already offered by a working sell is not there to sell twice.
+            # And what resting buys on one Kalshi market already put at risk there, either leg.
+            desk_id: {"committed": ZERO, "selling": {}, "event_buys": {}, "open_orders": 0, "orders_today": 0}
+            for desk_id in wanted
+        }
         for row in rows:
+            book = books[row["desk_id"]]
             stamp = row.get("submitted_at") or row.get("at") or ""
             if stamp[:10] == at[:10]:
-                orders_today += 1
+                book["orders_today"] += 1
             if row.get("status") in TERMINAL_STATUSES:
                 continue
-            open_orders += 1
+            book["open_orders"] += 1
             try:
                 remaining = max(ZERO, money(row.get("quantity") or 0) - money(row.get("filled_quantity") or 0))
                 if row.get("side") == "buy":
                     price = money(row.get("limit_price") or 0)
                     ins = row.get("instrument") or {}
                     cost = remaining * price * money(ins.get("multiplier") or 1)
-                    committed += cost
+                    book["committed"] += cost
                     if ins.get("asset_class") == "event":
                         market = ins.get("market_id") or ins.get("symbol")
                         if market:
-                            event_buys[market] = event_buys.get(market, ZERO) + cost
+                            book["event_buys"][market] = book["event_buys"].get(market, ZERO) + cost
                 elif row.get("side") == "sell":
                     key = _key_of(row.get("instrument"))
                     if key is not None:
-                        selling[key] = selling.get(key, ZERO) + remaining
+                        book["selling"][key] = book["selling"].get(key, ZERO) + remaining
             except Exception:
                 continue
-        for entry in flying.values():
-            open_orders += 1
-            orders_today += 1
-            if entry["side"] == "buy":
-                committed += entry["notional"]
-                if entry.get("market"):
-                    event_buys[entry["market"]] = event_buys.get(entry["market"], ZERO) + entry["notional"]
-            else:
-                selling[entry["key"]] = selling.get(entry["key"], ZERO) + entry["quantity"]
-        return {
-            "committed": committed,
-            "selling": selling,
-            "event_buys": event_buys,
-            "open_orders": open_orders,
-            "orders_today": orders_today,
-        }
+        for desk_id, entries in flying.items():
+            book = books[desk_id]
+            for entry in entries.values():
+                book["open_orders"] += 1
+                book["orders_today"] += 1
+                if entry["side"] == "buy":
+                    book["committed"] += entry["notional"]
+                    if entry.get("market"):
+                        book["event_buys"][entry["market"]] = book["event_buys"].get(entry["market"], ZERO) + entry["notional"]
+                else:
+                    book["selling"][entry["key"]] = book["selling"].get(entry["key"], ZERO) + entry["quantity"]
+        return books
 
     def _desk_lock(self, desk_id: str) -> threading.Lock:
         with self._book_lock:
@@ -626,15 +659,18 @@ class Gateway:
         # shadow book and sent it to the real venue (Sept 16, 2026 audit).
         live = self.live_desk(intent.desk_id)
         venue = intent.instrument.venue if live else SHADOW_VENUE
-        ctx = self.risk_context(intent, at, venue=venue)
+        # Without the floor's book: the fields that decide are read again under the locks below.
+        ctx = self.risk_context(intent, at, venue=venue, floor_book=False)
         reserved = False
         with self._desk_lock(intent.desk_id):
             blocked = self.blocked_desks.get(intent.desk_id)
             # Moving: logged but not yet applied, or applied since `live` was read above.
             moving = not blocked and (self._mode_moving(intent.desk_id) or self.live_desk(intent.desk_id) != live)
             if not blocked and not moving:
-                # A live event buy also holds the floor's lock: its caps read every live desk's book.
-                floor = self._floor_event_lock if live and intent.instrument.asset_class == "event" and intent.side == "buy" else contextlib.nullcontext()
+                # A live desk's opening event buy also holds the floor's lock: its caps read every
+                # live desk's book. Never held over the critic or the venue: both come after it.
+                opens = live and intent.instrument.asset_class == "event" and intent.side == "buy" and intent.purpose != "exit"
+                floor = self._floor_event_lock if opens else contextlib.nullcontext()
                 with floor:
                     ctx = dataclasses.replace(ctx, **self._book_fields(intent, at))
                     decision = self.risk_engine.check(intent, ctx)
