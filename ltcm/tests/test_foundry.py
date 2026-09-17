@@ -469,8 +469,9 @@ class BacktestTests(FoundryCase):
         self.assertGreater(len(desks), 1, "in parallel")
         self.assertTrue(all(timeout == 900 for _, _, timeout in self.manager.backtests))
         spec = self.manager.specs[0]
-        self.assertEqual((spec["start"], spec["end"], spec["step_minutes"]), ("2026-09-11T14:00:00Z", "2026-09-16T14:00:00Z", 15))
-        self.assertEqual((spec["fill_model"], spec["learning_usd"], spec["max_markets"], spec["seed"]), ("conservative", 10, 3000, 7))
+        # Sept 17, 2026: the Kalshi family replays ten days (`family_window_days`), other families five.
+        self.assertEqual((spec["start"], spec["end"], spec["step_minutes"]), ("2026-09-06T14:00:00Z", "2026-09-16T14:00:00Z", 15))
+        self.assertEqual((spec["fill_model"], spec["learning_usd"], spec["max_markets"], spec["seed"]), ("conservative", 10, 8000, 7), "the Kalshi family sees more of the board (`family_max_markets`)")
         self.assertIn("def decide(", spec["code"])
         hypothesis = self.log.kinds("lab.hypothesis")
         self.assertEqual(len(hypothesis), 1)

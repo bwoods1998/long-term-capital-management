@@ -31,6 +31,9 @@
     "MAX_ORDER_USD": "250",
     "MAX_DAY_USD": "6000",
     "MAX_DAY_ORDERS": "1500",
+    // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's
+    // notices from noon on once three live favorites desks were filling.
+    "NOTIFY_MAX_PER_DAY": "300",
     // The calendar the daily counters roll on: the floor's own trading day.
     "CAP_TIMEZONE": "America/New_York",
 

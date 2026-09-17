@@ -1095,3 +1095,76 @@ class GenomeStrategyTests(StrategyCase):
         self.assertIn("scholes-3/sharper_vol", deployed)
         self.assertNotIn("scholes-2/sharper_vol", deployed, "already there")
         self.assertEqual(self.strategies.store.for_desk("scholes-3")["sharper_vol"]["note"], "house genome: experiment exp-1")
+
+
+class PooledEvidenceTests(StrategyCase):
+    """leap: pooled evidence -- the family record and the size it earns (Sept 17, 2026)."""
+
+    settled = CancelAndRecordTests.settled
+
+    def setUp(self):
+        super().setUp()
+        self.log_events = []
+
+        class Event:
+            def __init__(self, payload, at=None):
+                self.payload, self.at = payload, at
+
+        def read(stream=None, kind=None, limit=None, newest=False):
+            return [Event(p, *rest) for s, k, p, *rest in self.log_events if (stream is None or s == stream) and k == kind]
+
+        self.service.log.read = read
+        self.service.gateway = type("G", (), {"open_orders": lambda g, desk_id: []})()
+        self.live = manifest(id="mullins", family="kalshi", parent_id=None, venues=["kalshi"], capital={"mode": "live", "usd": "200"})
+        self.shadows = [manifest(id=f"mullins-{n}", family="kalshi", parent_id="mullins", venues=["kalshi"], capital={"mode": "shadow", "usd": "200"}) for n in (2, 3, 4)]
+        self.service.manifests = {m.id: m for m in [self.live, *self.shadows]}
+        for m in self.service.manifests.values():
+            self.manager.files[m.id] = {"kalshi_favorites.py": "def decide(kit, params):\n    return []\n"}
+            self.strategies.deploy(m, "kalshi_favorites", 900, {}, house=True)
+
+    def favorites(self, desk, count, pnl="0.70", price="0.93", real=None, series="KXA", days=3):
+        rows = self.settled(desk, count, pnl=pnl, price=price, days=days, name="kalshi_favorites")
+        out = []
+        for stream, kind, payload, at in rows:
+            ticker = payload["instrument"].split(":")[1].replace("KXA", series, 1)
+            payload = {**payload, "instrument": f"event:{ticker}:kalshi:no:{ticker}", "market_id": ticker}
+            if real is not None:
+                payload["real_money"] = real
+            out.append((stream, kind, payload, at))
+        return out
+
+    def test_the_family_record_pools_every_desk_and_splits_by_group(self):
+        self.log_events += self.favorites("mullins", 4, real=True)
+        self.log_events += self.favorites("mullins-2", 6, series="KXMLBGAME")
+        self.log_events += self.favorites("mullins-3", 5, pnl="-9.30", series="KXHIGHNY")
+        record = self.strategies.family_record("kalshi", "kalshi_favorites")
+        self.assertEqual((record["settled"], record["desks"], record["real_settled"]), (15, 3, 4))
+        self.assertEqual(set(record["groups"]), {"KXA", "sports", "weather"})
+        self.assertEqual(record["groups"]["weather"]["losses"], 5)
+        self.assertEqual(record["series_groups"], {"KXA": "KXA", "KXMLBGAME": "sports", "KXHIGHNY": "weather"})
+        self.assertEqual(self.strategies.record("mullins", "kalshi_favorites")["settled"], 4, "a desk's own record is unchanged")
+        report = self.strategies.report(self.live, "kalshi_favorites")
+        self.assertEqual(report["family_evidence"]["settled"], 15)
+        ctx = self.strategies.context_for(self.live, NOW)
+        self.assertEqual(ctx["evidence"]["kalshi_favorites"]["n"], 15)
+        self.assertIn("crypto", ctx["evidence"]["kalshi_favorites"]["group_prefixes"])
+
+    def test_a_live_desk_sizes_on_the_family_record_once_enough_of_it_was_real(self):
+        self.service.config["learning"]["live_kalshi_usd"] = "10"
+        # 130 favorites at 0.93 across three shadows, no losses: the family passes the lopsided gate.
+        for desk in ("mullins-2", "mullins-3", "mullins-4"):
+            self.log_events += self.favorites(desk, 44)
+        self.assertEqual(self.strategies.size_cap(self.live, "kalshi_favorites"), Decimal("10"), "shadow settlements alone never lift real size")
+        self.log_events += self.favorites("mullins", 5, real=True)
+        cap = self.strategies.size_cap(self.live, "kalshi_favorites")
+        self.assertGreater(cap, Decimal("10"), "five real settlements let the pooled record count")
+        self.assertLessEqual(cap, Decimal("30"))
+        self.strategies.config["pooled_evidence"] = False
+        self.assertEqual(self.strategies.size_cap(self.live, "kalshi_favorites"), Decimal("10"), "off, the desk is judged alone again")
+
+    def test_a_pooled_record_that_fails_the_gate_lifts_nothing(self):
+        for desk in ("mullins-2", "mullins-3"):
+            self.log_events += self.favorites(desk, 44)
+        self.log_events += self.favorites("mullins-4", 8, pnl="-9.30")
+        self.log_events += self.favorites("mullins", 6, real=True)
+        self.assertEqual(self.strategies.size_cap(self.live, "kalshi_favorites"), Decimal("10"))

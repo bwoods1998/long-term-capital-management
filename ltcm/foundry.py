@@ -87,6 +87,11 @@ DEFAULTS: dict[str, Any] = {
     # Each backtest sandbox's own daily fuse; a desk's fuse would stop the loop by mid-morning.
     "sandbox_daily_seconds": 43200,
     "window_days": 5,
+    # Sept 17, 2026: five days gave the leading Kalshi candidates 2-8 positions against the 60
+    # the gate asks for, so nothing ever qualified. A family may replay a longer window and see
+    # more of the board; the sandboxes' history cache keeps the cost to the first cycle.
+    "family_window_days": {"kalshi": 10},
+    "family_max_markets": {"kalshi": 8000},
     "step_minutes": 15,
     "family_step_minutes": {"ranges": 5},
     "learning_usd": 10,
@@ -101,7 +106,7 @@ DEFAULTS: dict[str, Any] = {
     "min_forward_settled": 5,
     "jitter_min": 0.10,
     "jitter_max": 0.50,
-    "code_chars": 14000,
+    "code_chars": 20000,
     # A shadow desk that received a candidate is not handed another for this long, so the
     # candidate earns a forward record; after `forward_max_hours` without one it expires.
     "protect_hours": 6,
@@ -998,8 +1003,10 @@ class Foundry:
         # it settles, so a window ending now sees a board thinned by the settlements still to come
         # (the engine refuses to peek past them).
         end = math.floor(_epoch(at) / 3600.0) * 3600.0 - float(cfg.get("window_end_lag_hours", 0)) * 3600.0
+        window_days = float(dict(cfg.get("family_window_days") or {}).get(family, cfg["window_days"]))
         window = {
-            "start": _iso(end - float(cfg["window_days"]) * 86400.0),
+            "family": family,
+            "start": _iso(end - window_days * 86400.0),
             "end": _iso(end),
             "step_minutes": int(dict(cfg.get("family_step_minutes") or {}).get(family, cfg["step_minutes"])),
             "coinbase_fees": dict(self._cycle_fees),
@@ -1461,7 +1468,7 @@ class Foundry:
             "step_minutes": int(window["step_minutes"]),
             "learning_usd": cfg["learning_usd"],
             "fill_model": cfg["fill_model"],
-            "max_markets": int(cfg["max_markets"]),
+            "max_markets": int(dict(cfg.get("family_max_markets") or {}).get(str(candidate.get("family") or window.get("family") or ""), cfg["max_markets"])),
             "seed": int(cfg["seed"]),
             "coinbase_maker_fee": float(fees["maker"]),
             "coinbase_taker_fee": float(fees["taker"]),

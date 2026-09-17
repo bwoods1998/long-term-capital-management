@@ -10,6 +10,13 @@ per series, `max_new` a run; a bid older than `requote_seconds` is replaced. Hel
 `maker` false takes the NO ask; `no_max` caps the price (a 99-cent bid risks 99 to make one).
 Version 2 (Sept 17, 2026; rules and evidence in ltcm/README.md), each off until set so an unset
 desk trades as before: book_pricing, max_open_per_cluster, expire_seconds, keep_queue, band_exit.
+Version 3 (Sept 17, 2026 evening): the code reads the family's pooled evidence the floor hands it
+in `kit.context["evidence"]["kalshi_favorites"]` (`Strategies.family_record`): the settled record
+of this strategy on every desk of the family, split by market group. A group whose record has
+reached the settlements the gate asks for and is net negative is skipped (`learn_groups`, on by
+default; `explore_losing` keeps betting there, for a shadow variant that tests the verdict), and
+candidates in groups that pass the gate are placed first. Without evidence in the context the
+code behaves exactly as version 2.
 """
 
 import math
@@ -34,6 +41,7 @@ DEFAULTS = {
     "pages": 8,
     "notional_usd": None,
     "book_pricing": False, "max_open_per_cluster": None, "expire_seconds": None, "keep_queue": False, "band_exit": False,
+    "learn_groups": True, "explore_losing": False,
 }
 GROUPS = {"crypto": ("KXBTC", "KXETH", "KXSOL", "KXXRP", "KXDOGE"), "commod": ("KXGOLD", "KXSILVER", "KXBRENT", "KXWTI", "KXCOPPER"), "weather": ("KXHIGH",)}
 
@@ -101,6 +109,49 @@ def _tally(items):
     return ", ".join(f"{items.count(k)} {k}" for k in sorted(set(items))) or "none"
 
 
+def _evidence_group(series, evidence):
+    """The pooled-evidence group of a series: the floor's series map first, then its prefix
+    table, then the series itself (unknown to the record, so never judged)."""
+    root = str(series or "").upper()
+    known = (evidence.get("series_groups") or {}).get(root)
+    if known:
+        return str(known)
+    for group, prefixes in (evidence.get("group_prefixes") or {}).items():
+        if root.startswith(tuple(str(x).upper() for x in prefixes)):
+            return str(group)
+    return root
+
+
+def _rank_by_evidence(candidates, evidence, explore_losing):
+    """(kept candidates in evidence order, skipped tickers, verdict tally). A group is judged
+    only once it has the settlements the gate asked for: net negative there is skipped, passing
+    goes first, the rest keep their volume order."""
+    groups = evidence.get("groups") or {}
+    kept, skipped, tally = [], [], []
+    for cand in candidates:
+        verdict = groups.get(_evidence_group(_series(cand[1]), evidence)) or {}
+        n, need = _num(verdict.get("n"), 0) or 0, _num(verdict.get("n_needed"), 0) or 0
+        pnl = _num(verdict.get("settled_pnl_usd"))
+        judged = bool(verdict) and need > 0 and n >= need
+        if judged and pnl is not None and pnl < 0 and not verdict.get("passes"):
+            tally.append("losing group")
+            if not explore_losing:
+                skipped.append(cand[1])
+                continue
+        if verdict.get("passes"):
+            tally.append("passing group")
+            order = (0, -(_num(verdict.get("lower"), 0.0) or 0.0))
+        elif judged:
+            tally.append("judged, unproven")
+            order = (2, 0.0)
+        else:
+            tally.append("unjudged")
+            order = (1, 0.0)
+        kept.append((order, len(kept), cand))
+    kept.sort(key=lambda row: (row[0], row[1]))
+    return [row[2] for row in kept], skipped, tally
+
+
 def decide(kit, params):
     p = {**DEFAULTS, **(params or {})}
     ctx = kit.context or {}
@@ -147,6 +198,10 @@ def decide(kit, params):
             continue
         candidates.append((volume, ticker, market, hours, yes_ask, yes_bid))
     candidates.sort(key=lambda c: -c[0])
+    evidence = (ctx.get("evidence") or {}).get("kalshi_favorites") or {}
+    learned = None
+    if p.get("learn_groups", True) and evidence.get("groups"):
+        candidates, dropped, learned = _rank_by_evidence(candidates, evidence, bool(p.get("explore_losing")))
     books, skipped, why = {}, [], []
     if use_book or keep_queue or band_exit:
         # Resting bids' books first, then the band's candidates by volume; the kit reads 300 a run.
@@ -261,6 +316,8 @@ def decide(kit, params):
         per_series[series] = per_series.get(series, 0) + 1
         clusters.setdefault(cluster, set()).add(ticker)
     kit.say(f"{len(markets)} markets listed, {len(candidates)} in the band, {len(intents)} bid(s), {len(cancels)} requoted")
+    if learned is not None:
+        kit.say(f"family evidence over {evidence.get('n', 0)} settled on {evidence.get('desks', 0)} desk(s): {_tally(learned)}; skipped {len(dropped)} in losing groups")
     if v2:
         kit.say(f"{len(books)} book(s) read, {joined} bid(s) joined the best NO bid; skipped: {_tally(skipped)}; cancelled: {_tally(why)}")
     return {"intents": intents, "cancels": cancels, "notes": f"{len(candidates)} favorites in band, {len(intents)} placed, {len(cancels)} cancelled"}

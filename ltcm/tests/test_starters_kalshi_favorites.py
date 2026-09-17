@@ -336,3 +336,41 @@ class StartingParamsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroupLearningTests(unittest.TestCase):
+    """Version 3: the family's pooled evidence steers the bets (Sept 17, 2026)."""
+
+    EVIDENCE = {
+        "n": 120, "desks": 4, "passes": False, "lower": None, "n_needed": 43,
+        "groups": {
+            "weather": {"n": 50, "losses": 6, "settled_pnl_usd": "-12.40", "passes": False, "lower": -0.04, "n_needed": 43},
+            "crypto": {"n": 60, "losses": 1, "settled_pnl_usd": "31.00", "passes": True, "lower": 0.012, "n_needed": 43},
+            "mentions": {"n": 10, "losses": 0, "settled_pnl_usd": "4.00", "passes": False, "lower": None, "n_needed": 43},
+        },
+        "series_groups": {"KXRAIN": "weather", "KXBTCD": "crypto", "KXFEDMENTION": "mentions"},
+        "group_prefixes": {"weather": ["KXHIGH", "KXRAIN"], "crypto": ["KXBTC"], "mentions": ["KXFEDMENTION"]},
+    }
+
+    def kit(self, **params):
+        kit = FavKit()
+        kit.context["evidence"] = {"kalshi_favorites": dict(self.EVIDENCE)}
+        return kit
+
+    def test_a_losing_group_is_skipped_and_a_passing_group_goes_first(self):
+        kit = self.kit()
+        out = load().decide(kit, {"max_new": 3})
+        placed = [i["instrument"]["market_id"] for i in out["intents"]]
+        self.assertEqual(placed, [BTC, TARIFF], "the passing crypto group first, one bet on the mentions event, weather skipped")
+        self.assertNotIn(RAIN, placed, "weather has 50 settlements and a negative record: skipped")
+        self.assertTrue(any("skipped 1 in losing groups" in line for line in kit.log))
+
+    def test_explore_losing_keeps_the_verdict_under_test(self):
+        out = load().decide(self.kit(), {"max_new": 4, "explore_losing": True})
+        self.assertIn(RAIN, [i["instrument"]["market_id"] for i in out["intents"]])
+
+    def test_learning_off_is_version_two(self):
+        kit = self.kit()
+        out = load().decide(kit, {"learn_groups": False, "max_new": 4})
+        self.assertEqual([i["instrument"]["market_id"] for i in out["intents"]], [BTC, TARIFF, RAIN], "volume order, weather kept")
+        self.assertFalse(any("family evidence" in line for line in kit.log))

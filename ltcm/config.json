@@ -12,8 +12,14 @@
     "cache_seconds": 300
   },
   "strategy_lifecycle": {
-    "retired_families": ["ranges", "weather"],
-    "controls": ["scholes-4", "haghani-4-5"]
+    "retired_families": [
+      "ranges",
+      "weather"
+    ],
+    "controls": [
+      "scholes-4",
+      "haghani-4-5"
+    ]
   },
   "site_url": "https://blakewoods.us",
   "timezone": "America/New_York",
@@ -23,7 +29,12 @@
   "reserve_floor_usd": "10",
   "floor_capital_usd": "979",
   "floor_max_daily_loss_pct": "0.15",
-  "event_rules": {"min_event_price": "0.15", "max_event_market_pct": "0.15", "max_event_market_floor_pct": "0.035", "max_event_cluster_floor_pct": "0.08"},
+  "event_rules": {
+    "min_event_price": "0.15",
+    "max_event_market_pct": "0.15",
+    "max_event_market_floor_pct": "0.035",
+    "max_event_cluster_floor_pct": "0.08"
+  },
   "mark_interval_seconds": 300,
   "mark_parallelism": 6,
   "sleep_seconds": 30,
@@ -39,7 +50,7 @@
   "critic_profile": "glm_asap",
   "learning": {
     "shadow_notional_usd": "10",
-    "live_kalshi_usd": "10",
+    "live_kalshi_usd": "20",
     "live_coinbase_usd": "25",
     "live_orders_per_day": 6
   },
@@ -73,15 +84,26 @@
     "max_per_desk": 3,
     "min_cadence_seconds": 300,
     "max_intents_per_run": 5,
-    "max_runs_per_tick": 4,
-    "parallel_runs": 12,
-    "record_cache_seconds": 60,
+    "max_runs_per_tick": 8,
+    "parallel_runs": 24,
+    "record_cache_seconds": 120,
     "earned_settled": 6,
-    "promotion": {"min_settled": 6, "interval_seconds": 1800},
-    "evidence": {"z": 0.84, "min_n": 25, "skew_price": "0.80", "min_days": 3, "full_size_multiple": 3},
+    "promotion": {
+      "min_settled": 6,
+      "interval_seconds": 1800
+    },
+    "evidence": {
+      "z": 0.84,
+      "min_n": 25,
+      "skew_price": "0.80",
+      "min_days": 3,
+      "full_size_multiple": 3
+    },
     "run_timeout_seconds": 90,
     "idle_publish_seconds": 3600,
-    "starters": true
+    "starters": true,
+    "pooled_evidence": true,
+    "pooled_min_real": 5
   },
   "foundry": {
     "enabled": true,
@@ -92,22 +114,33 @@
       "kalshi",
       "crypto"
     ],
-    "param_candidates": 18,
-    "code_candidates": 6,
+    "param_candidates": 36,
+    "code_candidates": 10,
     "result_cache": true,
     "result_cache_seconds": 3600,
     "repair_invalid_code": true,
-    "paused_research_families": ["crypto"],
-    "paused_replacement_families": ["crypto"],
+    "paused_research_families": [
+      "crypto"
+    ],
+    "paused_replacement_families": [
+      "crypto"
+    ],
     "profile": "k3",
-    "code_profiles": ["k3", "flash_asap", "glm_asap"],
-    "profile_reasoning_effort": {"flash_asap": "medium", "glm_asap": "medium"},
+    "code_profiles": [
+      "k3",
+      "flash_asap",
+      "glm_asap"
+    ],
+    "profile_reasoning_effort": {
+      "flash_asap": "medium",
+      "glm_asap": "medium"
+    },
     "reasoning_effort": "high",
     "max_output_tokens": 16000,
-    "budget_usd_per_day": "60",
-    "sandboxes": 12,
-    "backtest_timeout_seconds": 900,
-    "sandbox_daily_seconds": 43200,
+    "budget_usd_per_day": "300",
+    "sandboxes": 16,
+    "backtest_timeout_seconds": 1500,
+    "sandbox_daily_seconds": 86400,
     "window_days": 5,
     "window_end_lag_hours": 72,
     "step_minutes": 15,
@@ -122,7 +155,7 @@
     "min_forward_settled": 5,
     "protect_hours": 6,
     "forward_max_hours": 72,
-    "code_chars": 14000,
+    "code_chars": 20000,
     "frozen_params": [
       "notional_usd",
       "no_max",
@@ -135,18 +168,30 @@
       "pages",
       "maker_fee",
       "min_margin"
-    ]
+    ],
+    "family_window_days": {
+      "kalshi": 10
+    },
+    "family_max_markets": {
+      "kalshi": 8000
+    }
   },
   "evolution": {
-    "excluded_families": ["ranges", "weather"],
-    "protected_desks": ["scholes-4", "haghani-4-5"],
+    "excluded_families": [
+      "ranges",
+      "weather"
+    ],
+    "protected_desks": [
+      "scholes-4",
+      "haghani-4-5"
+    ],
     "min_days": 1,
     "min_decisions": 5,
-    "target_variants": 8,
-    "max_variants": 10,
+    "target_variants": 12,
+    "max_variants": 16,
     "playbook_profile": "k3",
     "playbook_reasoning_effort": "high",
-    "playbook_budget_usd_per_day": "10.00"
+    "playbook_budget_usd_per_day": "40.00"
   },
   "sources": {},
   "publish": true,
@@ -187,7 +232,7 @@
     "infra_usd_per_day": "0.30"
   },
   "seed_interval_seconds": 3600,
-  "seed_batch": 2,
+  "seed_batch": 3,
   "founding": {
     "enabled": true,
     "founding_time": "21:30",
@@ -199,12 +244,12 @@
     "retire_below": "-5",
     "profile": "k3",
     "reasoning_effort": "high",
-    "budget_usd_per_day": "3.00"
+    "budget_usd_per_day": "10.00"
   },
   "sandbox": {
     "enabled": true,
     "image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
-    "daily_seconds": 14400,
+    "daily_seconds": 43200,
     "timeout_seconds": 120
   },
   "lab_time": "20:00",
@@ -212,10 +257,10 @@
     "profile": "k3",
     "reasoning_effort": "high",
     "max_output_tokens": 16384,
-    "budget_usd_per_day": "15.00",
-    "max_experiments_per_family": 3,
-    "max_experiments_per_day": 8,
-    "max_running_per_family": 3,
+    "budget_usd_per_day": "40.00",
+    "max_experiments_per_family": 6,
+    "max_experiments_per_day": 24,
+    "max_running_per_family": 6,
     "grace_days": 3,
     "hard_limits": {
       "max_position_pct": [
@@ -239,17 +284,22 @@
   "calibration_interval_seconds": 600,
   "mind": {
     "enabled": true,
-    "interval_minutes": 60,
+    "interval_minutes": 30,
     "new_outcomes_trigger": 4,
     "feedback_min_minutes": 5,
     "profile": "k3",
-    "budget_usd_per_day": "8",
+    "budget_usd_per_day": "20",
     "min_n": 15,
     "max_rules": 12
   },
   "committee": {
     "require_settled_evidence": true,
-    "evidence": {"z": 1.645, "q": 0.05, "min_n": 25, "min_days": 3},
+    "evidence": {
+      "z": 1.645,
+      "q": 0.05,
+      "min_n": 25,
+      "min_days": 3
+    },
     "bandit_enabled": true,
     "bandit_prior_sd_pct": "5",
     "bandit_scale_pct": "10",

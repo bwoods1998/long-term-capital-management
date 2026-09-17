@@ -514,6 +514,9 @@ class Strategies:
             # Live microstructure is forward-only; historical tests must tolerate its absence.
             "market_depth": self.service.feeds.depth("coinbase") if getattr(self.service, "feeds", None) is not None else {},
             "fee_rates": self.service.venue_fee_rates() if callable(getattr(self.service, "venue_fee_rates", None)) else {},
+            # leap: pooled evidence -- the family's verdict on each of the desk's strategies, by
+            # market group, so the code can stop betting where the record says there is no edge.
+            "evidence": self.evidence_for(manifest),
         }
 
     def open_orders_for(self, manifest: DeskManifest) -> list[dict[str, Any]]:
@@ -674,7 +677,24 @@ class Strategies:
         # The returns feed the gate; a desk reads the gate's verdict, not 500 numbers.
         verdict = {k: v for k, v in self.assess(record).items() if k in ("passes", "reason", "n_needed", "kind")} if record else {}
         shown = {k: v for k, v in record.items() if k != "returns"}
-        return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **shown, **({"evidence": verdict} if verdict else {})}
+        family: dict[str, Any] = {}
+        if bool(self.config.get("pooled_evidence", True)):
+            manifests = getattr(self.service, "manifests", None)
+            manifest = manifests.get(desk_id) if isinstance(manifests, Mapping) else None
+            if manifest is not None:
+                try:
+                    pooled = self.family_record(manifest.family, name)
+                except Exception:
+                    pooled = {}
+                if pooled:
+                    pv = self.assess(pooled)
+                    family = {"family_evidence": {
+                        "settled": pooled.get("independent_settled", 0), "real_settled": pooled.get("real_settled", 0),
+                        "desks": pooled.get("desks", 0), "settled_pnl_usd": pooled.get("settled_pnl_usd"),
+                        "passes": bool(pv.get("passes")), "reason": pv.get("reason"), "lower": pv.get("lower"),
+                        "groups": pooled.get("groups") or {},
+                    }}
+        return {"name": name, "desk_id": desk_id, **{k: row.get(k) for k in keys}, **shown, **({"evidence": verdict} if verdict else {}), **family}
 
     def _broker_index(self, reader: Callable[..., Any]) -> tuple[dict[str, set[str]], dict[str, list[Any]]]:
         """intent id -> its order ids, and order id -> its fills, over the newest 20,000 orders
@@ -713,10 +733,18 @@ class Strategies:
         whose opening is unknown is left out. Until Sept 16, 2026 the Foundry read the plain
         record, and a live desk could adopt settings on the settlements of positions the old
         settings had opened."""
+        gathered = self._gather(desk_id, name, since, opened_since=opened_since)
+        if gathered is None:
+            return {}
+        return _summarize(*gathered)
+
+    def _gather(self, desk_id: str, name: str, since: str | None = None, *, opened_since: bool = False) -> tuple[list[Any], list[Any]] | None:
+        """The strategy's fills and settled outcomes on one desk's tape; None when the tape
+        cannot be read. `record` and `family_record` both read through here."""
         log = getattr(self.service, "log", None)
         reader = getattr(log, "read", None)
         if not callable(reader):
-            return {}
+            return None
         stream = f"desk:{desk_id}"
         prefix = f"[strategy {name}]"
         start = _epoch(since) if since else 0.0
@@ -757,20 +785,104 @@ class Strategies:
                 if str(e.payload.get("rationale_excerpt") or "").startswith(prefix) and fresh(e) and opened_after(e)
             ]
         except Exception:
+            return None
+        return fills, outcomes
+
+    # ------------------------------------------------------------------ pooled evidence
+    def family_desks(self, family: str) -> list[str]:
+        """Every desk id the strategy store or the roster has ever placed in `family`: the live
+        desk, its shadow variants, and retired variants whose settlements are still evidence."""
+        from .mind import family_of
+
+        manifests = getattr(self.service, "manifests", None)
+        families = {m.id: m.family for m in manifests.values()} if isinstance(manifests, Mapping) else {}
+        ids = set(families) | set(self.store.read().keys())
+        return sorted(d for d in ids if family_of(d, families) == family)
+
+    def family_record(self, family: str, name: str) -> dict[str, Any]:
+        """leap: pooled evidence -- one record for a strategy across every desk of its family.
+
+        Until Sept 17, 2026 each desk's strategy earned size on its own settlements alone: a
+        live favorites desk needed 43-300 of its own to prove a 1:13 payoff, at three a run,
+        while eight shadow variants of the same code settled the same kind of bet on the same
+        board and none of it counted. The family record pools them: the same strategy name on
+        every desk the family has held, fills and settled outcomes together, summarized exactly
+        like a desk's own record, plus `desks` (how many contributed), `real_settled` (outcomes
+        marked real money), `groups` (the record split by market group, each with the gate's
+        verdict, so the code learns where the edge lives) and `series_groups` (series -> group).
+
+        Shadow settlements come from the shadow book's print-driven fills, not the venue, so
+        `size_cap` asks for `pooled_min_real` real settlements before a pooled pass lifts a
+        live desk's size. Cached for `record_cache_seconds` like the broker index."""
+        ttl = float(self.config.get("record_cache_seconds") or 0)
+        cache = getattr(self, "_family_cache", None)
+        if cache is None:
+            cache = self._family_cache = {}
+        key = (family, name)
+        hit = cache.get(key)
+        now = time.monotonic()
+        if ttl > 0 and hit is not None and now - hit[0] < ttl:
+            return dict(hit[1])
+        fills: list[Any] = []
+        outcomes: list[Any] = []
+        desks = 0
+        for desk_id in self.family_desks(family):
+            gathered = self._gather(desk_id, name)
+            if gathered is None:
+                continue
+            if gathered[0] or gathered[1]:
+                desks += 1
+            fills.extend(gathered[0])
+            outcomes.extend(gathered[1])
+        outcomes.sort(key=lambda e: str(getattr(e, "at", "") or ""))
+        record = _summarize(fills, outcomes)
+        record["desks"] = desks
+        record["real_settled"] = sum(1 for o in outcomes if o.payload.get("real_money") is True)
+        groups, series_groups = _group_outcomes(outcomes)
+        record["series_groups"] = series_groups
+        record["groups"] = {}
+        for group, rows in sorted(groups.items()):
+            summary = _summarize([], rows)
+            verdict = self.assess(summary)
+            record["groups"][group] = {
+                "n": summary.get("independent_settled", 0),
+                "losses": summary.get("losses", 0),
+                "avg_entry_price": summary.get("avg_entry_price"),
+                "settled_pnl_usd": summary.get("settled_pnl_usd"),
+                "passes": bool(verdict.get("passes")),
+                "lower": verdict.get("lower"),
+                "n_needed": verdict.get("n_needed"),
+            }
+        if ttl > 0:
+            cache[key] = (now, dict(record))
+        return record
+
+    def evidence_for(self, manifest: DeskManifest) -> dict[str, Any]:
+        """What a strategy run reads as `kit.context["evidence"]`: for each strategy on the desk,
+        the family record's verdict and its per-group verdicts, small enough for the sandbox."""
+        if not bool(self.config.get("pooled_evidence", True)):
             return {}
-        notional = sum((_dec(f.payload.get("price")) or Decimal(0)) * (_dec(f.payload.get("quantity")) or Decimal(0)) for f in fills)
-        fees = sum(_dec(f.payload.get("fee") or f.payload.get("fees")) or Decimal(0) for f in fills)
-        pnl = sum(_dec(o.payload.get("pnl")) or Decimal(0) for o in outcomes)
-        wins = sum(1 for o in outcomes if (_dec(o.payload.get("pnl")) or Decimal(0)) > 0)
-        return {
-            "fills": len(fills),
-            "filled_notional_usd": format(notional, "f"),
-            "fees_usd": format(fees, "f"),
-            "settled": len(outcomes),
-            "wins": wins,
-            "settled_pnl_usd": format(pnl, "f"),
-            **_evidence_fields(outcomes),
-        }
+        out: dict[str, Any] = {}
+        for name in sorted(self.store.for_desk(manifest.id)):
+            try:
+                record = self.family_record(manifest.family, name)
+            except Exception:
+                continue
+            if not record:
+                continue
+            verdict = self.assess(record)
+            out[name] = {
+                "n": record.get("independent_settled", 0),
+                "real_settled": record.get("real_settled", 0),
+                "desks": record.get("desks", 0),
+                "passes": bool(verdict.get("passes")),
+                "lower": verdict.get("lower"),
+                "n_needed": verdict.get("n_needed"),
+                "groups": record.get("groups") or {},
+                "series_groups": record.get("series_groups") or {},
+                "group_prefixes": {k: list(v) for k, v in EVIDENCE_GROUPS.items()},
+            }
+        return out
 
     def evidence_config(self) -> dict[str, Any]:
         """`strategies.evidence` from config.json (z, min_n, skew_price, min_days)."""
@@ -1180,18 +1292,34 @@ class Strategies:
         learning = self.learning_usd(manifest)
         fit = self.limit_fit_usd(manifest)
         if manifest.live:
+            gate = self.evidence_config()
+            top = fit if fit is not None else learning * Decimal(str(self.config.get("earned_multiple", 3)))
+            ramps: list[Decimal] = []
             record = self.record(manifest.id, name)
             settled = int(record.get("independent_settled", record.get("settled")) or 0)
-            gate = self.evidence_config()
             ok, _, needed = evidence.passes(record, **gate) if record else (False, "", 1)
             if settled >= int(self.config.get("earned_settled", 20)) and ok:
-                top = fit if fit is not None else learning * Decimal(str(self.config.get("earned_multiple", 3)))
-                ramp = earned_ramp(settled, needed, gate.get("full_size_multiple", 3))
+                ramps.append(earned_ramp(settled, needed, gate.get("full_size_multiple", 3)))
+            # leap: pooled evidence -- the family's settlements of the same strategy count too,
+            # once enough of them were real money (the shadow book's fills are modelled from
+            # prints). A live desk born yesterday sizes on what its family has already proved.
+            if bool(self.config.get("pooled_evidence", True)):
+                try:
+                    pooled = self.family_record(manifest.family, name)
+                except Exception:
+                    pooled = {}
+                pooled_n = int(pooled.get("independent_settled", pooled.get("settled")) or 0)
+                real = int(pooled.get("real_settled") or 0)
+                if pooled and real >= int(self.config.get("pooled_min_real", 5)) and pooled_n >= int(self.config.get("earned_settled", 20)):
+                    pooled_ok, _, pooled_needed = evidence.passes(pooled, **gate)
+                    if pooled_ok:
+                        ramps.append(earned_ramp(pooled_n, pooled_needed, gate.get("full_size_multiple", 3)))
+            if ramps:
                 # Compounding: a strategy that keeps earning ramps toward the desk's own order
                 # limit, a share of the desk's equity, so its bets grow as the book grows. The
                 # desk's position, daily-loss and floor limits, and the firm's event rules, still
                 # bind above it.
-                earned = (learning + (top - learning) * ramp).quantize(Decimal("0.01"))
+                earned = (learning + (top - learning) * max(ramps)).quantize(Decimal("0.01"))
                 learning = max(learning, earned)
         return min(learning, fit) if fit is not None else learning
 
@@ -1375,6 +1503,65 @@ def _independent_outcomes(outcomes: list[Any]) -> list[Any]:
             payload["instrument"] = "mixed:cluster"
         out.append(SimpleNamespace(payload=payload, at=max(str(e.at) for e in rows)))
     return out
+
+
+def _summarize(fills: list[Any], outcomes: list[Any]) -> dict[str, Any]:
+    """A strategy record from its fills and settled outcomes (the shape `record` returns)."""
+    notional = sum((_dec(f.payload.get("price")) or Decimal(0)) * (_dec(f.payload.get("quantity")) or Decimal(0)) for f in fills)
+    fees = sum(_dec(f.payload.get("fee") or f.payload.get("fees")) or Decimal(0) for f in fills)
+    pnl = sum(_dec(o.payload.get("pnl")) or Decimal(0) for o in outcomes)
+    wins = sum(1 for o in outcomes if (_dec(o.payload.get("pnl")) or Decimal(0)) > 0)
+    return {
+        "fills": len(fills),
+        "filled_notional_usd": format(notional, "f"),
+        "fees_usd": format(fees, "f"),
+        "settled": len(outcomes),
+        "wins": wins,
+        "settled_pnl_usd": format(pnl, "f"),
+        **_evidence_fields(outcomes),
+    }
+
+
+#: Market groups for pooled evidence: bets in one group fail together and share an edge. A series
+#: outside every prefix list is its own group. Kept in step with `kalshi_favorites.GROUPS`.
+EVIDENCE_GROUPS: dict[str, tuple[str, ...]] = {
+    "crypto": ("KXBTC", "KXETH", "KXSOL", "KXXRP", "KXDOGE"),
+    "commod": ("KXGOLD", "KXSILVER", "KXBRENT", "KXWTI", "KXCOPPER", "KXNATGAS", "KXGAS"),
+    "weather": ("KXHIGH", "KXLOW", "KXRAIN", "KXSNOW"),
+    "sports": ("KXMLB", "KXNFL", "KXNBA", "KXNHL", "KXNCAA", "KXUFC", "KXATP", "KXWTA", "KXPGA", "KXMLS", "KXEPL", "KXUCL", "KXLALIGA", "KXSERIEA", "KXBUNDESLIGA", "KXLIGUE", "KXF1", "KXNASCAR", "KXWNBA", "KXCFB"),
+    "mentions": ("KXFEDMENTION", "KXMENTION", "KXTRUMPMENTION", "KXSAY"),
+    "econ": ("KXFED", "KXCPI", "KXJOBS", "KXGDP", "KXUNRATE", "KXPAYROLL", "KXPCE", "KXPPI", "KXRETAIL", "KXTREASURY", "KXECB", "KXBOE", "KXBOJ"),
+    "politics": ("KXTRUMP", "KXPRES", "KXSENATE", "KXHOUSE", "KXGOV", "KXAPPROV", "KXDJT", "KXCONGRESS", "KXSCOTUS", "KXELECTION"),
+}
+
+
+def group_of(series: str) -> str:
+    """The evidence group of a Kalshi series (`KXBTCD` -> `crypto`); the series itself otherwise."""
+    root = str(series or "").upper()
+    for group, prefixes in EVIDENCE_GROUPS.items():
+        if root.startswith(prefixes):
+            return group
+    return root or "other"
+
+
+def _group_outcomes(outcomes: list[Any]) -> tuple[dict[str, list[Any]], dict[str, str]]:
+    """Outcomes by evidence group, and the series -> group map the strategies read."""
+    from .mind import parse_outcome
+
+    groups: dict[str, list[Any]] = {}
+    series_groups: dict[str, str] = {}
+    for event in outcomes:
+        parsed = parse_outcome(event)
+        series = parsed.series if parsed is not None else ""
+        if not series:
+            key = str(event.payload.get("instrument") or "")
+            parts = key.split(":")
+            series = str(event.payload.get("market_id") or (parts[1] if len(parts) > 1 else "")).split("-", 1)[0].upper()
+        group = group_of(series)
+        if series:
+            series_groups[series] = group
+        groups.setdefault(group, []).append(event)
+    return groups, series_groups
 
 
 def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
