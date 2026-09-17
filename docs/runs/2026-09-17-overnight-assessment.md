@@ -83,3 +83,15 @@ credit*. Already-paid costs therefore consumed the allowance a second time.
 
 The useful target is independently validated, fee-positive strategies reaching
 forward testing faster—not spending credits or executing orders for their own sake.
+
+## Deployment verification
+
+- 1,567 runtime tests and 79 gateway tests passed.
+- Gateway email update deployed as version
+  `82898359-9615-4831-9291-fb4de3ad5bce`.
+- Runtime restarted cleanly into the policy change. At 14:19:26 UTC, its budget
+  event reported `mode=open`, about $192 spendable, with runway still 2.9 days.
+- Fourteen new sessions started following restart.
+- Public Foundry progress at 14:22:31–14:22:36 UTC confirmed **cycle 45 resumed**:
+  two baselines and 18 parameter variants testing across 12 Sail sandboxes.
+  This verifies resumed work, not a newly qualified strategy or a profit claim.
