@@ -108,7 +108,11 @@
     "starters": true,
     "pooled_evidence": true,
     "pooled_min_real": 3,
-    "dispatch_seconds": 15
+    "dispatch_seconds": 15,
+    "book_roles": {
+      "mullins": "explorers",
+      "hilibrand": "explorers"
+    }
   },
   "foundry": {
     "enabled": true,

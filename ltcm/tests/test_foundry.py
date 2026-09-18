@@ -609,6 +609,14 @@ class DeploymentTests(FoundryCase):
         if summary.get("deployed_to") == "mullins":
             self.assertEqual(len(foundry.explorer_rows("mullins")), 1, "past protection the old row made room")
 
+    def test_the_explorers_book_takes_the_candidates_when_a_family_has_one(self):
+        second = manifest(id="mullins-9", family="kalshi", parent_id="mullins", capital={"mode": "live", "usd": "142"})
+        self.manifests["mullins-9"] = second
+        foundry = self.foundry()
+        self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins", "no roles: the first live desk by id")
+        self.strategies.config["book_roles"] = {"mullins-9": "explorers"}
+        self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins-9")
+
     def test_a_settings_winner_goes_to_the_worst_shadow_desk_and_never_the_live_desk(self):
         self.manager.script = settings_winner
         live_before = self.row("mullins")

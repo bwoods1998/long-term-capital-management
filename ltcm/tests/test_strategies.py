@@ -245,6 +245,20 @@ class TickTests(StrategyCase):
 
 
 class BootstrapTests(StrategyCase):
+    def test_an_explorers_book_runs_only_the_foundrys_candidates(self):
+        self.strategies.config["starters"] = True
+        self.strategies.config["book_roles"] = {"mullins": "explorers"}
+        events = manifest(id="mullins", family="kalshi", parent_id=None, capital={"mode": "live", "usd": "200"})
+        self.service.manifests = {"mullins": events}
+        self.manager.files["mullins"] = {"kalshi_favorites.py": "def decide(kit, params): return []", "kalshi_favorites_f9_1.py": "def decide(kit, params): return []"}
+        self.strategies.store.update("mullins", "kalshi_favorites", enabled=True, house=True, cadence_seconds=900, params={})
+        self.strategies.store.update("mullins", "kalshi_favorites_f9_1", enabled=True, foundry_explorer=True, foundry_code=True, cadence_seconds=900, params={})
+        self.assertEqual(self.strategies.bootstrap(self.service.manifests), [], "no house starter is dealt to an explorers book")
+        rows = self.strategies.store.for_desk("mullins")
+        self.assertFalse(rows["kalshi_favorites"]["enabled"])
+        self.assertIn("explorers book", rows["kalshi_favorites"]["note"])
+        self.assertTrue(rows["kalshi_favorites_f9_1"]["enabled"])
+
     def test_desks_of_a_family_with_a_starter_get_it_once(self):
         self.strategies.config["starters"] = True
         crypto = manifest(id="hilibrand-2", family="crypto", parent_id="hilibrand", venues=["coinbase"], capital={"mode": "shadow", "usd": "487"})

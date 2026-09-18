@@ -1039,6 +1039,12 @@ class Strategies:
                     dealt = dict(EXTRA_LIVE_PARAMS.get(extra) or {}) if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
                     wanted.append((extra, dealt, int(STARTER_CADENCE.get(extra, 600))))
             existing = self.store.for_desk(desk_id)
+            if manifest.live and self.book_role(manifest) == "explorers":
+                # An explorers book runs the Foundry's candidates and nothing else.
+                for name, row in existing.items():
+                    if not row.get("foundry_explorer") and row.get("enabled", True):
+                        self.store.update(desk_id, name, enabled=False, note="explorers book (Sept 18, 2026): only Foundry candidates trade here")
+                continue
             for retired in RETIRED_STARTERS.get(manifest.family, ()):
                 row = existing.get(retired)
                 if row is not None and row.get("house") and row.get("enabled", True):
@@ -1128,6 +1134,14 @@ class Strategies:
                               promoted_at=at, promoted_from="house code refresh")
         except Exception:
             return
+
+    def book_role(self, manifest: DeskManifest) -> str:
+        """The arena (Sept 18, 2026): a live book is a `house` book (the family's house
+        strategies and their promotions) or an `explorers` book (only the Foundry's candidates),
+        from `strategies.book_roles`. Explorers then never drain the cash the proven code earns
+        with, and every dollar of the explorers' record is theirs. Shadow desks have no role."""
+        roles = dict(self.config.get("book_roles") or {})
+        return str(roles.get(manifest.id) or "house")
 
     def family_enabled(self, manifest: DeskManifest) -> bool:
         policy = dict(getattr(self.service, "config", {}).get("strategy_lifecycle") or {})

@@ -812,9 +812,14 @@ class Foundry:
         return highest + 1
 
     # ------------------------------------------------------------------ the family
-    @staticmethod
-    def live_desk(family: str, manifests: Mapping[str, Any]) -> Any:
+    def live_desk(self, family: str, manifests: Mapping[str, Any]) -> Any:
+        """The family's live book that takes candidates: the one whose role is `explorers`
+        (`strategies.book_roles`), else the first live desk by id."""
         live = sorted((m for m in manifests.values() if m.family == family and m.live), key=lambda m: m.id)
+        roles = dict((getattr(self.strategies, "config", None) or {}).get("book_roles") or {})
+        for desk in live:
+            if str(roles.get(desk.id) or "") == "explorers":
+                return desk
         return live[0] if live else None
 
     @staticmethod
