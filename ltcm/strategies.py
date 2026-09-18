@@ -1645,6 +1645,16 @@ class Strategies:
                     cap = min(cap, free)
             args = dict(raw)
             args.setdefault("order_type", "limit")
+            # The arena's clock (Sept 18, 2026, 21:15 UTC, the owner's rule): an agent buys only
+            # what settles soon. A position that pays out in weeks teaches nothing for weeks; a
+            # strategy earns its record from settlements, and six of them move it to real money.
+            # Every strategy on every desk, shadow included: the shadow desks are the evidence.
+            horizon = _dec(self.config.get("max_holding_hours"))
+            hold = _dec(args.get("holding_period_hours"))
+            if horizon is not None and horizon > 0 and str((args.get("instrument") or {}).get("asset_class") or "") == "event" \
+                    and args.get("side") == "buy" and not args.get("reduce_only") and hold is not None and hold > horizon:
+                out.append({"approved": False, "reasons": [f"settles in {hold:.0f}h; the floor buys nothing that settles more than {horizon:.0f}h out (learning speed)"], "rationale": str(raw.get("rationale") or "")[:200]})
+                continue
             if args.get("order_type") != "limit" or _dec(args.get("limit_price")) is None:
                 out.append({"approved": False, "reasons": ["a strategy proposes limit orders with a limit_price"], "rationale": str(args.get("rationale") or "")[:200]})
                 continue

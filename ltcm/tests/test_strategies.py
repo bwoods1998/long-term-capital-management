@@ -259,6 +259,18 @@ class BootstrapTests(StrategyCase):
         self.assertIn("explorers book", rows["kalshi_favorites"]["note"])
         self.assertTrue(rows["kalshi_favorites_f9_1"]["enabled"])
 
+    def test_an_event_contract_settling_past_the_horizon_is_refused_before_the_risk_engine(self):
+        """Sept 18, 2026: the owner's rule for learning speed: buy only what settles soon."""
+        self.strategies.config["max_holding_hours"] = 36
+        intents = [
+            {"instrument": {"asset_class": "event", "symbol": "KXFED-26OCT", "market_id": "KXFED-26OCT", "right": "yes"}, "side": "buy", "quantity": "10", "order_type": "limit", "limit_price": "0.40", "rationale": "x", "holding_period_hours": 960},
+            {"instrument": {"asset_class": "event", "symbol": "KXBTCD-26SEP18", "market_id": "KXBTCD-26SEP18", "right": "no"}, "side": "buy", "quantity": "10", "order_type": "limit", "limit_price": "0.90", "rationale": "y", "holding_period_hours": 5},
+        ]
+        out = self.strategies._propose(self.manifest, "kalshi_favorites", intents, NOW)
+        self.assertFalse(out[0]["approved"])
+        self.assertIn("settles more than 36h out", out[0]["reasons"][0])
+        self.assertNotIn("settles more than", " ".join(out[1].get("reasons") or []), "the short one reaches the risk engine")
+
     def test_desks_of_a_family_with_a_starter_get_it_once(self):
         self.strategies.config["starters"] = True
         crypto = manifest(id="hilibrand-2", family="crypto", parent_id="hilibrand", venues=["coinbase"], capital={"mode": "shadow", "usd": "487"})

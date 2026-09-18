@@ -112,7 +112,8 @@
     "live_allow": [
       "kalshi_favorites",
       "spot_quotes"
-    ]
+    ],
+    "max_holding_hours": 36
   },
   "foundry": {
     "enabled": true,
@@ -273,7 +274,7 @@
     "reserve_usd": "10",
     "throttle_days": "0",
     "stretch_days": "5",
-    "desk_fuse_pct": "0.8",
+    "desk_fuse_pct": "1.5",
     "desk_fuse_min_usd": "40",
     "fallback_cap_usd": "40",
     "infra_usd_per_day": "0.30"
