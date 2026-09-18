@@ -1895,7 +1895,10 @@ class Foundry:
             if winner["kind"] == "params":
                 own = dict((store.for_desk(desk.id).get(name) or {}).get("params") or {})
                 params = {**{k: v for k, v in winner["params"].items() if k not in frozen}, **{k: own[k] for k in frozen if k in own}}
-                store.update(desk.id, name, params=params, promoted_at=at, note=note[:200], foundry_id=fid)
+                # `promoted_from` marks the row as the candidate's: a house row whose last stamp
+                # was a house code refresh follows the house params again on the next bootstrap
+                # (Sept 18, 2026: cycles 292 and 293 were wiped that way within a tick).
+                store.update(desk.id, name, params=params, promoted_at=at, promoted_from=f"foundry {fid}", note=note[:200], foundry_id=fid)
                 code_sha = _sha(winner.get("code"))
             else:
                 # Size, counts and price guards are the parent's (its row over its code's

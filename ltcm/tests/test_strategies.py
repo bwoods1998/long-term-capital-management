@@ -337,6 +337,21 @@ class BootstrapTests(StrategyCase):
         self.assertEqual((row["deployed_at"], row["promoted_at"]), (AFTER, AFTER))
         self.assertEqual(row["promoted_from"], "house code refresh")
 
+    def test_foundry_settings_on_a_refreshed_house_row_survive_bootstrap(self):
+        # Sept 18, 2026: a Foundry params candidate landed on a house row whose last stamp was
+        # a house code refresh, and the next bootstrap put the house params back within a tick.
+        self.strategies.config["starters"] = True
+        self.strategies.bootstrap(self.service.manifests)
+        self.strategies.store.update(self.manifest.id, "hourly_ranges", params={"min_edge": 0.9}, promoted_at=AFTER,
+                                     promoted_from="foundry fdy-292-x", foundry_id="fdy-292-x")
+        self.strategies.bootstrap(self.service.manifests)
+        self.assertEqual(self.strategies.store.for_desk(self.manifest.id)["hourly_ranges"]["params"], {"min_edge": 0.9})
+        # Without the Foundry mark, a refreshed row still follows the house params.
+        self.strategies.store.update(self.manifest.id, "hourly_ranges", params={"min_edge": 0.9}, promoted_at=AFTER,
+                                     promoted_from="house code refresh", foundry_id=None)
+        self.strategies.bootstrap(self.service.manifests)
+        self.assertNotEqual(self.strategies.store.for_desk(self.manifest.id)["hourly_ranges"]["params"], {"min_edge": 0.9})
+
 
 class CancelAndRecordTests(StrategyCase):
     def setUp(self):

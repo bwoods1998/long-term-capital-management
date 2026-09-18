@@ -674,6 +674,7 @@ class DeploymentTests(FoundryCase):
         self.assertIs(row["params"]["maker"], False)
         self.assertEqual(row["foundry_id"], summary["winner"])
         self.assertEqual(row["promoted_at"], deployment["deployed_at"], "the forward record starts now and bootstrap leaves it alone")
+        self.assertEqual(row["promoted_from"], f"foundry {summary['winner']}", "a house code refresh stamp would let bootstrap reset the params")
         self.assertTrue(row["note"].startswith(f"foundry {summary['winner']}"))
         runs = [e for e in self.log.kinds("desk.code_run") if e.stream == "desk:mullins-4"]
         self.assertEqual(len(runs), 1)

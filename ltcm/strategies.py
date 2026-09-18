@@ -1103,7 +1103,9 @@ class Strategies:
                         # but the row is still the house's: its params follow the house. Until
                         # Sept 18, 2026 that stamp froze every house row's params after the
                         # first refresh, so a changed house setting never reached a desk.
-                        untouched = not row.get("promoted_at") or row.get("promoted_from") == "house code refresh"
+                        # A Foundry candidate's settings on a house row are the candidate's until
+                        # its trial ends, whatever the row's last stamp says.
+                        untouched = (not row.get("promoted_at") or row.get("promoted_from") == "house code refresh") and not row.get("foundry_id")
                         if untouched and dict(row.get("params") or {}) != params:
                             changes["params"] = params
                         if int(row.get("cadence_seconds") or 0) != cadence:
