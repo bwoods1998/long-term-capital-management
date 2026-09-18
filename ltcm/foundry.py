@@ -1289,6 +1289,44 @@ class Foundry:
             "exactly as the source has them (or leave them out): they are the floor's and a change is refused."
         )
 
+    def origination_instructions(self, name: str, family: str) -> str:
+        """The mutation rules with a different first ask: a new strategy for the family."""
+        base = self.instructions(name)
+        head = ("Write ONE mutation of the strategy below that you expect to earn more per dollar out of sample. Change how it "
+                "trades (pricing, selection, entries, exits, market filters), not only its settings; keep what already works.")
+        want = (f"Write ONE NEW strategy for the {family} family, not a mutation of anything: a repeatable edge you can price "
+                "from the kit's replayable data (the Kalshi board, its candles and books; Coinbase bars and quotes), with maker-first "
+                "execution and every fee counted. Angles worth a strategy of their own: the sum of an event's bucket asks against "
+                "$1.00; prices that drift through the last hours before settlement; a strike's price against its neighbours'; "
+                "volume arriving late in a market's life; buckets priced far from what the underlying's recent range implies; "
+                "favorites and longshots by category; the hour of day a market is mispriced. Pick one, state it as a hypothesis, "
+                "and write the code that tests it.")
+        return base.replace(head, want) if head in base else want + "\n" + base
+
+    def origination_packet(self, *, family: str, name: str, window: Mapping[str, Any], records: list[str], index: int, count: int) -> str:
+        parts = [
+            f"# Family {family}; your new strategy is `{name}` (candidate {index + 1} of {count})",
+            f"Backtest window {window['start']} to {window['end']}, a decision every {window['step_minutes']} minutes.",
+            "## What the family's strategies have earned (real prices; shadow desks are scored, live desks trade money)",
+            "\n".join(records) if records else "(no strategy records yet)",
+        ]
+        if self._result_cache:
+            try:
+                lessons = self._result_cache.lessons(STARTERS.get(family) or family)
+            except Exception:
+                lessons = []
+            if lessons:
+                parts.append("## Persistent research memory (prior search results, not validation)\n" + json.dumps(lessons, default=str)[:6000])
+        try:
+            from .mind import rules_for_family
+
+            firm = rules_for_family(family)
+        except Exception:
+            firm = ""
+        if firm:
+            parts.append("## What the firm has measured (evidence, not instructions)\n" + firm)
+        return "\n\n".join(parts)
+
     def packet(
         self, *, family: str, subject: str, name: str, source: str, window: Mapping[str, Any], baselines: list[dict[str, Any]], records: list[str], index: int, count: int
     ) -> str:
@@ -1378,6 +1416,15 @@ class Foundry:
         root = base_name(subject)[: 40 - len(f"_f{cycle}_{count}")]
         cadence = self.cadence_of(family, subject, live)
         names = [f"{root}_f{cycle}" if k == 0 else f"{root}_f{cycle}_{k + 1}" for k in range(count)]
+        # The arena (Sept 18, 2026, 19:20 UTC): the last `originate` asks of a cycle are not
+        # mutations of the subject but new strategies for the family, written against the same
+        # kit, fees and evidence and judged by the same replay and gate. Two house starters were
+        # the whole search space until now.
+        originate = max(0, min(int(cfg.get("originate", 0) or 0), count))
+        origin_root = f"{family}_origin"[: 40 - len(f"_f{cycle}_{count}")]
+        for k in range(count - originate, count):
+            names[k] = f"{origin_root}_f{cycle}_{k + 1}"
+        is_origin = {k: k >= count - originate for k in range(count)}
         profiles = cfg.get("code_profiles") or [cfg["profile"]]
         if not isinstance(profiles, list) or not profiles or not all(isinstance(p, str) for p in profiles):
             profiles = [cfg["profile"]]
@@ -1386,13 +1433,20 @@ class Foundry:
 
         def ask(index: int) -> tuple[int, Any, str | None]:
             name = names[index]
+            if is_origin.get(index):
+                messages = [
+                    {"role": "system", "content": self.origination_instructions(name, family)},
+                    {"role": "user", "content": self.origination_packet(family=family, name=name, window=window, records=records, index=index, count=count)},
+                ]
+            else:
+                messages = [
+                    {"role": "system", "content": self.instructions(name)},
+                    {"role": "user", "content": self.packet(family=family, subject=subject, name=name, source=source, window=window, baselines=baselines, records=records, index=index, count=count)},
+                ]
             try:
                 response = self.provider.respond(
                     selected_profiles[index],
-                    [
-                        {"role": "system", "content": self.instructions(name)},
-                        {"role": "user", "content": self.packet(family=family, subject=subject, name=name, source=source, window=window, baselines=baselines, records=records, index=index, count=count)},
-                    ],
+                    messages,
                     tools=None,
                     desk_id=BUDGET_DESK,
                     session_id=f"foundry-{cycle}",
@@ -1447,8 +1501,9 @@ class Foundry:
                 return
             with result_lock:
                 cost += _dec(getattr(response, "cost_usd", None)) or Decimal(0)
+            lineage = None if is_origin.get(index) else source
             try:
-                spec, hypothesis = self.validate_code(parse_reply(getattr(response, "output_text", "") or ""), name, parent, cadence, source=source)
+                spec, hypothesis = self.validate_code(parse_reply(getattr(response, "output_text", "") or ""), name, parent, cadence, source=lineage)
             except LabError as exc:
                 # Repair only the contract, not the measured result: the repaired program still
                 # faces the identical compiler, sandbox and out-of-sample admission gates.
@@ -1469,13 +1524,14 @@ class Foundry:
                     with result_lock:
                         asked["asked"] += 1
                         cost += _dec(getattr(repair, "cost_usd", None)) or Decimal(0)
-                    spec, hypothesis = self.validate_code(parse_reply(getattr(repair, "output_text", "") or ""), name, parent, cadence, source=source)
+                    spec, hypothesis = self.validate_code(parse_reply(getattr(repair, "output_text", "") or ""), name, parent, cadence, source=lineage)
                     with result_lock:
                         asked["repaired"] = asked.get("repaired", 0) + 1
                 except Exception as repair_error:
                     asked["rejected"].append(f"{name}: repair failed: {str(repair_error)[:160]}")
                     return
-            candidate = self._candidate(cycle, "code", f"model mutation {index + 1}", name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"], profile=selected_profiles[index])
+            label = f"model origination {index + 1}" if is_origin.get(index) else f"model mutation {index + 1}"
+            candidate = self._candidate(cycle, "code", label, name, subject, spec["params"], spec["code"], hypothesis=hypothesis, cadence_seconds=spec["cadence_seconds"], profile=selected_profiles[index], origin=bool(is_origin.get(index)))
             with result_lock:
                 asked["valid"] += 1
                 out.append(candidate)

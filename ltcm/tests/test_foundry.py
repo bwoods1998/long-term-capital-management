@@ -245,6 +245,22 @@ class CandidateTests(FoundryCase):
         self.assertEqual(self.foundry().subjects("crypto", self.manifests), ["hourly_reversion", "perp_reversion", "spot_quotes"])
         self.assertEqual(self.foundry(excluded_strategies=["spot_quotes"]).subjects("crypto", self.manifests), ["hourly_reversion", "perp_reversion"])
 
+    def test_the_last_asks_of_a_cycle_originate_new_strategies_for_the_family(self):
+        provider = Provider()
+        self.manager.script = lambda spec: result_line(pnls(0.05, 0.05))
+        provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_origin_f1_2", code=GOOD_CODE.replace("0.1", "0.11"))}
+        foundry = self.foundry(provider, code_candidates=2, originate=1)
+        summary = foundry.cycle(NOW)
+        asks = [c for c in provider.calls if c["request_key"].startswith("foundry:1:kalshi_favorites:") and ":repair:" not in c["request_key"]]
+        self.assertEqual(len(asks), 2)
+        origin = asks[1]
+        self.assertIn("NEW strategy for the kalshi family", origin["items"][0]["content"])
+        self.assertNotIn("## Source of", origin["items"][1]["content"], "an origination sees no parent code")
+        self.assertIn("## Source of", asks[0]["items"][1]["content"])
+        names = [c["strategy"] for c in summary["candidates_detail"] if c["kind"] == "code"]
+        self.assertEqual(sorted(names), ["kalshi_favorites_f1", "kalshi_origin_f1_2"])
+        self.assertEqual(summary["code"]["valid"], 2)
+
     def test_the_code_generator_is_told_the_fees_the_backtest_charges(self):
         # Sept 17, 2026: the prompt still said Kalshi rounds to the cent and Coinbase charges
         # 0.25%/0.60% while the backtest charged $0.0001 rounding and 0.5%/1.2%.

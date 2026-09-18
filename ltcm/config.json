@@ -209,7 +209,8 @@
     ],
     "family_board_draw": {
       "kalshi": "event_volume"
-    }
+    },
+    "originate": 3
   },
   "evolution": {
     "excluded_families": [
