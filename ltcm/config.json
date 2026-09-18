@@ -195,7 +195,7 @@
         "families": [
           "kalshi"
         ],
-        "sandboxes": 12,
+        "sandboxes": 16,
         "sandbox_offset": 0
       },
       {
@@ -203,12 +203,12 @@
         "families": [
           "crypto"
         ],
-        "sandboxes": 12,
-        "sandbox_offset": 12
+        "sandboxes": 8,
+        "sandbox_offset": 16
       }
     ],
     "family_board_draw": {
-      "kalshi": "event_volume"
+      "kalshi": "series_volume"
     },
     "originate": 3
   },

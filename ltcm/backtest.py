@@ -675,12 +675,19 @@ def sample_markets(markets: Iterable[Market], limit: int, seed: Any = 7, draw: s
     if draw == "series_volume":
         by_series: dict[str, list[str]] = {}
         volume: dict[str, float] = {}
+        count: dict[str, int] = {}
         for event, members in by_event.items():
             series = members[0].series
             by_series.setdefault(series, []).append(event)
             volume[series] = volume.get(series, 0.0) + sum(float(getattr(m, "volume", 0.0) or 0.0) for m in members)
+            count[series] = count.get(series, 0) + len(members)
+        # Volume per market, not in total (19:55 UTC Sept 18, 2026): in total the fifteen-minute
+        # crypto strikes came first, thousands of small markets; per market the daily brackets
+        # and the game markets do, which is the board a maker strategy trades. Per event would
+        # be biased the other way: the events that traded most are the dramatic ones, where a
+        # favorite lost (a replay read -14% on a strategy that earns +2.6% live).
         chosen: list[Market] = []
-        for series in sorted(by_series, key=lambda s: (-volume[s], s)):
+        for series in sorted(by_series, key=lambda s: (-(volume[s] / max(1, count[s])), s)):
             for event in sorted(by_series[series], key=lambda e: hashed("event|" + e)):
                 members = sorted(by_event[event], key=lambda m: hashed(m.ticker))
                 chosen.extend(members)
@@ -843,7 +850,7 @@ class DataSet:
         draw = draw if draw in DRAWS else "events"
         chosen = sample_markets(pool, max_markets, seed, draw)
         if len(chosen) < len(pool):
-            how = ("whole events from the busiest series first (seed %s), never a bucket by its own volume or result" % seed
+            how = ("whole events from the series that trade most per market first (seed %s), never a bucket by its own volume or result" % seed
                    if draw == "series_volume" else "whole events, the busiest events first (seed %s), never a bucket by its own volume or result" % seed
                    if draw == "event_volume" else f"a seeded draw spread over events (seed {seed}), never by volume or result")
             self.notes.append(

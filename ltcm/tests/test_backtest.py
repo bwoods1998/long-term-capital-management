@@ -898,7 +898,7 @@ class SelectionTests(unittest.TestCase):
         self.assertGreaterEqual(sum(1 for n in events.values() if n == 10), 2, "whole events, ten buckets each")
         winners = sum(1 for m in kept if m.series == "KXBUCK" and m.payout_yes == 1.0)
         self.assertLessEqual(winners, 3, "a bucket is never kept for being the winner")
-        self.assertTrue(any("busiest series first" in n for n in data.notes))
+        self.assertTrue(any("trade most per market first" in n for n in data.notes))
 
     def test_the_event_volume_draw_keeps_the_busiest_whole_events_first(self):
         loud_markets, loud_candles = bucket_events(4, 10, winner_volume=1_000_000)
