@@ -1082,7 +1082,10 @@ class Foundry:
             # candidate that passed its replay can still fail its dry run on the live kit
             # (cycle 157: a favorites mutation raised in `decide`), and the next best takes its place.
             ranked = sorted(scored, key=lambda c: -(_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0))
-            explorers = [c for c in ranked if bool(cfg.get("explorers", True)) and (_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0) > reference][:3]
+            # An explorer must beat the baselines AND expect to earn: the best of a losing lot
+            # (every perp_reversion replay of Sept 18, 2026 lost) is not a bet for real money.
+            explorers = [c for c in ranked if bool(cfg.get("explorers", True))
+                         and (_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0) > max(reference, 0.0)][:3]
             full = False
             for chosen, role in ([(winner, "winner")] if winner is not None else []) + [(c, "explorer") for c in explorers if c is not winner]:
                 before = len(problems)
