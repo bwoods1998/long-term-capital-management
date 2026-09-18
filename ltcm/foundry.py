@@ -49,7 +49,7 @@ import secrets
 import threading
 import time
 import types
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as wait_futures
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError as FuturesTimeout, wait as wait_futures
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -107,6 +107,7 @@ DEFAULTS: dict[str, Any] = {
     "jitter_min": 0.10,
     "jitter_max": 0.50,
     "code_chars": 20000,
+    "model_wait_seconds": 600,
     # A shadow desk that received a candidate is not handed another for this long, so the
     # candidate earns a forward record; after `forward_max_hours` without one it expires.
     "protect_hours": 6,
@@ -1333,10 +1334,16 @@ class Foundry:
                 return index, None, f"{type(exc).__name__}: {str(exc)[:160]}"
             return index, response, None
 
+        # Sept 18, 2026: a model call that never answered held a cycle for an hour (the wait
+        # had no end). After `model_wait_seconds` the cycle goes on with the answers it has;
+        # the abandoned calls finish in the background at the provider's own idempotent pace.
+        deadline = time.monotonic() + float(cfg.get("model_wait_seconds", 600))
+
         def answers():
-            with ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-model") as pool:
-                pending = {pool.submit(ask, index) for index in range(count)}
-                started = time.monotonic()
+            pool = ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-model")
+            pending = {pool.submit(ask, index) for index in range(count)}
+            started = time.monotonic()
+            try:
                 while pending:
                     done, pending = wait_futures(pending, timeout=30, return_when=FIRST_COMPLETED)
                     if not done:
@@ -1344,6 +1351,14 @@ class Foundry:
                                       cycle=cycle, family=family, strategy=subject, pending_models=len(pending))
                     for future in done:
                         yield future.result()
+                    if pending and time.monotonic() > deadline:
+                        self.progress("think", f"{len(pending)}/{count} model jobs abandoned after {round(time.monotonic() - started)}s; the cycle goes on with {count - len(pending)} answer(s)",
+                                      cycle=cycle, family=family, strategy=subject, pending_models=len(pending))
+                        for future in pending:
+                            future.cancel()
+                        break
+            finally:
+                pool.shutdown(wait=False)
         out: list[dict[str, Any]] = []
         cost = Decimal(0)
         result_lock = threading.Lock()
@@ -1403,10 +1418,16 @@ class Foundry:
                 on_candidate(candidate)
         # Validation/repair is independent per answer. A slow compiler-repair call must not
         # prevent another already-completed model's valid candidate from reaching the tests.
-        with ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-repair") as consumers:
+        consumers = ThreadPoolExecutor(max_workers=count, thread_name_prefix="foundry-repair")
+        try:
             pending = [consumers.submit(consume, *answer) for answer in answers()]
             for future in pending:
-                future.result()
+                try:
+                    future.result(timeout=max(30.0, deadline - time.monotonic()))
+                except FuturesTimeout:
+                    self.progress("think", "a candidate's validation or repair did not finish in time; the cycle goes on without it", cycle=cycle, family=family, strategy=subject)
+        finally:
+            consumers.shutdown(wait=False)
         asked["cost_usd"] = format(cost, "f")
         return sorted(out, key=lambda candidate: candidate["label"]), asked
 
