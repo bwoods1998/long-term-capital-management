@@ -176,7 +176,10 @@
     },
     "family_max_markets": {
       "kalshi": 8000
-    }
+    },
+    "excluded_strategies": [
+      "spot_quotes"
+    ]
   },
   "evolution": {
     "excluded_families": [

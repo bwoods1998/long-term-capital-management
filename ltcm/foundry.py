@@ -108,6 +108,7 @@ DEFAULTS: dict[str, Any] = {
     "jitter_max": 0.50,
     "code_chars": 20000,
     "model_wait_seconds": 600,
+    "excluded_strategies": [],
     # A shadow desk that received a candidate is not handed another for this long, so the
     # candidate earns a forward record; after `forward_max_hours` without one it expires.
     "protect_hours": 6,
@@ -826,13 +827,17 @@ class Foundry:
         its descendants are, so two mutations of one parent never compete for the live desk."""
         names: list[str] = []
         house = STARTERS.get(family)
+        # `excluded_strategies` (config): strategies whose replay can say nothing (Sept 18, 2026:
+        # spot quoting at this account's fees makes no trade at any spread; its cycles cost the
+        # crypto family a third of its research turns).
+        excluded = {str(x) for x in (self.config.get("excluded_strategies") or ())} | set(UNBACKTESTABLE_STRATEGIES)
         live = self.live_desk(family, manifests)
         rows = self.store().for_desk(live.id) if live is not None else {}
-        if house and house not in UNBACKTESTABLE_STRATEGIES and (rows.get(house) or {}).get("enabled", True):
+        if house and house not in excluded and (rows.get(house) or {}).get("enabled", True):
             names.append(house)
         if live is not None:
             for name, row in sorted(rows.items()):
-                if row.get("enabled", True) and name not in names and base_name(name) not in UNBACKTESTABLE_STRATEGIES:
+                if row.get("enabled", True) and name not in names and base_name(name) not in excluded:
                     names.append(name)
         # A paused live family can still search for a successor in isolated research. This
         # never enables its live parent or bypasses adoption/promotion gates. Prefer an active

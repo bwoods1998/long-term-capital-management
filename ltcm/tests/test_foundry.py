@@ -237,6 +237,14 @@ class CandidateTests(FoundryCase):
         self.strategies.store.update("hilibrand", "hourly_reversion_f90", enabled=True)
         self.assertEqual(foundry.subjects("crypto", self.manifests), ["hourly_reversion_f90", "spot_quotes"])
 
+    def test_excluded_strategies_are_never_subjects(self):
+        self.manifests["hilibrand"] = SimpleNamespace(id="hilibrand", family="crypto", live=True)
+        self.strategies.store.update("hilibrand", "hourly_reversion", enabled=True, house=True)
+        self.strategies.store.update("hilibrand", "spot_quotes", enabled=True, house=True)
+        self.strategies.store.update("hilibrand", "perp_reversion", enabled=True, house=True)
+        self.assertEqual(self.foundry().subjects("crypto", self.manifests), ["hourly_reversion", "perp_reversion", "spot_quotes"])
+        self.assertEqual(self.foundry(excluded_strategies=["spot_quotes"]).subjects("crypto", self.manifests), ["hourly_reversion", "perp_reversion"])
+
     def test_the_code_generator_is_told_the_fees_the_backtest_charges(self):
         # Sept 17, 2026: the prompt still said Kalshi rounds to the cent and Coinbase charges
         # 0.25%/0.60% while the backtest charged $0.0001 rounding and 0.5%/1.2%.
