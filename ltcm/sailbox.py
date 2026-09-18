@@ -75,6 +75,21 @@ FLOOR_HOSTS: tuple[str, ...] = (
     # leap: weather -- the National Weather Service point forecasts and station readings the
     # weather desk prices Kalshi's daily temperature markets from. Public, no key.
     "api.weather.gov",
+    # The arena (Sept 18, 2026): more to read, all public and keyless. Polymarket's odds on
+    # the events Kalshi lists; open-meteo's GFS/ECMWF ensembles for the temperature markets;
+    # Deribit, OKX, Hyperliquid and Kraken for perps funding, basis and implied vol; ESPN's
+    # scoreboards for the sports markets; BLS prints and the Fed's calendar for the macro ones.
+    "gamma-api.polymarket.com",
+    "clob.polymarket.com",
+    "api.open-meteo.com",
+    "ensemble-api.open-meteo.com",
+    "www.deribit.com",
+    "www.okx.com",
+    "api.hyperliquid.xyz",
+    "futures.kraken.com",
+    "site.api.espn.com",
+    "api.bls.gov",
+    "www.federalreserve.gov",
     "news.google.com",
     "docs.sailresearch.com",
     "pypi.org",

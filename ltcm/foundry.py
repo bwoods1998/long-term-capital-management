@@ -123,7 +123,7 @@ DEFAULTS: dict[str, Any] = {
     ],
 }
 UNBACKTESTABLE_FAMILIES = ("weather",)
-UNBACKTESTABLE_STRATEGIES = ("daily_temps",)
+UNBACKTESTABLE_STRATEGIES = ("daily_temps", "temps_ensemble", "poly_cross", "perp_funding")
 BUDGET_DESK = "foundry"
 RESULT_MARKER = "BACKTEST-RESULT "
 #: The longest result line the sandbox prints: its output is bounded at 4,000 characters.

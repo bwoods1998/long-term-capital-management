@@ -42,6 +42,21 @@ SANDBOX_HOSTS = (
     "efts.sec.gov",
     "data.sec.gov",
     "api.weather.gov",            # leap: weather -- NWS forecasts and readings, public
+    # The arena (Sept 18, 2026): more to read, all public and keyless. Polymarket's odds on
+    # the events Kalshi lists; open-meteo's GFS/ECMWF ensembles for the temperature markets;
+    # Deribit, OKX, Hyperliquid and Kraken for perps funding, basis and implied vol; ESPN's
+    # scoreboards for the sports markets; BLS prints and the Fed's calendar for the macro ones.
+    "gamma-api.polymarket.com",
+    "clob.polymarket.com",
+    "api.open-meteo.com",
+    "ensemble-api.open-meteo.com",
+    "www.deribit.com",
+    "www.okx.com",
+    "api.hyperliquid.xyz",
+    "futures.kraken.com",
+    "site.api.espn.com",
+    "api.bls.gov",
+    "www.federalreserve.gov",
 )
 #: Only the lab image build needs package sources; forks keep the list, which is harmless.
 BUILD_HOSTS = SANDBOX_HOSTS + (
@@ -144,6 +159,52 @@ def kalshi_history(ticker, limit=500):
 def news(query, limit=10):
     src = _source("news")
     return src.news(query, limit) if src is not None and hasattr(src, "news") else []
+
+def _reader(module, cls, ttl=120.0):
+    mod = __import__("ltcm.data." + module, fromlist=[cls])
+    return getattr(mod, cls)(transport=HttpTransport(cache_dir="/lab/cache", ttl=ttl, min_interval=0.2))
+
+def polymarket(query="", limit=20):
+    """Polymarket's active markets matching the words of `query` (empty: the busiest 100), each
+    with outcomes, prices and token ids. `polymarket_matches(title)` scores one Kalshi title."""
+    return _reader("polymarket", "Polymarket").search(query, limit=limit)
+
+def polymarket_matches(title, limit=5):
+    return _reader("polymarket", "Polymarket").matches(title, limit=limit)
+
+def polymarket_book(token_id):
+    return _reader("polymarket", "Polymarket").book(token_id)
+
+def ensemble(city, days=3):
+    """open-meteo's GFS+ECMWF ensemble members' daily highs (F) for a Kalshi weather city:
+    days[{date, members, mean, sd, p10, p50, p90, n}]."""
+    from ltcm.data.weather import city_for
+    c = city_for(city)
+    return _reader("openmeteo", "OpenMeteo", ttl=900.0).ensemble_daily_high(float(c.latitude), float(c.longitude), days=days, timezone=c.timezone)
+
+def bracket_probability(members, low=None, high=None):
+    from ltcm.data.openmeteo import bracket_probability as bp
+    return bp(members, low, high)
+
+def derivs(symbols=("BTC", "ETH", "SOL")):
+    """Perps funding across OKX, Hyperliquid and Kraken, Deribit DVOL and a funding z-score per symbol."""
+    return _reader("derivs", "Derivatives", ttl=60.0).snapshot(symbols)
+
+def basis(currency="BTC"):
+    return _reader("derivs", "Derivatives", ttl=60.0).basis(currency)
+
+def scoreboard(league):
+    """ESPN's scoreboard for nfl, nba, mlb, nhl, ncaaf, ncaab, mls or epl: status, scores, odds."""
+    return _reader("sports", "Sports", ttl=60.0).scoreboard(league)
+
+def match_game(title, rows):
+    from ltcm.data.sports import Sports
+    return Sports.match_kalshi(title, rows)
+
+def macro(series=None):
+    """BLS series (CPI, unemployment, payrolls by default) newest first, and the next FOMC date."""
+    reader = _reader("macro", "Macro", ttl=3600.0)
+    return {"bls": reader.bls_series(series) if series else reader.bls_series(), "next_fomc": reader.next_fomc()}
 '''
 
 #: The image build, as one shell script run on the fresh box. Debian base; root.
@@ -178,6 +239,11 @@ FLOOR_EXTRAS = (
     "ltcm/data/kalshi.py",
     "ltcm/data/coinbase.py",
     "ltcm/data/weather.py",
+    "ltcm/data/polymarket.py",
+    "ltcm/data/openmeteo.py",
+    "ltcm/data/derivs.py",
+    "ltcm/data/sports.py",
+    "ltcm/data/macro.py",
     "ltcm/history.py",
     "ltcm/backtest.py",
 )

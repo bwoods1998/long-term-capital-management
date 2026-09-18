@@ -54,7 +54,9 @@ from .manifest import DeskManifest
 NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
-    "max_per_desk": 3,
+    # The arena (Sept 18, 2026): a live book runs every house strategy of its family and up to
+    # `foundry.max_explorers_per_desk` Foundry candidates side by side, each on its own record.
+    "max_per_desk": 12,
     "min_cadence_seconds": 300,
     "max_cadence_seconds": 86_400,
     "max_intents_per_run": 5,
@@ -83,20 +85,42 @@ STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": 
 SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
 #: leap: futures -- a third house strategy for the crypto family: mean reversion on Coinbase's
 #: CDE perpetual-style contracts, long and short, where a contract's fee is cents, not percent.
-EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion"], "kalshi": ["daily_temps"]}
+EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion", "perp_funding"], "kalshi": ["daily_temps", "temps_ensemble", "poly_cross"]}
 #: The asset class a desk must trade for an extra starter to be dealt to it (the perps need a
 #: futures mandate; the temperature markets are Kalshi events, priced on the Kalshi book since
 #: the weather family's chat desks were retired on Sept 18, 2026).
-EXTRA_REQUIRES: dict[str, str] = {"perp_reversion": "future", "daily_temps": "event"}
+EXTRA_REQUIRES: dict[str, str] = {"perp_reversion": "future", "perp_funding": "future", "daily_temps": "event", "temps_ensemble": "event", "poly_cross": "event"}
 #: What the live desks run on the perps (Sept 18, 2026, the owner's call: real Coinbase trades
 #: tonight): a lower trigger than the code's default, two entries a run, any contract the desk's
 #: whole sleeve can hold. The evidence gate still decides size; the risk engine still binds.
 EXTRA_LIVE_PARAMS: dict[str, dict[str, Any]] = {
     "perp_reversion": {"z_entry": 1.5, "max_intents": 2, "max_contract_usd": 300, "max_position_pct": 1.0},
+    "perp_funding": {"max_intents": 2, "max_contract_usd": 300, "max_position_pct": 1.0},
 }
 #: What the shadow desks explore on the perps: the signal's window, threshold and holding time.
 #: The live desk runs the code's defaults; each shadow is dealt one of these by its id.
 EXTRA_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "temps_ensemble": [
+        {"min_edge": 0.0},
+        {"min_edge": 0.01, "shrink": 0.3},
+        {"min_edge": 0.02, "shrink": 0.5, "min_price": 0.10},
+        {"min_edge": 0.01, "maker": True},
+        {"min_edge": 0.0, "max_hours": 18},
+    ],
+    "poly_cross": [
+        {"min_edge": 0.03},
+        {"min_edge": 0.05, "maker": True},
+        {"min_edge": 0.04, "max_hours": 72},
+        {"min_edge": 0.02, "min_volume_24h": 20000},
+        {"min_edge": 0.06, "max_hours": 240},
+    ],
+    "perp_funding": [
+        {"z_entry": 1.5},
+        {"z_entry": 2.5, "holding_hours": 8},
+        {"rate_entry": 0.0003},
+        {"z_entry": 2.0, "stop_mult": 1.0},
+        {"z_entry": 2.0, "holding_hours": 2},
+    ],
     "daily_temps": [
         {"min_edge": 0.0},
         {"min_edge": 0.0, "sigma_day_ahead": 3.5},
@@ -182,7 +206,7 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
 #: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
 PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "jitter": 0.25, "foundry_hold_hours": 72}
-STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800}
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800, "temps_ensemble": 1800, "poly_cross": 900, "perp_funding": 600}
 
 
 def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:
@@ -359,6 +383,48 @@ class Kit:
         from ltcm.data import HttpTransport
         from ltcm.data.weather import Weather
         return Weather(transport=HttpTransport(cache_dir="/lab/cache", ttl=600.0, min_interval=0.2)).forecast(city)
+    def _reader(self, module, cls, ttl=120.0):
+        from ltcm.data import HttpTransport
+        mod = __import__("ltcm.data." + module, fromlist=[cls])
+        return getattr(mod, cls)(transport=HttpTransport(cache_dir="/lab/cache", ttl=ttl, min_interval=0.2))
+    def polymarket(self, query="", limit=20):
+        """Polymarket's active markets matching the words of `query` (empty: the busiest 100):
+        {id, question, slug, outcomes, prices, token_ids, volume_24h, end_date}. Another venue's
+        price on the same question is the cleanest reference an event contract can have."""
+        return self._reader("polymarket", "Polymarket").search(query, limit=limit)
+    def polymarket_matches(self, title, limit=5):
+        """Polymarket markets whose question shares the words of a Kalshi title, best first,
+        each with yes_price and score (token overlap). Check the numbers and dates yourself."""
+        return self._reader("polymarket", "Polymarket").matches(title, limit=limit)
+    def polymarket_book(self, token_id):
+        return self._reader("polymarket", "Polymarket").book(token_id)
+    def ensemble(self, city, days=3):
+        """open-meteo's GFS and ECMWF ensemble members' daily highs (F) for a Kalshi weather
+        city: days[{date, members, mean, sd, p10, p50, p90, n}]. A bracket's probability is the
+        share of members inside it (kit.bracket_probability)."""
+        from ltcm.data.weather import city_for
+        c = city_for(city)
+        return self._reader("openmeteo", "OpenMeteo", ttl=900.0).ensemble_daily_high(float(c.latitude), float(c.longitude), days=days, timezone=c.timezone)
+    def bracket_probability(self, members, low=None, high=None):
+        from ltcm.data.openmeteo import bracket_probability as bp
+        return bp(members, low, high)
+    def derivs(self, symbols=("BTC", "ETH", "SOL")):
+        """Perps funding across OKX, Hyperliquid and Kraken, Deribit's DVOL implied vol and a
+        funding z-score against the trailing 30 settlements, one row per symbol."""
+        return self._reader("derivs", "Derivatives", ttl=60.0).snapshot(symbols)
+    def basis(self, currency="BTC"):
+        return self._reader("derivs", "Derivatives", ttl=60.0).basis(currency)
+    def scoreboard(self, league):
+        """ESPN's scoreboard for nfl, nba, mlb, nhl, ncaaf, ncaab, mls or epl: status, period,
+        clock, scores, records and the book's spread, total and moneylines."""
+        return self._reader("sports", "Sports", ttl=60.0).scoreboard(league)
+    def match_game(self, title, rows):
+        from ltcm.data.sports import Sports
+        return Sports.match_kalshi(title, rows)
+    def macro(self, series=None):
+        """BLS series (CPI, unemployment, payrolls by default) newest first, and the next FOMC date."""
+        reader = self._reader("macro", "Macro", ttl=3600.0)
+        return {"bls": reader.bls_series(series) if series else reader.bls_series(), "next_fomc": reader.next_fomc()}
     def weather_cities(self):
         from ltcm.data.weather import CITIES
         return [

@@ -827,6 +827,7 @@ class FastTrackTests(FoundryCase):
     def test_a_full_live_desk_makes_room_by_setting_aside_the_candidate_it_replaces(self):
         from ltcm.strategies import _sha
 
+        self.strategies.config["max_per_desk"] = 3  # the case is about a full desk
         for name in ("kalshi_extra", "kalshi_favorites_f1"):
             self.manager.files["mullins"][f"{name}.py"] = GOOD_CODE
             self.strategies.store.update("mullins", name, params={}, cadence_seconds=900, enabled=True, code_sha256=_sha(GOOD_CODE), foundry_code=name.endswith("_f1"))

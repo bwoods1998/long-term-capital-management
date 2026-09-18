@@ -1323,6 +1323,44 @@ class BacktestKit:
         self.unsupported = "family weather is not backtestable: there is no history of NWS forecasts"
         raise Unsupported(self.unsupported)
 
+    # The arena's live-only readers (Sept 18, 2026): no history of Polymarket's books, the
+    # ensembles, funding or scoreboards is kept, so a replay says so instead of guessing.
+    def _live_only(self, name):
+        self.unsupported = f"kit.{name} reads live data with no history: not backtestable"
+        raise Unsupported(self.unsupported)
+
+    def polymarket(self, query="", limit=20):
+        self._live_only("polymarket")
+
+    def polymarket_matches(self, title, limit=5):
+        self._live_only("polymarket_matches")
+
+    def polymarket_book(self, token_id):
+        self._live_only("polymarket_book")
+
+    def ensemble(self, city, days=3):
+        self._live_only("ensemble")
+
+    def bracket_probability(self, members, low=None, high=None):
+        from ltcm.data.openmeteo import bracket_probability as bp
+        return bp(members, low, high)
+
+    def derivs(self, symbols=("BTC", "ETH", "SOL")):
+        self._live_only("derivs")
+
+    def basis(self, currency="BTC"):
+        self._live_only("basis")
+
+    def scoreboard(self, league):
+        self._live_only("scoreboard")
+
+    def match_game(self, title, rows):
+        from ltcm.data.sports import Sports
+        return Sports.match_kalshi(title, rows)
+
+    def macro(self, series=None):
+        self._live_only("macro")
+
 
 # ------------------------------------------------------------------------ simulator
 

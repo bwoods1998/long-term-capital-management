@@ -103,7 +103,7 @@
       "min_days": 3,
       "full_size_multiple": 2
     },
-    "run_timeout_seconds": 90,
+    "run_timeout_seconds": 180,
     "idle_publish_seconds": 3600,
     "starters": true,
     "pooled_evidence": true,
