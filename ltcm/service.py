@@ -2380,12 +2380,15 @@ class Service:
         # to their strategy runs, and `sessions.max_live_per_day` thins a live desk's slots.
         policy = dict(self.config.get("sessions") or {})
         shadow_enabled = bool(policy.get("shadow_enabled", True))
+        live_enabled = bool(policy.get("live_enabled", True))
         max_live = policy.get("max_live_per_day")
         for desk_id, manifest in sorted(self.active_manifests().items()):
             if not self.entry_allowed(desk_id):
                 continue
             if not shadow_enabled and not manifest.live:
                 continue
+            if not live_enabled and manifest.live:
+                continue  # 17:15 UTC Sept 18, 2026: the live books trade by code alone
             tz = ZoneInfo(manifest.cadence.timezone)
             local = parse_iso(at).astimezone(tz)
             if self.resolution_due(manifest, at):
@@ -2482,6 +2485,8 @@ class Service:
         policy = dict(self.config.get("sessions") or {})
         if not manifest.live and not bool(policy.get("shadow_enabled", True)):
             return None  # the arena: a shadow desk runs its strategies, never a session
+        if manifest.live and not bool(policy.get("live_enabled", True)):
+            return None
         slots = self.session_slots(manifest)
         if not slots:
             return None
@@ -3319,6 +3324,8 @@ class Service:
             # A shadow desk woken by the night desk is a chat session by another door: the
             # arena's session policy applies here too (Sept 18, 2026: 60 shadow wakes in 8 hours).
             allow_shadow = not live_only and bool(dict(self.config.get("sessions") or {}).get("shadow_enabled", True))
+            if not bool(dict(self.config.get("sessions") or {}).get("live_enabled", True)):
+                allow_shadow = None  # no sessions at all: the night desk has nobody to wake
 
             def watch_once(at: str = at, allow: bool = allow_shadow) -> Any:
                 try:
@@ -3327,7 +3334,7 @@ class Service:
                     self.alert("warning", f"night watch failed: {type(exc).__name__}: {exc}")
                     return []
 
-            result["watch"] = self._off_tick("watch", watch_once) or []
+            result["watch"] = [] if allow_shadow is None else (self._off_tick("watch", watch_once) or [])
 
         # Keep the event-contract index warm so a desk's first search does not wait on a sweep.
         if any("event" in m.instruments.asset_classes for m in self.manifests.values()):

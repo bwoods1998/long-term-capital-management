@@ -348,6 +348,7 @@
   },
   "sessions": {
     "shadow_enabled": false,
+    "live_enabled": false,
     "max_live_per_day": 2
   }
 }

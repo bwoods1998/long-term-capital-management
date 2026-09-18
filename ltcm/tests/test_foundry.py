@@ -615,7 +615,7 @@ class DeploymentTests(FoundryCase):
         house = manifest(id="mullins-9", family="kalshi", parent_id="mullins", capital={"mode": "live", "usd": "142"})
         self.manifests["mullins-9"] = house
         self.strategies.config["book_roles"] = {"mullins": "explorers"}
-        self.strategies.store.update("mullins", "kalshi_favorites", enabled=False)
+        self.strategies.store.update("mullins", "kalshi_favorites", enabled=False, note="explorers book (Sept 18, 2026): only Foundry candidates trade here")
         self.strategies.store.update("mullins", "kalshi_favorites_f7_1", enabled=True, foundry_explorer=True, foundry_code=True)
         self.strategies.store.update("mullins-9", "kalshi_favorites", enabled=True, house=True)
         self.strategies.store.update("mullins-9", "temps_ensemble", enabled=True, house=True)

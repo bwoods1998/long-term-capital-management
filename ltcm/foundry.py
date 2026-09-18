@@ -845,12 +845,21 @@ class Foundry:
         books = sorted((m for m in manifests.values() if m.family == family), key=lambda m: (m.id != (live.id if live else ""), not getattr(m, "live", False), m.id))
         rows: dict[str, dict[str, Any]] = {}
         seen: set[str] = set()
+        paused: set[str] = set()
         for book in books:
             for name, row in self.store().for_desk(book.id).items():
                 seen.add(name)
+                if getattr(book, "live", False) and not row.get("enabled", True) and not str(row.get("note") or "").startswith(("real money follows evidence", "explorers book")):
+                    paused.add(name)  # the desk's own verdict on it: not mutated again
+                # A shadow desk lends its house strategies only: a Foundry candidate there is
+                # still proving itself and is not a parent until it reaches a live book.
+                if not getattr(book, "live", False) and (row.get("foundry_code") or FOUNDRY_NAME.search(str(name))):
+                    continue
                 if row.get("enabled", True) and name not in rows:
                     rows[name] = row
-        # The house starter: enabled on some live book, or on none of them yet (the file).
+        for name in paused:
+            rows.pop(name, None)
+        # The house starter: enabled on some book and not paused by a live one, or on none yet.
         if house and house not in excluded and (house in rows or house not in seen):
             names.append(house)
         if live is not None:
