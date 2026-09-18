@@ -1197,7 +1197,9 @@ class ServiceFoundryTests(ServiceCase):
         config = json.loads((starters.parent / "config.json").read_text(encoding="utf-8"))
         self.assertNotIn("ranges", config["foundry"]["families"])
         self.assertIn("ranges", config["evolution"]["excluded_families"])
-        self.assertEqual(config["event_rules"]["max_event_cluster_floor_pct"], "0.08")
+        # Sept 18, 2026: the pooled favorites record passed the evidence gate, and the firm's
+        # per-cluster cap on the live floor went from 8% to 12% (per market 3.5% to 6%).
+        self.assertEqual(config["event_rules"]["max_event_cluster_floor_pct"], "0.12")
 
     def test_a_running_cycle_is_never_started_twice(self):
         self.service.config["background_work"] = True

@@ -32,8 +32,8 @@
   "event_rules": {
     "min_event_price": "0.15",
     "max_event_market_pct": "0.15",
-    "max_event_market_floor_pct": "0.035",
-    "max_event_cluster_floor_pct": "0.08"
+    "max_event_market_floor_pct": "0.06",
+    "max_event_cluster_floor_pct": "0.12"
   },
   "mark_interval_seconds": 300,
   "mark_parallelism": 6,
