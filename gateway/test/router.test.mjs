@@ -20,7 +20,7 @@ const env = (extra = {}) => ({
   KALSHI_PRIVATE_KEY: keys.kalshi.pkcs8,
   COINBASE_KEY_NAME: 'organizations/o/apiKeys/k',
   COINBASE_API_SECRET: keys.coinbase.seed32,
-  MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York',
+  MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', PRODUCT_CACHE_MS: '0',
   ...extra,
 });
 

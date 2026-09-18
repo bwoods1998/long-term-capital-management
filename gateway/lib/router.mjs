@@ -23,6 +23,9 @@ import * as kalshi from './kalshi.mjs';
 import * as coinbase from './coinbase.mjs';
 
 export const VENUES = ['kalshi', 'coinbase'];
+//: A venue product listing (price, contract size) reused across orders for this long.
+const PRODUCT_CACHE_MS = 60_000;
+const productCache = new Map();
 const METHODS = ['GET', 'POST', 'DELETE'];
 const ALLOW = METHODS.join(', ');
 
@@ -123,21 +126,34 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
         // never from the trading VM that is asking us to authorize the spend. A futures order
         // also needs the venue's contract size, whatever the caller says its notional is.
         if (!/^[A-Z0-9-]{3,80}$/.test(product)) return fail('Invalid product id.', 400);
-        let quote = null;
-        try {
-          // Sept 18, 2026: the first live futures orders were refused here; the venue's edge
-          // answers a Worker's bare fetch differently from a client's, so the request names
-          // itself and the failure names the status.
-          quote = await fetcher(`https://api.coinbase.com/api/v3/brokerage/market/products/${product}`, {
-            method: 'GET', signal: AbortSignal.timeout(8000), redirect: 'follow',
-            headers: { 'User-Agent': 'ltcm-gateway/1.0', 'Accept': 'application/json' },
-          });
-        } catch (error) {
-          return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
+        // Sept 18, 2026: the venue rate-limited the Worker's bare product fetch (HTTP 429) and
+        // a live order was refused for it. The lookup is signed like every other venue call,
+        // and a product's listing is kept for PRODUCT_CACHE_MS across orders.
+        const cacheMs = Number(env.PRODUCT_CACHE_MS ?? PRODUCT_CACHE_MS);
+        let data = cacheMs > 0 ? productCache.get(product) : null;
+        if (!data || data.expires < Date.now()) {
+          let quote = null;
+          try {
+            const productPath = `api/v3/brokerage/market/products/${product}`;
+            let headers = { 'User-Agent': 'ltcm-gateway/1.0', Accept: 'application/json' };
+            try {
+              const signed = await sign({ venue: 'coinbase', path: productPath }, new Request(`https://x/${productPath}`, { method: 'GET' }), env, { now: now(), nonce });
+              headers = signed.headers;
+            } catch { /* unsigned when the venue key is not configured */ }
+            quote = await fetcher(`https://api.coinbase.com/${productPath}`, {
+              method: 'GET', signal: AbortSignal.timeout(8000), redirect: 'follow', headers,
+            });
+          } catch (error) {
+            return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
+          }
+          if (!quote.ok) return fail(`Cannot independently price this order: venue HTTP ${quote.status}.`, 503);
+          try {
+            data = { ...(await quote.json()), expires: Date.now() + cacheMs };
+          } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
+          if (cacheMs > 0) productCache.set(product, data);
+          if (productCache.size > 256) productCache.clear();
         }
         try {
-          if (!quote.ok) return fail(`Cannot independently price this order: venue HTTP ${quote.status}.`, 503);
-          const data = await quote.json();
           if (!(Number(data.price) > 0)) return fail('Cannot independently price this order: no venue price.', 503);
           if (!leg?.limit_price) reference = String(Number(data.price) * 1.10);
           if (future) {
