@@ -88,7 +88,7 @@ EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion"]}
 #: tonight): a lower trigger than the code's default, two entries a run, any contract the desk's
 #: whole sleeve can hold. The evidence gate still decides size; the risk engine still binds.
 EXTRA_LIVE_PARAMS: dict[str, dict[str, Any]] = {
-    "perp_reversion": {"z_entry": 1.75, "max_intents": 2, "max_contract_usd": 300, "max_position_pct": 1.0},
+    "perp_reversion": {"z_entry": 1.5, "max_intents": 2, "max_contract_usd": 300, "max_position_pct": 1.0},
 }
 #: What the shadow desks explore on the perps: the signal's window, threshold and holding time.
 #: The live desk runs the code's defaults; each shadow is dealt one of these by its id.
@@ -990,7 +990,12 @@ class Strategies:
                         changes: dict[str, Any] = {}
                         # A promoted or dealt setting (leap: promotion) is the desk's own until the
                         # next promotion; only an untouched house row follows the house params.
-                        if not row.get("promoted_at") and dict(row.get("params") or {}) != params:
+                        # A house code refresh stamps promoted_at too (its record starts over),
+                        # but the row is still the house's: its params follow the house. Until
+                        # Sept 18, 2026 that stamp froze every house row's params after the
+                        # first refresh, so a changed house setting never reached a desk.
+                        untouched = not row.get("promoted_at") or row.get("promoted_from") == "house code refresh"
+                        if untouched and dict(row.get("params") or {}) != params:
                             changes["params"] = params
                         if int(row.get("cadence_seconds") or 0) != cadence:
                             changes["cadence_seconds"] = cadence

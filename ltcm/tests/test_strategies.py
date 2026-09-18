@@ -1192,3 +1192,22 @@ class DispatcherTests(StrategyCase):
     def test_no_dispatcher_without_the_setting(self):
         self.strategies.config.update({"parallel_runs": 4, "dispatch_seconds": 0})
         self.assertFalse(self.strategies.start_dispatcher(lambda: self.service.manifests, lambda: NOW))
+
+
+class HouseParamsAfterRefreshTests(StrategyCase):
+    def test_a_house_row_stamped_by_a_code_refresh_still_follows_the_house_params(self):
+        from ltcm.strategies import EXTRA_LIVE_PARAMS
+        self.strategies.config["starters"] = True
+        live = manifest(id="hilibrand", family="crypto", parent_id=None, venues=["coinbase"], capital={"mode": "live", "usd": "487"},
+                        instruments={**SAMPLE["instruments"], "asset_classes": ["crypto", "future"], "deny": []})
+        self.service.manifests = {live.id: live}
+        self.manager.files[live.id] = {}
+        self.strategies.bootstrap(self.service.manifests)
+        row = self.strategies.store.for_desk(live.id)["perp_reversion"]
+        self.assertEqual(row["params"], EXTRA_LIVE_PARAMS["perp_reversion"])
+        self.strategies.store.update(live.id, "perp_reversion", params={}, promoted_at=NOW, promoted_from="house code refresh")
+        self.strategies.bootstrap(self.service.manifests)
+        self.assertEqual(self.strategies.store.for_desk(live.id)["perp_reversion"]["params"], EXTRA_LIVE_PARAMS["perp_reversion"], "the refresh stamp does not freeze the house params")
+        self.strategies.store.update(live.id, "perp_reversion", params={"z_entry": 2.5}, promoted_at=LATER, promoted_from="hilibrand-2")
+        self.strategies.bootstrap(self.service.manifests)
+        self.assertEqual(self.strategies.store.for_desk(live.id)["perp_reversion"]["params"], {"z_entry": 2.5}, "a promotion's params are the desk's own")
