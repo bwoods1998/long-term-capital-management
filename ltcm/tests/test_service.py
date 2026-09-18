@@ -222,6 +222,13 @@ class ServiceCase(unittest.TestCase):
             # the bandit has its own case in test_committee.
             "committee": {"bandit_enabled": False},
             "sources": {"news": False, "edgar": False, "event": False, "chain": False, "weather": False},
+            # Every desk sits down: the packaged config keeps shadow desks to their strategies
+            # (the arena, Sept 18, 2026); the cadence cases test the schedule itself.
+            "sessions": {"shadow_enabled": True},
+            # The lab proposes: the packaged config turned its experiments off with the chat desks.
+            "lab": {"max_experiments_per_day": 24, "max_experiments_per_family": 6},
+            # The floor founds families in the cases that ask; the packaged config stopped it.
+            "founding": {"enabled": True},
         }
         base.update(config)
         return Service(

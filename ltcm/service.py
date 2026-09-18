@@ -30,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from .broker import Instrument, OrderIntent, money, text
@@ -221,6 +221,20 @@ RUNWAY_KEYS = (
 def _venue_rank(venue: str) -> tuple[int, str]:
     """Sort key: the owner's own reading order first, anything else alphabetically after it."""
     return (VENUE_ORDER.index(venue) if venue in VENUE_ORDER else len(VENUE_ORDER), venue)
+
+
+def _thin_slots(slots: Sequence[str], limit: Any) -> list[str]:
+    """At most `limit` of the desk's session slots, spread evenly over its day; all of them
+    when `limit` is None or zero."""
+    rows = list(slots)
+    try:
+        keep = int(limit) if limit is not None else 0
+    except (TypeError, ValueError):
+        keep = 0
+    if keep <= 0 or len(rows) <= keep:
+        return rows
+    step = len(rows) / keep
+    return [rows[int(i * step)] for i in range(keep)]
 
 
 def _clock_minutes(value: str) -> int:
@@ -2309,8 +2323,17 @@ class Service:
         due: list[tuple[DeskManifest, str]] = []
         catchup = int(self.config["session_catchup_seconds"])
         postmortem_at = _clock_minutes(str(self.config["postmortem_time"]))
+        # The arena (Sept 18, 2026): a model session is the expensive, losing way to trade (every
+        # generation of chat desks was net negative over three days); the code strategies and the
+        # Foundry are the floor's learning loop. `sessions.shadow_enabled` false keeps shadow desks
+        # to their strategy runs, and `sessions.max_live_per_day` thins a live desk's slots.
+        policy = dict(self.config.get("sessions") or {})
+        shadow_enabled = bool(policy.get("shadow_enabled", True))
+        max_live = policy.get("max_live_per_day")
         for desk_id, manifest in sorted(self.active_manifests().items()):
             if not self.entry_allowed(desk_id):
+                continue
+            if not shadow_enabled and not manifest.live:
                 continue
             tz = ZoneInfo(manifest.cadence.timezone)
             local = parse_iso(at).astimezone(tz)
@@ -2320,7 +2343,7 @@ class Service:
                 continue
             day = local.date().isoformat()
             minutes_now = local.hour * 60 + local.minute
-            slots = [(slot, f"cadence:{slot}") for slot in manifest.cadence.sessions]
+            slots = [(slot, f"cadence:{slot}") for slot in _thin_slots(manifest.cadence.sessions, max_live)]
             slots.append((str(self.config["postmortem_time"]), "postmortem"))
             for slot, trigger in slots:
                 minutes_slot = _clock_minutes(slot) if trigger != "postmortem" else postmortem_at
@@ -2337,6 +2360,11 @@ class Service:
                     continue  # nothing to review: a desk bred an hour ago has no day to look back on
                 due.append((manifest, trigger))
         return due
+
+    def session_slots(self, manifest: DeskManifest) -> list[str]:
+        """The cadence slots the policy leaves a desk (see `due_sessions`)."""
+        policy = dict(self.config.get("sessions") or {})
+        return _thin_slots(manifest.cadence.sessions, policy.get("max_live_per_day"))
 
     def worked_since_last_postmortem(self, manifest: DeskManifest) -> bool:
         """True when the desk has sat down for a trading session since its last post-mortem.

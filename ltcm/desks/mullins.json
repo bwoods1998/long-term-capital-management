@@ -21,11 +21,11 @@
     "allow_short": false
   },
   "limits": {
-    "max_position_pct": "0.20",
-    "max_gross_pct": "1.0",
-    "max_order_notional_pct": "0.20",
-    "max_daily_loss_pct": "0.10",
-    "max_orders_per_day": 240,
+    "max_position_pct": "0.35",
+    "max_gross_pct": "1.5",
+    "max_order_notional_pct": "0.35",
+    "max_daily_loss_pct": "0.30",
+    "max_orders_per_day": 600,
     "max_limit_deviation_pct": "0.30"
   },
   "model": {

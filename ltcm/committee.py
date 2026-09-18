@@ -487,6 +487,15 @@ class Committee:
                 shadow[desk_id] = True
                 reasons[desk_id] = "shadow sleeve: notional scoring budget at manifest capital"
                 continue
+            if bool(self.config.get("venue_book", False)):
+                # The arena (Sept 18, 2026): a live desk is its venue's book. Its sleeve is the
+                # venue's whole equity, shared equally with the venue's other live desks, read
+                # again at every allocation so profit compounds and a deposit is capital at once.
+                # Until then the bandit had cut Mullins to $26 with $500 idle on Kalshi, and its
+                # strategies were refused for "insufficient desk cash" while the venue was flush.
+                targets[desk_id] = _quantize(base)  # replaced below once the venues are read
+                reasons[desk_id] = "venue book: an equal share of the venue's equity"
+                continue
             if not resize:
                 held = previous.get(desk_id, base)
                 targets[desk_id] = _quantize(held)
@@ -525,6 +534,18 @@ class Committee:
                 equity_by_venue = {}
         held_total = sum(equity_by_venue.values(), ZERO)
         cap = held_total if held_total > ZERO else money(self.config["floor_capital_usd"])
+        if bool(self.config.get("venue_book", False)) and equity_by_venue:
+            for venue, held in equity_by_venue.items():
+                books = sorted(
+                    desk_id for desk_id, manifest in active.items()
+                    if desk_id in targets and not shadow.get(desk_id) and manifest.market_venue == venue
+                    and capital_mode(manifest, modes) == "live"
+                )
+                if books and held > ZERO:
+                    share = _quantize(held / Decimal(len(books)))
+                    for desk_id in books:
+                        targets[desk_id] = share
+                        reasons[desk_id] = f"venue book: {text(share)} of {venue}'s {text(_quantize(held))}"
         # Only real sleeves compete for the floor's real capital; a notional budget costs nothing.
         funded = {k: v for k, v in targets.items() if not shadow.get(k)}
         total = sum(funded.values(), ZERO)

@@ -966,6 +966,10 @@ class Foundry:
         state = self.state()
         cycle = self._next_cycle(state)
         fast = self.fast_track(manifests, problems)
+        try:
+            self.prune_explorers(manifests)
+        except Exception as exc:
+            problems.append(f"explorer pruning failed: {type(exc).__name__}: {str(exc)[:120]}")
         pick = self._pick(manifests, state)
         if pick is None:
             self._save(cycle=cycle)
@@ -1063,7 +1067,17 @@ class Foundry:
         best = max(scored, key=lambda c: c["evidence"]["out_of_sample"]["return_on_notional"], default=None)
         winner = qualified[0] if qualified else None
         deployment = None
-        if winner is not None:
+        if bool(cfg.get("deploy_live")) and live is not None and live.live:
+            # The arena (Sept 18, 2026): a candidate earns its forward record with real fills at
+            # learning size on the live book, not with modelled fills on a shadow desk. The
+            # winner goes; when nothing qualified, the best candidate that beat the baselines
+            # goes as an explorer. `prune_explorers` retires the ones that lose.
+            chosen, role = (winner, "winner") if winner is not None else ((best, "explorer") if bool(cfg.get("explorers", True)) and best is not None and (_float(best["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0) > reference else (None, ""))
+            if chosen is not None:
+                deployment = self.deploy_live(chosen, family, subject, live, problems, source=source, role=role, cycle=cycle)
+                if deployment is not None:
+                    winner = chosen
+        elif winner is not None:
             deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
         self.progress("learn", f"Cycle {cycle}: {sum(1 for c in candidates if self.measured(c))}/{len(candidates)} candidates measured successfully; {len(qualified)} qualified; "
                       + ("winner deployed for forward testing" if deployment else "no new deployment"),
@@ -1809,6 +1823,112 @@ class Foundry:
         self.publish_desk(desk, name, f"foundry-{fid}-shadow", at, f"foundry {fid}: {name} on shadow desk {desk.id}", lines, code_sha, winner.get("seconds"))
         return record
 
+    # ------------------------------------------------------------------ the arena: live explorers
+    def explorer_rows(self, desk_id: str) -> dict[str, dict[str, Any]]:
+        return {name: row for name, row in self.store().for_desk(desk_id).items() if row.get("foundry_explorer")}
+
+    def deploy_live(self, candidate: dict[str, Any], family: str, subject: str, live: Any, problems: list[str], *, source: str | None, role: str, cycle: int) -> dict[str, Any] | None:
+        """Install a candidate on the family's live desk as its own strategy row, at learning
+        size (a row with no record sizes at `learning_usd`; `Strategies.size_cap` ramps it on its
+        own settled record and the family's pooled one). A params candidate becomes a code row
+        under a Foundry name, so its record is its own and the live desk's house row is untouched.
+        At most `max_explorers_per_desk` rows: the one with the worst record makes room."""
+        at = self.now()
+        store = self.store()
+        manager = self.sandboxes()
+        cfg = self.config
+        frozen = [str(k) for k in (cfg.get("frozen_params") or [])]
+        fid = candidate["id"]
+        source = candidate.get("code") if source is None else source
+        code = candidate.get("code") or source
+        if not code:
+            problems.append(f"{fid} has no code to deploy")
+            return None
+        if candidate["kind"] == "params":
+            name = f"{base_name(subject)}_f{cycle}_{100 + int(str(fid).rsplit('-', 1)[-1][:4], 16) % 900}"
+        else:
+            name = str(candidate["strategy"])
+        parent_row = store.for_desk(live.id).get(subject) or {}
+        params = {**{k: v for k, v in dict(candidate.get("params") or {}).items() if k not in frozen}, **pinned_frozen(code, parent_row.get("params"), frozen)}
+        limit = max(1, int(cfg.get("max_explorers_per_desk", 4)))
+        rows = self.explorer_rows(live.id)
+        if name not in rows and len(rows) >= limit:
+            # The explorer with the least to show for itself leaves: lowest settled P&L after
+            # fees since it was dealt, then the oldest.
+            def worth(item: tuple[str, dict[str, Any]]) -> tuple[Decimal, str]:
+                other, row = item
+                record = self._record(live.id, other, row.get("promoted_at") or row.get("deployed_at"), opened_since=True)
+                net = (_dec(record.get("settled_pnl_usd")) or Decimal(0)) - (_dec(record.get("fees_usd")) or Decimal(0))
+                return net, str(row.get("promoted_at") or "")
+            gone, gone_row = min(rows.items(), key=worth)
+            store.remove(live.id, gone)
+            self._remove_file(manager, live.id, gone)
+            self._deployment(gone_row.get("foundry_id"), status="replaced", ended_at=at, reason=f"made room for {fid}")
+        oos = candidate["evidence"]["out_of_sample"]
+        note = f"foundry {fid} {role}: out-of-sample {oos['trades']} positions, {_fmt(oos['return_on_notional'])} per $; learning size on the live book"
+        try:
+            self.strategies.install(live, {"name": name, "code": code, "cadence_seconds": int(candidate.get("cadence_seconds") or 600), "params": params}, note=note[:200])
+            store.update(live.id, name, foundry_id=fid, foundry_code=True, foundry_explorer=True, promoted_at=at, note=note[:200])
+        except Exception as exc:
+            self._remove_file(manager, live.id, name)
+            problems.append(f"{fid} not deployed to {live.id}: {type(exc).__name__}: {str(exc)[:160]}")
+            return None
+        code_sha = _sha(code)
+        record = {
+            "id": fid, "family": family, "subject": subject, "strategy": name, "kind": candidate["kind"], "role": role,
+            "desk_id": live.id, "live_desk_id": live.id, "deployed_at": at, "status": "live", "params": params, "code_sha256": code_sha,
+            "subject_sha256": _sha(source) if source else None, "cadence_seconds": int(candidate.get("cadence_seconds") or 0) or None,
+            "trades": candidate["evidence"]["trades"], "oos_trades": oos["trades"], "oos_return": oos["return_on_notional"],
+            "oos_ci_lower": oos["ci95_mean_pnl"][0], "hypothesis": candidate.get("hypothesis"),
+        }
+        self._add_deployment(record)
+        lines = [
+            f"foundry {fid} ({candidate['label']}) deployed to live desk {live.id} as {name} ({role}, learning size)",
+            f"backtest: {candidate['evidence']['trades']} trades; out of sample {oos['trades']} positions, return {_fmt(oos['return_on_notional'])} per $, "
+            f"95% CI on mean P&L [{_fmt(oos['ci95_mean_pnl'][0], '+.4f')}, {_fmt(oos['ci95_mean_pnl'][1], '+.4f')}]",
+            f"params: {json.dumps(params, sort_keys=True)[:800]}",
+        ]
+        if candidate.get("hypothesis"):
+            lines.append(f"hypothesis: {candidate['hypothesis']}")
+        lines.append(f"size ramps on its own real record; retired after {cfg['min_forward_settled']} settled positions at a loss after fees, or {cfg['forward_max_hours']} hours without fills")
+        self.publish_desk(live, name, f"foundry-{fid}-live", at, f"foundry {fid}: {name} on live desk {live.id} at learning size", lines, code_sha, candidate.get("seconds"))
+        return record
+
+    def prune_explorers(self, manifests: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Retire every live explorer whose forward record says no: `min_forward_settled`
+        positions opened and settled since it was dealt at a loss after fees, or
+        `forward_max_hours` gone by with fewer than two fills. A winner at learning size stays and
+        `Strategies.size_cap` grows it."""
+        cfg = self.config
+        store = self.store()
+        manager = self.sandboxes()
+        need = int(cfg["min_forward_settled"])
+        horizon = float(cfg["forward_max_hours"]) * 3600.0
+        out: list[dict[str, Any]] = []
+        for desk in [m for m in manifests.values() if getattr(m, "live", False)]:
+            for name, row in sorted(self.explorer_rows(desk.id).items()):
+                at = self.now()
+                since = row.get("promoted_at") or row.get("deployed_at")
+                record = self._record(desk.id, name, since, opened_since=True)
+                settled = int(record.get("settled") or 0)
+                fills = int(record.get("fills") or 0)
+                net = (_dec(record.get("settled_pnl_usd")) or Decimal(0)) - (_dec(record.get("fees_usd")) or Decimal(0))
+                age = _epoch(at) - _epoch(since)
+                reason = None
+                if settled >= need and net < 0:
+                    reason = f"{settled} settled at {net:+.2f} after fees"
+                elif age > horizon and fills < 2:
+                    reason = f"{fills} fills in {age / 3600:.0f} hours"
+                if reason is None:
+                    continue
+                store.remove(desk.id, name)
+                self._remove_file(manager, desk.id, name)
+                self._deployment(row.get("foundry_id"), status="retired", ended_at=at, reason=reason, forward={"settled": settled, "fills": fills, "pnl_usd": format(net, "f")})
+                self.alert("info", f"foundry: {desk.id}/{name} retired from the live book ({reason})")
+                self.publish_desk(desk, name, f"foundry-{row.get('foundry_id')}-retired", at, f"foundry {row.get('foundry_id')}: {name} retired from live desk {desk.id}", [f"retired: {reason}"], row.get("code_sha256"), None)
+                out.append({"desk_id": desk.id, "strategy": name, "reason": reason})
+        return out
+
     @staticmethod
     def _remove_file(manager: Any, desk_id: str, name: str) -> None:
         remover = getattr(manager, "toolbox_remove", None)
@@ -2049,7 +2169,9 @@ class Foundry:
         params_n = sum(1 for c in candidates if c["kind"] == "params")
         code_n = sum(1 for c in candidates if c["kind"] == "code")
         best = summary.get("best_oos_return")
-        if deployment is not None and winner is not None:
+        if deployment is not None and winner is not None and deployment.get("status") == "live":
+            outcome = f"{deployment.get('role') or 'winner'} {deployment['id']} ({winner['label']}) deployed to live desk {deployment['desk_id']} at learning size"
+        elif deployment is not None and winner is not None:
             outcome = f"winner {deployment['id']} ({winner['label']}) deployed to shadow desk {deployment['desk_id']}"
         elif winner is not None:
             outcome = f"winner {winner['id']} qualified but found no shadow desk"

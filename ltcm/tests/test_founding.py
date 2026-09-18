@@ -136,6 +136,9 @@ def proposal(**overrides):
     )
     manifest["cadence"] = {"sessions": ["10:00", "13:00", "19:30"], "timezone": "America/New_York",
                            "triggers": ["event_resolution"], "weekdays_only": False}
+    # Inside the lab's hard limits: the live book's own manifest runs wider since Sept 18, 2026.
+    manifest["limits"] = {"max_position_pct": "0.20", "max_gross_pct": "1.0", "max_order_notional_pct": "0.20",
+                          "max_daily_loss_pct": "0.10", "max_orders_per_day": 40, "max_limit_deviation_pct": "0.30"}
     data = {
         "family": "sports",
         "id": "leahy",
@@ -359,7 +362,7 @@ class ValidationTests(FoundingCase):
         manifest.update(id="mcentee", family="memes", capital={"mode": "shadow", "usd": "150"})
         # Hilibrand holds futures at a 60% position cap since Sept 17, 2026; a founded desk is
         # bound to the lab's limits and to a spot-only, long-only mandate.
-        manifest["limits"] = {**manifest["limits"], "max_position_pct": "0.50", "max_order_notional_pct": "0.50"}
+        manifest["limits"] = {**manifest["limits"], "max_position_pct": "0.50", "max_order_notional_pct": "0.50", "max_daily_loss_pct": "0.10", "max_orders_per_day": 40}
         manifest["instruments"] = {**manifest["instruments"], "asset_classes": ["crypto"], "allow_short": False}
         data = proposal(family="memes", id="mcentee", name="McEntee", targets=["pepe-usd", "BONK-USD"], manifest=manifest)
         out = self.validate(data)
@@ -393,7 +396,7 @@ class ValidationTests(FoundingCase):
             ({"max_position_pct": "0.9"}, "limits.max_position_pct must be between"),
             ({"max_orders_per_day": 5000}, "max_orders_per_day must be an integer between 1 and 480"),
             ({"max_daily_loss_pct": "0.5"}, "limits.max_daily_loss_pct"),
-            ({"max_gross_pct": "2"}, "limits.max_gross_pct"),
+            ({"max_gross_pct": "5"}, "limits.max_gross_pct"),
             ({"max_limit_deviation_pct": "0.9"}, "limits.max_limit_deviation_pct"),
             ({"leverage": "3"}, "unknown limits"),
         ]

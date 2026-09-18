@@ -254,14 +254,14 @@ class BootstrapTests(StrategyCase):
         deployed = self.strategies.bootstrap(self.service.manifests)
         self.assertEqual(
             deployed,
-            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "hilibrand-2/spot_quotes", "mullins/kalshi_favorites", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
+            ["haghani-2/daily_temps", "hilibrand-2/hourly_reversion", "hilibrand-2/spot_quotes", "mullins/kalshi_favorites", "mullins/daily_temps", "scholes-2/hourly_ranges", "scholes-2/hourly_quotes"],
         )
         self.assertIn("hourly_ranges.py", self.manager.toolbox_files("scholes-2"))
         self.assertTrue(self.strategies.report(self.manifest, "hourly_ranges")["house"])
         self.assertEqual(self.strategies.report(self.manifest, "hourly_quotes")["cadence_seconds"], 300)
         self.assertEqual(self.strategies.report(weather, "daily_temps")["cadence_seconds"], 1800)
         self.assertEqual(self.strategies.bootstrap(self.service.manifests), [], "never twice")
-        self.assertEqual([s["name"] for s in self.strategies.report(events)["strategies"]], ["kalshi_favorites"])
+        self.assertEqual([s["name"] for s in self.strategies.report(events)["strategies"]], ["daily_temps", "kalshi_favorites"])
         # The first tick bootstraps on its own.
         fresh = Strategies(self.service, path=Path(self.temp.name) / "s2.json", config={"starters": True})
         fresh.tick(self.service.manifests, NOW)

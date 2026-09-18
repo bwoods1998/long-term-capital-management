@@ -108,7 +108,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "live_venues": (),
     #: Limit bounds. The service passes the lab's configured `hard_limits`.
     "hard_limits": LAB_DEFAULTS["hard_limits"],
-    "max_gross_pct": "1.0",
+    "max_gross_pct": "4",
     "max_limit_deviation_pct": "0.30",
     "desk_budget_usd_per_day": "25",
     "desk_max_turns": 40,

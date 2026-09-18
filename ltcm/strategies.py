@@ -83,7 +83,11 @@ STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": 
 SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
 #: leap: futures -- a third house strategy for the crypto family: mean reversion on Coinbase's
 #: CDE perpetual-style contracts, long and short, where a contract's fee is cents, not percent.
-EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion"]}
+EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion"], "kalshi": ["daily_temps"]}
+#: The asset class a desk must trade for an extra starter to be dealt to it (the perps need a
+#: futures mandate; the temperature markets are Kalshi events, priced on the Kalshi book since
+#: the weather family's chat desks were retired on Sept 18, 2026).
+EXTRA_REQUIRES: dict[str, str] = {"perp_reversion": "future", "daily_temps": "event"}
 #: What the live desks run on the perps (Sept 18, 2026, the owner's call: real Coinbase trades
 #: tonight): a lower trigger than the code's default, two entries a run, any contract the desk's
 #: whole sleeve can hold. The evidence gate still decides size; the risk engine still binds.
@@ -93,6 +97,13 @@ EXTRA_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: What the shadow desks explore on the perps: the signal's window, threshold and holding time.
 #: The live desk runs the code's defaults; each shadow is dealt one of these by its id.
 EXTRA_VARIANTS: dict[str, list[dict[str, Any]]] = {
+    "daily_temps": [
+        {"min_edge": 0.0},
+        {"min_edge": 0.0, "sigma_day_ahead": 3.5},
+        {"min_edge": 0.01, "sigma_day_ahead": 2.0},
+        {"min_edge": 0.01, "sigma_day_ahead": 1.5, "min_price": 0.10},
+        {"min_edge": 0.02, "sigma_day_ahead": 2.0, "min_price": 0.20, "shrink": 0.6},
+    ],
     "perp_reversion": [
         {"z_entry": 1.5},
         {"z_entry": 2.5, "lookback": 48},
@@ -171,7 +182,7 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
 #: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
 PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "jitter": 0.25, "foundry_hold_hours": 72}
-STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300}
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800}
 
 
 def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:
@@ -953,7 +964,7 @@ class Strategies:
             if second:
                 wanted.append((second, starter_params(manifest.family, manifest, quotes=True), int(STARTER_CADENCE.get(second, 600))))
             for extra in EXTRA_STARTERS.get(manifest.family, []):
-                if "future" in tuple(getattr(manifest.instruments, "asset_classes", ()) or ()):
+                if EXTRA_REQUIRES.get(extra, "future") in tuple(getattr(manifest.instruments, "asset_classes", ()) or ()):
                     variants = EXTRA_VARIANTS.get(extra) or [{}]
                     dealt = dict(EXTRA_LIVE_PARAMS.get(extra) or {}) if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
                     wanted.append((extra, dealt, int(STARTER_CADENCE.get(extra, 600))))

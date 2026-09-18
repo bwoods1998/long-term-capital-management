@@ -567,6 +567,43 @@ def code_winner(spec):
 
 
 class DeploymentTests(FoundryCase):
+    def test_with_deploy_live_the_winner_joins_the_live_book_as_its_own_row_and_is_pruned_on_a_losing_record(self):
+        """The arena (Sept 18, 2026): a candidate earns its forward record with real fills at
+        learning size on the live desk; a losing record retires it, a full desk drops its worst."""
+        self.manager.script = settings_winner
+        live_before = self.row("mullins")
+        foundry = self.foundry(deploy_live=True, max_explorers_per_desk=1)
+        summary = foundry.cycle(NOW)
+        self.assertEqual(summary["deployed_to"], "mullins")
+        fid = summary["winner"]
+        deployment = foundry.state()["deployments"][fid]
+        self.assertEqual((deployment["status"], deployment["role"], deployment["live_desk_id"]), ("live", "winner", "mullins"))
+        name = deployment["strategy"]
+        self.assertRegex(name, r"^kalshi_favorites_f\d+_\d+$")
+        self.assertEqual(self.row("mullins"), live_before, "the house row is untouched: the candidate is its own row")
+        row = self.row("mullins", name)
+        self.assertTrue(row["foundry_explorer"])
+        self.assertEqual(row["params"], deployment["params"])
+        self.assertIn(f"{name}.py", self.manager.toolbox_files("mullins"))
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "a live row has nothing to fast-track")
+        # A losing forward record retires it from the book.
+        self.clock[0] += 3600
+        self.strategies.records[("mullins", name)] = {"settled": 5, "fills": 5, "settled_pnl_usd": "-1.20"}
+        pruned = foundry.prune_explorers(self.manifests)
+        self.assertEqual([(p["desk_id"], p["strategy"]) for p in pruned], [("mullins", name)])
+        self.assertIsNone(self.row("mullins", name))
+        self.assertEqual(foundry.state()["deployments"][fid]["status"], "retired")
+        # A record that holds stays, and the size ramp is the strategies' business.
+        summary = foundry.cycle(self.service.now())
+        again = summary["winner"]
+        self.strategies.records[("mullins", foundry.state()["deployments"][again]["strategy"])] = {"settled": 9, "fills": 9, "settled_pnl_usd": "3"}
+        self.assertEqual(foundry.prune_explorers(self.manifests), [])
+        # At capacity, the worst explorer makes room for the next.
+        self.clock[0] += 3600
+        summary = foundry.cycle(self.service.now())
+        if summary.get("deployed_to") == "mullins":
+            self.assertEqual(len(foundry.explorer_rows("mullins")), 1)
+
     def test_a_settings_winner_goes_to_the_worst_shadow_desk_and_never_the_live_desk(self):
         self.manager.script = settings_winner
         live_before = self.row("mullins")
@@ -1199,7 +1236,10 @@ class ServiceFoundryTests(ServiceCase):
         self.assertIn("ranges", config["evolution"]["excluded_families"])
         # Sept 18, 2026: the pooled favorites record passed the evidence gate, and the firm's
         # per-cluster cap on the live floor went from 8% to 12% (per market 3.5% to 6%).
-        self.assertEqual(config["event_rules"]["max_event_cluster_floor_pct"], "0.12")
+        # Sept 18, 2026 (the arena): the owner accepts the volatility; 10% a market, 25% a cluster.
+        self.assertEqual(config["event_rules"]["max_event_cluster_floor_pct"], "0.25")
+        self.assertTrue(config["foundry"]["deploy_live"], "candidates earn their record on the live book")
+        self.assertFalse(config["sessions"]["shadow_enabled"], "shadow desks run strategies, not chat sessions")
 
     def test_a_running_cycle_is_never_started_twice(self):
         self.service.config["background_work"] = True
