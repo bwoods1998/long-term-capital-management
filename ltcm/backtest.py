@@ -501,13 +501,16 @@ class Market:
 
     __slots__ = (
         "ticker", "series", "event", "open_ts", "close_ts", "listed_close_ts", "payout_yes", "static",
-        "ends", "periods", "candles", "_volume_prefix", "_last", "_decimals", "fine_from",
+        "ends", "periods", "candles", "_volume_prefix", "_last", "_decimals", "fine_from", "volume",
     )
 
     def __init__(self, row: Mapping[str, Any]):
         self.ticker = str(row.get("ticker") or "").upper()
         self.event = str(row.get("event_ticker") or "-".join(self.ticker.split("-")[:2]))
         self.series = self.ticker.split("-")[0]
+        #: Lifetime volume, known only after the close: never shown to a strategy, and used by the
+        #: draw only summed over a whole series (`sample_markets(draw="series_volume")`).
+        self.volume = _num(row.get("volume")) or 0.0
         self.open_ts = parse_time(row.get("open_time"))
         self.close_ts = parse_time(row.get("close_time"))
         self.listed_close_ts = listed_close(row, self.close_ts)
@@ -626,30 +629,57 @@ class Market:
         return row
 
 
-def sample_markets(markets: Iterable[Market], limit: int, seed: Any = 7) -> list[Market]:
-    """At most `limit` markets, drawn by a seeded hash and spread evenly over events: every event's
-    first draw comes before any event's second, and events take turns in a seeded order.
+DRAWS = ("events", "series_volume")
 
-    Nothing a settled row knows only after the close picks a market (final volume, open interest,
-    result). Sept 16, 2026: ranked by lifetime volume, the winning bucket of a Kalshi BTC event
-    was first or second of about 200 in 22 events of 24, so a capped board kept the winners. The
-    draw depends only on the seed and the tickers, so a bigger `limit` keeps a superset."""
+
+def sample_markets(markets: Iterable[Market], limit: int, seed: Any = 7, draw: str = "events") -> list[Market]:
+    """At most `limit` markets.
+
+    `draw="events"`: a seeded hash spread evenly over events: every event's first draw comes
+    before any event's second, and events take turns in a seeded order. Nothing a settled row
+    knows only after the close picks a market (final volume, open interest, result). Sept 16,
+    2026: ranked by lifetime volume, the winning bucket of a Kalshi BTC event was first or
+    second of about 200 in 22 events of 24, so a capped board kept the winners. The draw depends
+    only on the seed and the tickers, so a bigger `limit` keeps a superset.
+
+    `draw="series_volume"` (Sept 18, 2026): whole events, from the series that traded most over
+    the window first, events within a series in a seeded order. A series' volume is summed over
+    every market of every event, so no bucket of an event is preferred over its siblings and the
+    winner keeps no edge in the draw; what the cap keeps is the liquid board, which is the only
+    board a maker strategy ever trades. With the even draw a 10-day replay of `kalshi_favorites`
+    saw 8,000 of 736,000 settled markets, one in ninety, and filled 8 to 17 times against the
+    live books' dozens a day, so no candidate could ever qualify."""
     pool = list(markets)
     limit = max(0, int(limit))
     if len(pool) <= limit:
         return pool
 
-    def draw(text: str) -> bytes:
+    def hashed(text: str) -> bytes:
         return hashlib.sha256(f"{seed}|{text}".encode("utf-8")).digest()
 
     by_event: dict[str, list[Market]] = {}
     for market in pool:
         by_event.setdefault(market.event, []).append(market)
+    if draw == "series_volume":
+        by_series: dict[str, list[str]] = {}
+        volume: dict[str, float] = {}
+        for event, members in by_event.items():
+            series = members[0].series
+            by_series.setdefault(series, []).append(event)
+            volume[series] = volume.get(series, 0.0) + sum(float(getattr(m, "volume", 0.0) or 0.0) for m in members)
+        chosen: list[Market] = []
+        for series in sorted(by_series, key=lambda s: (-volume[s], s)):
+            for event in sorted(by_series[series], key=lambda e: hashed("event|" + e)):
+                members = sorted(by_event[event], key=lambda m: hashed(m.ticker))
+                chosen.extend(members)
+                if len(chosen) >= limit:
+                    return chosen[:limit]
+        return chosen[:limit]
     ranked: list[tuple[tuple[int, bytes, bytes], Market]] = []
     for event, members in by_event.items():
-        turn = draw("event|" + event)
-        members.sort(key=lambda m: draw(m.ticker))
-        ranked.extend(((rank, turn, draw(m.ticker)), m) for rank, m in enumerate(members))
+        turn = hashed("event|" + event)
+        members.sort(key=lambda m: hashed(m.ticker))
+        ranked.extend(((rank, turn, hashed(m.ticker)), m) for rank, m in enumerate(members))
     ranked.sort(key=lambda item: item[0])
     return [market for _, market in ranked[:limit]]
 
@@ -732,6 +762,7 @@ class DataSet:
         seed: Any = 7,
         horizon_seconds: float = 48 * 3600,
         settled_through: float | None = None,
+        draw: str = "events",
     ) -> None:
         """List the settled markets the run can show, cap them by a seeded draw, load candles.
 
@@ -797,11 +828,13 @@ class DataSet:
             pool.append(market)
         if hidden:
             self.notes.append(f"{hidden} settled market(s) listed to close after {iso(visible_until)} hidden, early closes included")
-        chosen = sample_markets(pool, max_markets, seed)
+        draw = draw if draw in DRAWS else "events"
+        chosen = sample_markets(pool, max_markets, seed, draw)
         if len(chosen) < len(pool):
+            how = ("whole events from the busiest series first (seed %s), never a bucket by its own volume or result" % seed
+                   if draw == "series_volume" else f"a seeded draw spread over events (seed {seed}), never by volume or result")
             self.notes.append(
-                f"{'board' if board else 'series'} capped at {len(chosen)} of {len(pool)} settled markets: a seeded draw "
-                f"spread over events (seed {seed}), never by volume or result; raise max_markets to see more"
+                f"{'board' if board else 'series'} capped at {len(chosen)} of {len(pool)} settled markets: {how}; raise max_markets to see more"
             )
         for market in chosen:
             self.markets[market.ticker] = market
@@ -2150,6 +2183,7 @@ def run_backtest(spec: Mapping[str, Any], *, history: Any = None, trusted_code: 
                 seed=spec.get("seed", 7),
                 horizon_seconds=horizon_hours * 3600.0,
                 settled_through=settled_through,
+                draw=str(spec.get("board_draw") or "events"),
             )
     except Exception as exc:
         data.errors += 1

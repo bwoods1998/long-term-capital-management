@@ -1561,6 +1561,7 @@ class Foundry:
             "learning_usd": cfg["learning_usd"],
             "fill_model": cfg["fill_model"],
             "max_markets": int(dict(cfg.get("family_max_markets") or {}).get(str(candidate.get("family") or window.get("family") or ""), cfg["max_markets"])),
+            "board_draw": str(dict(cfg.get("family_board_draw") or {}).get(str(candidate.get("family") or window.get("family") or ""), cfg.get("board_draw", "events"))),
             "seed": int(cfg["seed"]),
             "coinbase_maker_fee": float(fees["maker"]),
             "coinbase_taker_fee": float(fees["taker"]),

@@ -206,7 +206,10 @@
         "sandboxes": 12,
         "sandbox_offset": 12
       }
-    ]
+    ],
+    "family_board_draw": {
+      "kalshi": "series_volume"
+    }
   },
   "evolution": {
     "excluded_families": [
