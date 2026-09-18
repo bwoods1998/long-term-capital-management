@@ -1865,7 +1865,10 @@ class LeapSandboxAndRunClockTests(ServiceCase):
         self.assertEqual(event.payload["sandbox"], "sb_lab-x"[-12:])
         self.assertEqual(self.service.sandboxes.runs, [(DESK, "print(6*7)", "a probe", "answer")])
         self.service.close()
-        self.assertTrue(self.service.sandboxes.slept)
+        self.assertFalse(self.service.sandboxes.slept, "a restart no longer sleeps the sandboxes (Sept 18, 2026)")
+        self.service.config.setdefault("sandbox", {})["sleep_on_stop"] = True
+        self.service.close()
+        self.assertTrue(self.service.sandboxes.slept, "a real stop still does")
 
     def test_without_a_lab_image_the_tool_answers_rather_than_failing(self):
         self.assertIsNone(self.service.sandboxes)  # no image configured in tests

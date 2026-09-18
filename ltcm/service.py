@@ -4242,7 +4242,10 @@ class Service:
                 stopper()
             except Exception:
                 pass
-        if getattr(self, "sandboxes", None) is not None:  # leap: sandbox
+        # Sept 18, 2026: sleeping ninety sandboxes one by one held every restart for minutes;
+        # the supervisor restarts the loop at once and the sandboxes wake on their next run.
+        # `sandbox.sleep_on_stop` turns the sleep back on for a real stop.
+        if getattr(self, "sandboxes", None) is not None and bool((self.config.get("sandbox") or {}).get("sleep_on_stop", False)):  # leap: sandbox
             try:
                 self.sandboxes.sleep_all()
             except Exception:

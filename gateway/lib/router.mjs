@@ -123,18 +123,28 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
         // never from the trading VM that is asking us to authorize the spend. A futures order
         // also needs the venue's contract size, whatever the caller says its notional is.
         if (!/^[A-Z0-9-]{3,80}$/.test(product)) return fail('Invalid product id.', 400);
+        let quote = null;
         try {
-          const quote = await fetcher(`https://api.coinbase.com/api/v3/brokerage/market/products/${product}`, {
-            method: 'GET', signal: AbortSignal.timeout(5000), redirect: 'error',
+          // Sept 18, 2026: the first live futures orders were refused here; the venue's edge
+          // answers a Worker's bare fetch differently from a client's, so the request names
+          // itself and the failure names the status.
+          quote = await fetcher(`https://api.coinbase.com/api/v3/brokerage/market/products/${product}`, {
+            method: 'GET', signal: AbortSignal.timeout(8000), redirect: 'follow',
+            headers: { 'User-Agent': 'ltcm-gateway/1.0', 'Accept': 'application/json' },
           });
+        } catch (error) {
+          return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
+        }
+        try {
+          if (!quote.ok) return fail(`Cannot independently price this order: venue HTTP ${quote.status}.`, 503);
           const data = await quote.json();
-          if (!quote.ok || !(Number(data.price) > 0)) return fail('Cannot independently price this order.', 503);
+          if (!(Number(data.price) > 0)) return fail('Cannot independently price this order: no venue price.', 503);
           if (!leg?.limit_price) reference = String(Number(data.price) * 1.10);
           if (future) {
             contractSize = String(data?.future_product_details?.contract_size ?? '');
             if (!(Number(contractSize) > 0)) return fail('Cannot price this futures order: the venue lists no contract size.', 503);
           }
-        } catch { return fail('Cannot independently price this order.', 503); }
+        } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
       }
     }
     const priced = notional(target.venue, parsed, { reference, contractSize });
