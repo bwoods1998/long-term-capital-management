@@ -325,6 +325,31 @@ class AllocationTests(CommitteeCase):
         ).allocate("2026-09-09T20:10:00.000Z")
         self.assertEqual(broken, plain)
 
+    def test_a_venue_book_shares_the_venues_equity_equally_and_reads_it_again_each_time(self):
+        """The arena (Sept 18, 2026): a live desk is its venue's book; a shadow desk keeps its
+        notional budget; a deposit is capital at the next allocation."""
+        self.add(live_manifest("earnings-01"))
+        self.add(live_manifest("earnings-02"))
+        shadow = live_manifest("earnings-03")
+        import dataclasses
+        self.add(dataclasses.replace(shadow, capital_mode="shadow"))
+        committee = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False, "venue_book": True},
+            venue_equity=lambda: {"alpaca": "1500"},
+        )
+        targets = committee.allocate("2026-09-09T20:00:00.000Z", resize=False)
+        self.assertEqual((targets["earnings-01"], targets["earnings-02"]), (Decimal("750.00"), Decimal("750.00")), "no resize needed: the venue is read every time")
+        self.assertEqual(targets["earnings-03"], Decimal("1000.00"), "a shadow desk's notional budget")
+        event = self.log.last("committee", "committee.allocation")
+        self.assertIn("venue book: 750.00 of alpaca's 1500", event.payload["reasons"]["earnings-01"])
+        grown = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False, "venue_book": True},
+            venue_equity=lambda: {"alpaca": "1700"},
+        ).allocate("2026-09-09T20:05:00.000Z", resize=False)
+        self.assertEqual(grown["earnings-01"], Decimal("850.00"))
+
     def test_a_bankrupt_desk_goes_to_zero(self):
         self.add(live_manifest("earnings-01"))
         self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")
