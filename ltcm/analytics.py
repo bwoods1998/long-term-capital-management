@@ -40,6 +40,8 @@ and the owner, a month later -- can read the same numbers without this module.
 
 from __future__ import annotations
 
+import copy
+
 import datetime as _dt
 import re
 import time
@@ -313,11 +315,23 @@ class ResultsLedger:
         self.clock = clock
 
     # ------------------------------------------------------------------ public API
+    #: A trailing-window report is reused for this long by every reader on the same tape
+    #: (the checkpoint, the fitness policy, the lab): the fold walks the whole tape.
+    REPORT_CACHE_SECONDS = 300.0
+    _report_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+
     def report(self, window_days: int = DEFAULT_WINDOW_DAYS, now: Any = None) -> dict[str, Any]:
-        """Every metric for the trailing `window_days`, as plain dicts of strings."""
+        """Every metric for the trailing `window_days`, as plain dicts of strings. Shared for
+        `REPORT_CACHE_SECONDS` per tape and window (a copy; callers may edit their own)."""
         end = iso_time(now) if now is not None else now_iso(self.clock)
         days = max(1, int(window_days))
-        return self.between(_shift_days(end, -days), end, window_days=days)
+        key = (str(getattr(self.log, "path", id(self.log))), days, tuple(sorted(self.manifests)))
+        hit = ResultsLedger._report_cache.get(key)
+        if hit is not None and time.monotonic() - hit[0] < ResultsLedger.REPORT_CACHE_SECONDS:
+            return copy.deepcopy(hit[1])
+        report = self.between(_shift_days(end, -days), end, window_days=days)
+        ResultsLedger._report_cache[key] = (time.monotonic(), copy.deepcopy(report))
+        return report
 
     def between(self, start: str, end: str, *, window_days: int | None = None) -> dict[str, Any]:
         """The same report over an explicit `[start, end]` window of log timestamps."""
@@ -455,7 +469,9 @@ class ResultsLedger:
         for desk_id in self.manifests:
             roll_for(desk_id).is_desk = True
 
-        for event in self.log.iter_all():
+        walker = getattr(self.log, "iter_kinds", None)
+        events = walker(COUNTED_KINDS) if callable(walker) else self.log.iter_all()
+        for event in events:
             kind = event.kind
             if kind not in COUNTED_KINDS:
                 continue

@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Iterable, Any, Iterator
 
 GENESIS = "genesis"
 
@@ -420,6 +420,26 @@ class EventLog:
             batch = self.read(after=after, limit=5000)
             if not batch:
                 return
+            yield from batch
+            after = batch[-1].seq
+
+    def iter_kinds(self, kinds: Iterable[str]) -> Iterator[Event]:
+        """Every event of the given kinds, oldest first, decoding only those rows. A fold that
+        counts a fifth of the tape's kinds no longer decodes the other four fifths (Sept 18,
+        2026: the results ledger decoded 127k payloads per checkpoint)."""
+        wanted = sorted({str(k) for k in kinds})
+        if not wanted:
+            return
+        marks = ",".join("?" for _ in wanted)
+        after = 0
+        while True:
+            rows = self._fetchall(
+                f"SELECT * FROM events WHERE seq > ? AND kind IN ({marks}) ORDER BY seq ASC LIMIT 5000",
+                [int(after), *wanted],
+            )
+            if not rows:
+                return
+            batch = [_row_to_event(r) for r in rows]
             yield from batch
             after = batch[-1].seq
 
