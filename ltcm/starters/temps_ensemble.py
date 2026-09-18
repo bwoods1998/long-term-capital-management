@@ -10,8 +10,16 @@ shrunk `shrink` of the way toward the market's mid; the cheaper side is bought w
 the taker fee clears `min_edge` (`maker` rests a bid a cent over the best bid instead). Held to
 settlement. The floor caps size; the record decides whether the ensemble knows something.
 
+Bias (07:00 UTC, the first live run): the ensembles' 2 m temperatures run cool against the
+station highs Kalshi settles on (Miami members at 85F with the 89-90 bracket trading at 0.49;
+Phoenix at 97F with 102-103 at 0.54), so `bias_to_nws` (on) shifts every member by the gap
+between the ensemble mean and the National Weather Service's own point forecast for the day,
+which is bias-corrected to the station: the ensemble gives the spread, the NWS the centre. A
+resting bid of this strategy whose market no longer shows the edge is cancelled on the next run.
+
 Params: cities ("all" or names), inflate, floor_sigma, weight (empirical share vs normal),
-min_edge, min_price, shrink, maker, notional_usd, max_intents, max_quotes, max_hours.
+min_edge, min_price, shrink, maker, bias_to_nws, notional_usd, max_intents, max_quotes,
+max_hours.
 """
 
 import math
@@ -27,6 +35,7 @@ DEFAULTS = {
     "min_price": 0.03,
     "shrink": 0.4,
     "maker": False,
+    "bias_to_nws": True,
     "notional_usd": None,
     "max_intents": 3,
     "max_quotes": 6,
@@ -107,11 +116,16 @@ def decide(kit, params):
     ctx = kit.context or {}
     now = _when(ctx.get("now")) or datetime.now(timezone.utc)
     held = {str(x.get("market_id")) for x in (ctx.get("positions") or [])}
+    mine = {}
+    for order in ctx.get("open_orders") or []:
+        if str(order.get("strategy") or "") == "temps_ensemble" and order.get("order_id"):
+            mine.setdefault(str(order.get("market_id")), []).append(str(order["order_id"]))
     working = {str(x.get("market_id")) for x in (ctx.get("open_orders") or [])}
     notional = _num(p.get("notional_usd")) or _num(ctx.get("learning_usd"), 10.0)
     series_of = {c["name"]: c["series"] for c in (kit.weather_cities() or []) if c.get("series")}
     cities = list(series_of) if p["cities"] == "all" else list(p["cities"] or [])
     candidates = []
+    keep = set()
     for city in cities:
         series = series_of.get(city)
         if not series:
@@ -121,14 +135,36 @@ def decide(kit, params):
         except Exception as exc:
             kit.say(f"{city}: ensemble failed ({type(exc).__name__})")
             continue
-        days = {str(d.get("date"))[:10]: d for d in (ens.get("days") or []) if d.get("date") and d.get("members")}
+        days = {str(d.get("date"))[:10]: dict(d) for d in (ens.get("days") or []) if d.get("date") and d.get("members")}
         if not days:
             kit.say(f"{city}: no ensemble days")
             continue
+        if p.get("bias_to_nws"):
+            try:
+                forecast = kit.weather(city) or {}
+            except Exception:
+                forecast = {}
+            nws = {}
+            for d in forecast.get("days") or []:
+                high = _num(d.get("day_high")) or _num(d.get("hourly_max"))
+                if high is not None and d.get("date"):
+                    nws[str(d["date"])[:10]] = high
+            for day, row in days.items():
+                centre = nws.get(day)
+                members = [m for m in (_num(x) for x in row.get("members") or []) if m is not None]
+                if centre is None or not members:
+                    continue
+                shift = centre - sum(members) / len(members)
+                row["members"] = [m + shift for m in members]
+                row["mean"] = centre
+                row["shift"] = shift
+                for key in ("p10", "p50", "p90"):
+                    if _num(row.get(key)) is not None:
+                        row[key] = _num(row[key]) + shift
         priced = []
         for market in kit.kalshi_series(series) or []:
             ticker = str(market.get("ticker") or "")
-            if ticker in held or ticker in working or str(market.get("status") or "open") not in ("open", "active"):
+            if ticker in held or (ticker in working and ticker not in mine) or str(market.get("status") or "open") not in ("open", "active"):
                 continue
             close = _when(market.get("close_time"))
             day = settlement_day(ticker)
@@ -166,14 +202,19 @@ def decide(kit, params):
             side, price, edge = ("yes", yes_px, edge_yes) if edge_yes >= edge_no else ("no", no_px, edge_no)
             if edge < float(p["min_edge"]) or price < max(0.02, float(p.get("min_price") or 0)) or price > 0.98:
                 continue
+            if ticker in mine:
+                keep.add(ticker)  # a resting bid whose edge is still there stays
+                continue
             candidates.append((edge, ticker, side, price, prob, shrunk, mid, row, hours, city, str(market.get("yes_sub_title") or "")))
+    cancels = [oid for ticker, oids in mine.items() if ticker not in keep for oid in oids]
     candidates.sort(key=lambda c: -c[0])
-    intents, events = [], set()
+    intents, events = [], set(("-".join(t.split("-")[:2]) for t in keep))
     for edge, ticker, side, price, prob, shrunk, mid, row, hours, city, label in candidates:
         event = "-".join(ticker.split("-")[:2])
         if event in events:
             continue
         events.add(event)
+        shifted = f", shifted {_num(row.get('shift'), 0):+.1f}F to the NWS forecast" if row.get("shift") is not None else ""
         intents.append(
             {
                 "instrument": {"asset_class": "event", "symbol": ticker, "market_id": ticker, "right": side},
@@ -184,7 +225,7 @@ def decide(kit, params):
                 **({"post_only": True} if p.get("maker") else {}),
                 "rationale": (
                     f"{city}: {int(row.get('n') or len(row.get('members') or []))} ensemble members put the high at {_num(row.get('mean'), 0):.1f}F "
-                    f"(p10 {_num(row.get('p10'), 0):.0f}, p90 {_num(row.get('p90'), 0):.0f}); the {label} market settling in {hours:.0f}h "
+                    f"(p10 {_num(row.get('p10'), 0):.0f}, p90 {_num(row.get('p90'), 0):.0f}{shifted}); the {label} market settling in {hours:.0f}h "
                     f"has p={prob:.3f}, shrunk to {shrunk:.3f} against the market's {mid:.2f}; {side.upper()} at {price:.2f} "
                     f"has {edge:.3f} of edge{' as a maker' if p.get('maker') else ' after fees'}. Holds to settlement."
                 ),
@@ -193,5 +234,5 @@ def decide(kit, params):
         )
         if len(intents) >= int(p["max_intents"]):
             break
-    kit.say(f"{len(candidates)} candidate(s) with edge >= {p['min_edge']}, {len(intents)} proposed")
-    return {"intents": intents, "notes": f"{len(candidates)} brackets with edge >= {p['min_edge']} from the ensembles"}
+    kit.say(f"{len(candidates)} candidate(s) with edge >= {p['min_edge']}, {len(intents)} proposed, {len(keep)} resting kept, {len(cancels)} cancelled")
+    return {"intents": intents, "cancels": cancels, "notes": f"{len(candidates)} brackets with edge >= {p['min_edge']} from the ensembles; {len(cancels)} resting bid(s) cancelled"}
