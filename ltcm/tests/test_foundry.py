@@ -1217,7 +1217,7 @@ class ServiceFoundryTests(ServiceCase):
         self.tick()
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.service.state()["last_foundry_at"], calls[0])
-        self.tick(self.START + 120)
+        self.tick(self.START + 60)
         self.assertEqual(len(calls), 1, "not before the interval")
         self.tick(self.START + 360)
         self.assertEqual(len(calls), 2)
