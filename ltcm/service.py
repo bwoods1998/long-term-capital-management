@@ -3316,7 +3316,9 @@ class Service:
         # until something happens, and it is quiet when the floor has stopped for credit.
         self._tick_phase("watch")
         if self.watch is not None and not result["kill_switch"] and not stopped:
-            allow_shadow = not live_only
+            # A shadow desk woken by the night desk is a chat session by another door: the
+            # arena's session policy applies here too (Sept 18, 2026: 60 shadow wakes in 8 hours).
+            allow_shadow = not live_only and bool(dict(self.config.get("sessions") or {}).get("shadow_enabled", True))
 
             def watch_once(at: str = at, allow: bool = allow_shadow) -> Any:
                 try:
