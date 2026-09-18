@@ -113,7 +113,7 @@
       "kalshi_favorites",
       "spot_quotes"
     ],
-    "max_holding_hours": 36
+    "max_holding_hours": 12
   },
   "foundry": {
     "enabled": true,

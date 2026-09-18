@@ -639,6 +639,8 @@ class Strategies:
             # leap: pooled evidence -- the family's verdict on each of the desk's strategies, by
             # market group, so the code can stop betting where the record says there is no edge.
             "evidence": self.evidence_for(manifest),
+            # The floor's clock: no event buy may settle later than this many hours out.
+            "max_holding_hours": self.config.get("max_holding_hours"),
         }
 
     def open_orders_for(self, manifest: DeskManifest) -> list[dict[str, Any]]:

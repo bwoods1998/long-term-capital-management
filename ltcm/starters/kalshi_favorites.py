@@ -169,6 +169,12 @@ def decide(kit, params):
     expire = max(0.0, _num(p.get("expire_seconds"), 0.0) or 0.0)
     v2 = use_book or keep_queue or band_exit or cap is not None or expire > 0
     min_hours, yes_min, yes_max, series_cap = float(p["min_hours"]), float(p["yes_min"]), float(p["yes_max"]), int(p["max_open_per_series"])
+    # The floor's clock (Sept 18, 2026): `kit.context["max_holding_hours"]` is the longest a
+    # settlement may be away on this floor (12 hours: a result within the trading day, so the
+    # record, the size ramp and the avoid rule turn over daily); the params never exceed it.
+    horizon = _num((kit.context or {}).get("max_holding_hours"))
+    if horizon and horizon > 0:
+        p["max_hours"] = min(float(p["max_hours"]), horizon)
     held_events, per_series, held = set(), {}, set()
     for x in ctx.get("positions") or []:
         ticker = str(x.get("market_id") or x.get("symbol") or "")
