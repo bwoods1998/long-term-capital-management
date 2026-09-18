@@ -837,8 +837,19 @@ class Foundry:
         # crypto family a third of its research turns).
         excluded = {str(x) for x in (self.config.get("excluded_strategies") or ())} | set(UNBACKTESTABLE_STRATEGIES)
         live = self.live_desk(family, manifests)
-        rows = self.store().for_desk(live.id) if live is not None else {}
-        if house and house not in excluded and (rows.get(house) or {}).get("enabled", True):
+        # Every live book of the family: the house books run the house strategies and their
+        # promotions, the explorers book the Foundry's own rows (Sept 18, 2026: with book roles
+        # the explorers book alone would have left the house starters unmutated).
+        books = sorted((m for m in manifests.values() if m.family == family and getattr(m, "live", False)), key=lambda m: (m.id != (live.id if live else ""), m.id))
+        rows: dict[str, dict[str, Any]] = {}
+        seen: set[str] = set()
+        for book in books:
+            for name, row in self.store().for_desk(book.id).items():
+                seen.add(name)
+                if row.get("enabled", True) and name not in rows:
+                    rows[name] = row
+        # The house starter: enabled on some live book, or on none of them yet (the file).
+        if house and house not in excluded and (house in rows or house not in seen):
             names.append(house)
         if live is not None:
             for name, row in sorted(rows.items()):

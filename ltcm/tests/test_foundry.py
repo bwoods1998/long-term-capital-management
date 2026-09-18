@@ -609,6 +609,18 @@ class DeploymentTests(FoundryCase):
         if summary.get("deployed_to") == "mullins":
             self.assertEqual(len(foundry.explorer_rows("mullins")), 1, "past protection the old row made room")
 
+    def test_subjects_come_from_every_live_book_of_the_family(self):
+        """With book roles the explorers book runs no house starter; the house books do, and the
+        Foundry must keep mutating both."""
+        house = manifest(id="mullins-9", family="kalshi", parent_id="mullins", capital={"mode": "live", "usd": "142"})
+        self.manifests["mullins-9"] = house
+        self.strategies.config["book_roles"] = {"mullins": "explorers"}
+        self.strategies.store.update("mullins", "kalshi_favorites", enabled=False)
+        self.strategies.store.update("mullins", "kalshi_favorites_f7_1", enabled=True, foundry_explorer=True, foundry_code=True)
+        self.strategies.store.update("mullins-9", "kalshi_favorites", enabled=True, house=True)
+        self.strategies.store.update("mullins-9", "temps_ensemble", enabled=True, house=True)
+        self.assertEqual(self.foundry().subjects("kalshi", self.manifests), ["kalshi_favorites", "kalshi_favorites_f7_1"], "the house starter from the house book, the explorer from the explorers book; temps_ensemble is not backtestable")
+
     def test_the_explorers_book_takes_the_candidates_when_a_family_has_one(self):
         second = manifest(id="mullins-9", family="kalshi", parent_id="mullins", capital={"mode": "live", "usd": "142"})
         self.manifests["mullins-9"] = second
