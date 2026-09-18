@@ -109,7 +109,8 @@ def bids(out):
 
 class VersionOneTests(unittest.TestCase):
     def test_with_every_new_param_unset_the_output_is_version_one_byte_for_byte(self):
-        for params in ({}, {"book_pricing": False, "keep_queue": False, "band_exit": False, "max_open_per_cluster": None, "expire_seconds": None}):
+        # Sept 18, 2026: the cluster cap is on by default (3); version one is the cap switched off.
+        for params in ({"max_open_per_cluster": None}, {"book_pricing": False, "keep_queue": False, "band_exit": False, "max_open_per_cluster": None, "expire_seconds": None}):
             kit = FavKit(orders=V1_ORDERS)
             out = load().decide(kit, params)
             self.assertEqual(out, V1_OUTPUT)

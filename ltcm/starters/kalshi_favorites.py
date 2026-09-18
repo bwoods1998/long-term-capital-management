@@ -40,8 +40,14 @@ DEFAULTS = {
     "exclude_prefixes": ["KXMVE"],
     "pages": 8,
     "notional_usd": None,
-    "book_pricing": False, "max_open_per_cluster": None, "expire_seconds": None, "keep_queue": False, "band_exit": False,
+    "book_pricing": False, "max_open_per_cluster": 3, "expire_seconds": None, "keep_queue": False, "band_exit": False,
     "learn_groups": True, "explore_losing": False,
+    # Avoiding needs less evidence than trusting (Sept 18, 2026: the crypto brackets' pooled
+    # record read 22 settled, 9 losses, -$25 while the live books kept buying them at 0.93-0.95
+    # because the gate's count for a favorite is ~43). A group net negative after `avoid_min_n`
+    # settlements is skipped; passing still needs the gate. `max_open_per_cluster` caps the bets
+    # that fail together (same group, same close hour) at 3.
+    "avoid_min_n": 15,
 }
 GROUPS = {"crypto": ("KXBTC", "KXETH", "KXSOL", "KXXRP", "KXDOGE"), "commod": ("KXGOLD", "KXSILVER", "KXBRENT", "KXWTI", "KXCOPPER"), "weather": ("KXHIGH",)}
 
@@ -122,10 +128,11 @@ def _evidence_group(series, evidence):
     return root
 
 
-def _rank_by_evidence(candidates, evidence, explore_losing):
-    """(kept candidates in evidence order, skipped tickers, verdict tally). A group is judged
-    only once it has the settlements the gate asked for: net negative there is skipped, passing
-    goes first, the rest keep their volume order."""
+def _rank_by_evidence(candidates, evidence, explore_losing, avoid_min_n=15):
+    """(kept candidates in evidence order, skipped tickers, verdict tally). A group net
+    negative after `avoid_min_n` settlements is skipped (avoiding needs less evidence than
+    trusting); a passing group goes first once it has the settlements the gate asked for; the
+    rest keep their volume order."""
     groups = evidence.get("groups") or {}
     kept, skipped, tally = [], [], []
     for cand in candidates:
@@ -133,7 +140,8 @@ def _rank_by_evidence(candidates, evidence, explore_losing):
         n, need = _num(verdict.get("n"), 0) or 0, _num(verdict.get("n_needed"), 0) or 0
         pnl = _num(verdict.get("settled_pnl_usd"))
         judged = bool(verdict) and need > 0 and n >= need
-        if judged and pnl is not None and pnl < 0 and not verdict.get("passes"):
+        avoid = bool(verdict) and n >= float(avoid_min_n or 0) and avoid_min_n
+        if (judged or avoid) and pnl is not None and pnl < 0 and not verdict.get("passes"):
             tally.append("losing group")
             if not explore_losing:
                 skipped.append(cand[1])
@@ -201,7 +209,7 @@ def decide(kit, params):
     evidence = (ctx.get("evidence") or {}).get("kalshi_favorites") or {}
     learned = None
     if p.get("learn_groups", True) and evidence.get("groups"):
-        candidates, dropped, learned = _rank_by_evidence(candidates, evidence, bool(p.get("explore_losing")))
+        candidates, dropped, learned = _rank_by_evidence(candidates, evidence, bool(p.get("explore_losing")), _num(p.get("avoid_min_n"), 15))
     books, skipped, why = {}, [], []
     if use_book or keep_queue or band_exit:
         # Resting bids' books first, then the band's candidates by volume; the kit reads 300 a run.
