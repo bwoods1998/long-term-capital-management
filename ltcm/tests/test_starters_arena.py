@@ -107,6 +107,9 @@ class PolyKit(BaseKit):
     def kalshi_markets(self, max_close_hours=36, pages=5):
         return list(self.board)
 
+    def kalshi_series(self, series, limit=1000, status="open"):
+        return [m for m in self.board if str(m["ticker"]).startswith(str(series) + "-")]
+
     def kalshi_orderbooks(self, tickers):
         return {t: self.books[t] for t in tickers if t in self.books}
 

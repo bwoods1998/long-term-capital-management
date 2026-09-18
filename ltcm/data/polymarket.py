@@ -162,12 +162,14 @@ class Polymarket:
             what=what,
         )
 
-    def _page(self, limit: int = PAGE_SIZE, active: bool = True) -> list[dict[str, Any]]:
+    def _page(self, limit: int = PAGE_SIZE, active: bool = True, offset: int = 0) -> list[dict[str, Any]]:
         params = {
             "limit": max(1, min(int(limit), 500)),
             "order": "volume24hr",
             "ascending": "false",
         }
+        if offset:
+            params["offset"] = int(offset)
         if active:
             params["active"] = "true"
             params["closed"] = "false"
@@ -182,7 +184,14 @@ class Polymarket:
         """Active markets whose question or slug shares tokens with `query`, best overlap first.
 
         An empty query returns the page as Gamma orders it (24h volume, descending)."""
-        rows = self._page(PAGE_SIZE, active)
+        # Gamma answers at most a hundred rows a call whatever `limit` says: page by offset
+        # until `limit` rows are in hand (Sept 18, 2026).
+        rows: list[dict[str, Any]] = []
+        for offset in range(0, max(PAGE_SIZE, int(limit)), PAGE_SIZE):
+            page = self._page(PAGE_SIZE, active, offset)
+            rows.extend(page)
+            if len(page) < PAGE_SIZE:
+                break
         words = tokens(query)
         if not words:
             return rows[: max(0, int(limit))]

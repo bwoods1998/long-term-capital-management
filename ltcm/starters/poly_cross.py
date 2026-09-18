@@ -23,9 +23,14 @@ DEFAULTS = {
     "min_edge": 0.04,
     "maker": False,
     "min_volume_24h": 5000,
-    "max_hours": 120,
-    "pages": 6,
-    "poly_limit": 100,
+    "max_hours": 1100,
+    "pages": 8,
+    "poly_limit": 300,
+    # The series both venues list, read whole (the board's pages are ordered by the venue, and a
+    # market six weeks out can sit past the last page): Fed decisions, CPI, crypto levels, game
+    # winners, the big football and basketball futures.
+    "series": ["KXFEDDECISION", "KXFED", "KXCPI", "KXCPIYOY", "KXBTC", "KXETH", "KXBTCD", "KXETHD", "KXNFLGAME", "KXNBAGAME", "KXMLBGAME", "KXNHLGAME",
+               "KXUCL", "KXEPL", "KXSB", "KXNBACHAMP", "KXMLBWS", "KXNCAAFGAME", "KXMLBPLAYOFFS", "KXTAIWAN", "KXPUTIN", "KXGTA6"],
     "min_overlap": 0.6,
     "max_day_gap": 2,
     "min_words": 3,
@@ -38,10 +43,18 @@ DEFAULTS = {
 STOP = {"will", "the", "and", "for", "with", "this", "that", "than", "from", "into", "over", "under", "above", "below", "before", "after",
         "does", "did", "who", "what", "which", "when", "where", "how", "any", "all", "one", "two", "yes", "was", "are", "has", "have", "been",
         "its", "their", "there", "market", "resolve", "resolves", "price", "close", "between", "more", "less", "least", "most", "day", "end",
-        "week", "month", "year", "per", "win", "wins", "beat", "beats", "game", "match", "out", "off", "not", "new", "next", "first", "last"}
+        "week", "month", "year", "per", "win", "wins", "beat", "beats", "game", "match", "out", "off", "not", "new", "next", "first", "last",
+        "at", "by", "in", "on", "of", "to", "be", "is", "it", "an", "as", "or", "vs", "meeting", "rates", "rate", "interest", "following", "happen"}
 WORD = re.compile(r"[a-z][a-z']{1,}")
-NUMBER = re.compile(r"\$?(\d[\d,]*\.?\d*)\s*([kKmMbB])?")
-MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+NUMBER = re.compile(r"\$?(\d[\d,]*\.?\d*)\s*(bps|[kKmMbB](?![a-z]))?")
+YEAR = re.compile(r"^(?:19|20)\d\d$")
+#: Both venues say the same thing in different words: one vocabulary before the overlap is scored.
+SYNONYMS = {"decrease": "cut", "decreases": "cut", "lower": "cut", "lowers": "cut", "cuts": "cut", "increase": "hike", "increases": "hike",
+            "raise": "hike", "raises": "hike", "hikes": "hike", "maintain": "hold", "maintains": "hold", "unchanged": "hold", "change": "hold",
+            "federal": "fed", "reserve": "", "fomc": "fed", "bitcoin": "btc", "ethereum": "eth", "solana": "sol", "dollars": "", "usd": "",
+            "president": "president", "presidential": "president", "championship": "champion", "champions": "champion", "winner": "win"}
+MONTHS = {"jan": "january", "feb": "february", "mar": "march", "apr": "april", "may": "may", "jun": "june", "jul": "july", "aug": "august",
+          "sep": "september", "sept": "september", "oct": "october", "nov": "november", "dec": "december"}
 
 
 def _num(value, default=None):
@@ -63,9 +76,11 @@ def _fee(price):
 
 
 def numbers(text):
-    """The numbers in a title, scaled ('80k' -> 80000) and rounded to whole units."""
+    """The numbers in a title, scaled ('80k' -> 80000, '25bps' stays 25), years left out."""
     out = set()
     for raw, suffix in NUMBER.findall(str(text or "")):
+        if YEAR.match(raw):
+            continue
         value = _num(raw)
         if value is None:
             continue
@@ -75,25 +90,44 @@ def numbers(text):
 
 
 def words(text):
-    return {w for w in WORD.findall(str(text or "").lower()) if w not in STOP and w not in MONTHS}
+    out = set()
+    for w in WORD.findall(str(text or "").lower()):
+        w = MONTHS.get(w, w)
+        w = SYNONYMS.get(w, w)
+        if w and w not in STOP:
+            out.add(w)
+    return out
 
 
 def yes_price(row):
+    """Polymarket's YES price, and only from a Yes/No market: a two-team market's first price
+    is one team's, not a YES (Sept 18, 2026: "LSU vs. Ole Miss" at 0.585 read as Ole Miss YES)."""
     outcomes = [str(x).strip().lower() for x in (row.get("outcomes") or [])]
     prices = [_num(x) for x in (row.get("prices") or [])]
     if "yes" in outcomes and len(prices) > outcomes.index("yes"):
         return prices[outcomes.index("yes")]
-    if len(prices) == 2 and prices[0] is not None:
-        return prices[0]
     return None
+
+
+def bounds(text):
+    """The comparison words a title carries: 'gt' for >, '+', 'more than', 'or more', 'above';
+    'lt' for <, 'less than', 'or less', 'below'. Both venues must say the same or it is not the
+    same market ("hike by >25bps" is not "increase by 25 bps")."""
+    raw = str(text or "").lower()
+    out = set()
+    if ">" in raw or re.search(r"\d\s*\+", raw) or "more than" in raw or "or more" in raw or "above" in raw or "at least" in raw or "over" in raw:
+        out.add("gt")
+    if "<" in raw or "less than" in raw or "or less" in raw or "below" in raw or "under" in raw or "at most" in raw:
+        out.add("lt")
+    return out
 
 
 def match(kalshi, poly_rows, p):
     """The best Polymarket row for one Kalshi market, or None."""
     title = f"{kalshi.get('title') or ''} {kalshi.get('yes_sub_title') or ''}"
     kw, kn = words(title), numbers(title)
-    if len(kw) < int(p["min_words"]):
-        return None
+    if len(kw) + len(kn) < int(p["min_words"]) or not kw:
+        return None  # a number is as specific as a word: "BTC above 80,000 on September 20" is four
     close = _when(kalshi.get("close_time"))
     best, best_score = None, 0.0
     for row in poly_rows:
@@ -105,6 +139,8 @@ def match(kalshi, poly_rows, p):
         if overlap < float(p["min_overlap"]):
             continue
         if kn and not kn <= numbers(question):
+            continue
+        if bounds(title) != bounds(question):
             continue
         end = _when(str(row.get("end_date") or "").replace("Z", ""))
         if close is not None and end is not None and abs((end - close).total_seconds()) > float(p["max_day_gap"]) * 86400.0:
@@ -129,7 +165,17 @@ def decide(kit, params):
     except Exception as exc:
         kit.say(f"polymarket failed ({type(exc).__name__})")
         return {"intents": [], "notes": "no Polymarket page"}
-    board = kit.kalshi_markets(max_close_hours=float(p["max_hours"]), pages=int(p["pages"])) or []
+    board = list(kit.kalshi_markets(max_close_hours=float(p["max_hours"]), pages=int(p["pages"])) or [])
+    seen = {str(m.get("ticker")) for m in board}
+    for series in (p.get("series") or []):
+        try:
+            rows = kit.kalshi_series(str(series)) or []
+        except Exception:
+            continue
+        for market in rows:
+            if str(market.get("ticker")) not in seen:
+                seen.add(str(market.get("ticker")))
+                board.append(market)
     excluded = tuple(str(x) for x in (p.get("exclude_prefixes") or []))
     matched = []
     for market in board:
@@ -137,6 +183,9 @@ def decide(kit, params):
         if not ticker or ticker.startswith(excluded) or ticker in held or ticker in working or "-".join(ticker.split("-")[:2]) in held_events:
             continue
         if (_num(market.get("volume_24h"), 0) or 0) < float(p["min_volume_24h"]):
+            continue
+        close = _when(market.get("close_time"))
+        if close is not None and (close - now).total_seconds() > float(p["max_hours"]) * 3600.0:
             continue
         yes = _num(market.get("yes_ask"))
         if yes is None or yes < float(p["yes_min"]) or yes > float(p["yes_max"]):
