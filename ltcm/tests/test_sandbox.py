@@ -375,3 +375,20 @@ class LabImageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeaseReleaseTests(unittest.TestCase):
+    def test_foundry_leases_are_released_by_prefix_and_desk_leases_kept(self):
+        import tempfile, time as _time
+        from pathlib import Path
+        from ltcm.sandbox import SandboxManager
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = SandboxManager(None, Path(tmp) / "sandboxes.json", Path(tmp) / "toolbox", clock=lambda: 1000.0)
+            state = manager.state()
+            state["uncertain_until"] = {"foundry-0": 5000.0, "foundry-7": 5000.0, "mullins": 5000.0}
+            manager._save(state)
+            self.assertFalse(manager.ready_for_run("foundry-0"))
+            self.assertEqual(manager.release_leases("foundry-"), 2)
+            self.assertTrue(manager.ready_for_run("foundry-0"))
+            self.assertFalse(manager.ready_for_run("mullins"), "a desk's own lease is kept")
+            self.assertEqual(manager.release_leases("foundry-"), 0)

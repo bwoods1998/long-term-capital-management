@@ -62,7 +62,9 @@ SHADOW_VENUE = "shadow"
 
 #: How long a checkpoint will wait for *every* live venue to report its balance, in total. The
 #: venues are read together, so one slow exchange costs this much and not a multiple of it.
-VENUE_BALANCE_TIMEOUT = 3.0
+# Sept 18, 2026: a Coinbase balance is four venue calls now (accounts, the futures wallet, its
+# positions, and a mark per holding); at three seconds every other read came back "stale".
+VENUE_BALANCE_TIMEOUT = 12.0
 #: How long a balance is reused before the venue is asked again. The floor publishes every tick;
 #: an account balance does not move fast enough to be worth a request each time.
 VENUE_BALANCE_TTL = 60.0
@@ -1380,7 +1382,7 @@ class Service:
                             max_close_ts=int(now) + window_days * 86400,
                         )
                     except Exception as exc:
-                        self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}")
+                        self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}: {str(exc)[:140]}")
                         break
                     for row in page.get("markets", []):
                         if not isinstance(row, Mapping):
@@ -1474,6 +1476,14 @@ class Service:
                 limiter("foundry-", daily_seconds=int(merged["sandbox_daily_seconds"]), max_timeout=int(merged["backtest_timeout_seconds"]))
             except Exception:
                 pass
+            releaser = getattr(self.sandboxes, "release_leases", None)
+            if callable(releaser) and bool(merged.get("release_leases_on_start", True)):
+                try:
+                    released = releaser("foundry-")
+                    if released:
+                        self.alert("info", f"foundry: {released} research sandbox lease(s) released after the restart")
+                except Exception as exc:
+                    self.alert("warning", f"foundry lease release failed: {type(exc).__name__}")
         return foundry
 
     def _desk_equity(self, desk_id: str) -> Any:

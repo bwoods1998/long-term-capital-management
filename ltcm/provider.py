@@ -1170,7 +1170,9 @@ class Provider:
                 else:
                     payload = self.transport("POST", "/v1/responses", body, row["id"])
             except ProviderError as exc:
-                self._mark_error(row["id"], exc.code)
+                # The body of a venue's refusal is the only way to see why (Sept 18, 2026: eight
+                # sessions ended provider_http_400 with nothing else recorded).
+                self._mark_error(row["id"], f"{exc.code}: {str(exc.detail)[:240]}" if getattr(exc, "detail", None) else exc.code)
                 if not response_id and _rejected_outright(exc.code):
                     self._abandon(row)  # the venue refused it: nothing was accepted or charged
                 raise

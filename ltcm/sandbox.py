@@ -361,6 +361,22 @@ class SandboxManager:
     def box_for(self, desk_id: str) -> str | None:
         return (self.state().get("boxes") or {}).get(desk_id)
 
+    def release_leases(self, prefix: str) -> int:
+        """Forget the unconfirmed-execution leases of every box whose desk id starts with
+        `prefix`, and say how many. For the Foundry's research boxes a stray backtest left
+        running by a restart is harmless (its files are its own, its result is not read), while
+        the lease cost the loop 25 minutes of research after every restart (Sept 18, 2026)."""
+        with self._lock:
+            state = self.state()
+            leases = state.get("uncertain_until") or {}
+            stale = [desk_id for desk_id in leases if str(desk_id).startswith(prefix)]
+            for desk_id in stale:
+                leases.pop(desk_id, None)
+            if stale:
+                state["uncertain_until"] = leases
+                self._save(state)
+        return len(stale)
+
     def ready_for_run(self, desk_id: str) -> bool:
         """Read-only scheduling hint; run() rechecks under its per-desk execution lock."""
         pending = float((self.state().get("uncertain_until") or {}).get(desk_id) or 0)
