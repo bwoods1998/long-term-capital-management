@@ -262,8 +262,8 @@
     "reserve_usd": "10",
     "throttle_days": "0",
     "stretch_days": "5",
-    "desk_fuse_pct": "0.25",
-    "desk_fuse_min_usd": "10",
+    "desk_fuse_pct": "0.6",
+    "desk_fuse_min_usd": "40",
     "fallback_cap_usd": "40",
     "infra_usd_per_day": "0.30"
   },
