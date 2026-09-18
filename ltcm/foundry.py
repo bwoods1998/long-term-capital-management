@@ -1003,6 +1003,7 @@ class Foundry:
             self._report_problems(cycle, problems)
             return {"at": at, "cycle": cycle, "skipped": "no backtestable family has desks", "fast_tracked": fast}
         family, subject, family_index, subject_index = pick
+        self._cycle_family = family
         self.progress("research", f"Cycle {cycle}: exploring {family}/{subject}", cycle=cycle, family=family, strategy=subject)
         self._save(cycle=cycle, family_index=family_index, subject_index=subject_index)
         live = self.live_desk(family, manifests)
@@ -1167,6 +1168,7 @@ class Foundry:
 
     # ------------------------------------------------------------------ candidates
     def _candidate(self, cycle: int, kind: str, label: str, strategy: str, subject: str, params: Mapping[str, Any], code: str, **extra: Any) -> dict[str, Any]:
+        extra.setdefault("family", getattr(self, "_cycle_family", None))
         material = json.dumps({"strategy": strategy, "params": params, "code": _sha(code), "kind": kind}, sort_keys=True, default=str)
         return {
             "id": f"fdy-{cycle}-{hashlib.sha256(material.encode('utf-8')).hexdigest()[:8]}",
@@ -1779,8 +1781,16 @@ class Foundry:
         if ron is None or ron <= reference + float(cfg["margin"]):
             return False, f"out-of-sample return {_fmt(ron)} does not beat {reference:+.3f} by {cfg['margin']}"
         ci = oos["ci95_mean_pnl"]
-        if ci is None or ci[0] <= float(cfg["min_ci_lower"]):
+        # A family in `relative_families` is screened against its baselines only (Sept 18, 2026:
+        # the replay's touch fills are a maker's adverse fills, so it reads a favorites strategy
+        # that earns +2.6% live at -4% to -14% whatever the board; the absolute proof is the
+        # shadow desk's forward record on real prices, which the fast track requires).
+        family = str(candidate.get("family") or "")
+        relative = family in {str(f) for f in (cfg.get("relative_families") or ())}
+        if not relative and (ci is None or ci[0] <= float(cfg["min_ci_lower"])):
             return False, f"out-of-sample 95% lower bound {_fmt(ci[0] if ci else None, '+.4f')} is not above {cfg['min_ci_lower']}"
+        if relative and (ci is None or ci[1] is None or ci[1] <= reference):
+            return False, f"out-of-sample 95% upper bound {_fmt(ci[1] if ci else None, '+.4f')} is not above the baseline's {reference:+.3f}"
         return True, "qualified"
 
     # ------------------------------------------------------------------ shadow deployment
@@ -2110,8 +2120,13 @@ class Foundry:
             if str(dep.get("family")) in excluded or desk.family in excluded:
                 continue  # a retired family trades out its shadow record; none of it goes live
             lower = _float(dep.get("oos_ci_lower"))
-            if lower is None or lower <= 0 or int(dep.get("oos_trades") or 0) < int(cfg["min_oos_trades"]):
+            relative = str(dep.get("family")) in {str(f) for f in (cfg.get("relative_families") or ())}
+            if int(dep.get("oos_trades") or 0) < int(cfg["min_oos_trades"]):
+                continue
+            if not relative and (lower is None or lower <= 0):
                 continue  # a candidate may trade in shadow, but only a confident backtest goes live
+            # A relative family's proof is the forward record: `min_forward_settled` positions at
+            # P&L >= 0 after fees, and the evidence gate when the payoff is lopsided (below).
             record = self._record(desk.id, name, dep.get("deployed_at"), opened_since=True)
             settled = int(record.get("settled") or 0)
             fills = int(record.get("fills") or 0)

@@ -210,7 +210,10 @@
     "family_board_draw": {
       "kalshi": "series_volume"
     },
-    "originate": 3
+    "originate": 3,
+    "relative_families": [
+      "kalshi"
+    ]
   },
   "evolution": {
     "excluded_families": [

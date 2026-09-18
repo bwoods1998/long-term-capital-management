@@ -261,6 +261,21 @@ class CandidateTests(FoundryCase):
         self.assertEqual(sorted(names), ["kalshi_favorites_f1", "kalshi_origin_f1_2"])
         self.assertEqual(summary["code"]["valid"], 2)
 
+    def test_a_relative_family_qualifies_against_its_baseline_and_goes_live_on_its_forward_record(self):
+        """Sept 18, 2026: the replay's touch fills read a favorites strategy that earns live at a
+        loss whatever the board, so Kalshi candidates are screened against their baselines and
+        proven by the shadow desk's forward record."""
+        foundry = self.foundry(relative_families=["kalshi"])
+        evidence = {"trades": 80, "out_of_sample": {"trades": 30, "return_on_notional": -0.04, "ci95_mean_pnl": [-1.2, 0.3]}}
+        candidate = {"kind": "params", "family": "kalshi", "evidence": evidence, "report": {"errors": 0}}
+        self.assertEqual(foundry.qualifies(candidate, -0.09), (True, "qualified"), "beats a losing baseline; the upper bound clears it")
+        self.assertFalse(foundry.qualifies(candidate, -0.04)[0], "no margin over the baseline")
+        candidate["evidence"]["out_of_sample"]["ci95_mean_pnl"] = [-1.2, -0.5]
+        self.assertFalse(foundry.qualifies(candidate, -0.09)[0], "an upper bound under the baseline is noise")
+        strict = self.foundry()
+        candidate["evidence"]["out_of_sample"]["ci95_mean_pnl"] = [-1.2, 0.3]
+        self.assertFalse(strict.qualifies(candidate, -0.09)[0], "without the relative rule the absolute bound binds")
+
     def test_the_code_generator_is_told_the_fees_the_backtest_charges(self):
         # Sept 17, 2026: the prompt still said Kalshi rounds to the cent and Coinbase charges
         # 0.25%/0.60% while the backtest charged $0.0001 rounding and 0.5%/1.2%.
