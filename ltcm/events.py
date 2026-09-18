@@ -27,6 +27,10 @@ from typing import Any, Iterator
 
 GENESIS = "genesis"
 
+#: Fold-shaped reads (newest N of a kind from the start of the tape) are shared for this long.
+FOLD_CACHE_SECONDS = 15.0
+FOLD_CACHE_MIN_LIMIT = 1000
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,6 +231,7 @@ class EventLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.clock = clock
         self._lock = threading.RLock()
+        self._fold_cache: dict[tuple[Any, ...], tuple[float, list[Event]]] = {}
         self._db = sqlite3.connect(
             str(self.path), isolation_level=None, check_same_thread=False, timeout=30
         )
@@ -248,6 +253,9 @@ class EventLog:
         at: str | None = None,
     ) -> Event:
         """Append one event. Idempotent on `id`. Returns the stored event."""
+        # An append of this kind on this stream makes every fold that could include it stale:
+        # a reader never sees a tape older than its own writes (leap: throughput).
+        self._invalidate_folds(stream, kind)
         if not valid_stream(stream):
             raise EventError(f"invalid stream {stream!r}")
         if kind not in KINDS:
@@ -349,12 +357,44 @@ class EventLog:
             clauses.append("public = 1")
         params.append(max(1, min(int(limit), 10_000)))
         order = "DESC" if newest else "ASC"
+        # leap: throughput -- a fold-shaped read (the newest thousands of a kind, from the start
+        # of the tape) is asked once per desk by every checkpoint, gate, calibration and record
+        # reader: 76 desks x 122k events made one checkpoint take longer than the tick on Sept
+        # 18, 2026. Identical fold reads share one answer for `FOLD_CACHE_SECONDS`. Cursor reads
+        # (`after` > 0), small reads and oldest-first reads are never cached: the money path
+        # folds from cursors and must see its own appends at once.
+        cacheable = newest and int(after) == 0 and int(limit) >= FOLD_CACHE_MIN_LIMIT and FOLD_CACHE_SECONDS > 0
+        key = (stream, kind, params[-1], bool(public_only)) if cacheable else None
+        if key is not None:
+            hit = self._fold_cache.get(key)
+            if hit is not None and self._clock_mono() - hit[0] < FOLD_CACHE_SECONDS:
+                return list(hit[1])
         rows = self._fetchall(
             f"SELECT * FROM events WHERE {' AND '.join(clauses)} ORDER BY seq {order} LIMIT ?",
             params,
         )
         events = [_row_to_event(r) for r in rows]
-        return events[::-1] if newest else events
+        events = events[::-1] if newest else events
+        if key is not None:
+            self._fold_cache[key] = (self._clock_mono(), events)
+            if len(self._fold_cache) > 512:
+                self._fold_cache.clear()
+        return list(events) if key is not None else events
+
+    @staticmethod
+    def _clock_mono() -> float:
+        return time.monotonic()
+
+    def forget_folds(self) -> None:
+        """Drop the fold cache (tests, and any reader that must see the tape as of now)."""
+        self._fold_cache.clear()
+
+    def _invalidate_folds(self, stream: str, kind: str) -> None:
+        cache = getattr(self, "_fold_cache", None)
+        if not cache:
+            return
+        for key in [k for k in cache if k[1] in (None, kind) and k[0] in (None, stream)]:
+            cache.pop(key, None)
 
     def read_ledger(self, desk_id: str, *, after: int = 0, limit: int = 2000) -> list[Event]:
         """Indexed economic tape for one book. Do not deserialize every thought on the floor

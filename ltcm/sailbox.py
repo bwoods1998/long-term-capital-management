@@ -36,7 +36,7 @@ import uuid
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 API_HOST = "sailbox-api.sailresearch.com"
 API_BASE = f"https://{API_HOST}/v1"
@@ -206,6 +206,19 @@ def check_egress(row: Mapping[str, Any], expected: Mapping[str, Any]) -> dict[st
 # --------------------------------------------------------------------------- transport
 
 
+_SSL_CONTEXT = None
+
+
+def _shared_ssl_context():
+    """One TLS context per process for the Sail API (certificates loaded once)."""
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is None:
+        import ssl
+
+        _SSL_CONTEXT = ssl.create_default_context()
+    return _SSL_CONTEXT
+
+
 class _NoRedirect(HTTPRedirectHandler):
     """Refuse every redirect: a credentialed request must not follow the server elsewhere."""
 
@@ -262,7 +275,7 @@ class Transport:
         self.apps_url = apps_url.rstrip("/")
         self.key_source = key_source
         self.user_agent = user_agent
-        self._opener = opener or build_opener(_NoRedirect)
+        self._opener = opener or build_opener(_NoRedirect, HTTPSHandler(context=_shared_ssl_context()))
 
     # The complete set of routes this client may reach.
     def allowed(self, method: str, path: str) -> bool:

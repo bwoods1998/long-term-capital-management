@@ -358,6 +358,19 @@ def _headers_to_dict(headers: Iterable[tuple[str, str]] | Any) -> dict[str, str]
     return {str(k).lower(): str(v) for k, v in items}
 
 
+_SSL_CONTEXT = None
+
+
+def _shared_ssl_context():
+    """The process-wide TLS context (built once; certificates loaded once)."""
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is None:
+        import ssl
+
+        _SSL_CONTEXT = ssl.create_default_context()
+    return _SSL_CONTEXT
+
+
 class HttpTransport:
     """Bounded, redirect-free HTTP with an optional on-disk TTL cache.
 
@@ -394,7 +407,9 @@ class HttpTransport:
         self.min_interval = float(min_interval)
         self.cache_cap_bytes = int(cache_cap_bytes)
         self._stores = 0
-        self._opener = opener or urllib.request.build_opener(_NoRedirect).open
+        # One TLS context for every request: `urlopen` builds a fresh context and reloads the
+        # CA bundle per call, which was most of each quote's cost on Sept 18, 2026.
+        self._opener = opener or urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=_shared_ssl_context())).open
         self._lock = threading.RLock()
         self._next_at: dict[str, float] = {}
 

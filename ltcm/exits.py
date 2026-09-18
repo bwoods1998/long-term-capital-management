@@ -323,6 +323,11 @@ class ExitBook:
                 ledger = self.ledgers.get(plan.desk_id)
                 if ledger is None:
                     continue
+                # Sept 18, 2026: 586 plans, 70 cached prices, and a quote by HTTPS for every
+                # one of them held the tick for seven minutes. A plan with only a time stop
+                # needs the clock, not a quote; its mark is the ledger's own.
+                if plan.stop_price is None and plan.target_price is None:
+                    continue
                 try:
                     if plan.desk_id not in books:
                         books[plan.desk_id] = ledger.state(at).positions

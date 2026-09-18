@@ -156,3 +156,35 @@ class NewestReadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FoldCacheTests(unittest.TestCase):
+    """leap: throughput -- identical fold reads share one answer briefly; cursor reads never do."""
+
+    def test_a_fold_read_is_cached_briefly_and_a_cursor_read_is_not(self):
+        import tempfile
+        from pathlib import Path
+        from ltcm import events as events_module
+        with tempfile.TemporaryDirectory() as tmp:
+            log = EventLog(Path(tmp) / "e.sqlite")
+            log.append("desk:a", "desk.thought", {"session_id": "s", "text": "one"})
+            first = log.read(kind="desk.thought", limit=5000, newest=True)
+            self.assertEqual(len(first), 1)
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000, newest=True)), 1, "within the window the fold answer is shared")
+            log.append("desk:b", "desk.memo", {"session_id": "s", "title": "t", "text": "m"})
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000, newest=True)), 1, "another kind's append leaves the fold")
+            log.append("desk:a", "desk.thought", {"session_id": "s", "text": "two"})
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000, newest=True)), 2, "an append of the kind is seen at once")
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000)), 2, "an oldest-first read is never cached")
+            self.assertEqual(len(log.read(kind="desk.thought", after=0, limit=10)), 2, "a small read is never cached")
+            self.assertEqual(len(log.read(kind="desk.thought", after=1, limit=5000, newest=True)), 1, "a cursor read is never cached")
+            log.forget_folds()
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000, newest=True)), 2)
+            self.assertEqual(len(log.read(stream="desk:a", kind="desk.thought", limit=5000, newest=True)), 2)
+            log.append("desk:c", "desk.thought", {"session_id": "s", "text": "three"})
+            self.assertEqual(len(log.read(stream="desk:a", kind="desk.thought", limit=5000, newest=True)), 2, "another stream's append leaves a stream fold")
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000, newest=True)), 3, "but refreshes the kind-wide fold")
+            fresh = log.read(kind="desk.thought", limit=5000, newest=True)
+            fresh.append(None)
+            self.assertEqual(len(log.read(kind="desk.thought", limit=5000, newest=True)), 3, "a caller's edits never reach the cache")
+            log.close() if hasattr(log, "close") else None
