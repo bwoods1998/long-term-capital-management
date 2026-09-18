@@ -113,7 +113,8 @@
     "feedback_min_minutes": 2,
     "families": [
       "kalshi",
-      "crypto"
+      "crypto",
+      "kalshi"
     ],
     "param_candidates": 36,
     "code_candidates": 10,
