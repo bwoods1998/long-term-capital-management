@@ -196,20 +196,20 @@
         "families": [
           "kalshi"
         ],
-        "sandboxes": 16,
+        "sandboxes": 20,
         "sandbox_offset": 0,
-        "code_candidates": 12,
-        "originate": 6
+        "code_candidates": 14,
+        "originate": 8
       },
       {
         "name": "crypto",
         "families": [
           "crypto"
         ],
-        "sandboxes": 8,
-        "sandbox_offset": 16,
-        "code_candidates": 4,
-        "originate": 2
+        "sandboxes": 4,
+        "sandbox_offset": 20,
+        "code_candidates": 2,
+        "originate": 1
       }
     ],
     "family_board_draw": {
