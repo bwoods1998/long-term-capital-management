@@ -840,7 +840,9 @@ class Foundry:
         # Every live book of the family: the house books run the house strategies and their
         # promotions, the explorers book the Foundry's own rows (Sept 18, 2026: with book roles
         # the explorers book alone would have left the house starters unmutated).
-        books = sorted((m for m in manifests.values() if m.family == family and getattr(m, "live", False)), key=lambda m: (m.id != (live.id if live else ""), m.id))
+        # ...and the shadow desks after them: since 16:45 UTC a live book runs only the proven
+        # strategies, so the search would otherwise stop the moment a family had none.
+        books = sorted((m for m in manifests.values() if m.family == family), key=lambda m: (m.id != (live.id if live else ""), not getattr(m, "live", False), m.id))
         rows: dict[str, dict[str, Any]] = {}
         seen: set[str] = set()
         for book in books:
