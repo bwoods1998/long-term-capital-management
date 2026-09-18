@@ -1775,10 +1775,16 @@ class Foundry:
         if _int((candidate.get("report") or {}).get("errors")) != 0:
             return False, f"{(candidate.get('report') or {}).get('errors')} engine errors"
         oos = evidence["out_of_sample"]
-        if int(evidence["trades"]) < int(cfg["min_trades"]):
-            return False, f"{evidence['trades']} trades, {cfg['min_trades']} needed"
-        if int(oos["trades"]) < int(cfg["min_oos_trades"]):
-            return False, f"{oos['trades']} out-of-sample positions, {cfg['min_oos_trades']} needed"
+        family = str(candidate.get("family") or "")
+        # Per-family counts (Sept 18, 2026): a maker strategy on the Kalshi board fills 15 to 45
+        # times in a ten-day replay; the replay is a relative screen for that family and the
+        # forward record the proof, so its count gate is lighter than the crypto lane's.
+        min_trades = int(dict(cfg.get("family_min_trades") or {}).get(family, cfg["min_trades"]))
+        min_oos = int(dict(cfg.get("family_min_oos_trades") or {}).get(family, cfg["min_oos_trades"]))
+        if int(evidence["trades"]) < min_trades:
+            return False, f"{evidence['trades']} trades, {min_trades} needed"
+        if int(oos["trades"]) < min_oos:
+            return False, f"{oos['trades']} out-of-sample positions, {min_oos} needed"
         ron = oos["return_on_notional"]
         if ron is None or ron <= reference + float(cfg["margin"]):
             return False, f"out-of-sample return {_fmt(ron)} does not beat {reference:+.3f} by {cfg['margin']}"
@@ -1787,7 +1793,6 @@ class Foundry:
         # the replay's touch fills are a maker's adverse fills, so it reads a favorites strategy
         # that earns +2.6% live at -4% to -14% whatever the board; the absolute proof is the
         # shadow desk's forward record on real prices, which the fast track requires).
-        family = str(candidate.get("family") or "")
         relative = family in {str(f) for f in (cfg.get("relative_families") or ())}
         if not relative and (ci is None or ci[0] <= float(cfg["min_ci_lower"])):
             return False, f"out-of-sample 95% lower bound {_fmt(ci[0] if ci else None, '+.4f')} is not above {cfg['min_ci_lower']}"
@@ -2123,7 +2128,7 @@ class Foundry:
                 continue  # a retired family trades out its shadow record; none of it goes live
             lower = _float(dep.get("oos_ci_lower"))
             relative = str(dep.get("family")) in {str(f) for f in (cfg.get("relative_families") or ())}
-            if int(dep.get("oos_trades") or 0) < int(cfg["min_oos_trades"]):
+            if int(dep.get("oos_trades") or 0) < int(dict(cfg.get("family_min_oos_trades") or {}).get(str(dep.get("family")), cfg["min_oos_trades"])):
                 continue
             if not relative and (lower is None or lower <= 0):
                 continue  # a candidate may trade in shadow, but only a confident backtest goes live

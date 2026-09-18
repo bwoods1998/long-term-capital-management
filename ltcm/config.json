@@ -218,7 +218,13 @@
     "originate": 3,
     "relative_families": [
       "kalshi"
-    ]
+    ],
+    "family_min_trades": {
+      "kalshi": 20
+    },
+    "family_min_oos_trades": {
+      "kalshi": 8
+    }
   },
   "evolution": {
     "excluded_families": [
