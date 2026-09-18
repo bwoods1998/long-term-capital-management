@@ -183,6 +183,10 @@ class ExitBook:
         self.check_seconds = int(check_seconds)
         self.retry_seconds = int(retry_seconds)
         self.quote_parallelism = max(1, min(16, int(quote_parallelism)))
+        #: How often a shadow desk's plans are checked; None checks every desk every tick.
+        self.shadow_seconds = 300.0
+        self._last_shadow_check: str | None = None
+        self.is_live: Callable[[str], bool] | None = None
         self._fold_lock = threading.RLock()
         self.alert = alert or (lambda level, message: None)
         self._plans: dict[str, ExitPlan] = {}
@@ -315,10 +319,37 @@ class ExitBook:
         self._last_check = at
         outcomes: list[dict[str, Any]] = []
         plans = self.plans()
+        # Sept 18, 2026, 17:53-18:23 UTC: 527 plans, most of them shadow desks', held one tick
+        # for 29 minutes on a one-vCPU box (a ledger fold and a gateway order scan per plan)
+        # and the guest agent starved. A live desk's plans are checked every tick; a shadow
+        # desk's every `shadow_seconds` (its book is a score, and its exits are modelled fills).
+        is_live = getattr(self, "is_live", None)
+        shadow_due = self._last_shadow_check is None or _seconds_between(self._last_shadow_check, at) >= self.shadow_seconds
+        if shadow_due:
+            self._last_shadow_check = at
+        if callable(is_live) and not shadow_due:
+            live_cache: dict[str, bool] = {}
+
+            def wanted(desk_id: str) -> bool:
+                if desk_id not in live_cache:
+                    try:
+                        live_cache[desk_id] = bool(is_live(desk_id))
+                    except Exception:
+                        live_cache[desk_id] = True
+                return live_cache[desk_id]
+
+            plans = {k: v for k, v in plans.items() if wanted(v.desk_id)}
+        books: dict[str, Any] = {}
+
+        def positions_of(desk_id: str) -> Any:
+            if desk_id not in books:
+                ledger = self.ledgers.get(desk_id)
+                books[desk_id] = None if ledger is None else ledger.state(at).positions
+            return books[desk_id]
+
         quotes = None
         if self.quote_parallelism > 1:
             instruments = {}
-            books = {}
             for plan in plans.values():
                 ledger = self.ledgers.get(plan.desk_id)
                 if ledger is None:
@@ -329,9 +360,8 @@ class ExitBook:
                 if plan.stop_price is None and plan.target_price is None:
                     continue
                 try:
-                    if plan.desk_id not in books:
-                        books[plan.desk_id] = ledger.state(at).positions
-                    if plan.instrument.key in books[plan.desk_id]:
+                    held = positions_of(plan.desk_id)
+                    if held is not None and plan.instrument.key in held:
                         instruments[plan.instrument.key] = plan.instrument
                 except Exception:
                     continue
@@ -344,12 +374,11 @@ class ExitBook:
             with ThreadPoolExecutor(max_workers=self.quote_parallelism, thread_name_prefix="exit-quote") as pool:
                 quotes = dict(pool.map(fetch, instruments.items()))
         for intent_id, plan in sorted(plans.items()):
-            ledger = self.ledgers.get(plan.desk_id)
-            if ledger is None:
-                continue
             try:
-                positions = ledger.state(at).positions
+                positions = positions_of(plan.desk_id)
             except Exception:
+                continue
+            if positions is None:
                 continue
             position = positions.get(plan.instrument.key)
             held = getattr(position, "quantity", ZERO) if position is not None else ZERO

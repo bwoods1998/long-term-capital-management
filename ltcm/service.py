@@ -1090,6 +1090,7 @@ class Service:
                 alert=self.alert,
             )
             self.gateway.exits = self.exits
+            self.exits.is_live = self.gateway.live_desk  # shadow plans on their own slower clock
         # leap: watch. The night desk.
         watch_config = dict(self.config.get("watch") or {})
         self.watch: NightWatch | None = (
