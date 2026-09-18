@@ -2428,7 +2428,10 @@ class Service:
         does (a desk with no sessions). Slots already run today are skipped, weekends are
         skipped for a weekdays-only desk, and a slot inside the catch-up window that has not run
         yet counts as now. The site's idle line ("next 16:30 ET") reads this."""
-        slots = list(manifest.cadence.sessions)
+        policy = dict(self.config.get("sessions") or {})
+        if not manifest.live and not bool(policy.get("shadow_enabled", True)):
+            return None  # the arena: a shadow desk runs its strategies, never a session
+        slots = self.session_slots(manifest)
         if not slots:
             return None
         tz = ZoneInfo(manifest.cadence.timezone)

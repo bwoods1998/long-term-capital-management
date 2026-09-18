@@ -112,7 +112,7 @@
   },
   "foundry": {
     "enabled": true,
-    "interval_minutes": 5,
+    "interval_minutes": 2,
     "new_outcomes_trigger": 4,
     "feedback_min_minutes": 2,
     "families": [
@@ -121,7 +121,7 @@
       "kalshi"
     ],
     "param_candidates": 36,
-    "code_candidates": 12,
+    "code_candidates": 16,
     "result_cache": true,
     "result_cache_seconds": 3600,
     "repair_invalid_code": true,

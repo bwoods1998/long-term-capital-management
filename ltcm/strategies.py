@@ -206,7 +206,7 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
 #: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
 PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "jitter": 0.25, "foundry_hold_hours": 72}
-STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800, "temps_ensemble": 1800, "poly_cross": 900, "perp_funding": 600}
+STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800, "temps_ensemble": 1800, "poly_cross": 1800, "perp_funding": 600}
 
 
 def starter_params(family: str, manifest: DeskManifest, *, quotes: bool = False) -> dict[str, Any]:

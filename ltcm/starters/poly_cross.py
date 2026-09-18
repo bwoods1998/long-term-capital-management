@@ -24,7 +24,7 @@ DEFAULTS = {
     "maker": False,
     "min_volume_24h": 5000,
     "max_hours": 1100,
-    "pages": 8,
+    "pages": 4,
     "poly_limit": 300,
     # The series both venues list, read whole (the board's pages are ordered by the venue, and a
     # market six weeks out can sit past the last page): Fed decisions, CPI, crypto levels, game
