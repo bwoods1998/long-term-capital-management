@@ -1246,7 +1246,7 @@ class FuturesSimulatorTests(unittest.TestCase):
         position = self.sim.positions[("future", "ETP-20DEC30-CDE", "")]
         self.assertEqual(position["quantity"], -1)
         self.assertAlmostEqual(position["mult"], 0.1)
-        self.assertAlmostEqual(self.sim.fills[-1]["fee"], 0.20, msg="a contract fee, not a percentage")
+        self.assertAlmostEqual(self.sim.fills[-1]["fee"], 0.23, msg="a contract fee, not a percentage")
         ctx = self.sim.context(T0 + MINUTE)
         self.assertEqual(ctx["positions"][0]["quantity"], "-1")
         self.assertAlmostEqual(float(ctx["positions"][0]["average_cost"]), 2400.0 * 0.9999, places=2)
@@ -1256,7 +1256,7 @@ class FuturesSimulatorTests(unittest.TestCase):
         self.assertEqual(len(self.sim.closed), 1)
         closed = self.sim.closed[0]
         self.assertEqual((closed["asset_class"], closed["how"]), ("future", "covered"))
-        self.assertAlmostEqual(closed["pnl"], (2400 * 0.9999 - 2400 * 0.98 * 1.0001) * 0.1 - 0.40, places=3)
+        self.assertAlmostEqual(closed["pnl"], (2400 * 0.9999 - 2400 * 0.98 * 1.0001) * 0.1 - 0.46, places=3)
 
     def test_a_shorts_stop_and_target_sit_on_the_right_side_and_a_buy_never_flips(self):
         self.assertEqual(self.sim.submit(self.intent("sell", 2300, 2, stop_price="2500", target_price="2360", holding_period_hours=5), T0), "filled")

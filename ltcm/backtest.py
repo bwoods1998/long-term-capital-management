@@ -119,8 +119,13 @@ PERPS: dict[str, dict[str, Any]] = {
     "ZEC-20DEC30-CDE": {"root": "ZEC", "size": 1.0, "tick": 0.1}, "BNB-20DEC30-CDE": {"root": "BNB", "size": 1.0, "tick": 0.05},
     "AVE-20DEC30-CDE": {"root": "AAVE", "size": 5.0, "tick": 0.01}, "PAU-20DEC30-CDE": {"root": "PAXG", "size": 1.0, "tick": 0.1},
 }
-#: Per-contract fee on CDE futures (UNVERIFIED until a live fill; `adapters.coinbase.FUTURES_FEE_PER_CONTRACT`).
-FUTURES_FEE_PER_CONTRACT = 0.20
+#: The contracts a replay lists (`kit.futures()`): the liquid perps. Every contract in `PERPS`
+#: can be simulated when a strategy names it, but listing all 22 made a 21-day replay fetch
+#: 460 candle pages under the sandboxes' shared pacing and time out with no trades (Sept 18, 2026).
+REPLAY_PERPS = ("BIP-20DEC30-CDE", "ETP-20DEC30-CDE", "SLP-20DEC30-CDE", "XPP-20DEC30-CDE", "ADP-20DEC30-CDE",
+                "POP-20DEC30-CDE", "AVP-20DEC30-CDE", "BCP-20DEC30-CDE", "LCP-20DEC30-CDE", "DOP-20DEC30-CDE")
+#: Per-contract fee on CDE futures (a live fill on Sept 18, 2026 paid $0.23 on a $111 contract).
+FUTURES_FEE_PER_CONTRACT = 0.23
 BOOTSTRAP_RESAMPLES = 2000
 EPS = 1e-9
 
@@ -1216,7 +1221,8 @@ class BacktestKit:
         """The CDE perpetual contracts in `PERPS`, priced from history as of now, with a day's
         dollar volume from the candles; the shape `Kit.futures` gives a live strategy."""
         out = []
-        for product, spec in PERPS.items():
+        for product in REPLAY_PERPS:
+            spec = PERPS[product]
             if root and str(spec["root"]).upper() != str(root).upper():
                 continue
             seconds = GRANULARITY_SECONDS[QUOTE_GRANULARITY]

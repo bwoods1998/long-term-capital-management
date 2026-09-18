@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 0
     finally:
         service.close()
+        if not args.once and os.environ.get("LTCM_SLOW_EXIT") != "1":
+            # Sept 18, 2026: the interpreter's exit joined every thread-pool worker (the
+            # Foundry's backtests run for up to 25 minutes) and every restart stalled for as
+            # long. The health file and the tape are written; the supervisor restarts the loop.
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
