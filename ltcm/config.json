@@ -184,7 +184,25 @@
     "fill_model": "touch",
     "deploy_live": true,
     "explorers": true,
-    "max_explorers_per_desk": 4
+    "max_explorers_per_desk": 4,
+    "lanes": [
+      {
+        "name": "kalshi",
+        "families": [
+          "kalshi"
+        ],
+        "sandboxes": 12,
+        "sandbox_offset": 0
+      },
+      {
+        "name": "crypto",
+        "families": [
+          "crypto"
+        ],
+        "sandboxes": 12,
+        "sandbox_offset": 12
+      }
+    ]
   },
   "evolution": {
     "excluded_families": [

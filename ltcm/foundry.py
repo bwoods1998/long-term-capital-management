@@ -1025,7 +1025,8 @@ class Foundry:
 
         workers = max(1, int(cfg["sandboxes"]))
         ready = getattr(manager, "ready_for_run", lambda desk_id: True)
-        available = [f"foundry-{index}" for index in range(workers) if ready(f"foundry-{index}")]
+        offset = int(cfg.get("sandbox_offset", 0) or 0)  # a lane's own slice of the research boxes
+        available = [f"foundry-{index}" for index in range(offset, offset + workers) if ready(f"foundry-{index}")]
         if not available:
             return {**summary, "skipped": "research sandboxes are awaiting execution confirmation or daily capacity"}
         workers = len(available)
@@ -1935,7 +1936,8 @@ class Foundry:
         need = int(cfg["min_forward_settled"])
         horizon = float(cfg["forward_max_hours"]) * 3600.0
         out: list[dict[str, Any]] = []
-        for desk in [m for m in manifests.values() if getattr(m, "live", False)]:
+        mine = {str(f) for f in (cfg.get("families") or [])}
+        for desk in [m for m in manifests.values() if getattr(m, "live", False) and (not mine or m.family in mine)]:
             for name, row in sorted(self.explorer_rows(desk.id).items()):
                 at = self.now()
                 since = row.get("promoted_at") or row.get("deployed_at")

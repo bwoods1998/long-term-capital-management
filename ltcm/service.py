@@ -1473,19 +1473,39 @@ class Service:
         try:
             from .foundry import DEFAULTS as FOUNDRY_DEFAULTS, Foundry
 
-            foundry = Foundry(
-                log=self.log,
-                strategies=self.strategies,
-                sandboxes=lambda: self.sandboxes,
-                provider=self.provider,
-                manifests=self.active_manifests,
-                clock=self.clock,
-                alert=self.alert,
-                config=settings,
-                state_path=self.capital_dir / "foundry.json",
-                equity=self._desk_equity,
-                halted=lambda: self.gateway.kill_switch_engaged(),
-            )
+            def build(config: Mapping[str, Any], path: Path) -> Any:
+                return Foundry(
+                    log=self.log,
+                    strategies=self.strategies,
+                    sandboxes=lambda: self.sandboxes,
+                    provider=self.provider,
+                    manifests=self.active_manifests,
+                    clock=self.clock,
+                    alert=self.alert,
+                    config=config,
+                    state_path=path,
+                    equity=self._desk_equity,
+                    halted=lambda: self.gateway.kill_switch_engaged(),
+                )
+
+            # The arena (Sept 18, 2026): research lanes. Each lane is a Foundry of its own with
+            # its own families, slice of the research sandboxes and state file, so the Kalshi and
+            # the crypto search run at the same time instead of taking turns. The first lane keeps
+            # `foundry.json`; a new lane's file is seeded with the deployments of its families.
+            lanes = [dict(l) for l in (settings.get("lanes") or []) if isinstance(l, Mapping)]
+            if lanes:
+                self.foundries = []
+                for index, lane in enumerate(lanes):
+                    name = str(lane.get("name") or index)
+                    config = {**{k: v for k, v in settings.items() if k != "lanes"}, **lane, "name": name}
+                    path = self.capital_dir / ("foundry.json" if index == 0 else f"foundry-{name}.json")
+                    if index and not path.exists():
+                        self._seed_foundry_lane(path, {str(f) for f in (config.get("families") or [])})
+                    self.foundries.append(build(config, path))
+                foundry = self.foundries[0]
+            else:
+                foundry = build(settings, self.capital_dir / "foundry.json")
+                self.foundries = [foundry]
         except Exception as exc:
             self.alert("warning", f"foundry unavailable: {type(exc).__name__}")
             return None
@@ -1515,34 +1535,58 @@ class Service:
         except Exception:
             return None
 
+    def _seed_foundry_lane(self, path: Path, families: set[str]) -> None:
+        """A new lane's state file starts with the deployments of its families, moved out of
+        `foundry.json`, so a live explorer keeps the lane that will prune or promote it."""
+        source = self.capital_dir / "foundry.json"
+        try:
+            data = json.loads(source.read_text(encoding="utf-8")) if source.exists() else {}
+        except (OSError, ValueError):
+            data = {}
+        deployments = dict(data.get("deployments") or {})
+        mine = {k: v for k, v in deployments.items() if isinstance(v, Mapping) and str(v.get("family")) in families}
+        try:
+            path.write_text(json.dumps({"deployments": mine}, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+            if mine:
+                data["deployments"] = {k: v for k, v in deployments.items() if k not in mine}
+                source.write_text(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        except OSError as exc:
+            self.alert("warning", f"foundry lane state not seeded: {type(exc).__name__}")
+
     def _foundry_tick(self, at: str, state: Mapping[str, Any]) -> Any:
-        """leap: foundry -- start a cycle off the tick when one is due and none is running. The
-        cycle deploys from its worker; the strategy store is locked and sessions deploy from
-        threads too. Returns the previous cycle's summary once it has finished."""
-        foundry = self.foundry
-        if foundry is None or not foundry.enabled():
-            return None
-        due = foundry.due(at, state.get("last_foundry_at"))
-        if not due:
-            policy = self.config.get("foundry") or {}
-            threshold = int(policy.get("new_outcomes_trigger", 0))
-            last = state.get("last_foundry_at")
-            elapsed = (_epoch_of(at) - _epoch_of(last)) if last else 0
-            if threshold and elapsed >= float(policy.get("feedback_min_minutes", 10)) * 60:
-                from .evidence import fresh_clusters
-                due = fresh_clusters(self.log, int(state.get("last_foundry_evidence_seq") or 0),
-                                     families={k: m.family for k, m in self.manifests.items()},
-                                     allowed_families=policy.get("families", ["kalshi", "crypto"])) >= threshold
+        """leap: foundry -- start a cycle off the tick when one is due and none is running, for
+        every research lane. The cycle deploys from its worker; the strategy store is locked and
+        sessions deploy from threads too. Returns the finished cycles' summaries."""
+        lanes = list(getattr(self, "foundries", None) or ([self.foundry] if self.foundry is not None else []))
+        out: dict[str, Any] = {}
+        for index, foundry in enumerate(lanes):
+            if foundry is None or not foundry.enabled():
+                continue
+            suffix = "" if index == 0 else f"_{index}"
+            last_key, seq_key, worker = f"last_foundry_at{suffix}", f"last_foundry_evidence_seq{suffix}", f"foundry{suffix}"
+            due = foundry.due(at, state.get(last_key))
             if not due:
-                return None
-        slot = (getattr(self, "_workers", None) or {}).get("foundry")
-        if (slot is not None and slot["thread"].is_alive()) or foundry.running():
-            return None  # the last cycle is still working; a cycle never runs twice at once
-        self._save_state(last_foundry_at=at, last_foundry_evidence_seq=self.log.latest_seq())
-        done = self._off_tick("foundry", lambda at=at: foundry.cycle(at))
-        if isinstance(done, Mapping):
-            return {k: v for k, v in done.items() if k != "candidates_detail"}
-        return None
+                policy = foundry.config
+                threshold = int(policy.get("new_outcomes_trigger", 0))
+                last = state.get(last_key)
+                elapsed = (_epoch_of(at) - _epoch_of(last)) if last else 0
+                if threshold and elapsed >= float(policy.get("feedback_min_minutes", 10)) * 60:
+                    from .evidence import fresh_clusters
+                    due = fresh_clusters(self.log, int(state.get(seq_key) or 0),
+                                         families={k: m.family for k, m in self.manifests.items()},
+                                         allowed_families=policy.get("families", ["kalshi", "crypto"])) >= threshold
+                if not due:
+                    continue
+            slot = (getattr(self, "_workers", None) or {}).get(worker)
+            if (slot is not None and slot["thread"].is_alive()) or foundry.running():
+                continue  # the last cycle is still working; a cycle never runs twice at once
+            self._save_state(**{last_key: at, seq_key: self.log.latest_seq()})
+            done = self._off_tick(worker, lambda at=at, f=foundry: f.cycle(at))
+            if isinstance(done, Mapping):
+                out[worker] = {k: v for k, v in done.items() if k != "candidates_detail"}
+        if not out:
+            return None
+        return out["foundry"] if list(out) == ["foundry"] else out
 
     def _feeds_status(self) -> dict[str, Any] | None:
         """The venue sockets as the hub reports them, or None on a floor without feeds."""
@@ -4177,6 +4221,7 @@ class Service:
             "last_evolution_day": state.get("last_evolution_day"),
             "last_founding": state.get("last_founding"),  # leap: founding
             "last_foundry": self.foundry.summary() if getattr(self, "foundry", None) is not None else None,  # leap: foundry
+            "foundry_lanes": {str(f.config.get("name") or i): f.summary() for i, f in enumerate(getattr(self, "foundries", None) or []) if f is not None} if len(getattr(self, "foundries", None) or []) > 1 else None,
             "event_stream": dict(self._stream_status),
             "execution": getattr(self, "_execution_pulse", None),
             "notifications": {"enabled": self.notifier.enabled, "checked_at": state.get("notify_checked_at"),

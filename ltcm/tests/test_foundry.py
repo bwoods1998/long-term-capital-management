@@ -1228,6 +1228,29 @@ class ServiceFoundryTests(ServiceCase):
         self.assertEqual(len(calls), 2)
         self.assertIn("last_foundry", self.service.status())
 
+    def test_research_lanes_run_side_by_side_on_their_own_sandboxes_and_state(self):
+        """The arena (Sept 18, 2026): a Kalshi lane and a crypto lane, each a Foundry of its own."""
+        self.service.close()
+        self.service = self.build(foundry={"lanes": [
+            {"name": "kalshi", "families": ["kalshi"], "sandboxes": 2, "sandbox_offset": 0},
+            {"name": "crypto", "families": ["crypto"], "sandboxes": 2, "sandbox_offset": 2},
+        ]})
+        lanes = self.service.foundries
+        self.assertEqual([f.config["families"] for f in lanes], [["kalshi"], ["crypto"]])
+        self.assertEqual([f.config["sandbox_offset"] for f in lanes], [0, 2])
+        self.assertEqual([f.state_path.name for f in lanes], ["foundry.json", "foundry-crypto.json"])
+        self.assertIs(self.service.foundry, lanes[0])
+        calls = []
+        for lane in lanes:
+            lane.enabled = lambda: True
+            lane.cycle = lambda at=None, lane=lane: calls.append(lane.config["name"]) or {"at": at, "cycle": 1}
+        self.tick()
+        self.assertEqual(sorted(calls), ["crypto", "kalshi"], "both lanes cycle on the same tick")
+        state = self.service.state()
+        self.assertIn("last_foundry_at", state)
+        self.assertIn("last_foundry_at_1", state)
+        self.assertEqual(sorted(self.service.status()["foundry_lanes"]), ["crypto", "kalshi"])
+
     def test_the_foundry_reads_the_evolution_loops_retired_families(self):
         self.service.close()
         self.service = self.build(evolution={"target_variants": 1, "excluded_families": ["ranges"]}, foundry={"excluded_families": ["weather"]})
