@@ -657,6 +657,17 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(_capped_quantity({**event, "limit_price": "0.99", "quantity": "30"}, Decimal("0.5")), "1")
         coin = {"instrument": {"asset_class": "crypto"}, "quantity": "0.01", "limit_price": "75000"}
         self.assertEqual(_capped_quantity(coin, Decimal("25")), "0.00033333")
+        # leap: futures -- whole contracts, never fewer than one, priced through the contract size.
+        from ltcm import tools as tools_module
+        previous = tools_module.contract_size_resolver
+        tools_module.contract_size_resolver = lambda pid: Decimal("0.1")
+        try:
+            future = {"instrument": {"asset_class": "future", "symbol": "ETP-20DEC30-CDE", "market_id": "ETP-20DEC30-CDE"}, "limit_price": "2440", "quantity": "1"}
+            self.assertEqual(_capped_quantity(future, Decimal("25")), "1", "a $25 cap cannot buy a fraction of a $244 contract: one contract is the learning size")
+            self.assertEqual(_capped_quantity({**future, "quantity": "5"}, Decimal("600")), "2", "$600 covers two contracts")
+            self.assertEqual(_capped_quantity({**future, "quantity": "3"}, Decimal("100000")), "3", "the strategy's own count above the cap")
+        finally:
+            tools_module.contract_size_resolver = previous
 
 
 class FakeKit:

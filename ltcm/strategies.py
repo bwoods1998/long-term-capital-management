@@ -1820,10 +1820,27 @@ def _capped_quantity(args: Mapping[str, Any], cap_usd: Decimal) -> str:
     if notional <= cap_usd:
         return str(quantity)
     allowed = cap_usd / price
-    asset_class = str((args.get("instrument") or {}).get("asset_class") or "")
+    instrument = args.get("instrument") or {}
+    asset_class = str(instrument.get("asset_class") or "")
     if asset_class == "event":
         allowed = Decimal(int(allowed))
         return str(max(allowed, Decimal(1)))
+    if asset_class == "future":
+        # leap: futures -- contracts are whole, and one contract is the smallest learning size
+        # there is (Sept 18, 2026: a $25 cap made Hilibrand III's first live perps entry 0.01
+        # contracts and the risk engine refused it as fractional). The notional per contract is
+        # price x contract size, read through the same resolver the tools use.
+        from . import tools as tools_module
+
+        size = Decimal(1)
+        resolver = getattr(tools_module, "contract_size_resolver", None)
+        if callable(resolver):
+            try:
+                size = Decimal(str(resolver(str(instrument.get("market_id") or instrument.get("symbol") or ""))))
+            except Exception:
+                size = Decimal(1)
+        contracts = int(cap_usd / (price * size)) if price * size > 0 else 1
+        return str(max(1, min(int(quantity), contracts)))
     return format(allowed.quantize(Decimal("0.00000001")), "f")
 
 
