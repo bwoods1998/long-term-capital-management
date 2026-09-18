@@ -1535,10 +1535,28 @@ class Gateway:
             at=settled_at,
         )
 
+    #: How long the positions board may reuse a position's opening time and rationale. Sept 18,
+    #: 2026: the checkpoint read the desk's whole intent stream once per open position, and with
+    #: 122k events and 150 positions the publisher took longer than the tick, so the site's
+    #: summary froze for forty minutes. A held position's entry does not change while it is held.
+    ENTRY_CACHE_SECONDS = 600.0
+
     def entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
         """When this desk's position in the instrument opened, and the sentence it gave. Public
-        for the positions board (leap: exits)."""
-        return self._entry_of(desk_id, key)
+        for the positions board (leap: exits); memoized for `ENTRY_CACHE_SECONDS`."""
+        cache = getattr(self, "_entry_cache", None)
+        if cache is None:
+            cache = self._entry_cache = {}
+        now = time.monotonic()
+        hit = cache.get((desk_id, key))
+        if hit is not None and now - hit[0] < self.ENTRY_CACHE_SECONDS:
+            return hit[1]
+        value = self._entry_of(desk_id, key)
+        cache[(desk_id, key)] = (now, value)
+        if len(cache) > 4096:
+            for stale in [k for k, v in cache.items() if now - v[0] >= self.ENTRY_CACHE_SECONDS][:2048]:
+                cache.pop(stale, None)
+        return value
 
     def _entry_of(self, desk_id: str, key: str) -> tuple[str | None, str]:
         """When the desk's position in the contract opened, and the sentence it gave for doing so."""

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_stream ON events(stream, seq);
 CREATE INDEX IF NOT EXISTS events_kind ON events(kind, seq);
+CREATE INDEX IF NOT EXISTS events_stream_kind ON events(stream, kind, seq);
 CREATE INDEX IF NOT EXISTS events_fill_desk ON events(json_extract(payload, '$.desk_id'), seq)
     WHERE kind = 'broker.fill';
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
