@@ -196,7 +196,9 @@
           "kalshi"
         ],
         "sandboxes": 16,
-        "sandbox_offset": 0
+        "sandbox_offset": 0,
+        "code_candidates": 12,
+        "originate": 6
       },
       {
         "name": "crypto",
@@ -204,7 +206,9 @@
           "crypto"
         ],
         "sandboxes": 8,
-        "sandbox_offset": 16
+        "sandbox_offset": 16,
+        "code_candidates": 4,
+        "originate": 2
       }
     ],
     "family_board_draw": {

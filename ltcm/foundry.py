@@ -1302,7 +1302,9 @@ class Foundry:
                 "$1.00; prices that drift through the last hours before settlement; a strike's price against its neighbours'; "
                 "volume arriving late in a market's life; buckets priced far from what the underlying's recent range implies; "
                 "favorites and longshots by category; the hour of day a market is mispriced. Pick one, state it as a hypothesis, "
-                "and write the code that tests it.")
+                "and write the code that tests it. Prefer markets that settle within hours (the hourly and daily crypto brackets, "
+                "games in play, the day's temperature) over ones that settle in weeks: a strategy earns its real-money record from "
+                "settled positions, and the floor moves a candidate to real money after six of them, so hours beat days.")
         return base.replace(head, want) if head in base else want + "\n" + base
 
     def origination_packet(self, *, family: str, name: str, window: Mapping[str, Any], records: list[str], index: int, count: int) -> str:
