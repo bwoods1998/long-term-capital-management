@@ -18,7 +18,7 @@
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
-import { createsOrder, notional, isCoinbaseFuture, REFERENCE_HEADER, allowedVenuePath } from './caps.mjs';
+import { createsOrder, notional, isCoinbaseFuture, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as coinbase from './coinbase.mjs';
 
@@ -165,7 +165,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     }
     const priced = notional(target.venue, parsed, { reference, contractSize });
     if (priced.error) return fail(priced.error, 400);
-    const decision = await gate.reserve({ micro: String(priced.micro) });
+    const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
+    const decision = await gate.reserve({ micro: String(priced.micro), exit });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
     reservation = decision;
   }

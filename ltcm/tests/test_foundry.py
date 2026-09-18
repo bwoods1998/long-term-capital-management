@@ -598,11 +598,16 @@ class DeploymentTests(FoundryCase):
         again = summary["winner"]
         self.strategies.records[("mullins", foundry.state()["deployments"][again]["strategy"])] = {"settled": 9, "fills": 9, "settled_pnl_usd": "3"}
         self.assertEqual(foundry.prune_explorers(self.manifests), [])
-        # At capacity, the worst explorer makes room for the next.
+        # At capacity, a young explorer is protected: the next candidate goes to a shadow desk
+        # instead, and the live row keeps trading. Past the protection window it makes room.
         self.clock[0] += 3600
         summary = foundry.cycle(self.service.now())
+        self.assertEqual(len(foundry.explorer_rows("mullins")), 1, "the live row under protection stays")
+        self.assertNotEqual(summary.get("deployed_to"), "mullins")
+        self.clock[0] += 7 * 3600
+        summary = foundry.cycle(self.service.now())
         if summary.get("deployed_to") == "mullins":
-            self.assertEqual(len(foundry.explorer_rows("mullins")), 1)
+            self.assertEqual(len(foundry.explorer_rows("mullins")), 1, "past protection the old row made room")
 
     def test_a_settings_winner_goes_to_the_worst_shadow_desk_and_never_the_live_desk(self):
         self.manager.script = settings_winner

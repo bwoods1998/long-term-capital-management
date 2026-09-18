@@ -156,3 +156,15 @@ test('what the last pass learned about Sail is readable from the status', () => 
     reserve_usd: null, spendable_usd: null, burn_usd_per_day: null, runway_days: null, run_out_at: null,
   });
 });
+
+test('an exit skips the dollar caps but still counts as an order', () => {
+  const gate = build();
+  for (let i = 0; i < 8; i += 1) assert.equal(gate.reserve({ micro: usd(50) }).ok, true);
+  assert.equal(gate.reserve({ micro: usd(1) }).ok, false, 'the day is spent');
+  const exit = gate.reserve({ micro: usd(275), exit: true });
+  assert.equal(exit.ok, true, 'a stop on a $275 contract goes through the $50 order cap and the spent day');
+  assert.equal(gate.status(NOON).today.orders, 9);
+  const full = build({ ...ENV, MAX_DAY_ORDERS: '1' });
+  assert.equal(full.reserve({ micro: usd(1) }).ok, true);
+  assert.equal(full.reserve({ micro: usd(1), exit: true }).ok, false, 'the order count cap binds exits too');
+});

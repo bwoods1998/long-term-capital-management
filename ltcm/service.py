@@ -1362,6 +1362,8 @@ class Service:
             self._event_index_lock = lock
         now = time.time()
         stale = cached is None or now - cached[0] >= 600
+        if stale and cached is not None and now < float(getattr(self, "_event_index_backoff_until", 0) or 0):
+            stale = False  # rate-limited: the last index serves until the back-off ends
         if stale and not getattr(self, "_event_index_building", False):
             with lock:
                 if not getattr(self, "_event_index_building", False):
@@ -1397,6 +1399,10 @@ class Service:
                         )
                     except Exception as exc:
                         self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}: {str(exc)[:140]}")
+                        if "429" in str(exc):
+                            # The venue's read budget is the live strategies' too: leave it alone
+                            # for half an hour rather than take another page every two minutes.
+                            self._event_index_backoff_until = time.time() + 1800
                         break
                     for row in page.get("markets", []):
                         if not isinstance(row, Mapping):
@@ -4152,7 +4158,7 @@ class Service:
                 "daily_pnl": text(floor["daily_pnl"]),
                 "net_deposits": text(floor["net_deposits"]),
                 "live_desks": len(live),
-                "shadow_desks": len(self.ledgers) - len(live),
+                "shadow_desks": len(self.active_manifests()) - len(live),
                 "shadow_equity": text(shadow_floor["equity"]),
             },
             "budget": {

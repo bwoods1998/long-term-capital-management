@@ -1077,11 +1077,27 @@ class Foundry:
             # (cycle 157: a favorites mutation raised in `decide`), and the next best takes its place.
             ranked = sorted(scored, key=lambda c: -(_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0))
             explorers = [c for c in ranked if bool(cfg.get("explorers", True)) and (_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0) > reference][:3]
+            full = False
             for chosen, role in ([(winner, "winner")] if winner is not None else []) + [(c, "explorer") for c in explorers if c is not winner]:
+                before = len(problems)
                 deployment = self.deploy_live(chosen, family, subject, live, problems, source=source, role=role, cycle=cycle)
                 if deployment is not None:
                     winner = chosen
                     break
+                if any("under" in p and "protection" in p for p in problems[before:]):
+                    full = True
+                    break
+            # The live book full or the candidate refused there: the best still earns a modelled
+            # record on the family's worst shadow desk (the arena's second lane), so a cycle is
+            # never wasted and a candidate the live book turned away can still qualify.
+            if deployment is None and (winner is not None or explorers) and shadows:
+                shadow_pick = winner if winner is not None else explorers[0]
+                shadow_deployment = self.deploy(shadow_pick, family, subject, shadows, problems, source=source)
+                if shadow_deployment is not None:
+                    deployment = shadow_deployment
+                    winner = shadow_pick
+                    if full:
+                        problems[:] = [p for p in problems if not ("under" in p and "protection" in p)]
         elif winner is not None:
             deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
         self.progress("learn", f"Cycle {cycle}: {sum(1 for c in candidates if self.measured(c))}/{len(candidates)} candidates measured successfully; {len(qualified)} qualified; "
@@ -1858,14 +1874,23 @@ class Foundry:
         limit = max(1, int(cfg.get("max_explorers_per_desk", 4)))
         rows = self.explorer_rows(live.id)
         if name not in rows and len(rows) >= limit:
-            # The explorer with the least to show for itself leaves: lowest settled P&L after
-            # fees since it was dealt, then the oldest.
+            # Only an explorer past its protection window can make room, and the one with the
+            # least to show for itself goes: lowest settled P&L after fees since it was dealt,
+            # then the oldest. Sept 18, 2026: forty-six explorers were replaced in seven hours,
+            # each about ten minutes old, none with a fill; a row that has not had time to trade
+            # has no record to lose by, so a full book of young explorers takes nothing new.
+            protect = float(cfg.get("protect_hours", 6)) * 3600.0
+            eligible = {other: row for other, row in rows.items() if _epoch(at) - _epoch(row.get("promoted_at") or row.get("deployed_at")) >= protect}
+            if not eligible:
+                problems.append(f"{fid} not deployed: {live.id} carries {len(rows)} explorers all under {cfg.get('protect_hours', 6)}h of protection")
+                return None
+
             def worth(item: tuple[str, dict[str, Any]]) -> tuple[Decimal, str]:
                 other, row = item
                 record = self._record(live.id, other, row.get("promoted_at") or row.get("deployed_at"), opened_since=True)
                 net = (_dec(record.get("settled_pnl_usd")) or Decimal(0)) - (_dec(record.get("fees_usd")) or Decimal(0))
                 return net, str(row.get("promoted_at") or "")
-            gone, gone_row = min(rows.items(), key=worth)
+            gone, gone_row = min(eligible.items(), key=worth)
             store.remove(live.id, gone)
             self._remove_file(manager, live.id, gone)
             self._deployment(gone_row.get("foundry_id"), status="replaced", ended_at=at, reason=f"made room for {fid}")

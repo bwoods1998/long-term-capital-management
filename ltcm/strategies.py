@@ -1498,6 +1498,25 @@ class Strategies:
                 learning = max(learning, earned)
         return min(learning, fit) if fit is not None else learning
 
+    def free_cash_usd(self, manifest: DeskManifest) -> Decimal | None:
+        """The desk's cash less what its resting buys already commit, or None when unknown."""
+        ledgers = getattr(self.service, "ledgers", None)
+        ledger = ledgers.get(manifest.id) if isinstance(ledgers, Mapping) else None
+        if ledger is None:
+            return None
+        try:
+            cash = ledger.state(self.service.now()).cash
+        except Exception:
+            return None
+        committed = Decimal(0)
+        for row in self.open_orders_for(manifest):
+            try:
+                if str(row.get("side")) == "buy" and row.get("purpose") != "exit":
+                    committed += (_dec(row.get("quantity")) or Decimal(0)) * (_dec(row.get("limit_price")) or Decimal(0))
+            except Exception:
+                continue
+        return (cash - committed).quantize(Decimal("0.01"))
+
     def limit_fit_usd(self, manifest: DeskManifest) -> Decimal | None:
         """The largest order the desk's own limits allow now: the smaller of the order and the
         position caps, times desk equity, with a little headroom for the reference moving.
@@ -1564,6 +1583,15 @@ class Strategies:
                 current = self._manifest_now(manifest)
                 caps[live] = self.size_cap(current, name) if live else self.limit_fit_usd(current)
             cap = caps[live]
+            if live and cap is not None and not raw.get("reduce_only"):
+                # No bigger than the cash the book has: a $40 order against $6 of cash was refused
+                # hundreds of times an hour on Sept 18, 2026, and a smaller one trades.
+                free = self.free_cash_usd(manifest)
+                if free is not None:
+                    if free < Decimal("2"):
+                        out.append({"approved": False, "reasons": [f"desk cash exhausted ({free:.2f}); nothing proposed"], "rationale": str(raw.get("rationale") or "")[:200]})
+                        continue
+                    cap = min(cap, free)
             args = dict(raw)
             args.setdefault("order_type", "limit")
             if args.get("order_type") != "limit" or _dec(args.get("limit_price")) is None:

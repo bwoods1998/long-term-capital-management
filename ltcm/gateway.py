@@ -1150,27 +1150,37 @@ class Gateway:
         `pnl` is net of the sell's own fee, as it always was; `entry_fees` is the closed
         quantity's share of the fees its opening fills paid, so a reader nets both."""
         try:
-            if before is None or payload.get("side") != "sell" or money(before.quantity) <= 0:
+            if before is None:
+                return None
+            held = money(before.quantity)
+            side = payload.get("side")
+            # A sell that reduces a long, or a buy that covers a short (the perps, Sept 18, 2026:
+            # every short's round trip had gone unscored, so no perp strategy ever had a record).
+            if side == "sell" and held > 0:
+                short = False
+            elif side == "buy" and held < 0:
+                short = True
+            else:
                 return None
             desk_id = str(payload.get("desk_id") or "")
-            quantity = min(money(payload.get("quantity") or 0), money(before.quantity))
+            quantity = min(money(payload.get("quantity") or 0), abs(held))
             price = money(payload.get("price") or 0)
             fee = money(payload.get("fee") or 0)
             if not desk_id or quantity <= 0:
                 return None
             instrument = before.instrument
             entry = money(before.average_cost)
-            pnl = (price - entry) * quantity * instrument.multiplier - fee
+            pnl = ((entry - price) if short else (price - entry)) * quantity * instrument.multiplier - fee
             at = _stamp(payload.get("at"), self.now())
             fill_id = str(payload.get("fill_id") or "")
             opened_at, entry_fees = self._open_of(desk_id, instrument.key, fill_id=fill_id or None)
-            rationale = self._rationale_of(desk_id, instrument.key, opening_side="buy")
+            rationale = self._rationale_of(desk_id, instrument.key, opening_side="sell" if short else "buy")
             manifest = self.manifests.get(desk_id)
             stream = manifest.stream if manifest else f"desk:{desk_id}"
             body = {
                 "instrument": instrument.key,
                 "market_id": instrument.market_id or instrument.symbol,
-                "result": "sold",
+                "result": "sold",  # a cover closes a short the way a sell closes a long
                 "entry_price": text(entry),
                 "exit_price": text(price),
                 "quantity": text(quantity),

@@ -85,6 +85,7 @@ from ..data.kalshi import (
     dollars_from_cents,
 )
 from . import (
+    PURPOSE_HEADER,
     KalshiCredentials,
     VenueClient,
     confirm_or_unknown,
@@ -245,6 +246,7 @@ class KalshiBroker:
         body: Any = None,
         what: str,
         ok: tuple[int, ...] = (200, 201, 204),
+        headers: "dict[str, str] | None" = None,
     ) -> Any:
         """One signed request. The signature covers the prefixed path without its query."""
         signed_path = PREFIX + path
@@ -254,7 +256,7 @@ class KalshiBroker:
             if pairs:
                 url += "?" + urllib.parse.urlencode(pairs)
         status, payload = self.client.request(
-            method, url, headers=self.headers(method, signed_path), body=body, what=what
+            method, url, headers={**self.headers(method, signed_path), **(headers or {})}, body=body, what=what
         )
         return require_ok(status, payload, what=what, ok=ok)
 
@@ -502,7 +504,7 @@ class KalshiBroker:
         path = ORDERS_PATH if self.order_api == "legacy" else ORDERS_PATH_V2
         body = self.order_body(intent)
         try:
-            payload = self._call("POST", path, body=body, what="kalshi submit")
+            payload = self._call("POST", path, body=body, what="kalshi submit", headers={PURPOSE_HEADER: intent.purpose})
         except TransportError as exc:
             return confirm_or_unknown(
                 lambda: self.order_by_client_id(intent.id),

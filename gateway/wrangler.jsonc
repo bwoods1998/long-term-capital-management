@@ -28,9 +28,11 @@
     // Sized so a desk's own limits bind first: Hilibrand may put half its sleeve into one
     // order, Mullins fifteen percent. A quoting strategy replaces its resting bids as fair
     // moves, so a day holds a few hundred small orders; the dollar caps still bind the risk.
-    "MAX_ORDER_USD": "250",
-    "MAX_DAY_USD": "6000",
-    "MAX_DAY_ORDERS": "1500",
+    // Sept 18, 2026 (the arena): the owner accepts the loss of the whole account; the caps now
+    // bound a runaway loop, not a position. Exits (X-LTCM-Purpose: exit) skip the dollar caps.
+    "MAX_ORDER_USD": "2000",
+    "MAX_DAY_USD": "60000",
+    "MAX_DAY_ORDERS": "6000",
     // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's
     // notices from noon on once three live favorites desks were filling.
     "NOTIFY_MAX_PER_DAY": "300",

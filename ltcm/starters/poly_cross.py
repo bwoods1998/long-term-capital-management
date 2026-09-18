@@ -33,6 +33,11 @@ DEFAULTS = {
                "KXUCL", "KXEPL", "KXSB", "KXNBACHAMP", "KXMLBWS", "KXNCAAFGAME", "KXMLBPLAYOFFS", "KXTAIWAN", "KXPUTIN", "KXGTA6"],
     "min_overlap": 0.6,
     "max_day_gap": 2,
+    # A market settling within `short_hours` must end within `max_hour_gap` of its match: on
+    # Sept 18, 2026 Polymarket's "Bitcoin above $78,000 on September 18" (ends 12:00 UTC) was
+    # matched to Kalshi's 5pm EDT price, five hours of BTC apart, and the NO lost 62 cents.
+    "short_hours": 72,
+    "max_hour_gap": 2,
     "min_words": 3,
     "notional_usd": None,
     "max_new": 3,
@@ -143,8 +148,15 @@ def match(kalshi, poly_rows, p):
         if bounds(title) != bounds(question):
             continue
         end = _when(str(row.get("end_date") or "").replace("Z", ""))
-        if close is not None and end is not None and abs((end - close).total_seconds()) > float(p["max_day_gap"]) * 86400.0:
-            continue
+        if close is not None and end is not None:
+            gap = abs((end - close).total_seconds())
+            if gap > float(p["max_day_gap"]) * 86400.0:
+                continue
+            soon = (close - datetime.now(timezone.utc)).total_seconds() <= float(p["short_hours"]) * 3600.0
+            if soon and gap > float(p["max_hour_gap"]) * 3600.0:
+                continue
+        elif close is not None and end is None:
+            continue  # no end time on the other side: not the same question
         if yes_price(row) is None:
             continue
         if overlap > best_score:

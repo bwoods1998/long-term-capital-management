@@ -160,6 +160,14 @@ test('an order over the per-order cap is refused before anything is signed', asy
   assert.equal(gate.status(NOW).today.orders, 0, 'and nothing was spent');
 });
 
+test('an exit order passes the per-order cap when the header says so', async () => {
+  const { response, calls } = await call(
+    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: { ...KALSHI_ORDER, count: '100', price: '0.9900' }, headers: { 'X-LTCM-Purpose': 'exit' } }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1, 'the exit reached the venue');
+});
+
 test('coinbase orders are priced from the reference header the caller sends', async () => {
   const gate = gateFor();
   const priced = await call(

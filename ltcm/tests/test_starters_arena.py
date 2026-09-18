@@ -164,6 +164,18 @@ class PolyCrossTests(unittest.TestCase):
         self.assertNotIn("KXNFLGAME-26SEP20-KC", by, "no Polymarket match")
         self.assertIn("Polymarket prices", by["KXFEDDECISION-26OCT-C25"]["rationale"])
 
+    def test_a_short_dated_market_must_end_within_hours_of_its_match(self):
+        """Sept 18, 2026: Polymarket's noon BTC level was matched to Kalshi's 5pm one."""
+        module = load("poly_cross")
+        from datetime import datetime, timezone, timedelta
+        close = datetime.now(timezone.utc) + timedelta(hours=9)
+        board = [{"ticker": "KXBTCD-26SEP1817-T77999.99", "title": "Will Bitcoin be above $78,000 on September 18?", "close_time": close.strftime("%Y-%m-%dT%H:%M:%SZ"), "volume_24h": 30000, "yes_bid": 0.32, "yes_ask": 0.34}]
+        noon = [{"question": "Will Bitcoin be above $78,000 on September 18?", "outcomes": ["Yes", "No"], "prices": [0.26, 0.74], "volume_24h": 66000, "end_date": (close - timedelta(hours=9)).strftime("%Y-%m-%dT%H:%M:%SZ")}]
+        self.assertEqual(module.decide(PolyKit(noon, board), {"min_edge": 0.03})["intents"], [], "nine hours apart is a different question")
+        same = [{**noon[0], "end_date": (close - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")}]
+        out = module.decide(PolyKit(same, board), {"min_edge": 0.03})["intents"]
+        self.assertEqual([i["instrument"]["right"] for i in out], ["no"])
+
     def test_a_small_gap_a_held_event_and_a_thin_market_are_skipped(self):
         module = load("poly_cross")
         self.assertEqual(module.decide(PolyKit(POLY, BOARD), {"min_edge": 0.20, "max_hours": 2000})["intents"], [])

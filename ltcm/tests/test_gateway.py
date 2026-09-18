@@ -815,6 +815,27 @@ class SpotOutcomeTests(GatewayCase):
     def outcomes(self):
         return [e.payload for e in self.log.read(kind="desk.outcome", limit=100)]
 
+    def test_a_buy_that_covers_a_short_future_is_scored_too(self):
+        """Sept 18, 2026: every perp short's round trip had gone unscored, so no perp strategy
+        ever had a record to size on or be retired by."""
+        etp = Instrument("future", "ETP-20DEC30-CDE", "coinbase", market_id="ETP-20DEC30-CDE", multiplier=Decimal("0.1"), expiry="2030-12-20")
+
+        def fill(side, price, at, tag):
+            return Fill(id=tag, order_id="ord-" + tag, desk_id=DESK, instrument=etp, side=side,
+                        quantity=Decimal("1"), price=Decimal(price), fee=Decimal("0.23"), at=at)
+
+        self.broker._fills = [fill("sell", "2500", "2026-09-14T13:00:00.000Z", "s1")]
+        self.gateway.ingest_fills("shadow")
+        self.assertEqual(self.outcomes(), [], "a short opens; nothing to score")
+        self.broker._fills.append(fill("buy", "2480", "2026-09-14T15:00:00.000Z", "s2"))
+        self.gateway.ingest_fills("shadow")
+        outcomes = self.outcomes()
+        self.assertEqual(len(outcomes), 1)
+        out = outcomes[0]
+        self.assertEqual((out["result"], out["market_id"]), ("sold", "ETP-20DEC30-CDE"))
+        self.assertEqual(Decimal(out["pnl"]), (Decimal("2500") - Decimal("2480")) * Decimal("0.1") - Decimal("0.23"))
+        self.assertEqual(out["held_for_hours"], "2.0")
+
     def test_a_reducing_sell_writes_an_outcome_at_the_ledgers_average_cost(self):
         self.broker._fills = [
             self.fill("buy", "0.010", "60000", "2026-09-14T13:00:00.000Z", "f1"),

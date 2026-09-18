@@ -74,13 +74,13 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * Consume `micro` dollars of today's budget for one order, or refuse.
      * Refusal is `{ ok: false, status, error }`; the caller forwards nothing.
      */
-    reserve({ micro, at = now() }) {
+    reserve({ micro, at = now(), exit = false }) {
       if (killed()) {
         return { ok: false, status: 423, error: 'The kill switch is engaged; no orders are being forwarded.' };
       }
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
-      if (amount > limits.maxOrderMicro) {
+      if (!exit && amount > limits.maxOrderMicro) {
         return {
           ok: false, status: 403, cap: 'order',
           error: `Order notional $${formatUsd(amount)} exceeds the per-order cap of $${formatUsd(limits.maxOrderMicro)}.`,
@@ -93,7 +93,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
           error: `Today's order count cap of ${limits.maxDayOrders} is already reached.`,
         };
       }
-      if (row.notional + amount > limits.maxDayMicro) {
+      if (!exit && row.notional + amount > limits.maxDayMicro) {
         return {
           ok: false, status: 403, cap: 'day_notional',
           error: `Order notional $${formatUsd(amount)} would pass today's cap of $${formatUsd(limits.maxDayMicro)} ` +

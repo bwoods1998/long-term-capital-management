@@ -327,6 +327,8 @@ VENUE_AUTH_HEADERS = (
 
 #: The header a Coinbase order carries so the gateway can price a `base_size` in dollars.
 REFERENCE_HEADER = "X-LTCM-Reference-Price"
+#: What an order is for (`entry` or `exit`); the gateway lets an exit through its dollar caps.
+PURPOSE_HEADER = "X-LTCM-Purpose"
 
 #: The one Coinbase path whose POST creates an order, which is the only one that needs the price.
 COINBASE_ORDERS_PATH = "api/v3/brokerage/orders"
@@ -491,6 +493,7 @@ __all__ = [
     "gateway_url_for",
     "GATEWAY_PREFIXES",
     "REFERENCE_HEADER",
+    "PURPOSE_HEADER",
     "COINBASE_ORDERS_PATH",
     "b64url",
     "jws",

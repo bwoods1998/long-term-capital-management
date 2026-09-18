@@ -5,6 +5,12 @@
 import { parsePico, centsToPico, mulPico, picoToMicro, parseUsdMicro, parseCount, PICO } from './money.mjs';
 
 export const REFERENCE_HEADER = 'X-LTCM-Reference-Price';
+// What the order is for. `exit` marks an order that closes or trims a position the floor holds;
+// the dollar caps do not apply to it (Sept 18, 2026: two perp shorts sat past their stops for
+// twenty minutes because the contract had grown past the per-order cap, and the day's cap was
+// spent by the entries). The header is the floor's own claim, so a compromised VM could label an
+// entry an exit: the order count cap still counts every order, and the owner accepts the risk.
+export const PURPOSE_HEADER = 'X-LTCM-Purpose';
 
 /** The three paths that create an order, by venue. Everything else passes the caps untouched. */
 export const ORDER_PATHS = {

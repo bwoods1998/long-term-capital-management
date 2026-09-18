@@ -52,6 +52,7 @@ from ..broker import (
 from ..data import TransportError, iso
 from ..data.coinbase import HOST, PREFIX, CoinbaseMarketData, expiry_of, is_future, product_id
 from . import (
+    PURPOSE_HEADER,
     CoinbaseCredentials,
     VenueClient,
     confirm_or_unknown,
@@ -228,6 +229,7 @@ class CoinbaseBroker:
         body: Any = None,
         what: str,
         ok: tuple[int, ...] = (200, 201, 204),
+        headers: "dict[str, str] | None" = None,
     ) -> Any:
         """One authenticated request. The JWT `uri` claim covers the path without its query."""
         url = self.host + path
@@ -235,8 +237,8 @@ class CoinbaseBroker:
             pairs = [(k, v) for k, v in params.items() if v is not None and v != ""]
             if pairs:
                 url += "?" + urllib.parse.urlencode(pairs, doseq=True)
-        headers = {"Authorization": "Bearer " + self.token(method, path)}
-        status, payload = self.client.request(method, url, headers=headers, body=body, what=what)
+        sent = {"Authorization": "Bearer " + self.token(method, path), **(headers or {})}
+        status, payload = self.client.request(method, url, headers=sent, body=body, what=what)
         return require_ok(status, payload, what=what, ok=ok)
 
     def capabilities(self) -> set[str]:
@@ -469,8 +471,9 @@ class CoinbaseBroker:
             raise RejectedOrder(f"coinbase trades crypto and its CDE futures, not {intent.instrument.asset_class}")
         body = self.order_body(intent)
         attached = "attached_order_configuration" in body
+        purpose = {PURPOSE_HEADER: intent.purpose}  # an exit skips the gateway's dollar caps
         try:
-            payload = self._call("POST", PREFIX + "/orders", body=body, what="coinbase submit")
+            payload = self._call("POST", PREFIX + "/orders", body=body, what="coinbase submit", headers=purpose)
         except TransportError as exc:
             return confirm_or_unknown(
                 lambda: self.order_by_client_id(intent.id),
@@ -487,7 +490,7 @@ class CoinbaseBroker:
                 # bare and let the floor hold the stop and the target itself.
                 bare = {k: v for k, v in body.items() if k != "attached_order_configuration"}
                 try:
-                    payload = self._call("POST", PREFIX + "/orders", body=bare, what="coinbase submit")
+                    payload = self._call("POST", PREFIX + "/orders", body=bare, what="coinbase submit", headers=purpose)
                 except TransportError as exc:
                     return confirm_or_unknown(
                         lambda: self.order_by_client_id(intent.id),
