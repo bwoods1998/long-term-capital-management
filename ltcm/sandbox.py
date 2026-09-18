@@ -534,14 +534,17 @@ class SandboxManager:
         purpose: str = "",
         save_as: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
+        max_chars: int = MAX_CODE_CHARS,
     ) -> CodeRun:
-        """Run `code` in the desk's sandbox. Never raises; failures are results."""
+        """Run `code` in the desk's sandbox. Never raises; failures are results. `max_chars`
+        is the size a run may be: the model's own code keeps the 40,000 default; the floor's
+        strategy runner carries the desk's context (positions, books, evidence) and asks for more."""
         digest = sha256_text(code or "")
         zero = Decimal("0")
         if not isinstance(code, str) or not code.strip():
             return CodeRun(desk_id, digest, "no code given", 2, zero, None, purpose)
-        if len(code) > MAX_CODE_CHARS:
-            return CodeRun(desk_id, digest, f"code is over {MAX_CODE_CHARS} characters", 2, zero, None, purpose)
+        if len(code) > int(max_chars):
+            return CodeRun(desk_id, digest, f"code is over {int(max_chars)} characters", 2, zero, None, purpose)
         if not self.available():
             return CodeRun(desk_id, digest, "no sandbox is available on this floor", 3, zero, None, purpose)
         # One run per sandbox at a time. Every run uploads the same `/lab/run/main.py` and the

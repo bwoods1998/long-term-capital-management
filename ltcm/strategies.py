@@ -77,6 +77,8 @@ DEFAULTS: dict[str, Any] = {
     "dispatch_seconds": 0,
 }
 STARTERS_DIR = Path(__file__).resolve().parent / "starters"
+#: How large the strategy runner (code plus the desk's context) may be.
+RUNNER_MAX_CHARS = 400_000
 #: Family -> starter module name. A desk of the family with no strategy of its own gets the
 #: house starter deployed under this name, exactly as a bred desk gets the house playbook.
 STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": "daily_temps", "kalshi": "kalshi_favorites"}
@@ -1455,7 +1457,13 @@ class Strategies:
             "name": name,
             "max_intents": int(self.config["max_intents_per_run"]),
         }
-        run = manager.run(manifest.id, code, purpose=f"strategy {name}", timeout=int(self.config["run_timeout_seconds"]))
+        # The runner carries the desk's context; with the depth books and the pooled evidence a
+        # run passed the model-code cap of 40,000 characters on Sept 18, 2026 and every deploy
+        # to that desk failed its dry run.
+        try:
+            run = manager.run(manifest.id, code, purpose=f"strategy {name}", timeout=int(self.config["run_timeout_seconds"]), max_chars=RUNNER_MAX_CHARS)
+        except TypeError:
+            run = manager.run(manifest.id, code, purpose=f"strategy {name}", timeout=int(self.config["run_timeout_seconds"]))
         result: dict[str, Any] = {"exit_code": run.exit_code, "seconds": str(run.seconds), "stdout": run.stdout, "code_sha256": run.code_sha256, "sandbox": run.sandbox}
         parsed = _parse_result(run.stdout)
         if parsed is None:
