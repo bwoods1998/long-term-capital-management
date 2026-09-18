@@ -195,6 +195,9 @@ class CoinbaseMarketData:
             "volume_24h": decimal_or_none(row.get("volume_24h")),
             "base_increment": decimal_or_none(row.get("base_increment")),
             "quote_increment": decimal_or_none(row.get("quote_increment")),
+            # A CDE contract prices on `price_increment` (BIP 5, ETP 0.5, BCP 0.1), not the
+            # cent `quote_increment` (Sept 18, 2026: "Too many decimals in order price").
+            "price_increment": decimal_or_none(row.get("price_increment")),
             "base_min_size": decimal_or_none(row.get("base_min_size")),
             "quote_min_size": decimal_or_none(row.get("quote_min_size")),
             "base_name": row.get("base_name"),

@@ -515,3 +515,26 @@ class FuturesTests(unittest.TestCase):
             client.submit(intent(etp, side="sell", quantity="1.5", order_type="limit", limit_price="2440", time_in_force="gtc"))
         self.assertIn("short", client.capabilities())
         self.assertEqual(client.fee_rates.__doc__ is not None, True)
+
+
+class FuturesFillKeyTests(unittest.TestCase):
+    """Sept 18, 2026: a CDE fill, order and position all key as the same future."""
+
+    def test_a_cde_fill_is_a_future_with_the_contract_size(self):
+        fills_payload = {"fills": [{"trade_id": "t1", "order_id": "o1", "product_id": "ETP-20DEC30-CDE", "side": "SELL", "size": "1", "price": "2440", "commission": "0.23", "trade_time": "2026-09-18T02:06:57Z"},
+                                   {"trade_id": "t2", "order_id": "o2", "product_id": "BTC-USD", "side": "BUY", "size": "0.01", "price": "76000", "commission": "3.8", "trade_time": "2026-09-18T02:07:00Z"}]}
+        client, _, _ = make({HOST + PREFIX + "/orders/historical/fills*": fills_payload, HOST + MARKET + "/products/ETP-20DEC30-CDE": ETP_PRODUCT})
+        fills = client.fills()
+        future = [f for f in fills if f.instrument.symbol == "ETP-20DEC30-CDE"][0]
+        self.assertEqual((future.instrument.asset_class, str(future.instrument.multiplier), future.instrument.expiry), ("future", "0.1", "2030-12-20"))
+        self.assertEqual(future.instrument.key, Instrument("future", "ETP-20DEC30-CDE", "coinbase", multiplier="0.1", expiry="2030-12-20", market_id="ETP-20DEC30-CDE").key, "the same key as the intent and the venue position")
+        spot = [f for f in fills if f.instrument.symbol == "BTC-USD"][0]
+        self.assertEqual(spot.instrument.asset_class, "crypto")
+
+    def test_balance_counts_the_venues_total_usd_when_margin_is_held(self):
+        summary = {"balance_summary": {"cfm_usd_balance": {"value": "0"}, "total_usd_balance": {"value": "5065.35"}, "unrealized_pnl": {"value": "-0.10"}}}
+        client, _, _ = make({HOST + PREFIX + "/accounts*": ACCOUNTS, HOST + MARKET + "/product_book*": BOOK,
+                             HOST + PREFIX + "/cfm/balance_summary": summary, HOST + PREFIX + "/cfm/positions": {"positions": []}})
+        balance = client.balance()
+        self.assertEqual(balance.cash, Decimal("5065.35"), "the spot wallet shows 5000.25; the venue holds 65.10 more as margin")
+        self.assertEqual(balance.equity, Decimal("5065.35") + Decimal("0.30") * Decimal("64050") + Decimal("-0.10"))

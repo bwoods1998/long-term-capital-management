@@ -285,7 +285,7 @@ class Kit:
                             "volume_usd": float(row.get("volume_24h") or 0) * price * (size or 1.0), "contract_size": size,
                             "contract_usd": (price * size) if size else None, "perpetual": bool(row.get("perpetual")),
                             "funding_rate": float(row.get("funding_rate") or 0) if row.get("funding_rate") is not None else None,
-                            "quote_increment": float(row.get("quote_increment") or 0) or None})
+                            "quote_increment": float(row.get("price_increment") or row.get("quote_increment") or 0) or None})
             except (TypeError, ValueError):
                 continue
         out.sort(key=lambda r: (r["expiry"] or "9999", -r["volume_usd"]))

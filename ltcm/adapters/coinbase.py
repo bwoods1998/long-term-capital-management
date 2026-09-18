@@ -302,6 +302,20 @@ class CoinbaseBroker:
             cache[pid] = money(size)
         return cache[pid]
 
+    def instrument_for(self, product: str) -> Instrument:
+        """The instrument a product id names: a CDE contract is a future with the venue's
+        contract size as its multiplier and its expiry (Sept 18, 2026: the first live perps
+        fill was keyed as spot with a multiplier of 1, so the ledger booked a hundredth of
+        the position and the exit engine found no position to stop); anything else is spot."""
+        pid = product_id(product)
+        if is_future(pid):
+            try:
+                size = self.contract_size(pid)
+            except Exception:
+                size = money(1)
+            return Instrument("future", pid, self.venue, multiplier=size, expiry=expiry_of(pid), market_id=pid)
+        return Instrument("crypto", pid, self.venue, market_id=pid)
+
     def futures_positions(self) -> list[Position]:
         """`GET /api/v3/brokerage/cfm/positions` as positions: contracts signed by side, the
         venue's average entry as cost, its current price as the mark, the contract size as the
@@ -363,8 +377,16 @@ class CoinbaseBroker:
         except Exception:
             summary = {}
         if summary:
-            futures_cash = dec((summary.get("cfm_usd_balance") or {}).get("value"), "0") or money(0)
+            # `total_usd_balance` is the venue's own USD across the spot and futures wallets,
+            # margin held for open contracts included; the spot wallet's `available` alone
+            # dropped by the $65 margin of the first live contract (Sept 18, 2026) and the
+            # floor read a $68 loss that was not one.
+            total = dec((summary.get("total_usd_balance") or {}).get("value"))
             unrealized = dec((summary.get("unrealized_pnl") or {}).get("value"), "0") or money(0)
+            if total is not None and total > cash:
+                futures_cash = total - cash
+            else:
+                futures_cash = dec((summary.get("cfm_usd_balance") or {}).get("value"), "0") or money(0)
             equity += futures_cash + unrealized
         return Balance(
             venue=self.venue,
@@ -588,7 +610,7 @@ class CoinbaseBroker:
                     id=str(row.get("trade_id") or row.get("entry_id") or ""),
                     order_id=str(row.get("order_id") or ""),
                     desk_id="",
-                    instrument=Instrument("crypto", pid, self.venue, market_id=pid),
+                    instrument=self.instrument_for(pid),
                     side=str(row.get("side") or "BUY").lower(),
                     quantity=size,
                     price=price,
@@ -602,7 +624,10 @@ class CoinbaseBroker:
     # --------------------------------------------------------------- parsing
     def parse_order(self, row: dict[str, Any]) -> Order:
         pid = str(row.get("product_id") or "")
-        instrument = Instrument("crypto", pid or "UNKNOWN-USD", self.venue, market_id=pid or None)
+        try:
+            instrument = self.instrument_for(pid) if pid else Instrument("crypto", "UNKNOWN-USD", self.venue)
+        except Exception:
+            instrument = Instrument("crypto", pid or "UNKNOWN-USD", self.venue, market_id=pid or None)
         client_order_id = str(row.get("client_order_id") or "")
         configuration = row.get("order_configuration") or {}
         limit_price = None
