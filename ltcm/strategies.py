@@ -85,7 +85,11 @@ STARTERS = {"ranges": "hourly_ranges", "crypto": "hourly_reversion", "weather": 
 SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
 #: leap: futures -- a third house strategy for the crypto family: mean reversion on Coinbase's
 #: CDE perpetual-style contracts, long and short, where a contract's fee is cents, not percent.
-EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion", "perp_funding"], "kalshi": ["daily_temps", "temps_ensemble", "poly_cross"]}
+EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion", "perp_funding"], "kalshi": ["temps_ensemble", "poly_cross"]}
+#: House rows a family no longer runs: bootstrap switches an existing row off once, with a note.
+#: `daily_temps` on the Kalshi family (Sept 18, 2026): the ensemble strategy prices the same
+#: brackets from the same NWS centre with a real spread, so the two doubled every weather bet.
+RETIRED_STARTERS: dict[str, tuple[str, ...]] = {"kalshi": ("daily_temps",)}
 #: The asset class a desk must trade for an extra starter to be dealt to it (the perps need a
 #: futures mandate; the temperature markets are Kalshi events, priced on the Kalshi book since
 #: the weather family's chat desks were retired on Sept 18, 2026).
@@ -1035,6 +1039,10 @@ class Strategies:
                     dealt = dict(EXTRA_LIVE_PARAMS.get(extra) or {}) if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
                     wanted.append((extra, dealt, int(STARTER_CADENCE.get(extra, 600))))
             existing = self.store.for_desk(desk_id)
+            for retired in RETIRED_STARTERS.get(manifest.family, ()):
+                row = existing.get(retired)
+                if row is not None and row.get("house") and row.get("enabled", True):
+                    self.store.update(desk_id, retired, enabled=False, note="retired house starter (Sept 18, 2026): temps_ensemble prices these brackets")
             # leap: lab -- an adopted strategy is house genome: every desk of the family runs it,
             # the live desk included, until the desk replaces it with its own.
             for spec in self._genome_strategies(manifest.family):

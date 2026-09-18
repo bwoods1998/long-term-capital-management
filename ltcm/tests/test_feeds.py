@@ -270,6 +270,25 @@ class CoinbaseFeedTests(HubCase):
         self.assertEqual(self.hub.quote(Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD")).ask, Decimal("76800"))
         self.assertEqual(self.hub.quote(Instrument("crypto", "ETH-USD", "coinbase", market_id="ETH-USD")).last, Decimal("2431.2"))
 
+    def test_a_held_perp_or_a_flicker_in_the_universe_does_not_reopen_the_market_socket(self):
+        """Sept 18, 2026: a held CDE id sat in the wanted set but was never subscribed, so the
+        socket reconnected on every check and every spot quote came by REST."""
+        import ltcm.feeds.coinbase as module
+
+        feed = CoinbaseMarketFeed(self.hub, connect=Connector(FakeSocket([])), clock=self.clock)
+        feed.products = {"BTC-USD", "ETH-USD"}
+        feed.wanted = lambda: {"BTC-USD", "ETH-USD", "BIP-20DEC30-CDE"}
+        feed.maybe_resubscribe(None)  # the perp is not a difference
+        feed.wanted = lambda: {"BTC-USD", "ETH-USD", "SOL-USD"}
+        feed.maybe_resubscribe(None)  # a change is noted, not acted on
+        original = module.time.monotonic
+        try:
+            module.time.monotonic = lambda: original() + module.RESUBSCRIBE_GRACE_SECONDS + 1
+            with self.assertRaises(ConnectionError):
+                feed.maybe_resubscribe(None)  # a minute later it is real
+        finally:
+            module.time.monotonic = original
+
     def test_a_sequence_gap_reconnects_rather_than_trusting_the_stream(self):
         sock = FakeSocket(
             [

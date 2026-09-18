@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from typing import Any, Mapping
 
 from . import Feed, FeedHub, GatewayCredentials
@@ -87,6 +88,10 @@ class _CoinbaseFeed(Feed):
         return
 
 
+#: How long a changed product list must hold before the market socket is reopened for it.
+RESUBSCRIBE_GRACE_SECONDS = 60.0
+
+
 class CoinbaseMarketFeed(_CoinbaseFeed):
     """Public `ticker` for every product a desk may hold or trade."""
 
@@ -129,7 +134,21 @@ class CoinbaseMarketFeed(_CoinbaseFeed):
 
     def maybe_resubscribe(self, sock: Any) -> None:
         # "To add products, unsubscribe and open a new connection with the expanded list."
-        if self.wanted() != self.products:
+        # The CDE ids are never subscribed, so they are left out of the comparison: until Sept 18,
+        # 2026 a held perp made the wanted set differ from the subscribed set on every check, and
+        # the socket reconnected in a loop, leaving every spot quote to REST. A change must also
+        # hold for a minute before it costs a reconnect: a strategy's universe flickers by a coin.
+        wanted = {p for p in self.wanted() if not p.endswith("-CDE")}
+        if wanted == self.products:
+            self._change_seen_at = None
+            return
+        first = getattr(self, "_change_seen_at", None)
+        now = time.monotonic()
+        if first is None:
+            self._change_seen_at = now
+            return
+        if now - first >= RESUBSCRIBE_GRACE_SECONDS:
+            self._change_seen_at = None
             raise ConnectionError("coinbase product list changed; reconnecting")
 
     def handle(self, sock: Any, channel: str, envelope: Mapping[str, Any]) -> None:
