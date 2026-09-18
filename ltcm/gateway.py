@@ -154,6 +154,14 @@ def _seconds_between(start: "str | None", end: str) -> float:
         return float("inf")
 
 
+def _epoch_seconds(value: "str | None") -> float:
+    """POSIX seconds of a log instant; unreadable is zero, so it reads as long past."""
+    try:
+        return parse_iso(str(value)).timestamp()
+    except Exception:
+        return 0.0
+
+
 def _hours_between(start: "str | None", end: str) -> str | None:
     """Hours from `start` to `end` to one decimal, or None when the open is unknown."""
     if not start:
@@ -1365,7 +1373,7 @@ class Gateway:
         self._settlement_cursor[venue] = cursor
         return written
 
-    def settle_finalized_markets(self, venue: str = "kalshi", now: Any = None, *, limit: int = 10, grace_seconds: int = 180) -> list[dict[str, Any]]:
+    def settle_finalized_markets(self, venue: str = "kalshi", now: Any = None, *, limit: int = 40, grace_seconds: int = 180) -> list[dict[str, Any]]:
         """Close positions on event markets the venue has finalized but that the account's own
         settlements feed will never name: markets only shadow desks held.
 
@@ -1374,7 +1382,16 @@ class Gateway:
         Sept 16, 2026 three shadow lottery tickets on the 05:00 buckets sat unsettled while
         the exit engine tried to sell them into a closed book. This sweep reads the market
         itself: past its close by `grace_seconds`, `finalized` or `settled` with a yes/no
-        result, and not among the venue's own open positions."""
+        result, and not among the venue's own open positions.
+
+        The sweep walks the held tickers from where the last one stopped and asks the venue
+        about at most `limit` of them; a market that answered with a close still ahead is not
+        asked again before then. Until Sept 18, 2026 it read the first ten tickers in
+        alphabetical order every time, and ten permanently stuck ones (three gas markets
+        closing in three days, seven whose settlement had been misfiled on the live stream)
+        kept 180 held tickers, most of them finalized days earlier, from ever being read: the
+        Kalshi shadow desks were cash-locked in settled markets and could not trade.
+        """
         at = iso_time(now) if now is not None else self.now()
         source = None
         getter = getattr(self.data, "_source", None) or getattr(self.data, "source", None)
@@ -1406,11 +1423,25 @@ class Gateway:
                 if ticker and ticker not in open_tickers:
                     held.setdefault(ticker, []).append((desk_id, position))
         written: list[dict[str, Any]] = []
-        checked = 0
-        for ticker in sorted(held):
-            if checked >= limit:
+        tickers = sorted(held)
+        if not tickers:
+            return written
+        cursors: dict[str, str] = getattr(self, "_finalized_cursor", None) or {}
+        self._finalized_cursor = cursors
+        not_before: dict[str, float] = getattr(self, "_finalized_not_before", None) or {}
+        self._finalized_not_before = not_before
+        last = cursors.get(venue)
+        start = next((i for i, t in enumerate(tickers) if last is None or t > last), 0)
+        order = tickers[start:] + tickers[:start]
+        now_epoch = _epoch_seconds(at)
+        asked = 0
+        for ticker in order:
+            if asked >= limit:
                 break
-            checked += 1
+            cursors[venue] = ticker
+            if not_before.get(ticker, 0.0) > now_epoch:
+                continue
+            asked += 1
             try:
                 row = source.market(ticker)
             except Exception:
@@ -1421,9 +1452,13 @@ class Gateway:
             result = str(row.get("result") or "").lower()
             close_time = _log_stamp(row.get("expiration_time") or row.get("close_time"), at)
             if status not in ("finalized", "settled") or result not in ("yes", "no"):
+                ready_at = _epoch_seconds(close_time) + grace_seconds
+                if ready_at > now_epoch:
+                    not_before[ticker] = ready_at
                 continue
             if _seconds_between(close_time, at) < grace_seconds:
                 continue
+            not_before.pop(ticker, None)
             payout_yes = ONE if result == "yes" else ZERO
             holders = held[ticker]
             for desk_id, position in holders:
@@ -1473,8 +1508,18 @@ class Gateway:
             # legs -- cannot share a fill id. A single position, which is the floor today,
             # keeps the plain id the runbook names.
             fill_id += f":{desk_id}:{_short(instrument.key)}"
+        # A shadow desk's settlement is a shadow fill: it never goes to the tape as the venue's.
+        record_venue = venue if self.live_desk(desk_id) else SHADOW_VENUE
         if fill_id in self._seen_fills:
-            return []
+            # The id was spent and the position is still open: the earlier fill was filed
+            # where this desk's ledger does not read (on the venue's stream for a desk that
+            # since folds only shadow fills, Sept 16, 2026). A shadow book closes it once
+            # more under an id of its own; a live book is the venue's to reconcile.
+            if record_venue != SHADOW_VENUE:
+                return []
+            fill_id += ":shadow"
+            if fill_id in self._seen_fills:
+                return []
         fill = Fill(
             id=fill_id,
             order_id="",
@@ -1486,8 +1531,6 @@ class Gateway:
             fee=ZERO,
             at=settled_at,
         )
-        # A shadow desk's settlement is a shadow fill: it never goes to the tape as the venue's.
-        record_venue = venue if self.live_desk(desk_id) else SHADOW_VENUE
         payload = self._record_fill(record_venue, fill, {"settlement": True, "result": result})
         self._record_outcome(
             desk_id,

@@ -550,6 +550,10 @@ def rule_order_notional(intent: OrderIntent, ctx: RiskContext) -> str | None:
 def rule_cash(intent: OrderIntent, ctx: RiskContext) -> str | None:
     if intent.side != "buy":
         return None
+    if reduces_exposure(intent, ctx):
+        # Buying back a short is the exit; it frees margin rather than committing cash. On
+        # Sept 18, 2026 two shadow perp desks could not fire their stops for want of cash.
+        return None
     notional = notional_of(intent, ctx)
     if notional is None:
         return None

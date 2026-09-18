@@ -1682,3 +1682,82 @@ class FloorEventExposureTests(GatewayCase):
         self.assertEqual(errors, [])
         self.assertEqual(self.gateway._inflight, {}, "every reservation released")
         self.assertFalse(self.gateway._floor_event_lock.locked())
+
+
+class _EventSource:
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+
+    def market(self, ticker):
+        self.calls.append(ticker)
+        return self.rows[ticker]
+
+
+class _Data:
+    def __init__(self, source):
+        self._event = source
+
+    def source(self, kind):
+        return self._event
+
+
+OPEN_MARKET = Instrument("event", "GAS", "kalshi", market_id="KXAAAGASW-26SEP21-4.52", right="no")
+DONE_MARKET = Instrument("event", "LOW", "kalshi", market_id="KXLOWTNYC-26SEP16-B56.5", right="no")
+DONE_CLOSE = "2026-09-16T23:00:00.000Z"
+
+
+class FinalizedMarketTests(SettlementCase):
+    """Markets only shadow desks held: the sweep reads the market itself (Sept 16, 2026) and
+    must reach every held ticker, not the same ten forever (Sept 18, 2026)."""
+
+    def setUp(self):
+        super().setUp()
+        self.gateway.manifests[DESK] = DeskManifest.from_dict(SAMPLE)  # a shadow desk
+        self.source = _EventSource({
+            OPEN_MARKET.market_id: {"status": "active", "result": None, "close_time": "2026-09-21T03:59:00Z", "expiration_time": "2026-09-21T14:00:00Z"},
+            DONE_MARKET.market_id: {"status": "finalized", "result": "no", "close_time": "2026-09-16T22:55:00Z", "expiration_time": DONE_CLOSE},
+        })
+        self.gateway.data = _Data(self.source)
+        self.now = "2026-09-18T23:00:00.000Z"
+
+    def hold(self, instrument, quantity="10", price="0.93", at="2026-09-16T00:00:00.000Z", venue="kalshi"):
+        tag = "fl-open-" + instrument.market_id
+        payload = {"id": tag, "fill_id": tag, "order_id": "ord-open", "desk_id": DESK, "instrument": instrument.to_dict(),
+                   "side": "buy", "quantity": quantity, "price": price, "fee": "0", "at": at, "venue": venue}
+        if venue == "shadow":
+            payload["shadow"] = True
+        self.log.append(f"broker:{venue}", "broker.fill", payload, id=f"fill:{venue}:{tag}", at=at)
+
+    def quantity_held(self, instrument):
+        position = self.gateway.ledgers[DESK].state(self.now).positions.get(instrument.key)
+        return position.quantity if position else Decimal("0")
+
+    def test_the_sweep_walks_on_from_where_it_stopped(self):
+        self.hold(OPEN_MARKET)
+        self.hold(DONE_MARKET)
+        self.assertEqual(self.gateway.settle_finalized_markets("kalshi", self.now, limit=1), [])
+        self.assertEqual(self.source.calls, [OPEN_MARKET.market_id])
+        written = self.gateway.settle_finalized_markets("kalshi", self.now, limit=1)
+        self.assertEqual([w["fill_id"] for w in written], [f"settlement:{DONE_MARKET.market_id}:{DONE_CLOSE}"])
+        self.assertEqual(self.source.calls, [OPEN_MARKET.market_id, DONE_MARKET.market_id])
+        self.assertEqual(written[0]["venue"], "shadow")
+        self.assertEqual(Decimal(written[0]["price"]), Decimal("1"))  # the NO leg of a NO result pays a dollar
+        # The open market answered with a close three days out: it is not asked again before then.
+        self.assertEqual(self.gateway.settle_finalized_markets("kalshi", self.now, limit=5), [])
+        self.assertEqual(len(self.source.calls), 2)
+        self.assertEqual(self.quantity_held(DONE_MARKET), 0)
+        self.assertEqual(self.quantity_held(OPEN_MARKET), Decimal("10"))
+
+    def test_a_position_whose_settlement_was_misfiled_closes_under_its_own_id(self):
+        # Sept 16, 2026: a shadow desk's settlement went on the venue's stream, which a
+        # shadow ledger never reads; the id was spent and the position sat open for two days.
+        self.gateway.ledgers[DESK] = DeskLedger(self.log, DESK, mode="shadow")
+        self.hold(DONE_MARKET, venue="shadow")
+        plain = f"settlement:{DONE_MARKET.market_id}:{DONE_CLOSE}"
+        self.gateway._seen_fills.add(plain)
+        written = self.gateway.settle_finalized_markets("kalshi", self.now)
+        self.assertEqual([w["fill_id"] for w in written], [plain + ":shadow"])
+        self.assertEqual(written[0]["venue"], "shadow")
+        self.assertEqual(self.quantity_held(DONE_MARKET), 0)
+        self.assertEqual(self.gateway.settle_finalized_markets("kalshi", self.now), [])

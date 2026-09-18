@@ -175,6 +175,15 @@ class RiskEngineTests(unittest.TestCase):
         shadow = self.engine.check(intent(quantity="1"), context(**{**bleeding, "manifest": manifest()}))
         self.assertFalse([r for r in shadow.reasons if "floor daily loss" in r], shadow.reasons)
 
+    def test_buying_back_a_short_needs_no_cash(self):
+        # Sept 18, 2026: two shadow perp desks' stops were refused "insufficient desk cash".
+        short = {AAPL.key: Position(AAPL, "-3", "100", mark="100")}
+        cover = self.engine.check(intent(quantity="3"), context(positions=short, desk_cash=Decimal("0")))
+        self.assertFalse([r for r in cover.reasons if "insufficient desk cash" in r], cover.reasons)
+        # The exit stays the whole of it: a buy past the short is a new position and pays cash.
+        reverse = self.engine.check(intent(quantity="4"), context(positions=short, desk_cash=Decimal("0")))
+        self.assertTrue(any("insufficient desk cash" in r for r in reverse.reasons), reverse.reasons)
+
     def test_exposure_rules(self):
         decision = self.engine.check(intent(quantity="3"), context(desk_cash=Decimal("100")))
         self.assertTrue(any("insufficient desk cash" in r for r in decision.reasons))
