@@ -84,6 +84,12 @@ SECOND_STARTERS = {"ranges": "hourly_quotes", "crypto": "spot_quotes"}
 #: leap: futures -- a third house strategy for the crypto family: mean reversion on Coinbase's
 #: CDE perpetual-style contracts, long and short, where a contract's fee is cents, not percent.
 EXTRA_STARTERS: dict[str, list[str]] = {"crypto": ["perp_reversion"]}
+#: What the live desks run on the perps (Sept 18, 2026, the owner's call: real Coinbase trades
+#: tonight): a lower trigger than the code's default, two entries a run, any contract the desk's
+#: whole sleeve can hold. The evidence gate still decides size; the risk engine still binds.
+EXTRA_LIVE_PARAMS: dict[str, dict[str, Any]] = {
+    "perp_reversion": {"z_entry": 1.75, "max_intents": 2, "max_contract_usd": 300, "max_position_pct": 1.0},
+}
 #: What the shadow desks explore on the perps: the signal's window, threshold and holding time.
 #: The live desk runs the code's defaults; each shadow is dealt one of these by its id.
 EXTRA_VARIANTS: dict[str, list[dict[str, Any]]] = {
@@ -949,7 +955,7 @@ class Strategies:
             for extra in EXTRA_STARTERS.get(manifest.family, []):
                 if "future" in tuple(getattr(manifest.instruments, "asset_classes", ()) or ()):
                     variants = EXTRA_VARIANTS.get(extra) or [{}]
-                    dealt = {} if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
+                    dealt = dict(EXTRA_LIVE_PARAMS.get(extra) or {}) if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
                     wanted.append((extra, dealt, int(STARTER_CADENCE.get(extra, 600))))
             existing = self.store.for_desk(desk_id)
             # leap: lab -- an adopted strategy is house genome: every desk of the family runs it,
