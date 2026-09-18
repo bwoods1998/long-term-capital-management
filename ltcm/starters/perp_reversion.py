@@ -131,8 +131,14 @@ def decide(kit, params):
             continue
         tick = _tick(row.get("quote_increment"))
         side = "buy" if z < 0 else "sell"
-        # Take the touch: buy the ask after a drop, sell the bid after a spike.
-        entry = math.ceil(ask / tick - 1e-9) * tick if side == "buy" else math.floor(bid / tick + 1e-9) * tick
+        # Cross the touch by a tick: buy a tick over the ask after a drop, sell a tick under the
+        # bid after a spike. The venue fills at the touch (price improvement); the shadow book
+        # fills at its reference only when the limit crosses it, and a quote that merely met the
+        # touch rested until its two-minute expiry (Sept 18, 2026: six LTC shorts expired unfilled).
+        entry = (math.ceil(ask / tick - 1e-9) + 1) * tick if side == "buy" else (math.floor(bid / tick + 1e-9) - 1) * tick
+        entry = round(entry, 10)
+        if entry <= 0:
+            continue
         target = math.floor(mean / tick + 1e-9) * tick if side == "buy" else math.ceil(mean / tick - 1e-9) * tick
         move = (target - entry) if side == "buy" else (entry - target)
         notional = entry * size * contracts

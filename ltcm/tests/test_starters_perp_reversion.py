@@ -66,16 +66,16 @@ class PerpReversionTests(unittest.TestCase):
         self.assertEqual(len(out["intents"]), 1)
         intent = out["intents"][0]
         self.assertEqual((intent["instrument"]["asset_class"], intent["instrument"]["symbol"], intent["side"], intent["quantity"]), ("future", "ETP-20DEC30-CDE", "sell", "1"))
-        self.assertEqual(intent["limit_price"], "2459.5", "sell the bid, on the half-dollar tick")
+        self.assertEqual(intent["limit_price"], "2459", "a tick under the bid, on the half-dollar tick")
         self.assertEqual(intent["target_price"], "2402", "the window's mean (the spike is in it), rounded up to the tick for a short")
-        self.assertGreater(float(intent["stop_price"]), 2459.5, "a short's stop is above entry")
+        self.assertGreater(float(intent["stop_price"]), 2459.0, "a short's stop is above entry")
         self.assertEqual(intent["holding_period_hours"], 4)
         self.assertEqual(intent["expire_after_seconds"], 120)
         drop = flat(2400.0, 36) + [2340.0]
         kit = PerpKit({"ETP-20DEC30-CDE": drop, "AVP-20DEC30-CDE": flat(7.55)}, quotes={"ETP-20DEC30-CDE": {"bid": "2340", "ask": "2340.5"}})
         intent = load().decide(kit, {})["intents"][0]
-        self.assertEqual((intent["side"], intent["limit_price"], intent["target_price"]), ("buy", "2340.5", "2398"), "the mean rounded down to the tick for a long")
-        self.assertLess(float(intent["stop_price"]), 2340.5)
+        self.assertEqual((intent["side"], intent["limit_price"], intent["target_price"]), ("buy", "2341", "2398"), "a tick over the ask; the mean rounded down to the tick for a long")
+        self.assertLess(float(intent["stop_price"]), 2341.0)
 
     def test_a_small_move_does_not_clear_the_contract_fees_and_spread(self):
         # A $75 AVAX contract: two 20-cent fees are 0.53% of notional; a 0.4% move is not enough.
