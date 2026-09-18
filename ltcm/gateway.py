@@ -1520,6 +1520,9 @@ class Gateway:
             fill_id += ":shadow"
             if fill_id in self._seen_fills:
                 return []
+            scored = True  # the first filing scored it; the score is not written twice
+        else:
+            scored = False
         fill = Fill(
             id=fill_id,
             order_id="",
@@ -1532,15 +1535,22 @@ class Gateway:
             at=settled_at,
         )
         payload = self._record_fill(record_venue, fill, {"settlement": True, "result": result})
-        self._record_outcome(
-            desk_id,
-            position,
-            ticker=ticker,
-            result=result,
-            exit_price=exit_price,
-            settled_at=settled_at,
-            fill_id=fill_id,
-        )
+        if scored:
+            return [payload]
+        from .events import EventConflict
+
+        try:
+            self._record_outcome(
+                desk_id,
+                position,
+                ticker=ticker,
+                result=result,
+                exit_price=exit_price,
+                settled_at=settled_at,
+                fill_id=fill_id,
+            )
+        except EventConflict:
+            pass  # scored before under this id: the fill above is what the ledger needed
         return [payload]
 
     def _record_outcome(

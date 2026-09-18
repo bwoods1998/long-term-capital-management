@@ -19,7 +19,7 @@ from ltcm.broker import (
 )
 from ltcm.critic import CriticReview
 from ltcm.events import EventLog
-from ltcm.gateway import Gateway, GatewayError
+from ltcm.gateway import Gateway, GatewayError, _short
 from ltcm.ledger import DeskLedger
 from ltcm.manifest import DeskManifest
 from ltcm.risk import RiskEngine
@@ -1756,8 +1756,14 @@ class FinalizedMarketTests(SettlementCase):
         self.hold(DONE_MARKET, venue="shadow")
         plain = f"settlement:{DONE_MARKET.market_id}:{DONE_CLOSE}"
         self.gateway._seen_fills.add(plain)
+        # The first filing scored the position; the score stands and is not written twice
+        # (Sept 18, 2026: the second write raised EventConflict and stopped the whole sweep).
+        outcome_id = f"outcome:{DESK}:{DONE_MARKET.market_id}:{DONE_CLOSE}:{_short(DONE_MARKET.key)}"
+        self.log.append(f"desk:{DESK}", "desk.outcome", {"pnl": "-9.30", "old": True}, id=outcome_id, at=DONE_CLOSE)
         written = self.gateway.settle_finalized_markets("kalshi", self.now)
         self.assertEqual([w["fill_id"] for w in written], [plain + ":shadow"])
+        outcomes = [e for e in self.log.read(kind="desk.outcome", limit=100)]
+        self.assertEqual(len(outcomes), 1)
         self.assertEqual(written[0]["venue"], "shadow")
         self.assertEqual(self.quantity_held(DONE_MARKET), 0)
         self.assertEqual(self.gateway.settle_finalized_markets("kalshi", self.now), [])
