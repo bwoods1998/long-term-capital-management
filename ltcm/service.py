@@ -1388,15 +1388,16 @@ class Service:
             for window_days in (21, 60):
                 cursor = None
                 lower = int(now) if window_days == 21 else int(now) + 21 * 86400
-                for _ in range(150):
+                for _ in range(300):
                     try:
-                        page = source.markets(
-                            status="open",
-                            limit=400,
-                            cursor=cursor,
-                            min_close_ts=lower,
-                            max_close_ts=int(now) + window_days * 86400,
-                        )
+                        # 200 a page, combos left out: a 400-market page with its price ranges
+                        # passed the transport's 4 MB cap on Sept 18, 2026 and every sweep since
+                        # 12:00 stopped on the same cursor (42 alerts), leaving the index stale.
+                        kwargs = dict(status="open", limit=200, cursor=cursor, min_close_ts=lower, max_close_ts=int(now) + window_days * 86400)
+                        try:
+                            page = source.markets(mve_filter="exclude", **kwargs)
+                        except TypeError:
+                            page = source.markets(**kwargs)
                     except Exception as exc:
                         self.alert("warning", f"event index sweep stopped early: {type(exc).__name__}: {str(exc)[:140]}")
                         if "429" in str(exc):
