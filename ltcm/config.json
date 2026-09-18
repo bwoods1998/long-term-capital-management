@@ -196,10 +196,30 @@
         "families": [
           "kalshi"
         ],
-        "sandboxes": 20,
+        "sandboxes": 12,
         "sandbox_offset": 0,
-        "code_candidates": 14,
-        "originate": 8
+        "code_candidates": 10,
+        "originate": 6
+      },
+      {
+        "name": "fast",
+        "families": [
+          "kalshi"
+        ],
+        "subjects": [
+          "hourly_ranges",
+          "hourly_quotes"
+        ],
+        "sandboxes": 8,
+        "sandbox_offset": 12,
+        "code_candidates": 4,
+        "originate": 0,
+        "family_step_minutes": {
+          "kalshi": 5
+        },
+        "family_window_days": {
+          "kalshi": 3
+        }
       },
       {
         "name": "crypto",

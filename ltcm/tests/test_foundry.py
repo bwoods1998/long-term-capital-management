@@ -253,10 +253,13 @@ class CandidateTests(FoundryCase):
         summary = foundry.cycle(NOW)
         asks = [c for c in provider.calls if c["request_key"].startswith("foundry:1:kalshi_favorites:") and ":repair:" not in c["request_key"]]
         self.assertEqual(len(asks), 2)
-        origin = asks[1]
-        self.assertIn("NEW strategy for the kalshi family", origin["items"][0]["content"])
+        # The asks go out from a thread pool: their order on the provider is not the cycle's.
+        origins = [c for c in asks if "NEW strategy for the kalshi family" in c["items"][0]["content"]]
+        self.assertEqual(len(origins), 1, [c["items"][0]["content"][:80] for c in asks])
+        origin = origins[0]
+        mutation = [c for c in asks if c is not origin][0]
         self.assertNotIn("## Source of", origin["items"][1]["content"], "an origination sees no parent code")
-        self.assertIn("## Source of", asks[0]["items"][1]["content"])
+        self.assertIn("## Source of", mutation["items"][1]["content"])
         names = [c["strategy"] for c in summary["candidates_detail"] if c["kind"] == "code"]
         self.assertEqual(sorted(names), ["kalshi_favorites_f1", "kalshi_origin_f1_2"])
         self.assertEqual(summary["code"]["valid"], 2)
@@ -652,6 +655,16 @@ class DeploymentTests(FoundryCase):
         self.strategies.store.update("mullins-9", "kalshi_favorites", enabled=True, house=True)
         self.strategies.store.update("mullins-9", "temps_ensemble", enabled=True, house=True)
         self.assertEqual(self.foundry().subjects("kalshi", self.manifests), ["kalshi_favorites", "kalshi_favorites_f7_1"], "the house starter from the house book, the explorer from the explorers book; temps_ensemble is not backtestable")
+
+    def test_a_lane_with_its_own_subjects_mutates_those_and_their_descendants(self):
+        """The fast lane (Sept 19, 2026) works the hourly strategies on the Kalshi family."""
+        self.strategies.store.update("mullins", "hourly_ranges_f3", enabled=True, foundry_code=True)
+        self.strategies.store.update("mullins", "kalshi_favorites_f7_1", enabled=True, foundry_code=True)
+        lane = self.foundry(subjects=["hourly_ranges", "hourly_quotes"])
+        self.assertEqual(lane.subjects("kalshi", self.manifests), ["hourly_ranges", "hourly_quotes", "hourly_ranges_f3"])
+        self.assertIsNotNone(lane.source_of("hourly_ranges", None), "the house starter's file is the parent")
+        excluded = self.foundry(subjects=["hourly_ranges", "hourly_quotes"], excluded_strategies=["hourly_quotes"])
+        self.assertEqual(excluded.subjects("kalshi", self.manifests), ["hourly_ranges", "hourly_ranges_f3"])
 
     def test_the_explorers_book_takes_the_candidates_when_a_family_has_one(self):
         second = manifest(id="mullins-9", family="kalshi", parent_id="mullins", capital={"mode": "live", "usd": "142"})

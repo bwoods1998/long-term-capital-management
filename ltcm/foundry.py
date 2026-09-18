@@ -859,6 +859,16 @@ class Foundry:
                     rows[name] = row
         for name in paused:
             rows.pop(name, None)
+        # A lane with `subjects` (config) mutates those strategies and their descendants on the
+        # family's books, whatever the house runs: the fast lane (Sept 19, 2026) works the hourly
+        # strategies on the Kalshi family so a forward record settles within hours, not days.
+        wanted = [str(x) for x in (self.config.get("subjects") or ()) if str(x)]
+        if wanted:
+            names = [x for x in wanted if base_name(x) not in excluded and x not in paused]
+            for name, row in sorted(rows.items()):
+                if base_name(name) in wanted and name not in names and row.get("enabled", True):
+                    names.append(name)
+            return names
         # The house starter: enabled on some book and not paused by a live one, or on none yet.
         if house and house not in excluded and (house in rows or house not in seen):
             names.append(house)
@@ -893,11 +903,15 @@ class Foundry:
 
     @staticmethod
     def variants_for(family: str, name: str) -> list[Mapping[str, Any]]:
+        """The hand-written settings variants of a house strategy, by the family whose starter
+        it is: a lane's subject may be another family's starter (the hourly strategies on the
+        Kalshi family's fast lane, Sept 19, 2026)."""
         root = base_name(name)
-        if root == STARTERS.get(family):
-            return list(STARTER_VARIANTS.get(family) or [])
-        if root == SECOND_STARTERS.get(family):
-            return list(QUOTE_VARIANTS.get(family) or [])
+        for owner in [family] + sorted(set(STARTERS) - {family}):
+            if root == STARTERS.get(owner):
+                return list(STARTER_VARIANTS.get(owner) or [])
+            if root == SECOND_STARTERS.get(owner):
+                return list(QUOTE_VARIANTS.get(owner) or [])
         return []
 
     def cadence_of(self, family: str, name: str, live: Any) -> int:
