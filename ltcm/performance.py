@@ -79,7 +79,9 @@ def funding_flows(brokers, start_at):
                 continue
             kind = row["type"]
             # Fills are exchanges of assets inside the portfolio, not owner funding.
-            if kind == "advanced_trade_fill":
+            # Derivatives settlements move cash between the spot and futures
+            # balances of the same portfolio (daily perp mark-to-market).
+            if kind in {"advanced_trade_fill", "derivatives_settlement"}:
                 continue
             if row["status"] != "completed" or kind not in {"fiat_deposit", "fiat_withdrawal", "send"}:
                 raise ValueError("Unclassified account transaction")

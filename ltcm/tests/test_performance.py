@@ -37,7 +37,8 @@ class PerformanceTests(unittest.TestCase):
         failed = transaction(status="failed")
         deposit = {"created_ts": stamp(NOW), "finalized_ts": stamp(NOW), "status": "applied", "amount_cents": 2500}
         rows = brokers([before, failed, transaction(), transaction("fiat_withdrawal", "-40"),
-                        transaction("advanced_trade_fill", "-25")], [deposit], [{**deposit, "amount_cents": 1000}])
+                        transaction("advanced_trade_fill", "-25"),
+                        transaction("derivatives_settlement", "-109.51")], [deposit], [{**deposit, "amount_cents": 1000}])
         flows = funding_flows(rows, START)
         self.assertEqual(sum(value for _, _, value in flows), Decimal("75"))
         self.assertEqual(len(flows), 4)
