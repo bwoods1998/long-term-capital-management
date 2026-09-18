@@ -30,6 +30,7 @@ import math
 import os
 import re
 import time
+from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -552,6 +553,27 @@ class Publisher:
 
 #: The site refuses a checkpoint over 256 KB; the floor keeps a margin under it.
 CHECKPOINT_CAP_BYTES = 240 * 1024
+#: The site's `MAX_DESKS`: a checkpoint with more rows is refused whole.
+CHECKPOINT_MAX_DESKS = 100
+
+
+def _cap_desks(desks: list[dict[str, Any]], limit: int = CHECKPOINT_MAX_DESKS) -> tuple[list[dict[str, Any]], bool]:
+    """At most `limit` rows: live desks first, then the most recently updated."""
+    if len(desks) <= limit:
+        return desks, False
+    order = sorted(
+        range(len(desks)),
+        key=lambda i: (0 if desks[i].get("mode") == "live" else 1, -_epoch_of(desks[i].get("updated_at")), i),
+    )
+    keep = sorted(order[:limit])
+    return [desks[i] for i in keep], True
+
+
+def _epoch_of(stamp: Any) -> float:
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _checkpoint_bytes(payload: Mapping[str, Any]) -> int:
@@ -564,9 +586,13 @@ def fit_checkpoint(payload: Mapping[str, Any]) -> tuple[dict[str, Any], str | No
     book of sixteen desks holding fifty contracts each would otherwise refuse every checkpoint
     with nothing on the runtime side saying why (audit, Sept 16, 2026)."""
     body = dict(payload)
-    if _checkpoint_bytes(body) <= CHECKPOINT_CAP_BYTES:
-        return body, None
     steps: list[str] = []
+    capped, over = _cap_desks([dict(d) for d in body.get("desks") or []])
+    if over:
+        body["desks"] = capped
+        steps.append(f"desks capped at {CHECKPOINT_MAX_DESKS}")
+    if _checkpoint_bytes(body) <= CHECKPOINT_CAP_BYTES:
+        return body, (", ".join(steps) or None)
     desks = [dict(d) for d in body.get("desks") or []]
     for desk in desks:
         if desk.get("mode") != "live" and desk.get("positions"):

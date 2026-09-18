@@ -3811,6 +3811,10 @@ class Service:
                 orders_by_desk[desk_id] = orders_by_desk.get(desk_id, 0) + 1
         spawn_records = self._spawn_records()  # leap: lab
         for desk_id, manifest in sorted(self.manifests.items()):
+            if desk_id in retired:
+                # A retired desk leaves the board. Sept 18, 2026: 104 rows, 14 of them retired,
+                # against the site's cap of 100 refused every checkpoint for ninety minutes.
+                continue
             state = self.ledgers[desk_id].state(at)
             report = self.committee.gates(desk_id, at)
             if desk_id in live and state.net_deposits > 0:
