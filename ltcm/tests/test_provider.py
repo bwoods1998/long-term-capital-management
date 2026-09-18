@@ -328,6 +328,24 @@ class StaleReservationTests(ProviderCase):
         row = provider._db.execute("SELECT status, error FROM requests").fetchone()
         self.assertEqual((row["status"], row["error"]), ("abandoned", "provider_http_400"))
 
+    def test_an_idempotency_clash_is_resent_once_under_a_key_that_names_the_body(self):
+        # Sept 18, 2026: a resumed turn's body differed from the one its key was first used with.
+        clash = TransportError("provider_http_400", detail="idempotency_key already exists for a different request")
+        transport = FakeTransport(clash, response())
+        provider = self.provider(transport)
+        out = self.respond(provider, profile="pro_asap")
+        self.assertIsNotNone(out)
+        keys = [c["key"] for c in transport.posts]
+        self.assertEqual(len(keys), 2, "one clash, one resend")
+        self.assertTrue(keys[1].startswith(keys[0] + "-") and len(keys[1]) == len(keys[0]) + 11, keys)
+        row = provider._db.execute("SELECT status FROM requests").fetchone()
+        self.assertEqual(row["status"], "completed")
+        # Any other 400 still abandons the request as before.
+        transport = FakeTransport(TransportError("provider_http_400", detail="model not found"))
+        provider = self.provider(transport)
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap", key="s1:1")
+
     def test_a_rate_limit_keeps_the_hold_because_the_request_may_yet_be_sent(self):
         transport = FakeTransport(TransportError("provider_http_429", retry_after=1), TransportError("provider_http_429", retry_after=1), TransportError("provider_http_429", retry_after=1), TransportError("provider_http_429", retry_after=1))
         provider = self.provider(transport)

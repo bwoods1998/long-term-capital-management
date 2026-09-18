@@ -1168,7 +1168,19 @@ class Provider:
                 if response_id:
                     payload = self.transport("GET", f"/v1/responses/{response_id}")
                 else:
-                    payload = self.transport("POST", "/v1/responses", body, row["id"])
+                    try:
+                        payload = self.transport("POST", "/v1/responses", body, row["id"])
+                    except ProviderError as clash:
+                        # Sept 18, 2026: "idempotency_key already exists for a different request"
+                        # ended 19 sessions in a night of restarts: a resumed turn's body differs
+                        # from the one the key was first used with. The intent is a new call, so
+                        # it goes once more under a key that names this body.
+                        detail = str(getattr(clash, "detail", "") or "")
+                        if clash.code == "provider_http_400" and "idempotency" in detail.lower() and "already exists" in detail.lower():
+                            fresh = f"{row['id']}-{hashlib.sha256(row['body'].encode('utf-8')).hexdigest()[:10]}"
+                            payload = self.transport("POST", "/v1/responses", body, fresh)
+                        else:
+                            raise
             except ProviderError as exc:
                 # The body of a venue's refusal is the only way to see why (Sept 18, 2026: eight
                 # sessions ended provider_http_400 with nothing else recorded).

@@ -179,7 +179,8 @@
     },
     "excluded_strategies": [
       "spot_quotes"
-    ]
+    ],
+    "fill_model": "touch"
   },
   "evolution": {
     "excluded_families": [
