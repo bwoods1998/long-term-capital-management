@@ -47,6 +47,9 @@ class TempsKit(BaseKit):
     def kalshi_market(self, ticker):
         return next((m for m in self.markets if m["ticker"] == ticker), None)
 
+    def weather(self, city):
+        return {"days": [{"date": "2026-09-18", "day_high": self.nws}]} if getattr(self, "nws", None) is not None else {}
+
 
 def bracket_market(ticker, label, yes_bid, yes_ask):
     return {"ticker": ticker, "yes_sub_title": label, "close_time": "2026-09-19T03:00:00Z", "status": "open", "yes_bid": yes_bid, "yes_ask": yes_ask}
@@ -85,6 +88,29 @@ class TempsEnsembleTests(unittest.TestCase):
         kit = TempsKit(members, markets, positions=[{"market_id": "KXHIGHNY-26SEP18-B81.5"}])
         self.assertEqual(module.decide(kit, {})["intents"], [])
         self.assertEqual(module.decide(TempsKit(members, markets), {"min_edge": 0.10})["intents"], [], "0.93 for a sure thing is not 10 cents of edge")
+
+    def test_the_members_are_centred_on_the_nws_forecast_and_stale_bids_are_cancelled(self):
+        """07:00 UTC Sept 18: Miami's members at 85F against a 89-90 bracket at 0.49. With the
+        NWS saying 89, the shifted members make the bracket likely and the NO bid loses its edge."""
+        module = load("temps_ensemble")
+        members = [83.0, 84.0, 85.0, 85.5, 86.0, 84.5, 85.2, 86.5, 84.8, 85.5] * 5
+        markets = [bracket_market("KXHIGHMIA-26SEP18-B89.5", "89° to 90°", 0.47, 0.51)]
+        kit = TempsKit(members, markets, open_orders=[{"market_id": "KXHIGHMIA-26SEP18-B89.5", "order_id": "o-1", "right": "no", "strategy": "temps_ensemble"}])
+        kit.weather_cities = lambda: [{"name": "Miami", "series": "KXHIGHMIA", "station": "KMIA"}]
+        out = module.decide(kit, {"min_edge": 0.02, "weight": 1.0})
+        self.assertEqual(out["intents"], [], "the resting bid is neither doubled nor replaced")
+        self.assertEqual(out["cancels"], [], "without an NWS reading the members stand and the NO bid keeps its edge")
+        kit.nws = 89.0
+        out = module.decide(kit, {"min_edge": 0.02, "weight": 1.0})
+        self.assertEqual(out["cancels"], ["o-1"], "centred on 89F the 89-90 bracket is likely: the NO bid at 0.51 lost its edge")
+        fresh = TempsKit(members, markets)
+        fresh.weather_cities = kit.weather_cities
+        fresh.nws = 89.0
+        out = module.decide(fresh, {"min_edge": 0.02, "weight": 1.0})
+        self.assertEqual([(i["instrument"]["right"], i["limit_price"]) for i in out["intents"]], [("yes", "0.51")])
+        self.assertIn("shifted +4.0F to the NWS forecast", out["intents"][0]["rationale"])
+        off = module.decide(fresh, {"min_edge": 0.02, "weight": 1.0, "bias_to_nws": False})
+        self.assertEqual([i["instrument"]["right"] for i in off["intents"]], ["no"])
 
     def test_maker_rests_inside_the_spread(self):
         module = load("temps_ensemble")

@@ -119,7 +119,7 @@ def decide(kit, params):
     mine = {}
     for order in ctx.get("open_orders") or []:
         if str(order.get("strategy") or "") == "temps_ensemble" and order.get("order_id"):
-            mine.setdefault(str(order.get("market_id")), []).append(str(order["order_id"]))
+            mine.setdefault(str(order.get("market_id")), []).append((str(order["order_id"]), str(order.get("right") or "").lower()))
     working = {str(x.get("market_id")) for x in (ctx.get("open_orders") or [])}
     notional = _num(p.get("notional_usd")) or _num(ctx.get("learning_usd"), 10.0)
     series_of = {c["name"]: c["series"] for c in (kit.weather_cities() or []) if c.get("series")}
@@ -203,10 +203,11 @@ def decide(kit, params):
             if edge < float(p["min_edge"]) or price < max(0.02, float(p.get("min_price") or 0)) or price > 0.98:
                 continue
             if ticker in mine:
-                keep.add(ticker)  # a resting bid whose edge is still there stays
+                if any(right == side for _, right in mine[ticker]):
+                    keep.add(ticker)  # a resting bid on the side that still has the edge stays
                 continue
             candidates.append((edge, ticker, side, price, prob, shrunk, mid, row, hours, city, str(market.get("yes_sub_title") or "")))
-    cancels = [oid for ticker, oids in mine.items() if ticker not in keep for oid in oids]
+    cancels = [oid for ticker, orders in mine.items() if ticker not in keep for oid, _ in orders]
     candidates.sort(key=lambda c: -c[0])
     intents, events = [], set(("-".join(t.split("-")[:2]) for t in keep))
     for edge, ticker, side, price, prob, shrunk, mid, row, hours, city, label in candidates:
