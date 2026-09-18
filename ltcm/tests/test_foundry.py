@@ -1235,7 +1235,7 @@ class ServiceFoundryTests(ServiceCase):
         foundry = self.service.foundry
         self.assertIsNotNone(foundry)
         self.assertFalse(foundry.enabled(), "no sandboxes, no cycles")
-        self.assertEqual(foundry.config["interval_minutes"], 2)
+        self.assertEqual(foundry.config["interval_minutes"], 8)
         calls = []
         foundry.enabled = lambda: True
         foundry.cycle = lambda at=None: calls.append(at) or {"at": at, "cycle": len(calls)}
@@ -1244,7 +1244,7 @@ class ServiceFoundryTests(ServiceCase):
         self.assertEqual(self.service.state()["last_foundry_at"], calls[0])
         self.tick(self.START + 60)
         self.assertEqual(len(calls), 1, "not before the interval")
-        self.tick(self.START + 360)
+        self.tick(self.START + 600)
         self.assertEqual(len(calls), 2)
         self.assertIn("last_foundry", self.service.status())
 
@@ -1287,7 +1287,8 @@ class ServiceFoundryTests(ServiceCase):
         # per-cluster cap on the live floor went from 8% to 12% (per market 3.5% to 6%).
         # Sept 18, 2026 (the arena): the owner accepts the volatility; 10% a market, 25% a cluster.
         self.assertEqual(config["event_rules"]["max_event_cluster_floor_pct"], "0.25")
-        self.assertTrue(config["foundry"]["deploy_live"], "candidates earn their record on the live book")
+        self.assertFalse(config["foundry"]["deploy_live"], "16:45 UTC: candidates earn their record in shadow; real money follows evidence")
+        self.assertEqual(config["strategies"]["live_allow"], ["kalshi_favorites", "spot_quotes"])
         self.assertFalse(config["sessions"]["shadow_enabled"], "shadow desks run strategies, not chat sessions")
 
     def test_a_running_cycle_is_never_started_twice(self):

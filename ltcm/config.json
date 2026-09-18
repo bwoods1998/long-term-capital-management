@@ -109,14 +109,14 @@
     "pooled_evidence": true,
     "pooled_min_real": 3,
     "dispatch_seconds": 15,
-    "book_roles": {
-      "mullins": "explorers",
-      "hilibrand": "explorers"
-    }
+    "live_allow": [
+      "kalshi_favorites",
+      "spot_quotes"
+    ]
   },
   "foundry": {
     "enabled": true,
-    "interval_minutes": 2,
+    "interval_minutes": 8,
     "new_outcomes_trigger": 4,
     "feedback_min_minutes": 2,
     "families": [
@@ -125,7 +125,7 @@
       "kalshi"
     ],
     "param_candidates": 36,
-    "code_candidates": 16,
+    "code_candidates": 8,
     "result_cache": true,
     "result_cache_seconds": 3600,
     "repair_invalid_code": true,
@@ -158,7 +158,7 @@
     "min_trades": 60,
     "margin": 0.01,
     "min_ci_lower": 0,
-    "min_forward_settled": 4,
+    "min_forward_settled": 6,
     "protect_hours": 6,
     "forward_max_hours": 72,
     "code_chars": 20000,
@@ -186,7 +186,7 @@
       "spot_quotes"
     ],
     "fill_model": "touch",
-    "deploy_live": true,
+    "deploy_live": false,
     "explorers": true,
     "max_explorers_per_desk": 4,
     "lanes": [
@@ -223,8 +223,8 @@
     "protected_desks": [],
     "min_days": 1,
     "min_decisions": 5,
-    "target_variants": 8,
-    "max_variants": 10,
+    "target_variants": 12,
+    "max_variants": 14,
     "playbook_profile": "k3",
     "playbook_reasoning_effort": "high",
     "playbook_budget_usd_per_day": "40.00"
@@ -268,7 +268,7 @@
     "infra_usd_per_day": "0.30"
   },
   "seed_interval_seconds": 3600,
-  "seed_batch": 2,
+  "seed_batch": 3,
   "founding": {
     "enabled": false,
     "founding_time": "21:30",

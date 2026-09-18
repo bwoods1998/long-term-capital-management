@@ -1041,6 +1041,18 @@ class Strategies:
                     dealt = dict(EXTRA_LIVE_PARAMS.get(extra) or {}) if manifest.live else dict(variants[sum(ord(ch) for ch in manifest.id) % len(variants)])
                     wanted.append((extra, dealt, int(STARTER_CADENCE.get(extra, 600))))
             existing = self.store.for_desk(desk_id)
+            allow = self.live_allow()
+            if manifest.live and allow is not None:
+                # Real money follows evidence (Sept 18, 2026, 16:45 UTC: a day of learning-size
+                # bets by unproven strategies cost 13% of the account and produced little evidence
+                # the shadow desks were not producing for free). A live book runs only the
+                # strategies named in `strategies.live_allow`; everything else proves itself in
+                # shadow and reaches real money through promotion or the Foundry's fast track.
+                for name, row in existing.items():
+                    if name not in allow and row.get("enabled", True):
+                        self.store.update(desk_id, name, enabled=False, note="real money follows evidence: proving itself in shadow first (Sept 18, 2026)")
+                    elif name in allow and row.get("house") and not row.get("enabled", True) and str(row.get("note") or "").startswith("explorers book"):
+                        self.store.update(desk_id, name, enabled=True, note="house starter (the explorers books were retired on Sept 18, 2026)")
             if manifest.live and self.book_role(manifest) == "explorers":
                 # An explorers book runs the Foundry's candidates and nothing else.
                 for name, row in existing.items():
@@ -1063,6 +1075,8 @@ class Strategies:
                     self.service.alert("warning", f"genome strategy {spec['name']} for {desk_id} not deployed: {str(exc)[:160]}")
                     self.store.update(desk_id, spec["name"], enabled=False, last_error=str(exc)[:300], deployed_at=self.service.now(), cadence_seconds=int(spec.get("cadence_seconds", 600)), params=dict(spec.get("params") or {}))
             for name, params, cadence in wanted:
+                if manifest.live and allow is not None and name not in allow:
+                    continue  # dealt to the shadow desks only
                 row = existing.get(name)
                 if row is not None and row.get("house") and not row.get("enabled", True) and not int(row.get("runs") or 0):
                     # A house starter whose dry run failed on an earlier build: the code may be
@@ -1136,6 +1150,13 @@ class Strategies:
                               promoted_at=at, promoted_from="house code refresh")
         except Exception:
             return
+
+    def live_allow(self) -> "set[str] | None":
+        """The strategies a live book may run (`strategies.live_allow`), or None for any."""
+        allow = self.config.get("live_allow")
+        if allow is None:
+            return None
+        return {str(x) for x in (allow if isinstance(allow, (list, tuple, set)) else [allow])}
 
     def book_role(self, manifest: DeskManifest) -> str:
         """The arena (Sept 18, 2026): a live book is a `house` book (the family's house
