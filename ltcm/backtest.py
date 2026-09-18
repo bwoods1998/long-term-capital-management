@@ -629,7 +629,7 @@ class Market:
         return row
 
 
-DRAWS = ("events", "series_volume")
+DRAWS = ("events", "series_volume", "event_volume")
 
 
 def sample_markets(markets: Iterable[Market], limit: int, seed: Any = 7, draw: str = "events") -> list[Market]:
@@ -660,6 +660,18 @@ def sample_markets(markets: Iterable[Market], limit: int, seed: Any = 7, draw: s
     by_event: dict[str, list[Market]] = {}
     for market in pool:
         by_event.setdefault(market.event, []).append(market)
+    if draw == "event_volume":
+        # Whole events, the busiest events first: what a maker strategy's own liquidity filter
+        # keeps. (Sept 18, 2026: "series_volume" filled the cap with the series that trade most
+        # in total, the fifteen-minute crypto strikes among them, thousands of small markets a
+        # favorites strategy never touches: 1 or 2 fills a replay.)
+        events = sorted(by_event.items(), key=lambda kv: (-sum(float(getattr(m, "volume", 0.0) or 0.0) for m in kv[1]), hashed("event|" + kv[0])))
+        chosen: list[Market] = []
+        for event, members in events:
+            chosen.extend(sorted(members, key=lambda m: hashed(m.ticker)))
+            if len(chosen) >= limit:
+                break
+        return chosen[:limit]
     if draw == "series_volume":
         by_series: dict[str, list[str]] = {}
         volume: dict[str, float] = {}
@@ -832,7 +844,8 @@ class DataSet:
         chosen = sample_markets(pool, max_markets, seed, draw)
         if len(chosen) < len(pool):
             how = ("whole events from the busiest series first (seed %s), never a bucket by its own volume or result" % seed
-                   if draw == "series_volume" else f"a seeded draw spread over events (seed {seed}), never by volume or result")
+                   if draw == "series_volume" else "whole events, the busiest events first (seed %s), never a bucket by its own volume or result" % seed
+                   if draw == "event_volume" else f"a seeded draw spread over events (seed {seed}), never by volume or result")
             self.notes.append(
                 f"{'board' if board else 'series'} capped at {len(chosen)} of {len(pool)} settled markets: {how}; raise max_markets to see more"
             )

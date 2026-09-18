@@ -900,6 +900,21 @@ class SelectionTests(unittest.TestCase):
         self.assertLessEqual(winners, 3, "a bucket is never kept for being the winner")
         self.assertTrue(any("busiest series first" in n for n in data.notes))
 
+    def test_the_event_volume_draw_keeps_the_busiest_whole_events_first(self):
+        loud_markets, loud_candles = bucket_events(4, 10, winner_volume=1_000_000)
+        quiet_markets, quiet_candles = bucket_events(4, 10, winner_volume=10, seed_shift=3)
+        for row in quiet_markets:
+            row["ticker"] = row["ticker"].replace("KXBUCK", "KXQUIET"); row["event_ticker"] = row["event_ticker"].replace("KXBUCK", "KXQUIET")
+        quiet_candles = {(k[0].replace("KXBUCK", "KXQUIET"), k[1]): v for k, v in quiet_candles.items()}
+        data = DataSet(FakeHistory(loud_markets + quiet_markets, {**loud_candles, **quiet_candles}), T0, T0 + 30 * HOUR, say=lambda text: None, notes=[])
+        data.load_kalshi(series=None, board=True, max_markets=30, max_pages=20, seed=7, draw="event_volume")
+        kept = list(data.markets.values())
+        self.assertEqual(len(kept), 30)
+        self.assertGreaterEqual(sum(1 for m in kept if m.series == "KXBUCK"), 30, "the four busy events fill the cap before any quiet one")
+        winners = sum(1 for m in kept if m.payout_yes == 1.0)
+        self.assertLessEqual(winners, 3, "whole events: a bucket is never kept for winning")
+        self.assertTrue(any("busiest events first" in n for n in data.notes))
+
     def test_the_draw_is_seeded_and_a_bigger_cap_keeps_a_superset(self):
         data = self.load(*bucket_events(6, 10, winner_volume=5), board=False, cap=3000)
         pool = list(data.markets.values())

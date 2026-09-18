@@ -535,7 +535,7 @@ class RunwayPolicyTests(ServiceCase):
         result = self.tick()
         self.assertEqual(result["spend_mode"], "open")
         self.assertEqual(self.provider.floor_cap, Decimal("269.82"))  # everything above the reserve
-        self.assertEqual(self.provider.desk_fuse, Decimal("161.89"), "60% of the spendable credit since Sept 18, 2026")
+        self.assertEqual(self.provider.desk_fuse, Decimal("215.85"), "80% of the spendable credit since Sept 18, 2026")
         event = self.service.log.last("ops", "ops.budget")
         self.assertEqual(event.payload["mode"], "open")
         self.assertEqual(event.payload["balance_usd"], "279")  # the tape speaks in dollars
