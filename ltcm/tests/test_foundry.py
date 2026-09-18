@@ -208,7 +208,7 @@ class FoundryCase(unittest.TestCase):
         self.alerts = []
         self.provider = None
 
-    def foundry(self, provider=None, **config):
+    def foundry(self, provider=None, locked=None, **config):
         return Foundry(
             log=self.log,
             strategies=self.strategies,
@@ -220,6 +220,7 @@ class FoundryCase(unittest.TestCase):
             alert=lambda level, text: self.alerts.append((level, text)),
             config={"families": ["kalshi"], "sandboxes": 4, **config},
             equity=lambda desk_id: self.equity.get(desk_id),
+            locked=locked,
         )
 
     def row(self, desk_id, name="kalshi_favorites"):
@@ -673,6 +674,29 @@ class DeploymentTests(FoundryCase):
         self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins", "no roles: the first live desk by id")
         self.strategies.config["book_roles"] = {"mullins-9": "explorers"}
         self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins-9")
+
+    def test_a_winner_skips_a_shadow_desk_behind_its_daily_loss_breaker(self):
+        """mullins-11 took the fast lane's first winner at 45% daily loss (Sept 18, 2026) and
+        could place nothing until the day turned."""
+        self.manager.script = settings_winner
+        summary = self.foundry(locked=lambda desk_id: desk_id == "mullins-4").cycle(NOW)
+        self.assertEqual(summary["deployed_to"], "mullins-3", "the worst desk is locked; the next takes it")
+        # Every candidate desk locked: the worst still takes it rather than nobody.
+        summary = self.foundry(locked=lambda desk_id: True).cycle(NOW)
+        self.assertIn(summary["deployed_to"], ("mullins-3", "mullins-4"))
+
+    def test_a_later_lane_tags_its_cycle_ids_and_numbers_its_own_cycles(self):
+        self.manager.script = settings_winner
+        first = self.foundry().cycle(NOW)
+        second_lane = self.foundry(lane_tag="fast")
+        (self.root / "foundry.json").unlink()  # a lane state with no cycle reads the tape
+        second_lane._state = None
+        summary = second_lane.cycle(NOW)
+        events = self.log.kinds("lab.hypothesis")
+        self.assertEqual(len(events), 2, "the second lane's summary is not refused as a duplicate")
+        self.assertEqual(events[0].payload["hypothesis_id"], "foundry-1")
+        self.assertEqual(events[1].payload["hypothesis_id"], "foundry-fast-1")
+        self.assertEqual(summary["cycle"], 1, "its own numbering, not the first lane's next number")
 
     def test_a_settings_winner_goes_to_the_worst_shadow_desk_and_never_the_live_desk(self):
         self.manager.script = settings_winner

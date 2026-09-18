@@ -1487,6 +1487,7 @@ class Service:
                     config=config,
                     state_path=path,
                     equity=self._desk_equity,
+                    locked=self._desk_locked,
                     halted=lambda: self.gateway.kill_switch_engaged(),
                 )
 
@@ -1499,7 +1500,7 @@ class Service:
                 self.foundries = []
                 for index, lane in enumerate(lanes):
                     name = str(lane.get("name") or index)
-                    config = {**{k: v for k, v in settings.items() if k != "lanes"}, **lane, "name": name}
+                    config = {**{k: v for k, v in settings.items() if k != "lanes"}, **lane, "name": name, "lane_tag": name if index else ""}
                     path = self.capital_dir / ("foundry.json" if index == 0 else f"foundry-{name}.json")
                     if index and not path.exists():
                         self._seed_foundry_lane(path, {str(f) for f in (config.get("families") or [])})
@@ -1536,6 +1537,24 @@ class Service:
             return ledger.state(self.now()).equity
         except Exception:
             return None
+
+    def _desk_locked(self, desk_id: str) -> bool:
+        """Whether the desk's daily-loss breaker refuses new risk right now, as `rule_daily_loss`
+        reads it: a Foundry winner placed there would place nothing until the day turned."""
+        ledger = self.ledgers.get(desk_id)
+        manifest = self.manifests.get(desk_id)
+        if ledger is None or manifest is None:
+            return False
+        try:
+            state = ledger.state(self.now())
+            if state.equity <= 0:
+                return True
+            start = state.equity - state.daily_pnl
+            if start > 0 and state.daily_pnl < 0:
+                return (-state.daily_pnl / start) >= manifest.limits.max_daily_loss_pct
+        except Exception:
+            return False
+        return False
 
     def _seed_foundry_lane(self, path: Path, families: set[str]) -> None:
         """A new lane's state file starts with the deployments of its families, moved out of

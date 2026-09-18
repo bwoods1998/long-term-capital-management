@@ -674,6 +674,7 @@ class Foundry:
         alert: Callable[[str, str], None] | None = None,
         config: Mapping[str, Any] | None = None,
         equity: Callable[[str], Any] | None = None,
+        locked: Callable[[str], bool] | None = None,
         halted: Callable[[], bool] | None = None,
     ):
         self.log = log
@@ -686,6 +687,7 @@ class Foundry:
         self._alert = alert
         self.config = {**DEFAULTS, **dict(config or {})}
         self.equity = equity
+        self.locked = locked
         #: True while the kill switch is engaged: a cycle that started before it keeps its
         #: backtests but moves nothing onto a live desk.
         self.halted = halted
@@ -794,6 +796,12 @@ class Foundry:
         keys = ("at", "cycle", "family", "strategy", "candidates", "backtested", "cache_hits", "fresh_backtests", "qualified", "best_oos_return", "best_reason", "winner", "deployed_to", "fast_tracked", "seconds", "sandbox_seconds", "model_cost_usd", "skipped", "failed")
         return {k: last.get(k) for k in keys if k in last}
 
+    def lane_tag(self) -> str:
+        """What a lane after the first puts in its cycle ids (`lane_tag`, set by the service):
+        two lanes seeded in one tick numbered their cycles alike and the second's summary was
+        refused as a duplicate event (Sept 18, 2026)."""
+        return str(self.config.get("lane_tag") or "")
+
     def _next_cycle(self, state: Mapping[str, Any]) -> int:
         known = _int(state.get("cycle"))
         if known is not None:
@@ -801,10 +809,12 @@ class Foundry:
         # A lost state file must not reuse a cycle number (names and event ids carry it).
         highest = 0
         reader = getattr(self.log, "read", None)
+        tag = re.escape(self.lane_tag())
+        pattern = rf"^foundry-{tag}-(\d+)$" if tag else r"^foundry-(\d+)$"
         if callable(reader):
             try:
                 for event in reader(kind="lab.hypothesis", limit=500, newest=True):
-                    match = re.match(r"^foundry-(\d+)$", str(event.payload.get("hypothesis_id") or ""))
+                    match = re.match(pattern, str(event.payload.get("hypothesis_id") or ""))
                     if match:
                         highest = max(highest, int(match.group(1)))
             except Exception:
@@ -1850,6 +1860,11 @@ class Foundry:
         }
         rows = {m.id: store.for_desk(m.id) for m in shadows if not m.live}
         pool = [m for m in shadows if not m.live and m.id not in protected]
+        # The worst desk is the one most likely to sit behind its daily-loss breaker, where the
+        # winner could place nothing until the day turned (mullins-11 at 45% on Sept 18, 2026).
+        if self.locked is not None:
+            open_ = [m for m in pool if not self._locked(m.id)]
+            pool = open_ or pool
         name = winner["strategy"]
         if winner["kind"] == "params":
             sha = _sha(winner.get("code"))
@@ -1881,6 +1896,12 @@ class Foundry:
             return pnl, equity if equity is not None else Decimal("Infinity"), desk.id
 
         return min(pool, key=score)
+
+    def _locked(self, desk_id: str) -> bool:
+        try:
+            return bool(self.locked(desk_id)) if self.locked is not None else False
+        except Exception:
+            return False
 
     def deploy(self, winner: dict[str, Any], family: str, subject: str, shadows: list[Any], problems: list[str], *, source: str | None = None) -> dict[str, Any] | None:
         """Put the winner on a shadow desk now. Never a live desk. `source` is the code of the
@@ -2368,7 +2389,7 @@ class Foundry:
             })
         code = dict(summary.get("code") or {})
         payload: dict[str, Any] = {
-            "hypothesis_id": f"foundry-{cycle}",
+            "hypothesis_id": f"foundry-{self.lane_tag()}-{cycle}" if self.lane_tag() else f"foundry-{cycle}",
             "text": text,
             "test_plan": plan,
             "family": family,
@@ -2401,7 +2422,8 @@ class Foundry:
                 break
         at = str(summary.get("at") or self.now())
         try:
-            self.log.append("lab", "lab.hypothesis", payload, id=f"foundry:{cycle}:{at}"[:200], at=self.now())
+            tag = f"{self.lane_tag()}:" if self.lane_tag() else ""
+            self.log.append("lab", "lab.hypothesis", payload, id=f"foundry:{tag}{cycle}:{at}"[:200], at=self.now())
         except Exception as exc:
             self.alert("warning", f"foundry cycle not published: {type(exc).__name__}")
 
