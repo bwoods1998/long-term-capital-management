@@ -48,7 +48,7 @@
   "committee_time": "18:00",
   "committee_memo_daily": true,
   "evolution_time": "19:00",
-  "evolution_interval_hours": 6,
+  "evolution_interval_hours": 3,
   "postmortem_time": "21:30",
   "critic_enabled": true,
   "critic_profile": "glm_asap",
@@ -338,7 +338,7 @@
   "calibration_interval_seconds": 600,
   "mind": {
     "enabled": true,
-    "interval_minutes": 30,
+    "interval_minutes": 20,
     "new_outcomes_trigger": 4,
     "feedback_min_minutes": 5,
     "profile": "k3",
@@ -360,7 +360,7 @@
     "gate_min_days": 1,
     "gate_min_decisions": 25,
     "gate_max_breakers": 1,
-    "resize_interval_hours": 6,
+    "resize_interval_hours": 3,
     "resize_interval_days": 1,
     "venue_book": true
   },
