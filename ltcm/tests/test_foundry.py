@@ -1210,7 +1210,7 @@ class ServiceFoundryTests(ServiceCase):
         foundry = self.service.foundry
         self.assertIsNotNone(foundry)
         self.assertFalse(foundry.enabled(), "no sandboxes, no cycles")
-        self.assertEqual(foundry.config["interval_minutes"], 5)
+        self.assertEqual(foundry.config["interval_minutes"], 2)
         calls = []
         foundry.enabled = lambda: True
         foundry.cycle = lambda at=None: calls.append(at) or {"at": at, "cycle": len(calls)}

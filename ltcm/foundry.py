@@ -1072,11 +1072,16 @@ class Foundry:
             # learning size on the live book, not with modelled fills on a shadow desk. The
             # winner goes; when nothing qualified, the best candidate that beat the baselines
             # goes as an explorer. `prune_explorers` retires the ones that lose.
-            chosen, role = (winner, "winner") if winner is not None else ((best, "explorer") if bool(cfg.get("explorers", True)) and best is not None and (_float(best["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0) > reference else (None, ""))
-            if chosen is not None:
+            # The winner, else the best few candidates that beat the baselines, in order: a
+            # candidate that passed its replay can still fail its dry run on the live kit
+            # (cycle 157: a favorites mutation raised in `decide`), and the next best takes its place.
+            ranked = sorted(scored, key=lambda c: -(_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0))
+            explorers = [c for c in ranked if bool(cfg.get("explorers", True)) and (_float(c["evidence"]["out_of_sample"]["return_on_notional"]) or 0.0) > reference][:3]
+            for chosen, role in ([(winner, "winner")] if winner is not None else []) + [(c, "explorer") for c in explorers if c is not winner]:
                 deployment = self.deploy_live(chosen, family, subject, live, problems, source=source, role=role, cycle=cycle)
                 if deployment is not None:
                     winner = chosen
+                    break
         elif winner is not None:
             deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
         self.progress("learn", f"Cycle {cycle}: {sum(1 for c in candidates if self.measured(c))}/{len(candidates)} candidates measured successfully; {len(qualified)} qualified; "
