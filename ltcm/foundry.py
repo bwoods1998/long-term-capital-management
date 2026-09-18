@@ -791,7 +791,7 @@ class Foundry:
         last = self.state().get("last")
         if not isinstance(last, Mapping):
             return None
-        keys = ("at", "cycle", "family", "strategy", "candidates", "backtested", "cache_hits", "fresh_backtests", "qualified", "best_oos_return", "winner", "deployed_to", "fast_tracked", "seconds", "sandbox_seconds", "model_cost_usd", "skipped", "failed")
+        keys = ("at", "cycle", "family", "strategy", "candidates", "backtested", "cache_hits", "fresh_backtests", "qualified", "best_oos_return", "best_reason", "winner", "deployed_to", "fast_tracked", "seconds", "sandbox_seconds", "model_cost_usd", "skipped", "failed")
         return {k: last.get(k) for k in keys if k in last}
 
     def _next_cycle(self, state: Mapping[str, Any]) -> int:
@@ -1095,6 +1095,9 @@ class Foundry:
         scored = [c for c in candidates if c["kind"] != "baseline" and c.get("evidence") and c["evidence"]["out_of_sample"]["return_on_notional"] is not None]
         best = max(scored, key=lambda c: c["evidence"]["out_of_sample"]["return_on_notional"], default=None)
         winner = qualified[0] if qualified else None
+        # Why the best did not qualify, on the record: until Sept 18, 2026 a cycle said only "0
+        # qualified" and the gate that refused everything took an afternoon to find.
+        best_reason = None if best is None else self.qualifies(best, reference)[1]
         deployment = None
         if bool(cfg.get("deploy_live")) and live is not None and live.live:
             # The arena (Sept 18, 2026): a candidate earns its forward record with real fills at
@@ -1147,6 +1150,7 @@ class Foundry:
                 "reference_oos_return": reference,
                 "best_oos_return": None if best is None else best["evidence"]["out_of_sample"].get("return_on_notional"),
                 "best": None if best is None else best["id"],
+                "best_reason": best_reason,
                 "winner": None if deployment is None else deployment["id"],
                 "deployed_to": None if deployment is None else deployment["desk_id"],
                 "code": {k: asked.get(k) for k in ("asked", "valid", "repaired", "rejected", "skipped")},
@@ -1797,8 +1801,10 @@ class Foundry:
         relative = family in {str(f) for f in (cfg.get("relative_families") or ())}
         if not relative and (ci is None or ci[0] <= float(cfg["min_ci_lower"])):
             return False, f"out-of-sample 95% lower bound {_fmt(ci[0] if ci else None, '+.4f')} is not above {cfg['min_ci_lower']}"
-        if relative and (ci is None or ci[1] is None or ci[1] <= reference):
-            return False, f"out-of-sample 95% upper bound {_fmt(ci[1] if ci else None, '+.4f')} is not above the baseline's {reference:+.3f}"
+        # The bound is mean P&L per position in dollars, the reference a return on notional: the
+        # relative test asks only that the candidate could plausibly earn (upper bound above zero).
+        if relative and (ci is None or ci[1] is None or ci[1] <= 0):
+            return False, f"out-of-sample 95% upper bound {_fmt(ci[1] if ci else None, '+.4f')} is not above zero"
         return True, "qualified"
 
     # ------------------------------------------------------------------ shadow deployment

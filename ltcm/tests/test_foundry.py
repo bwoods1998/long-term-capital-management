@@ -271,7 +271,7 @@ class CandidateTests(FoundryCase):
         self.assertEqual(foundry.qualifies(candidate, -0.09), (True, "qualified"), "beats a losing baseline; the upper bound clears it")
         self.assertFalse(foundry.qualifies(candidate, -0.04)[0], "no margin over the baseline")
         candidate["evidence"]["out_of_sample"]["ci95_mean_pnl"] = [-1.2, -0.5]
-        self.assertFalse(foundry.qualifies(candidate, -0.09)[0], "an upper bound under the baseline is noise")
+        self.assertFalse(foundry.qualifies(candidate, -0.09)[0], "an upper bound under zero cannot earn")
         strict = self.foundry()
         candidate["evidence"]["out_of_sample"]["ci95_mean_pnl"] = [-1.2, 0.3]
         self.assertFalse(strict.qualifies(candidate, -0.09)[0], "without the relative rule the counts and the absolute bound bind")
