@@ -43,6 +43,22 @@ Death is `max_lifetime_seconds` plus the House refusing its token.
 - `league/publish.py`: the public tape. The site reads thoughts, research, fills, outcomes,
   balance marks, positions with reasons, and one `improvement` series by generation.
 
+## The frontier model
+
+The owner's choice is the best model available: `gpt-6-astra` for both the auditor and the
+architect (confirmed reachable with the project's key on Sept 19, 2026). Metered prices are
+$12.50 per million input tokens (the cache-write rate, so the meter errs high), $1.00 cached,
+$50 output. What the $100 month buys at those prices:
+
+| Call | Assumed size | Cost |
+|---|---|---|
+| Audit of one candidate | 8k in, 4k out including reasoning | about $0.30 |
+| Architect pass | 50k in, 12k out | about $1.25 |
+
+A month of weekly architect passes ($5) leaves room for roughly 300 audits, far more than the
+ladder will send to real money. Spend is attributed per agent in `/v1/health`, and the budget
+follows the measured return of each job.
+
 ## Build order
 
 1. Ledger + book + gateway-mode adapters for both venues, with the old risk rules. (Trade
