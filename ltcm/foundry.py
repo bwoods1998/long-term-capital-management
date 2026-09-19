@@ -1123,6 +1123,7 @@ class Foundry:
         # qualified" and the gate that refused everything took an afternoon to find.
         best_reason = None if best is None else self.qualifies(best, reference)[1]
         deployment = None
+        runners_up: list[str] = []
         if bool(cfg.get("deploy_live")) and live is not None and live.live:
             # The arena (Sept 18, 2026): a candidate earns its forward record with real fills at
             # learning size on the live book, not with modelled fills on a shadow desk. The
@@ -1159,6 +1160,16 @@ class Foundry:
                         problems[:] = [p for p in problems if not ("under" in p and "protection" in p)]
         elif winner is not None:
             deployment = self.deploy(winner, family, subject, shadows, problems, source=source)
+            # The arena's third lane (Sept 19, 2026): the runners-up earn forward records too, on
+            # the family's other shadow desks, so a cycle that qualified six trials more than
+            # one. `deploy_top` per lane; a desk taken this cycle is protected from the next.
+            for chosen in qualified[1:]:
+                if len(runners_up) >= max(0, int(cfg.get("deploy_top", 1) or 1) - 1) or deployment is None:
+                    break
+                extra = self.deploy(chosen, family, subject, shadows, problems, source=source)
+                if extra is None:
+                    break  # no desk left for this subject; the rest would fail the same way
+                runners_up.append(extra["id"])
         self.progress("learn", f"Cycle {cycle}: {sum(1 for c in candidates if self.measured(c))}/{len(candidates)} candidates measured successfully; {len(qualified)} qualified; "
                       + ("winner deployed for forward testing" if deployment else "no new deployment"),
                       cycle=cycle, family=family, strategy=subject, candidates=len(candidates), qualified=len(qualified))
@@ -1177,6 +1188,7 @@ class Foundry:
                 "best_reason": best_reason,
                 "winner": None if deployment is None else deployment["id"],
                 "deployed_to": None if deployment is None else deployment["desk_id"],
+                "runners_up": list(runners_up),
                 "code": {k: asked.get(k) for k in ("asked", "valid", "repaired", "rejected", "skipped")},
                 "model_cost_usd": asked.get("cost_usd"),
                 "sandbox_seconds": round(sum(_float(c.get("seconds")) or 0.0 for c in candidates), 1),

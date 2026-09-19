@@ -675,6 +675,23 @@ class DeploymentTests(FoundryCase):
         self.strategies.config["book_roles"] = {"mullins-9": "explorers"}
         self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins-9")
 
+    def test_a_lane_trials_its_runners_up_on_the_other_shadow_desks(self):
+        """Sept 19, 2026: a fast-lane cycle qualified six settings variants and trialled one."""
+        self.manager.script = settings_winner
+        foundry = self.foundry(deploy_top=2)
+        summary = foundry.cycle(NOW)
+        self.assertGreater(summary["qualified"], 1)
+        self.assertEqual(summary["deployed_to"], "mullins-4")
+        self.assertEqual(len(summary["runners_up"]), 1)
+        deployments = foundry.state()["deployments"]
+        self.assertEqual({d["desk_id"] for d in deployments.values() if d["status"] == "shadow"}, {"mullins-3", "mullins-4"})
+        runner = deployments[summary["runners_up"][0]]
+        self.assertEqual(self.row("mullins-3")["foundry_id"], runner["id"])
+        self.assertNotEqual(runner["id"], summary["winner"])
+        # A third would find no unprotected desk: the cycle says so and goes on.
+        summary = self.foundry(deploy_top=3).cycle(NOW)
+        self.assertEqual(summary["runners_up"], [])
+
     def test_a_winner_skips_a_shadow_desk_behind_its_daily_loss_breaker(self):
         """mullins-11 took the fast lane's first winner at 45% daily loss (Sept 18, 2026) and
         could place nothing until the day turned."""
