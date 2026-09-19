@@ -975,6 +975,7 @@ class Service:
             provider=self.provider,
             clock=clock,
             venue_equity=self._venue_equity,
+            venue_cash=self._venue_cash,
             config={
                 **(self.config.get("committee") or {}),
                 "floor_capital_usd": self.config["floor_capital_usd"],
@@ -1652,6 +1653,17 @@ class Service:
         try:
             for row in self.venue_balances():
                 out[str(row.get("venue"))] = money(row.get("equity"))
+        except Exception:
+            return {}
+        return out
+
+    def _venue_cash(self) -> dict[str, Decimal]:
+        """Each live venue's cash as the venue reports it: what its books can share."""
+        out: dict[str, Decimal] = {}
+        try:
+            for row in self.venue_balances():
+                if row.get("cash") is not None:
+                    out[str(row.get("venue"))] = money(row.get("cash"))
         except Exception:
             return {}
         return out

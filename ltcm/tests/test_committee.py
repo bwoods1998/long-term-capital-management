@@ -355,7 +355,7 @@ class AllocationTests(CommitteeCase):
         self.assertEqual((targets["earnings-01"], targets["earnings-02"]), (Decimal("750.00"), Decimal("750.00")), "no resize needed: the venue is read every time")
         self.assertEqual(targets["earnings-03"], Decimal("1000.00"), "a shadow desk's notional budget")
         event = self.log.last("committee", "committee.allocation")
-        self.assertIn("venue book: 750.00 of alpaca's 1500", event.payload["reasons"]["earnings-01"])
+        self.assertIn("venue book: 750.00 on alpaca (0.00 at cost, 750.00 of the venue's free 1500.00)", event.payload["reasons"]["earnings-01"])
         grown = Committee(
             self.log, self.manifests, self.ledgers, self.provider,
             config={"floor_capital_usd": "5000", "bandit_enabled": False, "venue_book": True},
@@ -377,7 +377,16 @@ class AllocationTests(CommitteeCase):
         targets = committee.allocate("2026-09-09T20:00:00.000Z", resize=False)
         self.assertEqual((targets["earnings-01"], targets["earnings-02"]), (Decimal("850.00"), Decimal("650.00")))
         event = self.log.last("committee", "committee.allocation")
-        self.assertIn("200.00 in positions, 650.00 of the free 1300.00", event.payload["reasons"]["earnings-01"])
+        self.assertIn("200.00 at cost, 650.00 of the venue's free 1300.00", event.payload["reasons"]["earnings-01"])
+        # The venue's own cash figure, when it answers, is what the books share: a position
+        # marked below cost does not read as missing cash.
+        self.ledgers["earnings-01"].mark({AAPL.key: Decimal("10")}, "2026-09-09T20:01:00.000Z")
+        with_cash = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False, "venue_book": True},
+            venue_equity=lambda: {"alpaca": "520"}, venue_cash=lambda: {"alpaca": "500"},
+        ).allocate("2026-09-09T20:02:00.000Z", resize=False)
+        self.assertEqual((with_cash["earnings-01"], with_cash["earnings-02"]), (Decimal("450.00"), Decimal("250.00")))
 
     def test_a_bankrupt_desk_goes_to_zero(self):
         self.add(live_manifest("earnings-01"))

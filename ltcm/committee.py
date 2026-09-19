@@ -176,6 +176,7 @@ class Committee:
         clock: Callable[[], float] = time.time,
         config: Mapping[str, Any] | None = None,
         venue_equity: Callable[[], Mapping[str, Any]] | None = None,
+        venue_cash: Callable[[], Mapping[str, Any]] | None = None,
     ):
         self.log = log
         self.manifests = _as_manifests(manifests)
@@ -186,6 +187,7 @@ class Committee:
         #: The venues' own equity, read live by the service: a live sleeve can only be as big as
         #: the account it trades from, however the floor's capital is counted.
         self.venue_equity = venue_equity
+        self.venue_cash = venue_cash
         #: `benchmark(start_iso, end_iso) -> Decimal` in percentage points; flat when absent.
         self.benchmark: Callable[[str, str], Decimal] | None = self.config.get("benchmark")
 
@@ -536,8 +538,17 @@ class Committee:
                     equity_by_venue[str(venue)] = money(amount)
             except Exception:
                 equity_by_venue = {}
+        cash_by_venue: dict[str, Decimal] = {}
+        if self.venue_cash is not None:
+            try:
+                for venue, amount in dict(self.venue_cash() or {}).items():
+                    cash_by_venue[str(venue)] = money(amount)
+            except Exception:
+                cash_by_venue = {}
         held_total = sum(equity_by_venue.values(), ZERO)
         cap = held_total if held_total > ZERO else money(self.config["floor_capital_usd"])
+        venue_books: list[str] = []
+        split_venues: set[str] = set()
         if bool(self.config.get("venue_book", False)) and equity_by_venue:
             for venue, held in equity_by_venue.items():
                 books = sorted(
@@ -546,23 +557,38 @@ class Committee:
                     and capital_mode(manifest, modes) == "live"
                 )
                 if books and held > ZERO:
-                    # Each book keeps what it holds in positions and the venue's free cash is
-                    # shared equally. An equal split of the whole (until Sept 19, 2026) left a
-                    # desk holding $100 of positions with a $71 sleeve: cash -$31, and the
-                    # strategies the Foundry had just put on it could place nothing.
-                    marked: dict[str, Decimal] = {}
+                    # Each book keeps its positions at cost and the venue's cash is shared
+                    # equally. An equal split of the whole (until Sept 19, 2026) left a desk
+                    # holding $100 of positions with a $71 sleeve: cash -$31, nothing placed;
+                    # a split by marked value then read every book as broke while the venue
+                    # held $140 of cash, because a book's cash is its sleeve less what it paid,
+                    # and yesterday's losses had not settled.
+                    cost: dict[str, Decimal] = {}
                     for desk_id in books:
                         state = states.get(desk_id)
-                        marked[desk_id] = max(ZERO, state.equity - state.cash) if state is not None else ZERO
-                    free = max(ZERO, held - sum(marked.values(), ZERO))
+                        total = ZERO
+                        for position in (state.positions.values() if state is not None else ()):
+                            try:
+                                total += abs(position.quantity * position.average_cost * position.instrument.multiplier)
+                            except Exception:
+                                continue
+                        cost[desk_id] = total
+                    free = cash_by_venue.get(venue)
+                    if free is None or free < ZERO:
+                        free = max(ZERO, held - sum(cost.values(), ZERO))
                     each = _quantize(free / Decimal(len(books)))
+                    venue_books.extend(books)
+                    split_venues.add(venue)
                     for desk_id in books:
-                        targets[desk_id] = _quantize(marked[desk_id] + each)
+                        targets[desk_id] = _quantize(cost[desk_id] + each)
                         reasons[desk_id] = (
-                            f"venue book: {text(targets[desk_id])} of {venue}'s {text(_quantize(held))} "
-                            f"({text(_quantize(marked[desk_id]))} in positions, {text(each)} of the free {text(_quantize(free))})"
+                            f"venue book: {text(targets[desk_id])} on {venue} "
+                            f"({text(_quantize(cost[desk_id]))} at cost, {text(each)} of the venue's free {text(_quantize(free))})"
                         )
         # Only real sleeves compete for the floor's real capital; a notional budget costs nothing.
+        # A venue book's sleeve is its cost plus its share of the venue's cash: money already
+        # spent and money in hand, never scaled below that by a mark that has not settled.
+        cap = max(cap, sum((targets[d] for d in venue_books), ZERO))
         funded = {k: v for k, v in targets.items() if not shadow.get(k)}
         total = sum(funded.values(), ZERO)
         if cap > 0 and total > cap:
@@ -576,6 +602,8 @@ class Committee:
         # And no venue's live sleeves may add up to more than that venue actually holds: three
         # desks sharing one Kalshi account cannot each be told they have the whole account.
         for venue, held in equity_by_venue.items():
+            if venue in split_venues:
+                continue  # its books were dealt cost plus the venue's own cash above
             sleeves = [
                 desk_id for desk_id in funded
                 if desk_id in active and active[desk_id].market_venue == venue and targets.get(desk_id, ZERO) > ZERO
