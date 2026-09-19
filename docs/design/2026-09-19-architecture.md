@@ -372,3 +372,17 @@ configured`).
     weeks to earn, so nothing it learned could ever trade.
 33. **The House box is checkpointed daily with Sail** (`league/backup.py`), each kept a week. *Why:*
     the ledger is one SQLite file on one disk, and it is every agent's code, record and journal.
+34. **The public chart is on the league's basis** (the owner's decision on the first production
+    afternoon). `account_equity` is the starting balance ($1,017.36, what the two real accounts held
+    on Sept 19 before the league's first real trade) plus the league's own real-money result from
+    the ledger; the raw balance is published beside it as `real_account_equity`. *Why:* the page
+    showed -$4.57 of "profit" before any real trade, all of it the first run's leftover Kalshi
+    contracts being marked to market. Total profit and the chart now move only when the league
+    trades real money; the owner's transfers do not move them either.
+35. **Three queues, a gentle cold start, and health from the moment the books are open.** Replays,
+    research and housekeeping each have their own lane; a House wakes five agents a tick in its
+    first five minutes. *Why, both measured in production on Sept 19:* one two-slot queue held
+    research, the backup and the survey behind 28 founders' replays; and the release that fixed it
+    was ROLLED BACK by the in-box watchdog, correctly, because its first tick re-read every venue
+    listing for sixteen agents and did not finish within the watchdog's five minutes. The floor
+    came back on the previous release by itself within a minute.

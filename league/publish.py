@@ -117,6 +117,18 @@ def hours_between(start: str | None, end: str) -> float | None:
 
 
 # --------------------------------------------------------------------------------- events
+def league_real_pnl(house: Any) -> Decimal:
+    """What the league has made or lost with real money: over every real-money book, each account's
+    equity less what it was lent (a closed account's is what it kept or lost), the House row's
+    fees and dust included. Zero while no real book exists."""
+    total = ZERO
+    for book in house.books.values():
+        if not book.real_money:
+            continue
+        for name, account in book.accounts.items():
+            total += book.equity(name) - account.staked
+    return total
+
 def option_label(instrument: Mapping[str, Any]) -> str:
     """`F 10-09 13C`: the underlying, the expiry's month and day, the strike and C or P."""
     try:
@@ -172,7 +184,10 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
             "pnl": money(p.get("pnl") or 0, 4, signed=True), "rationale_excerpt": str(p.get("reason") or "")[:240],
             "real_money": bool(p.get("real_money")), "held_for_hours": hours_between(p.get("opened_at"), entry.at), "quantity": p.get("quantity"),
         }))
-    elif kind == "floor.mark":
+    elif kind == "floor.mark" and "real_account_equity" in p:
+        # Only marks on the league's basis are published. The first production hour (Sept 19, 2026)
+        # recorded the raw account balance, which the first run's leftover contracts were moving;
+        # those rows stay on the ledger and off the chart.
         out.append(("", "ops", "floor.mark", {k: p[k] for k in ("account_equity", "account_cash", "as_of", "venues") if k in p}))
     else:
         message = league_news(entry.kind, agent, p)
@@ -329,9 +344,16 @@ class Publisher:
         return {"events": sent, "checkpoint": status}
 
     # -------------------------------------------------------------- real accounts
-    def account(self) -> dict[str, Any] | None:
+    def account(self, house: Any = None) -> dict[str, Any] | None:
         """The real venue accounts, read now. A venue that does not answer keeps its last good row,
-        marked stale, and a floor with a stale row publishes no profit figure."""
+        marked stale, and a floor with a stale row publishes no profit figure.
+
+        `account_equity`, the number the public chart draws, is on the LEAGUE'S BASIS: the balance
+        the accounts held when the record began (`performance.start_equity`) plus what the league's
+        own real-money trading has made since. The owner's decision of Sept 19, 2026: the chart is
+        flat until the league trades real money. The raw balance also moves for reasons that are
+        not the league's (the owner's transfers; the contracts the first run left behind, marked to
+        market until they settle), and it is published beside it as `real_account_equity`."""
         if not self.real_brokers:
             return None
         rows = []
@@ -346,8 +368,12 @@ class Publisher:
                     return None
                 row = {**row, "stale": True}
             rows.append(row)
+        real = sum(Decimal(r["equity"]) for r in rows)
+        start = self.performance.get("start_equity")
+        shown = Decimal(str(start)) + league_real_pnl(house) if start is not None and house is not None else real
         return {
-            "account_equity": money(sum(Decimal(r["equity"]) for r in rows), 4),
+            "account_equity": money(shown, 4),
+            "real_account_equity": money(real, 4),
             "account_cash": money(sum(Decimal(r["cash"]) for r in rows), 4),
             "venues": rows,
         }
@@ -356,7 +382,7 @@ class Publisher:
         now = self.clock()
         if now - float(self._state["last_mark"]) < MARK_EVERY_SECONDS:
             return
-        account = self.account()
+        account = self.account(house)
         if account is None or any(row.get("stale") for row in account["venues"]):
             return
         self._state["last_mark"] = now
@@ -367,7 +393,7 @@ class Publisher:
     def checkpoint(self, house: Any) -> dict[str, Any]:
         # The accounts are read first: the site refuses a checkpoint whose venue readings are
         # stamped later than the checkpoint itself (found on the first live publish).
-        account = self.account()
+        account = self.account(house)
         at = now_iso(self.clock)
         ledger = house.ledger
         desks, curve_rows = [], {}
@@ -413,6 +439,11 @@ class Publisher:
             floor.update(account)
             if self._flows is not None:
                 performance = self._flows.read({"venues": account["venues"]}, at)
+                # `account_equity` is already on the league's basis (see `account`): start + the league's
+                # own real-money result. Nothing else moves it, so there is nothing to subtract.
+                if performance.get("net_flows") is not None:
+                    performance["net_flows"] = "0"
+                    performance["league_pnl"] = money(league_real_pnl(house), 4, signed=True)
                 floor["performance"] = performance
                 if performance.get("net_flows") is not None:
                     pnl_total = Decimal(account["account_equity"]) - Decimal(str(performance["start_equity"])) - Decimal(str(performance["net_flows"]))

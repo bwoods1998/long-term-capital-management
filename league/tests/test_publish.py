@@ -98,9 +98,9 @@ class PublisherTest(HouseCase):
         self.assertEqual(fill["payload"]["desk_id"], agent.id)
         self.assertIs(fill["payload"]["real_money"], False)
         mark = next(e for e in events if e["kind"] == "floor.mark")
-        self.assertEqual(mark["payload"]["account_equity"], "1022.0300")  # the REAL accounts, never practice money
+        self.assertEqual(mark["payload"]["account_equity"], "1000.0000")  # the league's basis: never practice money, and flat until the league trades real money
         checkpoint = site.posts[-1][2]
-        self.assertEqual(checkpoint["floor"]["account_equity"], "1022.0300")
+        self.assertEqual((checkpoint["floor"]["account_equity"], checkpoint["floor"]["real_account_equity"]), ("1000.0000", "1022.0300"))
         for row in checkpoint["floor"]["venues"]:
             self.assertLessEqual(row["as_of"], checkpoint["published_at"])
         for desk in checkpoint["desks"]:
@@ -110,6 +110,46 @@ class PublisherTest(HouseCase):
         self.assertEqual(desk["positions"][0]["thesis"], "test buy")
         self.assertEqual(checkpoint["lab"]["curve"][0]["generation"], 1)
         self.assertEqual(checkpoint["run"]["started_at"], self.house.ledger.read(kinds="ops.started", limit=1)[0].at)
+
+    def test_total_profit_is_the_leagues_own_real_money_result_and_nothing_else(self):
+        # Found on the first production day (Sept 19, 2026): the page showed -$4.57 of "profit" before
+        # any real trade, because the contracts the first run left in the Kalshi account are marked
+        # to market. What is not the league's doing is a flow, whatever it is.
+        from league.publish import league_real_pnl
+
+        class Flows:
+            def read(self, accounts, at):
+                return {"start_at": "2026-09-09T00:00:00.000Z", "start_equity": "1000", "net_flows": "0", "verified_at": at}
+
+        self.seated()
+        site = FakeSite()
+        self.house.publisher = self.publisher(site)
+        self.house.publisher._flows = Flows()
+        self.house.tick()
+        floor = site.posts[-1][2]["floor"]
+        # The accounts are up $22.03 on the start and none of it is the league's: the chart's number does not move.
+        self.assertEqual((floor["account_equity"], floor["real_account_equity"]), ("1000.0000", "1022.0300"))
+        self.assertEqual(league_real_pnl(self.house), D(0))  # practice money is not profit either
+        self.assertEqual((floor["performance"]["net_flows"], floor["performance"]["league_pnl"]), ("0", "0.0000"))
+        self.assertEqual(D(floor["since_inception_pct"]), D(0))
+        marks = [e for u, _, b in site.posts if u.endswith("/events") for e in b["events"] if e["kind"] == "floor.mark"]
+        self.assertEqual({m["payload"]["account_equity"] for m in marks}, {"1000.0000"})  # a flat line
+        # And with a real book that has made a dollar, a dollar is what is published.
+        real = type("RealBook", (), {"real_money": True, "accounts": {"a1": type("A", (), {"staked": D(25)})(), "house": type("A", (), {"staked": D(0)})()},
+                                     "equity": lambda self, name: {"a1": D("26.10"), "house": D("-0.10")}[name]})()
+        self.house.books["alpaca"] = real
+        try:
+            self.assertEqual(league_real_pnl(self.house), D("1.00"))
+        finally:
+            del self.house.books["alpaca"]
+
+    def test_a_mark_of_the_raw_balance_from_before_the_leagues_basis_is_not_published(self):
+        from league.publish import to_events
+
+        old = self.house.ledger.append("floor.mark", {"account_equity": "1021.9251", "account_cash": "997.76", "as_of": "2026-09-19T18:05:00.000Z", "venues": []})
+        new = self.house.ledger.append("floor.mark", {"account_equity": "1017.3551", "real_account_equity": "1015.10", "account_cash": "997.76", "as_of": "2026-09-19T19:05:00.000Z", "venues": []})
+        self.assertEqual(to_events(old), [])
+        self.assertEqual([e["payload"]["account_equity"] for e in to_events(new)], ["1017.3551"])
 
     def test_a_closed_trade_is_published_with_its_reason(self):
         self.seated()

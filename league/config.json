@@ -14,6 +14,7 @@
   "inference_daily_cap_usd": "9.00",
   "performance": {
     "start_at": "2026-09-19T04:56:53.000Z",
-    "start_equity": "1021.9251"
+    "start_equity": "1017.3551",
+    "_about": "The record's first point. start_equity was reset on Sept 19, 2026 (the owner's decision) to what the two real accounts held that afternoon, before the league's first real trade; the public chart draws start_equity plus the league's own real-money result."
   }
 }

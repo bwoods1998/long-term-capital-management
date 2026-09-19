@@ -69,6 +69,7 @@ class Settings:
     replay_timeout: int = 600
     research: bool = True
     max_wakes_per_tick: int = 16
+    cold_wakes_per_tick: int = 5  # in a House's first five minutes (see `due`)
     wake_workers: int = 6
     slow_workers: int = 3  # replays at once, beside the tick and never inside it
     research_workers: int = 5  # research passes at once: each is minutes of WAITING on Sail's flex window, not work
@@ -159,6 +160,7 @@ class House:
                 specialty=lambda agent: (self.niche_of(agent).text() if self.niche_of(agent) else ""),
                 look=lambda agent: self.snapshot(agent, self.book_of(agent)), lineage=self.registry.lineage,
             )
+        self._born_at = self.clock()
         self._record_start()
         # Every book's baseline is taken now, before anything can trade: what the venue holds at
         # this moment is what is not the book's. (Taken later, a resting order's reserved cash or a
@@ -168,6 +170,8 @@ class House:
                 book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
                 self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
+        # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
+        self._health({"at": now_iso(self.clock)})
 
     def _chain(self, symbols: list[str], days: int, afford: float, quotes: Mapping[str, Any]) -> list[dict[str, Any]]:
         """The option contracts an agent may consider: its underlyings, expiring after today and
@@ -478,7 +482,12 @@ class House:
     def due(self) -> list[Agent]:
         now = self.clock()
         out = [a for a in self.registry.living() if float(self._state["next_wake"].get(a.id) or 0) <= now]
-        return out[: self.settings.max_wakes_per_tick]
+        # A House that has just started has every cache cold: each wake re-reads its venue listings.
+        # Measured Sept 19, 2026: sixteen cold wakes in one tick took over four minutes, and the
+        # watchdog rightly rolled the release back as a House whose ticks do not finish. For its
+        # first five minutes a House wakes a few agents a tick; the rest are a minute late.
+        cold = now - self._born_at < 300
+        return out[: min(self.settings.max_wakes_per_tick, self.settings.cold_wakes_per_tick) if cold else self.settings.max_wakes_per_tick]
 
     def wake(self, agent: Agent) -> dict[str, Any]:
         """One wake of one agent. Returns what happened, for the caller and the tests."""
