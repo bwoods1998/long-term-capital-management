@@ -8,15 +8,14 @@ Started 2026-09-19 06:00 UTC. Eight hours ends 14:00 UTC.
 
 ## Where I am
 
-- **Step:** 5 (Astra's roles, CI guard, canary, watchdog). Steps 1 to 4 are built, tested and
-  committed; the real end-to-end dry run is ticking (scratch root `dry2`, test tape).
-- **Verified so far:** see the step log. League suite 646 tests, site 64, gateway 81 (unchanged).
-- **Next:** `league/ci.py`, `league/watchdog.py`, `league/astra.py`; then step 6 (Kelly sizing,
-  capital recommendation); then deploy to the House box, runbook, README/docs, final report.
-- **Open items to finish before the end:** adversarial test agent's bug list (18 expected
-  failures in the suite are its bug demonstrations: fix each, remove the marker); dry-run
-  evidence for (b); real Astra audit + architect calls for (c); canary rollback for (d); test
-  tape render check for (e); stop the dry run and pause every box; flatten the paper account.
+- **Step:** all six steps are built and tested. Now: evidence runs and documentation.
+- **In flight (08:25 UTC):** the accelerated real run (one death, one fork by rule) in scratch
+  `accel1`; the first deploy of the league to the House box through the watchdog (canary on the
+  box; the loop is NOT started tonight).
+- **Next:** (d) a deliberately bad release refused by the canary on the box, and a local rollback
+  of a release that degrades after promotion; (e) look at the test tape page; runbook; README and
+  docs pass with the old record moved to docs/history; final report; pause every box; flatten the
+  paper account; terminate tonight's test boxes (prefixes league-test, league-, accel-, canary-).
 
 ## Decisions and their reasons
 
@@ -84,6 +83,39 @@ Started 2026-09-19 06:00 UTC. Eight hours ends 14:00 UTC.
     an egress allowlist of one never-resolving host because Sail refuses an empty allowlist.
     Verified live: DNS fails inside the box; decide takes about 9 s a wake; a fork takes about 25 s.
 
+17. **Every defect an adversarial test pass found was fixed** (a subagent wrote tests against the
+    evaluator, sandbox, runner, auditor and frontier client and found 18). The ones that mattered
+    most: a box was recorded before it was sealed (now sealed first, destroyed if it cannot be);
+    failed replays did not raise the family's trial count (now every replay does); `observe`
+    crashed after a rung change on a shared book; the audit read the string "false" as approval.
+18. **Astra's pull requests go through the gateway** (`POST /v1/github/pr`), which holds the GitHub
+    token like every other credential and enforces each role's paths outside Sail. CI on GitHub
+    judges (`.github/workflows/astra.yml`, run from main's copy with `pull_request_target`, so a
+    branch cannot rewrite its judge) and merges a green PR from a job that never runs the branch's
+    code. **The owner must place `GITHUB_TOKEN` in the gateway** (a fine-grained token for this one
+    repository: Contents and Pull requests read/write) before Astra's five PR roles can act
+    unattended; until then each pass is recorded with `forge_error: GitHub is not configured` and
+    nothing else changes. The auditor does not need it. Tonight the flow was proven from the
+    owner's machine with a `gh`-based forge of the same interface.
+19. **Drift is compared per unit of exposure.** The same strategy has a fifth of its stake at work
+    on paper and a third on the micro-real rung, so raw growth per block differs by rung; blocks
+    now record their average exposure and the CUSUM compares growth per unit of it.
+20. **The whole-ladder test earned its keep**: it found that a one-step crumb (0.000000001 BTC) the
+    venue still showed after its holder sold out froze the book, and that sweeping a promoted
+    agent's paper account read as a 100% daily loss and tripped the floor breaker for every other
+    agent. Both fixed; stake flows no longer count as profit or loss in the breakers.
+21. **Alpaca takes the cash behind a resting crypto bid out of `cash`** ($80.00 for two $40 bids,
+    measured). Reconciliation adds it back; the House takes every book's baseline at start, before
+    anything can trade.
+22. **Kalshi replay tapes are a week (hourly) and seven weeks (daily).** The dry run's own agents
+    diagnosed the one-day tape and filed tool requests; Astra's toolsmith correctly answered that
+    this needs data, not a tool, so the House was changed.
+23. **Old-run code is kept, not removed.** The league imports the first run's venue adapters,
+    broker types, risk engine, fee model, Sail clients, inference provider, data readers and
+    funding-flow reader. The rest of `ltcm/` (desks, committee, evolution, foundry, lab, mind,
+    service) is no longer run. Removing it safely is a job of its own (1,753 tests live there);
+    tonight the documents were corrected instead.
+
 ## Step log
 
 ### Step 1: ledger and order book (done about 06:20 UTC)
@@ -116,7 +148,26 @@ check: 72 BTC bars through the gateway, 27 live KXBTCD markets, a 12-hour Kalshi
 tests), `league/house.py`, `league/budget.py`. Sail sandbox verified live (decision 16). First real
 dry run (three seeds): replays ran in Sail boxes in 10 s each and were recorded as trials.
 
-### Step 4: auditor and publisher (built; live checks pending)
+### Step 5: Astra's roles, CI, canary, watchdog (done about 08:10 UTC)
+
+`league/ci.py`, `league/astra.py`, `league/strategies/`, `league/tools/`, `league/playbook/`,
+`.github/workflows/astra.yml`, `league/watchdog.py`, `league/sim.py`, `gateway/lib/github.mjs`
+(gateway suite 104), `scripts/floor_box.py` rewritten around releases (first-run suite 1,753).
+Verified live: one metered architect pass ($0.10: it declined to write a strategy, with reasons) and
+one toolsmith pass ($0.06: all three requests need data, not tools); PR #1 (a strategy importing
+`os`) refused by the `judge` job; PR #2 (a designer branch editing the constitution) refused by the
+`guard` job; PR #3 (a lesson) passed guard, judge and both suites and was squash-merged by the
+`merge` job with no human step.
+
+### Step 6: sizing, drift, recommendation (done about 08:05 UTC)
+
+`league/capital.py`, drift in `league/evaluator.py`, `league/tests/test_ladder.py`.
+
+### Step 4: auditor and publisher (done; verified live)
+
+Live: the auditor vetoed a deliberately bad candidate (a martingale with a good-looking paper
+record) with four blockers, $0.23 (plus a $0.07 first attempt); the dry run published 12 agents to
+the test tape and the site stored the checkpoint after the stamp-order fix.
 
 `league/frontier.py`, `league/auditor.py`, `league/publish.py`, `league/service.py`,
 `league/__main__.py`. The publisher's real output passes the site's own `validCheckpoint` and
