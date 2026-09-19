@@ -181,7 +181,7 @@ account identifiers: nothing (one match is a labelled test fixture string).
 
 | | Start | End | Spent | Limit for tonight |
 |---|---|---|---|---|
-| Sail credit | $97.80 | $97.53 | **$0.27** | $10 |
+| Sail credit | $97.80 | $97.50 | **$0.30** | $10 |
 | OpenAI, through the gateway's meter | $0.01 | $0.44 | **$0.43** (five calls: two audits, one architect pass, one toolsmith pass, and the first audit attempt) | $10 |
 | Real-money orders | 0 | 0 | none | none allowed |
 
