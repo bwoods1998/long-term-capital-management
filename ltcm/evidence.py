@@ -188,7 +188,8 @@ def assess(record: Mapping[str, Any] | None, **config: Any) -> dict[str, Any]:
     if n < need:
         return {**out, "passes": False, "reason": f"{n} of {need} settlements"}
     if len(days) < int(cfg["min_days"]):
-        return {**out, "passes": False, "reason": f"settlements on {len(days)} day(s); the bootstrap needs {int(cfg['min_days'])}"}
+        unit = "hour" if str(record.get("block") or "") == "hour" else "day"
+        return {**out, "passes": False, "reason": f"settlements in {len(days)} {unit}(s); the bootstrap needs {int(cfg['min_days'])}"}
     # Resampled only once the count and the days are there: the bootstrap is the costly part.
     lower = block_bootstrap_lower(days, cfg["q"], int(cfg["resamples"]), cfg["seed"]) if days else None
     out["lower"] = None if lower is None else round(lower, 6)

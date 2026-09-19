@@ -329,6 +329,24 @@ class BootstrapTests(StrategyCase):
         self.strategies.bootstrap(self.service.manifests)
         self.assertEqual(self.strategies.report(self.manifest, "hourly_ranges")["params"], {"min_edge": 0.9})
 
+    def test_a_fast_settling_record_blocks_its_bootstrap_by_hour(self):
+        """Kalshi's hourly strikes share an hour's move, not a day's (Sept 19, 2026)."""
+        from ltcm.strategies import _evidence_fields
+
+        class Outcome:
+            def __init__(self, at, held, pnl="0.50"):
+                self.at = at
+                self.payload = {"instrument": "event:KXBTC:kalshi:yes:X", "entry_price": "0.45", "quantity": "10", "entry_fees": "0.1", "pnl": pnl, "held_for_hours": held}
+
+        hourly = [Outcome(f"2026-09-19T0{h}:05:00.000Z", 0.8) for h in range(1, 5)]
+        record = _evidence_fields(hourly)
+        self.assertEqual(record["block"], "hour")
+        self.assertEqual(sorted({row[0] for row in record["returns"]}), ["2026-09-19T01", "2026-09-19T02", "2026-09-19T03", "2026-09-19T04"])
+        daily = [Outcome(f"2026-09-19T0{h}:05:00.000Z", 14.0) for h in range(1, 5)]
+        record = _evidence_fields(daily)
+        self.assertEqual(record["block"], "day")
+        self.assertEqual({row[0] for row in record["returns"]}, {"2026-09-19"})
+
     def test_house_code_refresh_resets_forward_evidence_and_inflight_identity(self):
         import hashlib
         self.strategies.config["starters"] = True

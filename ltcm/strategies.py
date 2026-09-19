@@ -215,6 +215,18 @@ PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_set
 #: What an idle strategy run says: counts of nothing. Stripped before deciding whether a run
 #: said anything worth a public thought.
 _IDLE_NOTE = re.compile(r"\b0 (?:kept|cancelled|placed|bucket\(s\) priced|quote\(s\) kept|in band|markets? in band|new|intents?)\b[,;:]?|\b(?:kept|cancelled|placed|priced)\b|[,;:.]|\s+")
+#: A record whose median position lived this long or less blocks its bootstrap by settlement hour.
+HOUR_BLOCK_MAX_HELD_HOURS = 2
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
 STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800, "temps_ensemble": 1800, "poly_cross": 1800, "perp_funding": 600}
 
 
@@ -1886,6 +1898,13 @@ def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
     priced = Decimal(0)
     entry_fees_total = Decimal(0)
     returns: list[list[Any]] = []
+    # The bootstrap's block is the settlement day, because positions that settle on one day
+    # share a market move. A strategy whose positions live an hour or two (Kalshi's hourly
+    # strikes, Sept 19, 2026) shares an hour's move, not a day's: its blocks are settlement
+    # hours, so its record can pass in an afternoon instead of three days.
+    held = sorted(h for h in (_float_or_none(event.payload.get("held_for_hours")) for event in outcomes) if h is not None)
+    hourly = bool(held) and held[len(held) // 2] <= float(HOUR_BLOCK_MAX_HELD_HOURS)
+    block = 13 if hourly else 10
     for event in outcomes:
         payload = event.payload
         entry_fees = _dec(payload.get("entry_fees")) or Decimal(0)
@@ -1901,7 +1920,7 @@ def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
         priced += price * quantity
         entry_fees_total += entry_fees
         cost = price * quantity + entry_fees
-        returns.append([str(getattr(event, "at", None) or "")[:10], float(net / cost)])
+        returns.append([str(getattr(event, "at", None) or "")[:block], float(net / cost)])
     known = classes - {None}
     asset_class = None if not known else (next(iter(known)) if len(known) == 1 else "mixed")
     return {
@@ -1911,6 +1930,7 @@ def _evidence_fields(outcomes: list[Any]) -> dict[str, Any]:
         "avg_entry_price": format((priced / quantity_total).quantize(Decimal("0.0001")), "f") if quantity_total > 0 else None,
         "avg_fee_per_contract": format((entry_fees_total / quantity_total).quantize(Decimal("0.000001")), "f") if quantity_total > 0 else None,
         "returns": returns[-RECORD_RETURNS:],
+        "block": "hour" if hourly else "day",
     }
 
 
