@@ -550,3 +550,25 @@ test('a venue may carry a tighter per-order cap than the floor', async () => {
   // An exit is never trapped by a dollar cap.
   assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
 });
+
+test('the paper account is its own venue: paper keys, paper host, no caps, no kill switch', async () => {
+  const settings = { ALPACA_PAPER_KEY_ID: 'PK-PAPER', ALPACA_PAPER_SECRET_KEY: 'paper-secret-held-by-the-worker' };
+  const read = await call(ask('GET', '/v1/alpaca-paper/v2/account'), { settings });
+  assert.equal(read.calls[0].url, 'https://paper-api.alpaca.markets/v2/account');
+  assert.equal(read.calls[0].headers['APCA-API-KEY-ID'], 'PK-PAPER', 'never the live key');
+  const data = await call(ask('GET', '/v1/alpaca-paper/v2/stocks/AAPL/quotes/latest'), { settings });
+  assert.equal(data.calls[0].url, 'https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest');
+
+  // An order far over the real-money cap goes through, is not counted, and ignores the kill switch.
+  const gate = gateFor(settings);
+  await gate.setKill(true);
+  const order = { symbol: 'AAPL', qty: '400', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' };
+  const placed = await call(ask('POST', '/v1/alpaca-paper/v2/orders', { body: order }), { settings, gate });
+  assert.equal(placed.response.status, 200);
+  assert.equal(placed.calls[0].url, 'https://paper-api.alpaca.markets/v2/orders');
+  assert.equal((await gate.status()).today.orders, 0);
+  // The live venue is still stopped by the same switch, and the path rules are shared.
+  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...order, qty: '1' } }), { settings, gate })).response.status, 423);
+  assert.equal((await call(ask('POST', '/v1/alpaca-paper/v2/account/configurations'), { settings })).response.status, 403);
+  assert.equal((await call(ask('GET', '/v1/alpaca-paper/v2/account'), { settings: { ALPACA_PAPER_SECRET_KEY: '' } })).response.status, 503);
+});

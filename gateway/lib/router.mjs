@@ -3,6 +3,7 @@
 //
 //   GET|POST|DELETE /v1/kalshi/<path>     signed with the Kalshi key, forwarded to the venue
 //   GET|POST|DELETE /v1/alpaca/<path>     keyed with the Alpaca headers, forwarded to the venue
+//   GET|POST|DELETE /v1/alpaca-paper/<path>  the paper account: same paths, simulated money, no caps
 //   GET             /v1/kalshi/ws-auth    handshake headers for the Kalshi WebSocket, 30 s of life
 //   GET             /v1/health            caps, counters, kill switch, watchdog
 //   POST            /v1/kill /v1/unkill   the kill switch, which lives outside the trading VM
@@ -22,7 +23,12 @@ import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
 
-export const VENUES = ['kalshi', 'alpaca'];
+export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
+//: Venues that hold no real money. Their orders are never metered and the kill switch does not
+//: stop them: the paper league must keep learning while real trading is halted.
+export const PAPER_VENUES = ['alpaca-paper'];
+//: The venue whose path rules a venue shares.
+const rulesOf = venue => (venue === 'alpaca-paper' ? 'alpaca' : venue);
 //: A venue quote reused across orders for this long.
 const PRODUCT_CACHE_MS = 60_000;
 const productCache = new Map();
@@ -31,7 +37,7 @@ const ALLOW = METHODS.join(', ');
 
 /** The venue and venue path a gateway path names, or `null` when it names neither. */
 export function parseRoute(pathname) {
-  const match = /^\/v1\/(kalshi|alpaca)\/(.+)$/.exec(pathname);
+  const match = /^\/v1\/(kalshi|alpaca-paper|alpaca)\/(.+)$/.exec(pathname);
   if (!match) return null;
   const path = match[2].replace(/^\/+/, '');
   // No traversal, no empty segments: a forwarded path is a venue path, not a filesystem one.
@@ -120,7 +126,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   const target = parseRoute(path);
   if (!target) return fail('Not found.', 404);
   if (!METHODS.includes(request.method)) return fail('Method not allowed.', 405, { Allow: ALLOW });
-  if (!allowedVenuePath(target.venue, request.method, target.path)) {
+  if (!allowedVenuePath(rulesOf(target.venue), request.method, target.path)) {
     return fail('Not a path this gateway signs.', 403);
   }
 
@@ -129,7 +135,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
 
   // --- caps, before anything is signed or sent -------------------------------------------------
   let reservation = null;
-  if (createsOrder(target.venue, request.method, target.path)) {
+  if (!PAPER_VENUES.includes(target.venue) && createsOrder(target.venue, request.method, target.path)) {
     let parsed = null;
     try {
       parsed = body.text ? JSON.parse(body.text) : null;
@@ -228,6 +234,11 @@ async function sign({ venue, path }, request, env, { now }) {
     ...(request.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
     'User-Agent': 'ltcm-gateway/1.0',
   };
+  if (venue === 'alpaca-paper') {
+    if (!env.ALPACA_PAPER_KEY_ID || !env.ALPACA_PAPER_SECRET_KEY) throw new Error('not configured');
+    Object.assign(headers, alpaca.authHeaders({ keyId: env.ALPACA_PAPER_KEY_ID, secretKey: env.ALPACA_PAPER_SECRET_KEY }));
+    return { url: alpaca.target(path, search, { paper: true }), headers };
+  }
   if (venue === 'alpaca') {
     if (!env.ALPACA_KEY_ID || !env.ALPACA_SECRET_KEY) throw new Error('not configured');
     Object.assign(headers, alpaca.authHeaders({ keyId: env.ALPACA_KEY_ID, secretKey: env.ALPACA_SECRET_KEY }));

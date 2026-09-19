@@ -10,21 +10,24 @@
 // account the owner funded; a paper account would be a second set of secrets and a second venue.
 
 export const TRADING_HOST = 'https://api.alpaca.markets';
+//: The paper account's trading host (venue `alpaca-paper`): the same API, simulated money.
+export const PAPER_HOST = 'https://paper-api.alpaca.markets';
 export const DATA_HOST = 'https://data.alpaca.markets';
 
 //: Path prefixes that belong to the market-data host. Everything else is a trading path.
 const DATA_PREFIXES = ['v2/stocks/', 'v2/news', 'v1beta1/', 'v1beta3/'];
 
-/** Which host serves this venue path. */
-export function hostFor(path) {
+/** Which host serves this venue path. Market data is one host for both accounts. */
+export function hostFor(path, { paper = false } = {}) {
   const clean = String(path || '').replace(/^\/+/, '');
-  return DATA_PREFIXES.some(prefix => clean.startsWith(prefix)) ? DATA_HOST : TRADING_HOST;
+  if (DATA_PREFIXES.some(prefix => clean.startsWith(prefix))) return DATA_HOST;
+  return paper ? PAPER_HOST : TRADING_HOST;
 }
 
 /** The absolute URL a venue path and query forward to. */
-export function target(path, search = '') {
+export function target(path, search = '', options = {}) {
   const clean = String(path || '').replace(/^\/+/, '');
-  return `${hostFor(clean)}/${clean}${search || ''}`;
+  return `${hostFor(clean, options)}/${clean}${search || ''}`;
 }
 
 /** The two headers Alpaca authenticates with. Nothing here is derived; both are the secret. */
