@@ -264,3 +264,30 @@ class Hiring(ResearchCase):
         r, out = self.hire(question="help")
         self.assertIn("something specific", self.tool_output(1)["error"])
         self.assertEqual(self.merton.seen, [])
+
+    def test_what_merton_says_the_agent_cannot_work_without_goes_to_the_toolsmiths_queue(self):
+        merton = self.FakeMerton({"answer": "You cannot price this without the score.", "code": "",
+                                  "tool": {"name": "live_score", "description": "the running score of a game in play"}, "confidence": "high"})
+        r, out = self.hire(merton=merton)
+        self.assertEqual(self.tool_output(1)["tool_requested"], "live_score")
+        queued = r.commons.open_requests()
+        self.assertEqual(queued[0]["name"], "live_score")
+        self.assertIn("Merton, for " + self.parent.id, queued[0]["description"])
+
+    def test_a_rung_that_has_climbed_may_have_him_oftener(self):
+        settings = {"min_credits_usd": "1.00", "cooldown_hours": 24, "cooldown_hours_by_rung": {"1": 24, "2": 8}}
+        rungs = {self.parent.id: 1}
+        self.merton = self.FakeMerton()
+        r = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead or is it the band?"})]],
+                            merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
+        r.research(self.parent, {}, session="s1")
+        self.clock.advance(9 * 3600)
+        r2 = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead or is it the band?"})]],
+                             merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
+        r2.research(self.parent, {}, session="s2")
+        self.assertIn("once every 24h", self.tool_output(1)["error"])
+        rungs[self.parent.id] = 2  # it reached real money
+        r3 = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead or is it the band?"})]],
+                             merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
+        r3.research(self.parent, {}, session="s3")
+        self.assertIn("answer", self.tool_output(1))

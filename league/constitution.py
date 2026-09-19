@@ -38,8 +38,12 @@ CONSTITUTION: dict[str, Any] = {
         "look_every_active_blocks": 5,
         # No promotion on fewer closed trades than this, however good the blocks look.
         "min_closed_trades": 10,
-        # Rung 0 -> 1: mechanical replay. Every replay ever run for the family is a trial.
-        "replay": {"min_trades": 20, "min_blocks": 30, "min_deflated_sharpe": 0.90, "min_oos_blocks": 8},
+        # Rung 0 -> 1: mechanical replay, and the only gate before a PAPER seat, which costs the
+        # owner nothing but compute. The deflated Sharpe is the confidence that the idea beats the
+        # best of the trials in its line; 0.75 is a three-to-one bet on free information, and the
+        # bar for money is the screen, the audit and the tuition cap that come after. The volume
+        # thresholds are NOT relaxed: what the league is short of is strategies that trade at all.
+        "replay": {"min_trades": 20, "min_blocks": 30, "min_deflated_sharpe": 0.75, "min_oos_blocks": 8},
         # Rung 1 -> 2: a SCREEN, then the frontier audit. Not a confidence bound: a bound strict
         # enough to mean something needs hundreds of trades (the first run's one measured edge
         # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
@@ -94,4 +98,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "036ff7c6301085a1c1a549a9f131a624e5bf71dfe845b647349de453f865490a"
+PINNED_DIGEST = "7cdaba125fc68a3da16275f24cf6f948ccc7d41b2f23d6d4935ab42c8e163c88"

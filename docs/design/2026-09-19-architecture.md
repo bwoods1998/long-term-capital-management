@@ -420,3 +420,22 @@ configured`).
 41. **A failure frees a seat that something new fills.** Before this the House staked a newcomer
     only below the population FLOOR, so a death shrank the league from 28 towards 12. It fills to
     the ceiling instead, one an hour, on the desk with the most room.
+42. **Bold where it is free, strict where it costs** (the owner's, Sept 19 evening). A paper seat
+    costs the owner nothing but compute, so the only gate before one asks 75% confidence rather
+    than 90%: a three-to-one bet on free information. The volume thresholds are untouched, because
+    what the league is short of is strategies that trade at all. Every gate that spends money is
+    where it was: the screen, Merton's audit, the $50 tuition and the confidence bound at the
+    scaled rung.
+43. **An agent with no record rewrites itself in place.** Measured on the first evening: the six
+    agents of the sports desk each saw 126 to 200 live markets, found none inside the band they
+    were born with, and could not trade at all; none could afford a fork for days. An agent with no
+    holding, no working order, no active block and no closed trade has no record for new code to
+    inherit unfairly and no position to leave it holding, so code that passes replay simply becomes
+    its own. The moment it trades, the rule returns and an improvement is a child.
+44. **Idleness costs.** The niche floor is paid only to an agent that has traded within the epoch
+    or has an order resting. An agent that does neither earns nothing and spends down what it has.
+    Before this an idle agent was immortal: it accrued no active blocks, so no statistical death
+    could reach it, and the floor paid it for ever.
+45. **What a rung buys is more of Merton.** An agent may hire him every 24 hours on paper, every 8
+    on real money, every 6 once scaled, and he may answer by putting the DATA the agent cannot work
+    without into the toolsmith's queue in his own name.

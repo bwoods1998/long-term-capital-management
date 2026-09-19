@@ -148,8 +148,9 @@ class BookRules(BookCase):
         self.assertFalse(self.book.reconcile().ok)
 
     def test_cash_the_venue_holds_behind_a_resting_option_bid_is_not_a_shortfall(self):
+        self.assertEqual(self.buy().status, "filled")  # a book with money at stake never re-reads its baseline
         self.assertTrue(self.book.reconcile().ok)
-        rest = self.buy(limit_price="0.41")
+        rest = self.buy(call(occ="F261009C00014000"), limit_price="0.41")
         self.assertEqual(rest.status, "resting", rest.detail)
         self.assertTrue(self.book.reconcile().ok)  # a venue that does not hold it back
         self.broker.cash -= D("41")  # and one that does, as Alpaca does for a resting crypto bid
@@ -276,12 +277,14 @@ class FirstBaseline(BookCase):
         self.assertFalse(self.book.reconcile().ok)
         self.assertEqual(len([e for e in self.ledger.iter(kinds="book.baseline") if "never traded" in e.payload["note"]]), 0)
 
-    def test_a_working_order_alone_counts_as_having_traded(self):
+    def test_an_order_resting_at_the_venue_has_moved_no_money(self):
         self.assertTrue(self.book.reconcile().ok)
         rest = self.book.submit([self.intent("a", self.btc, "buy", "0.0001", order_type="limit", limit_price="76000")])[0]
         self.assertEqual(rest.status, "resting", rest.detail)
         self.broker.cash -= D("40")
-        self.assertFalse(self.book.reconcile().ok)
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)  # nothing of the league's is hidden by reading again
+        self.assertIn("never traded", [e.payload for e in self.ledger.iter(kinds="book.baseline")][-1]["note"])
 
     def test_the_baseline_waits_for_a_foreign_order_to_stop_working(self):
         slept = []

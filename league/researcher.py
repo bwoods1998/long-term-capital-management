@@ -79,6 +79,7 @@ class Researcher:
         clock=time.time,
         specialty: Callable[[Agent], str] | None = None,  # (agent) -> what is known of its niche
         merton: Any = None,  # the frontier model an agent may hire with its own credits
+        rung: Callable[[str], int] | None = None,
         merton_settings: Mapping[str, Any] | None = None,
         look: Callable[[Agent], dict[str, Any]] | None = None,  # (agent) -> what its strategy sees now
         lineage: Callable[[str], list[str]] | None = None,  # (agent id) -> itself, its parent, its parent's parent...
@@ -95,6 +96,7 @@ class Researcher:
         self.clock = clock
         self.specialty = specialty
         self.merton = merton
+        self.rung = rung
         self.merton_settings = dict(merton_settings or {})
         self.look = look
         self.lineage = lineage
@@ -249,10 +251,18 @@ class Researcher:
         if self.house_budget is not None and not self.house_budget():
             return {"error": "the firm's frontier budget for today is spent; ask again tomorrow"}
         last = self._last_consult(agent)
-        hours = float(rules.get("cooldown_hours", 24))
+        # What a rung buys: the higher an agent has climbed, the more of him it may have.
+        by_rung = rules.get("cooldown_hours_by_rung") or {}
+        rung = self.rung(agent.id) if self.rung else 1
+        hours = float(by_rung.get(str(rung), rules.get("cooldown_hours", 24)))
         if last is not None and self.clock() - last < hours * 3600:
             return {"error": f"you hired Merton {int((self.clock() - last) / 3600)}h ago; once every {hours:g}h"}
         reply = self.merton.consult(agent, question, self.consult_evidence(agent), contract=self.contract)
+        asked_for = reply.get("tool") or None
+        if asked_for and asked_for.get("name"):
+            # What Merton says the agent cannot work without goes to the queue the toolsmith builds
+            # from, over Merton's name and the agent's: a request with a theorist behind it.
+            self.commons.request_tool(agent.id, asked_for["name"], f"Merton, for {agent.id}: {asked_for['description']}")
         cost = Decimal(str(reply.get("cost_usd") or 0))
         if cost > 0:
             self.economy.charge(agent.id, cost, "merton's time", detail={"session": session}, id=f"merton:{session}")
@@ -270,7 +280,7 @@ class Researcher:
                         "code": None, "note": f"the file he wrote was refused by the safety check and is not yours to run: {exc}"}
             out.consulted = code
         return {"answer": reply["answer"], "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
-                "code": code or None,
+                "code": code or None, "tool_requested": (asked_for or {}).get("name"),
                 "note": "replay it when you are ready: it is a trial in your line like any other" if code.strip() else None}
 
     def _last_consult(self, agent: Agent) -> float | None:

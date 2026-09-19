@@ -160,6 +160,7 @@ class House:
                 specialty=lambda agent: (self.niche_of(agent).text() if self.niche_of(agent) else ""),
                 look=lambda agent: self.snapshot(agent, self.book_of(agent)), lineage=self.registry.lineage,
                 merton_settings=self.game.get("consult") or {}, house_budget=lambda: self.pacer.may_spend("openai"),
+                rung=self.evaluator.rung,
             )
         self._born_at = self.clock()
         self._record_start()
@@ -1059,15 +1060,42 @@ class House:
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
             candidate = {**candidate, "purpose": "Merton wrote this file for it: " + candidate["purpose"]}
         if candidate:
-            if rung == 0:
+            if rung == 0 or self.record_is_empty(agent):
+                # An agent above rung 0 does not edit itself, because its record belongs to its
+                # code. With NO record there is nothing to protect, and the rule only slows the
+                # loop down: measured on the first evening, the six agents of the sports desk each
+                # saw 126 to 200 live markets and found none inside the band they were born with,
+                # so not one of them could trade at all, and none could afford a fork for days.
+                was = self.registry.get(agent.id).code_sha256
                 self.registry.adopt(agent.id, code=candidate["code"], needs=candidate["needs"], params=candidate["params"], reason=candidate["purpose"])
                 self._state["tried"][agent.id] = self.registry.get(agent.id).code_sha256
-                self.evaluator.promote(agent.id, 1, "its new code passed replay against every trial its family has run", candidate["numbers"])
+                if rung == 0:
+                    self.evaluator.promote(agent.id, 1, "its new code passed replay against every trial in its own line", candidate["numbers"])
+                else:
+                    self.ledger.append("agent.strategy", {"code_sha256": self.registry.get(agent.id).code_sha256, "was": was,
+                                                          "reason": "it rewrote itself: it had no record to protect", "_code": candidate["code"],
+                                                          "params": candidate["params"], "needs": candidate["needs"]}, agent=agent.id)
                 self.seat(self.registry.get(agent.id))
             else:
                 self.fork(agent, code=candidate["code"], params=candidate["params"], reason=candidate["purpose"], passed_replay=True,
                           staked_by_house=not self.economy.can_fork(agent.id))
         return outcome
+
+    def record_is_empty(self, agent: Agent) -> bool:
+        """True when nothing this agent has done could be evidence and nothing is in its hands: no
+        holding, no working order, no active block and no closed trade on the book of its rung.
+        Such an agent may rewrite itself in place, like one that has not passed replay yet: there
+        is no record for new code to inherit unfairly, and no position for it to be left holding."""
+        book = self.book_of(agent)
+        if book is None:
+            return True
+        if book.account(agent.id).holdings or book.open_orders(agent.id):
+            return False  # new code must not inherit a position it does not know how to leave
+        entered = self.evaluator._rung_entered(agent.id)
+        if any(row.get("active") for row in self.evaluator.blocks(agent.id, since_seq=entered, book=book.name)):
+            return False
+        returns, _ = self.evaluator.trade_returns(agent.id, book.name, since_seq=entered)
+        return not returns
 
     def _recent_trades(self, agent_id: str, limit: int = 12) -> list[dict[str, Any]]:
         """Its own last closed trades, forward-tested or real: what research should learn from first."""
@@ -1084,14 +1112,28 @@ class House:
 
     # ----------------------------------------------------------------- economy
     def standings(self) -> list[Standing]:
+        epoch = float(self.game["economy"]["epoch_seconds"])
         out = []
         for agent in self.registry.living():
             rung = self.evaluator.rung(agent.id)
             entered = self.evaluator._rung_entered(agent.id)
             rows = self.evaluator.blocks(agent.id, since_seq=entered) if rung >= 1 else []
             growth = [float(r["log_growth"]) for r in rows]
-            out.append(Standing(agent.id, agent.niche, rung, (sum(growth) / len(growth)) if growth else 0.0, sum(1 for r in rows if r.get("active"))))
+            active = sum(1 for r in rows if r.get("active"))
+            out.append(Standing(agent.id, agent.niche, rung, (sum(growth) / len(growth)) if growth else 0.0, active,
+                                working=self._working(agent, epoch)))
         return out
+
+    def _working(self, agent: Agent, epoch: float) -> bool:
+        """Has it traded in the last epoch, or is it too new to have had the chance? An agent that
+        has done neither earns no niche floor and spends down what it has: idleness must cost."""
+        if self.clock() - _epoch(agent.born_at) < epoch:
+            return True
+        book = self.book_of(agent)
+        if book is not None and book.open_orders(agent.id):
+            return True  # an order resting at the venue is work, even before it fills
+        since = now_iso(lambda: self.clock() - epoch)
+        return any(e.at >= since for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent.id))
 
     def keep_population(self) -> None:
         rules = self.game["economy"]

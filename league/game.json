@@ -113,8 +113,13 @@
     }
   },
   "consult": {
-    "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits. A good record earns credits, and credits buy better thinking: that is the whole flywheel.",
+    "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits. A good record earns credits, and credits buy better thinking: that is the whole flywheel. An agent that has climbed may have him oftener.",
     "min_credits_usd": "1.00",
-    "cooldown_hours": 24
+    "cooldown_hours": 24,
+    "cooldown_hours_by_rung": {
+      "1": 24,
+      "2": 8,
+      "3": 6
+    }
   }
 }

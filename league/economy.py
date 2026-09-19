@@ -71,6 +71,9 @@ class Standing:
     rung: int
     mean_growth: float  # mean after-cost log growth per block on the current rung
     active_blocks: int
+    #: Whether it has traded lately, or is new enough not to have had the chance. An agent that has
+    #: done neither earns no floor: it is not holding a seat in a specialty, it is sitting in one.
+    working: bool = True
 
 
 class Economy:
@@ -165,11 +168,13 @@ class Economy:
         floor_pool = pool * usd(self.rules["niche_floor_share"])
         performance_pool = pool - floor_pool
         out: dict[str, Decimal] = {s.agent: ZERO for s in standings}
-        # A niche is occupied by agents that have qualified for forward testing. An agent still in
-        # replay lives on its endowment: a floor for doing nothing would pay for squatting.
+        # A niche is occupied by agents that have qualified for forward testing AND are working.
+        # An agent still in replay lives on its endowment, and one that has not traded in an epoch
+        # lives on what it has left: a floor for doing nothing would pay for squatting, and an
+        # agent that cannot be starved cannot be killed by the game.
         niches: dict[str, list[Standing]] = {}
         for s in standings:
-            if s.rung >= 1:
+            if s.rung >= 1 and s.working:
                 niches.setdefault(s.niche, []).append(s)
         for members in niches.values():
             for s in members:

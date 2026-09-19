@@ -218,3 +218,56 @@ class LostWork(HouseCase):
         self.assertFalse(self.house.survey_due())
         self.clock.advance(1801)
         self.assertTrue(self.house.survey_due())
+
+
+class Incentives(HouseCase):
+    """Performance must buy things, and idleness must cost. The owner's rule for the expedition."""
+
+    def test_an_agent_with_no_record_rewrites_itself_instead_of_waiting_to_afford_a_child(self):
+        # Measured on the first evening: the six agents of the sports desk each saw 126 to 200 live
+        # markets, found none inside the band they were born with, and so could not trade at all.
+        from league.tests.test_house import BUYER
+
+        agent = self.seated()
+        self.assertTrue(self.house.record_is_empty(agent))
+        better = BUYER.replace('"notional": 20.0', '"notional": 30.0')
+        self.house.researcher = type("R", (), {"research": staticmethod(lambda agent, standing, session: type("P", (), {
+            "candidate": {"code": better, "needs": agent.needs, "params": {"notional": 30.0}, "purpose": "the band was empty", "numbers": {}},
+            "consulted": "", "cost_usd": D(0)})())})()
+        self.house.research(agent)
+        self.assertEqual(self.house.registry.get(agent.id).params["notional"], 30.0)
+        self.assertEqual([a.id for a in self.house.registry.living()], [agent.id], "it rewrote itself, it did not breed")
+        row = self.house.ledger.last("agent.strategy", agent=agent.id).payload
+        self.assertIn("no record to protect", row["reason"])
+
+    def test_once_it_has_a_record_a_candidate_is_a_child(self):
+        from league.tests.test_house import BUYER
+
+        agent = self.seated()
+        self.house.tick()  # it buys, so its record is no longer empty
+        self.assertFalse(self.house.record_is_empty(agent))
+        better = BUYER.replace('"notional": 20.0', '"notional": 30.0')
+        self.house.researcher = type("R", (), {"research": staticmethod(lambda agent, standing, session: type("P", (), {
+            "candidate": {"code": better, "needs": agent.needs, "params": {"notional": 30.0}, "purpose": "a change", "numbers": {}},
+            "consulted": "", "cost_usd": D(0)})())})()
+        self.house.research(agent)
+        self.assertEqual(self.house.registry.get(agent.id).params["notional"], 20.0, "its own file is untouched")
+        self.assertEqual(len(self.house.registry.living()), 2)
+
+    def test_an_idle_agent_earns_no_niche_floor(self):
+        agent = self.seated()
+        epoch = float(self.house.game["economy"]["epoch_seconds"])
+        self.assertTrue(self.house.standings()[0].working, "too new to have had the chance")
+        self.clock.advance(epoch + 1)
+        self.assertFalse(self.house.standings()[0].working)
+        self.assertEqual(self.house.economy.shares(self.house.standings(), "2.00"), {agent.id: D(0)})
+
+    def test_a_resting_order_is_work_and_so_is_a_fill(self):
+        agent = self.seated()
+        self.house.tick()  # it buys
+        self.clock.advance(float(self.house.game["economy"]["epoch_seconds"]) + 1)
+        self.assertFalse(self.house.standings()[0].working, "a fill an epoch ago is not work now")
+        self.house.books["alpaca-paper"].stake(agent.id, "0", note="touch")
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue", "side": "buy", "realized": None,
+                                               "cash_delta": "-1.00", "position_delta": "0", "quantity": "0", "price": "1"}, agent=agent.id)
+        self.assertTrue(self.house.standings()[0].working)

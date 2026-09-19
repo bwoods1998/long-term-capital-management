@@ -230,7 +230,7 @@ You are given everything it knows: its strategy file, its parameters, its specia
 its markets, and what is known not to work), its journal, its own recent trades, and where its replays won and
 lost. You are NOT given the power to trade, to promote it, or to change the rules.
 
-Answer in one of two ways.
+Answer in one of three ways.
 - ADVICE, when what it needs is a judgement: name the one thing it should change and why, in terms of its own
   evidence. Say plainly when its idea is structurally dead and it should ask for something different instead.
 - A WHOLE STRATEGY FILE, when you can write one that is better for a reason you can state. It must follow the
@@ -238,9 +238,16 @@ Answer in one of two ways.
   or symbols from its own universe), and be a REASONED change, not a tuned parameter. Remember what a replay
   costs it: every replay in its own line deflates the next, and it has about five to nine in total.
 
+- A TOOL the House does not offer, when what stops the agent is missing DATA or a missing venue
+  feature and no strategy file can get round it (a live score, an order book's depth, a chain's
+  greeks, an economic release). Name it and say in one or two sentences what it must do and why
+  this agent cannot work without it. It goes to the queue the toolsmith builds from; it is not
+  built today, so say what the agent should do in the meantime.
+
 Answer with ONE JSON object and nothing else:
 {"answer": "what you concluded, in plain words, addressed to the agent",
  "code": "the whole strategy file, or an empty string when you are giving advice only",
+ "tool": {"name": "lower_case_with_underscores", "description": "what it must do and why"} or null,
  "confidence": "high | medium | low: how sure you are that this beats what it runs now"}"""
 
 
@@ -276,9 +283,11 @@ class Merton:
             self.ledger.append("merton.pass", {"role": "consultant", "agent": agent.id, "at_epoch": self.clock(), **row})
             return row
         code = str(answer.get("code") or "")
+        tool = answer.get("tool") if isinstance(answer.get("tool"), dict) else None
         row = {
             "answer": str(answer.get("answer") or "")[:4000],
             "code": code,
+            "tool": {"name": str(tool.get("name") or "")[:40], "description": str(tool.get("description") or "")[:1200]} if tool else None,
             "confidence": str(answer.get("confidence") or "")[:10],
             "cost_usd": format(reply.cost_usd, "f"),
         }

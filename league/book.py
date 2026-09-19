@@ -1449,11 +1449,12 @@ class Book:
             return self._reconcile()
 
     def _traded_yet(self) -> bool:
-        """Whether this book has money of its own at stake. A stake is not a trade, and neither is
-        an order that was sent and came back unfilled: what counts is a position, a realised
-        result, a fee paid, or an order still working that could become one at any moment."""
-        return bool(self.open_orders()) or any(a.holdings or a.realized or a.fees
-                                               for name, a in self.accounts.items() if name != HOUSE)
+        """Whether any money of the league's has moved on this book. A stake is not a trade, and
+        neither is an order resting at the venue: what counts is a position held, a result
+        realised, or a fee paid. Nothing of the league's can be hidden by re-reading a baseline
+        when none of those exists, and a fill that lands during the re-read leaves a position the
+        ledger does not know, which freezes the book again on the next reading."""
+        return any(a.holdings or a.realized or a.fees for name, a in self.accounts.items() if name != HOUSE)
 
     def _reconcile(self) -> Reconciliation:
         if True:
