@@ -18,12 +18,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import time
 from pathlib import Path
 
 from .service import REPO, build, load_config
+
+
+#: What a canary founds: one agent per venue family is enough to exercise every path.
+CANARY_SEEDS = ["crypto-reversion", "favorites-maker"]
 
 
 def table(house) -> dict:
@@ -56,7 +61,11 @@ def main(argv=None) -> int:
     parser.add_argument("--no-research", action="store_true")
     parser.add_argument("--local-sandbox", action="store_true")
     parser.add_argument("--seeds", default=None, help="comma-separated seed names for `found` (default: all)")
+    parser.add_argument("--canary", action="store_true", help="a House that can hurt nothing: simulated paper venue, no publishing, no research")
     args = parser.parse_args(argv)
+    canary = args.canary or os.environ.get("LEAGUE_CANARY") == "1"
+    if canary and args.root == parser.get_default("root"):
+        parser.error("a canary needs its own --root")
     root = Path(args.root)
     stop_file = root / "STOP"
     if args.command == "stop":
@@ -71,13 +80,17 @@ def main(argv=None) -> int:
     config = load_config()
     if config.get("real_money") and args.local_sandbox:
         parser.error("real money needs sealed Sailboxes: drop --local-sandbox")
-    house = build(root, config=config, local_sandbox=args.local_sandbox, research=not args.no_research, publish=not args.no_publish, tape=args.tape)
+    house = build(root, config=config, local_sandbox=args.local_sandbox, research=not args.no_research, publish=not args.no_publish, tape=args.tape, canary=canary)
     try:
         if args.command == "found":
             born = house.found(args.seeds.split(",") if args.seeds else None)
             print(json.dumps({"born": [a.id for a in born]}))
         elif args.command == "tick":
+            if canary and not house.registry.living():
+                house.found(CANARY_SEEDS)
             print(json.dumps(house.tick(), default=str))
+            house.wait(300 if canary else 0)  # a canary proves its replays too; a House tick never waits
+            house.sandbox.sleep_all()
         elif args.command == "status":
             print(json.dumps(table(house), indent=1))
         elif args.command == "verify":

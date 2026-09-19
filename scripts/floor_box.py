@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
-"""Operate the floor's Sailbox from the owner's terminal.
+"""Operate the House's Sailbox from the owner's terminal.
 
-The MacBook is not the floor any more: it is the operator console. The floor runs on one Sail
-Sailbox and this script is the only thing that talks to it.
+The MacBook is not the floor: it is the operator console. The House (`python3 -m league run`) runs
+on one trusted Sailbox and this script is the only thing that talks to it.
 
-    python3 scripts/floor_box.py create            one size-s box, egress allowlist, code, venv
-    python3 scripts/floor_box.py secrets           push .env and the venue private keys (owner)
-    python3 scripts/floor_box.py start             start the supervised `python -m ltcm run` loop
-    python3 scripts/floor_box.py status            box state, spend, loop, log tail, health.json
-    python3 scripts/floor_box.py logs -n 200       the tail of /workspace/ltcm.log
-    python3 scripts/floor_box.py deploy            re-upload changed code, restart a running loop
+    python3 scripts/floor_box.py create            one size-s box, egress allowlist, venv, run.sh
+    python3 scripts/floor_box.py secrets           the three values the box holds -> /workspace/.env
+    python3 scripts/floor_box.py deploy            upload a release; the in-box watchdog stages it,
+                                                   canaries it, promotes it, watches it, rolls back
+    python3 scripts/floor_box.py start             start the supervised `python -m league run` loop
+    python3 scripts/floor_box.py status            box, spend, loop, releases, health.json, log tail
+    python3 scripts/floor_box.py logs -n 200       the tail of /workspace/league.log (--deploy: deploy.log)
     python3 scripts/floor_box.py checkpoint --name after-upgrade
     python3 scripts/floor_box.py fork --from sbcp_...      a second box, loop NOT started
-    python3 scripts/floor_box.py stop              kill switch, quiesce, then stop the loop
+    python3 scripts/floor_box.py stop              latch both STOP files, quiesce, stop the loop
     python3 scripts/floor_box.py sleep | resume | pause | terminate --yes
+
+The box, under /workspace:
+
+    releases/<id>/    one full code tree per release, never edited again
+    current, previous symlinks into releases/, managed ONLY by `league.watchdog`
+    state/            the House's state: ledger, health.json, STOP, sandbox.json ...
+    canary/           throwaway state for canary runs
+    incoming/<id>/    where an upload is unpacked before the watchdog stages it
+    .env              the three secrets, mode 600
+    run.sh restart.sh run.pid loop.pid deploy.pid league.log deploy.log deploys.jsonl .venv
+
+`/workspace/ltcm`, `/workspace/.data`, `/workspace/.archive` and `/workspace/ltcm.log` are the first
+run's history. Nothing this script does for the league reads, deletes, moves or overwrites them.
 
 What this script will not do:
 
@@ -24,14 +38,19 @@ What this script will not do:
   `ltcm.provider.default_key_source()` at the moment of each request.
 - **It never starts trading by itself.** `create` and `deploy` leave the loop exactly as they
   found it; only `start` starts it.
+- **It never decides about real money.** That is `real_money` in `league/config.json` and the
+  gateway's kill switch. This script changes neither.
+- **It never moves `current` or `previous`.** A release becomes current because the in-box
+  watchdog promoted it, and stops being current because the watchdog rolled it back.
 
-Box state lives in `.data/ltcm/box.json`: ids, names, the allowlist in effect, the uploaded-file
-digests and the checkpoints taken. It is owner-only (mode 600) and holds no credential.
+Box state lives in `.data/ltcm/box.json`: ids, names, the allowlist in effect, the releases sent
+and their verdicts, and the checkpoints taken. It is owner-only (mode 600) and holds no credential.
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -63,8 +82,9 @@ STATE_PATH = REPO_ROOT / ".data" / "ltcm" / "box.json"
 DEFAULT_APP = "ltcm"
 DEFAULT_NAME = "ltcm-floor"
 
-#: What the floor needs on the box. `ltcm/config.json` rides along inside `ltcm/`.
-UPLOAD_TREES = ("ltcm", "playbooks", "scripts", "deploy")
+#: What a release is made of. The league imports its venue adapters, broker types, risk engine,
+#: provider and data readers from `ltcm`, so both ride along; each package carries its config.json.
+UPLOAD_TREES = ("league", "ltcm", "playbooks", "scripts", "deploy")
 
 #: Never uploaded by the code path, whatever the working tree looks like.
 SKIP_DIRS = {"__pycache__", ".git", ".venv", ".data", ".ruff_cache", ".pytest_cache", "history"}
@@ -77,12 +97,42 @@ SECRET_ENV = ".env"
 BOX_ENV_NAMES = ("SAIL_API_KEY", "GATEWAY_TOKEN", "CAPITAL_PUBLISH_TOKEN")
 
 
+#: The box's layout (see the module docstring). Everything the league touches is one of these.
+ENV_FILE = f"{REMOTE_ROOT}/.env"
+STATE_DIR = f"{REMOTE_ROOT}/state"
+INCOMING_DIR = f"{REMOTE_ROOT}/incoming"
+LEAGUE_LOG = f"{REMOTE_ROOT}/league.log"
+DEPLOY_LOG = f"{REMOTE_ROOT}/deploy.log"
+DEPLOYS_JSONL = f"{REMOTE_ROOT}/deploys.jsonl"
+#: The supervisor's latch and the league's own. Either one ends the loop.
+STOP_FILES = (f"{REMOTE_ROOT}/STOP", f"{STATE_DIR}/STOP")
+
+#: `league.watchdog deploy` exit codes, mirrored by `deploy` here. 1: no verdict was seen.
+VERDICT_EXIT = {"promoted": 0, "refused": 2, "rolled_back": 3, "failed": 4}
+KEEP_RELEASES = 20
+
+#: What the league needs to reach. `hosts` says which of these the recorded allowlist lacks.
+LEAGUE_HOSTS = (
+    "api.sailresearch.com",          # cheap-model inference and search
+    "sailbox-api.sailresearch.com",  # the agents' boxes
+    "blakewoods.us",                 # the public site
+    "api.elections.kalshi.com",      # Kalshi market data (orders go through the gateway)
+    "news.google.com",               # the commons' news reader
+    "github.com",                    # merged code, pulled without credentials
+    "codeload.github.com",
+)
+
+
 def floor_config() -> dict[str, Any]:
-    """The packaged `ltcm/config.json`, or {} when it is not there (tests, a bare checkout)."""
-    try:
-        return json.loads((REPO_ROOT / "ltcm" / "config.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    """The packaged config that names the gateway: the league's, else the first run's, else {}."""
+    for package in ("league", "ltcm"):
+        try:
+            config = json.loads((REPO_ROOT / package / "config.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(config, dict) and config.get("gateway_url"):
+            return config
+    return {}
 
 
 def compose_box_env(raw: bytes) -> bytes:
@@ -94,38 +144,46 @@ def compose_box_env(raw: bytes) -> bytes:
         name, value = line.split(b"=", 1)
         values[name.strip().decode("ascii", "replace")] = value.strip()
     return b"".join(f"{name}=".encode() + values[name] + b"\n" for name in BOX_ENV_NAMES if values.get(name))
+
+
 SECRET_KEYS = Path(".data") / "ltcm" / "keys"
 
 RUN_SH = """#!/bin/sh
-# The floor's supervisor. Written by scripts/floor_box.py; edit there, not here.
+# The House's supervisor. Written by scripts/floor_box.py; edit there, not here.
 #
-# One `python -m ltcm run` at a time, restarted 30 s after it exits, logging to
-# /workspace/ltcm.log. `/workspace/STOP` ends the loop after the current run: that is what
-# `floor_box.py stop` writes, so a deliberate stop is never undone by the restart delay.
+# One `python -m league run` at a time, started from whatever {root}/current points at WHEN IT
+# STARTS: the link is resolved again on every restart, which is how a promotion or a rollback by
+# league.watchdog takes effect. Restarted 30 s after it exits, logging to {root}/league.log.
+# {root}/STOP (what `floor_box.py stop` writes) or {root}/state/STOP (the league's own
+# `python -m league stop`) ends the loop, so a deliberate stop is never undone by the restart delay.
 set -u
 cd {root} || exit 1
 umask 077
 echo $$ > {root}/run.pid
 stamp() {{ date -u +%Y-%m-%dT%H:%M:%SZ; }}
-while [ ! -e {root}/STOP ]; do
-  printf '%s  supervisor: starting the floor loop\\n' "$(stamp)" >> {root}/ltcm.log
-  {python} -m ltcm run >> {root}/ltcm.log 2>&1 &
+stopped() {{ [ -e {root}/STOP ] || [ -e {root}/state/STOP ]; }}
+while ! stopped; do
+  cd {root}/current || {{ printf '%s  supervisor: no {root}/current to start from\\n' "$(stamp)" >> {root}/league.log; sleep 30; continue; }}
+  printf '%s  supervisor: starting the House from %s\\n' "$(stamp)" "$(pwd -P)" >> {root}/league.log
+  LEAGUE_ENV={root}/.env {python} -m league run --root {root}/state >> {root}/league.log 2>&1 &
   child=$!
   echo "$child" > {root}/loop.pid
   wait "$child"
   code=$?
   rm -f {root}/loop.pid
-  printf '%s  supervisor: floor loop exited (%s)\\n' "$(stamp)" "$code" >> {root}/ltcm.log
-  [ -e {root}/STOP ] && break
+  printf '%s  supervisor: the House exited (%s)\\n' "$(stamp)" "$code" >> {root}/league.log
+  stopped && break
   sleep 30
 done
-printf '%s  supervisor: stopped\\n' "$(stamp)" >> {root}/ltcm.log
+printf '%s  supervisor: stopped\\n' "$(stamp)" >> {root}/league.log
 rm -f {root}/run.pid {root}/loop.pid
 """
 
 RESTART_SH = """#!/bin/sh
-# Restart the floor loop in place, without disturbing the supervisor: signal the running
-# `python -m ltcm run` and let run.sh bring a fresh one up after its 30 s delay.
+# Restart the House in place, without disturbing the supervisor: signal the running
+# `python -m league run` and let run.sh bring a fresh one up, from {root}/current, after its
+# 30 s delay. Both watchdogs call this: league.watchdog after a promotion or a rollback, and the
+# gateway's when the public checkpoint goes stale. It never starts a supervisor that is not up.
 set -u
 pid=$(cat {root}/loop.pid 2>/dev/null || true)
 if [ -n "${{pid:-}}" ] && [ -d "/proc/$pid" ]; then
@@ -135,14 +193,18 @@ else
 fi
 """
 
-#: Is the supervisor up, is the loop up, and what are their pids?
+#: The supervisor, the loop, a running deploy, both stop files, the two links, the .env.
 PROBE = (
-    "for f in run.pid loop.pid; do "
+    "for f in run.pid loop.pid deploy.pid; do "
     'p=$(cat %(root)s/$f 2>/dev/null || true); '
     'if [ -n "$p" ] && [ -d "/proc/$p" ]; then echo "$f=$p"; else echo "$f=-"; fi; '
     "done; "
     "[ -e %(root)s/STOP ] && echo stop=yes || echo stop=no; "
-    "[ -e %(root)s/.data/ltcm/KILL ] && echo kill=yes || echo kill=no"
+    "[ -e %(root)s/state/STOP ] && echo league_stop=yes || echo league_stop=no; "
+    'echo "current=$(readlink %(root)s/current 2>/dev/null || true)"; '
+    'echo "previous=$(readlink %(root)s/previous 2>/dev/null || true)"; '
+    "[ -f %(root)s/current/league/__main__.py ] && echo runnable=yes || echo runnable=no; "
+    "[ -s %(root)s/.env ] && echo env=yes || echo env=no"
 ) % {"root": REMOTE_ROOT}
 
 
@@ -221,25 +283,41 @@ def code_files() -> list[Path]:
     return found
 
 
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def tarball(files: Sequence[Path]) -> bytes:
-    """A deterministic gzip tar of the given repository-relative files."""
+    """A deterministic gzip tar of the given repository-relative files: the same tree is the same
+    bytes whenever it is packed (no file times, no owners, and no time in the gzip header), so
+    the sha256 of the bundle names its content."""
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
-        for relative in files:
-            source = REPO_ROOT / relative
-            info = tarfile.TarInfo(str(relative))
-            raw = source.read_bytes()
-            info.size = len(raw)
-            info.mtime = 0
-            info.mode = 0o755 if relative.suffix == ".sh" else 0o644
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            archive.addfile(info, io.BytesIO(raw))
+    with gzip.GzipFile(filename="", fileobj=buffer, mode="wb", mtime=0) as zipped:
+        with tarfile.open(fileobj=zipped, mode="w", format=tarfile.PAX_FORMAT) as archive:
+            for relative in files:
+                source = REPO_ROOT / relative
+                info = tarfile.TarInfo(str(relative))
+                raw = source.read_bytes()
+                info.size = len(raw)
+                info.mtime = 0
+                info.mode = 0o755 if relative.suffix == ".sh" else 0o644
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                archive.addfile(info, io.BytesIO(raw))
     return buffer.getvalue()
+
+
+def release_id_for(blob: bytes, *, now: float | None = None) -> str:
+    """`YYYYMMDDTHHMMSSZ-<first 12 hex of the bundle's sha256>`: when it was sent, and what it is."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(time.time() if now is None else now))
+    return f"{stamp}-{hashlib.sha256(blob).hexdigest()[:12]}"
+
+
+def release_of(link: Any) -> str | None:
+    """The release id a `readlink` of `current` or `previous` names (`releases/<id>`), or None."""
+    name = str(link or "").strip().rstrip("/").rpartition("/")[2]
+    return name or None
+
+
+def content_of(release_id: Any) -> str:
+    """The content part of a release id made here: the 12 hex after the last dash."""
+    return str(release_id or "").rpartition("-")[2]
 
 
 # --------------------------------------------------------------------------- box helpers
@@ -267,7 +345,7 @@ def run(api: SailboxClient, box: str, command: Any, *, timeout: int = 600, quiet
 
 
 def probe(api: SailboxClient, box: str) -> dict[str, str]:
-    """The supervisor, the loop, the stop latch and the kill switch, as seen on the box."""
+    """The supervisor, the loop, a running deploy, both stop files and the two release links."""
     try:
         result = api.exec(box, ["sh", "-c", PROBE], timeout=60, on_output=None)
     except SailboxError as error:
@@ -280,39 +358,178 @@ def probe(api: SailboxClient, box: str) -> dict[str, str]:
     return out
 
 
-def push_code(api: SailboxClient, box: str, files: Sequence[Path]) -> None:
-    """Upload a tar of `files` and unpack it over `/workspace`."""
-    blob = tarball(files)
-    name = f"{REMOTE_ROOT}/.upload/code-{uuid.uuid4().hex[:12]}.tgz"
-    say(f"  uploading {len(files)} files ({len(blob):,} bytes compressed)")
+def up(seen: Mapping[str, str], name: str) -> bool:
+    """Did the probe find the process whose pid file is `name` alive?"""
+    return _pid(seen.get(name)) is not None
+
+
+def push_release(api: SailboxClient, box: str, release_id: str, blob: bytes) -> str:
+    """Upload one bundle and unpack it into `/workspace/incoming/<id>/`. Returns that directory.
+
+    `incoming/` holds one upload at a time: the watchdog copies what it stages into `releases/`,
+    so whatever an earlier deploy left here is spent. Nothing outside `incoming/` and `.upload/`
+    is written."""
+    name = f"{REMOTE_ROOT}/.upload/release-{release_id}.tgz"
+    target = f"{INCOMING_DIR}/{release_id}"
     api.upload(box, name, blob, mode=0o600)
     api.exec(
         box,
-        ["sh", "-c", f"set -e; mkdir -p {REMOTE_ROOT}; "
-                     f"tar -xzf {name} -C {REMOTE_ROOT} --no-same-owner; rm -f {name}"],
+        ["sh", "-c", f"set -e; umask 077; rm -rf {INCOMING_DIR}; mkdir -p {target}; "
+                     f"tar -xzf {name} -C {target} --no-same-owner; rm -f {name}; "
+                     f"test -f {target}/league/__main__.py"],
         timeout=300,
         on_output=None,
     ).check()
+    return target
 
 
 def render(template: str, python: str) -> bytes:
     return template.format(root=REMOTE_ROOT, python=python).encode("utf-8")
 
 
+def supervisor_script(api: SailboxClient, box: str) -> bytes | None:
+    """The run.sh on the box now, or None when there is none."""
+    try:
+        return bytes(api.download(box, f"{REMOTE_ROOT}/run.sh"))
+    except SailboxError:
+        return None
+
+
 def write_scripts(api: SailboxClient, box: str, python: str) -> None:
-    api.upload(box, f"{REMOTE_ROOT}/run.sh", render(RUN_SH, python), mode=0o700)
-    api.upload(box, f"{REMOTE_ROOT}/restart.sh", render(RESTART_SH, python), mode=0o700)
+    """run.sh and restart.sh, each renamed into place: a supervisor that is running keeps reading
+    the file it opened, where writing over that file would change the script under its feet."""
+    for name, template in (("run.sh", RUN_SH), ("restart.sh", RESTART_SH)):
+        api.upload(box, f"{REMOTE_ROOT}/{name}.new", render(template, python), mode=0o700)
+    api.exec(
+        box,
+        ["sh", "-c", f"mv -f {REMOTE_ROOT}/run.sh.new {REMOTE_ROOT}/run.sh && "
+                     f"mv -f {REMOTE_ROOT}/restart.sh.new {REMOTE_ROOT}/restart.sh"],
+        timeout=60,
+        on_output=None,
+    ).check()
 
 
 def health(api: SailboxClient, box: str) -> Any:
+    """The House's own `health.json`, written at the end of every tick."""
     try:
-        raw = api.download(box, f"{REMOTE_ROOT}/.data/ltcm/health.json")
+        raw = api.download(box, f"{STATE_DIR}/health.json")
     except SailboxError:
         return None
     try:
         return json.loads(raw)
     except ValueError:
         return None
+
+
+def deploy_rows(api: SailboxClient, box: str, *, lines: int = 60) -> list[dict[str, Any]]:
+    """The last rows of `/workspace/deploys.jsonl`, the watchdog's own record. Oldest first."""
+    try:
+        raw = api.exec(box, ["sh", "-c", f"tail -n {int(lines)} {DEPLOYS_JSONL} 2>/dev/null"],
+                       timeout=60, on_output=None).stdout
+    except SailboxError:
+        return []
+    rows = []
+    for line in raw.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def verdict_in(rows: Sequence[Mapping[str, Any]], release_id: str) -> dict[str, Any] | None:
+    """The newest verdict for one release among watchdog rows (`status` or `deploys.jsonl`)."""
+    for row in reversed(list(rows)):
+        if row.get("release") == release_id and row.get("verdict"):
+            reasons = row.get("reasons")
+            return {"verdict": str(row["verdict"]), "at": row.get("at"),
+                    "reasons": [str(r) for r in reasons] if isinstance(reasons, list) else []}
+    return None
+
+
+def watchdog_launch(python: str, release_id: str, *, watch: bool) -> str:
+    """The shell line that starts `league.watchdog deploy` detached from the exec that runs it.
+
+    The canary plus the watch outlasts any exec timeout, so the watchdog gets a session of its own
+    and writes to `deploy.log`. It runs from the known-good code when there is some: the release
+    being judged must not be the code that judges it. Without `watch` it promotes and returns: a
+    first deploy, or a box whose loop is not up, has no running House to watch."""
+    source = f"{INCOMING_DIR}/{release_id}"
+    flags = f"--base {REMOTE_ROOT} --source {source} --id {release_id}" + ("" if watch else " --watch-seconds 0")
+    return (
+        f"umask 077; cd {REMOTE_ROOT}/current 2>/dev/null || cd {source}; "
+        f"LEAGUE_ENV={ENV_FILE} setsid nohup {python} -m league.watchdog deploy {flags} "
+        f"> {DEPLOY_LOG} 2>&1 < /dev/null & echo $! > {REMOTE_ROOT}/deploy.pid"
+    )
+
+
+def watchdog_status(python: str, release_id: str) -> str:
+    return (f"cd {REMOTE_ROOT}/current 2>/dev/null || cd {INCOMING_DIR}/{release_id}; "
+            f"exec {python} -m league.watchdog status --base {REMOTE_ROOT}")
+
+
+def read_verdict(api: SailboxClient, box: str, python: str, release_id: str) -> dict[str, Any] | None:
+    """Has the watchdog judged this release yet? `league.watchdog status` is asked first; when it
+    cannot answer (a box mid-promotion, a release whose own `status` is broken) the record it
+    appends to is read directly."""
+    try:
+        result = api.exec(box, ["sh", "-c", watchdog_status(python, release_id)], timeout=120, on_output=None)
+        report = json.loads(result.stdout)
+        rows = report.get("last_deploys") if isinstance(report, dict) else None
+        if isinstance(rows, list):
+            return verdict_in([r for r in rows if isinstance(r, dict)], release_id)
+    except (SailboxError, ValueError):
+        pass
+    return verdict_in(deploy_rows(api, box), release_id)
+
+
+def watchdog_progress(api: SailboxClient, box: str, *, lines: int = 3) -> tuple[bool | None, list[str]]:
+    """Is the detached watchdog still running, and the tail of what it has said."""
+    try:
+        out = api.exec(
+            box,
+            ["sh", "-c", f"p=$(cat {REMOTE_ROOT}/deploy.pid 2>/dev/null || true); "
+                         'if [ -n "$p" ] && [ -d "/proc/$p" ]; then echo alive; else echo gone; fi; '
+                         f"tail -n {int(lines)} {DEPLOY_LOG} 2>/dev/null"],
+            timeout=60, on_output=None,
+        ).stdout.splitlines()
+    except SailboxError:
+        return None, []
+    return (out[0].strip() == "alive" if out else None), [line for line in out[1:] if line.strip()]
+
+
+def await_verdict(api: SailboxClient, box: str, python: str, release_id: str, *,
+                  timeout: float, every: float) -> dict[str, Any]:
+    """Poll until the watchdog records a verdict for the release, it dies without one, or
+    `timeout` seconds pass. Returns `{"verdict": name | None, "reasons": [...], "why": ...}`."""
+    deadline = time.time() + float(timeout)
+    gone, said = 0, ""
+    while True:
+        found = read_verdict(api, box, python, release_id)
+        if found is not None:
+            return found
+        alive, tail = watchdog_progress(api, box)
+        if tail and tail[-1] != said:
+            said = tail[-1]
+            say(f"  {said[:200]}")
+        gone = gone + 1 if alive is False else 0
+        if gone >= 2:
+            # Twice in a row, so a watchdog that is only just starting is not called dead; and
+            # one last read, because the verdict is the last thing it writes before it exits.
+            found = read_verdict(api, box, python, release_id)
+            return found or {"verdict": None, "reasons": [], "why": "the watchdog exited without recording a verdict"}
+        if time.time() >= deadline:
+            return {"verdict": None, "reasons": [], "why": f"no verdict after {int(timeout)}s; the watchdog is still running on the box"}
+        time.sleep(max(1.0, float(every)))
+
+
+def remember_release(state: dict[str, Any], entry: Mapping[str, Any]) -> None:
+    """Record or update one release in box.json. Newest last, the last KEEP_RELEASES kept."""
+    rows = [r for r in (state.get("releases") or []) if isinstance(r, dict) and r.get("id") != entry.get("id")]
+    rows.append(dict(entry))
+    state["releases"] = rows[-KEEP_RELEASES:]
 
 
 # --------------------------------------------------------------------------- commands
@@ -359,7 +576,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         "box_id": None,
         "checkpoints": [],
         "forks": [],
-        "uploads": {},
+        "releases": [],
     }
     write_state(state)
 
@@ -370,9 +587,9 @@ def cmd_create(args: argparse.Namespace) -> int:
         name=args.name,
         size="s",
         egress=policy,
-        # Never sleep on its own: the floor must be awake for every open. The 30 s tick would
-        # keep it awake anyway (an idle Sailbox is one where "no process is waiting on a timer"),
-        # but that is a side effect of a config value, not a guarantee. This is the guarantee.
+        # Never sleep on its own: the House must be awake for every tick. The tick's own timer
+        # would keep it awake anyway (an idle Sailbox is one where "no process is waiting on a
+        # timer"), but that is a side effect of a config value, not a guarantee. This is.
         auto_sleep={"automatic": False},
         visibility=visibility,
         idempotency_key=key,
@@ -399,44 +616,40 @@ def cmd_create(args: argparse.Namespace) -> int:
     say(f"  vcpu={row.get('vcpu_count')} memory_mib={row.get('memory_mib')} "
         f"disk_gib={row.get('state_disk_size_gib')} auto_sleep={row.get('auto_sleep')}")
 
-    say("uploading the floor")
-    files = code_files()
-    push_code(api, box, files)
-    state["uploads"] = {str(f): digest(REPO_ROOT / f) for f in files}
-    write_state(state)
-
     say("preparing the interpreter")
     python = bootstrap_python(api, box)
     state["python"] = python
     write_state(state)
     say(f"  interpreter: {python}")
 
-    say("writing run.sh and restart.sh")
+    say("writing run.sh and restart.sh, and laying out /workspace")
     write_scripts(api, box, python)
     api.exec(
         box,
-        ["sh", "-c", f"mkdir -p {REMOTE_ROOT}/.data/ltcm && chmod 700 {REMOTE_ROOT}/.data "
-                     f"{REMOTE_ROOT}/.data/ltcm && touch {REMOTE_ROOT}/ltcm.log && "
-                     f"chmod 600 {REMOTE_ROOT}/ltcm.log && rm -f {REMOTE_ROOT}/STOP"],
+        ["sh", "-c", f"umask 077; mkdir -p {REMOTE_ROOT}/releases {STATE_DIR} {REMOTE_ROOT}/canary "
+                     f"{INCOMING_DIR} && chmod 700 {STATE_DIR} {REMOTE_ROOT}/canary && "
+                     f"touch {LEAGUE_LOG} && chmod 600 {LEAGUE_LOG}"],
         timeout=60,
         on_output=None,
     ).check()
 
     say("")
-    say(f"box {box} is up with the code on it and the loop STOPPED.")
+    say(f"box {box} is up with no code on it yet and the loop STOPPED.")
     say("next, from this terminal:")
-    say("  python3 scripts/floor_box.py secrets    # .env and .data/ltcm/keys -> the box")
-    say("  python3 scripts/floor_box.py start      # start trading")
+    say("  python3 scripts/floor_box.py secrets    # the three values -> /workspace/.env")
+    say("  python3 scripts/floor_box.py deploy     # the first release (its canary needs the .env)")
+    say("  python3 scripts/floor_box.py start      # start the House")
     return 0
 
 
 def bootstrap_python(api: SailboxClient, box: str) -> str:
-    """A Python on the box with `cryptography` in it. A venv when the image allows one.
+    """A Python on the box: a venv when the image allows one, else the system interpreter.
 
-    `cryptography` is the one dependency the floor has beyond the standard library: the Kalshi and
-    Coinbase adapters sign with it. It comes from `pypi.org` and `files.pythonhosted.org`, which
-    is why both are on the egress allowlist. Debian package mirrors deliberately are not, so this
-    never reaches for `apt`.
+    The league is standard library only: the gateway signs every venue request, so nothing on the
+    box needs `cryptography` to run. `ltcm.adapters` still imports it lazily (its direct-signing
+    path, which the box never takes), so it is installed when it can be and its absence is said
+    and survived. It comes from `pypi.org` and `files.pythonhosted.org`, both on the allowlist;
+    Debian package mirrors deliberately are not, so this never reaches for `apt`.
     """
     venv = f"{REMOTE_ROOT}/.venv"
     made = api.exec(
@@ -445,77 +658,131 @@ def bootstrap_python(api: SailboxClient, box: str) -> str:
     )
     if "ok" in made.stdout:
         python = f"{venv}/bin/python"
-        api.exec(
-            box, ["sh", "-c", f"{python} -m pip install --disable-pip-version-check --quiet "
-                              "--upgrade pip && "
-                              f"{python} -m pip install --disable-pip-version-check --quiet "
-                              "cryptography"],
-            timeout=900, on_output=stream,
-        ).check()
-        return python
-    say("  no venv on this image; installing into the system interpreter instead")
-    api.exec(
-        box, ["sh", "-c", "python3 -m pip install --disable-pip-version-check --quiet "
-                          "--break-system-packages cryptography || "
-                          "python3 -m pip install --disable-pip-version-check --quiet "
-                          "cryptography"],
-        timeout=900, on_output=stream,
-    ).check()
-    return "python3"
+        install = (f"{python} -m pip install --disable-pip-version-check --quiet --upgrade pip; "
+                   f"{python} -m pip install --disable-pip-version-check --quiet cryptography")
+    else:
+        say("  no venv on this image; using the system interpreter instead")
+        python = "python3"
+        install = ("python3 -m pip install --disable-pip-version-check --quiet "
+                   "--break-system-packages cryptography || "
+                   "python3 -m pip install --disable-pip-version-check --quiet cryptography")
+    try:
+        installed = api.exec(box, ["sh", "-c", install], timeout=900, on_output=stream).ok
+    except SailboxError as error:
+        say(f"  pip could not be run ({str(error)[:160]})")
+        installed = False
+    if not installed:
+        say("  `cryptography` did not install. The league does not need it (the gateway signs "
+            "everything); only the first run's direct-signing adapters would.")
+    return python
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
+    """Send one release and let the in-box watchdog decide whether the House runs it.
+
+    A release is always the whole tree: it is packed, named by its time and content, unpacked into
+    `incoming/<id>/` and handed to `python -m league.watchdog deploy`, which stages it under
+    `releases/`, runs it as a canary, promotes it (`current`), restarts the House, watches it and
+    rolls it back if the House goes bad. This script moves no link and restarts nothing itself.
+    Exit 0 only for `promoted`; 2 refused, 3 rolled back, 4 failed, 1 no verdict seen.
+    """
     state = read_state()
     box = require_box(state)
     api = client()
-    files = code_files()
-    known = dict(state.get("uploads") or {})
-    now = {str(f): digest(REPO_ROOT / f) for f in files}
-    changed = [f for f in files if known.get(str(f)) != now[str(f)]]
-    removed = sorted(set(known) - set(now))
-    if args.all:
-        changed = list(files)
+    python = state.get("python") or "python3"
 
-    if not changed and not (removed and args.prune):
-        say("nothing to deploy: the box already has this working tree")
-    else:
-        if changed:
-            say(f"deploying {len(changed)} changed file(s) to {box}")
-            for path in changed[:20]:
-                say(f"  {path}")
-            if len(changed) > 20:
-                say(f"  ... and {len(changed) - 20} more")
-            push_code(api, box, changed)
-        if removed:
-            say(f"{len(removed)} file(s) no longer in the working tree: {', '.join(removed[:10])}")
-            if args.prune:
-                targets = " ".join(f"{REMOTE_ROOT}/{p}" for p in removed)
-                api.exec(box, ["sh", "-c", f"rm -f {targets}"], timeout=120, on_output=None).check()
-                say("  removed from the box")
-            else:
-                say("  left on the box; pass --prune to remove them")
-        state["uploads"] = now
-        state["deployed_at"] = _now()
-        write_state(state)
-        # run.sh names the interpreter, so it is rewritten with the code it supervises.
-        write_scripts(api, box, state.get("python") or "python3")
+    files = code_files()
+    blob = tarball(files)
+    release_id = release_id_for(blob)
+    sha256 = hashlib.sha256(blob).hexdigest()
 
     seen = probe(api, box)
-    if seen.get("loop.pid", "-") != "-":
-        say("the loop is running; restarting it into the new code")
-        api.exec(box, ["sh", f"{REMOTE_ROOT}/restart.sh"], timeout=120, on_output=stream)
+    if seen.get("error"):
+        raise SystemExit(f"the box could not be probed, so nothing was sent: {seen['error']}")
+    if up(seen, "deploy.pid"):
+        raise SystemExit(
+            f"a deploy is still running on the box (pid {seen['deploy.pid']}); wait for its verdict "
+            "(`status` shows it, `logs --deploy` follows it) before sending another release."
+        )
+    if up(seen, "run.pid") and b"-m league run" not in (supervisor_script(api, box) or b""):
+        raise SystemExit(
+            "the supervisor running on the box is not the league's (its run.sh starts something "
+            "else), and a restart would bring that back, not this release. Run `stop`, then "
+            "`deploy`, then `start`."
+        )
+    if seen.get("env") != "yes":
+        raise SystemExit(f"there is no {ENV_FILE} on the box and the canary cannot run without "
+                         "it: run `python3 scripts/floor_box.py secrets` first.")
+    current = release_of(seen.get("current")) if seen.get("runnable") == "yes" else None
+    if current and content_of(current) == sha256[:12]:
+        say(f"nothing to deploy: the box already runs this working tree ({current})")
+        return 0
+
+    # run.sh names the interpreter and restart.sh is what the watchdog calls, so both are in
+    # place before it starts. A supervisor that is already up keeps the run.sh it started with.
+    write_scripts(api, box, python)
+
+    # A supervisor between two Houses (its 30 s delay) still counts: it starts the next one from
+    # whatever is current, and that is the House the watchdog has to watch.
+    watch = current is not None and (up(seen, "loop.pid") or up(seen, "run.pid"))
+    say(f"release {release_id}: {len(files)} files, {len(blob):,} bytes compressed -> {box}")
+    target = push_release(api, box, release_id, blob)
+    say(f"  unpacked into {target}")
+
+    entry = {"id": release_id, "sha256": sha256, "files": len(files), "bytes": len(blob),
+             "at": _now(), "replaces": current, "watched": watch, "verdict": "pending", "reasons": []}
+    remember_release(state, entry)
+    state.pop("uploads", None)  # the first run's per-file digests: a release is a whole tree
+    state["deployed_at"] = entry["at"]
+    write_state(state)
+
+    if watch:
+        say(f"  starting the watchdog from {current}: canary, promote, restart, then watch the House")
     else:
-        say("the loop is not running; nothing to restart")
-    return 0
+        why = "there is no current release" if current is None else "the loop is not running"
+        say(f"  starting the watchdog with --watch-seconds 0 ({why}): canary, then promote")
+    api.exec(box, watchdog_launch(python, release_id, watch=watch), timeout=60, background=True,
+             on_output=None)
+    if args.no_wait:
+        say("  launched. The verdict will be in `status`; the watchdog's own words in `logs --deploy`.")
+        return 0
+
+    say(f"  waiting for a verdict (up to {int(args.timeout)}s)")
+    result = await_verdict(api, box, python, release_id, timeout=args.timeout, every=args.poll_seconds)
+    verdict = result.get("verdict")
+    entry.update(verdict=verdict or "pending", reasons=list(result.get("reasons") or []), verdict_at=result.get("at"))
+    remember_release(state, entry)
+    write_state(state)
+
+    if verdict is None:
+        say(f"NO VERDICT for {release_id}: {result.get('why')}")
+        _, tail = watchdog_progress(api, box, lines=15)
+        for line in tail:
+            say(f"  | {line[:300]}")
+        say("`status` shows the verdict when there is one; `logs --deploy` shows deploy.log.")
+        return 1
+    after = probe(api, box)
+    say(f"{verdict.upper()}: {release_id}")
+    for reason in result.get("reasons") or []:
+        say(f"  - {reason}")
+    say(f"  current={release_of(after.get('current'))}  previous={release_of(after.get('previous'))}")
+    if verdict == "promoted" and not up(after, "run.pid"):
+        say("  the loop is not running: `python3 scripts/floor_box.py start` when ready")
+    return VERDICT_EXIT.get(verdict, 1)
 
 
 def cmd_secrets(args: argparse.Namespace) -> int:
     """Push the owner's credentials to the box. The only command here that reads one.
 
-    Run by the owner, from the owner's machine, on purpose. It reads `.env` and every file in
-    `.data/ltcm/keys/` as bytes, refuses any of them that is group- or world-readable, uploads
-    them mode 600 to `/workspace/.env` and `/workspace/.data/ltcm/keys/`, and prints names and
-    byte counts only. No value is decoded, logged or kept.
+    Run by the owner, from the owner's machine, on purpose. With a gateway named in
+    `league/config.json` (how the House runs) the box gets exactly three values, composed from
+    the local `.env` into `/workspace/.env`, mode 600, and no venue key. It refuses a source that
+    is group- or world-readable and prints names and byte counts only. No value is decoded,
+    logged or kept.
+
+    Without a gateway anywhere in the config the first run's direct mode still applies (the whole
+    `.env` and every file in `.data/ltcm/keys/`, to the same paths on the box). The league cannot
+    run that way; it is kept for a checkout that predates the gateway.
     """
     state = read_state()
     box = require_box(state)
@@ -535,11 +802,19 @@ def cmd_secrets(args: argparse.Namespace) -> int:
         missing = [name for name in BOX_ENV_NAMES if f"{name}=".encode() not in wanted]
         if missing:
             raise SystemExit(f"{SECRET_ENV} lacks {', '.join(missing)}; the box needs all of them")
-        api.exec(box, ["sh", "-c", f"chmod 700 {REMOTE_ROOT}/.data {REMOTE_ROOT}/.data/ltcm 2>/dev/null; rm -rf {REMOTE_ROOT}/.data/ltcm/keys"], timeout=60, on_output=None)
-        api.upload(box, f"{REMOTE_ROOT}/.env", wanted, mode=0o600)
-        say(f"  {SECRET_ENV} -> {REMOTE_ROOT}/.env  ({len(wanted):,} bytes, {len(BOX_ENV_NAMES)} values, mode 600)")
-        say("  venue keys stay in the gateway; none were sent and any on the box were removed")
+        api.upload(box, ENV_FILE, wanted, mode=0o600)
+        say(f"  {SECRET_ENV} -> {ENV_FILE}  ({len(wanted):,} bytes, {len(BOX_ENV_NAMES)} values, mode 600)")
+        say("  venue keys stay in the gateway; none were sent")
         del wanted
+        # The first run's state on the box is history and nothing here deletes under it, so a
+        # key file an earlier direct-mode `secrets` put there is the owner's to remove.
+        legacy = sorted({str(n) for n in (state.get("secret_names") or []) if n != SECRET_ENV}
+                        | {str(n) for n in (state.get("legacy_key_names") or [])})
+        if legacy:
+            state["legacy_key_names"] = legacy
+            say(f"  NOTE: box.json says an earlier `secrets` put {', '.join(legacy)} under "
+                f"{REMOTE_ROOT}/.data/ltcm/keys. This script no longer deletes anything under "
+                f"{REMOTE_ROOT}/.data; if it is still there, removing it is the owner's step.")
         state["secrets_pushed_at"] = _now()
         state["secret_names"] = [SECRET_ENV]
         write_state(state)
@@ -598,25 +873,29 @@ def cmd_secrets(args: argparse.Namespace) -> int:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
+    """Clear both stop files and launch the supervisor. Nothing else.
+
+    Whether the House trades real money is `real_money` in the release's `league/config.json`
+    and the gateway's kill switch; this command reads and changes neither."""
     state = read_state()
     box = require_box(state)
     api = client()
     seen = probe(api, box)
-    if seen.get("run.pid", "-") != "-" and not args.force:
+    if seen.get("error"):
+        raise SystemExit(f"the box could not be probed, so nothing was started: {seen['error']}")
+    if up(seen, "run.pid") and not args.force:
         say(f"the supervisor is already running (pid {seen['run.pid']}); nothing to do")
         return 0
-    if seen.get("kill", "no") == "yes" and not args.keep_kill_switch:
-        say("releasing the kill switch")
-        # An exec runs in `/` by default, and `ltcm` is only importable from /workspace.
-        api.exec(
-            box,
-            ["sh", "-c", f"cd {REMOTE_ROOT} && exec {state.get('python') or 'python3'} "
-                         "-m ltcm unkill"],
-            timeout=180,
-            on_output=stream,
+    if seen.get("runnable") != "yes":
+        raise SystemExit(
+            f"there is no release at {REMOTE_ROOT}/current, so there is nothing to start: deploy "
+            "first (`python3 scripts/floor_box.py deploy`)."
         )
-    api.exec(box, ["sh", "-c", f"rm -f {REMOTE_ROOT}/STOP"], timeout=60, on_output=None).check()
-    say("starting the supervisor")
+    # The supervisor that starts is always the one this script describes, never a run.sh left
+    # on the box by the first run.
+    write_scripts(api, box, state.get("python") or "python3")
+    api.exec(box, ["sh", "-c", "rm -f " + " ".join(STOP_FILES)], timeout=60, on_output=None).check()
+    say(f"starting the supervisor on {release_of(seen.get('current'))}")
     api.exec(
         box,
         f"setsid /bin/sh {REMOTE_ROOT}/run.sh >/dev/null 2>&1 < /dev/null",
@@ -627,7 +906,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     time.sleep(5)
     seen = probe(api, box)
     say(f"  supervisor={seen.get('run.pid')}  loop={seen.get('loop.pid')}")
-    if seen.get("run.pid", "-") == "-":
+    if not up(seen, "run.pid"):
         say("  the supervisor did not come up; check `logs`")
         return 1
     state["started_at"] = _now()
@@ -636,25 +915,24 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
-    """Kill switch first, then quiesce, then stop. In that order, always."""
+    """Latch first, then quiesce, then stop. In that order, always."""
     state = read_state()
     box = require_box(state)
     api = client()
-    python = state.get("python") or "python3"
 
-    say("engaging the kill switch (no new orders from this moment)")
+    say("writing both stop files so nothing restarts the loop")
     api.exec(
         box,
-        ["sh", "-c", f'cd {REMOTE_ROOT} && exec {python} -m ltcm kill --reason "$1"',
+        ["sh", "-c", f"mkdir -p {STATE_DIR} && for f in {' '.join(STOP_FILES)}; do "
+                     "printf 'stopped by floor_box: %s\\n' \"$1\" > \"$f\"; done",
          "floor_box", args.reason],
-        timeout=180,
-        on_output=stream,
-    )
-    say("latching the supervisor so the loop is not restarted")
-    api.exec(box, ["sh", "-c", f"touch {REMOTE_ROOT}/STOP"], timeout=60, on_output=None).check()
+        timeout=60,
+        on_output=None,
+    ).check()
 
     seen = probe(api, box)
     loop = _pid(seen.get("loop.pid"))
+    killed = False
     if loop is None:
         say("  no floor loop was running")
     else:
@@ -664,13 +942,14 @@ def cmd_stop(args: argparse.Namespace) -> int:
         while time.time() < deadline:
             time.sleep(5)
             seen = probe(api, box)
-            if seen.get("loop.pid", "-") == "-":
+            if not up(seen, "loop.pid"):
                 say(f"  the loop quiesced after {int(args.timeout - (deadline - time.time()))}s")
                 break
         else:
             say(f"  still running after {args.timeout}s; killing it")
             api.exec(box, ["sh", "-c", f"kill -KILL {loop} 2>/dev/null || true"],
                      timeout=60, on_output=None)
+            killed = True
             time.sleep(3)
 
     seen = probe(api, box)
@@ -687,7 +966,14 @@ def cmd_stop(args: argparse.Namespace) -> int:
         )
     state["stopped_at"] = _now()
     write_state(state)
-    say("stopped. The kill switch stays engaged; `start` releases it (or --keep-kill-switch).")
+    say("stopped. Both stop files stay until `start` removes them.")
+    if killed:
+        say("the loop was KILLED, so it did not put its agent boxes to sleep: any that were awake "
+            "stay awake, and billing, until the House next runs or they are slept by hand.")
+    else:
+        say("the agent boxes are the loop's to put to sleep, which `league run` does on its way "
+            "out; this script does not touch them.")
+    say("the gateway's kill switch and `real_money` are as they were: this script changes neither.")
     return 0
 
 
@@ -703,17 +989,36 @@ def cmd_status(args: argparse.Namespace) -> int:
         "loop_pid": seen.get("loop.pid"),
         # An exec that fails (a full disk stops the runtime writing its record) says nothing
         # about the loop: report the probe error rather than a dead loop.
-        "alive": None if seen.get("error") else seen.get("loop.pid", "-") != "-",
+        "alive": None if seen.get("error") else up(seen, "loop.pid"),
         "probe_error": str(seen.get("error") or "")[:200] or None,
         "stop_latch": seen.get("stop") == "yes",
-        "kill_switch": seen.get("kill") == "yes",
+        "league_stop": seen.get("league_stop") == "yes",
     }
+    rows = deploy_rows(api, box)
+    report["release"] = {
+        "current": release_of(seen.get("current")),
+        "previous": release_of(seen.get("previous")),
+        "current_link": seen.get("current") or None,
+        "previous_link": seen.get("previous") or None,
+        "deploy_running": None if seen.get("error") else up(seen, "deploy.pid"),
+        "last_deploy_row": rows[-1] if rows else None,
+    }
+    # A deploy sent with --no-wait, or one that outlasted --timeout, gets its verdict here.
+    changed = False
+    for entry in state.get("releases") or []:
+        if isinstance(entry, dict) and entry.get("verdict") == "pending":
+            found = verdict_in(rows, str(entry.get("id")))
+            if found is not None:
+                entry.update(verdict=found["verdict"], reasons=found["reasons"], verdict_at=found["at"])
+                changed = True
+    if changed:
+        write_state(state)
     report["hourly_cost_usd"] = hourly_cost(report, report.get("spend") or {})
-    report["floor_health"] = health(api, box)
+    report["house_health"] = health(api, box)
     tail = ""
     try:
         tail = api.exec(
-            box, ["sh", "-c", f"tail -n {int(args.tail)} {REMOTE_ROOT}/ltcm.log 2>/dev/null"],
+            box, ["sh", "-c", f"tail -n {int(args.tail)} {LEAGUE_LOG} 2>/dev/null"],
             timeout=60, on_output=None,
         ).stdout
     except SailboxError:
@@ -738,23 +1043,36 @@ def cmd_status(args: argparse.Namespace) -> int:
     if loop.get("probe_error"):
         say(f"loop         unknown: the probe failed ({loop['probe_error']})")
     say(f"loop         alive={loop['alive']} supervisor={loop['supervisor_pid']} "
-        f"loop={loop['loop_pid']} stop_latch={loop['stop_latch']} kill={loop['kill_switch']}")
-    floor = report.get("floor_health")
-    if isinstance(floor, Mapping):
-        say(f"floor        {floor.get('status')}  equity={(floor.get('floor') or {}).get('equity')}"
-            f"  events={floor.get('events')}  updated={floor.get('updated_at')}")
-        say(f"             spent_today={(floor.get('budget') or {}).get('spent_today_usd')} "
-            f"cap={(floor.get('budget') or {}).get('cap_usd')} "
-            f"last_error={floor.get('last_error')}")
+        f"loop={loop['loop_pid']} stop_latch={loop['stop_latch']} league_stop={loop['league_stop']}")
+    release = report["release"]
+    say(f"release      current={release['current']}  previous={release['previous']}"
+        + ("  (a deploy is running)" if release["deploy_running"] else ""))
+    last = release["last_deploy_row"]
+    if last:
+        words = " ".join(f"{key}={last[key]}" for key in ("stage", "verdict", "ok", "reading") if last.get(key) is not None)
+        say(f"last deploy  {last.get('at')}  {last.get('release')}  {words}")
+        for reason in (last.get("reasons") or [])[:5]:
+            say(f"             - {str(reason)[:200]}")
     else:
-        say("floor        no health.json on the box yet (the loop has never ticked)")
+        say(f"last deploy  nothing in {DEPLOYS_JSONL} yet")
+    house = report.get("house_health")
+    if isinstance(house, Mapping):
+        say(f"house        living={house.get('living')} dead={house.get('dead')} "
+            f"ledger_seq={house.get('ledger_seq')} real_money={house.get('real_money')} "
+            f"release={house.get('release')}  updated={house.get('at')}")
+        for name, book in sorted((house.get("books") or {}).items()):
+            book = book if isinstance(book, Mapping) else {}
+            frozen = f"FROZEN: {str(book.get('frozen'))[:160]}" if book.get("frozen") else "ok"
+            say(f"             {name}: {frozen}, {book.get('open_orders')} open order(s)")
+    else:
+        say(f"house        no {STATE_DIR}/health.json yet (no tick has finished)")
     checkpoints = state.get("checkpoints") or []
     if checkpoints:
         say(f"checkpoints  {len(checkpoints)}, newest {checkpoints[-1].get('name')} "
             f"({checkpoints[-1].get('checkpoint_id')})")
     if tail.strip():
         say("")
-        say(f"--- last {args.tail} lines of {REMOTE_ROOT}/ltcm.log ---")
+        say(f"--- last {args.tail} lines of {LEAGUE_LOG} ---")
         say(tail.rstrip())
     return 0
 
@@ -763,14 +1081,14 @@ def cmd_logs(args: argparse.Namespace) -> int:
     state = read_state()
     box = require_box(state)
     api = client()
+    path = DEPLOY_LOG if args.deploy else LEAGUE_LOG
     result = api.exec(
         box,
-        ["sh", "-c", f"tail -n {int(args.lines)} {REMOTE_ROOT}/ltcm.log 2>/dev/null "
-                     "|| echo '(no log yet)'"],
+        ["sh", "-c", f"tail -n {int(args.lines)} {path} 2>/dev/null || echo '(no log yet)'"],
         timeout=120,
         on_output=None,
     )
-    print(result.stdout.rstrip() or f"({REMOTE_ROOT}/ltcm.log is empty: the loop has never run)")
+    print(result.stdout.rstrip() or f"({path} is empty)")
     return 0
 
 
@@ -834,10 +1152,11 @@ def cmd_fork(args: argparse.Namespace) -> int:
     say("  latching the loop off on the copy")
     api.exec(
         fork,
-        ["sh", "-c", f"touch {REMOTE_ROOT}/STOP; "
-                     f"for f in loop.pid run.pid; do p=$(cat {REMOTE_ROOT}/$f 2>/dev/null); "
+        ["sh", "-c", f"mkdir -p {STATE_DIR}; touch {' '.join(STOP_FILES)}; "
+                     f"for f in deploy.pid loop.pid run.pid; do p=$(cat {REMOTE_ROOT}/$f 2>/dev/null); "
                      'if [ -n "$p" ] && [ -d "/proc/$p" ]; then kill -TERM "$p" 2>/dev/null; fi; '
-                     f"done; sleep 2; rm -f {REMOTE_ROOT}/run.pid {REMOTE_ROOT}/loop.pid; true"],
+                     f"done; sleep 2; rm -f {REMOTE_ROOT}/run.pid {REMOTE_ROOT}/loop.pid "
+                     f"{REMOTE_ROOT}/deploy.pid; true"],
         timeout=120,
         on_output=None,
     )
@@ -856,9 +1175,9 @@ def cmd_fork(args: argparse.Namespace) -> int:
     say(f"  egress inherited from the parent, matches: {report['ok']} "
         f"({len(report['allowlist'])} hosts)")
     if entry["inherits_secrets"]:
-        say("  WARNING: this copy has the parent's credentials on its disk and can reach the live "
-            "venues. Put it in paper mode, or wipe /workspace/.data/ltcm/keys and /workspace/.env, "
-            "before starting anything on it.")
+        say("  WARNING: this copy has the parent's /workspace/.env on its disk, so it can ask the "
+            "gateway for anything the House can. Remove that file from the copy before starting "
+            "anything on it.")
     say(f"  it bills like any Sailbox until you terminate it: "
         f"python3 scripts/floor_box.py terminate --box {fork} --yes")
     return 0
@@ -933,7 +1252,27 @@ def cmd_hosts(args: argparse.Namespace) -> int:
     say(f"({len(policy['allowlist'])} hosts; everything else is closed by Sail, not by the floor)")
     say(f"base list: {len(FLOOR_HOSTS)} hosts + the gateway "
         f"({state.get('gateway_host') or GATEWAY_HOST})")
+    missing = missing_league_hosts(policy["allowlist"])
+    if missing:
+        say(f"the league needs, and this list lacks: {', '.join(missing)}")
+        say(f"  python3 scripts/floor_box.py hosts --add {' '.join(h for h in missing if '<' not in h) or '<gateway host>'}")
+    else:
+        say("every host the league needs is on it")
     return 0
+
+
+def missing_league_hosts(allowlist: Sequence[str]) -> list[str]:
+    """Which hosts the league needs are not on an allowlist. The gateway counts only by its exact
+    name: Sail accepts `*.workers.dev` and never resolves it."""
+    have = {str(h).strip().lower() for h in allowlist}
+    missing = [host for host in LEAGUE_HOSTS if host not in have]
+    gateway = str(floor_config().get("gateway_url") or "").partition("://")[2].partition("/")[0].lower()
+    if gateway:
+        if gateway not in have:
+            missing.insert(0, gateway)
+    elif not any(h.endswith(".workers.dev") and "*" not in h for h in have):
+        missing.insert(0, "<the gateway's exact *.workers.dev host>")
+    return missing
 
 
 def _pid(value: Any) -> int | None:
@@ -984,7 +1323,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    create = sub.add_parser("create", help="create the box, upload the floor, install, stop")
+    create = sub.add_parser("create", help="create the box, the policy, the venv and run.sh; no code, loop stopped")
     create.add_argument("--app", default=DEFAULT_APP)
     create.add_argument("--name", default=DEFAULT_NAME)
     create.add_argument("--visibility", default="private", choices=("private", "org"))
@@ -995,27 +1334,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument("--force", action="store_true", help="create a second box anyway")
 
-    deploy = sub.add_parser("deploy", help="re-upload changed code, restart a running loop")
-    deploy.add_argument("--all", action="store_true", help="upload every file, not just changed")
-    deploy.add_argument("--prune", action="store_true", help="delete files no longer in the tree")
+    deploy = sub.add_parser("deploy", help="send a release; the in-box watchdog canaries, promotes, watches, rolls back")
+    deploy.add_argument("--timeout", type=float, default=1500.0,
+                        help="seconds to wait for the watchdog's verdict (default %(default)s)")
+    deploy.add_argument("--poll-seconds", type=float, default=15.0, help=argparse.SUPPRESS)
+    deploy.add_argument("--no-wait", action="store_true",
+                        help="return as soon as the watchdog is launched; `status` has the verdict")
 
-    sub.add_parser("secrets", help="upload .env and .data/ltcm/keys (the owner runs this)")
+    sub.add_parser("secrets", help="the three values the box holds -> /workspace/.env (the owner runs this)")
 
-    start = sub.add_parser("start", help="start the supervised floor loop")
+    start = sub.add_parser("start", help="clear both stop files and start the supervised House loop")
     start.add_argument("--force", action="store_true")
-    start.add_argument("--keep-kill-switch", action="store_true",
-                       help="start the loop with the kill switch still engaged")
 
-    stop = sub.add_parser("stop", help="kill switch, quiesce, then stop the loop")
+    stop = sub.add_parser("stop", help="write both stop files, quiesce, then stop the loop")
     stop.add_argument("--timeout", type=float, default=120.0)
     stop.add_argument("--reason", default="operator stop")
 
-    status = sub.add_parser("status", help="box, spend, loop, log tail and the floor's health")
+    status = sub.add_parser("status", help="box, spend, loop, releases, last deploy, health, log tail")
     status.add_argument("--json", action="store_true")
     status.add_argument("--tail", type=int, default=15)
 
-    logs = sub.add_parser("logs", help="tail /workspace/ltcm.log")
+    logs = sub.add_parser("logs", help="tail /workspace/league.log")
     logs.add_argument("-n", "--lines", type=int, default=100)
+    logs.add_argument("--deploy", action="store_true", help="tail /workspace/deploy.log instead")
 
     checkpoint = sub.add_parser("checkpoint", help="checkpoint the box and record the id")
     checkpoint.add_argument("--name")

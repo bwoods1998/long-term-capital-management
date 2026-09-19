@@ -133,6 +133,11 @@ class Decide(unittest.TestCase):
             elapsed = time.monotonic() - started
         self.assertEqual(result, {"ok": False, "error": "decide ran past 1 seconds"})
         self.assertLess(elapsed, 3.0)
+        import signal
+
+        # The alarm repeats every quarter second until it is disarmed: after a timeout it must be
+        # off, or it would fire again while `main` writes the result line.
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
 
     def test_a_module_body_that_runs_too_long_is_cut_off_in_decide(self):
         with mock.patch.object(runner, "MAX_SECONDS", 1):
@@ -146,16 +151,10 @@ class Decide(unittest.TestCase):
         self.assertEqual(signal.alarm(0), 0)  # nothing was left pending
 
     def test_a_strategy_cannot_swallow_its_own_timeout(self):
-        # BUG (medium): runner.py:35 `class TimedOut(Exception)` and runner.py:64-68. The alarm
-        # raises an ordinary `Exception` INSIDE the strategy's frame, so a strategy that wraps its
-        # loop in `try: ... except Exception: pass` swallows it; the alarm is one-shot, and
-        # `decide` has no after-the-fact check, so the strategy then returns a perfectly valid
-        # result after running as long as it liked (up to the box's 30 s `timeout`). replay.py
-        # already guards both ways (`_DecideTimeout(BaseException)` plus "took longer than" after
-        # the call), so the same code is judged under a 5 s limit in replay and is unlimited live.
-        # FIX: derive `TimedOut` from `BaseException`, re-arm with
-        # `signal.setitimer(ITIMER_REAL, MAX_SECONDS, 0.25)`, and after the call return the
-        # timeout error when `time.monotonic() - started > MAX_SECONDS`.
+        # Regression: `TimedOut` was once an ordinary `Exception` raised by a one-shot alarm, and
+        # `decide` never looked at the clock afterwards, so `try: <spin> except Exception: pass` swallowed
+        # the deadline and returned a valid result. It is a `BaseException` now, the alarm repeats, and
+        # an answer that arrives after MAX_SECONDS is a timeout whatever the strategy caught.
         code = strategy(
             "try:\n"
             "    while True:\n"
@@ -169,13 +168,31 @@ class Decide(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("ran past", result.get("error", ""))
 
+    def test_a_strategy_that_swallows_three_alarms_is_interrupted_a_fourth_time(self):
+        code = strategy(
+            "swallowed = 0\n"
+            "while swallowed < 3:\n"
+            "    try:\n"
+            "        while True:\n"
+            "            pass\n"
+            "    except BaseException:\n"
+            "        swallowed += 1\n"
+            "return {'thought': 'swallowed three'}"
+        )
+        with mock.patch.object(runner, "MAX_SECONDS", 1):
+            started = time.monotonic()
+            result = runner.decide(code, {})
+            elapsed = time.monotonic() - started
+        self.assertEqual(result, {"ok": False, "error": "decide ran past 1 seconds"})
+        self.assertLess(elapsed, 3.0)  # 1 s, then one more alarm every quarter second
+        import signal
+
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))  # and the repeating alarm is off again
+
     def test_decide_never_raises_on_a_malformed_answer(self):
-        # BUG (low): runner.py:68 calls `clean(out, ...)` OUTSIDE the try block, and `clean`
-        # iterates `out.get("intents") or []` and `out.get("cancels") or []`. A strategy that
-        # returns `{"intents": 5}` (or `{"cancels": True}`) makes `decide` raise TypeError although
-        # its docstring says "Never raises"; in `main` that is an uncaught traceback and NO result
-        # line, so the House sees "no result line (exit 1)" instead of the strategy's error.
-        # FIX: in `clean`, take a field only when `isinstance(value, list)`; or call `clean` inside the try.
+        # Regression: `clean` once ran outside `decide`'s try block and iterated `intents` and `cancels`
+        # unchecked, so `{"intents": 5}` raised TypeError and `main` printed no result line. A field
+        # that is not a list is now read as empty.
         for answer in ("{'intents': 5}", "{'cancels': True}", "{'intents': 1.5, 'cancels': 2}"):
             result = runner.decide(strategy(f"return {answer}"), {})
             self.assertIn("ok", result, answer)
@@ -267,6 +284,14 @@ class NeedsOf(unittest.TestCase):
         failed = runner.needs_of("NEEDS = {}['x']\n" + strategy("return {}"))
         self.assertEqual((failed["ok"], failed["error"][:8]), (False, "KeyError"))
         self.assertFalse(runner.needs_of("raise SystemExit(3)\n" + strategy("return {}"))["ok"])
+
+    def test_an_endless_module_body_is_cut_off_and_the_alarm_is_left_off(self):
+        import signal
+
+        with mock.patch.object(runner, "MAX_SECONDS", 1):
+            result = runner.needs_of("while True:\n    pass\n" + strategy("return {}"))
+        self.assertEqual(result, {"ok": False, "error": "the strategy file ran past 1 seconds while loading"})
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
 
     def test_prints_in_the_module_body_go_nowhere(self):
         with mock.patch("sys.stdout") as out:
@@ -452,13 +477,15 @@ class SlowRuns(BoxCase):
         self.assertLess(elapsed, self.WAIT)
 
     def test_an_endless_module_body_is_cut_off_in_needs_mode_too(self):
-        # BUG (low): runner.py:97-107 `needs_of` executes the strategy's module body with NO alarm
-        # (only `decide` arms one), so `while True: pass` at the top of a file hangs the runner in
-        # needs mode until the box's outer `timeout 30` kills it, and the House is billed 30 box
-        # seconds for reading NEEDS. `House.spawn`/`adopt` call `sandbox.needs` on code the cheap
-        # models wrote, so this path takes untrusted code.
-        # FIX: arm the same SIGALRM deadline around the `exec` in `needs_of`.
+        # Regression: `needs_of` once ran the module body with no alarm, so `while True` at the top of a
+        # file hung needs mode until the box's 30 s outer timeout. It is armed like `decide` now.
         self.assertIsNotNone(self.results["needs"], "needs mode was still running after 7 seconds (MAX_SECONDS is 5)")
+        returncode, out, err, elapsed = self.results["needs"]
+        self.assertEqual(returncode, 0, err)
+        result = runner.parse_result(out, "needs-token")
+        self.assertFalse(result["ok"])
+        self.assertIn("ran past 5 seconds", result["error"])
+        self.assertGreaterEqual(elapsed, 4.5)
 
 
 if __name__ == "__main__":

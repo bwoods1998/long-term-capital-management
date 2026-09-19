@@ -80,11 +80,15 @@ class LocalSandbox:
         path = self.root / agent
         if not path.exists():
             path.mkdir(parents=True)
-        for name, source in kit_files().items():
+        wanted = kit_files()
+        for name, source in wanted.items():
             target = path / name
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists() or target.read_bytes() != Path(source).read_bytes():
                 shutil.copyfile(source, target)
+        for stale in (path / "tools").glob("*.py"):
+            if f"tools/{stale.name}" not in wanted:
+                stale.unlink()  # a tool withdrawn from the repository is withdrawn from every box
         return path
 
     def _run(self, agent: str, program: str, spec: Mapping[str, Any], marker: str, timeout: float) -> Run:
@@ -193,15 +197,6 @@ class SailSandbox:
                 self._state.setdefault("sealed", {})[box] = True
                 self._save()
         else:
-            if not self._state.setdefault("sealed", {}).get(box):
-                # A box from before sealing was recorded: seal it again before anything runs in it.
-                try:
-                    self.client.set_egress(box, SEALED)
-                except Exception as exc:  # noqa: BLE001
-                    raise SandboxError(f"could not close the network of {agent}'s box: {exc}") from exc
-                with self._lock:
-                    self._state["sealed"][box] = True
-                    self._save()
             status = str((self.client.get(box) or {}).get("status") or "")
             if status in ("sleeping", "paused", "asleep"):
                 self.client.resume(box)
@@ -212,14 +207,29 @@ class SailSandbox:
                     self._state.setdefault("sealed", {}).pop(box, None)
                     self._save()
                 return self._ensure(agent, checkpoint=checkpoint)
+            if not self._state.setdefault("sealed", {}).get(box):
+                # A box from before sealing was recorded: seal it again before anything runs in it.
+                try:
+                    self.client.set_egress(box, SEALED)
+                except Exception as exc:  # noqa: BLE001
+                    raise SandboxError(f"could not close the network of {agent}'s box: {exc}") from exc
+                with self._lock:
+                    self._state["sealed"][box] = True
+                    self._save()
         digest = _kit_digest()
         if self._state["kit"].get(box) != digest:
+            # Each version of the kit gets a directory of its own, and programs run from it: a tool
+            # withdrawn from the repository is simply not there, whatever older kits left behind.
             for name, source in kit_files().items():
-                self.client.upload(box, f"{REMOTE_DIR}/{name}", Path(source).read_bytes(), mode=0o644)
+                self.client.upload(box, f"{self.kit_dir()}/{name}", Path(source).read_bytes(), mode=0o644)
             with self._lock:
                 self._state["kit"][box] = digest
                 self._save()
         return box, created
+
+    @staticmethod
+    def kit_dir() -> str:
+        return f"{REMOTE_DIR}/kit-{_kit_digest()}"
 
     def _run(self, agent: str, command: str, spec: Mapping[str, Any], marker: str, timeout: int) -> Run:
         with self._agent_lock(agent):
@@ -227,8 +237,8 @@ class SailSandbox:
             try:
                 box, created = self._ensure(agent)
                 token = secrets.token_hex(16)
-                self.client.upload(box, f"{REMOTE_DIR}/spec.json", json.dumps({**spec, "token": token}).encode("utf-8"), mode=0o600)
-                done = self.client.exec(box, ["sh", "-c", f"cd {REMOTE_DIR} && timeout {timeout} python3 -E -s {command}"], timeout=timeout + 30)
+                self.client.upload(box, f"{self.kit_dir()}/spec.json", json.dumps({**spec, "token": token}).encode("utf-8"), mode=0o600)
+                done = self.client.exec(box, ["sh", "-c", f"cd {self.kit_dir()} && timeout {timeout} python3 -E -s {command}"], timeout=timeout + 30)
             except SandboxError:
                 raise
             except Exception as exc:  # noqa: BLE001 - the Sail API failing is not the strategy failing

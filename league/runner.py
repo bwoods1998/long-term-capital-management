@@ -17,6 +17,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 
 try:
@@ -42,13 +43,13 @@ def _alarm(signum, frame):
 
 def _arm() -> None:
     """Start the deadline. The alarm repeats, so code that swallows one interruption gets another."""
-    if hasattr(signal, "SIGALRM"):
+    if hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGALRM, _alarm)
         signal.setitimer(signal.ITIMER_REAL, MAX_SECONDS, 0.25)
 
 
 def _disarm() -> None:
-    if hasattr(signal, "SIGALRM"):
+    if hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
         signal.setitimer(signal.ITIMER_REAL, 0)
 
 
@@ -75,6 +76,7 @@ def decide(code: str, ctx: dict) -> dict:
             return {"ok": False, "error": f"decide ran past {MAX_SECONDS} seconds"}
         return clean(out, namespace.get("NEEDS"), elapsed)
     except TimedOut:
+        _disarm()
         return {"ok": False, "error": f"decide ran past {MAX_SECONDS} seconds"}
     except BaseException as exc:  # noqa: BLE001 - a strategy may raise anything
         _disarm()
@@ -125,6 +127,7 @@ def needs_of(code: str) -> dict:
         params = json.loads(json.dumps(params)) if isinstance(params, dict) else {}
         return {"ok": True, "needs": needs, "params": params}
     except TimedOut:
+        _disarm()
         return {"ok": False, "error": f"the strategy file ran past {MAX_SECONDS} seconds while loading"}
     except BaseException as exc:  # noqa: BLE001
         _disarm()

@@ -35,7 +35,8 @@ from ltcm.broker import Instrument, money
 
 from . import seeds as seeds_module
 from .agents import Agent, Registry, niche_of
-from .book import Book, Intent, Limits, step_of
+from . import capital
+from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
 from .constitution import CONSTITUTION, digest as constitution_digest
 from .economy import Economy, Standing, load_game
@@ -163,7 +164,7 @@ class House:
         self.ledger.append(
             "ops.started",
             {"constitution": constitution_digest(), "real_money": self.settings.real_money, "books": sorted(self.books),
-             "sandbox": type(self.sandbox).__name__},
+             "sandbox": type(self.sandbox).__name__, "release": Path(__file__).resolve().parents[1].name},
         )
 
     def alert(self, level: str, text: str) -> None:
@@ -265,7 +266,10 @@ class House:
         # demotion after a loss leaves `staked` above zero and cash at zero: it is staked afresh).
         if account.staked <= 0 or (account.swept and not account.holdings):
             stake = CONSTITUTION["rungs"]["2" if book.real_money else "1"]["stake_usd"]
-            book.stake(agent.id, stake, note=f"rung {rung} stake")
+            try:
+                book.stake(agent.id, stake, note=f"rung {rung} stake")
+            except BookError as exc:  # a real book not reconciled yet, or out of real cash: try again next wake
+                self.alert("warning", f"{agent.id} could not be staked on {book.name}: {exc}")
 
     # ------------------------------------------------------------------- data
     def _cached(self, key: str, ttl: float, build: Callable[[], Any]) -> Any:
@@ -350,6 +354,8 @@ class House:
         if book is None:
             return {"agent": agent.id, "skipped": "no book for its venue"}
         self.seat(agent)
+        if book.account(agent.id).staked <= 0 and not book.account(agent.id).holdings:
+            return {"agent": agent.id, "skipped": "no stake on its book yet"}
         try:
             ctx = self.snapshot(agent, book)
         except Exception as exc:  # noqa: BLE001 - a data outage skips a wake, it does not stop the floor
@@ -772,6 +778,10 @@ class House:
             self._background("astra:follow", self.astra.follow)
         if open_for_business and self.economy.payout_due():
             self.learn()
+            for agent in self.registry.living():
+                if self.evaluator.rung(agent.id) >= 3:
+                    capital.resize(self, agent)
+            capital.recommend(self, {name: (book.venue_cash or ZERO) for name, book in self.books.items() if book.real_money})
             self.economy.payout(self.standings())
             if self.auditor is not None:
                 self.auditor.score()
@@ -792,6 +802,7 @@ class House:
             "at": summary["at"], "living": len(self.registry.living()), "dead": len(self.registry.dead()),
             "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders())} for name, book in self.books.items()},
             "ledger_seq": self.ledger.head()[0], "real_money": self.settings.real_money,
+            "release": Path(__file__).resolve().parents[1].name,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")

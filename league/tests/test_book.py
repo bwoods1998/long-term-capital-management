@@ -322,6 +322,26 @@ class PaperBookTest(BookCase):
         self.broker.held[BTC.key] = (inst, held - D("0.0001"))  # $8 missing is not dust
         self.assertFalse(self.book.reconcile().ok)
 
+    def test_a_crumb_left_at_the_venue_after_the_holder_sold_out_is_dust_not_a_freeze(self):
+        """Found by the ladder test: after thousands of round trips the venue showed 0.000000001
+        BTC that no agent held any more, and with no holder there was no instrument to value it
+        against, so reconciliation called it a real difference and froze the book."""
+        self.book.reconcile()
+        self.seat("a1")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.book.submit([self.intent("a1", BTC, "buy", "0.0005")])
+        held = self.book.account("a1").holdings[BTC.key].quantity
+        self.book.submit([self.intent("a1", BTC, "sell", str(held))])
+        self.assertEqual(self.book.account("a1").holdings, {})
+        inst, _ = self.broker.held[BTC.key]
+        self.broker.held[BTC.key] = (inst, D("0.000000001"))
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertIsNone(self.book.frozen)
+        self.assertEqual(self.book.account(HOUSE).holdings[BTC.key].quantity, D("0.000000001"))
+        again = self.new_book()  # and a restart knows the instrument too
+        self.assertTrue(again.reconcile().ok)
+
     def test_the_ledger_verifies_after_all_of_it(self):
         self.seat("a1")
         self.broker.set_quote(BTC, "80000", "80010")

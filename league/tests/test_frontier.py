@@ -151,13 +151,9 @@ class ReadingTheAnswer(unittest.TestCase):
             self.assertEqual(answer.cost_usd, Decimal(0), cost)
 
     def test_a_cost_header_that_is_not_a_finite_number_is_not_passed_on(self):
-        # BUG (low): frontier.py:100. `Decimal("NaN")` and `Decimal("Infinity")` parse without
-        # `InvalidOperation`, so they become `Answer.cost_usd`. The auditor then evaluates
-        # `answer.cost_usd > 0`, which RAISES `decimal.InvalidOperation` for NaN, and
-        # `Economy.charge` raises on Infinity: an audit that was paid for ends in an uncaught
-        # exception with no `audit.verdict` row. The header comes from our own gateway, so this
-        # needs a gateway bug to happen, but the House should not crash on it.
-        # FIX: `if not cost_usd.is_finite() or cost_usd < 0: cost_usd = Decimal(0)` (or raise FrontierError).
+        # Regression: `Decimal("NaN")` and `Decimal("Infinity")` parse, and once became `cost_usd`; the
+        # auditor's `cost_usd > 0` then raised InvalidOperation. A cost that is not finite, or is
+        # negative, is now read as zero (the gateway's own meter is the record).
         for cost in ("NaN", "Infinity", "-Infinity", "sNaN"):
             answer = frontier(FakeOpener(ok(cost=cost))).ask(system="s", user="u", agent="a")
             self.assertTrue(answer.cost_usd.is_finite(), cost)
@@ -272,12 +268,8 @@ class Failures(unittest.TestCase):
                 frontier(FakeOpener(FakeResponse(raw=raw))).ask(system="s", user="u", agent="a")
 
     def test_a_json_body_that_is_not_an_object_is_a_frontier_error(self):
-        # BUG (low-medium): frontier.py:92 and :103. `json.load` happily returns a list, a string
-        # or `null`; `output_text(payload)` then calls `payload.get` and raises AttributeError
-        # OUTSIDE the try block. Callers catch only `FrontierError` (auditor.py:88), so the House
-        # gets an uncaught AttributeError instead of a veto row, and a gateway or proxy that
-        # answers 200 with `null` or `[]` crashes the judge pass.
-        # FIX: after `json.load`, `if not isinstance(payload, dict): raise FrontierError(...)`.
+        # Regression: a 200 answer of `[]` or `null` once raised AttributeError outside the try block,
+        # past every caller that catches `FrontierError`. It is a `FrontierError` now.
         for raw in (b"[]", b"null", b'"ok"', b"42"):
             with self.assertRaises(FrontierError, msg=raw):
                 frontier(FakeOpener(FakeResponse(raw=raw))).ask(system="s", user="u", agent="a")

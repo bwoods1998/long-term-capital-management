@@ -2,8 +2,8 @@
 
 Every test builds a real `Ledger` in a temp dir and appends the rows a `Book` would write
 (`book.stake`, `book.mark`, `book.fill`, `book.settle`), or `eval.block` rows directly when a
-statistic has to be exact. Tests marked `expectedFailure` demonstrate bugs; each carries a
-`# BUG:` comment with what is wrong and the proposed fix.
+statistic has to be exact. A test that begins with a `# Regression:` note pins a bug this file
+found: the note says what was wrong once and what the code does now.
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ class EvalCase(unittest.TestCase):
         return self.ledger.append(
             "eval.block",
             {"book": book, "key": f"k{self._keys:05d}", "horizon": "hour", "start_equity": begin, "end_equity": end,
-             "flow": 0.0, "log_growth": growth, "active": active, "rung": self.ev.rung(agent)},
+             "flow": 0.0, "log_growth": growth, "active": active},
             agent=agent,
         )
 
@@ -265,12 +265,9 @@ class ObserveBlocks(EvalCase):
         self.assertEqual(self.ledger.verify(), self.ledger.count())
 
     def test_re_observation_reports_zero_blocks_added(self):
-        # BUG: evaluator.py:187 `added += 1 if entry.seq > last.seq else 0`. The test is meant to
-        # tell a new row from an idempotent re-append, but a block row is always written after the
-        # last mark of its own block (a block is only finished once a LATER mark exists), so
-        # `entry.seq > last.seq` is true for old rows too. `observe` therefore returns the total
-        # number of finished blocks on every call, not "how many blocks were added".
-        # FIX: take `head = self.ledger.head()[0]` before the loop and count `entry.seq > head`.
+        # Regression: `observe` once counted `entry.seq > last.seq`, which is true for rows already on the
+        # ledger too, so it returned every finished block on every call. It now skips recorded keys and
+        # counts only the rows it writes.
         self.stake("a", 200, at(0, 0))
         for hour in range(5):
             self.mark("a", 200 + hour, at(hour, 10))
@@ -278,7 +275,7 @@ class ObserveBlocks(EvalCase):
         self.assertEqual(self.ev.observe("a", "paper", "hour"), 0)
 
     def test_observe_counts_only_the_new_block_when_one_more_hour_finishes(self):
-        # BUG: same defect as above (evaluator.py:187): after one more hour this returns 5, not 1.
+        # Regression: the same defect; this used to return 5.
         self.stake("a", 200, at(0, 0))
         for hour in range(5):
             self.mark("a", 200 + hour, at(hour, 10))
@@ -410,17 +407,10 @@ class ObserveBlocks(EvalCase):
         self.assertEqual(self.ev.blocks("a", since_seq=block["first_mark_seq"]), [])
 
     def test_observing_the_same_book_after_a_rung_change_does_not_crash(self):
-        # BUG (severe): evaluator.py:171-186. `observe` recomputes EVERY finished block on every
-        # call and re-appends it under the id `block:{agent}:{book}:{key}` with `"rung":
-        # self.rung(agent)` in the payload. Rungs 2 and 3 share the real-money book
-        # (house.py `book_of`: rung >= 2 -> REAL_BOOK), so the first `observe` after a 2 -> 3
-        # promotion (or a 3 -> 2 demotion) re-appends the old blocks with a different rung, and the
-        # ledger raises `LedgerConflict`. `House.judge` calls `observe` first, so from that moment
-        # every judge pass of that agent raises: a rung-3 agent can never be looked at, never die
-        # on evidence or drawdown, and never be demoted on drift.
-        # FIX: skip a block whose id is already on the ledger (`self.ledger.get(id)`) before
-        # building the payload, or keep `rung` out of the idempotent payload. Skipping also stops
-        # the O(all marks) rewrite on every wake.
+        # Regression: `observe` once re-appended every block with `"rung": self.rung(agent)` in its
+        # idempotent payload. Rungs 2 and 3 share the real-money book, so the first observation after a
+        # 2 -> 3 promotion raised `LedgerConflict` and the agent could never be judged again. Blocks now
+        # carry their mark positions instead of a rung, and a recorded key is never rewritten.
         self.stake("a", 25, at(0, 0), book="real")
         self.ev.seat("a", 2, "test")
         for hour in range(4):
@@ -615,26 +605,21 @@ class Judge(EvalCase):
         for agent, trough, decision in (("at", 140.0, "die"), ("under", 140.5, "hold")):
             self.ev.seat(agent, 1, "test")
             self.ledger.append("eval.block", {"book": "paper", "key": "k1", "start_equity": 200.0, "end_equity": trough, "flow": 0.0,
-                                              "log_growth": math.log(trough / 200.0), "active": True, "rung": 1}, agent=agent)
+                                              "log_growth": math.log(trough / 200.0), "active": True}, agent=agent)
             self.assertEqual(self.ev.judge(agent, "paper").decision, decision, agent)
 
     def test_the_drawdown_is_measured_from_the_first_blocks_start(self):
         self.ev.seat("a", 1, "test")
         self.ledger.append("eval.block", {"book": "paper", "key": "k1", "start_equity": 200.0, "end_equity": 130.0, "flow": 0.0,
-                                          "log_growth": math.log(130 / 200), "active": True, "rung": 1}, agent="a")
+                                          "log_growth": math.log(130 / 200), "active": True}, agent="a")
         verdict = self.ev.judge("a", "paper")
         self.assertEqual(verdict.decision, "die")
         self.assertAlmostEqual(verdict.numbers["drawdown"], 0.35)
 
     def test_taking_part_of_a_stake_back_is_not_a_drawdown(self):
-        # BUG: evaluator.py:226-229 builds the drawdown from raw `end_equity`, which includes stake
-        # flows, although `log_growth` on the same rows takes them out. `Book.stake` accepts a
-        # negative amount ("negative takes it back"), so a House (or owner) that withdraws 40% of a
-        # flat agent's stake makes `judge` return `die` for a 40% "drawdown" the agent never had.
-        # The mirror is as bad: a deposit hides a real drawdown (200 -> 130 with +100 lent in the
-        # same block reads as 200 -> 230).
-        # FIX: compute the drawdown on the flow-free wealth index, e.g.
-        # `index = [1.0]; index.append(index[-1] * exp(log_growth))` for each row.
+        # Regression: the drawdown was once read from raw `end_equity`, so the House taking back 40% of
+        # a flat agent's stake was a 40% "drawdown" and a death. It is now the drawdown of the wealth
+        # index built from the blocks' log growth, which has the stake flows taken out.
         self.stake("a", 200, at(0, 0))
         self.ev.seat("a", 1, "test")
         self.mark("a", 200, at(0, 10))
@@ -648,8 +633,8 @@ class Judge(EvalCase):
         self.assertEqual(verdict.decision, "hold")
 
     def test_a_deposit_does_not_hide_a_drawdown(self):
-        # BUG: the mirror of the test above (evaluator.py:226-229): 200 -> 130 is a 35% loss, but
-        # $100 lent in the same block makes end_equity 230 and the breaker sees no drawdown at all.
+        # Regression: the mirror of the test above. 200 -> 130 with $100 lent in the same block once
+        # read as 200 -> 230 and no drawdown.
         self.stake("a", 200, at(0, 0))
         self.ev.seat("a", 1, "test")
         self.mark("a", 200, at(0, 10))
@@ -767,19 +752,11 @@ class Judge(EvalCase):
         self.assertEqual(verdict.numbers["trades"], 0)
 
     def test_a_backlog_of_blocks_from_the_time_on_another_rung_is_not_judged_on_this_one(self):
-        # BUG (medium): evaluator.py:191-196 and :222. A block belongs to a rung by the sequence
-        # number at which its ROW WAS WRITTEN (`e.seq > since_seq`), not by when the block
-        # happened. The House observes only the book of the agent's current rung, so while an agent
-        # is on rung 2 nobody observes its paper book, although the paper book is still marked
-        # every tick (and may still hold Kalshi contracts: `_wind_down` keeps them to settlement).
-        # On demotion the first `observe` of the paper book writes that whole backlog at once,
-        # every row AFTER the demotion verdict, stamped `"rung": 1`, and `judge` counts all of it
-        # as the new rung-1 record: a settlement loss taken on paper while the agent was on real
-        # money can kill it for "drawdown" the moment it returns. The same happens to the block
-        # that straddles any promotion.
-        # FIX: store the block's first mark seq in the row (e.g. `"from_seq": first.seq`) and let
-        # `blocks(since_seq)` keep rows whose `from_seq > since_seq`; do not write backlog blocks
-        # under the new rung at all.
+        # Regression: a block once belonged to a rung by when its ROW was written. The paper book is not
+        # observed while an agent is on rung 2, so after a demotion its whole backlog was written at
+        # once and judged as the new rung-1 record: a paper settlement loss taken during the stay on
+        # real money killed the agent on its return. A block now carries `first_mark_seq`, and
+        # `blocks(since_seq)` keeps those that BEGAN after the rung was entered.
         self.stake("a", 200, at(0, 0))
         self.ev.seat("a", 1, "test")
         for hour in range(3):
@@ -799,14 +776,10 @@ class Judge(EvalCase):
         self.assertEqual(verdict.decision, "hold")
 
     def test_a_lopsided_record_with_no_measured_risk_is_not_waved_through(self):
-        # BUG (low-medium): evaluator.py:214 returns a risk of 0.0 when no buy was seen since the
-        # rung was entered (positions opened before it, e.g. Kalshi contracts carried across a
-        # demotion and settling afterwards), and :249 hands that 0.0 to
-        # `stats.lopsided_growth_lcb`, where "the worst loss that could have happened" becomes
-        # zero: the bound is then (1 - p) * win_growth > 0 for ANY all-win record, so the one gate
-        # built for favourites passes exactly when it knows least.
-        # FIX: when `risked` is empty return `float("nan")` (the gate reads a risk that is not
-        # finite as "everything at risk"), or 1.0.
+        # Regression: `trade_returns` once reported a risk of 0.0 when no buy had been seen since the
+        # rung began (contracts carried in and settling later), which made the worst case of the
+        # lopsided gate a loss of nothing, so any all-win record passed. No entry seen now means all of
+        # the stake is assumed at risk.
         self.ev.seat("a", 1, "test")
         self.stake("a", 200, at())
         for _ in range(12):
@@ -1000,17 +973,10 @@ class ReplayTrials(EvalCase):
         self.assertEqual(self.ev.rung("a"), 0)
 
     def test_a_failed_replay_still_counts_as_a_trial_for_the_family(self):
-        # BUG (exploitable): evaluator.py:82-88 and :95-98. `family_trials` drops every trial row
-        # whose `sharpe` is None, and `record_trial` sets `sharpe = None` for an `ok: False` replay
-        # (and for a flat one), then passes `n_trials=len(trials)`. So failed replays are written
-        # as `eval.trial` rows but never raise N in the deflated Sharpe: the constitution's "every
-        # replay ever run for the family is a trial" does not hold. A strategy can use this:
-        # `raise` inside `decide` whenever the run is going badly -> replay.py returns
-        # `{"ok": False, "error": "too many errors"}` -> the try is free, and only lucky runs are
-        # ever counted.
-        # FIX: count N as the number of `eval.trial` rows of the family (plus this one), and pass
-        # only the defined Sharpes for the variance:
-        # `deflated_sharpe(growth, defined_sharpes, n_trials=rows_for_family + 1)`.
+        # Regression: `family_trials` once dropped trials without a Sharpe ratio, so a failed (or flat)
+        # replay never raised N in the deflated Sharpe, and a strategy that raised whenever a run went
+        # badly got its tries for free. Every `eval.trial` row of the family now counts toward N; only
+        # the defined Sharpes feed the variance.
         for i in range(50):
             self.ev.record_trial(f"crasher-{i % 5}", "fam", replay_result(ok=False, error="too many errors"))
         self.assertEqual(self.ledger.count(kinds="eval.trial"), 50)
@@ -1018,10 +984,7 @@ class ReplayTrials(EvalCase):
         self.assertEqual(verdict.numbers["trials"], 51)
 
     def test_failed_replays_raise_the_bar(self):
-        # BUG: the consequence of the one above. The same replay is judged against a benchmark
-        # Sharpe of 0.0 whether it was the family's first try or its fifty-first, so long as the
-        # other fifty "failed". With N = 51 and the 1/n variance floor the benchmark would be
-        # about 0.36 a block.
+        # Regression: the consequence of the one above. The benchmark after fifty failed tries was once 0.0.
         for i in range(50):
             self.ev.record_trial(f"crasher-{i % 5}", "fam", replay_result(ok=False, error="too many errors"))
         verdict = self.ev.record_trial("a", "fam", replay_result(), promote=False)
@@ -1174,16 +1137,64 @@ class Drift(EvalCase):
         self.block("a", 0.003, book="real", start=25.0)
         self.assertEqual(self.ev.drift("a", "real").decision, "hold")
 
+    def climb_to_three_with_a_flat_paper_account_in_the_window(self, agent="a"):
+        """Rung 2 was earned on paper and rung 3 on the real book (+0.4% a block, steadily), while
+        the wound-down paper account went on being marked, flat and idle, inside the same stay."""
+        self.ev.seat(agent, 1, "test")
+        for i in range(30):
+            self.block(agent, 0.013 if i % 2 else 0.007)
+        self.ev.promote(agent, 2, "test")
+        for i in range(30):
+            self.block(agent, 0.005 if i % 2 else 0.003, book="real", start=25.0)
+            self.block(agent, 0.0, book="paper", active=False)
+            self.block(agent, 0.0, book="paper", active=False)
+        self.ev.promote(agent, 3, "test")
+
+    def test_the_record_that_earned_a_rung_is_the_record_of_one_book(self):
+        # Regression: `_record_below` once took every block that began inside the stay, whatever
+        # its book, so a wound-down paper account (still marked, flat) diluted the real-money
+        # record: here the reference would have been +0.13% with twice the sd instead of +0.4%.
+        # It now keeps the one book the stay was traded on (the book with the active blocks).
+        self.climb_to_three_with_a_flat_paper_account_in_the_window()
+        record = self.ev._record_below("a", 3)
+        self.assertEqual({row["book"] for row in record}, {"real"})
+        self.assertEqual(len(record), 30)
+        for i in range(10):
+            self.block("a", 0.005 if i % 2 else 0.003, book="real", start=25.0)
+        verdict = self.ev.drift("a", "real")
+        self.assertEqual(verdict.decision, "hold")
+        self.assertAlmostEqual(verdict.numbers["reference_mean"], 0.004)
+        self.assertAlmostEqual(verdict.numbers["reference_sd"], stats.mean_bounds([0.003, 0.005] * 15, 0.5)["sd"])
+
+    def test_a_flat_account_elsewhere_does_not_blunt_the_drift_alarm(self):
+        # Regression: the consequence of the dilution above. A fall from +0.4% to +0.1% a block is
+        # 2.5 sd a step against the real record, and was under the slack against the diluted one.
+        self.climb_to_three_with_a_flat_paper_account_in_the_window()
+        for _ in range(4):
+            self.block("a", 0.001, book="real", start=25.0)
+        verdict = self.ev.drift("a", "real")
+        self.assertEqual((verdict.decision, verdict.rung), ("demote", 2))
+        self.assertTrue(verdict.numbers["alarm"])
+
+    def test_the_record_below_is_the_latest_stay_there_and_empty_when_there_was_none(self):
+        self.assertEqual(self.ev._record_below("nobody", 2), [])
+        self.ev.seat("a", 2, "straight to real money, for the test")
+        self.assertEqual(self.ev._record_below("a", 2), [])
+        self.ev.seat("b", 1, "test")
+        for _ in range(3):
+            self.block("b", 0.01)
+        self.ev.promote("b", 2, "test")
+        self.ev.demote("b", "drift")
+        for _ in range(5):
+            self.block("b", 0.002)
+        self.ev.promote("b", 2, "test")
+        self.assertEqual([row["log_growth"] for row in self.ev._record_below("b", 2)], [0.002] * 5)  # the second stay on paper only
+
     def test_rung_three_drifts_against_the_real_money_record_that_earned_it(self):
-        # QUESTIONABLE / BUG: evaluator.py:302 takes as "the record that earned the rung" EVERY
-        # `eval.block` of the agent before the rung was entered: all books, all earlier rungs. For
-        # rung 3 that pools the rung-1 paper record (optimistic fills, by the memo's own account)
-        # with the rung-2 real-money record that actually earned the rung; after a 3 -> 2 demotion
-        # it also pools in the decayed rung-3 blocks. Here paper showed +1% a block and real money
-        # +0.2%: the reference mean comes out near +0.6%, so an agent still doing exactly what
-        # earned it rung 3 is demoted for "decay".
-        # FIX: build `earned` from blocks with `previous_entered < seq <= entered` (the rung just
-        # below), and filter it by the book that rung was judged on.
+        # Regression: the drift reference was once EVERY earlier block of the agent, all books and all
+        # rungs, so rung 3 was measured against the optimistic paper record pooled with the real one
+        # (a reference mean of +0.6% here, and a demotion for "decay" that never happened). It is now
+        # the agent's latest stay on the rung just below (`_record_below`).
         self.ev.seat("a", 1, "test")
         for i in range(30):
             self.block("a", 0.013 if i % 2 else 0.007)

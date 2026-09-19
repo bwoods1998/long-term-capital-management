@@ -1,143 +1,193 @@
-# Running the floor
+# Running the House
 
-The floor runs on a **Sailbox** -- one small always-on Linux VM in Sail's cloud. The MacBook is
-the operator terminal: it holds the credentials, it decides, and it can be closed without the
-floor missing an open. Everything below is run from the repository on the MacBook.
-
-One script drives the box:
+The House (`python3 -m league run`) runs on one trusted **Sailbox**: a small always-on Linux VM in
+Sail's cloud. The MacBook is the operator terminal: it holds the credentials, it decides, and it
+can be closed without the House missing a tick. Everything below is run from the repository on
+the MacBook, and one script drives the box:
 
 ```sh
 python3 scripts/floor_box.py --help
 ```
 
-Box state (ids, the allowlist in effect, uploaded-file digests, checkpoints) lives in
-`.data/ltcm/box.json`. It is owner-only and contains no credential.
+Box state (ids, the allowlist in effect, the releases sent and their verdicts, checkpoints) lives
+in `.data/ltcm/box.json`. It is owner-only and contains no credential.
 
-## The five steps
+## The box
+
+Everything is under `/workspace`:
+
+| Path | What it is |
+|---|---|
+| `releases/<id>/` | one full code tree per release (`league/`, `ltcm/`, `scripts/`, `deploy/`, `playbooks/`), never edited again |
+| `current`, `previous` | symlinks into `releases/`. Only `league.watchdog` moves them |
+| `state/` | the House's state: the ledger, `health.json`, `STOP`, `sandbox.json`, caches |
+| `canary/` | throwaway state for canary runs; the real state is never touched by one |
+| `incoming/<id>/` | where an upload is unpacked before the watchdog stages it |
+| `.env` | the three secrets, mode 600 |
+| `.venv` | the interpreter |
+| `run.sh`, `restart.sh` | the supervisor loop, and the one signal that restarts the House |
+| `run.pid`, `loop.pid`, `deploy.pid` | the supervisor, the House, a deploy being judged |
+| `league.log` | the House and its supervisor |
+| `deploy.log` | what the watchdog said during the last deploy |
+| `deploys.jsonl` | the watchdog's append-only record: every stage, reading, verdict and reason |
+
+`/workspace/ltcm`, `/workspace/.data`, `/workspace/.archive` and `/workspace/ltcm.log` are the first
+run's record. Nothing the script does for the league reads, moves, overwrites or deletes them.
+
+## The steps
 
 ```sh
-python3 scripts/floor_box.py create      # 1. the box, the network policy, the code, the venv
-python3 scripts/floor_box.py secrets     # 2. the three values the box needs -> /workspace/.env, mode 600
-python3 scripts/floor_box.py start       # 3. start the supervised loop
-python3 scripts/floor_box.py status      # 4. box, spend, loop, log tail, the floor's health
-python3 scripts/floor_box.py checkpoint --name before-<change>   # 5. before anything risky
+python3 scripts/floor_box.py create      # 1. the box, the network policy, the venv, run.sh
+python3 scripts/floor_box.py secrets     # 2. the three values the box needs -> /workspace/.env
+python3 scripts/floor_box.py deploy      # 3. the first release, through the watchdog
+python3 scripts/floor_box.py start       # 4. start the supervised loop
+python3 scripts/floor_box.py status      # 5. box, spend, loop, releases, health, log tail
+python3 scripts/floor_box.py checkpoint --name before-<change>   # before anything risky
 ```
 
-and then, for every code change afterwards:
-
-```sh
-python3 scripts/floor_box.py deploy      # re-upload what changed; restart a running loop
-```
+and then, for every code change afterwards, `deploy` again.
 
 ### 1. `create`
 
 Creates one **size `s`** Sailbox (1 vCPU, 16 GiB memory ceiling, 32 GiB disk) from
 `BASE_IMAGE_DEBIAN`, private to the owner's key, in the `ltcm` app. Then, in order: attaches the
 egress allowlist, **reads the policy back from the live API and refuses to go on if it differs**,
-uploads `ltcm/` (including `ltcm/config.json`), `playbooks/`, `scripts/` and `deploy/` as one tar,
-builds `/workspace/.venv` and installs `cryptography` into it, and writes `/workspace/run.sh` and
-`/workspace/restart.sh`.
+builds `/workspace/.venv`, writes `run.sh` and `restart.sh`, and makes the directories above.
 
-It leaves the loop **stopped**. Nothing trades until `start`.
+It uploads no code and leaves the loop **stopped**. The first release needs the `.env` (its canary
+talks to the gateway), so `secrets` comes before `deploy`.
+
+The league is standard library only. `cryptography` is still installed when it can be, because
+`ltcm.adapters` imports it lazily for a signing path the box never takes; if the install fails,
+`create` says so and carries on.
 
 Sail bills observed usage, not the ceiling: `$0.015` per used vCPU-hour, `$0.008` per used
 GiB-hour of memory, `$0.0007` per used GiB-hour of disk, plus `$0.005` once to create an `s` box.
-An idle floor uses a small fraction of one vCPU, so the box costs single-digit dollars a month.
 `status` prints the running rate at the box's actual usage.
 
 ### 2. `secrets` -- the one command that touches a credential
 
+The box needs exactly three values and gets exactly three: `SAIL_API_KEY` (agent boxes and
+cheap-model inference), `GATEWAY_TOKEN` (venues and the frontier model, through the gateway) and
+`CAPITAL_PUBLISH_TOKEN` (the public site). They are read from the local `.env`, composed into a
+three-line file and uploaded as bytes to `/workspace/.env`, mode 600. **No venue key ever goes to
+the box**: they live only in the gateway's Cloudflare secrets, so a fork or a checkpoint of the box
+can never reach a venue without the gateway's caps.
+
+No value is decoded, logged or kept; the command prints names and byte counts only. It deletes
+nothing on the box. If `box.json` says an earlier run put a key file under `/workspace/.data`, it
+says so: removing it is the owner's step.
+
+### 3. `deploy` -- through the in-box watchdog
+
 ```sh
-python3 scripts/floor_box.py secrets
+python3 scripts/floor_box.py deploy              # wait for the verdict (up to 1500 s)
+python3 scripts/floor_box.py deploy --no-wait    # launch and return; `status` has the verdict
 ```
 
-In gateway mode (`gateway_url` set in `ltcm/config.json`, which is how the floor runs) the box
-needs exactly three values and gets exactly three: `SAIL_API_KEY` (the desks think on Sail),
-`GATEWAY_TOKEN` (the box asks the gateway to sign venue requests) and `CAPITAL_PUBLISH_TOKEN`
-(the box publishes to the site). They are read from the local `.env`, composed into a three-line
-file and uploaded as bytes to `/workspace/.env`, mode 600. **The venue keys never go to the
-box**: `KALSHI_KEY_ID`, `kalshi.pem`, `COINBASE_KEY_NAME` and `COINBASE_API_SECRET` live only in
-the gateway's Cloudflare secrets, so a fork or a checkpoint of the box can never reach a venue
-without the gateway's caps. Without a `gateway_url` the older direct mode applies and the whole
-`.env` and `.data/ltcm/keys/` are sent, which is the mode this script was first written for.
+A release is always the whole tree. `deploy` packs it into a deterministic tarball, names it
+`YYYYMMDDTHHMMSSZ-<first 12 hex of the tarball's sha256>`, unpacks it into
+`/workspace/incoming/<id>/`, and hands it to `python -m league.watchdog deploy`, detached, run
+from the known-good `current` code when there is one. The watchdog then:
 
-No value is decoded, logged or kept; the command prints names and byte counts only.
+1. **stages** the tree as `releases/<id>/`;
+2. runs it as a **canary**: a whole House on throwaway state, a simulated paper account, no
+   publishing, no research, no real money. A non-zero exit, a traceback, a timeout or bad health
+   and the release is **refused**: `current` is not touched;
+3. **promotes** it (`previous` := old `current`, `current` := the release) and runs `restart.sh`;
+4. **watches** the real House's `health.json` for ten minutes. After a grace of two readings, the
+   first bad one **rolls back**: `current` goes back, the House is restarted again.
 
-### 3. `start` / `stop`
+On a first deploy, or when the loop is not running, there is no House to watch and the watchdog
+is told `--watch-seconds 0`: canary, then promote.
 
-`start` clears the stop latch, releases the kill switch, and launches `/workspace/run.sh` as a
-detached process. `run.sh` runs one `python -m ltcm run` at a time, logs everything to
-`/workspace/ltcm.log`, and restarts the loop 30 seconds after it exits -- unless
-`/workspace/STOP` exists, which is how a deliberate stop survives the restart delay.
+`deploy` prints the verdict and the reasons, records both in `box.json` (the last 20 releases),
+and exits 0 only for `promoted` (2 refused, 3 rolled back, 4 failed: it went bad with nothing to
+roll back to, 1 no verdict seen). It never moves a link, never restarts the loop and never starts
+one. The same tree as `current` is not sent again, and a second deploy is refused while the first
+is still being judged.
 
-`stop` does the three things in the only order that is safe:
+To go back by hand, on the box, from the code being gone back to:
 
-1. engages the kill switch on the box (`python -m ltcm kill`), so no new order can be placed;
-2. writes `/workspace/STOP` so the supervisor will not bring the loop back;
-3. `SIGTERM`s the loop and waits up to **120 seconds** for it to finish its tick and exit, then
-   kills it and the supervisor.
+```sh
+cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace
+```
 
-`stop` leaves the kill switch engaged. `start` releases it again, or `start --keep-kill-switch`
-brings the loop up halted so you can watch it without letting it trade.
+### 4. `start` / `stop`
 
-`restart.sh` on the box signals only the loop and lets the supervisor restart it; `deploy` uses it.
+`start` refuses when there is no `/workspace/current` (deploy first). Otherwise it removes both
+stop files and launches `/workspace/run.sh` as a detached process. `run.sh` runs one House at a
+time: `cd /workspace/current` (the link is resolved again on every restart, which is how a
+promotion or a rollback takes effect), then
+`LEAGUE_ENV=/workspace/.env python -m league run --root /workspace/state`, restarted 30 seconds
+after it exits. Either stop file ends the loop: `/workspace/STOP` (the supervisor's) or
+`/workspace/state/STOP` (the league's own, which `python -m league stop` writes).
 
-### 4. `status` and `logs`
+`stop` writes both stop files, `SIGTERM`s the House and waits up to **120 seconds** for it to
+finish its tick, then kills it if it must, then stops the supervisor. The House puts its agent
+boxes to sleep on its way out; a House that had to be killed did not, and `stop` says so.
+
+Neither command touches real money. That is `real_money` in `league/config.json` and the
+gateway's kill switch (below), and this script changes neither.
+
+`restart.sh` signals only the House and lets the supervisor restart it from `current`. It never
+starts a supervisor that is not up, so it cannot undo a `stop`.
+
+### 5. `status` and `logs`
 
 ```sh
 python3 scripts/floor_box.py status           # human-readable
 python3 scripts/floor_box.py status --json    # the same thing for a script
-python3 scripts/floor_box.py logs -n 300
+python3 scripts/floor_box.py logs -n 300      # /workspace/league.log
+python3 scripts/floor_box.py logs --deploy    # /workspace/deploy.log
 ```
 
-`status` shows the Sailbox state and size, observed CPU/memory/disk, spend so far this month and
-the hourly rate that implies, whether the egress allowlist still matches the recorded one, whether
-the supervisor and the loop are alive, whether the stop latch or the kill switch is set, the
-floor's own `health.json` read off the box, and the tail of the log.
+`status` shows the Sailbox state and size, observed CPU/memory/disk, spend and the hourly rate,
+whether the egress allowlist still matches the recorded one, whether the supervisor and the House
+are alive, both stop files, the `current` and `previous` release ids, the last line of
+`deploys.jsonl`, the House's `state/health.json` (living and dead agents, ledger sequence, frozen
+books, the release it is running), and the tail of `league.log`.
 
-### 5. `checkpoint`, `fork`, `sleep`
+### Checkpoints, forks, sleep
 
 ```sh
-python3 scripts/floor_box.py checkpoint --name before-live-kalshi --ttl-days 30
+python3 scripts/floor_box.py checkpoint --name before-real-money --ttl-days 30
 python3 scripts/floor_box.py checkpoints
 python3 scripts/floor_box.py fork --from sbcp_...
 python3 scripts/floor_box.py sleep | resume | pause
 python3 scripts/floor_box.py terminate --yes
 ```
 
-A checkpoint is a durable snapshot of the whole machine -- disk *and* memory. Take one before any
-upgrade: Sail also restores the box from its most recent checkpoint if the hardware under it
-fails. The default TTL is 30 days; the API's own default is seven.
+A checkpoint is a durable snapshot of the whole machine, disk *and* memory. Sail also restores the
+box from its most recent checkpoint if the hardware under it fails. The default TTL is 30 days.
 
-`fork` starts a second Sailbox from a checkpoint and **does not start the loop on it** -- it
-writes the stop latch and signals anything that came back with the memory image. A fork inherits
-the disk, so a checkpoint taken after `secrets` produces a copy that can reach the live venues:
-`fork` says so, and refuses outright to fork a checkpoint that was taken while the loop was
-running unless you pass `--i-know`. Every fork bills like a full Sailbox until it is terminated.
+`fork` starts a second Sailbox from a checkpoint and **does not start the loop on it**: it writes
+both stop files and signals anything that came back with the memory image. A fork inherits the
+disk, so it carries `/workspace/.env`: `fork` says so, and refuses outright to fork a checkpoint
+taken while the loop was running unless you pass `--i-know`. Every fork bills like a full Sailbox
+until it is terminated.
 
 `sleep` stops the billing and keeps the disk; a command, a file transfer or `resume` wakes it.
-`pause` is the same but only `resume` brings it back. Neither is part of normal running.
+`pause` is the same but only `resume` brings it back.
+
+## Two watchdogs
+
+| | In the box: `league/watchdog.py` | Outside: `gateway/lib/watchdog.mjs` |
+|---|---|---|
+| Runs | once per deploy, started by `floor_box.py deploy` | every five minutes, as the gateway's cron |
+| Reads | `state/health.json` and the ledger, read-only | the public checkpoint on the site, the Sail balance, the box's state |
+| Decides | which release `current` points at | whether the box is awake and the House is publishing |
+| Does | stage, canary, promote, watch, roll back | resumes a paused or sleeping box; runs `/workspace/restart.sh` when the checkpoint is over 15 minutes stale, at most once in 30 minutes; mails the owner when it has run out of things to do |
+| Never | touches Sail, publishes, or writes the ledger | moves a link or chooses a release |
+
+The only thing both do is run `restart.sh`, which is the same harmless signal from either: the
+supervisor starts the next House from whatever `current` is at that moment.
 
 ## Autosleep
 
 The box is created with **automatic sleep turned off** (`auto_sleep: {"automatic": false}`), so
-Sail will never sleep it on its own. That is deliberate: the floor has to be awake for every open,
-and "it happens to look busy" is not a guarantee.
-
-It would in fact look busy. Sail sleeps a Sailbox only when *nothing inside would notice*, and one
-of the conditions is that no process is waiting on a timer. `Service.run` sleeps
-`sleep_seconds` (30) between ticks, which is exactly such a timer, so the idle test never passes
-while the loop runs. But that is a side effect of a value in `ltcm/config.json`, not a promise --
-turn the tick down to a wall-clock schedule and the box would become sleepable overnight. The
-`auto_sleep` setting is the promise; the 30-second tick is the belt as well as the braces.
-
-To let the box sleep between sessions later (a real saving -- sleeping time is not billed), set it
-explicitly rather than relying on the tick:
-
-```sh
-python3 -c "from ltcm.sailbox import SailboxClient; \
-  SailboxClient().set_auto_sleep('sb_...', automatic=True, min_seconds_before_sleep=600)"
-```
+Sail will never sleep it on its own. The House's tick timer would keep the box looking busy
+anyway, but that is a side effect of a config value, not a promise; the setting is the promise.
 
 ## What the box can reach
 
@@ -146,99 +196,55 @@ Sail resolves the names itself, so `/etc/hosts` on the box cannot redirect anyth
 connection to an unlisted host is accepted and then closed rather than refused.
 
 ```sh
-python3 scripts/floor_box.py hosts                      # what the box may reach
+python3 scripts/floor_box.py hosts                      # the list, and what the league still lacks
 python3 scripts/floor_box.py hosts --add gw.example.workers.dev   # widen the live list
 ```
 
-Sail's allowlist is applied at DNS resolution and a wildcard such as `*.workers.dev` is
-accepted but never resolves, so the gateway is listed by its exact name. `hosts --add` sends
-the widened list as an inline policy document, reads it back, and records what the API kept
-in `.data/ltcm/box.json`, which is what `status` checks against and what a fork inherits.
+A wildcard such as `*.workers.dev` is accepted but never resolves, so the gateway is listed by its
+exact name. `hosts --add` sends the widened list, reads it back, and records what the API kept in
+`.data/ltcm/box.json`, which is what `status` checks against and what a fork inherits.
+
+What the league needs:
 
 | Host | Why |
 |---|---|
-| `api.sailresearch.com` | the model provider: every desk session, the critic, the committee |
-| `api.elections.kalshi.com`, `api.coinbase.com` | the live venues |
-| `advanced-trade-ws.coinbase.com`, `advanced-trade-ws-user.coinbase.com` | the Coinbase WebSockets (prices, order state); Kalshi's socket shares its API host. Read-only: no venue takes an order over a socket, and the box opens them with credential material the gateway mints for seconds |
-| `blakewoods.us` | the public site the publisher pushes the tape to |
-| `*.workers.dev` | the owner's publish gateway |
-| `www.sec.gov`, `data.sec.gov`, `efts.sec.gov` | EDGAR: filings, company facts, full-text search |
-| `query2.finance.yahoo.com`, `feeds.finance.yahoo.com` | quotes and bars, headlines |
-| `news.google.com` | the news source |
-| `docs.sailresearch.com` | the published rate card the provider diffs its frozen prices against |
-| `pypi.org`, `files.pythonhosted.org` | `cryptography`, the floor's one non-stdlib dependency |
+| the gateway's exact `*.workers.dev` name | every venue request and the frontier model; the gateway holds the venue keys and signs |
+| `api.sailresearch.com` | cheap-model inference and search |
+| `sailbox-api.sailresearch.com` | the agents' boxes |
+| `blakewoods.us` | the public site |
+| `api.elections.kalshi.com` | Kalshi market data (orders go through the gateway) |
+| `news.google.com` | the news reader |
+| `github.com`, `codeload.github.com` | pulling merged code without credentials |
+| `pypi.org`, `files.pythonhosted.org` | `create` only: pip and `cryptography` |
 
-Debian package mirrors are deliberately **not** on the list, so nothing on the box can `apt-get`
-its way to a new dependency. Add a host by editing `FLOOR_HOSTS` in `ltcm/sailbox.py`; the policy
-can be changed on a live box with `PUT /v1/sailboxes/{id}/egress-policy`, and `status` reports the
-moment the box stops matching the list recorded in `.data/ltcm/box.json`.
+The base list is `FLOOR_HOSTS` in `ltcm/sailbox.py`, which also carries the first run's data
+hosts. `hosts` prints any host from the table above that the recorded allowlist lacks. Debian
+package mirrors are deliberately **not** on the list, so nothing on the box can `apt-get` its way
+to a new dependency.
 
-The box holds three values as a file, `/workspace/.env`, mode 600: the Sail key, the gateway
-token and the publish token. Every venue request is signed by the gateway from its own Cloudflare
-secrets; the box never holds a venue key, so there is no HTTP policy and Sail is never handed a
-key to inject.
+## The agents' boxes
 
-## The lab image and the desks' sandboxes
+Agent-written code never runs on the House box. Each agent has a Sailbox of its own, forked from
+the image named by `agent_image_checkpoint` in `league/config.json`, with no network and no
+credential; the House uploads the strategy and the data, runs it over Sail's exec API and puts the
+box back to sleep (a sleeping box costs nothing). The registry is `/workspace/state/sandbox.json`.
 
-A desk that writes code runs it on its own Sailbox, never on the floor box. The **lab image** is
-one box provisioned once with python3, numpy, pandas, the floor's read-only market-data package
-and `labkit`, then checkpointed; each desk's sandbox is a fork of that checkpoint, created on
-its first `run_code`, woken for a run and asleep otherwise (asleep is free). A sandbox has a
-data-only egress allowlist and carries no venue key, no gateway token and no Sail key.
+## Real money
 
-```sh
-python3 scripts/lab_image.py build       # provision, check, checkpoint, record (a few minutes)
-python3 scripts/lab_image.py status      # the recorded checkpoint
-python3 scripts/lab_image.py sandboxes   # every desk's sandbox and its sleep state
-python3 scripts/lab_image.py sleep       # put them all to sleep now
-```
-
-The checkpoint id goes in `ltcm/config.json` under `sandbox.image_checkpoint`, which is how the
-floor box learns it; rebuild the image when the data package changes and update the id.
-
-## Going live
-
-Every desk starts **shadow**: it runs full sessions and its proposals are scored against real
-prices, but nothing is sent. Moving one to live capital is an owner decision, recorded as a public
-event. Do it in this order:
-
-```sh
-# 1. name the venue in ltcm/config.json:  "live_venues": ["kalshi", "coinbase"]
-python3 scripts/floor_box.py deploy
-python3 scripts/floor_box.py checkpoint --name before-live-kalshi
-
-# 2. the decision itself, made on the box
-python3 -c "
-from ltcm.sailbox import SailboxClient
-print(SailboxClient().exec('sb_...', ['sh', '-c',
-  'cd /workspace && .venv/bin/python -m ltcm promote kalshi-01 --to live '
-  '--reason \"first live sleeve\"']).output)"
-
-# 3. restart the loop into the decision
-python3 scripts/floor_box.py deploy
-```
-
-Each desk's `capital.usd` in its manifest is its live sleeve. `promote <desk> --to shadow` sends a
-desk back. `python3 scripts/floor_box.py stop` is the brake: kill switch first, then quiesce, then
-stop -- and the kill switch stays engaged until `start` releases it.
+Every book is practice until `"real_money": true` in `league/config.json`, a line only the owner
+changes; it reaches the box as a release like any other, canary and all. Behind it stands the
+gateway's kill switch, which refuses real orders while it is engaged and which nothing on Sail can
+change (`python3 scripts/gateway_admin.py unkill` releases it, from the owner's machine).
+`python3 scripts/floor_box.py stop` stops the House; it does not engage the kill switch.
 
 ## Local development
 
-The MacBook still runs the floor for development, with the same code and every desk in shadow:
-
 ```sh
-python3 -m unittest discover -s ltcm/tests -t .   # the whole suite, no network
-python3 -m ltcm init                              # create .data/ltcm and check the roster
-python3 -m ltcm run --once                        # one tick, printed
-python3 -m ltcm status                            # the health projection
-python3 -m ltcm session merton --trigger manual   # one desk session now
-python3 -m ltcm kill | unkill                     # the switch the risk engine reads first
+python3 -m unittest discover -s ltcm/tests -t .     # the first run's suite, with this script's tests
+python3 -m unittest discover -s league/tests -t .   # the league's
+python3 -m league tick --local-sandbox --no-publish # one tick here (reads the local .env; never with real money)
+python3 -m league status                            # the table, the books and the budget
+python3 -m league.watchdog status --base DIR        # releases, links, health, the last verdicts
 ```
 
-`python3 -c "import json,ltcm.hostinfo as h; print(json.dumps(h.describe_host(), indent=2))"`
-says which machine a process is on -- `"host": "sailbox"` with the box id when it is running on
-the box, `"host": "local"` here.
-
-`deploy/ltcm.service` is the systemd unit for running the floor on a Linux machine of your own. It
-is kept for that case and for disaster recovery; the Sailbox does not use it. The keep-awake
-service from `~/Work/agent-host` is no longer part of running the floor -- the box does not sleep.
+`deploy/ltcm.service` is the first run's systemd unit. The Sailbox does not use it.

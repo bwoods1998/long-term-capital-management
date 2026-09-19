@@ -31,7 +31,8 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
 def load_env(path: Path | None = None) -> None:
     """Read NAME=value lines into the environment (never overriding what is already set). The
     file must not be readable by anyone but its owner."""
-    env = path or REPO / ".env"
+    # On the House box the code lives in a release directory and the secrets beside them all.
+    env = path or Path(os.environ.get("LEAGUE_ENV") or REPO / ".env")
     if not env.exists():
         return
     if stat.S_IMODE(env.stat().st_mode) & 0o077:
@@ -71,7 +72,11 @@ def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, tt
 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
-          astra: bool = True) -> House:
+          astra: bool = True, canary: bool = False) -> House:
+    """`canary=True` is a House that can hurt nothing: a simulated Alpaca account instead of the
+    shared paper one (the real House reconciles that account to the cent, and a second trader on it
+    would break the reconciliation), its own Kalshi shadow state, no real venues, no publishing,
+    no research, no Astra. The watchdog runs new code this way before the House runs it."""
     from ltcm.adapters import GatewaySigner, VenueClient
     from ltcm.data.kalshi import KalshiMarketData
     from ltcm.data.news import News
@@ -90,6 +95,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     from .venues import gateway_broker
 
     config = dict(config or load_config())
+    if canary:
+        config.update(real_money=False, replay_days=2)
+        research = publish = astra = False
+        name_prefix = "canary"
     load_env()
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -98,17 +107,19 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     real_money = bool(config.get("real_money"))
 
     market_data = KalshiMarketData()
-    brokers: dict[str, Any] = {
-        "alpaca-paper": gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex")),
-        "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data),
-    }
-    if real_money:
-        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"))
-        brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
-
     data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue="alpaca-paper")
     alpaca_data = AlpacaData(data_client, feed=config.get("alpaca_feed", "iex"))
     kalshi_data = KalshiData(market_data, History(cache_dir=root / "cache"))
+    if canary:
+        from .sim import SimBroker, touch_from
+
+        paper: Any = SimBroker(root / "alpaca-sim.json", touch_from(alpaca_data))
+    else:
+        paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"))
+    brokers: dict[str, Any] = {"alpaca-paper": paper, "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data)}
+    if real_money:
+        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"))
+        brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
 
     if local_sandbox:
         sandbox: Any = LocalSandbox(root / "boxes")
@@ -119,6 +130,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     house_settings = Settings(
         tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
         real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
+        replay_timeout=120 if canary else 600, kalshi_replay_days=1 if canary else 7, kalshi_replay_markets=60 if canary else 2000,
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,

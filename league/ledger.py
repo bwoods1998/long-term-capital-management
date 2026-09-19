@@ -324,9 +324,8 @@ class Ledger:
         entries = [_entry(r) for r in rows]
         return entries[::-1] if newest else entries
 
-    def iter(self, *, kinds: Iterable[str] | str | None = None, agent: str | None = None) -> Iterator[Entry]:
-        """Every matching row, oldest first, in pages."""
-        after = 0
+    def iter(self, *, kinds: Iterable[str] | str | None = None, agent: str | None = None, after: int = 0) -> Iterator[Entry]:
+        """Every matching row after `after`, oldest first, in pages."""
         while True:
             batch = self.read(kinds=kinds, agent=agent, after=after, limit=5000)
             if not batch:

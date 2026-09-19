@@ -869,7 +869,8 @@ class HouseHealth:
 
 
 def production(base: str | Path = DEFAULT_BASE, *, state: str | Path | None = None, python: str | None = None,
-               tick_timeout: float = 600, log: Callable[[str], Any] | None = None) -> Watchdog:
+               tick_timeout: float = 600, max_age_seconds: float = 300, restart_within: float | None = 300,
+               log: Callable[[str], Any] | None = None) -> Watchdog:
     """The watchdog as it runs on the House box."""
     releases = Releases(base)
     state_dir = Path(state) if state else releases.state_dir
@@ -877,7 +878,7 @@ def production(base: str | Path = DEFAULT_BASE, *, state: str | Path | None = No
         releases,
         run_canary=SubprocessCanary(python=python, tick_timeout=tick_timeout, env_file=releases.base / ".env", protected=[state_dir]),
         restart_house=RestartScript(releases.base),
-        read_house_health=HouseHealth(state_dir),
+        read_house_health=HouseHealth(state_dir, max_age_seconds=max_age_seconds, restart_within=restart_within),
         log=log,
     )
 
@@ -918,6 +919,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     deploy.add_argument("--watch-every", type=int, default=30)
     deploy.add_argument("--tick-timeout", type=int, default=600, help="the hard limit on one canary tick, in seconds")
     deploy.add_argument("--python", default=None, help="the interpreter the canary runs under (default: this one)")
+    deploy.add_argument("--max-age-seconds", type=int, default=300, help="how old the House's health.json may be before a reading is bad")
+    deploy.add_argument("--restart-within", type=int, default=300,
+                        help="a House that has recorded no ops.started this long after the promotion is a bad reading (0: do not ask)")
     common(sub.add_parser("status", help="current, previous, the staged releases, the House's health, the last verdicts"))
     rollback = sub.add_parser("rollback", help="current := previous, and restart the House")
     common(rollback)
@@ -937,7 +941,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps({"removed": releases.prune(args.keep)}))
         return 0
     say = lambda text: print(f"{iso(time.time())}  watchdog: {text}", file=sys.stderr, flush=True)  # noqa: E731
-    dog = production(args.base, state=state, python=getattr(args, "python", None), tick_timeout=getattr(args, "tick_timeout", 600), log=say)
+    dog = production(args.base, state=state, python=getattr(args, "python", None), tick_timeout=getattr(args, "tick_timeout", 600),
+                     max_age_seconds=getattr(args, "max_age_seconds", 300), restart_within=getattr(args, "restart_within", 300) or None, log=say)
     if args.command == "rollback":
         try:
             result = dog.rollback(args.reason)

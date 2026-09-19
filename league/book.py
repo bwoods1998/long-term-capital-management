@@ -387,6 +387,9 @@ class Book:
         #: a limit order was booked as a taker and may have been a maker: dollars, and units by key.
         self._fee_slack_usd = ZERO
         self._fee_slack_units: dict[str, Decimal] = {}
+        #: Every instrument the book has ever traded, by position key: a crumb the venue still
+        #: shows after its holder sold out must still be valued, or it cannot be called dust.
+        self._traded: dict[str, Instrument] = {}
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -417,6 +420,12 @@ class Book:
             account.staked += usd
             account.cash += usd
             account.swept = usd < 0  # the House took the account's cash back: it is closed until staked again
+            opened = self.day_open.get(agent)
+            if opened is not None and opened[0] == at[:10]:
+                # Capital lent or taken back is not a day's profit or loss: without this, sweeping a
+                # promoted agent's paper account read as a 100% loss and tripped the floor breaker
+                # for every other agent on the book.
+                self.day_open[agent] = (opened[0], opened[1] + usd)
         elif kind == "book.fill":
             if agent == HOUSE:
                 self._apply_house(p)
@@ -445,6 +454,7 @@ class Book:
         account.fees += money(p.get("fee_usd") or 0)
         if position_delta != 0:
             instrument = Instrument.from_dict(p["instrument"])
+            self._traded[position_key(instrument)] = instrument
             holding = account.holdings.get(instrument.key)
             if holding is None:
                 holding = account.holdings[instrument.key] = Holding(instrument)
@@ -903,6 +913,7 @@ class Book:
         delta = money(p["position_delta"])
         if delta != 0 and p.get("instrument"):
             instrument = Instrument.from_dict(p["instrument"])
+            self._traded[position_key(instrument)] = instrument
             holding = account.holdings.get(instrument.key)
             if holding is None:
                 holding = account.holdings[instrument.key] = Holding(instrument)
@@ -1318,9 +1329,18 @@ class Book:
                 diff = venue_positions.get(key, ZERO) - positions.get(key, ZERO) - self.baseline_positions.get(key, ZERO)
                 if diff == 0:
                     continue
-                instrument = instruments.get(key)
+                instrument = instruments.get(key) or self._traded.get(key)
                 mark = self.marks.get(instrument.key) if instrument is not None else None
-                small = instrument is not None and mark is not None and abs(diff) * mark * instrument.multiplier < DUST_USD
+                if instrument is not None and mark is None:
+                    quote = self._quote(instrument)  # sold out long ago: the mark is gone, so ask
+                    mark = self.marks.get(instrument.key) if quote is not None else None
+                # Dust: under a cent of value, or no more than one quantity step for each venue fill
+                # since the last reconciliation (the venue rounds each in-kind fee its own way).
+                crumbs = step_of(instrument) * max(1, self._fills_since_reconcile) if instrument is not None else ZERO
+                small = instrument is not None and (
+                    (mark is not None and abs(diff) * mark * instrument.multiplier < DUST_USD)
+                    or (step_of(instrument) < ONE and abs(diff) <= crumbs)
+                )
                 # The venue kept fewer coins than the taker's fee the book assumed: a maker's fill.
                 refund = instrument is not None and ZERO < diff <= self._fee_slack_units.get(key, ZERO)
                 if small or refund:

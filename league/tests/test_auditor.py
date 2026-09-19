@@ -118,27 +118,21 @@ class Approval(AuditorCase):
             self.assertIs(result["approve"], False, answer)
 
     def test_approve_must_be_the_json_true_not_a_truthy_string(self):
-        # BUG (medium, fails OPEN on the real-money gate): auditor.py:100 `bool(result.get("approve"))`.
-        # A model that answers `"approve": "false"` (a string: a common slip) or `"approve": "no"`
-        # is read as an approval, because any non-empty string is truthy. The gate's contract is
-        # "approve only when `approve` is true".
-        # FIX: `approve = result.get("approve") is True and not blockers`.
+        # Regression: the gate once read `bool(result.get("approve"))`, so `"false"`, `"no"` and
+        # `[false]` were approvals. Only the JSON literal `true` approves now.
         for value in ("false", "no", "False", "veto", [False], {"approve": False}):
             result = self.auditor(says({"approve": value, "summary": "do not promote", "findings": []})).audit(self.agent, self.verdict)
             self.assertIs(result["approve"], False, value)
 
     def test_a_blocker_beyond_the_twentieth_finding_still_vetoes(self):
-        # BUG (low-medium, fails OPEN): auditor.py:98-100 cuts `findings` to the first 20 BEFORE it
-        # looks for blockers, so a blocker listed 21st (a model that lists its notes first and its
-        # blocker last) is dropped and `approve: true` goes through.
-        # FIX: search ALL findings for blockers; truncate only what is written to the row.
+        # Regression: findings were once cut to twenty BEFORE the search for blockers, so a blocker
+        # listed 21st was dropped. All findings are searched now; only the ledger row is cut.
         findings = [finding("note", f"note {i}") for i in range(20)] + [finding("blocker", "the fills are look-ahead")]
         result = self.auditor(says({"approve": True, "summary": "ok", "findings": findings})).audit(self.agent, self.verdict)
         self.assertIs(result["approve"], False)
 
     def test_a_blocker_with_stray_whitespace_still_vetoes(self):
-        # BUG (low, fails OPEN): auditor.py:99 compares `str(severity).lower() == "blocker"` with
-        # no strip, so "blocker " or " Blocker" is not a blocker. FIX: `.strip().lower()`.
+        # Regression: the severity was once compared without `strip()`, so "blocker " was no blocker.
         for severity in ("blocker ", " Blocker", "BLOCKER\n"):
             result = self.auditor(says({"approve": True, "findings": [finding(severity)]})).audit(self.agent, self.verdict)
             self.assertIs(result["approve"], False, repr(severity))
@@ -149,11 +143,8 @@ class Approval(AuditorCase):
         self.assertEqual(len(result["findings"]), 1)
 
     def test_findings_of_the_wrong_type_are_a_veto_not_a_crash(self):
-        # BUG (low): auditor.py:98 iterates `result.get("findings") or []`; a truthy non-iterable
-        # (`"findings": 3`, `true`) raises TypeError after the audit has been charged and before
-        # any `audit.verdict` row is written, so the House's judge pass dies and `score()` never
-        # sees the cost. FIX: `raw = result.get("findings"); raw = raw if isinstance(raw, list) else []`
-        # (and treat a malformed answer as a veto).
+        # Regression: `"findings": 3` once raised TypeError after the audit was charged and before any
+        # `audit.verdict` row was written. Findings that are not a list are now read as none.
         for value in (3, True, 2.5):
             result = self.auditor(says({"approve": True, "findings": value})).audit(self.agent, self.verdict)
             self.assertIn("approve", result)
@@ -410,15 +401,9 @@ class Score(AuditorCase):
         self.assertEqual((result["vetoes"], result["audit_cost_usd"], result["losses_avoided_usd"], result["net_value_usd"]), (1, "0.0375", "1.0000", "0.9625"))
 
     def test_an_agent_vetoed_twice_is_not_scored_twice_for_the_same_blocks(self):
-        # BUG (medium, inflates the gate's measured value): auditor.py:122-140 scores EVERY veto
-        # row against every paper block after it. `House._promote` audits again each time `judge`
-        # says `eligible` (every 5 active blocks), so an agent that stays on paper collects many
-        # vetoes, and a block after the n-th veto is counted n times. Had the first veto not
-        # happened the agent would have gone to real money ONCE; the second audit would never
-        # have run. Here a single -$8 of paper loss is reported as $2 of losses avoided, not $1,
-        # and the auditor's budget "follows its measured counterfactual value".
-        # FIX: score each agent once, from its first veto (or score veto i only over the blocks
-        # before veto i+1 of the same agent).
+        # Regression: `score()` once scored every veto row against every later block, so an agent
+        # re-audited at each look had one paper loss counted once per veto ($2.00 avoided here, not
+        # $1.00). Each agent now has one window, from its first veto to its approval.
         self.audit_row("loser", False, cost="0")
         self.paper_block("loser", 200.0, 200.0)
         self.audit_row("loser", False, cost="0")

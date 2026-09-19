@@ -44,6 +44,16 @@ class Verdict:
     numbers: dict[str, Any] = field(default_factory=dict)
 
 
+def _per_exposure(rows: Sequence[Mapping[str, Any]]) -> list[float]:
+    """Block growth per unit of exposure, for comparing an agent with itself across rungs, where
+    the same strategy may have a fifth or a third of its stake at work. Blocks with nothing at
+    work say nothing about the edge and are left out. Rows that carry no exposure (older rows)
+    are compared as they are."""
+    if not rows or any(r.get("exposure") is None for r in rows):
+        return [float(r["log_growth"]) for r in rows]
+    return [float(r["log_growth"]) / float(r["exposure"]) for r in rows if float(r["exposure"]) >= 0.02]
+
+
 def block_key(at: str, horizon: str) -> str:
     """`2026-09-20T13` for an hour block, `2026-09-20` for a day block."""
     return at[:13] if horizon == "hour" else at[:10]
@@ -140,20 +150,25 @@ class Evaluator:
     def observe(self, agent: str, book: str, horizon: str) -> int:
         """Turn the agent's equity marks on a book into finished blocks of log growth. A block is
         finished when a mark exists in a later block. Returns how many blocks were added."""
-        marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent) if e.payload.get("book") == book]
+        # Only what has happened since the last finished block is read: the marks of a week are
+        # thousands of rows an agent, and this runs for every agent every few minutes.
+        done = [e.payload for e in self.ledger.iter(kinds="eval.block", agent=agent) if e.payload.get("book") == book and e.payload.get("last_mark_seq")]
+        resume = done[-1] if done else None
+        since = int(resume["last_mark_seq"]) if resume else 0
+        marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent, after=since) if e.payload.get("book") == book]
         if not marks:
             return 0
-        stakes = [e for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
+        stakes = [e for e in self.ledger.iter(kinds="book.stake", agent=agent, after=0 if resume is None else since) if e.payload.get("book") == book]
         fills = [
-            e for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent) if e.payload.get("book") == book
+            e for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=since) if e.payload.get("book") == book
         ]
         by_block: dict[str, list] = {}
         for entry in marks:
             by_block.setdefault(block_key(entry.at, horizon), []).append(entry)
         keys = sorted(by_block)
         added = 0
-        previous_equity: float | None = None
-        previous_seq = 0
+        previous_equity: float | None = float(resume["end_equity"]) if resume else None
+        previous_seq = since
         recorded = {e.payload.get("key") for e in self.ledger.iter(kinds="eval.block", agent=agent) if e.payload.get("book") == book}
         for index, key in enumerate(keys):
             last = by_block[key][-1]
@@ -172,6 +187,14 @@ class Evaluator:
                     block_key(f.at, horizon) == key for f in fills
                 )
                 growth = stats.log_growth(start_equity, end_equity, flow)
+                # How much of the account was at work, on average over the block's marks. Growth per
+                # unit of exposure is what an edge is; growth per block also depends on how big the
+                # positions were against the stake, which changes from rung to rung.
+                shares = [
+                    max(1.0 - float(m.payload.get("cash") or 0) / float(m.payload["equity"]), 0.0)
+                    for m in by_block[key] if float(m.payload.get("equity") or 0) > 0
+                ]
+                exposure = sum(shares) / len(shares) if shares else 0.0
                 # A block belongs to the rung the agent was on when the block HAPPENED, so it
                 # carries the ledger position of its first mark; when the row was written says
                 # nothing (a paper backlog may be written long after a demotion).
@@ -186,6 +209,7 @@ class Evaluator:
                         "flow": round(flow, 8),
                         "log_growth": growth,
                         "active": bool(active),
+                        "exposure": round(exposure, 6),
                         "first_mark_seq": by_block[key][0].seq,
                         "last_mark_seq": last.seq,
                     },
@@ -296,7 +320,16 @@ class Evaluator:
                 end = changes[index + 1].seq if index + 1 < len(changes) else None
         if start is None:
             return []
-        return self.blocks(agent, since_seq=start, until_seq=end)
+        rows = self.blocks(agent, since_seq=start, until_seq=end)
+        # One book only: the book that stay was traded on (a wound-down account elsewhere may
+        # still be marked, flat, inside the same window).
+        books: dict[str, int] = {}
+        for row in rows:
+            books[row.get("book")] = books.get(row.get("book"), 0) + (1 if row.get("active") else 0)
+        if not books:
+            return []
+        main = max(books, key=lambda b: books[b])
+        return [row for row in rows if row.get("book") == main]
 
     def promote(self, agent: str, to_rung: int, reason: str, numbers: Mapping[str, Any] | None = None) -> Verdict:
         """Move an agent up one rung. The House calls this for rung 2 only after the audit passes."""
@@ -329,8 +362,8 @@ class Evaluator:
         if rung < 2:
             return Verdict(agent, rung, "hold", "drift is watched on real-money rungs only")
         entered = self._rung_entered(agent)
-        earned = [float(r["log_growth"]) for r in self._record_below(agent, rung)]
-        recent = [float(r["log_growth"]) for r in self.blocks(agent, since_seq=entered, book=book)]
+        earned = _per_exposure(self._record_below(agent, rung))
+        recent = _per_exposure(self.blocks(agent, since_seq=entered, book=book))
         rules = self.ladder["drift"]
         recent = recent[-int(rules["window_blocks"]):]
         reference = stats.mean_bounds(earned, 0.5)
