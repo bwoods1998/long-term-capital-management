@@ -3907,7 +3907,9 @@ class Service:
         if account and config:
             from .performance import AccountPerformance
             if not hasattr(self, "_account_performance"):
-                self._account_performance = AccountPerformance(config, self.venue_brokers(), self.clock)
+                # The venues the floor actually trades decide when the figure is complete.
+                settings = {**dict(config), "venues": list(self.config.get("live_venues") or ())}
+                self._account_performance = AccountPerformance(settings, self.venue_brokers(), self.clock)
             account["performance"] = self._account_performance.read(account, at)
         return account
 

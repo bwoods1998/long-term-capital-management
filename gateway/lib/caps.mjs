@@ -59,6 +59,7 @@ export const VENUE_PATHS = {
   // reads its account, places and cancels orders, and reads quotes and bars.
   alpaca: [
     ['GET', /^v2\/account$/],
+    ['GET', /^v2\/account\/activities$/],
     ['GET', /^v2\/account\/activities\/[A-Z_]{1,32}$/],
     ['GET', /^v2\/positions(\/[A-Za-z0-9._~%-]+)?$/],
     ['GET', /^v2\/orders(\/[A-Za-z0-9._~%-]+)?$/],

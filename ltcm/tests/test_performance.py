@@ -18,11 +18,19 @@ class Broker:
         return self.rows[path]
 
 
-def brokers(transactions=(), deposits=(), withdrawals=()):
-    return {"kalshi": Broker({"/portfolio/deposits": {"deposits": deposits},
+def brokers(transactions=(), deposits=(), withdrawals=(), activities=None):
+    rows = {"kalshi": Broker({"/portfolio/deposits": {"deposits": deposits},
                               "/portfolio/withdrawals": {"withdrawals": withdrawals}}),
             "coinbase": Broker({"/v2/accounts": {"data": [{"id": "account-1"}]},
                                 "/v2/accounts/account-1/transactions": {"data": transactions}})}
+    if activities is not None:
+        rows["alpaca"] = Broker({"/v2/account/activities": list(activities)})
+    return rows
+
+
+def activity(kind="CSD", value="100", **kwargs):
+    return {"id": kwargs.pop("id", f"act-{kind}-{value}"), "activity_type": kind,
+            "date": NOW, "net_amount": value, "status": "executed", **kwargs}
 
 
 def transaction(kind="fiat_deposit", value="100", **kwargs):
@@ -42,6 +50,32 @@ class PerformanceTests(unittest.TestCase):
         flows = funding_flows(rows, START)
         self.assertEqual(sum(value for _, _, value in flows), Decimal("75"))
         self.assertEqual(len(flows), 4)
+
+    def test_alpaca_funding_counts_and_its_earnings_do_not(self):
+        rows = brokers(activities=[
+            activity("CSD", "500"),                                  # the owner funding the account
+            activity("CSW", "-40"),                                  # and taking money back out
+            activity("JNLC", "25"),
+            activity("DIV", "3.10"),                                 # earnings, not funding
+            activity("FEE", "-0.50"),
+            activity("FILL", "-120"),                                # a trade, already in the ledger
+            activity("CSD", "900", date="2026-09-15T00:00:00Z", id="old"),  # before the baseline
+            # An instant deposit books on the next business day; the money moved when it was made.
+            activity("CSD", "700", date="2026-09-30", created_at="2026-09-15T03:16:38Z", id="booked-later"),
+        ])
+        flows = [f for f in funding_flows(rows, START) if f[0] == "alpaca"]
+        self.assertEqual(sum(value for _, _, value in flows), Decimal("485"))
+        self.assertEqual(len(flows), 3)
+
+    def test_an_unknown_alpaca_activity_fails_closed(self):
+        # A funding type this runtime has never seen must not be counted as profit.
+        with self.assertRaises(ValueError):
+            funding_flows(brokers(activities=[activity("SURPRISE", "250")]), START)
+        with self.assertRaises(ValueError):
+            funding_flows(brokers(activities=[activity("CSD", "250", status="pending")]), START)
+
+    def test_a_floor_without_alpaca_reads_two_venues_as_before(self):
+        self.assertEqual(funding_flows(brokers(), START), [])
 
     def test_unknown_pending_and_unvalued_transactions_fail_closed(self):
         for row in [transaction("surprise"), transaction(status="pending"),

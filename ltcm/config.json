@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "account_performance": {
-    "start_at": "2026-09-16T04:58:42.508Z",
-    "start_equity": "976.11177639"
+    "start_at": "2026-09-19T04:21:28.000Z",
+    "start_equity": "1605.9851"
   },
   "segregated_books": true,
   "event_stream_seconds": 2,
@@ -282,7 +282,8 @@
   "gateway_token_env": "GATEWAY_TOKEN",
   "live_venues": [
     "kalshi",
-    "coinbase"
+    "coinbase",
+    "alpaca"
   ],
   "venues": {
     "alpaca": {
