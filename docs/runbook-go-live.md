@@ -38,9 +38,11 @@ published checkpoint the dot goes green and says "live".
 
 ## 2. What you will see in the first hour
 
-- **Minutes 0 to 5.** The House takes each book's baseline, then founds the twelve seeds (each
-  one's strategy file is read inside a sealed Sailbox; about a minute for all twelve) and stakes
-  each with $200 of practice money. `status` shows `living: 12`. The live stream shows twelve "is born" lines.
+- **Minutes 0 to 5.** The House takes each book's baseline, then founds the 26 specialists of
+  `league/niches.json` (each one's strategy file is read inside a sealed Sailbox; two to three
+  minutes for all of them) and stakes each with $200 of practice money. `status` shows
+  `living: 26`. The live stream shows 26 "is born" lines. In the background it surveys Kalshi once
+  (about a minute and a half) so every specialty's universe is ranked by what is trading today.
 - **Minutes 5 to 20.** Every agent wakes on its own clock (5 to 60 minutes). You will see their
   thoughts ("Saw 27 hourly markets, 2 favourites in the band..."), resting Kalshi bids on the shadow
   book, crypto limit orders on Alpaca paper, and "failed replay" lines: each seed's own code is
@@ -58,9 +60,9 @@ published checkpoint the dot goes green and says "live".
   fork (about three dollars of credits: days, not hours) or a seed dies and is replaced.
 - **Equity strategies do nothing until Monday 09:30 New York.**
 
-Nothing can reach real money in this mode. The earliest an agent can even become eligible is after
-30 active hour-blocks of paper trading with a lower confidence bound on its growth above zero,
-which is more than a day away for the fastest of them.
+Nothing can reach real money in this mode. The earliest an agent can become eligible is after 15
+active blocks and 10 closed trades with growth above zero and a drawdown under 15%: about a day
+for the fastest hourly agents, two to three weeks for a daily one.
 
 ## 3. Turning real money on (your call, any time)
 
@@ -81,10 +83,14 @@ python3 scripts/gateway_admin.py unkill
 ```
 
 What changes: the House opens a book on the real Kalshi and Alpaca accounts and records their
-baselines. **Still no order is sent** until an agent has (a) 30 active paper blocks and at least 10
-closed trades with a lower bound on its growth above zero, and (b) passed Astra's audit. Then it
-gets a $25 real stake and positions of at most $10, and must earn the same evidence again on real
-fills before a quarter-Kelly stake. The gateway's caps stand behind all of it: $75 an order, $4,000
+baselines. **Still no order is sent** until an agent has (a) cleared the paper screen (15 active
+blocks, 10 closed trades, growth above zero, a drawdown under 15%) and (b) passed Astra's audit.
+Then it gets a $25 real stake and positions of at most $10. The screen is easy on purpose, and what
+it may cost you is capped in dollars: at most 4 agents hold real money on that rung at once, and
+when the rung has lost $50 net it closes, everyone on it goes back to paper, and you get an email.
+Reopening it is yours: raise `tuition.max_loss_usd` in `league/constitution.py`, re-pin the digest
+the test prints, and deploy. To reach a quarter-Kelly stake an agent must then show a lower
+confidence bound on its growth above zero over 30 active blocks of REAL fills. The gateway's caps stand behind all of it: $75 an order, $4,000
 and 2,000 orders a day. If the real account has open orders the House did not send, it refuses to
 open that book and says so in `status`; cancel them at the venue.
 
@@ -151,10 +157,10 @@ Measured during the build, at Sail's and OpenAI's current prices:
 | What | Basis | A week |
 |---|---|---|
 | The House box | one small box, mostly idle: about half a cent an hour | about $1 |
-| Agents' sandbox seconds | about 9 s a wake; twelve agents; 5 to 60 minute clocks | about $1 |
-| Research passes (cheap Sail models, flex window) | measured $0.001 to $0.002 a pass, at most one per agent every six hours | about $1 |
+| Agents' sandbox seconds | about 9 s a wake; 26 agents; 5 to 60 minute clocks | about $2 |
+| Research passes (cheap Sail models, flex window) | measured $0.001 to $0.002 a pass, at most one per agent every four hours | about $2 |
 | Web searches | Sail does not publish a price; the House assumes $0.01 each | under $2 |
-| **Sail total** | bounded above by the economy: agents cannot spend credits they were not granted ($2 a day plus $12 of endowments), and the House stops research at $100 in a calendar month | **$3 to $6, at most about $26** |
+| **Sail total** | bounded above by the economy: agents cannot spend credits they were not granted ($2 a day plus $26 of endowments), and the House stops research at $100 in a calendar month | **$5 to $9, at most about $40** |
 | Astra, auditor | $0.23 measured for one audit; an agent is audited at most once every 72 hours | $0 to $3 |
 | Astra, other roles (only with the GitHub token, but the passes run either way) | operator daily (about $0.10), toolsmith daily when the queue has requests ($0.06), teacher every three days, designer and architect weekly ($0.10 measured; up to $1.25 when it writes code) | $2 to $4 |
 | **OpenAI total** | hard-capped by the gateway at $100 a month | **$2 to $7** |

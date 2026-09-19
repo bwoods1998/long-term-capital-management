@@ -12,6 +12,28 @@ Written at the end of the build, about 09:30 UTC on Sept 19, 2026 (02:30 in Cali
 a half hours after it started. All six steps are built. Everything below was run, not assumed;
 where something was not verified it says so.
 
+### After the report: the owner's changes of Sept 19 (afternoon)
+
+The owner's worry on reading the report was a league too strict to ever trade. It was right, and
+measured: run with the ladder's own code, the one edge the first run measured had a 0% chance of
+reaching real money within a month. Four changes followed, all built with tests (the league's
+suite is now 923) and recorded as deviations 22 to 27 in `docs/design/2026-09-19-architecture.md`:
+
+- **The paper gate is a screen with a dollar cap** (`tuition`: 4 agents on the micro rung at once,
+  $50 net, then the rung closes). The confidence bound stays between micro-real and scaled, with
+  its own alpha, and a family's pooled real-money record can carry a member.
+- **The horizon rule:** Kalshi entries pay within 12 or 48 hours, crypto positions close after 48,
+  equities unbounded. Games are now shown by their scheduled end (before this no NFL, college,
+  MLB or soccer game was visible to any agent).
+- **Specialists:** eleven open niches and one dormant (options), 26 founders, universes from a live
+  survey of the venue that the House repeats daily so they follow the season.
+- **Found on the way:** a rung-3 agent's limits were reset to the micro rung's at every wake; the
+  replay charged Kalshi makers nothing on the series that charge them; a bid left resting during a
+  match is picked off when a goal is scored (sports founders now enter before the start only).
+
+**Not built:** options. The gateway refuses Alpaca's option chain and quote paths, and nothing
+about pricing a contract can be checked against a live market before Monday's open.
+
 ### State everything was left in
 
 - Gateway kill switch **engaged**. No real-money order was placed tonight (gateway counter: 0

@@ -37,8 +37,8 @@ or a day.
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
 | 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 30 blocks and 8 out-of-sample blocks with growth above zero, and a deflated Sharpe ratio of 0.90 or more against every replay its family has ever run |
-| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | 30 active blocks, 10 closed trades, and a one-sided lower confidence bound on mean block growth above zero; then Astra's audit; and only once the owner has turned real money on |
-| 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | the same test again, on 30 active blocks of real fills |
+| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active blocks, 10 closed trades, growth above zero and a drawdown under 15%; then Astra's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below) |
+| 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | 30 active blocks and 10 closed trades of real fills, and a one-sided lower confidence bound on mean block growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
 | 3. Scaled | the real accounts | a quarter of Kelly on the lower bound of its growth: never under $25, never over 25% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
 
 The error rate for every promotion and every statistical death is 5%, spent across looks (look
@@ -48,6 +48,24 @@ a false pass. A record that wins 80% or more of its trades must also clear an ex
 seen yet: clean wins of +0.5% risking 7% need 46 in a row. On rungs 2 and 3 a CUSUM compares the
 edge per closed trade with the record that earned the rung (real fills worse than the paper fills
 that earned rung 2 are exactly what it is there to catch); promotion is not tenure.
+
+**Why the first gate is a screen, and what it may cost.** Simulated with the ladder's own code, the
+first run's one measured edge (favourites, about 0.09 standard deviations a trade) had a 0% chance
+of clearing a confidence bound within a month, and an excellent crypto edge 11% within a week: a
+small edge needs about a thousand trades to prove by ANY honest test, and the strict test was
+guarding a $25 stake. So the loss of the micro rung is capped in dollars instead of statistics. The
+constitution's **tuition**: at most 4 agents hold real money on rung 2 at once; a new one is seated
+only while the net loss of every real-money account that has not earned rung 3, plus what the seated
+agents could still lose before the 30% drawdown rule stops them ($7.50 each), fits under **$50**; at
+$50 the rung closes, everyone on it goes back to paper, and only the owner reopens it. The strict
+test stays where the money is, between micro-real and scaled. Promotion and death spend separate
+alpha series there (a look that can only kill spends none of promotion's).
+
+**The horizon rule.** Fast results are what a record is built from. The House refuses a Kalshi entry
+expected to pay more than 12 hours out (hourly strategies) or 48 (daily), and closes a crypto
+position after 48 hours. Equities, and options when they open, are not bounded. A game lists a
+close two days after kickoff and really closes when a winner is declared, so markets are shown and
+judged by their scheduled expiration.
 
 **Compute credits.** The owner funds a fixed research pool, $2.00 a day. Profit decides an agent's
 share of it, never its size. Each epoch (a day) 40% of the pool is a floor split evenly across the
@@ -66,13 +84,24 @@ retires the box and writes a post-mortem that every living agent's research read
 **Forks.** An agent with $3.00 of credits or more may fork, and must endow the child with $1.00 of
 its own. An agent above rung 0 never edits itself, because its record belongs to its code: an
 improvement is a child, a mutation of its parameters or new code its researcher wrote, and the child
-answers for itself from replay up. The population is kept between 8 and 16.
+answers for itself from replay up. The population is kept between 12 and 36, and no specialty may hold more than its share.
 
-**Niches** are venue x horizon x style (`kalshi/hour/favorites`, `alpaca/day/trend`). The floor is
-paid per niche so the population cannot collapse onto whichever niche got lucky last week.
+**Specialists.** Every agent belongs for life to one specialty of
+[`league/niches.json`](league/niches.json), and its children inherit it: crypto strikes, 15-minute
+crypto, weather, sports results, player props, slow prices (gasoline, oil, gold, currencies),
+counts and ratings on Kalshi; bitcoin and ether, alternative coins, index ETFs and large stocks on
+Alpaca; listed options, defined and closed until the House can quote them. The House shows an agent
+only its specialty's markets, refuses an entry outside it, hands its research loop a brief of what
+is known there (including which series charge makers) and files its notes under it, so a niche's
+library compounds. The universes are real tickers from a survey of the venue (Sept 19, 2026: 736
+series and $63M a day resolving within 48 hours, about 85% of it sports). Sports is ONE broad niche
+on purpose, because the calendar decides what is live: an agent specialises inside it by the series
+its strategy names, the House re-surveys the venue daily so a new season joins by pattern and
+category, and an agent whose series have gone dark is shown the busiest live ones. The floor is paid
+per specialty so the population cannot collapse onto whichever one got lucky last week.
 
-**Founders start on paper.** The twelve founding seeds (four Kalshi, four Alpaca crypto, four Alpaca
-equities) are seated on rung 1 at birth. The first dry run showed honest replays failing most of
+**Founders start on paper.** The 26 founders (the twelve seed programs, pointed at the specialties)
+are seated on rung 1 at birth. The first dry run showed honest replays failing most of
 them (crypto reversion below zero after fees; Kalshi favourites at a deflated Sharpe of 0.85 against
 the 0.90 line). Paper costs nothing and forward evidence is what counts, so they are forward-tested
 from the first day; their replay still runs and still counts as their family's first trial.
@@ -181,7 +210,8 @@ The `league/` modules:
 | `commons.py` | What agents share: web search, the research library, the tool-request queue, the playbook. |
 | `researcher.py` | The research loop a cheap Sail model runs for one agent, at that agent's expense. |
 | `rules.py` | The text every agent is told, generated from the constitution and the game file. |
-| `seeds/` | The twelve founding strategies. |
+| `seeds/` | The twelve founding programs. |
+| `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season. |
 | `strategies/`, `tools/`, `playbook/` | What Astra adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop. |
 | `budget.py` | The Sail budget meter. |

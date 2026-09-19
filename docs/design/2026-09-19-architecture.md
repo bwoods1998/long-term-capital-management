@@ -85,8 +85,11 @@ The agents:
 - `league/safety.py`: what a strategy file may contain (an import allowlist, no underscore
   attributes, no attribute assignment, no `eval`/`exec`/`open`), ported unchanged from the first
   run's Foundry. The contract a strategy follows is `league/CONTRACT.md`.
-- `league/seeds/`: the twelve founding strategies (four Kalshi, four Alpaca crypto, four Alpaca
+- `league/seeds/`: the twelve founding programs (four Kalshi, four Alpaca crypto, four Alpaca
   equities).
+- `league/niches.py`, `league/niches.json`: the specialties. Every agent belongs to one for life;
+  the 26 founders are the seeds' programs pointed at them; a Kalshi universe follows the season
+  through a daily survey of the venue.
 - `league/strategies/`, `league/tools/`, `league/playbook/`: what Astra adds by pull request as
   architect, toolsmith and teacher. `strategies/registry.json` lists what the House should spawn.
 
@@ -311,3 +314,34 @@ configured`).
     production tape stays empty until go-live, which also keeps the gateway's external watchdog
     from resuming or restarting the box, since it acts only on a published production checkpoint
     (it still mails: see `gateway/README.md`).
+22. **The paper gate is a screen with a dollar cap, not a confidence bound** (the owner's decision,
+    Sept 19). The plan used the same bound at both real-money gates. Built: paper to micro-real
+    needs 15 active blocks, 10 closed trades, growth above zero, a drawdown under 15% and the
+    audit; the micro rung's loss is capped by the constitution's `tuition` (4 agents at once, $50
+    net, the seated agents' possible losses budgeted before they happen, and at the line everyone
+    on the rung returns to paper). *Why:* run with the ladder's own code, the one edge the first
+    run measured had a 0% chance of reaching real money in a month and an excellent crypto edge
+    11% in a week; a small edge needs about a thousand trades to prove by any honest test, and the
+    strict test was guarding a $25 stake. The strict bound stays between micro-real and scaled.
+23. **Promotion and death spend separate alpha.** They shared one series, and the looks at 20 and
+    25 active blocks, where promotion is impossible, spent 76% of it. *Why:* they are errors in
+    opposite directions; each is still bounded at 5% over all looks.
+24. **A family's pooled real-money record can carry a member to the scaled rung**, and sizes it
+    while its own bound is not above zero (on its own variance). One series, the mean growth of
+    the family's rung-2 agents block by block, with its own alpha and looks; the member's own
+    growth must be above zero. *Why:* the first run's favourites edge was only ever measurable pooled.
+25. **The horizon rule**: Kalshi entries must be expected to pay within 12 hours (hourly agents)
+    or 48 (daily); crypto positions are closed after 48 hours; equities and options are not
+    bounded (the owner's decision). Markets are shown and judged by their scheduled expiration,
+    because a game lists a close two days after kickoff (before this, no NFL, college, MLB or
+    soccer game was visible to any agent).
+26. **Specialists** (the owner's design): every agent belongs to one niche of `league/niches.json`
+    for life. The plan's niches were venue x horizon x style labels an agent gave itself. Built:
+    eleven open specialties and one dormant (options), with universes from a live survey of the
+    venue, briefs of what is measured there, 26 founders, a daily survey so a universe follows
+    the season, and one broad sports niche rather than one per sport. *Why:* a small research
+    budget spent in one place compounds; spread over everything it learns nothing.
+27. **The replay charges Kalshi makers where the series does.** *Why:* found by replaying a sports
+    founder over a real week: the big leagues' game series charge a maker fee and the replay
+    charged none. The same replay showed a bid left resting during a match being picked off when
+    a goal is scored (38 wins, 7 losses at 93 cents), so sports founders enter before the start only.
