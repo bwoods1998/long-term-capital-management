@@ -1,7 +1,11 @@
 Build the rebuilt LTCM floor overnight so it is ready to be switched on in the morning and then run for a week with no human in the loop. Work autonomously for up to 8 hours; do not stop to ask me questions. Follow docs/proposals/2026-09-19-the-game.md and docs/design/2026-09-19-architecture.md, plus the four additions I approved (agent web search, a shared research library, a tool-request queue that Astra fulfils, a graveyard playbook) and Astra (gpt-6-astra) as architect, auditor, toolsmith, operator, game designer and teacher.
 
+ALREADY DONE AND VERIFIED, do not rebuild: the gateway serves kalshi, alpaca and alpaca-paper (paper is unmetered and ignores the kill switch); POST /v1/frontier/responses meters gpt-6-astra against the $100 month; order caps are $75 an order, $4,000 and 2,000 orders a day; Coinbase is removed; the site is one page with five sections reading the published tape; the performance baseline is $1,021.93 with incoming transfers read as deposits. Sail credit is about $98. The paper keys are placed and answer.
+
+KEEP YOUR PLACE. Before writing code, create docs/runs/2026-09-20-overnight-build.md and keep it current as you go: the step you are on, what is verified, what is next, every decision and its reason. Your context may be summarized during the night; that file is how you resume without redoing or contradicting earlier work. Re-read it and both design documents whenever you resume.
+
 WHAT TO BUILD, in this order. Finish and verify each before starting the next. Correctness beats coverage: a smaller system that is right is the goal, not a larger one that might be.
-1. Ledger and order book: append-only hash-chained ledger; one netting book per venue so agents never trade against each other; Kalshi and Alpaca through the gateway; the existing risk rules kept. Add the Alpaca paper account to the gateway as its own venue using the secrets ALPACA_PAPER_KEY_ID and ALPACA_PAPER_SECRET_KEY, which I will have placed.
+1. Ledger and order book: append-only hash-chained ledger; one netting book per venue so agents never trade against each other; Kalshi and Alpaca through the gateway; the existing risk rules kept. Wire the runtime to the alpaca-paper venue the gateway already serves.
 2. Evaluator rungs 0 and 1: mechanical replay with every backtest counted as a trial and an overfitting correction; forward testing on Alpaca paper and a conservative Kalshi shadow book; promotion and death by pre-registered tests on a lower confidence bound of after-cost log growth.
 3. Economy and agent lifecycle on Sail: one Sail API key or equivalent attribution per agent, compute credits, niche budget floors, death at zero credits, forking for the rich, sleeping boxes with scheduled wakes, and the first population of about a dozen agents seeded from what the old run measured plus Alpaca seeds. Agents get web search, the shared research library, the tool-request queue and the playbook.
 4. Rung 2 micro-real trading ($1 to $10 positions) behind the Astra auditor, with every rejection scored as if taken; the publisher feeding the five-section site (live thoughts, research and trades; total profit and running time; the balance chart; open and closed positions with reasons; one self-improvement series by generation).
@@ -12,10 +16,13 @@ THE CONSTITUTION, which no model and no code path on Sail may change: the gatewa
 
 HARD RULES FOR TONIGHT.
 - No real-money order is placed tonight. The kill switch stays engaged and the floor loop stays stopped. Real money starts only when I say so in the morning.
+- The paper account holds $100,000 with 4x margin and shorting; the live account holds about $800 with neither. Paper agents are held to the live account's real limits (capital, no leverage, no shorts, whole option contracts, the same $75 order cap), or a strategy could pass on paper and be impossible to run live.
 - You may resume Sail boxes to test, and use Alpaca paper freely. Keep tonight's Sail spend under $10 and OpenAI spend under $10, and pause every box you resumed when you finish.
 - Never chain a deploy on a filter's exit status. Run the full test suite, read its real result, then commit, then deploy.
 - Every module ships with tests. The full runtime suite, the gateway suite and the site suite must all pass at the end. Fix root causes; do not skip, weaken or delete a test to get green.
 - Commit in small, described steps and push. Do not rewrite history. Remove old-run code only when the new code replaces it and tests prove it.
+- The archives on the floor box (/workspace/.archive) and the retired desk folder are history; never delete them.
+- US equity and options markets are closed until Monday 09:30 ET. Tonight's forward tests use Alpaca crypto (open now) and Kalshi's hourly markets; equity and options paths are verified with accepted-then-cancelled paper orders and replays, and the report says which paths have not yet seen a real fill.
 - If something cannot be finished or verified, say so plainly in the report rather than papering over it.
 
 DEFINITION OF DONE. All of these are true and you have shown the evidence for each:
