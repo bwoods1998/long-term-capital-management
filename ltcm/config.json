@@ -54,7 +54,7 @@
   "critic_profile": "glm_asap",
   "learning": {
     "shadow_notional_usd": "15",
-    "live_kalshi_usd": "40",
+    "live_kalshi_usd": "8",
     "live_coinbase_usd": "60",
     "live_orders_per_day": 12
   },
