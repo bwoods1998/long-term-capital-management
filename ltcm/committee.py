@@ -563,27 +563,27 @@ class Committee:
                     # a split by marked value then read every book as broke while the venue
                     # held $140 of cash, because a book's cash is its sleeve less what it paid,
                     # and yesterday's losses had not settled.
-                    cost: dict[str, Decimal] = {}
-                    for desk_id in books:
-                        state = states.get(desk_id)
-                        total = ZERO
-                        for position in (state.positions.values() if state is not None else ()):
-                            try:
-                                total += abs(position.quantity * position.average_cost * position.instrument.multiplier)
-                            except Exception:
-                                continue
-                        cost[desk_id] = total
                     free = cash_by_venue.get(venue)
                     if free is None or free < ZERO:
-                        free = max(ZERO, held - sum(cost.values(), ZERO))
+                        marked = ZERO
+                        for desk_id in books:
+                            state = states.get(desk_id)
+                            marked += max(ZERO, state.equity - state.cash) if state is not None else ZERO
+                        free = max(ZERO, held - marked)
                     each = _quantize(free / Decimal(len(books)))
                     venue_books.extend(books)
                     split_venues.add(venue)
                     for desk_id in books:
-                        targets[desk_id] = _quantize(cost[desk_id] + each)
+                        state = states.get(desk_id)
+                        cash_now = state.cash if state is not None else ZERO
+                        # The sleeve moves the book's cash to its share and leaves its positions
+                        # alone: a book's cash is its sleeve less what it paid less what it lost,
+                        # so a target set from equity or cost left a losing book unable to trade
+                        # while the venue held the money (Sept 19, 2026, twice).
+                        targets[desk_id] = max(ZERO, _quantize(previous.get(desk_id, ZERO) + each - cash_now))
                         reasons[desk_id] = (
-                            f"venue book: {text(targets[desk_id])} on {venue} "
-                            f"({text(_quantize(cost[desk_id]))} at cost, {text(each)} of the venue's free {text(_quantize(free))})"
+                            f"venue book: cash to {text(each)} of {venue}'s free {text(_quantize(free))} "
+                            f"(was {text(_quantize(cash_now))}; positions kept)"
                         )
         # Only real sleeves compete for the floor's real capital; a notional budget costs nothing.
         # A venue book's sleeve is its cost plus its share of the venue's cash: money already
