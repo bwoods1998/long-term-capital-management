@@ -362,6 +362,17 @@ class PaperBookTest(BookCase):
         result = self.book.reconcile()
         self.assertTrue(result.ok, result.detail)
 
+    def test_orders_left_at_the_venue_by_someone_else_are_cleared_before_a_practice_book_opens(self):
+        from ltcm.broker import OrderIntent
+
+        self.broker.set_quote(BTC, "80000", "80010")
+        stray = OrderIntent.new(desk_id="an-earlier-house", instrument=BTC, side="buy", quantity="0.0005", order_type="limit", limit_price="79000",
+                                time_in_force="gtc", rationale="left behind", created_at=iso(self.clock), nonce="stray")
+        self.broker.submit(stray)
+        self.assertEqual(len(self.broker.open_orders()), 1)
+        self.assertTrue(self.book.reconcile().ok)
+        self.assertEqual(self.broker.open_orders(), [])
+
     def test_the_ledger_verifies_after_all_of_it(self):
         self.seat("a1")
         self.broker.set_quote(BTC, "80000", "80010")
@@ -376,6 +387,17 @@ class KalshiBookTest(BookCase):
     family = "kalshi"
     real = True
     cash = "500"
+
+    def test_a_real_book_will_not_open_over_orders_it_did_not_send(self):
+        from ltcm.broker import OrderIntent
+
+        self.broker.set_quote(event(), "0.50", "0.52")
+        stray = OrderIntent.new(desk_id="the-owner", instrument=event(), side="buy", quantity="5", order_type="limit", limit_price="0.40",
+                                time_in_force="gtc", rationale="the owner's own order", created_at=iso(self.clock), nonce="stray")
+        self.broker.submit(stray)
+        with self.assertRaises(BookError):
+            self.book.reconcile()
+        self.assertEqual(len(self.broker.open_orders()), 1)  # never cancelled by the book
 
     def test_a_real_stake_is_a_slice_of_real_cash(self):
         self.book.limits["a1"] = Limits(D(10), D(10))

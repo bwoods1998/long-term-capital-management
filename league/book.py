@@ -1259,6 +1259,16 @@ class Book:
         with self._lock:
             if self.baseline_cash is not None:
                 return
+            # Orders resting at the venue that this book never sent (an earlier House on the same
+            # account, a test) would fill later and read as money moving by itself: found on the
+            # night of the build, when a leftover SOL bid filled under a new ledger. A practice
+            # account is cleared of them; on a real account they are the owner's, so the book
+            # refuses to open until they are gone.
+            foreign = [o for o in self.broker.open_orders() if o.id not in self.orders]
+            if foreign and self.real_money:
+                raise BookError(f"{self.name} has {len(foreign)} open order(s) this book did not send; cancel them at the venue first")
+            for order in foreign:
+                self.broker.cancel(order.broker_order_id or order.id)
             venue_cash, venue_positions = self._venue()
             cash, positions, _ = self._ledger_totals()
             baseline = {

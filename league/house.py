@@ -557,7 +557,7 @@ class House:
         if rung == 1:
             if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
                 return  # it stays eligible on paper until the owner turns real money on
-            if self.auditor is None:
+            if self.auditor is None or not self._audit_due(agent):
                 return
             audit = self.auditor.audit(agent, verdict)
             if not audit.get("approve"):
@@ -566,6 +566,18 @@ class House:
         self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
         if rung == 1 and old is not None:
             self._move_books(agent, old)
+
+    def _audit_due(self, agent: Agent) -> bool:
+        """An audit is about a quarter of a dollar, charged to the agent. A vetoed agent is not
+        audited again at every look: it waits out a cooldown on paper (where its record is the
+        auditor's counterfactual), and no agent is audited that cannot pay for it and live."""
+        rules = self.game.get("audit") or {}
+        if self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
+            return False
+        last = self.ledger.last("audit.verdict", agent=agent.id)
+        if last is None:
+            return True
+        return self.clock() - _epoch(last.at) >= float(rules.get("cooldown_hours", 72)) * 3600
 
     def _move_books(self, agent: Agent, old: Book) -> None:
         """Leave one book for another: cancel, sell what can be sold, and take the stake back."""
@@ -616,6 +628,8 @@ class House:
         blocks = self.evaluator.blocks(agent.id)
         growth = sum(float(b["log_growth"]) for b in blocks)
         spent = sum(Decimal(e.payload["usd"]) for e in self.ledger.iter(kinds="credit.charge", agent=agent.id))
+        detail = detail.strip()
+        detail = (detail[0].upper() + detail[1:] + ("" if detail.endswith(".") else ".")) if detail else ""
         lines = [
             f"{agent.id} (family {agent.family}, niche {agent.niche}, generation {agent.generation}) died on rung {rung} of {cause}. {detail}".strip(),
             f"It ran {len(trials)} replay trials, traded {len(blocks)} blocks forward for a total log growth of {growth:+.4f}, and spent ${spent:.2f} of compute.",

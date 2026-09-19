@@ -67,10 +67,12 @@ class InProcessSandbox:
 
 class FakeAuditor:
     def __init__(self, approve=True):
-        self.approve, self.seen = approve, []
+        self.approve, self.seen, self.ledger = approve, [], None
 
     def audit(self, agent, verdict):
         self.seen.append(agent.id)
+        if self.ledger is not None:  # the real auditor records every verdict; the cooldown reads that row
+            self.ledger.append("audit.verdict", {"approve": self.approve, "summary": "test"}, agent=agent.id)
         return {"approve": self.approve, "summary": "test"}
 
     def score(self):
@@ -90,6 +92,7 @@ class LadderTest(unittest.TestCase):
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.paper, "alpaca": self.real}, sandbox=InProcessSandbox(),
             alpaca_data=self.data, clock=self.clock, settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game, auditor=self.auditor,
         )
+        self.auditor.ledger = self.house.ledger
         self.price = 80000.0
         self.step = 0
 
@@ -116,6 +119,21 @@ class LadderTest(unittest.TestCase):
                 broker.set_quote(instrument_for(broker.venue, {"symbol": "BTC/USD"}), f"{self.price - 2:.2f}", f"{self.price + 2:.2f}")
             self.clock.advance(300)
             self.house.tick()
+
+    def test_a_vetoed_agent_waits_out_a_cooldown_and_a_poor_one_is_not_audited(self):
+        house = self.house
+        self.auditor.approve = False
+        agent = house.spawn("climber", "ladder-test", LADDER, reason="test", endowment="2.5")
+        house.evaluator.seat(agent.id, 1, "test")
+        house._state["tried"][agent.id] = agent.code_sha256
+        self.run_hours(45, edge=0.78)  # eligible at several looks, vetoed at the first
+        self.assertEqual(house.evaluator.rung(agent.id), 1)
+        self.assertEqual(self.auditor.seen.count(agent.id), 1)  # audited once, not at every look (a child it forked may be audited too)
+        self.assertFalse(house._audit_due(agent))
+        self.clock.advance(73 * 3600)
+        self.assertTrue(house._audit_due(agent))
+        house.economy.charge(agent.id, house.economy.balance(agent.id) - D("0.10"), "test")
+        self.assertFalse(house._audit_due(agent))
 
     def test_up_the_ladder_sized_and_back_down(self):
         house = self.house

@@ -23,6 +23,10 @@
     "max_population": [8, 24],
     "min_population": [4, 12]
   },
+  "audit": {
+    "cooldown_hours": 72,
+    "min_credits_usd": "0.60"
+  },
   "research": {
     "profile": "flash_flex",
     "fast_profile": "flash_asap",
