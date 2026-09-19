@@ -16,6 +16,7 @@ export const PURPOSE_HEADER = 'X-LTCM-Purpose';
 export const ORDER_PATHS = {
   kalshi: ['portfolio/events/orders', 'portfolio/orders'],
   coinbase: ['api/v3/brokerage/orders'],
+  alpaca: ['v2/orders'],
 };
 
 export const normalizePath = path => String(path || '').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -53,6 +54,25 @@ export const VENUE_PATHS = {
     ['POST', /^api\/v3\/brokerage\/orders$/],
     ['POST', /^api\/v3\/brokerage\/orders\/batch_cancel$/],
   ],
+  // Alpaca (Sept 19, 2026). Trading and market data share the credential and the allow-list;
+  // the host follows the path. No transfers, no journals, no account configuration: the floor
+  // reads its account, places and cancels orders, and reads quotes and bars.
+  alpaca: [
+    ['GET', /^v2\/account$/],
+    ['GET', /^v2\/account\/activities\/[A-Z_]{1,32}$/],
+    ['GET', /^v2\/positions(\/[A-Za-z0-9._~%-]+)?$/],
+    ['GET', /^v2\/orders(\/[A-Za-z0-9._~%-]+)?$/],
+    ['GET', /^v2\/orders:by_client_order_id$/],
+    ['GET', /^v2\/clock$/],
+    ['GET', /^v2\/calendar$/],
+    ['GET', /^v2\/assets(\/[A-Za-z0-9._~%-]+)?$/],
+    ['POST', /^v2\/orders$/],
+    ['DELETE', /^v2\/orders\/[A-Za-z0-9._~%-]+$/],
+    // Market data, read only.
+    ['GET', new RegExp(`^v2\\/stocks(\\/${SEGMENT})?\\/(quotes|trades|bars|snapshots?)(\\/latest)?$`)],
+    ['GET', /^v2\/stocks\/snapshots$/],
+    ['GET', /^v1beta3\/crypto\/[a-z]{2,4}\/(latest\/)?(quotes|trades|bars|snapshots)$/],
+  ],
 };
 
 /** True when this gateway is willing to sign `method path` for `venue`. */
@@ -83,7 +103,9 @@ export function caps(env = {}) {
  */
 export function notional(venue, body, { reference = null, contractSize = null } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
-  return venue === 'kalshi' ? kalshiNotional(body) : coinbaseNotional(body, reference, contractSize);
+  if (venue === 'kalshi') return kalshiNotional(body);
+  if (venue === 'alpaca') return alpacaNotional(body, reference);
+  return coinbaseNotional(body, reference, contractSize);
 }
 
 /** True for a Coinbase Financial Markets futures product id (`BIP-20DEC30-CDE`). */
@@ -107,6 +129,28 @@ function kalshiNotional(body) {
   }
   if (price <= 0n) return { error: 'Order price is not positive.' };
   return { micro: picoToMicro(mulPico(count, price)) };
+}
+
+// Alpaca: `notional` is already the dollar amount. A `qty` is a quantity of the security, priced
+// with its own limit price where there is one and otherwise with the reference the router reads
+// from the venue's own quote -- never from the VM that is asking us to authorize the spend.
+// A short sale is worth what it sells, so the sign of the position never enters the notional.
+function alpacaNotional(body, reference) {
+  const dollars = parsePico(body.notional);
+  if (dollars !== null && dollars > 0n) return { micro: picoToMicro(dollars) };
+  const qty = parsePico(body.qty);
+  if (qty === null || qty <= 0n) return { error: 'Order qty is missing or not positive.' };
+  const limit = parsePico(body.limit_price);
+  const stop = parsePico(body.stop_price);
+  let price = parsePico(reference);
+  for (const own of [limit, stop]) {
+    // The dearest of the caller's own prices and the venue's: an order can fill at its limit.
+    if (own !== null && own > 0n && (price === null || own > price)) price = own;
+  }
+  if (price === null || price <= 0n) {
+    return { error: `Cannot price this order: send a ${REFERENCE_HEADER} header, a limit price or a notional.` };
+  }
+  return { micro: picoToMicro(mulPico(qty, price)) };
 }
 
 // Coinbase: a `quote_size` already is the dollar amount. A `base_size` is a quantity of the base

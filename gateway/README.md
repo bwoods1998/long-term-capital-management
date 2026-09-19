@@ -2,9 +2,9 @@
 
 The desks run in a Sail cloud VM. The venue private keys do not.
 
-This Worker holds the Kalshi and Coinbase credentials as Worker secrets, signs every request
-itself, enforces hard caps and a kill switch **before** it forwards anything, and watches the
-floor from outside. The VM holds one bearer token. So the worst a compromised, confused or
+This Worker holds the Kalshi, Coinbase and Alpaca credentials as Worker secrets, authenticates
+every request itself, enforces hard caps and a kill switch **before** it forwards anything, and
+watches the floor from outside. The VM holds one bearer token. So the worst a compromised, confused or
 runaway VM can do is *ask* for an order — it cannot sign one, it cannot exceed the caps, and it
 cannot turn the kill switch off, because none of those things live in it.
 
@@ -17,6 +17,8 @@ step the design admits.
 ltcm runtime (Sail VM)                 this Worker                        the venues
   GatewaySigner: a bearer token   ->   KALSHI_PRIVATE_KEY (RSA-PSS)  ->   api.elections.kalshi.com
                                        COINBASE_API_SECRET (CDP JWT) ->   api.coinbase.com
+                                       ALPACA_KEY_ID + _SECRET_KEY   ->   api.alpaca.markets
+                                                                          data.alpaca.markets
                                        caps + kill switch (Durable Object)
                                        watchdog cron (checkpoint, balance, box)
 ```
@@ -31,6 +33,7 @@ characters.
 | --- | --- | --- |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
 | `GET`/`POST`/`DELETE` | `/v1/coinbase/<path>` | Mints a CDP JWT bound to `METHOD api.coinbase.com/<path>` and forwards to `https://api.coinbase.com/<path>`. |
+| `GET`/`POST`/`DELETE` | `/v1/alpaca/<path>` | Adds `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY` and forwards to `https://api.alpaca.markets/<path>`, or to `https://data.alpaca.markets/<path>` when the path is a market-data one (`v2/stocks/`, `v1beta3/`). One venue name, two hosts, one credential. |
 | `GET` | `/v1/health` | Caps, today's counters, kill switch, watchdog record, Sail balance and box state, and when each alert last went out. |
 | `POST` | `/v1/kill` | Runtime token may engage the kill switch. |
 | `POST` | `/v1/unkill` | Only the separate owner token may release it. |

@@ -3,6 +3,7 @@
 //
 //   GET|POST|DELETE /v1/kalshi/<path>     signed with the Kalshi key, forwarded to the venue
 //   GET|POST|DELETE /v1/coinbase/<path>   signed with the Coinbase key, forwarded to the venue
+//   GET|POST|DELETE /v1/alpaca/<path>     keyed with the Alpaca headers, forwarded to the venue
 //   GET             /v1/kalshi/ws-auth    handshake headers for the Kalshi WebSocket, 30 s of life
 //   GET             /v1/coinbase/ws-jwt   a JWT for the Coinbase user WebSocket, 120 s of life
 //   GET             /v1/health            caps, counters, kill switch, watchdog
@@ -21,8 +22,9 @@ import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import { createsOrder, notional, isCoinbaseFuture, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as coinbase from './coinbase.mjs';
+import * as alpaca from './alpaca.mjs';
 
-export const VENUES = ['kalshi', 'coinbase'];
+export const VENUES = ['kalshi', 'coinbase', 'alpaca'];
 //: A venue product listing (price, contract size) reused across orders for this long.
 const PRODUCT_CACHE_MS = 60_000;
 const productCache = new Map();
@@ -31,7 +33,7 @@ const ALLOW = METHODS.join(', ');
 
 /** The venue and venue path a gateway path names, or `null` when it names neither. */
 export function parseRoute(pathname) {
-  const match = /^\/v1\/(kalshi|coinbase)\/(.+)$/.exec(pathname);
+  const match = /^\/v1\/(kalshi|coinbase|alpaca)\/(.+)$/.exec(pathname);
   if (!match) return null;
   const path = match[2].replace(/^\/+/, '');
   // No traversal, no empty segments: a forwarded path is a venue path, not a filesystem one.
@@ -163,6 +165,42 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
         } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
       }
     }
+    if (target.venue === 'alpaca' && !parsed?.notional && !parsed?.limit_price && !parsed?.stop_price) {
+      // A market order has no enforceable limit, so its reference comes from the venue's own
+      // quote, signed like every other call. An unpriceable order is refused, never passed.
+      const symbol = String(parsed?.symbol || '');
+      if (!/^[A-Za-z0-9.\/-]{1,24}$/.test(symbol)) return fail('Invalid symbol.', 400);
+      const crypto = symbol.includes('/');
+      const quotePath = crypto
+        ? `v1beta3/crypto/us/latest/quotes?symbols=${encodeURIComponent(symbol)}`
+        : `v2/stocks/${encodeURIComponent(symbol)}/quotes/latest`;
+      const cacheKey = `alpaca:${symbol}`;
+      const cacheMs = Number(env.PRODUCT_CACHE_MS ?? PRODUCT_CACHE_MS);
+      let data = cacheMs > 0 ? productCache.get(cacheKey) : null;
+      if (!data || data.expires < Date.now()) {
+        let quote = null;
+        try {
+          const [bare, query = ''] = quotePath.split('?');
+          const signed = await sign({ venue: 'alpaca', path: bare }, new Request(`https://x/${bare}${query ? '?' + query : ''}`, { method: 'GET' }), env, { now: now(), nonce });
+          quote = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'follow' });
+        } catch (error) {
+          return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
+        }
+        if (!quote.ok) return fail(`Cannot independently price this order: venue HTTP ${quote.status}.`, 503);
+        try {
+          data = { ...(await quote.json()), expires: Date.now() + cacheMs };
+        } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
+        if (cacheMs > 0) productCache.set(cacheKey, data);
+        if (productCache.size > 256) productCache.clear();
+      }
+      // A stock answer is `quote` beside `symbol`; a crypto answer is `quotes`, keyed by symbol.
+      const level = data.quote || data.quotes?.[symbol] || null;
+      const ask = Number(level?.ap ?? level?.AskPrice ?? 0);
+      const bid = Number(level?.bp ?? level?.BidPrice ?? 0);
+      const price = ask > 0 ? ask : bid;
+      if (!(price > 0)) return fail('Cannot independently price this order: no venue quote.', 503);
+      reference = String(price * 1.10);  // a market order may fill through the touch
+    }
     const priced = notional(target.venue, parsed, { reference, contractSize });
     if (priced.error) return fail(priced.error, 400);
     const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
@@ -224,6 +262,11 @@ async function sign({ venue, path }, request, env, { now, nonce }) {
     ...(request.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
     'User-Agent': 'ltcm-gateway/1.0',
   };
+  if (venue === 'alpaca') {
+    if (!env.ALPACA_KEY_ID || !env.ALPACA_SECRET_KEY) throw new Error('not configured');
+    Object.assign(headers, alpaca.authHeaders({ keyId: env.ALPACA_KEY_ID, secretKey: env.ALPACA_SECRET_KEY }));
+    return { url: alpaca.target(path, search), headers };
+  }
   if (venue === 'kalshi') {
     if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error('not configured');
     Object.assign(headers, await kalshi.authHeaders({

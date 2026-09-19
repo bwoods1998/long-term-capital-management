@@ -20,6 +20,8 @@ const env = (extra = {}) => ({
   KALSHI_PRIVATE_KEY: keys.kalshi.pkcs8,
   COINBASE_KEY_NAME: 'organizations/o/apiKeys/k',
   COINBASE_API_SECRET: keys.coinbase.seed32,
+  ALPACA_KEY_ID: 'AK-TEST-KEY',
+  ALPACA_SECRET_KEY: 'alpaca-secret-that-never-leaves-the-worker',
   MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', PRODUCT_CACHE_MS: '0',
   ...extra,
 });
@@ -328,11 +330,64 @@ test('the Kalshi tier upgrade is forwarded as a plain write and never counted as
   assert.equal(gate.status(NOW).today.orders, 0, 'an upgrade is not an order');
 });
 
+test('alpaca is keyed inside the worker, hosted by path, and priced before it is sent', async () => {
+  // A read: the two headers are added here and the VM never sees them.
+  const read = await call(ask('GET', '/v1/alpaca/v2/account'));
+  assert.equal(read.response.status, 200);
+  assert.equal(read.calls[0].url, 'https://api.alpaca.markets/v2/account');
+  assert.equal(read.calls[0].headers['APCA-API-KEY-ID'], 'AK-TEST-KEY');
+  assert.equal(read.calls[0].headers['APCA-API-SECRET-KEY'], 'alpaca-secret-that-never-leaves-the-worker');
+
+  // Market data is the same credential on the other host.
+  const quotes = await call(ask('GET', '/v1/alpaca/v2/stocks/AAPL/quotes/latest?feed=iex'));
+  assert.equal(quotes.calls[0].url, 'https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex');
+
+  // A limit order is priced from its own limit: 4 x $10 is inside the $50 per-order cap.
+  const limit = await call(ask('POST', '/v1/alpaca/v2/orders', {
+    body: { symbol: 'AAPL', qty: '4', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' },
+  }));
+  assert.equal(limit.response.status, 200);
+  assert.equal(JSON.parse(limit.calls[0].body).symbol, 'AAPL');
+  assert.equal((await limit.gate.status()).today.notional_usd, '40.00');
+
+  // The same order for 400 shares is over the per-order cap and never reaches the venue.
+  const big = await call(ask('POST', '/v1/alpaca/v2/orders', {
+    body: { symbol: 'AAPL', qty: '400', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' },
+  }));
+  assert.equal(big.response.status, 403);
+  assert.equal(big.body.cap, "order");
+  assert.equal(big.calls.length, 0);
+
+  // A market order carries no price, so the gateway reads the venue's own quote and prices
+  // the order 10% through the ask; the VM's claim about the price is never used.
+  const market = await call(ask('POST', '/v1/alpaca/v2/orders', {
+    body: { symbol: 'AAPL', qty: '2', side: 'buy', type: 'market', time_in_force: 'day' },
+    headers: { 'X-LTCM-Reference-Price': '0.01' },
+  }), {
+    fetcher: async (url, init) => {
+      if (String(url).includes('/quotes/latest')) return new Response(JSON.stringify({ symbol: 'AAPL', quote: { ap: 12, bp: 11.9 } }), { status: 200 });
+      return new Response(JSON.stringify({ id: 'o1' }), { status: 200 });
+    },
+  });
+  assert.equal(market.response.status, 200);
+  assert.equal((await market.gate.status()).today.notional_usd, '26.40', '2 x 12 x 1.10, the venue price, not the caller s');
+
+  // A path this gateway does not sign, and a venue write that is not an order path.
+  assert.equal((await call(ask('POST', '/v1/alpaca/v2/account/configurations'))).response.status, 403);
+  assert.equal((await call(ask('DELETE', '/v1/alpaca/v2/positions'))).response.status, 403);
+
+  // Without the secret the gateway refuses rather than sending an unauthenticated order.
+  const bare = await call(ask('GET', '/v1/alpaca/v2/account'), { settings: { ALPACA_SECRET_KEY: '' } });
+  assert.equal(bare.response.status, 503);
+  assert.match(bare.body.error, /alpaca/);
+});
+
 test('only the documented routes and methods exist', async () => {
   assert.deepEqual(parseRoute('/v1/kalshi/portfolio/balance'), { venue: 'kalshi', path: 'portfolio/balance' });
   assert.equal(parseRoute('/v1/kalshi'), null);
   assert.equal(parseRoute('/v1/kalshi/'), null);
-  assert.equal(parseRoute('/v1/alpaca/x'), null);
+  assert.deepEqual(parseRoute('/v1/alpaca/v2/account'), { venue: 'alpaca', path: 'v2/account' });
+  assert.equal(parseRoute('/v1/schwab/accounts'), null, 'a venue this gateway holds no key for');
   assert.equal(parseRoute('/v1/kalshi/../../secret'), null, 'no traversal out of the venue path');
 
   assert.equal((await call(ask('GET', '/v1/unknown'))).response.status, 404);

@@ -1270,13 +1270,15 @@ class Service:
         if self.broker_factory is not None:
             return self.broker_factory(venue, settings=settings, service=self)
         gateway_url = self.config.get("gateway_url")
-        if gateway_url and venue in ("kalshi", "coinbase"):
+        if gateway_url and venue in ("kalshi", "coinbase", "alpaca"):
             try:
                 from .adapters import (
+                    AlpacaCredentials,
                     CoinbaseCredentials,
                     GatewaySigner,
                     KalshiCredentials,
                     VenueClient,
+                    alpaca,
                     coinbase,
                     kalshi,
                 )
@@ -1292,6 +1294,17 @@ class Service:
                 if venue == "kalshi":
                     return kalshi.KalshiBroker(
                         KalshiCredentials("gateway", GatewaySigner(token)), client=client, clock=self.clock
+                    )
+                if venue == "alpaca":
+                    # Alpaca authenticates with two headers rather than a signature, so in
+                    # gateway mode the credential is a placeholder: the client drops the headers
+                    # this builds and the Worker adds the real ones. `paper` is False because
+                    # the gateway signs for the production account; the paths are the same
+                    # either way, and the host is the Worker's to choose.
+                    return alpaca.AlpacaBroker(
+                        AlpacaCredentials("gateway", "gateway", paper=False),
+                        client=client,
+                        feed=str(settings.get("feed") or alpaca.DEFAULT_FEED),
                     )
                 broker = coinbase.CoinbaseBroker(
                     CoinbaseCredentials("gateway", GatewaySigner(token)), client=client, clock=self.clock

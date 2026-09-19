@@ -12,6 +12,7 @@ from decimal import Decimal
 from ltcm.adapters import (
     COINBASE_ORDERS_PATH,
     REFERENCE_HEADER,
+    AlpacaCredentials,
     CoinbaseCredentials,
     GatewaySigner,
     KalshiCredentials,
@@ -19,6 +20,7 @@ from ltcm.adapters import (
     gateway_path,
     gateway_url_for,
 )
+from ltcm.adapters.alpaca import AlpacaBroker
 from ltcm.adapters.coinbase import CoinbaseBroker
 from ltcm.adapters.kalshi import KalshiBroker
 from ltcm.broker import Instrument, OrderIntent, Quote
@@ -32,6 +34,13 @@ EPOCH = 1789480800
 TICKER = "KXTEST-26SEP15"
 EVENT = Instrument("event", TICKER, "kalshi", market_id=TICKER)
 BTC = Instrument("crypto", "BTC-USD", "coinbase", market_id="BTC-USD")
+AAPL = Instrument("equity", "AAPL", "alpaca")
+
+ALPACA_ACCOUNT = {"id": "a-1", "status": "ACTIVE", "currency": "USD", "cash": "500.00",
+                  "equity": "500.00", "buying_power": "500.00", "portfolio_value": "500.00"}
+ALPACA_ORDER = {"id": "a-o-1", "client_order_id": "oi-" + "c" * 32, "symbol": "AAPL",
+                "status": "new", "qty": "2", "filled_qty": "0", "side": "buy",
+                "order_type": "limit", "limit_price": "10.00", "submitted_at": NOW}
 
 BALANCE = {"balance": 50000, "portfolio_value": 50000}
 ACCOUNTS = {"accounts": [], "has_next": False}
@@ -97,6 +106,18 @@ def coinbase_broker(transport, *, gateway=False, market_data=None):
     return broker
 
 
+def alpaca_broker(transport, *, gateway=False):
+    if gateway:
+        client = VenueClient(
+            transport, gateway_url=GATEWAY, gateway=GatewaySigner(TOKEN), venue="alpaca"
+        )
+        credentials = AlpacaCredentials("gateway", "gateway", paper=False)
+    else:
+        client = VenueClient(transport)
+        credentials = AlpacaCredentials("PKREALKEYID", "real-secret", paper=False)
+    return AlpacaBroker(credentials, client=client)
+
+
 class GatewayUrlTest(unittest.TestCase):
     def test_kalshi_loses_its_prefix_and_keeps_its_query(self):
         self.assertEqual(
@@ -113,6 +134,18 @@ class GatewayUrlTest(unittest.TestCase):
             GATEWAY + "/v1/coinbase/api/v3/brokerage/accounts",
         )
         self.assertEqual(gateway_path("coinbase", "https://api.coinbase.com/x?y=1"), ("x", "y=1"))
+
+    def test_alpacas_two_hosts_map_onto_one_venue_route(self):
+        # Trading and market data are different hosts with the same credential; the gateway
+        # picks the host from the path, so the floor needs one venue name, not two.
+        self.assertEqual(
+            gateway_url_for(GATEWAY, "alpaca", "https://api.alpaca.markets/v2/account"),
+            GATEWAY + "/v1/alpaca/v2/account",
+        )
+        self.assertEqual(
+            gateway_url_for(GATEWAY, "alpaca", "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex"),
+            GATEWAY + "/v1/alpaca/v2/stocks/AAPL/quotes/latest?feed=iex",
+        )
 
     def test_gateway_mode_needs_a_token_and_a_venue(self):
         with self.assertRaises(ValueError):
@@ -283,3 +316,40 @@ class ServiceGatewayModeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlpacaGatewayTest(unittest.TestCase):
+    def test_a_read_carries_the_bearer_token_and_neither_alpaca_header(self):
+        transport = FakeTransport({GATEWAY + "/v1/alpaca/v2/account": ALPACA_ACCOUNT})
+        balance = alpaca_broker(transport, gateway=True).balance()
+        self.assertEqual(balance.cash, Decimal("500.00"))
+        call = transport.calls[-1]
+        self.assertEqual(call["url"], GATEWAY + "/v1/alpaca/v2/account")
+        self.assertEqual(call["headers"]["Authorization"], "Bearer " + TOKEN)
+        for name in ("APCA-API-KEY-ID", "APCA-API-SECRET-KEY"):
+            self.assertNotIn(name, call["headers"])
+
+    def test_direct_mode_still_sends_the_key_and_the_secret(self):
+        transport = FakeTransport({"https://api.alpaca.markets/v2/account": ALPACA_ACCOUNT})
+        alpaca_broker(transport).balance()
+        call = transport.calls[-1]
+        self.assertEqual(call["headers"]["APCA-API-KEY-ID"], "PKREALKEYID")
+        self.assertEqual(call["headers"]["APCA-API-SECRET-KEY"], "real-secret")
+        self.assertNotIn("Authorization", call["headers"])
+
+    def test_an_order_body_is_unchanged_by_the_detour(self):
+        order = intent(AAPL, quantity="2", order_type="limit", limit_price="10.00", time_in_force="day")
+        direct = FakeTransport({("POST", "https://api.alpaca.markets/v2/orders"): ALPACA_ORDER})
+        alpaca_broker(direct).submit(order)
+        through = FakeTransport({("POST", GATEWAY + "/v1/alpaca/v2/orders"): ALPACA_ORDER})
+        alpaca_broker(through, gateway=True).submit(order)
+        self.assertEqual(direct.calls[-1]["body"], through.calls[-1]["body"])
+        self.assertEqual(through.calls[-1]["body"]["symbol"], "AAPL")
+
+    def test_market_data_goes_through_the_gateway_too(self):
+        quote = {"symbol": "AAPL", "quote": {"ap": 12.5, "bp": 12.4, "t": NOW}}
+        transport = FakeTransport({GATEWAY + "/v1/alpaca/v2/stocks/AAPL/quotes/latest*": quote})
+        found = alpaca_broker(transport, gateway=True).quote(AAPL)
+        self.assertEqual(found.ask, Decimal("12.5"))
+        self.assertTrue(transport.calls[-1]["url"].startswith(GATEWAY + "/v1/alpaca/v2/stocks/AAPL/quotes/latest"))
+        self.assertEqual(transport.calls[-1]["headers"]["Authorization"], "Bearer " + TOKEN)

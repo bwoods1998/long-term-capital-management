@@ -286,9 +286,10 @@
   ],
   "venues": {
     "alpaca": {
-      "paper": true,
-      "key_id_env": "ALPACA_PAPER_KEY_ID",
-      "secret_env": "ALPACA_PAPER_SECRET_KEY"
+      "key_id_env": "ALPACA_KEY_ID",
+      "secret_env": "ALPACA_SECRET_KEY",
+      "paper": false,
+      "feed": "iex"
     },
     "kalshi": {
       "key_id_env": "KALSHI_KEY_ID",
