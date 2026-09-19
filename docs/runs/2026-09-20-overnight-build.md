@@ -6,16 +6,195 @@ This file is the builder's place-keeper and, at the end, the report. The goal is
 
 Started 2026-09-19 06:00 UTC. Eight hours ends 14:00 UTC.
 
-## Where I am
+## The report
 
-- **Step:** all six steps are built and tested. Now: evidence runs and documentation.
-- **In flight (08:25 UTC):** the accelerated real run (one death, one fork by rule) in scratch
-  `accel1`; the first deploy of the league to the House box through the watchdog (canary on the
-  box; the loop is NOT started tonight).
-- **Next:** (d) a deliberately bad release refused by the canary on the box, and a local rollback
-  of a release that degrades after promotion; (e) look at the test tape page; runbook; README and
-  docs pass with the old record moved to docs/history; final report; pause every box; flatten the
-  paper account; terminate tonight's test boxes (prefixes league-test, league-, accel-, canary-).
+Written at the end of the build, about 09:30 UTC on Sept 19, 2026 (02:30 in California), three and
+a half hours after it started. All six steps are built. Everything below was run, not assumed;
+where something was not verified it says so.
+
+### State everything was left in
+
+- Gateway kill switch **engaged**. No real-money order was placed tonight (gateway counter: 0
+  orders, $0.00). `league/config.json` has `"real_money": false`.
+- The House loop is **stopped** and has never been started on the box. The House box holds the
+  release the watchdog promoted from `main`, three secrets, no venue key, and is **paused**.
+- The production tape is **empty** (`/api/capital/checkpoint` is 404); the page shows the red
+  "stopped" dot by itself. Test data is on the `test` tape only.
+- The Alpaca paper account is **flat**: no positions, no open orders, $99,999.18.
+- Every Sail box this build created (agent boxes, probes, canaries) is terminated. The first run's
+  ~100 boxes are as they were: paused or sleeping, billing nothing.
+- Both repositories are clean and pushed; the deployed gateway, site and box code are `main`.
+
+Switching on is `docs/runbook-go-live.md`: `floor_box.py resume`, `deploy`, `start`.
+
+### What was built
+
+| Step | What | Where |
+|---|---|---|
+| 1 | Append-only hash-chained ledger; one netting book per venue (per-agent accounts folded from the ledger, the first run's 21 risk rules unchanged plus the league's own, market orders netted with internal crosses priced as the venue would have, pro-rata attribution, reconciliation against a baseline); gateway venues including `alpaca-paper` | `league/ledger.py`, `book.py`, `fees.py`, `venues.py` |
+| 2 | Statistics (alpha-spent t-bounds, the exact loss-rate gate, deflated Sharpe, CUSUM, quarter Kelly); a self-contained replay simulator that runs in the agent's box; tapes from Alpaca and Kalshi; the Kalshi shadow venue; the evaluator; the pinned constitution | `stats.py`, `replay.py`, `tapes.py`, `paper.py`, `evaluator.py`, `constitution.py` |
+| 3 | Compute credits with niche floors, payout, fork threshold; the agent registry; one sealed Sailbox per agent with fork-by-checkpoint; the in-box runner and its safety check; web search, library, tool-request queue, graveyard playbook; the researcher loop; twelve founding seeds; the House tick; the Sail budget meter | `economy.py`, `game.json`, `agents.py`, `sandbox.py`, `runner.py`, `safety.py`, `commons.py`, `researcher.py`, `rules.py`, `seeds/`, `house.py`, `budget.py` |
+| 4 | The frontier client and the fail-closed auditor with counterfactual scoring; the publisher for the five-section site; service wiring and the command line; on the site: a test tape, practice positions with a tag, the new research tools, a data-driven live dot | `frontier.py`, `auditor.py`, `publish.py`, `service.py`, `__main__.py`; personal-site |
+| 5 | Astra's five pull-request roles; the gateway's GitHub route; the CI judge and the two workflows; releases, canary, promotion, watch and rollback; a simulated paper venue for the canary; the updater that pulls `main`; the box script rebuilt around releases | `astra.py`, `ci.py`, `strategies/`, `tools/`, `playbook/`, `watchdog.py`, `sim.py`, `updater.py`, `gateway/lib/github.mjs`, `.github/workflows/astra.yml`, `scripts/floor_box.py` |
+| 6 | Quarter-Kelly stakes on the lower bound, capped by a share of the venue's cash and by what one order can close; drift on the edge per trade; the standing capital recommendation | `capital.py`, `evaluator.py` |
+
+### Definition of done, item by item
+
+**(a) All three suites pass.** League: 847 tests. Gateway: 104. Site: 65. (The first run's suite,
+which the league's imports depend on: 1,753.) GitHub Actions ran the league and first-run suites
+green on Python 3.11 and 3.14. The league's suite includes a whole-ladder test (paper, the audit,
+micro-real, scaled, sizing, decay and demotion in one run) and a replay regression over canned
+tapes for every seed.
+
+**(b) End-to-end dry runs on Alpaca paper and the Kalshi shadow book, with real Sail boxes.**
+- *Book against the real paper venue* (scratch `book_live.py`): two agents, three netted buys, a
+  cross inside the House with only the difference sent, everything closed; reconciled after every
+  stage with cash differences of -$0.0015, -$0.0024, +$0.0021, no position differences.
+- *The league for an hour* (scratch root `dry2`, test tape): twelve founders woke on their clocks in
+  sealed Sailboxes, thought, researched with real Sail inference (53 research steps, 5 library
+  notes, 3 tool requests, about $0.001 a pass), proposed 7 orders, rested bids on both venues, took
+  a Kalshi shadow maker fill that later settled, ran 12 replays as counted trials; both books
+  reconciled at every one of 24 checks; the ledger's 576 rows verified, including after a
+  `kill -9` of the House mid-run and a restart on the same state.
+- *Accelerated* (scratch `accel3`, sandbox seconds priced a thousand times over so a week's burn
+  takes minutes): `crypto-dip-limit`, born with $3.30 of credits, **forked** `crypto-dip-limit-2` by
+  rule and endowed it with $1.00 (a real Sail checkpoint fork: `box_forked: true`);
+  `favorites-no` **died** of credits at its second wake, with a post-mortem in the playbook; both
+  books reconciled with a cash difference of zero; 102 ledger rows verified.
+- Paper fills seen tonight: Alpaca crypto market buys and sells (real paper fills), a Kalshi shadow
+  maker fill and its settlement. **Not yet seen as a fill:** any equity, any option, any Alpaca
+  limit order (they rested), anything on a real venue. Equity and option order paths were verified
+  as accepted-then-cancelled paper orders (F, one share; SPY 2026-10-16 740 call, one contract).
+  The House's own rules correctly refused an equity market order while New York was closed.
+  **Options are switched off** in the book until the House can quote them (no chain or option
+  quotes; the gateway does not serve Alpaca's contract listing).
+
+**(c) Astra, metered through the gateway.** The auditor vetoed a deliberately bad candidate (a
+martingale with a good-looking 40-block paper record) with four blockers, naming the unbounded
+doubling, the breach of the micro limits and the $75 cap, and wins that were losses after fees:
+$0.23 (a first attempt with an empty record cost $0.07). The architect completed one metered pass
+($0.10) and declined to write a strategy, with reasons; the toolsmith one ($0.06), correctly
+answering that the agents' three requests needed data, not tools (the House was changed instead).
+Pull requests: **#1** (a strategy importing `os`) refused by the `judge` job; **#2** (a designer
+branch editing the constitution) refused by the `guard` job run from main's copy; **#3** (a lesson
+for the playbook) passed guard, judge and both suites and was squash-merged by the `merge` job with
+no human step. The three were opened from this machine with a `gh` forge of the same interface,
+because the gateway has no GitHub token yet (see "what is still yours").
+
+**(d) The watchdog on the box.** First deploy of the league: canary passed, `PROMOTED`. Then a
+release whose `House.tick` raises was handed to it on the box: verdict `refused` ("tick 1: it
+exited 1: RuntimeError: a deliberately broken release"), `current` untouched. The other half, a
+release that passes the canary and degrades after promotion being rolled back, is verified by the
+watchdog's tests with real subprocesses and symlinks and by a command-line run against a stand-in
+House; it was **not** run on the box, because that needs the House loop running and tonight's rule
+was that it stays stopped.
+
+**(e) The site on a test tape.** The real publisher filled `https://blakewoods.us/capital/?tape=test`
+during the dry runs. The page's own functions over that live tape: a live stream of agents'
+thoughts and league news; Total profit $0.00 and a running clock (the real accounts are flat
+against the $1,021.93 baseline, funding verified); a 16-point balance chart of the real accounts;
+a closed Kalshi shadow trade with its reason (open-position rows with reasons are covered by the
+publisher's tests and the site's contract test; none were open at that moment); one improvement
+bar for generation 1. The publisher's output passes the site's `validCheckpoint` and
+`validEventBatch`. Production was never written to.
+
+**(f)** `docs/runbook-go-live.md`.
+
+**(g)** This file.
+
+**(h) GitHub.** Both repositories clean and pushed; gateway (version d553812d), site (8ed04f2d) and
+the box's release deployed from `main`; README rewritten for the system as it exists with the first
+run's record moved to `docs/history/`; `league/README.md` added; `ltcm/README.md`,
+`gateway/README.md`, `docs/README.md`, `deploy/README.md`, the architecture (with a section on
+everything built differently from the plan, and why) and the game memo brought into agreement with
+the code; the repository description and website link are unchanged and right; tonight's commits
+in both repositories were scanned for the values in `.env`, key and token shapes and the two
+account identifiers: nothing (one match is a labelled test fixture string).
+
+### What was deferred, and why
+
+- **Removing the first run's code.** The league imports its adapters, broker types, risk engine,
+  fee model, Sail clients, provider, data readers and funding-flow reader. The rest (desks,
+  committee, evolution, Foundry, lab, mind, service) is no longer run. Cutting it out safely means
+  untangling 1,753 tests; tonight the documents were corrected instead.
+- **Replay for daily-bar equity strategies.** A day's bar is stamped at its close, when the market
+  is shut, so the simulator never sees a moment an equity order is allowed. Those three founders are
+  judged forward only, and their children cannot qualify until the tape steps inside the session.
+- **Options.** Order path proven; no quotes, chains or marks. Switched off.
+- **An off-box copy of the ledger.** The ledger lives on the House box's disk. A lost box is a lost
+  ledger (the public tape would survive). A daily Sail checkpoint taken by the House itself is the
+  obvious next step.
+- **Rollback on the box with the loop running** (see (d)).
+
+### What is still yours
+
+1. **`GITHUB_TOKEN` in the gateway** (runbook, section 4). Without it Astra's five pull-request
+   roles run, are recorded and change nothing. The auditor does not need it.
+2. The two obsolete `COINBASE_*` Worker secrets are already gone from the Worker; revoke the key at
+   Coinbase if you have not.
+3. About a hundred first-run Sail boxes are paused or sleeping. They cost nothing; terminating them
+   is tidying.
+
+### Every known risk
+
+1. **Most founders honestly fail replay** (crypto reversion lost after fees; Kalshi favourites scored
+   a deflated Sharpe of 0.85 against 0.90). They trade on paper anyway, earn floors, pay for their
+   compute, and some will die within days. That is the game working, but the first week may look
+   like attrition, and the population is refilled by forks and House-staked mutations, not by
+   brilliance, until Astra's architect can open pull requests.
+2. **Practice fills are kinder than real ones.** Alpaca paper fills at the touch with no queue; the
+   shadow book models no depth. Rung 2 exists to measure the gap at $10 a position, and the drift
+   monitor demotes an agent whose real edge per trade falls below its paper edge.
+3. **No real-money path has carried a real order** (tonight's rule). The real Kalshi and Alpaca
+   books are the same code as the practice books behind the same adapters, and are tested against
+   fakes, including Kalshi's habit of reporting a NO holding as a negative count. What has not been
+   seen live: a real Kalshi fill's fee attribution, a real Kalshi settlement arriving through
+   `settlements()`, Alpaca's real crypto fee tier. Every one of those failing shows up as a book
+   that does not reconcile, which freezes new entries on that book, never exits, and raises an
+   alert. The first real order is more than a day away after real money is turned on, and gated by
+   the audit: look at `status` when the first agent reaches rung 2.
+4. **The updater deploys whatever reaches `main`**, through the content checks, the canary and a
+   ten-minute watch. A change that passes all three and degrades an hour later is not rolled back
+   (the gateway's watchdog restarts a quiet House but never changes its release).
+5. **Two watchdogs read two signals.** A House that ticks but cannot publish is healthy to the
+   in-box one and stale to the gateway's, which will restart it every thirty minutes. A gateway
+   restart landing inside the in-box watch can age `health.json` and cause a needless rollback (to
+   the known-good release).
+6. **Sail's search price is unpublished.** Agents are charged an assumed $0.01 a query. The real
+   cost shows up only in the Sail balance, which the budget meter reads, so the monthly line holds
+   either way.
+7. **The Sail budget is metered from falls in the account balance**, so anything else spending on
+   that account counts against the league's $100.
+8. **The agent image is the first run's lab image checkpoint** (Sept 15). If Sail expires it,
+   existing agent boxes keep working but no new box can be made (no births, forks or canaries).
+   A small dedicated image should replace it.
+9. **Reads that grow with the ledger.** The publisher and parts of the evaluator re-read whole
+   tables each tick. Fine for a week (tens of thousands of rows), not for a year.
+10. **The canary uses real Sail boxes** (two agents and a probe), destroyed at its end; a canary that
+    dies midway can leave a few asleep (free, untidy).
+11. **Mail.** While the kill switch is engaged and the box paused, the gateway's watchdog mails
+    about both every six hours, plus the evening digest. That stops when the floor runs.
+12. **A long `pause` is undone by the gateway's watchdog** once the production tape has a
+    checkpoint (runbook, section 6).
+
+### Spend tonight
+
+| | Start | End | Spent | Limit for tonight |
+|---|---|---|---|---|
+| Sail credit | $97.80 | $97.53 | **$0.27** | $10 |
+| OpenAI, through the gateway's meter | $0.01 | $0.44 | **$0.43** (five calls: two audits, one architect pass, one toolsmith pass, and the first audit attempt) | $10 |
+| Real-money orders | 0 | 0 | none | none allowed |
+
+The Sail figure is the fall in the account balance (`/v2/usage/summary`), so it includes every
+agent box, probe, fork, canary, replay and research pass of the night and the House box's hours
+awake. The five Astra calls are filed under "unattributed" in the gateway's month because the
+House sent names with a colon, which the gateway does not accept; fixed during the build
+(`league/frontier.py`), so from now on audits are filed under `audit-<agent>` and passes under
+`astra-<role>`.
+
+## Where I am (the builder's place-keeper, kept for the record)
+
+- **Step:** finished. The report above is the summary; what follows is the log it was written from.
 
 ## Decisions and their reasons
 
@@ -173,8 +352,3 @@ the test tape and the site stored the checkpoint after the stamp-order fix.
 `league/__main__.py`. The publisher's real output passes the site's own `validCheckpoint` and
 `validEventBatch`. Site changes deployed (version 64cdf966): test tape, practice positions with a
 tag, research tool phrases; production checkpoint still 404 (clean).
-
-## Spend tonight
-
-- Sail at start: to be read from `/v2/usage/summary` before the first box is resumed.
-- OpenAI at start: read from the gateway's `/v1/health` frontier block.
