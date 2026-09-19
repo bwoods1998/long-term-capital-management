@@ -1938,6 +1938,21 @@ class Foundry:
 
         return min(pool, key=score)
 
+    def _forward_rate(self, desk_id: str, name: str, row: Mapping[str, Any]) -> Decimal | None:
+        """Net P&L per settled position of a live row: its own live record once it has the
+        fast track's `min_forward_settled`, else the shadow record its trial came in on."""
+        need = int(self.config["min_forward_settled"])
+        record = self._record(desk_id, name, row.get("promoted_at"), opened_since=True)
+        settled = int(record.get("settled") or 0)
+        if settled >= need:
+            return ((_dec(record.get("settled_pnl_usd")) or Decimal(0)) - (_dec(record.get("fees_usd")) or Decimal(0))) / Decimal(settled)
+        dep = dict(self.state().get("deployments") or {}).get(str(row.get("foundry_id") or ""))
+        forward = dict((dep or {}).get("forward") or {})
+        settled = int(_float(forward.get("settled")) or 0)
+        if not settled:
+            return None
+        return ((_dec(forward.get("pnl_usd")) or Decimal(0)) - (_dec(forward.get("fees_usd")) or Decimal(0))) / Decimal(settled)
+
     def _retire_trial(self, desk: Any, name: str, fid: str, at: str, verdict: str) -> None:
         """Switch a finished trial's row off and say so on the desk's stream. Never raises."""
         try:
@@ -2353,6 +2368,18 @@ class Foundry:
                 **{k: v for k, v in dict(dep.get("params") or {}).items() if k not in frozen},
                 **pinned_frozen(self.source_of(subject, live), (parent or {}).get("params"), frozen),
             }
+            # An incumbent of the lineage keeps the live row while its record is the stronger:
+            # four adoptions in one minute on Sept 19, 2026 left the weakest one trading.
+            settled_here = int(record.get("settled") or 0)
+            rate = ((_dec(record.get("settled_pnl_usd")) or Decimal(0)) - (_dec(record.get("fees_usd")) or Decimal(0))) / Decimal(settled_here) if settled_here else Decimal(0)
+            lineage = {base_name(name), base_name(subject)}
+            for other, row in sorted(live_rows.items()):
+                if other == name or not row.get("enabled", True) or base_name(other) not in lineage:
+                    continue
+                incumbent = self._forward_rate(live.id, other, row)
+                if incumbent is not None and incumbent >= rate:
+                    self._deployment(fid, held_back=f"{other} on {live.id} earns {incumbent:+.3f} a position, this {rate:+.3f}"[:200])
+                    return None
             for other, row in list(live_rows.items()):
                 if row.get("foundry_code") and not row.get("enabled", True) and other not in (name, subject):
                     store.remove(live.id, other)

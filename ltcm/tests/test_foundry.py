@@ -923,6 +923,24 @@ class FastTrackTests(FoundryCase):
         self.assertEqual(self.manager.files["mullins"]["kalshi_favorites_f1.py"], GOOD_CODE)
         self.assertFalse(self.row("mullins")["enabled"], "the parent strategy is paused, never doubled")
 
+    def test_a_stronger_incumbent_keeps_the_live_row(self):
+        """Sept 19, 2026: four adoptions in one minute left the weakest one trading."""
+        provider = Provider()
+        provider.replies = {0: reply("kalshi_favorites_f1", params={"yes_max": 0.08}), 1: reply("kalshi_favorites_f1_2")}
+        self.manager.script = code_winner
+        foundry = self.foundry(provider)
+        fid = foundry.cycle(NOW)["winner"]
+        self.clock[0] += 7200
+        self.strategies.records[("mullins-4", "kalshi_favorites_f1")] = {"settled": 6, "fills": 6, "settled_pnl_usd": "1.20"}
+        self.strategies.records[("mullins", "kalshi_favorites")] = {"settled": 6, "settled_pnl_usd": "3.00"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "the house row earns more a position")
+        self.assertIsNone(self.row("mullins", "kalshi_favorites_f1"))
+        self.assertTrue(self.row("mullins")["enabled"])
+        self.assertIn("earns +0.500 a position, this +0.200", foundry.state()["deployments"][fid]["held_back"])
+        self.strategies.records[("mullins", "kalshi_favorites")] = {"settled": 6, "settled_pnl_usd": "0.60"}
+        self.assertEqual([a["kind"] for a in foundry.fast_track(self.manifests, [])], ["code"])
+        self.assertFalse(self.row("mullins")["enabled"], "outdone, the incumbent is paused")
+
     def test_paused_house_can_only_be_replaced_by_strong_new_forward_code(self):
         provider = Provider()
         provider.replies = {0: reply("kalshi_favorites_f1"), 1: reply("kalshi_favorites_f1_2")}
