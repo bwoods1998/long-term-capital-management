@@ -182,6 +182,11 @@ class TickTests(StrategyCase):
         self.assertEqual((row["runs"], row["intents"], row["approved"], row["errors"], row["last_run_at"]), (1, 1, 1, 0, NOW))
         run_events = [e for e in self.service.log.events if e[1] == "desk.code_run"]
         self.assertEqual(run_events[-1][2]["purpose"], "strategy edge: 1 intent(s), 1 approved")
+        thoughts = [e for e in self.service.log.events if e[1] == "desk.thought"]
+        self.assertEqual(len(thoughts), 1, "the run's reasoning is a public thought the site types")
+        self.assertEqual(thoughts[0][0], "desk:scholes-2")
+        self.assertTrue(thoughts[0][2]["text"].startswith("edge: 1 intent(s), 1 approved."), thoughts[0][2]["text"])
+        self.assertEqual(thoughts[0][2]["session_id"], run_events[-1][2]["session_id"])
         self.assertIn("pricing 4 buckets", run_events[-1][2]["stdout"])
         self.assertIn("one bucket cheap", run_events[-1][2]["stdout"])
         # Not due again until the cadence has passed.
@@ -231,7 +236,7 @@ class TickTests(StrategyCase):
         self.strategies.tick(self.service.manifests, NOW)  # idle, just published by the deploy
         self.assertEqual(len(self.service.log.events), before)
         self.strategies.tick(self.service.manifests, "2026-09-16T05:20:00.000Z")
-        self.assertEqual(len(self.service.log.events), before + 1)
+        self.assertEqual([e[1] for e in self.service.log.events[before:]], ["desk.code_run", "desk.thought"], "the hourly idle run and what it said")
 
     def test_runs_per_tick_are_bounded_and_oldest_first(self):
         self.strategies.config["max_runs_per_tick"] = 1

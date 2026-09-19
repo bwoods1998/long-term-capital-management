@@ -733,6 +733,10 @@ class DeploymentTests(FoundryCase):
         runs = [e for e in self.log.kinds("desk.code_run") if e.stream == "desk:mullins-4"]
         self.assertEqual(len(runs), 1)
         self.assertIn("shadow desk mullins-4", runs[0].payload["purpose"])
+        thoughts = [e for e in self.log.kinds("desk.thought") if e.stream == "desk:mullins-4"]
+        self.assertEqual(len(thoughts), 1, "the trial is a thought on the desk that runs it")
+        self.assertIn(f"foundry {summary['winner']}", thoughts[0].payload["text"])
+        self.assertIn("live after", thoughts[0].payload["text"])
         self.assertEqual(runs[0].payload["session_id"].split(":strategy:")[1], "kalshi_favorites")
         event = self.log.kinds("lab.hypothesis")[0]
         self.assertEqual(event.stream, "lab")

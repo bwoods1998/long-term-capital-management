@@ -2359,6 +2359,14 @@ class Foundry:
             self.log.append(manifest.stream, "desk.code_run", payload, id=f"{suffix}:{at}"[:200], at=at)
         except Exception as exc:
             self.alert("warning", f"foundry run not published: {type(exc).__name__}")
+        # The trial as a thought on the desk that runs it: what was changed, what the replay
+        # said, what it must do to go live. The site's Now panel types `desk.thought` lines.
+        said = [lines[0]] + [line for line in lines[1:] if line.startswith(("hypothesis:", "live after", "backtest:"))]
+        thought = {"session_id": payload["session_id"], "strategy": name, "text": _clip_bytes(_clean(" ".join(said)), 900)}
+        try:
+            self.log.append(manifest.stream, "desk.thought", thought, id=f"{suffix}:thought:{at}"[:200], at=at)
+        except Exception as exc:
+            self.alert("warning", f"foundry thought not published: {type(exc).__name__}")
 
     def publish_cycle(self, summary: Mapping[str, Any], window: Mapping[str, Any], reference: float, winner: Mapping[str, Any] | None, deployment: Mapping[str, Any] | None) -> None:
         cfg = self.config

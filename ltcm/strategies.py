@@ -212,6 +212,9 @@ QUOTE_LIVE_PARAMS: dict[str, dict[str, Any]] = {
 #: `foundry_hold_hours`: a shadow row the Foundry dealt a candidate is not re-dealt for this long
 #: (its forward record needs the settings it was given; the Foundry expires it after 72 hours).
 PROMOTION: dict[str, Any] = {"enabled": True, "interval_seconds": 3600, "min_settled": 12, "jitter": 0.25, "foundry_hold_hours": 72}
+#: What an idle strategy run says: counts of nothing. Stripped before deciding whether a run
+#: said anything worth a public thought.
+_IDLE_NOTE = re.compile(r"\b0 (?:kept|cancelled|placed|bucket\(s\) priced|quote\(s\) kept|in band|markets? in band|new|intents?)\b[,;:]?|\b(?:kept|cancelled|placed|priced)\b|[,;:.]|\s+")
 STARTER_CADENCE = {"ranges": 300, "crypto": 600, "weather": 1800, "kalshi": 900, "hourly_quotes": 300, "spot_quotes": 300, "perp_reversion": 300, "daily_temps": 1800, "temps_ensemble": 1800, "poly_cross": 1800, "perp_funding": 600}
 
 
@@ -1468,8 +1471,34 @@ class Strategies:
         purpose = f"strategy {name}: " + (
             f"error" if run.get("error") else f"{len(intents)} intent(s), {approved} approved"
         )
-        self._publish_run(manifest, name, run, at, purpose, always=bool(intents or run.get("error")), row=row)
+        if self._publish_run(manifest, name, run, at, purpose, always=bool(intents or run.get("error")), row=row):
+            self._think(manifest, name, run, at, intents=len(intents), approved=approved)
         return {"desk_id": manifest.id, "strategy": name, "intents": len(intents), "approved": approved, "error": bool(run.get("error"))}
+
+    def _think(self, manifest: DeskManifest, name: str, run: Mapping[str, Any], at: str, *, intents: int, approved: int) -> None:
+        """The run's reasoning as a public `desk.thought`, the line the site's Now panel types.
+
+        The arena's desks think in code, and until Sept 19, 2026 their notes lived only inside
+        `desk.code_run` payloads the page does not read: the floor looked idle while thirty
+        strategies priced markets every few minutes. An idle run (nothing priced, placed,
+        refused or cancelled) says nothing."""
+        notes = str(run.get("notes") or "").strip()
+        log = [str(x).strip() for x in (run.get("log") or []) if str(x).strip()]
+        if run.get("error"):
+            text = f"{name} failed: {str(run['error'])[-300:]}"
+        else:
+            said = [notes] + [line for line in log[-4:] if line and line not in notes]
+            said = [x for x in said if x]
+            if not intents and not any(_IDLE_NOTE.sub("", x).strip() for x in said):
+                return
+            head = f"{intents} intent(s), {approved} approved. " if intents else ""
+            text = f"{name}: {head}" + " ".join(said)
+        stamp = at[:16].replace("-", "").replace(":", "").replace("T", "-")
+        payload = {"session_id": f"{manifest.id}:{stamp}:strategy:{name}", "strategy": name, "text": text[:900]}
+        try:
+            self.service.log.append(manifest.stream, "desk.thought", payload, id=f"strategy-thought:{manifest.id}:{name}:{at}", at=at)
+        except Exception as exc:
+            self.service.alert("warning", f"strategy thought not published: {type(exc).__name__}")
 
     # ------------------------------------------------------------------ execution
     def _execute(self, manifest: DeskManifest, name: str, params: Mapping[str, Any], at: str, *, dry: bool = False) -> dict[str, Any]:
@@ -1690,12 +1719,13 @@ class Strategies:
                 pass
         return self._manifest_now(manifest).live
 
-    def _publish_run(self, manifest: DeskManifest, name: str, run: Mapping[str, Any], at: str, purpose: str, *, always: bool, row: Mapping[str, Any] | None = None) -> None:
-        """A `desk.code_run` for the run: always for a deploy, an error or an intent; hourly when idle."""
+    def _publish_run(self, manifest: DeskManifest, name: str, run: Mapping[str, Any], at: str, purpose: str, *, always: bool, row: Mapping[str, Any] | None = None) -> bool:
+        """A `desk.code_run` for the run: always for a deploy, an error or an intent; hourly when
+        idle. Returns whether it was published."""
         if not always:
             last = _epoch(row.get("last_published_at")) if row and row.get("last_published_at") else None
             if last is not None and _epoch(at) - last < int(self.config["idle_publish_seconds"]):
-                return
+                return False
         stdout = str(run.get("stdout") or "")
         parsed_line = stdout.rfind("STRATEGY-RESULT ")
         shown = stdout[:parsed_line].rstrip() if parsed_line > 0 else ""
@@ -1722,6 +1752,8 @@ class Strategies:
             self.store.patch(manifest.id, name, last_published_at=at)
         except Exception as exc:
             self.service.alert("warning", f"strategy run not published: {type(exc).__name__}")
+            return False
+        return True
 
 
 # ---------------------------------------------------------------------- helpers
