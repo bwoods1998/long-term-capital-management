@@ -223,7 +223,8 @@
         },
         "deploy_top": 3,
         "protect_hours": 2,
-        "interval_minutes": 4
+        "interval_minutes": 4,
+        "fill_model": "conservative"
       },
       {
         "name": "crypto",
