@@ -133,8 +133,8 @@ class HouseTest(HouseCase):
 
     def test_a_rung_zero_agent_gets_one_replay_and_climbs_if_it_passes(self):
         agent = self.house.spawn("sawtooth", "test-family", SAWTOOTH, reason="test")
-        out = self.house.wake(agent)
-        self.assertEqual(out["replay"], "promote", out)
+        self.assertEqual(self.house.wake(agent), {"agent": agent.id, "skipped": "in replay"})
+        self.house.wait()  # the replay runs beside the tick, in the agent's box
         self.assertEqual(self.house.evaluator.rung(agent.id), 1)
         trial = self.house.ledger.last("eval.trial", agent=agent.id).payload
         self.assertTrue(trial["passed"])
@@ -143,13 +143,35 @@ class HouseTest(HouseCase):
 
     def test_a_failed_replay_is_a_counted_trial_and_is_not_repeated(self):
         agent = self.house.spawn("idle", "test-family", IDLE, reason="test")
-        out = self.house.wake(agent)
-        self.assertEqual(out["replay"], "hold")
-        self.assertIn("0 closed trades", " ".join(out["reasons"]))
+        self.house.wake(agent)
+        self.house.wait()
+        trial = self.house.ledger.last("eval.trial", agent=agent.id).payload
+        self.assertFalse(trial["passed"])
+        self.assertIn("0 closed trades", " ".join(trial["reasons"]))
         self.assertEqual(self.house.evaluator.rung(agent.id), 0)
         self.clock.advance(301)
-        self.assertIn("skipped", self.house.wake(agent))
+        self.house.wake(agent)
+        self.house.wait()
         self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent=agent.id), 1)
+
+    def test_a_founder_starts_on_paper_and_its_replay_still_counts(self):
+        born = self.house.found(["crypto-reversion"])
+        self.assertEqual([a.id for a in born], ["crypto-reversion"])
+        self.assertEqual(self.house.evaluator.rung("crypto-reversion"), 1)
+        self.assertEqual(self.house.books["alpaca-paper"].account("crypto-reversion").staked, D("200"))
+        self.assertEqual(self.house.found(["crypto-reversion"]), [])  # idempotent
+        self.house.tick()
+        self.house.wait()
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent="crypto-reversion"), 1)
+
+    def test_an_agent_that_never_qualifies_is_retired(self):
+        agent = self.house.spawn("idle", "test-family", IDLE, reason="test")
+        self.house.tick()
+        self.house.wait()
+        self.assertTrue(self.house.registry.get(agent.id).alive)
+        self.clock.advance(3 * 86400 + 60)
+        self.house.tick()
+        self.assertEqual(self.house.registry.get(agent.id).cause, "never qualified")
 
     def test_death_at_zero_credits_winds_down_and_leaves_a_postmortem(self):
         agent = self.seated()

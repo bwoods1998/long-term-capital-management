@@ -23,6 +23,7 @@ grants is bounded by the pool, so the Sail bill for the whole population is boun
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
@@ -74,16 +75,13 @@ class Economy:
         self.game = dict(game or load_game())
         self.rules = self.game["economy"]
         self.clock = clock
+        self._lock = threading.RLock()  # agents are woken side by side, and each wake ends in a charge
         self._balances: dict[str, Decimal] = {}
         self._cursor = 0
         self._fold()
 
     # ------------------------------------------------------------------ state
     def _fold(self) -> None:
-        for entry in self.ledger.read(kinds=("credit.grant", "credit.charge", "credit.transfer"), after=self._cursor, limit=10_000):
-            self._apply(entry.kind, entry.agent, entry.payload)
-            self._cursor = entry.seq
-        # `read` pages at 10,000 rows: keep going until the tail is reached.
         while True:
             batch = self.ledger.read(kinds=("credit.grant", "credit.charge", "credit.transfer"), after=self._cursor, limit=10_000)
             if not batch:
@@ -91,6 +89,13 @@ class Economy:
             for entry in batch:
                 self._apply(entry.kind, entry.agent, entry.payload)
                 self._cursor = entry.seq
+
+    def _record(self, kind: str, payload: Mapping[str, Any], agent: str, id: str | None) -> None:
+        """Append one credit row and apply it, once, whatever other thread got there first."""
+        with self._lock:
+            entry = self.ledger.append(kind, dict(payload), agent=agent, id=id)
+            if entry.seq > self._cursor:
+                self._fold()
 
     def _apply(self, kind: str, agent: str, p: Mapping[str, Any]) -> None:
         amount = usd(p["usd"])
@@ -104,7 +109,8 @@ class Economy:
             self._balances[to] = self._balances.get(to, ZERO) + amount
 
     def balance(self, agent: str) -> Decimal:
-        return self._balances.get(agent, ZERO)
+        with self._lock:
+            return self._balances.get(agent, ZERO)
 
     def alive(self, agent: str) -> bool:
         return self.balance(agent) > 0
@@ -114,10 +120,7 @@ class Economy:
         amount = usd(amount).quantize(PLACES, rounding=ROUND_DOWN)
         if amount <= 0:
             return ZERO
-        entry = self.ledger.append("credit.grant", {"usd": format(amount, "f"), "reason": reason}, agent=agent, id=id)
-        if entry.seq > self._cursor:
-            self._apply(entry.kind, agent, entry.payload)
-            self._cursor = entry.seq
+        self._record("credit.grant", {"usd": format(amount, "f"), "reason": reason}, agent, id)
         return amount
 
     def charge(self, agent: str, amount: Any, what: str, *, detail: Mapping[str, Any] | None = None, id: str | None = None) -> Decimal:
@@ -127,22 +130,17 @@ class Economy:
         if amount <= 0:
             return ZERO
         payload = {"usd": format(amount, "f"), "what": what, **({"detail": dict(detail)} if detail else {})}
-        entry = self.ledger.append("credit.charge", payload, agent=agent, id=id)
-        if entry.seq > self._cursor:
-            self._apply(entry.kind, agent, entry.payload)
-            self._cursor = entry.seq
+        self._record("credit.charge", payload, agent, id)
         return amount
 
     def transfer(self, source: str, to: str, amount: Any, reason: str) -> Decimal:
         amount = usd(amount).quantize(PLACES, rounding=ROUND_DOWN)
         if amount <= 0:
             raise ValueError("a transfer moves a positive amount")
-        if self.balance(source) - amount <= 0:
-            raise ValueError(f"{source} cannot give {amount} and stay alive")
-        entry = self.ledger.append("credit.transfer", {"usd": format(amount, "f"), "to": to, "reason": reason}, agent=source)
-        if entry.seq > self._cursor:
-            self._apply(entry.kind, source, entry.payload)
-            self._cursor = entry.seq
+        with self._lock:
+            if self.balance(source) - amount <= 0:
+                raise ValueError(f"{source} cannot give {amount} and stay alive")
+            self._record("credit.transfer", {"usd": format(amount, "f"), "to": to, "reason": reason}, source, None)
         return amount
 
     def can_fork(self, agent: str) -> bool:
@@ -163,13 +161,15 @@ class Economy:
         floor_pool = pool * usd(self.rules["niche_floor_share"])
         performance_pool = pool - floor_pool
         out: dict[str, Decimal] = {s.agent: ZERO for s in standings}
+        # A niche is occupied by agents that have qualified for forward testing. An agent still in
+        # replay lives on its endowment: a floor for doing nothing would pay for squatting.
         niches: dict[str, list[Standing]] = {}
         for s in standings:
-            niches.setdefault(s.niche, []).append(s)
-        per_niche = floor_pool / len(niches)
+            if s.rung >= 1:
+                niches.setdefault(s.niche, []).append(s)
         for members in niches.values():
             for s in members:
-                out[s.agent] += per_niche / len(members)
+                out[s.agent] += floor_pool / len(niches) / len(members)
         weights = self.rules["rung_weights"]
         scores = {
             s.agent: Decimal(str(max(s.mean_growth, 0.0))) * Decimal(str(max(s.active_blocks, 0))).sqrt() * usd(weights.get(str(s.rung), "0"))
@@ -182,7 +182,6 @@ class Economy:
         return {agent: amount.quantize(PLACES, rounding=ROUND_DOWN) for agent, amount in out.items()}
 
     def last_payout_at(self) -> float | None:
-        entry = self.ledger.last("ops.budget", agent=HOUSE)
         rows = [e for e in self.ledger.read(kinds="ops.budget", limit=200, newest=True) if e.payload.get("what") == "payout"]
         if not rows:
             return None

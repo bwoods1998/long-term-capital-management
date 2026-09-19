@@ -105,10 +105,11 @@
       "kind": "lab.progress",
       "at": "2026-09-19T06:15:00.000Z",
       "payload": {
+        "component": "league",
         "stage": "test",
         "message": "Replayed 3 variants of crypto-reversion against 30 days of 5-minute bars; 1 passed rung 0 and starts on paper."
       },
-      "digest": "80e2551cb00338c7010ecc84d9f6c2d369c0a5e0675f702af0371c390bbec98a"
+      "digest": "4df358dc934b64cb145ab329fa90d21cc94b77d64145ed522f58576e6ce94177"
     },
     {
       "id": "ops:floor.mark:2026-09-19T06:20:00.000Z",

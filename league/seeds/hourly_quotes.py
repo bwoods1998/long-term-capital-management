@@ -99,7 +99,8 @@ def decide(ctx):
     want = knob("notional_usd")
     reserved = sum((_num(o.get("quantity"), 0.0) or 0.0) * (_num(o.get("limit_price"), 0.0) or 0.0) for o in orders if o.get("side") == "buy")
     free = ((_num(ctx.get("cash"), 0.0) or 0.0) - reserved) * 0.98  # 2% headroom
-    per_leg = min(want, _num(limits.get("max_order_usd"), want), _num(limits.get("max_position_usd"), want))
+    cap = min(_num(limits.get("max_order_usd"), want), _num(limits.get("max_position_usd"), want))
+    per_leg = min(want, cap)
     slots = int(knob("max_markets")) - len(busy)
     improve, locked = knob("improve"), knob("min_locked")
 
@@ -119,7 +120,7 @@ def decide(ctx):
             # One leg filled, the other is gone: re-rest the missing leg if the pair still locks a profit.
             have, leg = held[(ticker, legs_held[0])], ("no" if legs_held[0] == "yes" else "yes")
             cost, price = _num(have.get("average_cost"), 1.0), prices[leg]
-            quantity = int(min(_num(have.get("quantity"), 0.0), min(per_leg, free) / price) + EPS)
+            quantity = int(min(_num(have.get("quantity"), 0.0), min(cap, free) / price) + EPS)  # match the held count
             if cost + price <= 1.0 - locked + EPS and quantity >= 1 and quantity * price >= 1.0:
                 free -= quantity * price
                 intents.append(_bid(ticker, leg, quantity, price,

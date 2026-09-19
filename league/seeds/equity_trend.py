@@ -81,7 +81,8 @@ def _answer(intents, thought, done):
 def decide(ctx):
     p = {**PARAMS, **(ctx.get("params") or {})}
     return_days, mean_days = max(1, int(_num(p.get("return_days"), 60))), max(2, int(_num(p.get("mean_days"), 100)))
-    done = (ctx.get("memory") or {}).get("done")
+    memory = ctx.get("memory")
+    done = memory.get("done") if isinstance(memory, dict) else None
     done = done if isinstance(done, str) else None
     ny = _new_york(ctx.get("now"))
     minute = _session_minute(ny)

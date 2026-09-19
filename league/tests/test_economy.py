@@ -71,10 +71,10 @@ class EconomyTest(unittest.TestCase):
         shares = self.economy.shares(standings, "2.00")
         self.assertLessEqual(sum(shares.values()), D("2.00"))
         self.assertGreater(sum(shares.values()), D("1.9999"))
-        # Three niches share the 40% floor; the lone agents get a whole niche's floor each.
-        floor = D("0.80") / 3
+        # Two qualified niches share the 40% floor; an agent still in replay earns nothing at all.
+        floor = D("0.80") / 2
         self.assertAlmostEqual(float(shares["a1"]), float(floor), places=6)
-        self.assertAlmostEqual(float(shares["r0"]), float(floor), places=6)  # replay growth earns nothing
+        self.assertEqual(shares["r0"], D("0"))
         self.assertGreater(shares["k1"], shares["k2"])  # same record, but real money weighs five times paper
         self.assertAlmostEqual(float(shares["k1"] - floor / 2), float((D("1.20")) * 5 / 6), places=6)
 

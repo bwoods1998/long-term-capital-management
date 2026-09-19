@@ -1,0 +1,15 @@
+{
+  "_about": "Where the House finds things. No secret is ever in this file: tokens come from the environment or the box's .env.",
+  "gateway_url": "https://ltcm-gateway.blake-woods-personal-site.workers.dev",
+  "site_url": "https://blakewoods.us",
+  "site_tape": null,
+  "agent_image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
+  "sail_app": "ltcm",
+  "alpaca_feed": "iex",
+  "real_money": false,
+  "tick_seconds": 60,
+  "mark_every_seconds": 300,
+  "replay_days": 21,
+  "inference_daily_cap_usd": "3.00",
+  "performance": {"start_at": "2026-09-19T04:56:53.000Z", "start_equity": "1021.9251"}
+}

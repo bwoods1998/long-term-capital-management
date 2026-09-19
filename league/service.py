@@ -1,0 +1,149 @@
+"""Builds the real House from `league/config.json` and the environment.
+
+Secrets: the House box holds exactly three, in its environment or in a 0600 `.env` beside the
+code: `GATEWAY_TOKEN` (venues and the frontier model, through the gateway), `SAIL_API_KEY`
+(agent boxes and cheap-model inference) and `CAPITAL_PUBLISH_TOKEN` (the public site). No venue
+key and no OpenAI key ever reaches Sail.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import stat
+import time
+import urllib.request
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Callable
+
+from .house import House, Settings
+
+PACKAGE = Path(__file__).resolve().parent
+REPO = PACKAGE.parent
+SECRET_NAMES = ("GATEWAY_TOKEN", "SAIL_API_KEY", "CAPITAL_PUBLISH_TOKEN")
+
+
+def load_config(path: Path | None = None) -> dict[str, Any]:
+    return json.loads((path or PACKAGE / "config.json").read_text(encoding="utf-8"))
+
+
+def load_env(path: Path | None = None) -> None:
+    """Read NAME=value lines into the environment (never overriding what is already set). The
+    file must not be readable by anyone but its owner."""
+    env = path or REPO / ".env"
+    if not env.exists():
+        return
+    if stat.S_IMODE(env.stat().st_mode) & 0o077:
+        raise PermissionError(f"{env} is readable by others; chmod 600 it")
+    for line in env.read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            name, value = line.split("=", 1)
+            os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
+
+
+def secret(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if len(value) < 16:
+        raise RuntimeError(f"{name} is not set")
+    return value
+
+
+def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, ttl: float = 60.0) -> Callable[[], bool]:
+    """The kill switch lives in the gateway, which refuses real orders while it is engaged. The
+    House asks so it can refuse first and say why. Unreadable counts as engaged."""
+    state = {"at": 0.0, "value": True}
+
+    def engaged() -> bool:
+        if time.time() - state["at"] < ttl:
+            return state["value"]
+        try:
+            request = urllib.request.Request(gateway_url.rstrip("/") + "/v1/health", headers={"Authorization": "Bearer " + token_source(), "User-Agent": "ltcm-floor/1.0"})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                state["value"] = bool(json.load(response).get("kill_switch"))
+        except Exception:  # noqa: BLE001
+            state["value"] = True
+        state["at"] = time.time()
+        return state["value"]
+
+    return engaged
+
+
+def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
+          publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league") -> House:
+    from ltcm.adapters import GatewaySigner, VenueClient
+    from ltcm.data.kalshi import KalshiMarketData
+    from ltcm.data.news import News
+    from ltcm.history import History
+    from ltcm.provider import Provider
+    from ltcm.sailbox import SailboxClient
+
+    from .auditor import Auditor
+    from .budget import Budget
+    from .commons import Commons, sail_search
+    from .frontier import Frontier
+    from .paper import KalshiShadowBroker
+    from .publish import Publisher
+    from .sandbox import LocalSandbox, SailSandbox
+    from .tapes import AlpacaData, KalshiData
+    from .venues import gateway_broker
+
+    config = dict(config or load_config())
+    load_env()
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    gateway_url = config["gateway_url"]
+    token = lambda: secret("GATEWAY_TOKEN")  # noqa: E731
+    real_money = bool(config.get("real_money"))
+
+    market_data = KalshiMarketData()
+    brokers: dict[str, Any] = {
+        "alpaca-paper": gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex")),
+        "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data),
+    }
+    if real_money:
+        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"))
+        brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
+
+    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue="alpaca-paper")
+    alpaca_data = AlpacaData(data_client, feed=config.get("alpaca_feed", "iex"))
+    kalshi_data = KalshiData(market_data, History(cache_dir=root / "cache"))
+
+    if local_sandbox:
+        sandbox: Any = LocalSandbox(root / "boxes")
+    else:
+        sandbox = SailSandbox(SailboxClient(), root / "sandbox.json", image_checkpoint=config["agent_image_checkpoint"], name_prefix=name_prefix)
+
+    provider = Provider(root / "provider.sqlite", floor_cap_usd_per_day=config.get("inference_daily_cap_usd", "3.00")) if research else None
+    house_settings = Settings(
+        tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
+        real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
+    )
+    house = House(
+        root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
+        game=game, settings=house_settings, kill_switch=gateway_kill_switch(gateway_url, token) if real_money else None,
+    )
+    house.commons = Commons(house.ledger, search=sail_search(lambda: secret("SAIL_API_KEY")), news=News(cache_dir=root / "cache"))
+    if house.researcher is not None:
+        house.researcher.commons = house.commons
+    frontier = Frontier(gateway_url, token)
+    house.frontier = frontier
+    house.auditor = Auditor(
+        frontier, house.ledger, house.economy, house.evaluator,
+        live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
+    )
+    if provider is not None:
+        house.budget = Budget(house.ledger, lambda: provider.check_balance())
+    if publish:
+        # The balance chart is the REAL accounts whatever the agents are doing, so the publisher
+        # reads them (balances only) even while every book is practice.
+        readers = {
+            "alpaca": brokers.get("alpaca") or gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex")),
+            "kalshi": brokers.get("kalshi") or gateway_broker("kalshi", gateway_url=gateway_url, token=token()),
+        }
+        house.publisher = Publisher(
+            config["site_url"], lambda: secret("CAPITAL_PUBLISH_TOKEN"), root / "publish.json", tape=tape or config.get("site_tape"),
+            performance=config.get("performance"), real_brokers=readers,
+            gateway_url=gateway_url, gateway_token=token,
+        )
+    return house

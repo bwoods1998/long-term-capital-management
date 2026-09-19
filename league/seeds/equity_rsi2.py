@@ -90,7 +90,9 @@ def decide(ctx):
     p = {**PARAMS, **(ctx.get("params") or {})}
     period, trend_days = max(1, int(_num(p.get("rsi_period"), 2))), max(2, int(_num(p.get("trend_days"), 200)))
     exit_days, max_days, rsi_entry = max(1, int(_num(p.get("exit_mean_days"), 5))), _num(p.get("max_days"), 7), _num(p.get("rsi_entry"), 10.0)
-    acted = {k: v for k, v in ((ctx.get("memory") or {}).get("acted") or {}).items() if k in NEEDS["symbols"] and isinstance(v, str)}
+    memory = ctx.get("memory")
+    remembered = memory.get("acted") if isinstance(memory, dict) else None
+    acted = {k: v for k, v in (remembered if isinstance(remembered, dict) else {}).items() if k in NEEDS["symbols"] and isinstance(v, str)}
     ny = _new_york(ctx.get("now"))
     minute = _session_minute(ny)
     if minute is None or not 575 <= minute <= 955:

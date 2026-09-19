@@ -161,7 +161,7 @@
       ],
       "capital_usd": "100.00",
       "equity": "99.96",
-      "cash": "99.96",
+      "cash": "75.00",
       "daily_pnl": "-0.04",
       "return_pct": "-0.04",
       "max_drawdown_pct": "0.04",
@@ -180,7 +180,27 @@
       "updated_at": "2026-09-19T06:29:50.000Z",
       "pnl_usd": "-0.04",
       "next_session_at": "2026-09-19T06:45:00.000Z",
-      "positions": []
+      "positions": [
+        {
+          "instrument": {
+            "symbol": "ETH/USD",
+            "asset_class": "crypto",
+            "venue": "alpaca"
+          },
+          "side": "long",
+          "quantity": "0.0078",
+          "entry_price": "3205.00",
+          "mark_price": "3200.00",
+          "market_value": "24.96",
+          "unrealized_pnl": "-0.04",
+          "opened_at": "2026-09-19T06:18:00.000Z",
+          "thesis": "ETH closed 2.4 standard deviations under its 24-bar mean, past the wider entry this variant waits for. Practice book until the forward test passes.",
+          "target_price": "3231.00",
+          "stop_price": null,
+          "time_stop_at": "2026-09-19T08:18:00.000Z",
+          "exit_orders": []
+        }
+      ]
     }
   ],
   "committee": {

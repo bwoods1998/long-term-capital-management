@@ -93,7 +93,9 @@ def _session_vwap(rows, ny):
 def decide(ctx):
     p = {**PARAMS, **(ctx.get("params") or {})}
     band_pct, stop_pct, min_bars = _num(p.get("band_pct"), 0.4), _num(p.get("stop_pct"), 0.5), int(_num(p.get("min_bars"), 6))
-    stopped = {k: v for k, v in ((ctx.get("memory") or {}).get("stopped") or {}).items() if k in NEEDS["symbols"] and isinstance(v, str)}
+    memory = ctx.get("memory")
+    remembered = memory.get("stopped") if isinstance(memory, dict) else None
+    stopped = {k: v for k, v in (remembered if isinstance(remembered, dict) else {}).items() if k in NEEDS["symbols"] and isinstance(v, str)}
     ny = _new_york(ctx.get("now"))
     minute = _session_minute(ny)
     if minute is None:

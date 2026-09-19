@@ -23,7 +23,9 @@ from __future__ import annotations
 import json
 import os
 import random
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
@@ -51,6 +53,7 @@ CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
 #: Which book an agent trades on, by venue family and rung.
 PRACTICE_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
+PROBE_BOX = "house-probe"
 
 
 @dataclass
@@ -64,6 +67,10 @@ class Settings:
     replay_timeout: int = 600
     research: bool = True
     max_wakes_per_tick: int = 16
+    wake_workers: int = 6
+    slow_workers: int = 2  # replays and research passes run beside the tick, never inside it
+    kalshi_replay_days: int = 7
+    kalshi_replay_markets: int = 300
 
 
 class House:
@@ -79,6 +86,7 @@ class House:
         commons: Commons | None = None,
         auditor: Any = None,
         publisher: Any = None,
+        budget: Any = None,
         game: Mapping[str, Any] | None = None,
         settings: Settings | None = None,
         clock: Callable[[], float] = time.time,
@@ -100,6 +108,7 @@ class House:
         self.provider = provider
         self.auditor = auditor
         self.publisher = publisher
+        self.budget = budget
         self.kill_switch = kill_switch
         self.books: dict[str, Book] = {}
         for name, broker in brokers.items():
@@ -116,6 +125,10 @@ class House:
         self._state = self._load_state()
         self._data_cache: dict[str, tuple[float, Any]] = {}
         self._tapes: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._tape_lock = threading.Lock()
+        self._state_lock = threading.RLock()
+        self._slow = ThreadPoolExecutor(max_workers=max(1, self.settings.slow_workers), thread_name_prefix="league-slow")
+        self._jobs: dict[str, Future] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -136,8 +149,10 @@ class House:
         return state
 
     def _save_state(self) -> None:
+        with self._state_lock:
+            text = json.dumps(self._state, sort_keys=True)
         tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._state, sort_keys=True), encoding="utf-8")
+        tmp.write_text(text, encoding="utf-8")
         os.chmod(tmp, 0o600)
         os.replace(tmp, self._state_path)
 
@@ -164,13 +179,21 @@ class House:
                 continue
             if seed["name"] in existing:
                 continue
-            born.append(self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"]))
+            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"])
+            # The founders are the owner's priors (what the first run measured, and published
+            # research): they start their forward test at once, because paper costs nothing and
+            # forward evidence is the evidence that counts. Their replay is still run and still
+            # counts as their family's first trial. Everything born later must pass replay first.
+            self.evaluator.seat(agent.id, 1, "a founding seed: forward-tested from the first day")
+            self.seat(agent)
+            born.append(agent)
         return born
 
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
               params: Mapping[str, Any] | None = None, endowment: Any | None = None) -> Agent:
-        described = self.sandbox.needs(name, code)
-        self._charge_box(name, described, note="reading the strategy's NEEDS", defer=True)
+        # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
+        # sealed probe box the House keeps for the purpose, never the House's own process.
+        described = self.sandbox.needs(PROBE_BOX, code)
         info = described.result
         if not info.get("ok"):
             raise ValueError(f"{name}: {info.get('error')}")
@@ -179,24 +202,15 @@ class House:
             name=name, family=family, code=code, needs=info["needs"], params={**info.get("params", {}), **dict(params or {})},
             parent=parent, reason=reason,
         )
-        if agent.id != name:
-            self.sandbox.retire(name)  # the probe box was made under the requested name
-        if parent is None:
+        if parent is None or endowment is not None:
+            # A seed, or a newcomer the House stakes itself. (A fork is endowed by its parent.)
             self.economy.grant(agent.id, self.game["economy"]["endowment_usd"] if endowment is None else endowment, "endowment", id=f"endow:{agent.id}")
-        self._flush_deferred(agent.id)
+        self._charge_box(agent.id, described, note="reading its strategy's NEEDS")
         return agent
 
-    # Box seconds spent before an agent exists (its NEEDS probe) are charged once it does.
-    def _charge_box(self, agent: str, run: Any, *, note: str, defer: bool = False) -> None:
+    def _charge_box(self, agent: str, run: Any, *, note: str) -> None:
         cost = self.economy.box_cost(run.seconds, created=run.created)
-        if defer:
-            self._state.setdefault("deferred", {}).setdefault(agent, []).append([format(cost, "f"), note])
-            return
         self.economy.charge(agent, cost, "sandbox seconds", detail={"seconds": round(run.seconds, 2), "for": note})
-
-    def _flush_deferred(self, agent: str) -> None:
-        for cost, note in self._state.get("deferred", {}).pop(agent, []):
-            self.economy.charge(agent, cost, "sandbox seconds", detail={"for": note})
 
     # ------------------------------------------------------------------ books
     def book_of(self, agent: Agent) -> Book | None:
@@ -295,8 +309,10 @@ class House:
         """One wake of one agent. Returns what happened, for the caller and the tests."""
         self._state["next_wake"][agent.id] = self.clock() + agent.wake_minutes * 60
         rung = self.evaluator.rung(agent.id)
+        if self._state["tried"].get(agent.id) != agent.code_sha256:
+            self._background(f"replay:{agent.id}", self._replay_own, agent)  # its code has not had its replay yet
         if rung == 0:
-            return self._replay_own(agent)
+            return {"agent": agent.id, "skipped": "in replay"}
         book = self.book_of(agent)
         if book is None:
             return {"agent": agent.id, "skipped": "no book for its venue"}
@@ -361,12 +377,26 @@ class House:
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
         return intents, dropped
 
+    def _wake_safely(self, agent: Agent) -> dict[str, Any]:
+        try:
+            return self.wake(agent)
+        except Exception as exc:  # noqa: BLE001 - one agent's wake must never take the tick down
+            self.alert("error", f"{agent.id}: its wake failed ({type(exc).__name__}: {str(exc)[:200]})")
+            return {"agent": agent.id, "error": str(exc)}
+
+    def _holds_real_money(self, agent: Agent) -> bool:
+        book = self.books.get(REAL_BOOK[agent.venue])
+        return bool(book and agent.id in book.accounts and (book.account(agent.id).holdings or book.open_orders(agent.id)))
+
     # ----------------------------------------------------------------- replay
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
         end = self.clock()
-        days = self.settings.replay_days * (6 if horizon == "day" and venue == "alpaca" else 1)
+        if venue == "kalshi":
+            days = self.settings.kalshi_replay_days * (3 if horizon == "day" else 1)
+        else:
+            days = self.settings.replay_days * (6 if horizon == "day" else 1)
         start_iso, end_iso = now_iso(lambda: end - days * 86400), now_iso(lambda: end)
         if venue == "alpaca":
             symbols = sorted(str(s) for s in (needs.get("symbols") or []))[:12]
@@ -376,11 +406,12 @@ class House:
         else:
             series = sorted(str(s) for s in (needs.get("series") or []))[:12]
             key = f"kalshi:{','.join(series)}:{horizon}:{start_iso[:10]}"
-            build = lambda: self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon)  # noqa: E731
-        hit = self._tapes.get(key)
-        if hit is None or end - hit[0] > 86400:
-            self._tapes[key] = (end, build())
-        return key, self._tapes[key][1]
+            build = lambda: self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=self.settings.kalshi_replay_markets)  # noqa: E731
+        with self._tape_lock:  # one build at a time: two agents of one family want the same tape
+            hit = self._tapes.get(key)
+            if hit is None or end - hit[0] > 86400:
+                self._tapes[key] = (end, build())
+            return key, self._tapes[key][1]
 
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
         tape_id, tape = self.tape_for(needs)
@@ -393,8 +424,30 @@ class House:
         self._charge_box(agent.id, run, note="a replay")
         return run.result, tape_id
 
+    def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
+        """Run slow work beside the tick. One job per key at a time; failures become alerts."""
+        running = self._jobs.get(key)
+        if running is not None and not running.done():
+            return False
+
+        def job() -> Any:
+            try:
+                return work(*args)
+            except Exception as exc:  # noqa: BLE001
+                self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})")
+                return None
+
+        self._jobs[key] = self._slow.submit(job)
+        return True
+
+    def wait(self, timeout: float | None = None) -> None:
+        """Block until the slow work in hand is done (tests, and an orderly stop)."""
+        for future in list(self._jobs.values()):
+            future.result(timeout=timeout)
+
     def _replay_own(self, agent: Agent) -> dict[str, Any]:
-        """A rung-0 agent's own code gets one replay; after that only research can change its fate."""
+        """An agent's own code gets one replay, counted as a trial. For an agent on rung 0 it is
+        the way up; after it, only research can change its fate."""
         if self._state["tried"].get(agent.id) == agent.code_sha256:
             return {"agent": agent.id, "skipped": "its code has had its replay; research may change it"}
         try:
@@ -402,7 +455,8 @@ class House:
         except Exception as exc:  # noqa: BLE001 - no tape or no box: try again next wake
             self.alert("warning", f"{agent.id}: replay could not run ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "replay unavailable"}
-        self._state["tried"][agent.id] = agent.code_sha256
+        with self._state_lock:
+            self._state["tried"][agent.id] = agent.code_sha256
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id)
         if verdict.decision == "promote":
             self.seat(agent)
@@ -410,7 +464,7 @@ class House:
 
     def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
         """The researcher's `replay` tool: a counted trial of candidate code, never a promotion."""
-        described = self.sandbox.needs(agent.id, code)
+        described = self.sandbox.needs(PROBE_BOX, code)
         self._charge_box(agent.id, described, note="reading a candidate's NEEDS")
         info = described.result
         if not info.get("ok"):
@@ -552,7 +606,6 @@ class House:
         return self.clock() - last >= float(rules.get("min_hours_between", 6)) * 3600
 
     def research(self, agent: Agent) -> Any:
-        self._state["last_research"][agent.id] = self.clock()
         rung = self.evaluator.rung(agent.id)
         standing = {
             "rung": rung, "credits_usd": format(self.economy.balance(agent.id), "f"),
@@ -586,9 +639,12 @@ class House:
 
     def keep_population(self) -> None:
         rules = self.game["economy"]
+        deadline = float(rules.get("replay_deadline_epochs", 3)) * float(rules["epoch_seconds"])
         for agent in self.registry.living():
             if not self.economy.alive(agent.id):
                 self.kill(agent, "credits", "its compute credits reached zero")
+            elif self.evaluator.rung(agent.id) == 0 and self.clock() - _epoch(agent.born_at) > deadline:
+                self.kill(agent, "never qualified", f"it did not pass replay within {rules.get('replay_deadline_epochs', 3)} epochs of its birth")
         for agent in self.registry.living():
             if self.economy.can_fork(agent.id) and self.evaluator.rung(agent.id) >= 1:
                 last = float(self._state.setdefault("last_fork", {}).get(agent.id) or 0)
@@ -597,6 +653,18 @@ class House:
                     self.fork(agent)
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
+        living = self.registry.living()
+        if living and len(living) < int(rules["min_population"]):
+            # Every seed has had its life. The House stakes a newcomer: a mutation of whoever
+            # stands highest, endowed from the pool like a seed, answering for itself from replay.
+            best = max(living, key=lambda a: (self.evaluator.rung(a.id), self.economy.balance(a.id)))
+            last = float(self._state.setdefault("last_newcomer", {}).get("at") or 0)
+            if self.clock() - last >= float(rules["epoch_seconds"]) / 4:
+                self._state["last_newcomer"]["at"] = self.clock()
+                child = self.spawn(best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
+                                   params=mutate(best.params, seed=f"newcomer:{len(self.registry.agents)}"),
+                                   reason=f"a House-staked mutation of {best.id}: the population was below its floor")
+                self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False, "reason": "population floor", "new_code": False}, agent=best.id)
 
     # -------------------------------------------------------------------- tick
     def tick(self) -> dict[str, Any]:
@@ -618,11 +686,16 @@ class House:
                                 self._state["settled"][name] = stamp
             except Exception as exc:  # noqa: BLE001 - one venue's outage must not stop the others
                 self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
+        # Past the monthly compute line only agents holding real money are woken, so they can exit.
+        open_for_business = self.budget is None or self.budget.check() == "open"
+        summary["budget"] = "open" if open_for_business else "stopped"
         batches: dict[str, list[Intent]] = {}
-        for agent in self.due():
-            if not self.economy.alive(agent.id):
-                continue
-            outcome = self.wake(agent)
+        waking = [a for a in self.due() if self.economy.alive(a.id) and (open_for_business or self._holds_real_money(a))]
+        # Each wake is mostly waiting on the agent's box, so they run side by side; every agent
+        # has its own box and its own lock, and the ledger and the books are thread-safe.
+        with ThreadPoolExecutor(max_workers=max(1, min(self.settings.wake_workers, len(waking) or 1))) as pool:
+            outcomes = list(pool.map(self._wake_safely, waking))
+        for agent, outcome in zip(waking, outcomes):
             summary["woke"].append(agent.id)
             if outcome.get("intents"):
                 batches.setdefault(outcome["book"], []).extend(outcome["intents"])
@@ -649,16 +722,17 @@ class House:
             for agent in self.registry.dead():
                 if agent.id in book.accounts:
                     self._sweep(agent.id, book)
-        for agent in self.registry.living():
+        for agent in self.registry.living() if open_for_business else []:
             if self.research_due(agent):
-                try:
-                    self.research(agent)
-                except Exception as exc:  # noqa: BLE001
-                    self.alert("warning", f"{agent.id}: research failed ({type(exc).__name__}: {str(exc)[:200]})")
-                break  # one research pass a tick keeps the loop responsive
-        if self.economy.payout_due():
+                with self._state_lock:
+                    self._state["last_research"][agent.id] = self.clock()
+                self._background(f"research:{agent.id}", self.research, agent)
+        if open_for_business and self.economy.payout_due():
             self.economy.payout(self.standings())
-        self.keep_population()
+            if self.auditor is not None:
+                self.auditor.score()
+        if open_for_business:
+            self.keep_population()
         summary["deaths"] = sorted(living_before - {a.id for a in self.registry.living()})
         self._save_state()
         if self.publisher is not None:
@@ -680,8 +754,16 @@ class House:
         os.replace(tmp, self.root / "health.json")
 
     def close(self) -> None:
+        self._slow.shutdown(wait=True)
         self._save_state()
         self.ledger.close()
+
+
+def _epoch(iso: str) -> float:
+    from ltcm.broker import instant
+
+    parsed = instant(iso)
+    return parsed.timestamp() if parsed else 0.0
 
 
 def mutate(params: Mapping[str, Any], *, seed: str, scale: float = 0.2) -> dict[str, Any]:

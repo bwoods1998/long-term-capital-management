@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .ledger import Ledger
 
-NAME = re.compile(r"^[a-z][a-z0-9-]{1,38}$")
+NAME = re.compile(r"^[a-z][a-z0-9-]{1,33}$")  # the site takes ids up to 40 characters, and a fork appends -N
 
 
 def code_sha(code: str) -> str:
@@ -76,16 +77,18 @@ class Registry:
         self.ledger = ledger
         self.agents: dict[str, Agent] = {}
         self._cursor = 0
+        self._lock = threading.RLock()
         self.refresh()
 
     def refresh(self) -> None:
-        while True:
-            batch = self.ledger.read(kinds=("agent.born", "agent.strategy", "agent.died"), after=self._cursor, limit=5000)
-            if not batch:
-                return
-            for entry in batch:
-                self._apply(entry.kind, entry.agent, entry.payload, entry.at)
-                self._cursor = entry.seq
+        with self._lock:
+            while True:
+                batch = self.ledger.read(kinds=("agent.born", "agent.strategy", "agent.died"), after=self._cursor, limit=5000)
+                if not batch:
+                    return
+                for entry in batch:
+                    self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+                    self._cursor = entry.seq
 
     def _apply(self, kind: str, agent_id: str, p: Mapping[str, Any], at: str) -> None:
         if kind == "agent.born":
@@ -112,10 +115,12 @@ class Registry:
         return self.agents.get(agent_id)
 
     def living(self) -> list[Agent]:
-        return sorted((a for a in self.agents.values() if a.alive), key=lambda a: a.born_at + a.id)
+        with self._lock:
+            return sorted((a for a in self.agents.values() if a.alive), key=lambda a: a.born_at + a.id)
 
     def dead(self) -> list[Agent]:
-        return sorted((a for a in self.agents.values() if not a.alive), key=lambda a: a.died_at or "")
+        with self._lock:
+            return sorted((a for a in self.agents.values() if not a.alive), key=lambda a: a.died_at or "")
 
     def lineage(self, agent_id: str) -> list[str]:
         out, seen = [], set()
@@ -132,6 +137,10 @@ class Registry:
         if not NAME.match(name):
             raise ValueError(f"agent name {name!r} must be lowercase letters, digits and dashes")
         venue, horizon, style = niche_of(needs)
+        with self._lock:
+            return self._born(name, family, code, needs, params, parent, reason, venue, horizon, style)
+
+    def _born(self, name, family, code, needs, params, parent, reason, venue, horizon, style) -> Agent:
         generation = (self.agents[parent].generation + 1) if parent and parent in self.agents else 1
         taken = {a.id for a in self.agents.values()}
         agent_id, n = name, 1

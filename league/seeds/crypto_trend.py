@@ -61,11 +61,11 @@ def _when(text):
 
 def _budget(ctx, want, held_usd, spent):
     """Dollars for one buy: the wanted size, capped by the order limit, by the room left under
-    the position limit, and by free cash (cash less resting buys and this wake's buys) less 2%."""
+    the position limit, and by free cash: 98% of (cash less resting buys), less this wake's earlier buys."""
     limits = ctx.get("limits") or {}
     resting = sum(_num(o.get("quantity")) * _num(o.get("limit_price")) for o in ctx.get("open_orders") or []
                   if isinstance(o, dict) and o.get("side") == "buy")
-    free = (_num(ctx.get("cash")) - resting - spent) * 0.98
+    free = (_num(ctx.get("cash")) - resting) * 0.98 - spent
     return min(want, _num(limits.get("max_order_usd"), want), _num(limits.get("max_position_usd"), want) - held_usd, free)
 
 
