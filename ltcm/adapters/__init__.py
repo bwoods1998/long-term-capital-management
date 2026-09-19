@@ -313,7 +313,7 @@ def message_of(payload: Any, *, limit: int = 300) -> str:
 
 #: What has to come off a venue path to leave the path the gateway routes on. Kalshi signs (and
 #: therefore carries) its `/trade-api/v2` prefix; Coinbase's paths are already absolute.
-GATEWAY_PREFIXES: dict[str, str] = {"kalshi": "/trade-api/v2/", "coinbase": "/", "alpaca": "/"}
+GATEWAY_PREFIXES: dict[str, str] = {"kalshi": "/trade-api/v2/", "coinbase": "/", "alpaca": "/", "alpaca-paper": "/"}
 
 #: Venue auth headers an adapter builds and gateway mode throws away: this process cannot sign.
 VENUE_AUTH_HEADERS = (
