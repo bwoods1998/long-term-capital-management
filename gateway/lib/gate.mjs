@@ -6,7 +6,8 @@
 // this module rather than in the Durable Object class is what lets every rule below be tested
 // without a Workers runtime.
 
-import { caps, } from './caps.mjs';
+import { caps, venueOrderCap } from './caps.mjs';
+import { monthCapMicro } from './frontier.mjs';
 import { formatUsd } from './money.mjs';
 import { iso } from './http.mjs';
 
@@ -19,6 +20,7 @@ export const WATCHDOG_KEY = 'watchdog';
 export const SAIL_KEY = 'sail';
 export const ALERTS_KEY = 'alerts';
 const NOTICES_KEY = 'notices';
+export const FRONTIER_KEY = 'frontier';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -74,16 +76,20 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * Consume `micro` dollars of today's budget for one order, or refuse.
      * Refusal is `{ ok: false, status, error }`; the caller forwards nothing.
      */
-    reserve({ micro, at = now(), exit = false }) {
+    reserve({ micro, at = now(), exit = false, venue = null }) {
       if (killed()) {
         return { ok: false, status: 423, error: 'The kill switch is engaged; no orders are being forwarded.' };
       }
       const amount = BigInt(micro);
       if (amount <= 0n) return { ok: false, status: 400, cap: 'order', error: 'An order must have a positive notional.' };
-      if (!exit && amount > limits.maxOrderMicro) {
+      // A venue may carry a tighter per-order cap than the floor's (`MAX_ORDER_USD_<VENUE>`):
+      // the accounts are a few hundred dollars each, and one order must never be one account.
+      const venueCap = venueOrderCap(env, venue);
+      const orderCap = venueCap !== null && venueCap < limits.maxOrderMicro ? venueCap : limits.maxOrderMicro;
+      if (!exit && amount > orderCap) {
         return {
           ok: false, status: 403, cap: 'order',
-          error: `Order notional $${formatUsd(amount)} exceeds the per-order cap of $${formatUsd(limits.maxOrderMicro)}.`,
+          error: `Order notional $${formatUsd(amount)} exceeds the per-order cap of $${formatUsd(orderCap)}.`,
         };
       }
       const row = counters(at);
@@ -119,6 +125,49 @@ export function createGate({ store, env = {}, now = Date.now }) {
         notional: row.notional > amount ? row.notional - amount : 0n,
       });
       return { ok: true };
+    },
+
+    /**
+     * The frontier model's month. `frontierReserve` holds a call's worst-case cost against the
+     * month's budget or refuses; `frontierSettle` replaces the hold with what the call cost.
+     * A month is a UTC calendar month and starts at zero.
+     */
+    frontierMonth(at = now()) {
+      const month = new Date(at).toISOString().slice(0, 7);
+      const row = read(store, FRONTIER_KEY, null);
+      return row && row.month === month
+        ? { month, spent: BigInt(row.spent || 0), calls: Number(row.calls) || 0, agents: row.agents && typeof row.agents === 'object' ? row.agents : {} }
+        : { month, spent: 0n, calls: 0, agents: {} };
+    },
+
+    frontierReserve({ micro, at = now() }) {
+      const cap = monthCapMicro(env);
+      const amount = BigInt(micro);
+      if (cap <= 0n) return { ok: false, status: 403, error: 'No frontier budget is configured.' };
+      if (amount <= 0n) return { ok: false, status: 400, error: 'A call must have a positive worst-case cost.' };
+      const row = this.frontierMonth(at);
+      if (row.spent + amount > cap) {
+        return {
+          ok: false, status: 402, cap: 'frontier_month',
+          error: `This call could cost $${formatUsd(amount)}; the month has $${formatUsd(cap > row.spent ? cap - row.spent : 0n)} left of $${formatUsd(cap)}.`,
+        };
+      }
+      write(store, FRONTIER_KEY, { month: row.month, spent: String(row.spent + amount), calls: row.calls, agents: row.agents });
+      return { ok: true, month: row.month, micro: String(amount) };
+    },
+
+    frontierSettle({ month, reserved, actual, agent = null, at = now() }) {
+      const row = this.frontierMonth(at);
+      if (row.month !== month) return { ok: false };
+      const held = BigInt(reserved);
+      // A call whose cost cannot be read keeps its whole reservation: unknown is not free.
+      const cost = actual === null || actual === undefined ? held : BigInt(actual);
+      const spent = row.spent - held + cost;
+      const agents = { ...row.agents };
+      const name = typeof agent === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(agent) ? agent : 'unattributed';
+      agents[name] = String(BigInt(agents[name] || 0) + cost);
+      write(store, FRONTIER_KEY, { month: row.month, spent: String(spent > 0n ? spent : 0n), calls: row.calls + 1, agents });
+      return { ok: true, cost_usd: formatUsd(cost) };
     },
 
     watchdog: () => read(store, WATCHDOG_KEY, { last_check_at: null, last_action: null, last_action_at: null }),
@@ -198,6 +247,13 @@ export function createGate({ store, env = {}, now = Date.now }) {
           timezone: limits.timezone,
         },
         caps_exhausted: row.orders >= limits.maxDayOrders || row.notional >= limits.maxDayMicro,
+        frontier: (() => {
+          const month = this.frontierMonth(at);
+          return {
+            month: month.month, spent_usd: formatUsd(month.spent), cap_usd: formatUsd(monthCapMicro(env)), calls: month.calls,
+            by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
+          };
+        })(),
         watchdog: {
           last_check_at: watch.last_check_at ?? null,
           last_action: watch.last_action ?? null,

@@ -20,6 +20,7 @@ import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
+import * as frontier from './frontier.mjs';
 
 export const VENUES = ['kalshi', 'alpaca'];
 //: A venue quote reused across orders for this long.
@@ -95,6 +96,27 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     }
   }
 
+  if (path === '/v1/frontier/models') {
+    // Free and read-only: which models the key can reach, so a price is never set on a guess.
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    if (!env.OPENAI_SECRET_KEY) return fail('The frontier model is not configured.', 503);
+    try {
+      const upstream = await fetcher(frontier.HOST + '/v1/models', {
+        method: 'GET', headers: { Accept: 'application/json', Authorization: `Bearer ${env.OPENAI_SECRET_KEY}` },
+        redirect: 'manual', signal: AbortSignal.timeout(20000),
+      });
+      const data = await upstream.json().catch(() => null);
+      if (!upstream.ok) return fail(`The provider answered HTTP ${upstream.status}.`, 502);
+      return json({ models: (data?.data || []).map(row => row?.id).filter(id => typeof id === 'string').sort(), priced: Object.keys(frontier.priceTable(env)) });
+    } catch {
+      return fail('The frontier provider did not answer.', 502);
+    }
+  }
+  if (path === '/v1/frontier/responses') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return frontierCall(request, env, { gate, fetcher, now });
+  }
+
   const target = parseRoute(path);
   if (!target) return fail('Not found.', 404);
   if (!METHODS.includes(request.method)) return fail('Method not allowed.', 405, { Allow: ALLOW });
@@ -154,7 +176,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     const priced = notional(target.venue, parsed, { reference });
     if (priced.error) return fail(priced.error, 400);
     const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
-    const decision = await gate.reserve({ micro: String(priced.micro), exit });
+    const decision = await gate.reserve({ micro: String(priced.micro), exit, venue: target.venue });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
     reservation = decision;
   }
@@ -219,4 +241,56 @@ async function sign({ venue, path }, request, env, { now }) {
     return { url: kalshi.target(path, search), headers };
   }
   throw new Error(`unknown venue ${String(venue)}`);
+}
+
+/**
+ * One metered call to the frontier model. Reserved at its worst case, settled at its real cost;
+ * a failure before the provider answers gives the reservation back, a failure after keeps it.
+ */
+async function frontierCall(request, env, { gate, fetcher, now }) {
+  if (!env.OPENAI_SECRET_KEY) return fail('The frontier model is not configured.', 503);
+  const body = await readBody(request, 512 * 1024);
+  if (body.error) return fail(body.error, 413);
+  let parsed;
+  try {
+    parsed = JSON.parse(body.text || '');
+  } catch {
+    return fail('The request must be JSON.', 400);
+  }
+  const admitted = frontier.admit(parsed, env);
+  if (admitted.error) return fail(admitted.error, admitted.status);
+  const bytes = new TextEncoder().encode(body.text).length;
+  const hold = await gate.frontierReserve({ micro: String(frontier.worstCase(admitted.price, bytes, admitted.maxOutput)), at: now() });
+  if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
+  const agent = request.headers.get(frontier.AGENT_HEADER);
+  let upstream;
+  try {
+    upstream = await fetcher(frontier.HOST + frontier.PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${env.OPENAI_SECRET_KEY}`, 'User-Agent': 'ltcm-gateway/1.0' },
+      body: body.text,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(280000),
+    });
+  } catch {
+    // Nothing came back. The provider may still bill a call it received, so the hold stays.
+    await gate.frontierSettle({ month: hold.month, reserved: hold.micro, actual: null, agent, at: now() });
+    return fail('The frontier model did not answer.', 502);
+  }
+  const text = await upstream.text();
+  let actual = null;
+  if (upstream.ok) {
+    try { actual = frontier.actualCost(admitted.price, JSON.parse(text).usage); } catch { actual = null; }
+  } else if (upstream.status >= 400 && upstream.status < 500) {
+    actual = 0n;  // refused by the provider before any generation: nothing was billed
+  }
+  const settled = await gate.frontierSettle({ month: hold.month, reserved: hold.micro, actual: actual === null ? null : String(actual), agent, at: now() });
+  return new Response(text, {
+    status: upstream.status,
+    headers: {
+      'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+      ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
+    },
+  });
 }

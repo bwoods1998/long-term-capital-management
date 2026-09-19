@@ -34,9 +34,20 @@
     // moves, so a day holds a few hundred small orders; the dollar caps still bind the risk.
     // Sept 18, 2026 (the arena): the owner accepts the loss of the whole account; the caps now
     // bound a runaway loop, not a position. Exits (X-LTCM-Purpose: exit) skip the dollar caps.
-    "MAX_ORDER_USD": "2000",
-    "MAX_DAY_USD": "60000",
-    "MAX_DAY_ORDERS": "6000",
+    // Sept 19, 2026 (the rebuild): two accounts of about $800 each. One order is never more
+    // than a tenth of an account, and a day's submitted notional is a few times the floor's
+    // capital because resting quotes are replaced as prices move. Exits skip the dollar caps.
+    "MAX_ORDER_USD": "75",
+    "MAX_ORDER_USD_KALSHI": "75",
+    "MAX_ORDER_USD_ALPACA": "75",
+    "MAX_DAY_USD": "4000",
+    "MAX_DAY_ORDERS": "2000",
+    // The frontier model's month, in dollars. The owner raises it when the return earns it.
+    "FRONTIER_MONTH_USD": "100",
+    // Dollars per million tokens: input, cached input, output. A model absent here is refused.
+    // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
+    // cache-write rate, the dearest an input token can be, so the meter errs high.
+    "FRONTIER_MODELS": "{\"gpt-6-astra\": {\"input\": 12.5, \"cached\": 1.0, \"output\": 50}, \"gpt-5.6-sol\": {\"input\": 5.0, \"cached\": 0.4, \"output\": 20}, \"gpt-5.6-terra\": {\"input\": 2.5, \"cached\": 0.2, \"output\": 12}}",
     // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's
     // notices from noon on once three live favorites desks were filling.
     "NOTIFY_MAX_PER_DAY": "300",

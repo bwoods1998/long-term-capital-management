@@ -51,6 +51,8 @@ export class Gate extends DurableObject {
   // One transaction, no await inside it: the check and the spend are the same step.
   reserve(request) { return this.ctx.storage.transactionSync(() => this.gate.reserve(request)); }
   refund(request) { return this.ctx.storage.transactionSync(() => this.gate.refund(request)); }
+  frontierReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierReserve(request)); }
+  frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
 
   watchdog() { return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) }); }
 }

@@ -488,3 +488,65 @@ test('the gateway signs only the venue paths the floor uses; everything else is 
     assert.notEqual(response.status, 403, `${method} ${path}`);
   }
 });
+
+test('the frontier model is metered: reserved at its worst case, settled at its real cost, capped by the month', async () => {
+  const settings = {
+    OPENAI_SECRET_KEY: 'sk-test-key-that-never-leaves-the-worker',
+    FRONTIER_MONTH_USD: '0.50',
+    FRONTIER_MODELS: JSON.stringify({ 'frontier-test': { input: 10, cached: 1, output: 50 } }),
+  };
+  const gate = gateFor(settings);
+  const usage = { input_tokens: 2000, input_tokens_details: { cached_tokens: 1000 }, output_tokens: 1000 };
+  const seen = [];
+  const fetcher = async (url, init) => { seen.push({ url, init }); return new Response(JSON.stringify({ id: 'r1', usage }), { status: 200 }); };
+  const body = { model: 'frontier-test', input: 'Audit this candidate.', max_output_tokens: 1000 };
+
+  const first = await call(ask('POST', '/v1/frontier/responses', { body, headers: { 'X-LTCM-Agent': 'auditor' } }), { settings, gate, fetcher });
+  assert.equal(first.response.status, 200);
+  assert.equal(seen[0].url, 'https://api.openai.com/v1/responses');
+  assert.equal(seen[0].init.headers.Authorization, 'Bearer sk-test-key-that-never-leaves-the-worker');
+  // 1000 fresh x $10 + 1000 cached x $1 + 1000 out x $50, per million: $0.061.
+  assert.equal(first.response.headers.get('X-LTCM-Cost-USD'), '0.07', 'costs round up to the cent');
+  let status = await gate.status();
+  assert.equal(status.frontier.spent_usd, '0.07');
+  assert.deepEqual(status.frontier.by_agent, { auditor: '0.07' });
+  assert.equal(status.frontier.cap_usd, '0.50');
+
+  // A call whose worst case does not fit in what is left of the month never leaves.
+  const before = seen.length;
+  const greedy = await call(ask('POST', '/v1/frontier/responses', { body: { ...body, max_output_tokens: 16000 } }), { settings, gate, fetcher });
+  assert.equal(greedy.response.status, 402);
+  assert.equal(greedy.body.cap, 'frontier_month');
+  assert.equal(seen.length, before);
+
+  // Unpriced models, streaming, and calls with no output bound are refused before any spend.
+  for (const bad of [{ ...body, model: 'mystery-model' }, { ...body, stream: true }, { ...body, background: true }, { model: 'frontier-test', input: 'x' }]) {
+    const refused = await call(ask('POST', '/v1/frontier/responses', { body: bad }), { settings, gate, fetcher });
+    assert.ok([400, 403].includes(refused.response.status), JSON.stringify(bad));
+  }
+  assert.equal(seen.length, before);
+
+  // A provider refusal bills nothing; a call that never answers keeps its whole reservation.
+  const refusedUpstream = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate, fetcher: async () => new Response('{"error":{"message":"bad"}}', { status: 400 }) });
+  assert.equal(refusedUpstream.response.status, 400);
+  assert.equal((await gate.status()).frontier.spent_usd, '0.07');
+  const silent = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate, fetcher: async () => { throw new Error('timeout'); } });
+  assert.equal(silent.response.status, 502);
+  assert.notEqual((await gate.status()).frontier.spent_usd, '0.07', 'unknown is not free');
+
+  // No key, no budget: refused.
+  assert.equal((await call(ask('POST', '/v1/frontier/responses', { body }), { settings: { ...settings, OPENAI_SECRET_KEY: '' } })).response.status, 503);
+  assert.equal((await call(ask('POST', '/v1/frontier/responses', { body }), { settings: { ...settings, FRONTIER_MONTH_USD: '' } })).response.status, 403);
+  assert.equal((await call(ask('GET', '/v1/frontier/responses'), { settings })).response.status, 405);
+});
+
+test('a venue may carry a tighter per-order cap than the floor', async () => {
+  const settings = { MAX_ORDER_USD: '50', MAX_ORDER_USD_ALPACA: '20' };
+  const order = qty => ({ symbol: 'AAPL', qty, side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' });
+  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('2') }), { settings })).response.status, 200);
+  const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3') }), { settings });
+  assert.equal(refused.response.status, 403);
+  assert.match(refused.body.error, /per-order cap of \$20\.00/);
+  // An exit is never trapped by a dollar cap.
+  assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
+});

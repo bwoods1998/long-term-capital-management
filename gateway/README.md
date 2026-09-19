@@ -32,6 +32,8 @@ characters.
 | --- | --- | --- |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
 | `GET`/`POST`/`DELETE` | `/v1/alpaca/<path>` | Adds `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY` and forwards to `https://api.alpaca.markets/<path>`, or to `https://data.alpaca.markets/<path>` when the path is a market-data one (`v2/stocks/`, `v1beta3/`). One venue name, two hosts, one credential. |
+| `POST` | `/v1/frontier/responses` | One metered call to the frontier model (OpenAI Responses API) with `OPENAI_SECRET_KEY`. Priced twice: reserved at its worst case before it leaves, settled at the provider's reported usage after. Refused when the month's `FRONTIER_MONTH_USD` cannot cover the worst case, when the model has no price in `FRONTIER_MODELS`, when it streams or runs in the background, or when `max_output_tokens` is missing. `X-LTCM-Agent` attributes the cost. |
+| `GET` | `/v1/frontier/models` | The model ids the key can reach, and which are priced. Free. |
 | `GET` | `/v1/health` | Caps, today's counters, kill switch, watchdog record, Sail balance and box state, and when each alert last went out. |
 | `POST` | `/v1/kill` | Runtime token may engage the kill switch. |
 | `POST` | `/v1/unkill` | Only the separate owner token may release it. |

@@ -74,6 +74,15 @@ export function createsOrder(venue, method, path) {
   return (ORDER_PATHS[venue] || []).includes(normalizePath(path));
 }
 
+/** A venue's own per-order cap (`MAX_ORDER_USD_ALPACA`), in micro-dollars, or null when unset. */
+export function venueOrderCap(env = {}, venue) {
+  if (typeof venue !== 'string' || !/^[a-z]{2,16}$/.test(venue)) return null;
+  const raw = env[`MAX_ORDER_USD_${venue.toUpperCase()}`];
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = parseUsdMicro(raw, -1n);
+  return value > 0n ? value : null;
+}
+
 /** The caps in force, read from `vars`. A malformed value falls back to the documented default. */
 export function caps(env = {}) {
   return {
