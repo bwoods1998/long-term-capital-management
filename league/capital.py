@@ -51,6 +51,17 @@ def kelly_stake(growth: list[float], present_stake: Decimal, venue_cash: Decimal
     return max(floor, min(target, ceiling)), {**numbers, "reason": basis}
 
 
+def scaled_limits(staked: Decimal) -> tuple[Decimal, Decimal]:
+    """(max position, max order) for a rung-3 account lent `staked`: half the stake a position,
+    and never more than can be closed in ONE order under the gateway's cap even after it has
+    appreciated by a quarter (four fifths of the order cap). Never below the micro rung's."""
+    micro = CONSTITUTION["rungs"]["2"]
+    cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
+    ceiling = (cap * Decimal("0.8")).quantize(CENT)
+    half = (staked / 2).quantize(CENT)
+    return max(Decimal(micro["max_position_usd"]), min(half, ceiling)), max(Decimal(micro["max_order_usd"]), min(cap, half, ceiling))
+
+
 def resize(house: Any, agent: Any) -> dict[str, Any] | None:
     """Move a rung-3 agent's stake toward what its record justifies. Returns what was done."""
     book = house.book_of(agent)
@@ -75,13 +86,7 @@ def resize(house: Any, agent: Any) -> dict[str, Any] | None:
         if delta == 0:
             return None
     book.stake(agent.id, delta, note="rung 3 sizing: " + numbers["reason"])
-    from .book import Limits
-
-    cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
-    # A position must always be closable in ONE order under the gateway's cap, even after it has
-    # appreciated by a quarter: so no position is opened above four fifths of the order cap.
-    ceiling = (cap * Decimal("0.8")).quantize(CENT)
-    book.limits[agent.id] = Limits(max_position_usd=min((target / 2).quantize(CENT), ceiling), max_order_usd=min(cap, (target / 2).quantize(CENT), ceiling))
+    house.seat(agent)  # the limits follow the stake
     row = {"agent": agent.id, "book": book.name, "stake_usd": str(target), "moved_usd": str(delta), **numbers}
     house.ledger.append("eval.verdict", {"decision": "size", "rung": 3, **{k: v for k, v in row.items() if k != "agent"}}, agent=agent.id)
     return row

@@ -123,6 +123,7 @@ class House:
             self.books[name] = Book(
                 name, broker, self.ledger, fees=Fees(family_of(name)), real_money=real, clock=clock,
                 market_open=market_hours, kill_switch=kill_switch,
+                resolves_at=self._resolves_at if family_of(name) == "kalshi" else None,
             )
         self._state_path = self.root / "house.json"
         self._state = self._load_state()
@@ -150,6 +151,11 @@ class House:
                 book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
                 self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
+
+    def _resolves_at(self, instrument: Any) -> float | None:
+        if self.kalshi_data is None:
+            return None
+        return self.kalshi_data.resolves_at(instrument.market_id or instrument.symbol)
 
     # ------------------------------------------------------------------ state
     def _load_state(self) -> dict[str, Any]:
@@ -259,9 +265,19 @@ class House:
             return self.books[REAL_BOOK[agent.venue]]
         return self.books.get(PRACTICE_BOOK[agent.venue])
 
-    def _limits(self, rung: int) -> Limits:
+    def _limits(self, rung: int, agent: Agent | None = None, staked: Decimal | None = None) -> Limits:
         row = CONSTITUTION["rungs"][str(min(max(rung, 1), 2))]
-        return Limits(Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"]))
+        position, order = Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"])
+        if rung >= 3 and staked is not None:
+            position, order = capital.scaled_limits(staked)  # rung 3's limits follow its stake
+        return Limits(position, order, max_hours_to_resolve=self.horizon_hours(agent))
+
+    def horizon_hours(self, agent: Agent | None) -> float | None:
+        """The horizon rule for this agent's entries: Kalshi only (hours by its block length)."""
+        rules = self.game.get("horizon") or {}
+        if agent is None or agent.venue != "kalshi" or not rules:
+            return None
+        return float(rules["kalshi_day_max_hours" if agent.horizon == "day" else "kalshi_hour_max_hours"])
 
     def seat(self, agent: Agent) -> None:
         """Give an agent its limits and its stake on the book of its rung (once per book)."""
@@ -269,8 +285,8 @@ class House:
         book = self.book_of(agent)
         if rung < 1 or book is None:
             return
-        book.limits[agent.id] = self._limits(rung if book.real_money else 1)
         account = book.account(agent.id)
+        book.limits[agent.id] = self._limits(rung if book.real_money else 1, agent, account.staked)
         # A new seat, or a return to a book the House had closed the agent's account on (a
         # demotion after a loss leaves `staked` above zero and cash at zero: it is staked afresh).
         if account.staked <= 0 or (account.swept and not account.holdings):
@@ -293,7 +309,7 @@ class House:
         """Everything a strategy sees, as plain data (floats: the box converts nothing back)."""
         needs = agent.needs
         account = book.account(agent.id)
-        limits = book.limits.get(agent.id) or self._limits(1)
+        limits = book.limits.get(agent.id) or self._limits(1, agent)
         ctx: dict[str, Any] = {
             "now": now_iso(self.clock),
             "venue": agent.venue,
@@ -575,6 +591,42 @@ class House:
         self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
         if rung == 1 and old is not None:
             self._move_books(agent, old)
+
+    # ---------------------------------------------------------------- horizon
+    def _enforce_horizon(self) -> int:
+        """Close crypto positions held past the horizon (the entry side of the rule, for Kalshi, is
+        in the book's check). The agent's own working orders in that coin are cancelled first, so
+        the whole holding is free to sell; a position is closed by the House, at the market."""
+        hours = float((self.game.get("horizon") or {}).get("crypto_max_hold_hours") or 0)
+        if hours <= 0:
+            return 0
+        closed = 0
+        for book in self.books.values():
+            if family_of(book.name) != "alpaca":
+                continue
+            exits = []
+            now = now_iso(self.clock)
+            for agent_id in book.agents():
+                for holding in list(book.account(agent_id).holdings.values()):
+                    if holding.instrument.asset_class != "crypto" or not holding.opened_at or holding.quantity <= 0:
+                        continue
+                    held = (self.clock() - _epoch(holding.opened_at)) / 3600.0
+                    if held <= hours:
+                        continue
+                    for working in book.open_orders(agent_id):
+                        if working.instrument.key == holding.instrument.key:
+                            book.cancel(agent_id, working.order_id)
+                    quantity = book.account(agent_id).holdings.get(holding.instrument.key)
+                    if quantity is None or quantity.quantity <= 0:
+                        continue
+                    exits.append(Intent.new(
+                        agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
+                        reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
+                        created_at=now, nonce=f"horizon:{holding.opened_at}",
+                    ))
+            if exits:
+                closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
+        return closed
 
     # ---------------------------------------------------------------- tuition
     def tuition(self) -> dict[str, Any]:
@@ -864,6 +916,10 @@ class House:
             self.economy.payout(self.standings())
             if self.auditor is not None:
                 self.auditor.score()
+        try:
+            self._enforce_horizon()
+        except Exception as exc:  # noqa: BLE001 - a venue that is down now is asked again next tick
+            self.alert("warning", f"the horizon rule could not close a position ({type(exc).__name__}: {str(exc)[:160]})")
         if self.settings.real_money:
             self._enforce_tuition()
         if open_for_business:

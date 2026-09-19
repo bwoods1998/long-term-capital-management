@@ -53,10 +53,17 @@ ctx = {
   "quotes": {"BTC/USD": {"bid": 81000.0, "ask": 81020.0}},
   # kalshi
   "markets": [{"market": "KXBTCD-26SEP2017-T80999.99", "series": "KXBTCD", "title": "...",
-               "yes_bid": 0.91, "yes_ask": 0.93, "close_time": "...", "hours_to_close": 0.6,
+               "yes_bid": 0.91, "yes_ask": 0.93, "close_time": "...", "hours_to_close": 0.6, "hours_to_resolve": 0.7,
                "volume_24h": 12000, "open_interest": 3400, "strike": 80999.99}],
 }
 ```
+
+`hours_to_close` is when trading is expected to stop and `hours_to_resolve` when the contract is
+expected to pay. For a game the two are the same (it closes when a winner is declared, near its
+scheduled end, whatever later close it lists); a weather market stops trading the evening before
+it is paid. **The horizon rule:** the House refuses a Kalshi entry expected to pay more than 12
+hours out for an `hour` strategy or 48 for a `day` strategy, and closes any crypto position held
+longer than 48 hours. Equities are not bounded. Exits are never refused.
 
 ## What `decide` returns
 

@@ -162,6 +162,11 @@ class LadderTest(unittest.TestCase):
         self.assertTrue(sized)
         self.assertGreater(D(sized[-1]["stake_usd"]), D("25"))
         self.assertLessEqual(D(sized[-1]["stake_usd"]), real.venue_cash * D("0.25") + 1)  # never more than a quarter of the venue's cash
+        # Regression: every wake re-seats the agent, and a seat once reset a scaled agent's limits to
+        # the micro rung's, so its larger stake traded at $10 a position until the next day's sizing.
+        self.run_hours(1, edge=0.78)
+        self.assertEqual(real.limits[agent.id].max_position_usd, min(real.account(agent.id).staked / 2, D("60")).quantize(D("0.01")))
+        self.assertGreater(real.limits[agent.id].max_position_usd, D("10"))
         recommendation = house.ledger.last("ops.recommendation").payload
         self.assertEqual(recommendation["ranked"][0]["agent"], agent.id)
 

@@ -50,6 +50,10 @@ def check_bounds(game: Mapping[str, Any]) -> None:
         value = Decimal(str(economy[key]))
         if not Decimal(str(low)) <= value <= Decimal(str(high)):
             raise ValueError(f"game.json: economy.{key} = {value} is outside [{low}, {high}]")
+    for key, (low, high) in game.get("horizon_bounds", {}).items():
+        value = float(game["horizon"][key])
+        if not float(low) <= value <= float(high):
+            raise ValueError(f"game.json: horizon.{key} = {value:g} is outside [{low}, {high}]")
     if int(economy["min_population"]) > int(economy["max_population"]):
         raise ValueError("game.json: min_population is above max_population")
 

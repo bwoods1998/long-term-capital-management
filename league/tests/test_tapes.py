@@ -364,7 +364,67 @@ def live(ticker, bid, ask, close, **extra):
     return row
 
 
+class ListedStopTest(unittest.TestCase):
+    """What a replay shows as a settled market's close must be what the live view showed while it
+    was open, never the moment the result was really declared."""
+
+    def test_a_settled_game_shows_its_scheduled_expiration(self):
+        from league.tapes import _listed_stop, parse_time
+
+        row = {"can_close_early": True, "close_time": "2026-09-18T03:29:53Z", "expiration_time": "2026-09-18T03:15:00Z", "latest_expiration_time": "2026-09-20T00:15:00Z"}
+        self.assertEqual(iso(_listed_stop(row, parse_time(row["close_time"]))), "2026-09-18T03:15:00Z")
+
+    def test_a_market_that_cannot_close_early_shows_its_close(self):
+        from league.tapes import _listed_stop, parse_time
+
+        row = {"can_close_early": False, "close_time": "2026-09-18T15:00:00Z", "expiration_time": "2026-09-18T10:00:00Z"}
+        self.assertEqual(iso(_listed_stop(row, parse_time(row["close_time"]))), "2026-09-18T15:00:00Z")
+
+    def test_a_weather_market_stops_at_its_close_and_is_paid_later(self):
+        from league.tapes import _listed_stop, parse_time, resolve_time
+
+        row = {"can_close_early": True, "close_time": "2026-09-19T05:00:00Z", "expiration_time": "2026-09-19T19:00:00Z"}
+        close = parse_time(row["close_time"])
+        self.assertEqual((iso(_listed_stop(row, close)), iso(resolve_time(row, close))), ("2026-09-19T05:00:00Z", "2026-09-19T19:00:00Z"))
+
+
 class KalshiMarketsTest(unittest.TestCase):
+    def test_a_game_is_shown_by_when_it_is_expected_to_end_not_by_its_listed_close(self):
+        """Measured Sept 19, 2026: a game's close is two days after kickoff; it really closes when a
+        winner is declared, near its scheduled expiration."""
+        game = dict(can_close_early=True, expiration_time="2026-09-10T20:15:00Z")  # 6.3 hours from NOW
+        data = FakeMarketData({"KXNFLGAME": [[
+            live("KXNFLGAME-26SEP10AB-A", "0.60", "0.62", "2026-09-12T17:00:00Z", **game),
+            live("KXNFLGAME-26SEP14CD-C", "0.60", "0.62", "2026-09-13T01:00:00Z", can_close_early=True, expiration_time="2026-09-12T23:00:00Z"),  # next week's
+        ]]})
+        rows = KalshiData(data, clock=clock).markets(["KXNFLGAME"], max_hours_to_close=12)
+        self.assertEqual([row["market"] for row in rows], ["KXNFLGAME-26SEP10AB-A"])
+        self.assertEqual((rows[0]["close_time"], rows[0]["hours_to_close"], rows[0]["hours_to_resolve"]), ("2026-09-10T20:15:00Z", 6.2167, 6.2167))
+
+    def test_a_market_paid_after_it_stops_trading_shows_both_times(self):
+        data = FakeMarketData({"KXHIGHNY": [[live("KXHIGHNY-26SEP10-T78", "0.91", "0.93", "2026-09-10T20:00:00Z", can_close_early=True, expiration_time="2026-09-11T10:00:00Z")]]})
+        row = KalshiData(data, clock=clock).markets(["KXHIGHNY"], max_hours_to_close=24)[0]
+        self.assertEqual((row["hours_to_close"], row["hours_to_resolve"]), (5.9667, 19.9667))
+
+    def test_resolves_at_is_the_scheduled_expiration_and_not_knowing_is_none(self):
+        class One:
+            def __init__(self):
+                self.calls = 0
+
+            def market(self, ticker):
+                self.calls += 1
+                if ticker == "GONE":
+                    raise RuntimeError("404")
+                return {"ticker": ticker, "close_time": "2026-09-12T17:00:00Z", "expiration_time": "2026-09-10T20:15:00Z" if ticker == "GAME" else None}
+
+        source = One()
+        data = KalshiData(source, clock=clock)
+        self.assertEqual(iso(data.resolves_at("game")), "2026-09-10T20:15:00Z")
+        self.assertEqual(iso(data.resolves_at("PLAIN")), "2026-09-12T17:00:00Z")
+        self.assertIsNone(data.resolves_at("GONE"))
+        data.resolves_at("GAME")
+        self.assertEqual(source.calls, 3)  # a schedule is asked for once; a failure is asked again
+
     def test_snapshot_shape_filters_and_order(self):
         data = FakeMarketData({
             "KXBTCD": [
@@ -391,7 +451,7 @@ class KalshiMarketsTest(unittest.TestCase):
         ])
         self.assertEqual(rows[0], {
             "market": "KXBTCD-26SEP1011-T81099.99", "series": "KXBTCD", "title": "Bitcoin price on Sep 10, 2026?",
-            "yes_bid": 0.40, "yes_ask": 0.44, "close_time": "2026-09-10T15:00:00Z", "hours_to_close": 0.9667,
+            "yes_bid": 0.40, "yes_ask": 0.44, "close_time": "2026-09-10T15:00:00Z", "hours_to_close": 0.9667, "hours_to_resolve": 0.9667,
             "volume_24h": 12000.0, "open_interest": 3400.5, "strike": 81099.99,
         })
         self.assertEqual(rows[1]["strike"], 2625.0)
@@ -402,7 +462,7 @@ class KalshiMarketsTest(unittest.TestCase):
         first, second, third = data.calls
         self.assertEqual(first, {
             "series_ticker": "KXBTCD", "status": "open", "limit": 1000, "cursor": None,
-            "min_close_ts": int(NOW), "max_close_ts": int(NOW + 24 * 3600), "mve_filter": "exclude",
+            "min_close_ts": int(NOW), "max_close_ts": int(NOW + 24 * 3600) + 72 * 3600, "mve_filter": "exclude",  # further: a game lists a late close
         })
         self.assertEqual(second["cursor"], "1")
         self.assertEqual(third["series_ticker"], "KXETHD")
@@ -540,7 +600,7 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertEqual(self.by_time["2026-09-10T12:05:00Z"][A], {
             "market": A, "series": "KXBTCD", "title": "Bitcoin price on Sep 10, 2026?",
             "yes_bid": 0.40, "yes_ask": 0.44, "yes_ask_low": 0.43, "yes_bid_high": 0.41,
-            "close_time": "2026-09-10T13:00:00Z", "hours_to_close": 0.9167,
+            "close_time": "2026-09-10T13:00:00Z", "hours_to_close": 0.9167, "hours_to_resolve": 0.9167,
             "volume_24h": 10.0, "open_interest": 10.0, "strike": 80999.99,
         })
         row = self.by_time["2026-09-10T12:10:00Z"][A]   # two candles inside (12:05, 12:10]

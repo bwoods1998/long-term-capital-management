@@ -441,6 +441,37 @@ def listed_close(row: "dict[str, Any]", close_ts: float) -> float:
     return close_ts
 
 
+def _listed_stop(row: "dict[str, Any]", close_ts: float) -> float:
+    """What the live view would have shown as this settled market's close while it was open: the
+    listed close, or the scheduled expiration when that came first (see `KalshiData._live_row`).
+    Never the real moment an early close happened."""
+    listed = listed_close(row, close_ts)
+    if not row.get("can_close_early"):
+        return listed
+    return min(listed, resolve_time(row, listed))
+
+
+def resolve_time(row: "dict[str, Any]", close_ts: float) -> float:
+    """When a market is expected to pay: its scheduled `expiration_time`, which a listing shows
+    from the day it opens and never changes. (Measured Sept 19, 2026: a game's `close_time` is two
+    days after kickoff and it really closes when a winner is declared, near its expiration; a
+    weather market stops trading at `close_time` and is paid at its expiration, 14 hours later.)
+    The close stands in when there is no usable expiration."""
+    for key in ("expected_expiration_time", "expiration_time"):
+        try:
+            value = parse_time(row.get(key)) if row.get(key) else None
+        except TapeError:
+            value = None
+        if value is not None and value > 0:
+            return value
+    return close_ts
+
+
+#: A market that may close early lists a close well after it will really stop trading. The live
+#: view asks this much further ahead, and keeps what is expected to RESOLVE inside the window.
+EARLY_CLOSE_SLACK_SECONDS = 72 * 3600
+
+
 def _day_windows(start_ts: float, end_ts: float) -> "list[tuple[int, int]]":
     """[start, end] cut on UTC midnights, so a whole day always asks History the same URL (its
     disk cache is keyed by URL). Kalshi's close-time bounds are both inclusive (Sept 19, 2026)."""
@@ -481,11 +512,28 @@ class KalshiData:
                 out.append(name)
         return out
 
+    # ----------------------------------------------------------------- horizon
+    def resolves_at(self, ticker: str) -> "float | None":
+        """When this market is expected to pay (epoch seconds), or None when it cannot be told.
+        A market's schedule does not change, so an answer is kept for the life of the process."""
+        ticker = str(ticker or "").upper()
+        cache = self.__dict__.setdefault("_resolves", {})
+        if ticker in cache:
+            return cache[ticker]
+        try:
+            raw = self.market_data.market(ticker)
+            row = raw.get("market", raw) if isinstance(raw, dict) else None
+            close_ts = parse_time(row.get("close_time"))
+        except Exception:  # noqa: BLE001 - not knowing is an answer: the book refuses the entry
+            return None
+        cache[ticker] = resolve_time(row, close_ts)
+        return cache[ticker]
+
     # ---------------------------------------------------------------- snapshot
     def markets(self, series: "list[str]", *, max_hours_to_close: float = 24.0, limit: int = 200) -> "list[dict[str, Any]]":
-        """The open markets of these series closing within `max_hours_to_close`, soonest first,
-        in the CONTRACT.md shape. Only a market with a two-sided touch is shown; at most `limit`
-        rows (the soonest to close)."""
+        """The open markets of these series that stop trading or resolve within
+        `max_hours_to_close`, soonest first, in the CONTRACT.md shape. Only a market with a
+        two-sided touch is shown; at most `limit` rows (the soonest to close)."""
         names = self._series(series)
         hours = _float(max_hours_to_close)
         if hours is None or hours <= 0:
@@ -503,7 +551,7 @@ class KalshiData:
                         limit=1000,
                         cursor=cursor,
                         min_close_ts=int(now),
-                        max_close_ts=int(math.ceil(horizon_ts)),
+                        max_close_ts=int(math.ceil(horizon_ts)) + EARLY_CLOSE_SLACK_SECONDS,
                         mve_filter="exclude",
                     )
                 except Exception as exc:
@@ -531,20 +579,24 @@ class KalshiData:
             close_ts = parse_time(raw.get("close_time"))
         except TapeError:
             return None
-        if not now < close_ts <= horizon_ts:
+        resolve_ts = resolve_time(raw, close_ts)
+        # What a strategy should plan around: the sooner of the listed close and the expected result.
+        stop_ts = min(close_ts, resolve_ts) if raw.get("can_close_early") else close_ts
+        if not now < close_ts or not now < stop_ts <= horizon_ts:
             return None
         bid, ask = _float(raw.get("yes_bid")), _float(raw.get("yes_ask"))
         if not two_sided(bid, ask):
             return None
         ticker = str(raw["ticker"]).upper()
-        return close_ts, {
+        return stop_ts, {
             "market": ticker,
             "series": series,
             "title": str(raw.get("title") or ""),
             "yes_bid": bid,
             "yes_ask": ask,
-            "close_time": iso(close_ts),
-            "hours_to_close": round((close_ts - now) / 3600.0, 4),
+            "close_time": iso(stop_ts),
+            "hours_to_close": round((stop_ts - now) / 3600.0, 4),
+            "hours_to_resolve": round((max(resolve_ts, stop_ts) - now) / 3600.0, 4),
             "volume_24h": _float(raw.get("volume_24h")) or 0.0,
             "open_interest": _float(raw.get("open_interest")) or 0.0,
             "strike": parse_strike(ticker, raw),
@@ -673,8 +725,9 @@ class KalshiData:
                         "title": str(row.get("title") or ""),
                         "result": result,
                         "close_ts": close_ts,
-                        "close_time": iso(listed_close(row, close_ts)),
-                        "listed_close_ts": listed_close(row, close_ts),
+                        "close_time": iso(_listed_stop(row, close_ts)),
+                        "listed_close_ts": _listed_stop(row, close_ts),
+                        "resolve_ts": max(resolve_time(row, close_ts), _listed_stop(row, close_ts)),
                         "candles_from": candles_from,
                         "strike": parse_strike(ticker, row),
                     })
@@ -720,6 +773,7 @@ class KalshiData:
                 "yes_bid_high": max(highs),
                 "close_time": market["close_time"],
                 "hours_to_close": round((market["listed_close_ts"] - t) / 3600.0, 4),
+                "hours_to_resolve": round((market.get("resolve_ts", market["listed_close_ts"]) - t) / 3600.0, 4),
                 "volume_24h": round(max(0.0, day), 2),
                 "open_interest": _float(candle.get("open_interest")) or 0.0,
                 "strike": market["strike"],

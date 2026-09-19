@@ -4,7 +4,12 @@
     "epoch_seconds": 86400,
     "daily_pool_usd": "2.00",
     "niche_floor_share": "0.40",
-    "rung_weights": {"0": "0", "1": "0.2", "2": "1.0", "3": "1.0"},
+    "rung_weights": {
+      "0": "0",
+      "1": "0.2",
+      "2": "1.0",
+      "3": "1.0"
+    },
     "endowment_usd": "1.00",
     "fork_threshold_usd": "3.00",
     "fork_endowment_usd": "1.00",
@@ -15,13 +20,34 @@
     "box_creation_usd": "0.005"
   },
   "bounds": {
-    "daily_pool_usd": ["0.50", "3.00"],
-    "niche_floor_share": ["0.10", "0.70"],
-    "endowment_usd": ["0.25", "2.00"],
-    "fork_threshold_usd": ["1.50", "10.00"],
-    "fork_endowment_usd": ["0.50", "3.00"],
-    "max_population": [8, 24],
-    "min_population": [4, 12]
+    "daily_pool_usd": [
+      "0.50",
+      "3.00"
+    ],
+    "niche_floor_share": [
+      "0.10",
+      "0.70"
+    ],
+    "endowment_usd": [
+      "0.25",
+      "2.00"
+    ],
+    "fork_threshold_usd": [
+      "1.50",
+      "10.00"
+    ],
+    "fork_endowment_usd": [
+      "0.50",
+      "3.00"
+    ],
+    "max_population": [
+      8,
+      24
+    ],
+    "min_population": [
+      4,
+      12
+    ]
   },
   "audit": {
     "cooldown_hours": 72,
@@ -34,5 +60,25 @@
     "max_output_tokens": 4096,
     "min_hours_between": 6,
     "min_credits_usd": "0.10"
+  },
+  "horizon": {
+    "_about": "Fast feedback: no Kalshi entry expected to resolve later than this, and no crypto position held longer. Equities and options are not bounded.",
+    "kalshi_hour_max_hours": 12,
+    "kalshi_day_max_hours": 48,
+    "crypto_max_hold_hours": 48
+  },
+  "horizon_bounds": {
+    "kalshi_hour_max_hours": [
+      1,
+      24
+    ],
+    "kalshi_day_max_hours": [
+      12,
+      96
+    ],
+    "crypto_max_hold_hours": [
+      6,
+      168
+    ]
   }
 }

@@ -271,6 +271,10 @@ class Limits:
     #: mark one with, and the gateway does not serve Alpaca's contract listing.
     asset_classes: tuple[str, ...] = ("equity", "crypto", "event")
     max_orders_per_day: int = 200
+    #: The horizon rule: no entry in an event market expected to pay later than this many hours
+    #: from now (None: no rule). Fast feedback is what the ladder runs on, and a stake parked in
+    #: a contract that pays next year closes no trades. Equities and options are not bounded.
+    max_hours_to_resolve: float | None = None
 
 
 @dataclass(frozen=True)
@@ -360,6 +364,7 @@ class Book:
         rules: Mapping[str, Any] | None = None,
         clock=time.time,
         market_open: Any = None,
+        resolves_at: Any = None,
         kill_switch: Any = None,
     ):
         self.name = name
@@ -370,6 +375,7 @@ class Book:
         self.rules = {**DEFAULT_RULES, **dict(rules or {})}
         self.clock = clock
         self.market_open = market_open  # callable(instrument, iso) -> bool | None
+        self.resolves_at = resolves_at  # callable(instrument) -> epoch seconds | None: when an event market is expected to pay
         self.kill_switch = kill_switch  # callable() -> bool
         self.engine = RiskEngine()
         self.limits: dict[str, Limits] = {}
@@ -769,6 +775,16 @@ class Book:
             )
             if held or bidding:
                 reasons.append(f"the House already holds or bids the {other} leg of this market; one account cannot hold both")
+        if intent.side == "buy" and intent.instrument.asset_class == "event" and limits.max_hours_to_resolve is not None:
+            try:
+                due = self.resolves_at(intent.instrument) if self.resolves_at else None
+            except Exception:  # noqa: BLE001 - not knowing is a refusal, never a pass
+                due = None
+            hours = None if due is None else (float(due) - _epoch_seconds(now)) / 3600.0
+            if hours is None:
+                reasons.append("the House cannot tell when this market resolves, so it cannot be entered")
+            elif hours > limits.max_hours_to_resolve:
+                reasons.append(f"this market is expected to resolve in {hours:.0f} hours; entries must resolve within {limits.max_hours_to_resolve:g}")
         crossing = self._would_cross_own(intent, quote)
         if crossing:
             reasons.append(crossing)
@@ -1464,3 +1480,12 @@ def _age_seconds(as_of: str, now: str) -> float | None:
     if a is None or b is None:
         return None
     return (b - a).total_seconds()
+
+
+def _epoch_seconds(now: str) -> float:
+    from ltcm.broker import instant
+
+    moment = instant(now)
+    if moment is None:
+        raise ValueError(f"not a timestamp: {now!r}")
+    return moment.timestamp()
