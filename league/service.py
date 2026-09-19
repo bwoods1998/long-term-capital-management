@@ -96,9 +96,15 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
 
     config = dict(config or load_config())
     if canary:
+        from .economy import load_game
+
         config.update(real_money=False, replay_days=2)
         research = publish = astra = False
         name_prefix = "canary"
+        # Two agents are enough to exercise every path: the canary does not refill itself to the
+        # league's population floor (the first canary on the box founded all twelve seeds).
+        game = dict(game or load_game())
+        game["economy"] = {**game["economy"], "min_population": 0}
     load_env()
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)

@@ -97,6 +97,10 @@ def main(argv=None) -> int:
             rows = house.ledger.verify()
             books = {name: vars(book.reconcile()) for name, book in house.books.items()}
             print(json.dumps({"ledger_rows_verified": rows, "books": books}, indent=1, default=str))
+            if canary:
+                # `verify` is the canary's last act: its throwaway boxes are destroyed, not left asleep.
+                for agent in list(getattr(house.sandbox, "_state", {}).get("boxes", {})):
+                    house.sandbox.retire(agent)
             return 0 if all(b["ok"] for b in books.values()) else 1
         else:
             stopping = {"now": False}
