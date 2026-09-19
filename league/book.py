@@ -266,7 +266,10 @@ class Limits:
 
     max_position_usd: Decimal
     max_order_usd: Decimal
-    asset_classes: tuple[str, ...] = ("equity", "option", "crypto", "event")
+    #: Options are not offered yet: the order path is proven (a paper contract was accepted and
+    #: cancelled on Sept 19, 2026), but the House has no option quotes or chains to price, size or
+    #: mark one with, and the gateway does not serve Alpaca's contract listing.
+    asset_classes: tuple[str, ...] = ("equity", "crypto", "event")
     max_orders_per_day: int = 200
 
 
