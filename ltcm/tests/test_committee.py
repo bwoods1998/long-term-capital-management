@@ -363,6 +363,22 @@ class AllocationTests(CommitteeCase):
         ).allocate("2026-09-09T20:05:00.000Z", resize=False)
         self.assertEqual(grown["earnings-01"], Decimal("850.00"))
 
+    def test_a_venue_book_keeps_its_positions_and_shares_the_free_cash(self):
+        # Sept 19, 2026: an equal split of the whole left the explorers book at -$31 of cash.
+        self.add(live_manifest("earnings-01"))
+        self.add(live_manifest("earnings-02"))
+        self.fill("earnings-01", "buy", "2", "100", "2026-09-09T19:00:00.000Z")
+        self.ledgers["earnings-01"].mark({AAPL.key: Decimal("100")}, "2026-09-09T19:30:00.000Z")
+        committee = Committee(
+            self.log, self.manifests, self.ledgers, self.provider,
+            config={"floor_capital_usd": "5000", "bandit_enabled": False, "venue_book": True},
+            venue_equity=lambda: {"alpaca": "1500"},
+        )
+        targets = committee.allocate("2026-09-09T20:00:00.000Z", resize=False)
+        self.assertEqual((targets["earnings-01"], targets["earnings-02"]), (Decimal("850.00"), Decimal("650.00")))
+        event = self.log.last("committee", "committee.allocation")
+        self.assertIn("200.00 in positions, 650.00 of the free 1300.00", event.payload["reasons"]["earnings-01"])
+
     def test_a_bankrupt_desk_goes_to_zero(self):
         self.add(live_manifest("earnings-01"))
         self.allocate_event({"earnings-01": "1000"}, "2026-09-01T13:00:00.000Z")

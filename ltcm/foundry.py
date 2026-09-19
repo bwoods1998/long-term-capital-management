@@ -2356,6 +2356,11 @@ class Foundry:
                 self._remove_file(manager, live.id, subject)
                 parent = None
             marks = {"foundry_code": True} if name not in current else {}
+            previous = str((current.get(name) or {}).get("foundry_id") or "")
+            if previous and previous != fid:
+                # The same row taken again by a later trial of the lineage: the earlier one is
+                # over (Sept 19, 2026: three adoptions under one name stayed "live" as ghosts).
+                self._deployment(previous, status="retired", ended_at=at)
             store.update(live.id, name, foundry_id=fid, promoted_at=at, promoted_from=desk.id, note=note[:200], **marks)
             if name not in current:
                 # The mutation replaces the code it came from and anything else of its line on the

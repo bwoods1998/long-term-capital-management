@@ -546,10 +546,22 @@ class Committee:
                     and capital_mode(manifest, modes) == "live"
                 )
                 if books and held > ZERO:
-                    share = _quantize(held / Decimal(len(books)))
+                    # Each book keeps what it holds in positions and the venue's free cash is
+                    # shared equally. An equal split of the whole (until Sept 19, 2026) left a
+                    # desk holding $100 of positions with a $71 sleeve: cash -$31, and the
+                    # strategies the Foundry had just put on it could place nothing.
+                    marked: dict[str, Decimal] = {}
                     for desk_id in books:
-                        targets[desk_id] = share
-                        reasons[desk_id] = f"venue book: {text(share)} of {venue}'s {text(_quantize(held))}"
+                        state = states.get(desk_id)
+                        marked[desk_id] = max(ZERO, state.equity - state.cash) if state is not None else ZERO
+                    free = max(ZERO, held - sum(marked.values(), ZERO))
+                    each = _quantize(free / Decimal(len(books)))
+                    for desk_id in books:
+                        targets[desk_id] = _quantize(marked[desk_id] + each)
+                        reasons[desk_id] = (
+                            f"venue book: {text(targets[desk_id])} of {venue}'s {text(_quantize(held))} "
+                            f"({text(_quantize(marked[desk_id]))} in positions, {text(each)} of the free {text(_quantize(free))})"
+                        )
         # Only real sleeves compete for the floor's real capital; a notional budget costs nothing.
         funded = {k: v for k, v in targets.items() if not shadow.get(k)}
         total = sum(funded.values(), ZERO)
