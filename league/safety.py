@@ -29,6 +29,9 @@ class CodeRefused(ValueError):
 SAFE_MODULES = frozenset({
     "__future__", "bisect", "collections", "datetime", "decimal", "fractions", "functools", "heapq",
     "itertools", "json", "math", "random", "re", "statistics", "time", "typing", "zoneinfo",
+    # The toolsmith's helper modules, vetted by CI under these same rules and placed beside the
+    # strategy in its box as the package `tools`.
+    "tools",
 })
 SAFE_TYPING = frozenset({
     "Any", "Callable", "DefaultDict", "Dict", "FrozenSet", "Iterable", "Iterator", "List", "Mapping",

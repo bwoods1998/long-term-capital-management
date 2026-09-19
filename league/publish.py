@@ -346,6 +346,9 @@ class Publisher:
 
     # ---------------------------------------------------------------- checkpoint
     def checkpoint(self, house: Any) -> dict[str, Any]:
+        # The accounts are read first: the site refuses a checkpoint whose venue readings are
+        # stamped later than the checkpoint itself (found on the first live publish).
+        account = self.account()
         at = now_iso(self.clock)
         ledger = house.ledger
         desks, curve_rows = [], {}
@@ -376,7 +379,6 @@ class Publisher:
                 "pnl_usd": money(g["pnl"], 4, signed=True), "cost_adjusted_excess_pct": money(excess, 4, signed=True), "brier": None,
                 "pnl_per_inference_usd": money(g["pnl"] / g["cost"], 4, signed=True) if g["cost"] > 0 else "0",
             })
-        account = self.account()
         started = next(iter(ledger.read(kinds="ops.started", limit=1)), None)
         started_at = started.at if started else at
         practice_equity = sum((book.total_equity() for book in house.books.values() if not book.real_money), ZERO)

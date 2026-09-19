@@ -1,0 +1,76 @@
+name: Astra
+
+# Pull requests opened by Astra (branches astra/<role>/<slug>) are judged here and merged here.
+# Nothing else merges them, and Astra holds no way to.
+#
+# `pull_request_target` runs THIS file as it is on main, never the branch's copy, so a branch
+# cannot rewrite its own judge. The jobs that touch the branch's code hold a read-only token and
+# no secret; the one job that can write never checks the branch out.
+
+"on":
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: astra-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    # The path guard, from main's copy of league/ci.py, against the branch's commits.
+    if: startsWith(github.head_ref, 'astra/') && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Fetch the branch without checking it out
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "refs/pull/${NUMBER}/head:refs/remotes/pull/head"
+      - name: May this role change these paths?
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: python3 -m league.ci --guard-only --base HEAD --head refs/remotes/pull/head --branch "$BRANCH"
+
+  judge:
+    # The branch's own code: content checks and the whole league suite. Read-only token, no secrets.
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Content checks, the replay regression and the league suite
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: python3 -m league.ci --base origin/main --branch "$BRANCH"
+
+  merge:
+    # Green means merged. This job never runs the branch's code.
+    needs: [guard, judge]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Squash-merge and delete the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --squash --delete-branch "$PR_URL"

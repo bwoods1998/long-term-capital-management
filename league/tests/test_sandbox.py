@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from league import sandbox as sandbox_module
-from league.sandbox import KIT_FILES, REMOTE_DIR, SEALED, LocalSandbox, Run, SailSandbox, SandboxError
+from league.sandbox import KIT_FILES, REMOTE_DIR, SEALED, LocalSandbox, Run, SailSandbox, SandboxError, kit_files
 
 IMAGE = "cp_clean_image"
 
@@ -105,18 +105,23 @@ class Local(unittest.TestCase):
             self.box.decide("tiny-1", TINY, {})
         self.assertEqual(set(spawned.call_args.kwargs["env"]), {"PATH"})
 
+    def broken_kit(self, program: str):
+        """The kit with `runner.py` replaced at its SOURCE. (The agent's own copy cannot be used
+        for this: `_dir` puts the real file back before every run.)"""
+        source = Path(self.dir.name) / "stand-in-runner.py"
+        source.write_text(program)
+        return mock.patch.dict(sandbox_module.KIT_FILES, {"runner.py": str(source)})
+
     def test_a_program_that_prints_no_result_line_is_an_error_result(self):
-        directory = self.box._dir("broken")
-        (directory / "runner.py").write_text("import sys\nsys.stderr.write('kit is broken')\nsys.exit(3)\n")
-        run = self.box.decide("broken", TINY, {})
+        with self.broken_kit("import sys\nsys.stderr.write('kit is broken')\nsys.exit(3)\n"):
+            run = self.box.decide("broken", TINY, {})
         self.assertFalse(run.result["ok"])
         self.assertIn("no result line (exit 3)", run.result["error"])
         self.assertIn("kit is broken", run.result["error"])
 
     def test_a_run_past_the_timeout_is_an_error_result_not_a_hang(self):
-        directory = self.box._dir("sleeper")
-        (directory / "runner.py").write_text("import time\ntime.sleep(30)\n")
-        run = self.box._run("sleeper", "runner.py", {"code": TINY}, "DECIDE-RESULT", 0.5)
+        with self.broken_kit("import time\ntime.sleep(30)\n"):
+            run = self.box._run("sleeper", "runner.py", {"code": TINY}, "DECIDE-RESULT", 0.5)
         self.assertEqual(run.result["ok"], False)
         self.assertIn("timed out", run.result["error"])
         self.assertLess(run.seconds, 5)
@@ -306,13 +311,14 @@ class SailCase(unittest.TestCase):
 class SailFirstRun(SailCase):
     def test_a_new_agents_box_is_made_from_the_image_and_sealed_before_anything_else(self):
         run = self.sandbox.decide("alpha", TINY, {"now": "n"})
-        kit = [("upload", "sb_0001", f"{REMOTE_DIR}/{name}", 0o644) for name in KIT_FILES]
+        kit = [("upload", "sb_0001", f"{REMOTE_DIR}/{name}", 0o644) for name in kit_files()]
+        after = 2 + len(kit)
         self.assertEqual(self.sail.calls[0], ("from_checkpoint", IMAGE, "league-alpha"))
         self.assertEqual(self.sail.calls[1], ("set_egress", "sb_0001", ["sealed.invalid"]))
-        self.assertEqual(self.sail.calls[2:5], kit)
-        self.assertEqual(self.sail.calls[5], ("upload", "sb_0001", f"{REMOTE_DIR}/spec.json", 0o600))
-        self.assertEqual(self.sail.calls[6][0], "exec")
-        self.assertEqual(self.sail.calls[7:], [("sleep", "sb_0001")])
+        self.assertEqual(self.sail.calls[2:after], kit)
+        self.assertEqual(self.sail.calls[after], ("upload", "sb_0001", f"{REMOTE_DIR}/spec.json", 0o600))
+        self.assertEqual(self.sail.calls[after + 1][0], "exec")
+        self.assertEqual(self.sail.calls[after + 2:], [("sleep", "sb_0001")])
         self.assertTrue(run.created)
         self.assertEqual(SEALED, ["sealed.invalid"])
 
@@ -326,10 +332,10 @@ class SailFirstRun(SailCase):
         (ran,) = self.sail.execs
         self.assertEqual(ran["argv"], ["sh", "-c", "cd /agent && timeout 30 python3 -E -s runner.py spec.json"])
         self.assertEqual(ran["timeout"], 60)
-        self.assertEqual(ran["files"], sorted(f"/agent/{name}" for name in (*KIT_FILES, "spec.json")))
+        self.assertEqual(ran["files"], sorted(f"/agent/{name}" for name in (*kit_files(), "spec.json")))
         self.assertEqual({k: v for k, v in ran["spec"].items() if k != "token"}, {"code": TINY, "ctx": {"now": "n", "params": {"notional": 9}}})
         self.assertRegex(ran["spec"]["token"], r"^[0-9a-f]{32}$")
-        for name, source in KIT_FILES.items():
+        for name, source in kit_files().items():
             self.assertEqual(self.sail.boxes["sb_0001"]["files"][f"/agent/{name}"], Path(source).read_bytes())
 
     def test_needs_and_replay_send_their_own_specs_and_commands(self):
@@ -418,40 +424,66 @@ class SailSealing(SailCase):
         self.assertIsNone(self.sandbox.box_of("alpha"))
 
     def test_a_box_whose_sealing_failed_is_never_used_unsealed_on_the_next_run(self):
-        # BUG (HIGH, security): sandbox.py:162-173. `_ensure` writes the new box into the state
-        # file BEFORE it calls `set_egress`, and only a box it has just created is ever sealed.
-        # When sealing fails, the run raises (good) but the box stays recorded; the next
-        # `decide`/`replay` for that agent finds it, resumes it, uploads the kit and EXECUTES THE
-        # AGENT'S CODE IN A BOX WITH ITS NETWORK OPEN, with no second attempt to seal. One
-        # transient Sail API error at creation turns into a permanently unsealed box, across House
-        # restarts (the state file survives). Forks take the same path (`fork` -> `_ensure`).
-        # FIX: record the box only after `set_egress` succeeds, and on failure `terminate` it
-        # (best effort) and forget it; or keep a `sealed` map in the state and (re)seal any box
-        # not marked sealed before every run.
+        # Regression: `_ensure` once recorded a new box BEFORE sealing it and sealed only boxes it
+        # had just made, so after one failed `set_egress` the next run executed agent code in a box
+        # with its network open. Now a box is recorded only once sealed, and one that cannot be
+        # sealed is terminated and forgotten: the next run starts from a fresh, sealed box.
         self.sail.failing["set_egress"] = Boom("egress API is down for a moment")
         with self.assertRaises(SandboxError):
             self.sandbox.decide("alpha", TINY, {})
         del self.sail.failing["set_egress"]  # the API is back
-        try:
-            self.sandbox.decide("alpha", TINY, {})
-        except SandboxError:
-            pass  # refusing to run would be fine too
-        for ran in self.sail.execs:
-            self.assertEqual(ran["egress"], SEALED, "agent code ran in a box whose network was never closed")
+        run = self.sandbox.decide("alpha", TINY, {})
+        self.assertTrue(run.created)
+        self.assertEqual(self.sail.boxes["sb_0001"]["status"], "terminated")
+        self.assertEqual(self.sandbox.box_of("alpha"), "sb_0002")
+        self.assertEqual([(ran["box"], ran["egress"]) for ran in self.sail.execs], [("sb_0002", SEALED)])
 
     def test_an_unsealed_box_is_not_trusted_after_a_restart_either(self):
-        # BUG: the same defect as above, seen across a House restart: the unsealed box is in the
-        # state file, and a new `SailSandbox` runs code in it without sealing it.
+        # Regression: the same defect across a House restart (the unsealed box used to be in the state file).
         self.sail.failing["set_egress"] = Boom("egress API is down for a moment")
         with self.assertRaises(SandboxError):
             self.sandbox.decide("alpha", TINY, {})
         del self.sail.failing["set_egress"]
-        try:
-            self.new_sandbox().replay("alpha", TINY, {}, {}, stake=200.0, limits={})
-        except SandboxError:
-            pass
-        for ran in self.sail.execs:
-            self.assertEqual(ran["egress"], SEALED)
+        if self.state_path.exists():
+            self.assertEqual(self.state()["boxes"], {})  # nothing unsealed was ever written down
+        self.new_sandbox().replay("alpha", TINY, {}, {}, stake=200.0, limits={})
+        self.assertEqual([(ran["box"], ran["egress"]) for ran in self.sail.execs], [("sb_0002", SEALED)])
+
+    def legacy_state(self):
+        """A state file from before sealing was recorded: a box is known, nothing says it is sealed."""
+        self.sail.from_checkpoint(IMAGE, name="league-alpha")  # sb_0001 exists at the platform, network open
+        self.sail.calls.clear()
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(json.dumps({"boxes": {"alpha": "sb_0001"}, "kit": {}}))
+        return self.new_sandbox()
+
+    def test_a_box_from_an_older_state_file_is_sealed_before_anything_runs_in_it(self):
+        sandbox = self.legacy_state()
+        run = sandbox.decide("alpha", TINY, {})
+        self.assertFalse(run.created)
+        self.assertEqual(self.sail.calls[0], ("set_egress", "sb_0001", SEALED))
+        self.assertEqual([(ran["box"], ran["egress"]) for ran in self.sail.execs], [("sb_0001", SEALED)])
+        self.assertEqual(self.state()["sealed"], {"sb_0001": True})
+        mark = len(self.sail.calls)
+        sandbox.decide("alpha", TINY, {})
+        self.assertNotIn("set_egress", self.sail.names(mark))  # once is enough: the seal is on record now
+
+    def test_if_an_older_box_cannot_be_sealed_nothing_runs_in_it(self):
+        sandbox = self.legacy_state()
+        self.sail.failing["set_egress"] = Boom("egress API is down")
+        for _ in range(2):
+            with self.assertRaises(SandboxError):
+                sandbox.decide("alpha", TINY, {})
+        self.assertEqual(self.sail.execs, [])
+        self.assertNotIn("upload", self.sail.names())
+        del self.sail.failing["set_egress"]
+        sandbox.decide("alpha", TINY, {})
+        self.assertEqual([ran["egress"] for ran in self.sail.execs], [SEALED])
+
+    def test_a_forked_child_is_on_record_as_sealed_too(self):
+        self.sandbox.decide("parent", TINY, {})
+        self.sandbox.fork("parent", "child")
+        self.assertEqual(self.state()["sealed"], {"sb_0001": True, self.sandbox.box_of("child"): True})
 
     def test_if_the_box_cannot_be_created_nothing_else_is_tried(self):
         self.sail.failing["from_checkpoint"] = Boom("quota")
@@ -478,7 +510,7 @@ class SailReuse(SailCase):
         with mock.patch.object(sandbox_module, "_kit_digest", return_value="a-new-release"):
             mark = len(self.sail.calls)
             self.sandbox.decide("alpha", TINY, {})
-            self.assertEqual(len([c for c in self.sail.calls[mark:] if c[0] == "upload"]), len(KIT_FILES) + 1)
+            self.assertEqual(len([c for c in self.sail.calls[mark:] if c[0] == "upload"]), len(kit_files()) + 1)
             mark = len(self.sail.calls)
             self.sandbox.decide("alpha", TINY, {})
             self.assertEqual(len([c for c in self.sail.calls[mark:] if c[0] == "upload"]), 1)
@@ -520,7 +552,7 @@ class SailReuse(SailCase):
             names = self.sail.names(mark)
             self.assertEqual(names[:3], ["get", "from_checkpoint", "set_egress"])
             self.assertEqual(self.sail.calls[mark + 1], ("from_checkpoint", IMAGE, "league-alpha"))
-            self.assertEqual(names.count("upload"), len(KIT_FILES) + 1)
+            self.assertEqual(names.count("upload"), len(kit_files()) + 1)
             self.assertEqual(self.sail.execs[-1]["box"], new)
             self.assertEqual(self.sail.execs[-1]["egress"], SEALED)
             self.assertNotIn(old, self.state()["kit"])
@@ -571,7 +603,7 @@ class SailAlwaysSleeps(SailCase):
         del self.sail.failing["upload"]
         mark = len(self.sail.calls)
         self.assertTrue(self.sandbox.decide("alpha", TINY, {}).result["ok"])
-        self.assertEqual(self.sail.names(mark).count("upload"), len(KIT_FILES) + 1)
+        self.assertEqual(self.sail.names(mark).count("upload"), len(kit_files()) + 1)
 
     def test_sleep_all(self):
         for agent in ("alpha", "beta", "gamma"):
@@ -705,6 +737,192 @@ class SailRestart(SailCase):
         text = self.state_path.read_text()
         self.assertNotIn(self.sail.execs[0]["spec"]["token"], text)
         self.assertNotIn("def decide", text)
+
+
+# =================================================================================================
+# the toolsmith's modules: the package `tools` beside the strategy
+# =================================================================================================
+TOOL_USER = '''
+from tools.edge import double
+from tools import edge
+
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "tool-user", "symbols": ["BTC/USD"]}
+PARAMS = {"n": 21}
+
+def decide(ctx):
+    held = [p for p in ctx.get("positions", []) if p["symbol"] == "BTC/USD"]
+    if held:
+        return {"intents": [{"symbol": "BTC/USD", "side": "sell", "quantity": held[0]["quantity"], "type": "market", "reason": "off"}]}
+    return {"intents": [{"symbol": "BTC/USD", "side": "buy", "notional_usd": double(10), "type": "market", "reason": "on"}],
+            "memory": {"doubled": double(ctx["params"]["n"]), "again": edge.double(4)}, "thought": edge.NAME}
+'''
+
+
+class ToolsCase(unittest.TestCase):
+    """A temp directory stands in for `league/tools`, so the tests do not depend on what the toolsmith has built."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.tools = Path(self.dir.name) / "toolshed"
+        self.tools.mkdir()
+        (self.tools / "__init__.py").write_text('"""test tools"""\n')
+        (self.tools / "edge.py").write_text('NAME = "edge tool"\n\ndef double(x):\n    return 2 * x\n')
+        (self.tools / "notes.txt").write_text("not a module")
+        (self.tools / "nested").mkdir()
+        (self.tools / "nested" / "deep.py").write_text("X = 1\n")
+        patcher = mock.patch.object(sandbox_module, "TOOLS_DIR", self.tools)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class KitFiles(ToolsCase):
+    def test_the_kit_is_the_three_programs_then_every_tool_module_by_name(self):
+        (self.tools / "alpha.py").write_text("A = 1\n")
+        files = kit_files()
+        self.assertEqual(list(files), ["runner.py", "replay.py", "safety.py", "tools/__init__.py", "tools/alpha.py", "tools/edge.py"])
+        self.assertEqual({k: files[k] for k in KIT_FILES}, KIT_FILES)
+        self.assertEqual(files["tools/edge.py"], str(self.tools / "edge.py"))
+
+    def test_without_a_tools_directory_the_kit_is_the_three_programs(self):
+        with mock.patch.object(sandbox_module, "TOOLS_DIR", self.tools / "missing"):
+            self.assertEqual(kit_files(), KIT_FILES)
+
+    def test_the_real_tools_directory_is_a_package(self):
+        with mock.patch.object(sandbox_module, "TOOLS_DIR", Path(sandbox_module.__file__).resolve().parent / "tools"):
+            self.assertIn("tools/__init__.py", kit_files())
+
+    def test_the_digest_covers_names_and_contents(self):
+        first = sandbox_module._kit_digest()
+        self.assertEqual(first, sandbox_module._kit_digest())
+        (self.tools / "edge.py").write_text('NAME = "edge tool"\n\ndef double(x):\n    return x + x\n')
+        changed = sandbox_module._kit_digest()
+        self.assertNotEqual(changed, first)
+        (self.tools / "edge.py").rename(self.tools / "edge2.py")  # the same bytes under another name
+        self.assertNotIn(sandbox_module._kit_digest(), (first, changed))
+
+
+class SafetyAndTools(unittest.TestCase):
+    def test_a_strategy_may_import_from_the_tools_package(self):
+        from league.safety import check_code
+
+        for line in ("from tools.edge import double", "from tools import edge", "import tools.edge", "from tools.edge import double as twice"):
+            check_code(line + "\n\ndef decide(ctx):\n    return {}\n")
+        check_code(TOOL_USER)
+
+    def test_and_nothing_else_got_in_with_it(self):
+        from league.safety import CodeRefused, check_code
+
+        refused = ("import os", "from os import path", "import subprocess", "from tools import *", "from tools.edge import _private",
+                   "from . import tools", "from .tools import edge", "import toolsx", "from tools_evil import x", "import os.path as tools",
+                   "from tools import os", "from tools.edge import sys")
+        for line in refused:
+            with self.assertRaises(CodeRefused, msg=line):
+                check_code(line + "\n\ndef decide(ctx):\n    return {}\n")
+
+
+class LocalTools(ToolsCase):
+    def setUp(self):
+        super().setUp()
+        self.box = LocalSandbox(Path(self.dir.name) / "boxes")
+
+    def test_decide_needs_and_replay_can_use_a_tool(self):
+        decided = self.box.decide("tool-user", TOOL_USER, {"positions": [], "params": {}})
+        self.assertTrue(decided.result["ok"], decided.result)
+        self.assertEqual(decided.result["memory"], {"doubled": 42, "again": 8})
+        self.assertEqual(decided.result["thought"], "edge tool")
+        self.assertEqual(decided.result["intents"][0]["notional_usd"], 20)
+        needs = self.box.needs("tool-user", TOOL_USER)
+        self.assertEqual((needs.result["ok"], needs.result["params"]), (True, {"n": 21}))
+        replayed = self.box.replay("tool-user", TOOL_USER, {}, tiny_tape(2), stake=200.0, limits={})
+        self.assertTrue(replayed.result["ok"], replayed.result)
+        self.assertGreater(replayed.result["trades"], 0)
+        self.assertEqual(replayed.result["errors"], 0)
+
+    def test_the_agents_directory_holds_the_tools_as_a_package_and_nothing_else_from_there(self):
+        directory = self.box._dir("tool-user")
+        self.assertEqual(sorted(str(p.relative_to(directory)) for p in directory.rglob("*") if p.is_file()),
+                         ["replay.py", "runner.py", "safety.py", "tools/__init__.py", "tools/edge.py"])
+
+    def test_a_tool_that_does_not_exist_is_the_strategys_error(self):
+        run = self.box.decide("tool-user", TOOL_USER.replace("tools.edge", "tools.missing"), {"positions": [], "params": {}})
+        self.assertFalse(run.result["ok"])
+        self.assertIn("ModuleNotFoundError", run.result["error"])
+
+    def test_a_tool_built_later_reaches_an_agent_that_already_has_a_directory(self):
+        self.box.decide("tool-user", TOOL_USER, {"positions": [], "params": {}})
+        (self.tools / "later.py").write_text("def triple(x):\n    return 3 * x\n")
+        code = "from tools.later import triple\n\ndef decide(ctx):\n    return {'memory': {'n': triple(5)}}\n"
+        self.assertEqual(self.box.decide("tool-user", code, {}).result["memory"], {"n": 15})
+
+    def test_a_kit_file_tampered_with_in_the_agents_directory_is_put_back_before_the_next_run(self):
+        directory = self.box._dir("tool-user")
+        (directory / "runner.py").write_text("print('DECIDE-RESULT  {}')\n")
+        (directory / "tools" / "edge.py").write_text("def double(x):\n    return 1000000\n")
+        run = self.box.decide("tool-user", TOOL_USER, {"positions": [], "params": {}})
+        self.assertEqual(run.result["memory"], {"doubled": 42, "again": 8})
+        self.assertEqual((directory / "runner.py").read_bytes(), Path(KIT_FILES["runner.py"]).read_bytes())
+
+    def test_a_fork_carries_the_tools(self):
+        self.box.decide("parent", TOOL_USER, {"positions": [], "params": {}})
+        self.box.fork("parent", "child")
+        self.assertTrue(self.box.decide("child", TOOL_USER, {"positions": [], "params": {}}).result["ok"])
+
+
+class SailTools(ToolsCase):
+    def setUp(self):
+        super().setUp()
+        self.sail = FakeSail()
+        self.sandbox = SailSandbox(self.sail, Path(self.dir.name) / "state.json", image_checkpoint=IMAGE)
+
+    def uploads(self, start=0):
+        return [c[2] for c in self.sail.calls[start:] if c[0] == "upload"]
+
+    def test_the_tools_are_uploaded_with_the_kit_as_a_package(self):
+        self.sandbox.decide("alpha", TOOL_USER, {})
+        self.assertEqual(self.uploads(), ["/agent/runner.py", "/agent/replay.py", "/agent/safety.py", "/agent/tools/__init__.py",
+                                          "/agent/tools/edge.py", "/agent/spec.json"])
+        modes = {c[2]: c[3] for c in self.sail.calls if c[0] == "upload"}
+        self.assertEqual(modes["/agent/tools/edge.py"], 0o644)
+        self.assertEqual(modes["/agent/spec.json"], 0o600)
+        files = self.sail.boxes["sb_0001"]["files"]
+        self.assertEqual(files["/agent/tools/edge.py"], (self.tools / "edge.py").read_bytes())
+        self.assertNotIn("/agent/tools/notes.txt", files)
+        self.assertNotIn("/agent/tools/nested/deep.py", files)
+        self.assertEqual(self.sail.execs[0]["egress"], SEALED)
+
+    def test_a_new_tool_is_a_new_kit_and_is_uploaded_once_to_a_box_that_exists(self):
+        self.sandbox.decide("alpha", TOOL_USER, {})
+        mark = len(self.sail.calls)
+        self.sandbox.decide("alpha", TOOL_USER, {})
+        self.assertEqual(self.uploads(mark), ["/agent/spec.json"])
+        (self.tools / "later.py").write_text("def triple(x):\n    return 3 * x\n")
+        mark = len(self.sail.calls)
+        self.sandbox.decide("alpha", TOOL_USER, {})
+        self.assertEqual(self.uploads(mark), [f"/agent/{name}" for name in kit_files()] + ["/agent/spec.json"])
+        self.assertIn("/agent/tools/later.py", self.uploads(mark))
+        mark = len(self.sail.calls)
+        self.sandbox.decide("alpha", TOOL_USER, {})
+        self.assertEqual(self.uploads(mark), ["/agent/spec.json"])
+
+    def test_the_uploaded_kit_really_runs_a_strategy_that_uses_a_tool(self):
+        def really_run(box, argv, spec):
+            with tempfile.TemporaryDirectory() as root:
+                for path, content in self.sail.boxes[box]["files"].items():
+                    target = Path(root) / Path(path).relative_to("/")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(content)
+                command = argv[-1].replace(f"cd {REMOTE_DIR} ", f"cd {root}{REMOTE_DIR} ")
+                done = subprocess.run([*argv[:-1], command], capture_output=True, text=True, timeout=60, env={"PATH": os.environ.get("PATH", "")})
+                return done.stdout, done.stderr, done.returncode
+
+        self.sail.answer = really_run
+        decided = self.sandbox.decide("alpha", TOOL_USER, {"positions": [], "params": {"n": 5}})
+        self.assertTrue(decided.result["ok"], decided.result)
+        self.assertEqual(decided.result["memory"], {"doubled": 10, "again": 8})
+        replayed = self.sandbox.replay("alpha", TOOL_USER, {}, tiny_tape(1), stake=200.0, limits={})
+        self.assertTrue(replayed.result["ok"], replayed.result)
+        self.assertEqual(replayed.result["errors"], 0)
 
 
 if __name__ == "__main__":

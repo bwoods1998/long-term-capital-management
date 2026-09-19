@@ -1,0 +1,282 @@
+"""Astra's other five jobs. It is already the auditor; here it is architect, toolsmith, operator,
+game designer and teacher, and in every one of them it can do exactly one thing: propose a pull
+request. It never picks a trade, never touches the ledger, and never merges.
+
+One pass of one role:
+
+1. the House gathers that role's evidence from the ledger (the league table, the graveyard, the
+   tool-request queue, the alerts, the economy's numbers);
+2. Astra answers, through the gateway's metered route, with a small set of whole files;
+3. the House checks the proposal against the same path guard CI uses (`league/ci.py`) and drops
+   anything outside the role's paths;
+4. the forge turns it into a branch `astra/<role>/<slug>` and a pull request. In production the
+   forge is the gateway (`POST /v1/github/pr`: the GitHub credential lives there, not on Sail);
+5. CI judges the pull request; a repository workflow merges a green one; the House notices `main`
+   move, and the watchdog stages the new code on a canary before the House runs it.
+
+Every pass and every change is a row on the ledger and a line on the public tape, with its cost.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Callable, Mapping
+
+from . import ci
+from .frontier import Frontier, FrontierError
+from .ledger import Ledger
+from .safety import CodeRefused, check_code, check_strategy_code
+
+REPO = Path(__file__).resolve().parents[1]
+CONTRACT = (Path(__file__).resolve().parent / "CONTRACT.md")
+ROLES = ("architect", "toolsmith", "operator", "designer", "teacher")
+
+ANSWER = """Answer with ONE JSON object and nothing else:
+{"summary": "two or three plain sentences: what you concluded and why",
+ "slug": "lowercase-words-with-dashes",
+ "title": "the pull request's title, under 100 characters",
+ "body": "the pull request's description: the evidence, the change, how it will be judged",
+ "files": [{"path": "...", "content": "the WHOLE file"}]}
+Give "files": [] when the evidence does not justify a change. Doing nothing is a respectable answer:
+every change you propose costs the owner money to test and may cost more if it is wrong."""
+
+BRIEFS: dict[str, str] = {
+    "architect": """You are the architect of a small real-money trading league. You do not pick trades. You read the league
+table and the graveyard and write NEW STRATEGY PROGRAMS that cheap agents then run, mutate and are judged on.
+A new strategy is born on rung 0 and must pass a mechanical replay (deflated Sharpe against every trial its
+family has run) before it is forward-tested on paper, then audited, then given $1 to $10 positions.
+Write at most two strategies a pass. Aim at niches (venue/horizon/style) that are empty or where everything has
+died for a reason you can name and avoid. Prefer structural edges that survive fees (maker fills, favourites,
+settlement mechanics, calendar effects) to pattern-fitting. Each strategy is one file
+`league/strategies/<name>.py` that follows the strategy contract EXACTLY, plus the WHOLE updated
+`league/strategies/registry.json` (a JSON list of {"name", "family", "file", "why"}; keep every existing row).
+Names are lowercase with dashes (under 30 characters); files are the name with underscores.""",
+    "toolsmith": """You are the toolsmith of a small trading league. Agents run strategy programs in sealed boxes with no
+network; they may only import a short list of standard modules plus `tools`, a package of pure helper modules
+you maintain. Agents file requests in plain words. Build what is asked when it can be built as PURE PYTHON over
+the data a strategy already receives (indicators, estimators, pricing formulas, calendars). A request that
+needs new data cannot be met by you: say so in the summary. Each tool is `league/tools/<name>.py` (same safety
+rules as a strategy: whitelisted imports only, no files, no network, no attribute assignment) with a docstring
+an agent can learn it from, plus `league/tests/test_tool_<name>.py` (unittest) proving it right on known values.""",
+    "operator": """You are the operator of a small trading league's House process. You read its alerts, health and budget.
+You may propose changes ONLY to the operating dials in `league/config.json`: tick_seconds (30-600),
+mark_every_seconds (60-1800), replay_days (7-60), inference_daily_cap_usd (0.5-5). Give the WHOLE file back with
+only those values changed. Everything else (real_money, URLs, the performance baseline) belongs to the owner.
+Most passes should change nothing: say what you saw, what it means, and what the owner should know.""",
+    "designer": """You are the game designer of a small trading league's compute economy. Agents earn compute credits by
+evidence-weighted performance, pay for every token and sandbox second, die at zero and may fork when rich. You
+may propose changes ONLY to `league/game.json`, inside the bounds that file itself lists, and never to the
+statistical thresholds (they are constitutional). Give the WHOLE file back. Judge the game by: is the population
+diverse, do the dead die for good reasons, is compute going to agents whose evidence is improving, is the
+owner's budget being spent on research that raises the odds of a verified edge? Change one thing at a time.""",
+    "teacher": """You are the teacher of a small trading league. You read the graveyard (every dead agent's post-mortem), the
+replay trials and the forward records, and you write LESSONS the living agents will read before they spend
+credits on research. A lesson is specific and checkable: what was tried, what the numbers were, why it failed or
+worked, what to do differently. No platitudes. Each lesson is one markdown file `league/playbook/<date>-<slug>.md`
+under 600 words. Write at most two a pass, and none when the graveyard has taught nothing new.""",
+}
+
+
+class ForgeError(RuntimeError):
+    pass
+
+
+class GatewayForge:
+    """Pull requests through the gateway: the only forge the House uses. It holds no GitHub token."""
+
+    def __init__(self, gateway_url: str, token_source: Callable[[], str], *, opener: Any = None):
+        self.base = gateway_url.rstrip("/") + "/v1/github/pr"
+        self.token_source = token_source
+        self.opener = opener or urllib.request.urlopen
+
+    def _call(self, method: str, url: str, body: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        request = urllib.request.Request(
+            url, data=None if body is None else json.dumps(body).encode("utf-8"), method=method,
+            headers={"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json", "User-Agent": "ltcm-floor/1.0"},
+        )
+        try:
+            with self.opener(request, timeout=120) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise ForgeError(f"HTTP {exc.code}: {exc.read()[:300].decode('utf-8', 'replace')}") from None
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise ForgeError(f"the gateway did not answer: {type(exc).__name__}") from None
+
+    def propose(self, *, role: str, slug: str, title: str, body: str, files: list[dict[str, str]]) -> dict[str, Any]:
+        return self._call("POST", self.base, {"role": role, "slug": slug, "title": title, "body": body, "files": files})
+
+    def status(self, number: int) -> dict[str, Any]:
+        return self._call("GET", f"{self.base}/{int(number)}")
+
+
+@dataclass
+class Proposal:
+    role: str
+    summary: str
+    slug: str
+    title: str
+    body: str
+    files: list[dict[str, str]]
+    dropped: list[str]
+    cost_usd: Decimal
+
+
+def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Proposal:
+    """Astra's answer, reduced to what the role may actually change. Anything else is dropped here,
+    refused again by the gateway, and refused a third time by CI."""
+    files, dropped = [], []
+    listed = answer.get("files") if isinstance(answer.get("files"), list) else []
+    for row in listed[:12]:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) or not isinstance(row.get("content"), str):
+            dropped.append("a file entry without a path and content")
+            continue
+        path, content = row["path"].strip(), row["content"]
+        problems = ci.guard([path], role)
+        if not problems and path.startswith(("league/strategies/", "league/tools/")) and path.endswith(".py"):
+            try:
+                (check_code if path.startswith("league/strategies/") else check_strategy_code)(content)
+            except CodeRefused as exc:
+                problems = [f"{path}: {exc}"]
+        if not problems and path.endswith(".json"):
+            try:
+                json.loads(content)
+            except ValueError:
+                problems = [f"{path}: not valid JSON"]
+        if problems or len(content) > 60_000:
+            dropped.extend(problems or [f"{path}: over 60,000 characters"])
+        else:
+            files.append({"path": path, "content": content})
+    slug = re.sub(r"[^a-z0-9-]+", "-", str(answer.get("slug") or role).lower()).strip("-")[:48] or role
+    return Proposal(role, str(answer.get("summary") or "")[:1500], slug, str(answer.get("title") or f"Astra ({role})")[:110],
+                    str(answer.get("body") or "")[:7000], files, dropped, cost)
+
+
+class Astra:
+    def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
+                 schedule_hours: Mapping[str, float] | None = None):
+        self.frontier = frontier
+        self.forge = forge
+        self.ledger = ledger
+        self.evidence = evidence
+        self.clock = clock
+        #: How often each role sits down. One architect pass is about $1.25 of the $100 month.
+        self.schedule_hours = dict(schedule_hours or {"operator": 24, "teacher": 72, "toolsmith": 24, "designer": 168, "architect": 168})
+
+    # ---------------------------------------------------------------- schedule
+    def last_pass(self, role: str) -> float | None:
+        rows = [e for e in self.ledger.read(kinds="astra.pass", limit=500, newest=True) if e.payload.get("role") == role]
+        return float(rows[-1].payload["at_epoch"]) if rows else None
+
+    def due(self) -> list[str]:
+        now = self.clock()
+        out = []
+        for role in ROLES:
+            last = self.last_pass(role)
+            if last is None or now - last >= self.schedule_hours[role] * 3600:
+                out.append(role)
+        return out
+
+    # -------------------------------------------------------------------- pass
+    def run(self, role: str) -> dict[str, Any]:
+        """One pass of one role. Never raises: a failed pass is a row that says why."""
+        if role not in ROLES:
+            raise ValueError(f"no such role {role!r}")
+        evidence = self.evidence(role)
+        if role == "toolsmith" and not evidence.get("open_requests"):
+            return self._record(role, {"summary": "no tool requests are waiting", "cost_usd": "0", "files": 0, "skipped": True})
+        system = BRIEFS[role] + "\n\n" + ANSWER
+        if role in ("architect", "toolsmith"):
+            system += "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT.read_text(encoding="utf-8")
+        try:
+            answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"astra:{role}",
+                                       max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000)
+            proposal = parse_proposal(role, answer.json(), answer.cost_usd)
+        except FrontierError as exc:
+            return self._record(role, {"summary": f"the pass could not run: {exc}", "cost_usd": "0", "files": 0, "error": True})
+        row = {"summary": proposal.summary, "cost_usd": format(proposal.cost_usd, "f"), "files": len(proposal.files), "dropped": proposal.dropped[:10]}
+        if proposal.files:
+            try:
+                made = self.forge.propose(role=role, slug=proposal.slug, title=proposal.title, body=proposal.body, files=proposal.files)
+                row.update(branch=made.get("branch"), number=made.get("number"), url=made.get("url"))
+                self.ledger.append("astra.change", {"role": role, "branch": made.get("branch"), "number": made.get("number"), "title": proposal.title,
+                                                    "status": "opened", "paths": [f["path"] for f in proposal.files]})
+            except ForgeError as exc:
+                row["forge_error"] = str(exc)[:300]
+        return self._record(role, row)
+
+    def _record(self, role: str, row: Mapping[str, Any]) -> dict[str, Any]:
+        payload = {"role": role, "at_epoch": self.clock(), **dict(row)}
+        self.ledger.append("astra.pass", payload)
+        return payload
+
+    # ------------------------------------------------------------------ follow
+    def follow(self) -> list[dict[str, Any]]:
+        """Ask the gateway what CI made of each open change, and record the verdicts."""
+        latest: dict[int, dict[str, Any]] = {}
+        for entry in self.ledger.iter(kinds="astra.change"):
+            if entry.payload.get("number") is not None:
+                latest[int(entry.payload["number"])] = dict(entry.payload)
+        out = []
+        for number, row in latest.items():
+            if row.get("status") not in ("opened", "pending"):
+                continue
+            try:
+                status = self.forge.status(number)
+            except ForgeError:
+                continue
+            checks = (status.get("checks") or {}).get("conclusion")
+            verdict = "merged" if status.get("merged") else ("refused by CI" if checks == "failure" else ("closed" if status.get("state") == "closed" else "pending"))
+            if verdict != row.get("status") and verdict != "pending":
+                row = {**row, "status": verdict}
+                self.ledger.append("astra.change", row)
+                out.append(row)
+        return out
+
+
+def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
+    """What each role is shown, gathered from the House. Plain data, public rows only, no code secrets."""
+
+    def table() -> list[dict[str, Any]]:
+        rows = []
+        for agent in house.registry.living():
+            blocks = house.evaluator.blocks(agent.id)
+            growth = [float(b["log_growth"]) for b in blocks]
+            rows.append({"agent": agent.id, "family": agent.family, "niche": agent.niche, "generation": agent.generation, "rung": house.evaluator.rung(agent.id),
+                         "credits_usd": format(house.economy.balance(agent.id), "f"), "blocks": len(blocks), "total_log_growth": round(sum(growth), 6)})
+        return rows
+
+    def gather(role: str) -> dict[str, Any]:
+        ledger = house.ledger
+        graveyard = [{"agent": e.agent, "text": e.payload.get("text")} for e in ledger.read(kinds="agent.postmortem", limit=40, newest=True)]
+        trials = [{"agent": e.agent, **{k: e.payload.get(k) for k in ("family", "passed", "sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "reasons")}}
+                  for e in ledger.read(kinds="eval.trial", limit=60, newest=True)]
+        base = {"league_table": table(), "graveyard": graveyard}
+        if role == "architect":
+            from . import seeds, strategies
+
+            base.update(replay_trials=trials, occupied_niches=sorted({a.niche for a in house.registry.living()}),
+                        founding_seeds=[{k: s[k] for k in ("name", "family", "why")} for s in seeds.SEEDS],
+                        registry=strategies.registry(), library=house.commons.library_search("edge evidence fees maker", 8)["results"])
+        elif role == "toolsmith":
+            base = {"open_requests": house.commons.open_requests()[:10], "existing_tools": sorted(p.name for p in (Path(__file__).resolve().parent / "tools").glob("*.py"))}
+        elif role == "operator":
+            alerts = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.alert", limit=60, newest=True)]
+            budget = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.budget", limit=20, newest=True)]
+            base = {"alerts": alerts, "budget": budget, "books": {n: {"frozen": b.frozen, "open_orders": len(b.open_orders())} for n, b in house.books.items()},
+                    "config": json.loads((Path(__file__).resolve().parent / "config.json").read_text(encoding="utf-8")), "living": len(house.registry.living())}
+        elif role == "designer":
+            base.update(game=house.game, deaths=[{"agent": a.id, "cause": a.cause, "niche": a.niche} for a in house.registry.dead()][-30:],
+                        payouts=[e.payload for e in ledger.read(kinds="ops.budget", limit=30, newest=True) if e.payload.get("what") == "payout"])
+        elif role == "teacher":
+            base.update(replay_trials=trials, lessons_so_far=[e.payload.get("title") for e in ledger.read(kinds="playbook.entry", limit=40, newest=True)],
+                        today=time.strftime("%Y-%m-%d", time.gmtime(house.clock())))
+        return base
+
+    return gather

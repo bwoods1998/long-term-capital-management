@@ -70,7 +70,8 @@ def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, tt
 
 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
-          publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league") -> House:
+          publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
+          astra: bool = True) -> House:
     from ltcm.adapters import GatewaySigner, VenueClient
     from ltcm.data.kalshi import KalshiMarketData
     from ltcm.data.news import News
@@ -132,6 +133,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
     )
+    if astra:
+        from .astra import Astra, GatewayForge, evidence_from
+
+        house.astra = Astra(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house))
     if provider is not None:
         house.budget = Budget(house.ledger, lambda: provider.check_balance())
     if publish:

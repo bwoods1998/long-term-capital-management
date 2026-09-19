@@ -30,6 +30,16 @@ from . import runner as runner_module
 from . import safety as safety_module
 
 KIT_FILES = {"runner.py": runner_module.__file__, "replay.py": replay_module.__file__, "safety.py": safety_module.__file__}
+TOOLS_DIR = Path(__file__).resolve().parent / "tools"
+
+
+def kit_files() -> dict[str, str]:
+    """What is placed beside a strategy in its box: the runner, the replay simulator, the safety
+    check, and the toolsmith's helper modules (as the package `tools`)."""
+    files = dict(KIT_FILES)
+    for path in sorted(TOOLS_DIR.glob("*.py")):
+        files[f"tools/{path.name}"] = str(path)
+    return files
 REMOTE_DIR = "/agent"
 #: Sail's egress policy is an allowlist and refuses an empty one. `.invalid` is reserved by RFC 2606
 #: and never resolves, so a box allowed to reach only this host can reach nothing.
@@ -51,8 +61,9 @@ def _kit_digest() -> str:
     import hashlib
 
     h = hashlib.sha256()
-    for name in sorted(KIT_FILES):
-        h.update(Path(KIT_FILES[name]).read_bytes())
+    for name, source in sorted(kit_files().items()):
+        h.update(name.encode())
+        h.update(Path(source).read_bytes())
     return h.hexdigest()[:16]
 
 
@@ -69,8 +80,11 @@ class LocalSandbox:
         path = self.root / agent
         if not path.exists():
             path.mkdir(parents=True)
-            for name, source in KIT_FILES.items():
-                shutil.copyfile(source, path / name)
+        for name, source in kit_files().items():
+            target = path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists() or target.read_bytes() != Path(source).read_bytes():
+                shutil.copyfile(source, target)
         return path
 
     def _run(self, agent: str, program: str, spec: Mapping[str, Any], marker: str, timeout: float) -> Run:
@@ -200,7 +214,7 @@ class SailSandbox:
                 return self._ensure(agent, checkpoint=checkpoint)
         digest = _kit_digest()
         if self._state["kit"].get(box) != digest:
-            for name, source in KIT_FILES.items():
+            for name, source in kit_files().items():
                 self.client.upload(box, f"{REMOTE_DIR}/{name}", Path(source).read_bytes(), mode=0o644)
             with self._lock:
                 self._state["kit"][box] = digest

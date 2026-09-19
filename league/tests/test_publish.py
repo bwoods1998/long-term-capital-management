@@ -39,10 +39,12 @@ class FakeSite:
 
 
 class RealAccount:
-    def __init__(self, venue, equity):
-        self.venue, self.equity = venue, D(equity)
+    def __init__(self, venue, equity, clock=None):
+        self.venue, self.equity, self.clock = venue, D(equity), clock
 
     def balance(self):
+        if self.clock is not None:
+            self.clock.advance(0.4)  # a real venue read takes time: the checkpoint must be stamped after it
         return Balance(self.venue, self.equity, self.equity, self.equity, "2026-09-10T00:00:00.000Z")
 
 
@@ -70,7 +72,7 @@ class PublisherTest(HouseCase):
         return Publisher(
             "https://blakewoods.us", lambda: "t" * 40, Path(self.dir.name) / "publish.json", tape=tape, opener=site, clock=self.clock,
             performance={"start_at": "2026-09-09T00:00:00.000Z", "start_equity": "1000"},
-            real_brokers={"alpaca": RealAccount("alpaca", "500.10"), "kalshi": RealAccount("kalshi", "521.93")},
+            real_brokers={"alpaca": RealAccount("alpaca", "500.10", self.clock), "kalshi": RealAccount("kalshi", "521.93", self.clock)},
         )
 
     def test_a_tick_becomes_a_tape_the_site_accepts(self):
@@ -99,6 +101,10 @@ class PublisherTest(HouseCase):
         self.assertEqual(mark["payload"]["account_equity"], "1022.0300")  # the REAL accounts, never practice money
         checkpoint = site.posts[-1][2]
         self.assertEqual(checkpoint["floor"]["account_equity"], "1022.0300")
+        for row in checkpoint["floor"]["venues"]:
+            self.assertLessEqual(row["as_of"], checkpoint["published_at"])
+        for desk in checkpoint["desks"]:
+            self.assertLessEqual(desk["updated_at"], checkpoint["published_at"])
         desk = checkpoint["desks"][0]
         self.assertEqual((desk["id"], desk["mode"], desk["status"]), (agent.id, "shadow", "active"))
         self.assertEqual(desk["positions"][0]["thesis"], "test buy")

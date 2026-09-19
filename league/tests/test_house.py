@@ -62,7 +62,7 @@ class HouseCase(unittest.TestCase):
         self.house = self.new_house()
 
     def tearDown(self):
-        self.house.close()
+        self.house.close(wait=None)
         self.dir.cleanup()
 
     def new_house(self, **kw):

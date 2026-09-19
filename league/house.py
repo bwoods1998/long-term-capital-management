@@ -25,7 +25,7 @@ import os
 import random
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
@@ -109,6 +109,7 @@ class House:
         self.auditor = auditor
         self.publisher = publisher
         self.budget = budget
+        self.astra: Any = None  # set by the service: Astra's pull-request roles
         self.kill_switch = kill_switch
         self.books: dict[str, Book] = {}
         for name, broker in brokers.items():
@@ -127,8 +128,10 @@ class House:
         self._tapes: dict[str, tuple[float, dict[str, Any]]] = {}
         self._tape_lock = threading.Lock()
         self._state_lock = threading.RLock()
-        self._slow = ThreadPoolExecutor(max_workers=max(1, self.settings.slow_workers), thread_name_prefix="league-slow")
-        self._jobs: dict[str, Future] = {}
+        # Slow work runs on daemon threads: a flex-window model call can take a quarter of an hour,
+        # and a House that is told to stop must stop. (The provider settles an orphaned call later.)
+        self._slow_slots = threading.Semaphore(max(1, self.settings.slow_workers))
+        self._jobs: dict[str, threading.Thread] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -188,6 +191,33 @@ class House:
             self.seat(agent)
             born.append(agent)
         return born
+
+    def enroll(self) -> list[Agent]:
+        """Give the architect's merged strategies their life: each is born once, on rung 0, with a
+        seed's endowment, while the population has room. They answer to replay like any child."""
+        from . import strategies
+
+        born = []
+        known = {a.name for a in self.registry.agents.values()} | set(self.registry.agents)
+        for row in strategies.all_strategies():
+            if row["name"] in known or len(self.registry.living()) >= int(self.game["economy"]["max_population"]):
+                continue
+            try:
+                born.append(self.spawn(row["name"], row["family"], row["code"], reason="Astra, as architect: " + row["why"]))
+            except ValueError as exc:
+                self.alert("warning", f"the architect's strategy {row['name']} could not be born: {str(exc)[:200]}")
+        return born
+
+    def learn(self) -> int:
+        """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook, once each."""
+        have = {e.payload.get("title") for e in self.ledger.iter(kinds="playbook.entry")}
+        added = 0
+        for path in sorted((Path(__file__).resolve().parent / "playbook").glob("*.md")):
+            title = f"Lesson: {path.stem}"
+            if path.name != "README.md" and title not in have:
+                self.commons.playbook_add(title, path.read_text(encoding="utf-8"), source="teacher")
+                added += 1
+        return added
 
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
               params: Mapping[str, Any] | None = None, endowment: Any | None = None) -> Agent:
@@ -430,23 +460,28 @@ class House:
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
         running = self._jobs.get(key)
-        if running is not None and not running.done():
+        if running is not None and running.is_alive():
             return False
 
-        def job() -> Any:
-            try:
-                return work(*args)
-            except Exception as exc:  # noqa: BLE001
-                self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})")
-                return None
+        def job() -> None:
+            with self._slow_slots:
+                try:
+                    work(*args)
+                except Exception as exc:  # noqa: BLE001
+                    try:
+                        self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})")
+                    except Exception:  # noqa: BLE001 - the ledger may already be closed on the way out
+                        pass
 
-        self._jobs[key] = self._slow.submit(job)
+        thread = threading.Thread(target=job, name=f"league-slow:{key}"[:60], daemon=True)
+        self._jobs[key] = thread
+        thread.start()
         return True
 
     def wait(self, timeout: float | None = None) -> None:
-        """Block until the slow work in hand is done (tests, and an orderly stop)."""
-        for future in list(self._jobs.values()):
-            future.result(timeout=timeout)
+        """Block until the slow work in hand is done (tests use it; the run loop does not)."""
+        for thread in list(self._jobs.values()):
+            thread.join(timeout)
 
     def _replay_own(self, agent: Agent) -> dict[str, Any]:
         """An agent's own code gets one replay, counted as a trial. For an agent on rung 0 it is
@@ -656,6 +691,7 @@ class House:
                     self.fork(agent)
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
+        self.enroll()
         living = self.registry.living()
         if living and len(living) < int(rules["min_population"]):
             # Every seed has had its life. The House stakes a newcomer: a mutation of whoever
@@ -730,7 +766,12 @@ class House:
                 with self._state_lock:
                     self._state["last_research"][agent.id] = self.clock()
                 self._background(f"research:{agent.id}", self.research, agent)
+        if open_for_business and self.astra is not None:
+            for role in self.astra.due():
+                self._background(f"astra:{role}", self.astra.run, role)
+            self._background("astra:follow", self.astra.follow)
         if open_for_business and self.economy.payout_due():
+            self.learn()
             self.economy.payout(self.standings())
             if self.auditor is not None:
                 self.auditor.score()
@@ -756,8 +797,8 @@ class House:
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.root / "health.json")
 
-    def close(self) -> None:
-        self._slow.shutdown(wait=True)
+    def close(self, *, wait: float | None = 5.0) -> None:
+        self.wait(wait)
         self._save_state()
         self.ledger.close()
 
