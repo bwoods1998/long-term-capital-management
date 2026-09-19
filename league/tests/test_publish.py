@@ -100,7 +100,7 @@ class PublisherTest(HouseCase):
         mark = next(e for e in events if e["kind"] == "floor.mark")
         self.assertEqual(mark["payload"]["account_equity"], "1000.0000")  # the league's basis: never practice money, and flat until the league trades real money
         checkpoint = site.posts[-1][2]
-        self.assertEqual((checkpoint["floor"]["account_equity"], checkpoint["floor"]["real_account_equity"]), ("1000.0000", "1022.0300"))
+        self.assertEqual(checkpoint["floor"]["account_equity"], "1000.0000")
         for row in checkpoint["floor"]["venues"]:
             self.assertLessEqual(row["as_of"], checkpoint["published_at"])
         for desk in checkpoint["desks"]:
@@ -128,9 +128,11 @@ class PublisherTest(HouseCase):
         self.house.tick()
         floor = site.posts[-1][2]["floor"]
         # The accounts are up $22.03 on the start and none of it is the league's: the chart's number does not move.
-        self.assertEqual((floor["account_equity"], floor["real_account_equity"]), ("1000.0000", "1022.0300"))
+        self.assertEqual(floor["account_equity"], "1000.0000")
+        self.assertNotIn("real_account_equity", floor)  # the site's schema is exact; the raw balance is on the ledger
+        self.assertEqual(self.house.ledger.last("floor.mark").payload["real_account_equity"], "1022.0300")
         self.assertEqual(league_real_pnl(self.house), D(0))  # practice money is not profit either
-        self.assertEqual((floor["performance"]["net_flows"], floor["performance"]["league_pnl"]), ("0", "0.0000"))
+        self.assertEqual(floor["performance"], {"start_at": "2026-09-09T00:00:00.000Z", "start_equity": "1000", "net_flows": "0", "verified_at": floor["performance"]["verified_at"]})
         self.assertEqual(D(floor["since_inception_pct"]), D(0))
         marks = [e for u, _, b in site.posts if u.endswith("/events") for e in b["events"] if e["kind"] == "floor.mark"]
         self.assertEqual({m["payload"]["account_equity"] for m in marks}, {"1000.0000"})  # a flat line

@@ -436,14 +436,14 @@ class Publisher:
         }
         pnl_total = ZERO
         if account:
-            floor.update(account)
+            # The site's schema is exact: the raw balance stays on the ledger's floor.mark rows.
+            floor.update({k: v for k, v in account.items() if k != "real_account_equity"})
             if self._flows is not None:
                 performance = self._flows.read({"venues": account["venues"]}, at)
                 # `account_equity` is already on the league's basis (see `account`): start + the league's
                 # own real-money result. Nothing else moves it, so there is nothing to subtract.
                 if performance.get("net_flows") is not None:
                     performance["net_flows"] = "0"
-                    performance["league_pnl"] = money(league_real_pnl(house), 4, signed=True)
                 floor["performance"] = performance
                 if performance.get("net_flows") is not None:
                     pnl_total = Decimal(account["account_equity"]) - Decimal(str(performance["start_equity"])) - Decimal(str(performance["net_flows"]))
