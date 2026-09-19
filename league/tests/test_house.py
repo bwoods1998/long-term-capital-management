@@ -299,5 +299,26 @@ def decide(ctx):
 '''
 
 
+
+class Lanes(HouseCase):
+    def test_housekeeping_and_research_never_queue_behind_replays(self):
+        # Regression: on the first production start (Sept 19, 2026) one two-slot queue held 28 founders'
+        # replays, and research, the daily backup and the niche survey all waited behind them.
+        import threading
+
+        release, done = threading.Event(), []
+        for i in range(self.house.settings.slow_workers + 2):
+            self.house._background(f"replay:{i}", release.wait)
+        self.house._background("backup", lambda: done.append("backup"))
+        self.house._background("research:a1", lambda: done.append("research"))
+        for key in ("backup", "research:a1"):
+            self.house._jobs[key].join(5)
+        try:
+            self.assertEqual(sorted(done), ["backup", "research"])
+        finally:
+            release.set()
+            self.house.wait(5)
+
+
 if __name__ == "__main__":
     unittest.main()

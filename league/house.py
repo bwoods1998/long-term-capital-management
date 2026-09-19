@@ -70,7 +70,9 @@ class Settings:
     research: bool = True
     max_wakes_per_tick: int = 16
     wake_workers: int = 6
-    slow_workers: int = 2  # replays and research passes run beside the tick, never inside it
+    slow_workers: int = 3  # replays at once, beside the tick and never inside it
+    research_workers: int = 5  # research passes at once: each is minutes of WAITING on Sail's flex window, not work
+    ops_workers: int = 3  # the backup, the survey, the updater and Astra: never queued behind a replay
     kalshi_replay_days: int = 7
     kalshi_replay_markets: int = 2000
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
@@ -142,7 +144,11 @@ class House:
         self._state_lock = threading.RLock()
         # Slow work runs on daemon threads: a flex-window model call can take a quarter of an hour,
         # and a House that is told to stop must stop. (The provider settles an orphaned call later.)
-        self._slow_slots = threading.Semaphore(max(1, self.settings.slow_workers))
+        # Three lanes (measured on the first production start, Sept 19, 2026: with one two-slot queue,
+        # research, the daily backup and the niche survey all waited behind 28 founders' replays).
+        self._lanes = {"replay": threading.Semaphore(max(1, self.settings.slow_workers)),
+                       "research": threading.Semaphore(max(1, self.settings.research_workers)),
+                       "ops": threading.Semaphore(max(1, self.settings.ops_workers))}
         self._jobs: dict[str, threading.Thread] = {}
         self.researcher = None
         if provider is not None:
@@ -611,8 +617,10 @@ class House:
         if running is not None and running.is_alive():
             return False
 
+        lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay") else "ops"]
+
         def job() -> None:
-            with self._slow_slots:
+            with lane:
                 try:
                     work(*args)
                 except Exception as exc:  # noqa: BLE001
