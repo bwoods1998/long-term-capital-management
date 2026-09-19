@@ -53,7 +53,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 DEFAULT_BASE = "/workspace"
 RELEASE_ID = re.compile(r"^[A-Za-z0-9._-]{4,64}$")
@@ -158,7 +158,7 @@ def _verify_chain(db: sqlite3.Connection) -> int:
     return checked
 
 
-def read_health(
+def read_health(  # noqa: PLR0913 - one reading, one place
     root: str | Path,
     *,
     now: float,
@@ -167,11 +167,13 @@ def read_health(
     since_seq: int | None = None,
     verify: bool = False,
     stall_seconds: float = 450,
+    inherited_frozen: "Iterable[str] | None" = None,
 ) -> Health:
     """Is the House whose state directory is `root` healthy, and if not, why not.
 
     From `<root>/health.json` (written at the end of every tick): a missing, unreadable or stale
-    file, and any book that is `frozen`. Against `previous` (an earlier reading of the same
+    file, and any book that is `frozen` and not named in `inherited_frozen` (what was already
+    frozen before the release under watch was promoted). Against `previous` (an earlier reading of the same
     House; hand each reading to the next and the baselines carry): more than half of the living
     agents gone since the first reading of the chain, a `ledger_seq` that went backwards, and a
     `ledger_seq` that has not advanced for `stall_seconds` (0: it must advance between any two
@@ -217,12 +219,24 @@ def read_health(
                 reasons.append(f"health.json is {int(age)}s old (the limit is {int(max_age_seconds)}s): ticks are not finishing")
             elif age < -max(60.0, float(max_age_seconds)):
                 reasons.append(f"health.json is dated {int(-age)}s in the future")
+    if raw is not None:
+        # A book already frozen before a release was promoted is not that release's doing, and
+        # blaming it makes a release that REPAIRS a freeze impossible to deploy (found Sept 19,
+        # 2026: the fix for a frozen paper book was rolled back by the freeze it fixed). Only the
+        # watch after a promotion inherits anything; a canary runs a House of its own, so every
+        # book it freezes is its own doing and `inherited_frozen` is left None.
+        inherited = set(inherited_frozen or ())
         for name, book in sorted(books.items()):
             frozen = book.get("frozen") if isinstance(book, dict) else None
-            if frozen:
+            if not frozen:
+                continue
+            if name in inherited:
+                detail.setdefault("frozen_before", []).append(str(name))
+            else:
                 reasons.append(f"the {name} book is frozen: {str(frozen)[:200]}")
 
     before = previous.detail if previous is not None else {}
+
     baseline = before.get("living_baseline", before.get("living"))
     if not isinstance(baseline, int):
         baseline = living
@@ -850,6 +864,7 @@ class HouseHealth:
         self.previous: Health | None = None
         self.since_seq: int | None = None
         self.first_at: float | None = None
+        self.inherited_frozen: tuple[str, ...] = ()
 
     def __call__(self) -> Health:
         now = self.clock()
@@ -857,8 +872,13 @@ class HouseHealth:
         if first:
             self.first_at = now
             self.since_seq = ledger_head(self.root) or 0
+            # What was already broken before this release was promoted. It is judged on what it
+            # breaks, not on what it inherited, or a release that mends a frozen book could never
+            # be deployed while that book is frozen.
+            inherited = read_health(self.root, now=now, max_age_seconds=self.max_age_seconds, since_seq=0, stall_seconds=0)
+            self.inherited_frozen = tuple(name for name, frozen in (inherited.detail.get("books") or {}).items() if frozen)
         health = read_health(self.root, now=now, max_age_seconds=self.max_age_seconds, previous=self.previous,
-                             since_seq=self.since_seq, stall_seconds=self.stall_seconds)
+                             since_seq=self.since_seq, stall_seconds=self.stall_seconds, inherited_frozen=self.inherited_frozen)
         waited = now - float(self.first_at)
         if (not first and self.restart_within is not None and waited >= self.restart_within and not health.detail.get("stopped")
                 and health.detail.get("started_since") == 0):

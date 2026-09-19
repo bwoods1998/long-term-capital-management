@@ -69,6 +69,7 @@ class HouseCase(unittest.TestCase):
     def new_house(self, **kw):
         game = load_game()
         game["economy"]["min_population"] = 0  # these tests bring their own agents, not the seeds
+        game["economy"]["newcomer_seconds"] = 10 ** 9  # and no newcomer joins unless a test asks for one
         kw.setdefault("game", game)
         return House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.broker, "alpaca": FakeBroker("alpaca", cash="500")},
@@ -300,6 +301,39 @@ def decide(ctx):
     ], "thought": "two of these are junk"}
 '''
 
+
+
+class Refill(HouseCase):
+    """A death is only useful if something new sits in the empty seat."""
+
+    def test_the_house_fills_up_to_the_ceiling_not_only_off_the_floor(self):
+        agent = self.seated()
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=3, min_population=0)
+        self.assertIsNone(self.house._refill(rules), "a House that has just started breeds nobody")
+        self.clock.advance(601)
+        first = self.house._refill(rules)
+        self.assertIsNotNone(first)
+        self.assertEqual((first.parent, first.line, first.specialty), (agent.id, agent.line, agent.specialty))
+        self.assertNotEqual(first.params, agent.params)  # a mutation, not a copy
+        self.assertIsNone(self.house._refill(rules))  # one at a time
+        self.clock.advance(601)
+        self.assertIsNotNone(self.house._refill(rules))
+        self.clock.advance(601)
+        self.assertIsNone(self.house._refill(rules), "the ceiling holds")
+
+    def test_a_newcomer_joins_the_desk_with_the_most_room(self):
+        crypto = self.seated()  # alpaca-crypto-majors
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=9, min_population=0)
+        self.house.niches["alpaca-crypto-majors"].max_members = 1  # full
+        self.house.niches["alpaca-index-etfs"].max_members = 9
+        etf = self.house.spawn("scholes", "etf", BUYER.replace('"symbols": ["BTC/USD"]', '"symbols": ["SPY"]').replace("test-buyer", "etf"), reason="test")
+        self.assertEqual(etf.specialty, "alpaca-index-etfs")
+        self.clock.advance(601)
+        joined = self.house._refill(rules)
+        self.assertEqual((joined.specialty, joined.parent), ("alpaca-index-etfs", etf.id))
+        self.assertNotEqual(joined.parent, crypto.id)
 
 
 class Lanes(HouseCase):

@@ -857,3 +857,32 @@ class CommandLineTest(Case):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InheritedFreeze(ReadHealthTest):
+    """A release is judged on what it breaks, not on what it inherited.
+
+    Sept 19, 2026: the Alpaca paper book froze on the league's first tick, and the release that
+    fixed the freeze was rolled back by the watchdog because the book was frozen while it watched.
+    """
+
+    def test_a_book_frozen_before_the_promotion_is_not_the_releases_doing(self):
+        write_health(self.root, self.clock, frozen="cash differs by 12.5000")
+        self.assertFalse(self.read().ok)  # a canary, which inherits nothing, still fails
+        healthy = self.read(inherited_frozen=["alpaca-paper"])
+        self.assertTrue(healthy.ok, healthy.reasons)
+        self.assertEqual(healthy.detail["frozen_before"], ["alpaca-paper"])
+
+    def test_a_book_that_freezes_under_the_release_is(self):
+        write_health(self.root, self.clock, frozen="cash differs by 12.5000")
+        health = self.read(inherited_frozen=["kalshi"])
+        self.assertEqual(health.reasons, ("the alpaca-paper book is frozen: cash differs by 12.5000",))
+
+    def test_the_watch_reads_what_was_broken_before_it_looks(self):
+        from league.watchdog import HouseHealth
+
+        write_health(self.root, self.clock, frozen="cash differs by 12.5000")
+        watch = HouseHealth(self.root, clock=self.clock, max_age_seconds=300, stall_seconds=0, restart_within=None)
+        self.assertTrue(watch().ok, "the freeze was already there when the watch began")
+        write_health(self.root, self.clock, frozen=None, seq=2)
+        self.assertTrue(watch().ok)

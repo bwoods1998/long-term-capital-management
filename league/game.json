@@ -18,7 +18,8 @@
     "replay_deadline_epochs": 3,
     "box_usd_per_hour": "0.04",
     "box_creation_usd": "0.005",
-    "unearned_share_to_floors": true
+    "unearned_share_to_floors": true,
+    "newcomer_seconds": 3600
   },
   "bounds": {
     "daily_pool_usd": [
@@ -48,6 +49,10 @@
     "min_population": [
       4,
       24
+    ],
+    "newcomer_seconds": [
+      600,
+      86400
     ]
   },
   "audit": {

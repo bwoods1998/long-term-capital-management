@@ -1449,9 +1449,11 @@ class Book:
             return self._reconcile()
 
     def _traded_yet(self) -> bool:
-        """Whether this book has ever moved money of its own. A stake is not a trade."""
-        return bool(self.orders) or any(a.holdings or a.realized or a.fees
-                                        for name, a in self.accounts.items() if name != HOUSE)
+        """Whether this book has money of its own at stake. A stake is not a trade, and neither is
+        an order that was sent and came back unfilled: what counts is a position, a realised
+        result, a fee paid, or an order still working that could become one at any moment."""
+        return bool(self.open_orders()) or any(a.holdings or a.realized or a.fees
+                                               for name, a in self.accounts.items() if name != HOUSE)
 
     def _reconcile(self) -> Reconciliation:
         if True:

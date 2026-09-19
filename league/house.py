@@ -1107,18 +1107,39 @@ class House:
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
         self.enroll()
+        self._refill(rules)
+
+    def _refill(self, rules: Mapping[str, Any]) -> Agent | None:
+        """Keep a seat filled. A death that leaves an empty seat is only useful if something new
+        sits in it: before this the House staked a newcomer only below the population FLOOR, so a
+        failure shrank the league from 28 towards 12 instead of cycling it. Now it fills up to the
+        ceiling, one at a time, and puts the newcomer on the desk that is furthest from full, so
+        exploration spreads across the firm instead of converging on whoever is winning."""
         living = self.registry.living()
-        if living and len(living) < int(rules["min_population"]):
-            # Every seed has had its life. The House stakes a newcomer: a mutation of whoever
-            # stands highest, endowed from the pool like a seed, answering for itself from replay.
-            best = max(living, key=lambda a: (self.evaluator.rung(a.id), self.economy.balance(a.id)))
-            last = float(self._state.setdefault("last_newcomer", {}).get("at") or 0)
-            if self.clock() - last >= float(rules["epoch_seconds"]) / 4:
-                self._state["last_newcomer"]["at"] = self.clock()
-                child = self.spawn(best.line or best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
-                                   params=mutate(best.params, seed=f"newcomer:{len(self.registry.agents)}"),
-                                   reason=f"a House-staked mutation of {best.id}: the population was below its floor")
-                self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False, "reason": "population floor", "new_code": False}, agent=best.id)
+        if not living or len(living) >= int(rules["max_population"]):
+            return None
+        urgent = len(living) < int(rules["min_population"])
+        every = float(rules["newcomer_seconds"]) / (4 if urgent else 1)
+        # A House that has just started waits a full interval before it adds anyone: the first
+        # minutes are for founding and for taking baselines, not for breeding.
+        last = float(self._state.setdefault("last_newcomer", {}).get("at") or self._born_at)
+        if self.clock() - last < every:
+            return None
+        room = [n for n in self.niches.values() if not n.dormant and self.members(n.id) < n.max_members]
+        seats = {n.id: n.max_members - self.members(n.id) for n in room}
+        here = [a for a in living if a.specialty in seats] or living
+        if seats:
+            widest = max(seats.values())
+            here = [a for a in here if seats.get(a.specialty) == widest] or here
+        best = max(here, key=lambda a: (self.evaluator.rung(a.id), self.economy.balance(a.id)))
+        with self._state_lock:
+            self._state["last_newcomer"]["at"] = self.clock()
+        child = self.spawn(best.line or best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
+                           params=mutate(best.params, seed=f"newcomer:{len(self.registry.agents)}"),
+                           reason=f"a House-staked mutation of {best.id}: its desk had the most room, and the league was {len(living)} of {rules['max_population']}")
+        self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False,
+                                            "reason": "population", "new_code": False}, agent=best.id)
+        return child
 
     # -------------------------------------------------------------------- tick
     def tick(self) -> dict[str, Any]:
