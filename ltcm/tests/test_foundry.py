@@ -674,6 +674,14 @@ class DeploymentTests(FoundryCase):
         self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins", "no roles: the first live desk by id")
         self.strategies.config["book_roles"] = {"mullins-9": "explorers"}
         self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins-9")
+        # An explorers book under its learning size in free cash hands over to the best-funded book.
+        from decimal import Decimal as D
+        cash = {"mullins-9": D("-50"), "mullins": D("40")}
+        self.strategies.free_cash_usd = lambda manifest: cash.get(manifest.id)
+        self.strategies.learning_usd = lambda manifest: D("10")
+        self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins", "the explorers book cannot fund a quote")
+        cash["mullins-9"] = D("12")
+        self.assertEqual(foundry.live_desk("kalshi", self.manifests).id, "mullins-9", "funded again, it takes the candidates")
 
     def test_a_lane_trials_its_runners_up_on_the_other_shadow_desks(self):
         """Sept 19, 2026: a fast-lane cycle qualified six settings variants and trialled one."""

@@ -824,13 +824,38 @@ class Foundry:
     # ------------------------------------------------------------------ the family
     def live_desk(self, family: str, manifests: Mapping[str, Any]) -> Any:
         """The family's live book that takes candidates: the one whose role is `explorers`
-        (`strategies.book_roles`), else the first live desk by id."""
+        (`strategies.book_roles`), else the first live desk by id. A book whose free cash is
+        under its learning size hands the candidates to the family's best-funded live book
+        (Sept 19, 2026: the explorers book sat at -$50 of cash under its own settling
+        positions while four adopted strategies could place nothing)."""
         live = sorted((m for m in manifests.values() if m.family == family and m.live), key=lambda m: m.id)
+        if not live:
+            return None
         roles = dict((getattr(self.strategies, "config", None) or {}).get("book_roles") or {})
-        for desk in live:
-            if str(roles.get(desk.id) or "") == "explorers":
-                return desk
-        return live[0] if live else None
+        preferred = [d for d in live if str(roles.get(d.id) or "") == "explorers"]
+        ordered = preferred + [d for d in live if d not in preferred]
+        cash_of = getattr(self.strategies, "free_cash_usd", None)
+        size_of = getattr(self.strategies, "learning_usd", None)
+        if len(ordered) > 1 and callable(cash_of) and callable(size_of):
+            def free(desk: Any) -> Decimal | None:
+                try:
+                    return _dec(cash_of(desk))
+                except Exception:
+                    return None
+
+            def funded(desk: Any) -> bool:
+                cash = free(desk)
+                try:
+                    need = _dec(size_of(desk)) or Decimal(0)
+                except Exception:
+                    need = Decimal(0)
+                return cash is None or cash >= need  # an unreadable book is given the benefit
+
+            if not funded(ordered[0]):
+                able = [d for d in ordered[1:] if funded(d)]
+                if able:
+                    return max(able, key=lambda d: free(d) or Decimal(0))
+        return ordered[0]
 
     @staticmethod
     def shadow_desks(family: str, manifests: Mapping[str, Any]) -> list[Any]:
