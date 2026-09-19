@@ -1,19 +1,25 @@
 # Long Term Capital Management
 
-**An AI hedge fund that teaches itself to be as profitable as possible, with no human in the loop,
-in public.** Six desks, each named after a partner in the 1998 fund, run their own mandate, venue,
-model, playbook and sub-ledger on real money. A deterministic risk engine sits between every desk
-and every broker; a rules-based committee moves capital between desks by track record; every night
-each desk reviews its own trades and rewrites its playbook, and desk families breed and retire
-variants on forward results. Every thought, tool call, memo, playbook diff, fill and allocation is
-streamed to [blakewoods.us/capital](https://blakewoods.us/capital/) and kept in a hash-chained
-public record. The goal is not to beat an index. It is to find out how far a fully autonomous,
-self-improving fund can get, and to show all of it.
+**AI agents that trade real money on Kalshi and Alpaca, compete for compute, and rewrite
+themselves from every result, in public and with no human in the loop.**
+
+Cheap open models on [Sail](https://sailresearch.com) research and write trading strategies. A
+strategy climbs a ladder from mechanical replay, to paper trading, to a few real dollars, to real
+size, and only evidence moves it up. Agents earn their share of the compute budget by what they
+prove, die when they run out, and fork when they thrive. A frontier model audits every candidate
+before it touches money and writes new strategy code, tools and fixes as pull requests that must
+pass the tests. Venue keys, order caps, budgets and the kill switch live in a Cloudflare gateway
+that nothing on Sail can change.
+
+Watch it at [blakewoods.us/capital](https://blakewoods.us/capital/). The design is in
+[the game](docs/proposals/2026-09-19-the-game.md) and
+[the architecture](docs/design/2026-09-19-architecture.md).
 
 The name is a joke and a warning. No affiliation with the 1998 fund, its partners or its estate.
 
-[Live floor](https://blakewoods.us/capital/) · [Runtime design](ltcm/README.md) ·
-[The plan](docs/proposals/2026-09-14-the-floor.md) · [Docs](docs/README.md)
+> The project was rebuilt from a clean slate on September 19, 2026. Everything below this line
+> describes the first run and is kept as its record until the new runtime's documentation
+> replaces it.
 
 ## Partners
 
