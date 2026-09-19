@@ -791,6 +791,25 @@ class FastTrackTests(FoundryCase):
         summary = foundry.cycle(NOW)
         return foundry, summary["winner"]
 
+    def test_a_trial_losing_on_twice_the_evidence_is_retired_and_remembered(self):
+        foundry, fid = self.deploy_settings()
+        self.clock[0] += 3600
+        key = ("mullins-4", "kalshi_favorites")
+        self.strategies.records[key] = {"settled": 9, "fills": 9, "settled_pnl_usd": "-4"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [], "losing but under twice the evidence: it trades on")
+        self.assertEqual(foundry.state()["deployments"][fid]["status"], "shadow")
+        self.strategies.records[key] = {"settled": 10, "fills": 10, "settled_pnl_usd": "-4"}
+        self.assertEqual(foundry.fast_track(self.manifests, []), [])
+        deployment = foundry.state()["deployments"][fid]
+        self.assertEqual((deployment["status"], deployment["forward"]["settled"]), ("lost", 10))
+        self.assertFalse(self.row("mullins-4")["enabled"], "the desk is free for the next trial")
+        verdicts = [e for e in self.log.kinds("desk.thought") if e.stream == "desk:mullins-4" and "lost" in e.payload["text"]]
+        self.assertEqual(len(verdicts), 1)
+        lines = foundry.trial_ledger("kalshi", "kalshi_favorites")
+        self.assertEqual(len(lines), 1)
+        self.assertIn(f"{fid} (params, lost)", lines[0])
+        self.assertIn("forward 10 settled, P&L -4", lines[0])
+
     def test_fast_track_needs_both_the_backtest_bound_and_the_forward_record(self):
         foundry, fid = self.deploy_settings()
         deployment = foundry.state()["deployments"][fid]

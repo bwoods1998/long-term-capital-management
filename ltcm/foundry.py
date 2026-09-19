@@ -1385,6 +1385,10 @@ class Foundry:
             parts.append(self._report_line(candidate))
         parts.append("## Forward record since each setting was dealt (real prices; shadow desks are scored, live desks trade money)")
         parts.append("\n".join(records) if records else "(no strategy records yet)")
+        trials = self.trial_ledger(family, subject)
+        if trials:
+            parts.append("## Trials so far (newest first: what was dealt, what the replay said, what happened at real prices; a lost trial is not proposed again)")
+            parts.append("\n".join(trials))
         if self._result_cache:
             try:
                 lessons = self._result_cache.lessons(subject)
@@ -1909,6 +1913,43 @@ class Foundry:
 
         return min(pool, key=score)
 
+    def _retire_trial(self, desk: Any, name: str, fid: str, at: str, verdict: str) -> None:
+        """Switch a finished trial's row off and say so on the desk's stream. Never raises."""
+        try:
+            self.store().update(desk.id, name, enabled=False, note=f"foundry {fid} {verdict}"[:200])
+        except Exception as exc:
+            self.alert("warning", f"trial {fid} not retired on {desk.id}: {type(exc).__name__}")
+        stamp = at[:16].replace("-", "").replace(":", "").replace("T", "-")
+        thought = {"session_id": f"{desk.id}:{stamp}:strategy:{name}", "strategy": name, "text": f"Foundry trial {fid} ({name}) {verdict}; retired from this desk."}
+        try:
+            self.log.append(desk.stream, "desk.thought", thought, id=f"foundry-{fid}-verdict:{at}"[:200], at=at)
+        except Exception:
+            pass
+
+    def trial_ledger(self, family: str, subject: str, limit: int = 16) -> list[str]:
+        """The subject's trials so far, newest first, as lines for the model: what was dealt,
+        what the replay said and what happened forward. The search reads its own history
+        (Sept 19, 2026): until then a losing idea could be proposed again the next cycle."""
+        lines: list[str] = []
+        deployments = [
+            d for d in dict(self.state().get("deployments") or {}).values()
+            if isinstance(d, Mapping) and str(d.get("family")) == family and base_name(str(d.get("strategy") or "")) == base_name(subject)
+        ]
+        for dep in sorted(deployments, key=lambda d: str(d.get("deployed_at") or ""), reverse=True)[:limit]:
+            forward = dict(dep.get("forward") or {})
+            if not forward and dep.get("status") == "shadow":
+                record = self._record(str(dep.get("desk_id")), str(dep.get("strategy")), dep.get("deployed_at"), opened_since=True)
+                forward = {"settled": record.get("settled", 0), "pnl_usd": record.get("settled_pnl_usd", "0"), "fees_usd": record.get("fees_usd", "0")}
+            oos = _float(dep.get("oos_return"))
+            lines.append(
+                f"- {dep.get('id')} ({dep.get('kind')}, {dep.get('status')}) dealt {str(dep.get('deployed_at') or '')[:16]} to {dep.get('desk_id')}: "
+                f"replay {'n/a' if oos is None else f'{oos:+.3f}'} per $ on {dep.get('oos_trades', '?')} positions; "
+                f"forward {forward.get('settled', 0)} settled, P&L {forward.get('pnl_usd', '0')}, fees {forward.get('fees_usd', '0')}"
+                + (f"; params {json.dumps(dep.get('params') or {}, sort_keys=True)[:200]}" if dep.get("kind") == "params" else "")
+                + (f"; hypothesis: {str(dep.get('hypothesis'))[:200]}" if dep.get("hypothesis") else "")
+            )
+        return lines
+
     def _locked(self, desk_id: str) -> bool:
         try:
             return bool(self.locked(desk_id)) if self.locked is not None else False
@@ -2199,8 +2240,15 @@ class Foundry:
             net = pnl - fees
             unproven = evidence.lopsided(record, gate["skew_price"]) and not evidence.passes(record, **gate)[0]
             if settled < need or fills < need or net < 0 or unproven:
+                forward = {"settled": settled, "fills": fills, "pnl_usd": format(pnl, "f"), "fees_usd": format(fees, "f")}
+                if settled >= 2 * need and net < 0:
+                    # Twice the evidence the fast track asks for and still losing: the trial is
+                    # over now, not at `forward_max_hours`. Its desk, cash and thoughts go to the
+                    # next candidate, and the next cycle's prompt reads what happened (Sept 19, 2026).
+                    self._deployment(fid, status="lost", ended_at=at, forward=forward)
+                    self._retire_trial(desk, name, fid, at, f"lost: {settled} settled, net {net:+.2f} after fees")
+                    continue
                 if _epoch(at) - _epoch(dep.get("deployed_at")) > float(cfg["forward_max_hours"]) * 3600.0:
-                    forward = {"settled": settled, "fills": fills, "pnl_usd": format(pnl, "f"), "fees_usd": format(fees, "f")}
                     self._deployment(fid, status="expired", ended_at=at, forward=forward)
                 continue
             live = self.live_desk(str(dep.get("family")), manifests)
