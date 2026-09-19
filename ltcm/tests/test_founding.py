@@ -27,6 +27,14 @@ HARD = {"max_position_pct": ["0.01", "0.50"], "max_order_notional_pct": ["0.01",
 # --------------------------------------------------------------------------- fakes
 
 
+
+def founder_manifest(desk_id):
+    """A founding desk's manifest as it shipped. Hilibrand's crypto desk traded Coinbase and was
+    retired with that venue on Sept 19, 2026; the founding machinery is still tested against it."""
+    live = REPO / "ltcm" / "desks" / f"{desk_id}.json"
+    return live if live.exists() else REPO / "ltcm" / "desks" / "retired-coinbase" / f"{desk_id}.json"
+
+
 class FakeKalshi:
     """Pages of open markets and one series at a time, like `KalshiMarketData`."""
 
@@ -165,7 +173,7 @@ class FoundingCase(unittest.TestCase):
         self.desks.mkdir()
         self.playbooks.mkdir()
         for desk_id in FOUNDERS:  # the four the owner wrote, exactly as they ship
-            shutil.copy(REPO / "ltcm" / "desks" / f"{desk_id}.json", self.desks / f"{desk_id}.json")
+            shutil.copy(founder_manifest(desk_id), self.desks / f"{desk_id}.json")
             shutil.copy(REPO / "playbooks" / f"{desk_id}.md", self.playbooks / f"{desk_id}.md")
         self.log = EventLog(self.root / "events.sqlite")
         self.evolution = Evolution(self.log, self.desks, self.playbooks, config={"target_variants": 2, "max_variants": 6})
@@ -358,7 +366,7 @@ class ValidationTests(FoundingCase):
         self.assertNotIn("<", out["rationale"])
 
     def test_a_coinbase_family_is_held_to_its_targets(self):
-        manifest = json.loads((REPO / "ltcm" / "desks" / "hilibrand.json").read_text())
+        manifest = json.loads(founder_manifest("hilibrand").read_text())
         manifest.update(id="mcentee", family="memes", capital={"mode": "shadow", "usd": "150"})
         # Hilibrand holds futures at a 60% position cap since Sept 17, 2026; a founded desk is
         # bound to the lab's limits and to a spot-only, long-only mandate.

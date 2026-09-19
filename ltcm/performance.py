@@ -50,7 +50,14 @@ def funding_flows(brokers, start_at):
         else:
             raise ValueError("Incomplete funding history")
 
-    coinbase = brokers["coinbase"]
+    alpaca = brokers.get("alpaca")
+    if alpaca is not None:
+        flows.extend(alpaca_flows(alpaca, start))
+    # Coinbase left the floor on Sept 19, 2026 (the owner closed the account). A floor that
+    # still configures it is read as before; one that does not skips it.
+    coinbase = brokers.get("coinbase")
+    if coinbase is None:
+        return flows
 
     def pages(path):
         next_path, seen = path + "?limit=100", set()
@@ -95,10 +102,6 @@ def funding_flows(brokers, start_at):
             if kind == "fiat_deposit" and value < 0 or kind == "fiat_withdrawal" and value > 0:
                 raise ValueError("Unexpected funding direction")
             flows.append(("coinbase", when, value))
-
-    alpaca = brokers.get("alpaca")
-    if alpaca is not None:
-        flows.extend(alpaca_flows(alpaca, start))
     return flows
 
 
@@ -199,7 +202,7 @@ class AccountPerformance:
         venues = {row["venue"]: row for row in account.get("venues", [])}
         # Every venue the floor trades has to answer, whichever those are: a profit figure that
         # silently drops an account is worse than no figure (Sept 19, 2026, when Alpaca joined).
-        wanted = {str(v) for v in (self.config.get("venues") or ("kalshi", "coinbase"))}
+        wanted = {str(v) for v in (self.config.get("venues") or self.brokers or ())}
         complete = set(venues) == wanted and not any(row.get("stale") for row in venues.values())
         ready = complete and flows is not None and verified and 0 <= stamp(at) - stamp(verified) <= 600
         net = sum((value for venue, when, value in (flows or [])

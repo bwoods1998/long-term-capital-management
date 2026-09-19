@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "account_performance": {
-    "start_at": "2026-09-19T04:21:28.000Z",
-    "start_equity": "1605.9851"
+    "start_at": "2026-09-19T04:56:53.000Z",
+    "start_equity": "1021.9251"
   },
   "segregated_books": true,
   "event_stream_seconds": 2,
@@ -282,7 +282,6 @@
   "gateway_token_env": "GATEWAY_TOKEN",
   "live_venues": [
     "kalshi",
-    "coinbase",
     "alpaca"
   ],
   "venues": {
@@ -295,11 +294,6 @@
     "kalshi": {
       "key_id_env": "KALSHI_KEY_ID",
       "private_key_path": ".data/ltcm/keys/kalshi.pem"
-    },
-    "coinbase": {
-      "key_name_env": "COINBASE_KEY_NAME",
-      "secret_env": "COINBASE_API_SECRET",
-      "private_key_path": ".data/ltcm/keys/coinbase.pem"
     }
   },
   "spend_mode": "runway",
