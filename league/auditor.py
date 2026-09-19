@@ -95,9 +95,12 @@ class Auditor:
             result = answer.json()
         except FrontierError:
             result = {"approve": False, "summary": "the auditor's answer could not be read", "findings": []}
-        findings = [f for f in (result.get("findings") or []) if isinstance(f, dict)][:20]
-        blockers = [f for f in findings if str(f.get("severity")).lower() == "blocker"]
-        approve = bool(result.get("approve")) and not blockers
+        listed = result.get("findings") if isinstance(result.get("findings"), list) else []
+        everything = [f for f in listed if isinstance(f, dict)]
+        blockers = [f for f in everything if str(f.get("severity")).strip().lower() == "blocker"]
+        findings = (blockers + [f for f in everything if f not in blockers])[:20]  # a blocker is never the one cut off
+        # Only the literal JSON `true` with no blocker is an approval: "false", "no" and [false] are all truthy.
+        approve = result.get("approve") is True and not blockers
         row = {
             "approve": approve,
             "confidence": result.get("confidence"),
@@ -119,19 +122,26 @@ class Auditor:
         missed = Decimal(0)  # gains a veto kept off it
         cost = Decimal(0)
         vetoes = approvals = 0
+        # One window per agent: from its FIRST veto to its approval (or to now). An agent vetoed
+        # three times is still one agent kept off the real account once.
+        windows: dict[str, dict[str, Any]] = {}
         for entry in self.ledger.iter(kinds="audit.verdict"):
             p = entry.payload
             cost += Decimal(str(p.get("cost_usd") or 0))
             if p.get("error"):
                 continue
-            if p.get("approve"):
+            if p.get("approve") is True:
                 approvals += 1
+                if entry.agent in windows and windows[entry.agent]["until"] is None:
+                    windows[entry.agent]["until"] = entry.seq
                 continue
             vetoes += 1
-            book = p.get("book")
+            windows.setdefault(entry.agent, {"since": entry.seq, "until": None, "book": p.get("book")})
+        for agent, window in windows.items():
             pnl = Decimal(0)
-            for block in self.ledger.iter(kinds="eval.block", agent=entry.agent):
-                if block.seq > entry.seq and block.payload.get("book") == book:
+            for block in self.ledger.iter(kinds="eval.block", agent=agent):
+                first = int(block.payload.get("first_mark_seq") or block.seq)
+                if first > window["since"] and (window["until"] is None or first <= window["until"]) and block.payload.get("book") == window["book"]:
                     pnl += Decimal(str(block.payload["end_equity"])) - Decimal(str(block.payload["start_equity"])) - Decimal(str(block.payload.get("flow") or 0))
             scaled = pnl * scale
             if scaled < 0:

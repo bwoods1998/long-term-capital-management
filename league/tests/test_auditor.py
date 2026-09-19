@@ -117,7 +117,6 @@ class Approval(AuditorCase):
             result = self.auditor(says(answer)).audit(self.agent, self.verdict)
             self.assertIs(result["approve"], False, answer)
 
-    @unittest.expectedFailure
     def test_approve_must_be_the_json_true_not_a_truthy_string(self):
         # BUG (medium, fails OPEN on the real-money gate): auditor.py:100 `bool(result.get("approve"))`.
         # A model that answers `"approve": "false"` (a string: a common slip) or `"approve": "no"`
@@ -128,7 +127,6 @@ class Approval(AuditorCase):
             result = self.auditor(says({"approve": value, "summary": "do not promote", "findings": []})).audit(self.agent, self.verdict)
             self.assertIs(result["approve"], False, value)
 
-    @unittest.expectedFailure
     def test_a_blocker_beyond_the_twentieth_finding_still_vetoes(self):
         # BUG (low-medium, fails OPEN): auditor.py:98-100 cuts `findings` to the first 20 BEFORE it
         # looks for blockers, so a blocker listed 21st (a model that lists its notes first and its
@@ -138,7 +136,6 @@ class Approval(AuditorCase):
         result = self.auditor(says({"approve": True, "summary": "ok", "findings": findings})).audit(self.agent, self.verdict)
         self.assertIs(result["approve"], False)
 
-    @unittest.expectedFailure
     def test_a_blocker_with_stray_whitespace_still_vetoes(self):
         # BUG (low, fails OPEN): auditor.py:99 compares `str(severity).lower() == "blocker"` with
         # no strip, so "blocker " or " Blocker" is not a blocker. FIX: `.strip().lower()`.
@@ -151,7 +148,6 @@ class Approval(AuditorCase):
         result = self.auditor(says(answer)).audit(self.agent, self.verdict)
         self.assertEqual(len(result["findings"]), 1)
 
-    @unittest.expectedFailure
     def test_findings_of_the_wrong_type_are_a_veto_not_a_crash(self):
         # BUG (low): auditor.py:98 iterates `result.get("findings") or []`; a truthy non-iterable
         # (`"findings": 3`, `true`) raises TypeError after the audit has been charged and before
@@ -174,6 +170,8 @@ class FailsClosed(AuditorCase):
             TimeoutError("slow"),
         )
         for failure in failures:
+            if isinstance(failure, urllib.error.HTTPError):
+                self.addCleanup(failure.close)
             result = self.auditor(failure).audit(self.agent, self.verdict)
             self.assertIs(result["approve"], False)
             self.assertTrue(result["error"])
@@ -330,7 +328,9 @@ class Packet(AuditorCase):
 
     def test_no_row_the_audit_writes_holds_the_token(self):
         self.auditor(says({"approve": True, "findings": []})).audit(self.agent, self.verdict)
-        self.auditor(urllib.error.HTTPError(GATEWAY, 500, "x", {}, io.BytesIO(SECRET.encode()[:0] + b"boom"))).audit(self.agent, self.verdict)
+        refusal = urllib.error.HTTPError(GATEWAY, 500, "x", {}, io.BytesIO(b"boom"))
+        self.addCleanup(refusal.close)
+        self.auditor(refusal).audit(self.agent, self.verdict)
         for entry in self.ledger.iter():
             self.assertNotIn(SECRET, json.dumps(entry.payload))
 
@@ -409,7 +409,6 @@ class Score(AuditorCase):
         result = auditor.score()
         self.assertEqual((result["vetoes"], result["audit_cost_usd"], result["losses_avoided_usd"], result["net_value_usd"]), (1, "0.0375", "1.0000", "0.9625"))
 
-    @unittest.expectedFailure
     def test_an_agent_vetoed_twice_is_not_scored_twice_for_the_same_blocks(self):
         # BUG (medium, inflates the gate's measured value): auditor.py:122-140 scores EVERY veto
         # row against every paper block after it. `House._promote` audits again each time `judge`

@@ -139,6 +139,7 @@ class SailSandbox:
             state = {}
         state.setdefault("boxes", {})
         state.setdefault("kit", {})
+        state.setdefault("sealed", {})
         return state
 
     def _save(self) -> None:
@@ -163,15 +164,30 @@ class SailSandbox:
             row = self.client.from_checkpoint(checkpoint or self.image_checkpoint, name=f"{self.name_prefix}-{agent}"[:60])
             box = str(row.get("sailbox_id") or row.get("id"))
             created = True
-            with self._lock:
-                self._state["boxes"][agent] = box
-                self._save()
-            # No network at all: everything a strategy sees is handed to it as data.
+            # No network at all: everything a strategy sees is handed to it as data. The box is
+            # recorded only once it is sealed; one that cannot be sealed is destroyed, never used.
             try:
                 self.client.set_egress(box, SEALED)
             except Exception as exc:  # noqa: BLE001
+                try:
+                    self.client.terminate(box)
+                except Exception:  # noqa: BLE001
+                    pass
                 raise SandboxError(f"could not close the network of {agent}'s box: {exc}") from exc
+            with self._lock:
+                self._state["boxes"][agent] = box
+                self._state.setdefault("sealed", {})[box] = True
+                self._save()
         else:
+            if not self._state.setdefault("sealed", {}).get(box):
+                # A box from before sealing was recorded: seal it again before anything runs in it.
+                try:
+                    self.client.set_egress(box, SEALED)
+                except Exception as exc:  # noqa: BLE001
+                    raise SandboxError(f"could not close the network of {agent}'s box: {exc}") from exc
+                with self._lock:
+                    self._state["sealed"][box] = True
+                    self._save()
             status = str((self.client.get(box) or {}).get("status") or "")
             if status in ("sleeping", "paused", "asleep"):
                 self.client.resume(box)
@@ -179,6 +195,7 @@ class SailSandbox:
                 with self._lock:
                     self._state["boxes"].pop(agent, None)
                     self._state["kit"].pop(box, None)
+                    self._state.setdefault("sealed", {}).pop(box, None)
                     self._save()
                 return self._ensure(agent, checkpoint=checkpoint)
         digest = _kit_digest()

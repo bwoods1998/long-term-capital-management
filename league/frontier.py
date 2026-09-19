@@ -96,8 +96,12 @@ class Frontier:
             raise FrontierError(f"frontier call refused: HTTP {exc.code} {detail}", status=exc.code) from None
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise FrontierError(f"frontier call failed: {type(exc).__name__}") from None
+        if not isinstance(payload, dict):
+            raise FrontierError("the frontier model's answer was not a JSON object")
         try:
             cost_usd = Decimal(str(cost)) if cost is not None else Decimal(0)
         except InvalidOperation:
             cost_usd = Decimal(0)
+        if not cost_usd.is_finite() or cost_usd < 0:
+            cost_usd = Decimal(0)  # the gateway's own meter is the record; a garbled header charges nothing here
         return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model))

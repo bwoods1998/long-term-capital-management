@@ -150,7 +150,6 @@ class ReadingTheAnswer(unittest.TestCase):
             answer = frontier(FakeOpener(ok(cost=cost))).ask(system="s", user="u", agent="a")
             self.assertEqual(answer.cost_usd, Decimal(0), cost)
 
-    @unittest.expectedFailure
     def test_a_cost_header_that_is_not_a_finite_number_is_not_passed_on(self):
         # BUG (low): frontier.py:100. `Decimal("NaN")` and `Decimal("Infinity")` parse without
         # `InvalidOperation`, so they become `Answer.cost_usd`. The auditor then evaluates
@@ -244,16 +243,20 @@ class ExtractJson(unittest.TestCase):
 class Failures(unittest.TestCase):
     def test_http_refusals_carry_their_status(self):
         for code in (402, 403, 429, 500, 502, 503):
+            refusal = http_error(code, "the month's budget is spent")
+            self.addCleanup(refusal.close)
             with self.assertRaises(FrontierError) as caught:
-                frontier(FakeOpener(http_error(code, "the month's budget is spent"))).ask(system="s", user="u", agent="a")
+                frontier(FakeOpener(refusal)).ask(system="s", user="u", agent="a")
             self.assertEqual(caught.exception.status, code)
             self.assertIn(str(code), str(caught.exception))
             self.assertIn("the month's budget is spent", str(caught.exception))
             self.assertNotIn(SECRET, str(caught.exception))
 
     def test_the_refusal_detail_is_cut_short(self):
+        refusal = http_error(500, "x" * 5000)
+        self.addCleanup(refusal.close)
         with self.assertRaises(FrontierError) as caught:
-            frontier(FakeOpener(http_error(500, "x" * 5000))).ask(system="s", user="u", agent="a")
+            frontier(FakeOpener(refusal)).ask(system="s", user="u", agent="a")
         self.assertLess(len(str(caught.exception)), 400)
 
     def test_transport_failures_have_no_status(self):
@@ -268,7 +271,6 @@ class Failures(unittest.TestCase):
             with self.assertRaises(FrontierError):
                 frontier(FakeOpener(FakeResponse(raw=raw))).ask(system="s", user="u", agent="a")
 
-    @unittest.expectedFailure
     def test_a_json_body_that_is_not_an_object_is_a_frontier_error(self):
         # BUG (low-medium): frontier.py:92 and :103. `json.load` happily returns a list, a string
         # or `null`; `output_text(payload)` then calls `payload.get` and raises AttributeError

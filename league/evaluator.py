@@ -25,6 +25,7 @@ House acts on the verdicts it returns.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -79,13 +80,15 @@ class Evaluator:
         )
 
     # ------------------------------------------------------------------ rung 0
-    def family_trials(self, family: str) -> list[float]:
-        """The Sharpe ratio of every replay ever run for this family, passed or not."""
-        out = []
-        for entry in self.ledger.iter(kinds="eval.trial"):
-            if entry.payload.get("family") == family and entry.payload.get("sharpe") is not None:
-                out.append(float(entry.payload["sharpe"]))
-        return out
+    def family_trials(self, family: str) -> list[float | None]:
+        """One entry for every replay ever run for this family, passed, failed or crashed: its
+        Sharpe ratio, or None when it had none. A failed replay is still a try, so it still raises
+        the bar; only the defined Sharpes feed the variance."""
+        return [
+            (float(entry.payload["sharpe"]) if entry.payload.get("sharpe") is not None else None)
+            for entry in self.ledger.iter(kinds="eval.trial")
+            if entry.payload.get("family") == family
+        ]
 
     def record_trial(self, agent: str, family: str, result: Mapping[str, Any], *, tape_id: str = "", promote: bool = True) -> Verdict:
         """Score one replay. It is recorded as a trial whatever it shows, and it is judged against
@@ -93,9 +96,9 @@ class Evaluator:
         rules = self.ladder["replay"]
         growth = [float(b["log_growth"]) for b in result.get("blocks") or []]
         sharpe = stats.sharpe(growth) if result.get("ok") else None
-        prior = self.family_trials(family)
-        trials = prior + ([sharpe] if sharpe is not None else [])
-        deflated = stats.deflated_sharpe(growth, trials, n_trials=max(len(trials), 1)) if sharpe is not None else None
+        trials = self.family_trials(family) + [sharpe]
+        defined = [t for t in trials if t is not None]
+        deflated = stats.deflated_sharpe(growth, defined, n_trials=len(trials)) if sharpe is not None else None
         oos = result.get("out_of_sample") or {}
         reasons = []
         if not result.get("ok"):
@@ -131,7 +134,7 @@ class Evaluator:
         self.ledger.append("eval.trial", numbers, agent=agent)
         if passed and promote and self.rung(agent) == 0:
             return self.promote(agent, 1, "passed replay against every trial its family has run", numbers)
-        return Verdict(agent, self.rung(agent), "hold", "; ".join(reasons) or "already above replay", numbers)
+        return Verdict(agent, self.rung(agent), "hold", "; ".join(reasons) or "passed replay; no promotion was asked for or due", numbers)
 
     # ------------------------------------------------------------ rungs 1 to 3
     def observe(self, agent: str, book: str, horizon: str) -> int:
@@ -151,6 +154,7 @@ class Evaluator:
         added = 0
         previous_equity: float | None = None
         previous_seq = 0
+        recorded = {e.payload.get("key") for e in self.ledger.iter(kinds="eval.block", agent=agent) if e.payload.get("book") == book}
         for index, key in enumerate(keys):
             last = by_block[key][-1]
             end_equity = float(last.payload["equity"])
@@ -163,12 +167,15 @@ class Evaluator:
             else:
                 start_equity = previous_equity
                 flow = sum(float(s.payload["usd"]) for s in stakes if previous_seq < s.seq <= last.seq)
-            if finished and start_equity > 0:
+            if finished and start_equity > 0 and key not in recorded:
                 active = any(int(m.payload.get("holdings") or 0) > 0 for m in by_block[key]) or any(
                     block_key(f.at, horizon) == key for f in fills
                 )
                 growth = stats.log_growth(start_equity, end_equity, flow)
-                entry = self.ledger.append(
+                # A block belongs to the rung the agent was on when the block HAPPENED, so it
+                # carries the ledger position of its first mark; when the row was written says
+                # nothing (a paper backlog may be written long after a demotion).
+                self.ledger.append(
                     "eval.block",
                     {
                         "book": book,
@@ -179,21 +186,24 @@ class Evaluator:
                         "flow": round(flow, 8),
                         "log_growth": growth,
                         "active": bool(active),
-                        "rung": self.rung(agent),
+                        "first_mark_seq": by_block[key][0].seq,
+                        "last_mark_seq": last.seq,
                     },
                     agent=agent,
                     id=f"block:{agent}:{book}:{key}",
                 )
-                added += 1 if entry.seq > last.seq else 0
+                added += 1
             previous_equity, previous_seq = end_equity, last.seq
         return added
 
-    def blocks(self, agent: str, *, since_seq: int = 0, book: str | None = None) -> list[dict[str, Any]]:
-        return [
-            e.payload
-            for e in self.ledger.iter(kinds="eval.block", agent=agent)
-            if e.seq > since_seq and (book is None or e.payload.get("book") == book)
-        ]
+    def blocks(self, agent: str, *, since_seq: int = 0, until_seq: int | None = None, book: str | None = None) -> list[dict[str, Any]]:
+        """Finished blocks that BEGAN after `since_seq` (and at or before `until_seq`)."""
+        out = []
+        for e in self.ledger.iter(kinds="eval.block", agent=agent):
+            began = int(e.payload.get("first_mark_seq") or e.seq)
+            if began > since_seq and (until_seq is None or began <= until_seq) and (book is None or e.payload.get("book") == book):
+                out.append(e.payload)
+        return out
 
     def trade_returns(self, agent: str, book: str, *, since_seq: int = 0) -> tuple[list[float], float]:
         """Closed trades as a fraction of the stake, and the average fraction put at risk."""
@@ -201,17 +211,22 @@ class Evaluator:
         if staked <= 0:
             return [], 0.0
         returns, risked = [], []
+        running: dict[str, float] = {}  # a position sold in ten fills is one trade, closed when it is flat
         for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent):
             p = entry.payload
             if entry.seq <= since_seq or p.get("book") != book:
                 continue
+            key = str((p.get("instrument") or {}).get("market_id") or (p.get("instrument") or {}).get("symbol")) + ":" + str((p.get("instrument") or {}).get("right"))
             if entry.kind == "book.settle":
-                returns.append(float(p["pnl"]) / staked)
+                returns.append((running.pop(key, 0.0) + float(p["pnl"])) / staked)
             elif p.get("realized") is not None and p.get("source") != "dust":
-                returns.append(float(p["realized"]) / staked)
+                running[key] = running.get(key, 0.0) + float(p["realized"])
+                if p.get("flat", True):
+                    returns.append(running.pop(key) / staked)
             elif p.get("side") == "buy" and p.get("source") in ("venue", "cross"):
                 risked.append(-float(p["cash_delta"]) / staked)
-        return returns, (sum(risked) / len(risked) if risked else 0.0)
+        # With no entry seen since the rung began (contracts carried in), assume all of it was at risk.
+        return returns, (sum(risked) / len(risked) if risked else 1.0)
 
     def judge(self, agent: str, book: str) -> Verdict:
         """Look at an agent on the book of its current rung and say what the rules say."""
@@ -223,10 +238,11 @@ class Evaluator:
         growth = [float(r["log_growth"]) for r in rows]
         active = sum(1 for r in rows if r.get("active"))
         death = self.ladder["death"]
-        equity = [float(r["end_equity"]) for r in rows]
-        if rows:
-            equity.insert(0, float(rows[0]["start_equity"]))
-        drawdown = stats.max_drawdown(equity)
+        wealth, level = [1.0], 0.0
+        for value in growth:  # the wealth index of the blocks themselves: stakes lent or returned are not losses
+            level += value
+            wealth.append(math.exp(max(level, -700.0)))
+        drawdown = stats.max_drawdown(wealth)
         numbers: dict[str, Any] = {"book": book, "blocks": len(rows), "active_blocks": active, "drawdown": drawdown}
         if drawdown >= death["max_drawdown"]:
             return self._decide(agent, rung, "die", f"drawdown of {drawdown:.0%} is past the {death['max_drawdown']:.0%} limit", numbers)
@@ -254,9 +270,10 @@ class Evaluator:
         self.ledger.append("eval.verdict", {"decision": "look", "rung": rung, **numbers}, agent=agent)
         if active >= death["min_active_blocks"] and bounds["ucb"] < 0:
             return self._decide(agent, rung, "die", "the upper bound on its growth is below zero", numbers)
-        enough_trades = len(returns) >= int(self.ladder["min_closed_trades"])
-        if not enough_trades or bounds["sd"] <= 0:
+        if len(returns) < int(self.ladder["min_closed_trades"]):
             return Verdict(agent, rung, "hold", f"{len(returns)} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
+        if bounds["sd"] <= 0:
+            return Verdict(agent, rung, "hold", "its block growth has no variance yet: nothing to bound", numbers)
         if rung < 3 and active >= self._promotion_blocks(rung) and bounds["lcb"] > 0 and (wilson is None or wilson > 0):
             return Verdict(agent, rung, "eligible", "the lower bound on its growth is above zero", numbers)
         return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
@@ -267,6 +284,19 @@ class Evaluator:
     def _decide(self, agent: str, rung: int, decision: str, reason: str, numbers: Mapping[str, Any]) -> Verdict:
         self.ledger.append("eval.verdict", {"decision": decision, "rung": rung, "reason": reason, **numbers}, agent=agent)
         return Verdict(agent, rung, decision, reason, dict(numbers))
+
+    def _record_below(self, agent: str, rung: int) -> list[dict[str, Any]]:
+        """The blocks of the agent's most recent stay on the rung just below `rung`: the record
+        that earned this rung, and nothing else (not older rungs, not a decayed stay above)."""
+        changes = [e for e in self.ledger.iter(kinds="eval.verdict", agent=agent) if e.payload.get("decision") in ("promote", "demote", "seat")]
+        start = end = None
+        for index, entry in enumerate(changes):
+            if int(entry.payload["to_rung"]) == rung - 1:
+                start = entry.seq
+                end = changes[index + 1].seq if index + 1 < len(changes) else None
+        if start is None:
+            return []
+        return self.blocks(agent, since_seq=start, until_seq=end)
 
     def promote(self, agent: str, to_rung: int, reason: str, numbers: Mapping[str, Any] | None = None) -> Verdict:
         """Move an agent up one rung. The House calls this for rung 2 only after the audit passes."""
@@ -299,7 +329,7 @@ class Evaluator:
         if rung < 2:
             return Verdict(agent, rung, "hold", "drift is watched on real-money rungs only")
         entered = self._rung_entered(agent)
-        earned = [float(e.payload["log_growth"]) for e in self.ledger.iter(kinds="eval.block", agent=agent) if e.seq <= entered]
+        earned = [float(r["log_growth"]) for r in self._record_below(agent, rung)]
         recent = [float(r["log_growth"]) for r in self.blocks(agent, since_seq=entered, book=book)]
         rules = self.ladder["drift"]
         recent = recent[-int(rules["window_blocks"]):]

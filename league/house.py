@@ -230,7 +230,10 @@ class House:
         if rung < 1 or book is None:
             return
         book.limits[agent.id] = self._limits(rung if book.real_money else 1)
-        if book.account(agent.id).staked <= 0:
+        account = book.account(agent.id)
+        # A new seat, or a return to a book the House had closed the agent's account on (a
+        # demotion after a loss leaves `staked` above zero and cash at zero: it is staked afresh).
+        if account.staked <= 0 or (account.swept and not account.holdings):
             stake = CONSTITUTION["rungs"]["2" if book.real_money else "1"]["stake_usd"]
             book.stake(agent.id, stake, note=f"rung {rung} stake")
 
@@ -535,8 +538,8 @@ class House:
     def _sweep(self, agent_id: str, book: Book) -> None:
         """Return a finished account's free cash to the House's side of the book."""
         account = book.account(agent_id)
-        if not account.holdings and not book.open_orders(agent_id) and account.cash > 0 and account.staked > 0:
-            book.stake(agent_id, -min(account.cash, account.staked), note="account closed")
+        if not account.holdings and not book.open_orders(agent_id) and account.cash > 0 and not account.swept:
+            book.stake(agent_id, -account.cash, note="account closed")  # all of it: what is left of the stake, and any profit
 
     # ------------------------------------------------------------------ death
     def kill(self, agent: Agent, cause: str, detail: str = "") -> None:

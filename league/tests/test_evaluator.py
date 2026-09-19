@@ -13,6 +13,7 @@ import math
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from league import stats
@@ -263,7 +264,6 @@ class ObserveBlocks(EvalCase):
         self.assertEqual(before, after)
         self.assertEqual(self.ledger.verify(), self.ledger.count())
 
-    @unittest.expectedFailure
     def test_re_observation_reports_zero_blocks_added(self):
         # BUG: evaluator.py:187 `added += 1 if entry.seq > last.seq else 0`. The test is meant to
         # tell a new row from an idempotent re-append, but a block row is always written after the
@@ -277,7 +277,6 @@ class ObserveBlocks(EvalCase):
         self.assertEqual(self.ev.observe("a", "paper", "hour"), 4)
         self.assertEqual(self.ev.observe("a", "paper", "hour"), 0)
 
-    @unittest.expectedFailure
     def test_observe_counts_only_the_new_block_when_one_more_hour_finishes(self):
         # BUG: same defect as above (evaluator.py:187): after one more hour this returns 5, not 1.
         self.stake("a", 200, at(0, 0))
@@ -302,8 +301,12 @@ class ObserveBlocks(EvalCase):
                 if incremental:
                     ev.observe("a", "paper", "hour")
             ev.observe("a", "paper", "hour")
-        mine = [e.payload for e in self.ledger.iter(kinds="eval.block")]
-        theirs = [e.payload for e in other.iter(kinds="eval.block")]
+        def economic(ledger):
+            # Ledger positions differ between the two runs (blocks are interleaved with marks in
+            # one and not the other); everything economic about a block must not.
+            return [{k: v for k, v in e.payload.items() if k not in ("first_mark_seq", "last_mark_seq")} for e in ledger.iter(kinds="eval.block")]
+
+        mine, theirs = economic(self.ledger), economic(other)
         self.assertEqual(len(mine), 7)
         self.assertEqual(mine, theirs)
 
@@ -393,15 +396,19 @@ class ObserveBlocks(EvalCase):
         self.assertEqual(blocks[1]["log_growth"], stats.RUIN)
         self.assertTrue(all(math.isfinite(b["log_growth"]) for b in blocks))
 
-    def test_blocks_record_the_rung_they_were_observed_on(self):
+    def test_blocks_record_the_marks_that_made_them(self):
+        """A block belongs to the rung the agent was on when the block happened, so it carries
+        the ledger position of its first mark (not the rung it was written under)."""
         self.stake("a", 200, at(0, 0))
         self.ev.seat("a", 1, "test")
         self.mark("a", 200, at(0, 10))
         self.mark("a", 201, at(1, 10))
         self.ev.observe("a", "paper", "hour")
-        self.assertEqual(self.ev.blocks("a")[0]["rung"], 1)
+        block = self.ev.blocks("a")[0]
+        self.assertNotIn("rung", block)
+        self.assertLessEqual(block["first_mark_seq"], block["last_mark_seq"])
+        self.assertEqual(self.ev.blocks("a", since_seq=block["first_mark_seq"]), [])
 
-    @unittest.expectedFailure
     def test_observing_the_same_book_after_a_rung_change_does_not_crash(self):
         # BUG (severe): evaluator.py:171-186. `observe` recomputes EVERY finished block on every
         # call and re-appends it under the id `block:{agent}:{book}:{key}` with `"rung":
@@ -446,7 +453,7 @@ class TradeReturns(EvalCase):
         self.sell("a", 5.0, at(), book="real")
         self.sell("b", 5.0, at())
         self.buy("a", 40, at(), source="dust")
-        self.assertEqual(self.ev.trade_returns("a", "paper"), ([], 0.0))
+        self.assertEqual(self.ev.trade_returns("a", "paper"), ([], 1.0))  # no entry seen: all of it is assumed at risk
 
     def test_a_scratch_trade_is_a_closed_trade(self):
         self.stake("a", 200, at())
@@ -537,6 +544,7 @@ class Judge(EvalCase):
     def test_alpha_spending_decides_a_record_that_full_alpha_would_pass(self):
         """t is about 2.3 on 30 blocks: past the 5% line (1.70) but not the third look's 0.34% line (2.9)."""
         self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
         self.mixed_trades("a")
         growth = [0.01 if i % 2 == 0 else -0.004 for i in range(30)]
         verdict = None
@@ -547,7 +555,8 @@ class Judge(EvalCase):
         self.assertGreater(stats.mean_bounds(growth, ALPHA)["lcb"], 0)  # an unspent alpha would promote
         self.assertEqual(verdict.numbers["look"], 3)
         self.assertLess(verdict.numbers["lcb"], 0)
-        self.assertEqual(verdict.decision, "hold")
+        self.assertEqual(verdict.numbers["trades"], 12)  # enough trades: it is the bound that holds it
+        self.assertEqual((verdict.decision, verdict.reason), ("hold", "the evidence does not decide yet"))
 
     def test_a_steady_profitable_agent_becomes_eligible_at_thirty_active_blocks(self):
         self.stake("a", 200, at(0, 0))
@@ -617,7 +626,6 @@ class Judge(EvalCase):
         self.assertEqual(verdict.decision, "die")
         self.assertAlmostEqual(verdict.numbers["drawdown"], 0.35)
 
-    @unittest.expectedFailure
     def test_taking_part_of_a_stake_back_is_not_a_drawdown(self):
         # BUG: evaluator.py:226-229 builds the drawdown from raw `end_equity`, which includes stake
         # flows, although `log_growth` on the same rows takes them out. `Book.stake` accepts a
@@ -639,7 +647,6 @@ class Judge(EvalCase):
         verdict = self.ev.judge("a", "paper")
         self.assertEqual(verdict.decision, "hold")
 
-    @unittest.expectedFailure
     def test_a_deposit_does_not_hide_a_drawdown(self):
         # BUG: the mirror of the test above (evaluator.py:226-229): 200 -> 130 is a 35% loss, but
         # $100 lent in the same block makes end_equity 230 and the breaker sees no drawdown at all.
@@ -672,7 +679,8 @@ class Judge(EvalCase):
         self.assertGreater(fav.numbers["lcb"], 0)
         self.assertTrue(fav.numbers["lopsided"])
         self.assertLess(fav.numbers["wilson_lcb"], 0)
-        self.assertEqual(fav.decision, "hold")
+        self.assertEqual(fav.numbers["trades"], 12)  # past the minimum: only the exact-bound gate is in its way
+        self.assertEqual((fav.decision, fav.reason), ("hold", "the evidence does not decide yet"))
         self.assertFalse(mix.numbers["lopsided"])
         self.assertEqual(mix.decision, "eligible")  # the same blocks with an honest mix of trades pass
 
@@ -758,6 +766,58 @@ class Judge(EvalCase):
         self.assertEqual(verdict.numbers["blocks"], 20)
         self.assertEqual(verdict.numbers["trades"], 0)
 
+    def test_a_backlog_of_blocks_from_the_time_on_another_rung_is_not_judged_on_this_one(self):
+        # BUG (medium): evaluator.py:191-196 and :222. A block belongs to a rung by the sequence
+        # number at which its ROW WAS WRITTEN (`e.seq > since_seq`), not by when the block
+        # happened. The House observes only the book of the agent's current rung, so while an agent
+        # is on rung 2 nobody observes its paper book, although the paper book is still marked
+        # every tick (and may still hold Kalshi contracts: `_wind_down` keeps them to settlement).
+        # On demotion the first `observe` of the paper book writes that whole backlog at once,
+        # every row AFTER the demotion verdict, stamped `"rung": 1`, and `judge` counts all of it
+        # as the new rung-1 record: a settlement loss taken on paper while the agent was on real
+        # money can kill it for "drawdown" the moment it returns. The same happens to the block
+        # that straddles any promotion.
+        # FIX: store the block's first mark seq in the row (e.g. `"from_seq": first.seq`) and let
+        # `blocks(since_seq)` keep rows whose `from_seq > since_seq`; do not write backlog blocks
+        # under the new rung at all.
+        self.stake("a", 200, at(0, 0))
+        self.ev.seat("a", 1, "test")
+        for hour in range(3):
+            self.mark("a", 200, at(hour, 10))
+        self.ev.observe("a", "paper", "hour")
+        self.ev.promote("a", 2, "test")
+        self.mark("a", 200, at(3, 10), holdings=1)  # still holding a paper contract to settlement
+        self.settle("a", -70.0, at(4, 5))  # it settles against the agent while it is on rung 2
+        self.mark("a", 130, at(4, 10))
+        self.mark("a", 130, at(5, 10))
+        self.ev.demote("a", "drift on the real book")
+        self.mark("a", 130, at(6, 10))
+        self.mark("a", 130, at(7, 10))
+        self.ev.observe("a", "paper", "hour")
+        verdict = self.ev.judge("a", "paper")
+        self.assertLessEqual(verdict.numbers["blocks"], 2)  # hours 5 and 6 at most: the rung was entered in hour 5
+        self.assertEqual(verdict.decision, "hold")
+
+    def test_a_lopsided_record_with_no_measured_risk_is_not_waved_through(self):
+        # BUG (low-medium): evaluator.py:214 returns a risk of 0.0 when no buy was seen since the
+        # rung was entered (positions opened before it, e.g. Kalshi contracts carried across a
+        # demotion and settling afterwards), and :249 hands that 0.0 to
+        # `stats.lopsided_growth_lcb`, where "the worst loss that could have happened" becomes
+        # zero: the bound is then (1 - p) * win_growth > 0 for ANY all-win record, so the one gate
+        # built for favourites passes exactly when it knows least.
+        # FIX: when `risked` is empty return `float("nan")` (the gate reads a risk that is not
+        # finite as "everything at risk"), or 1.0.
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        for _ in range(12):
+            self.settle("a", 0.5, at())  # twelve favourites came in; the buys were before this rung
+        for i in range(1, 31):
+            self.block("a", 0.006 if i % 3 else -0.001)
+            if i in (20, 25, 30):
+                verdict = self.ev.judge("a", "paper")
+        self.assertTrue(verdict.numbers["lopsided"])
+        self.assertNotEqual(verdict.decision, "eligible")
+
     def test_a_drawdown_on_an_earlier_rung_does_not_kill_on_this_one(self):
         self.ev.seat("a", 1, "test")
         self.block("a", math.log(0.6))
@@ -778,7 +838,8 @@ class Judge(EvalCase):
                 up = self.ev.judge("up", "real")
                 down = self.ev.judge("down", "real") if i == 20 else down
         self.assertGreater(up.numbers["lcb"], 0)
-        self.assertEqual(up.decision, "hold")
+        self.assertEqual((up.numbers["trades"], up.numbers["active_blocks"]), (12, 30))
+        self.assertEqual((up.decision, up.reason), ("hold", "the evidence does not decide yet"))  # there is no rung 4
         self.assertEqual(down.decision, "die")
 
     def test_a_custom_constitution_is_honoured(self):
@@ -938,7 +999,6 @@ class ReplayTrials(EvalCase):
         self.assertEqual((trial["passed"], trial["sharpe"], trial["deflated_sharpe"]), (False, None, None))
         self.assertEqual(self.ev.rung("a"), 0)
 
-    @unittest.expectedFailure
     def test_a_failed_replay_still_counts_as_a_trial_for_the_family(self):
         # BUG (exploitable): evaluator.py:82-88 and :95-98. `family_trials` drops every trial row
         # whose `sharpe` is None, and `record_trial` sets `sharpe = None` for an `ok: False` replay
@@ -957,7 +1017,6 @@ class ReplayTrials(EvalCase):
         verdict = self.ev.record_trial("a", "fam", replay_result(), promote=False)
         self.assertEqual(verdict.numbers["trials"], 51)
 
-    @unittest.expectedFailure
     def test_failed_replays_raise_the_bar(self):
         # BUG: the consequence of the one above. The same replay is judged against a benchmark
         # Sharpe of 0.0 whether it was the family's first try or its fifty-first, so long as the
@@ -1115,7 +1174,6 @@ class Drift(EvalCase):
         self.block("a", 0.003, book="real", start=25.0)
         self.assertEqual(self.ev.drift("a", "real").decision, "hold")
 
-    @unittest.expectedFailure
     def test_rung_three_drifts_against_the_real_money_record_that_earned_it(self):
         # QUESTIONABLE / BUG: evaluator.py:302 takes as "the record that earned the rung" EVERY
         # `eval.block` of the agent before the rung was entered: all books, all earlier rungs. For
@@ -1138,6 +1196,126 @@ class Drift(EvalCase):
         verdict = self.ev.drift("a", "real")
         self.assertAlmostEqual(verdict.numbers["reference_mean"], 0.002)
         self.assertEqual(verdict.decision, "hold")
+
+
+# =================================================================================================
+# a real Book writing the rows
+# =================================================================================================
+class WithARealBook(unittest.TestCase):
+    """The hand-written rows above must be what a `Book` really writes: drive one and read it."""
+
+    def setUp(self):
+        from league.tests.fakes import Clock, FakeBroker
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.db", clock=self.clock)
+        self.ev = Evaluator(self.ledger, clock=self.clock)
+        self.FakeBroker = FakeBroker
+        self.n = 0
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def book(self, venue, family, cash="100000"):
+        from league.book import Book, Limits
+        from league.fees import Fees
+
+        self.broker = self.FakeBroker(venue, cash=cash, family=family)
+        book = Book(venue, self.broker, self.ledger, fees=Fees(family), real_money=False, clock=self.clock)
+        book.limits["a"] = Limits(Decimal("100"), Decimal("75"))
+        book.stake("a", "200")
+        self.ev.seat("a", 1, "test")
+        return book
+
+    def order(self, book, instrument, side, quantity):
+        from league.book import Intent
+        from league.tests.fakes import iso
+
+        self.n += 1
+        (outcome,) = book.submit([Intent.new(agent="a", instrument=instrument, side=side, quantity=Decimal(quantity), reason="test",
+                                             created_at=iso(self.clock), nonce=str(self.n))])
+        self.assertEqual(outcome.status, "filled")
+
+    def hour(self):
+        from league.tests.fakes import iso
+
+        self.clock.advance(3600)
+        self.broker.clock_iso = iso(self.clock)
+
+    def test_an_equity_round_trip_with_a_top_up(self):
+        from ltcm.broker import Instrument
+
+        spy = Instrument("equity", "SPY", "alpaca-paper")
+        book = self.book("alpaca-paper", "alpaca")
+        self.broker.set_quote(spy, "100.00", "100.10")
+        self.order(book, spy, "buy", "0.5")  # pays the ask: $50.05 for something worth $50.00 at the bid
+        equity = [book.mark()["a"]]
+        self.hour()
+        self.broker.set_quote(spy, "101.00", "101.10")
+        self.order(book, spy, "sell", "0.5")
+        equity.append(book.mark()["a"])
+        self.hour()
+        book.stake("a", "50")  # the House lends more: not growth
+        equity.append(book.mark()["a"])
+        self.hour()
+        equity.append(book.mark()["a"])
+        self.assertEqual([str(e) for e in equity], ["199.95000000", "200.45000000", "250.45000000", "250.45000000"])
+        self.assertEqual(self.ev.observe("a", "alpaca-paper", "hour"), 3)
+        first, second, third = self.ev.blocks("a", book="alpaca-paper")
+        self.assertEqual((first["start_equity"], first["end_equity"], first["active"]), (200.0, 199.95, True))
+        self.assertAlmostEqual(first["log_growth"], math.log(199.95 / 200), places=12)
+        self.assertAlmostEqual(second["log_growth"], math.log(200.45 / 199.95), places=12)
+        self.assertTrue(second["active"])  # flat at the mark, but it sold inside the hour
+        self.assertEqual((third["flow"], third["active"]), (50.0, False))
+        self.assertAlmostEqual(third["log_growth"], 0.0, places=12)
+        returns, risk = self.ev.trade_returns("a", "alpaca-paper")
+        self.assertEqual(len(returns), 1)
+        self.assertAlmostEqual(returns[0], 0.45 / 250)  # against everything staked, top-up included
+        self.assertAlmostEqual(risk, 50.05 / 250)
+        self.assertEqual(self.ev.judge("a", "alpaca-paper").decision, "hold")
+
+    def test_a_kalshi_favourite_held_to_settlement(self):
+        from ltcm.broker import Instrument
+
+        ticker = "KXBTCD-26SEP2017-T80999"
+        yes = Instrument("event", ticker, "kalshi-shadow", market_id=ticker, right="yes")
+        book = self.book("kalshi-shadow", "kalshi", cash="1000")
+        self.broker.set_quote(yes, "0.94", "0.95")
+        self.order(book, yes, "buy", "10")
+        book.mark()
+        self.hour()
+        self.assertEqual(book.settle(ticker, "yes"), 1)
+        book.mark()
+        self.hour()
+        book.mark()
+        self.assertEqual(self.ev.observe("a", "kalshi-shadow", "hour"), 2)
+        first, second = self.ev.blocks("a")
+        self.assertTrue(first["active"])  # holding ten contracts at the mark
+        self.assertTrue(second["active"])  # nothing held at the mark, but the settlement fell in the hour
+        self.assertGreater(second["log_growth"], 0)
+        returns, risk = self.ev.trade_returns("a", "kalshi-shadow")
+        self.assertEqual(len(returns), 1)
+        self.assertGreater(returns[0], 0)
+        self.assertAlmostEqual(returns[0], float(book.account("a").realized) / 200)
+        self.assertAlmostEqual(risk, (9.5 + float(book.account("a").fees)) / 200, places=6)
+
+    def test_a_rebuilt_book_and_a_second_observation_change_nothing(self):
+        from ltcm.broker import Instrument
+
+        spy = Instrument("equity", "SPY", "alpaca-paper")
+        book = self.book("alpaca-paper", "alpaca")
+        self.broker.set_quote(spy, "100.00", "100.10")
+        for _ in range(4):
+            self.order(book, spy, "buy", "0.1")
+            book.mark()
+            self.hour()
+        self.ev.observe("a", "alpaca-paper", "hour")
+        rows = [(e.seq, e.payload) for e in self.ledger.iter(kinds="eval.block")]
+        Evaluator(self.ledger).observe("a", "alpaca-paper", "hour")
+        self.assertEqual(rows, [(e.seq, e.payload) for e in self.ledger.iter(kinds="eval.block")])
+        self.assertEqual(self.ledger.verify(), self.ledger.count())
 
 
 if __name__ == "__main__":

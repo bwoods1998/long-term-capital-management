@@ -215,6 +215,7 @@ class Account:
     cash: Decimal = ZERO
     realized: Decimal = ZERO
     fees: Decimal = ZERO
+    swept: bool = False
     holdings: dict[str, Holding] = field(default_factory=dict)
 
 
@@ -415,6 +416,7 @@ class Book:
             usd = money(p["usd"])
             account.staked += usd
             account.cash += usd
+            account.swept = usd < 0  # the House took the account's cash back: it is closed until staked again
         elif kind == "book.fill":
             if agent == HOUSE:
                 self._apply_house(p)
@@ -950,6 +952,7 @@ class Book:
             "order_id": order_id,
             "intent_id": intent_id or (intent.id if intent else None),
             "realized": text(realized),
+            "flat": bool(held is not None and quantity >= held.quantity) if side == "sell" else None,
             "opened_at": held.opened_at if held is not None else None,
             "entry_reason": held.reason if held is not None else None,
             "instrument": instrument.to_dict(),

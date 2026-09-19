@@ -145,7 +145,6 @@ class Decide(unittest.TestCase):
         runner.decide(strategy("return {}"), {})
         self.assertEqual(signal.alarm(0), 0)  # nothing was left pending
 
-    @unittest.expectedFailure
     def test_a_strategy_cannot_swallow_its_own_timeout(self):
         # BUG (medium): runner.py:35 `class TimedOut(Exception)` and runner.py:64-68. The alarm
         # raises an ordinary `Exception` INSIDE the strategy's frame, so a strategy that wraps its
@@ -170,7 +169,6 @@ class Decide(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("ran past", result.get("error", ""))
 
-    @unittest.expectedFailure
     def test_decide_never_raises_on_a_malformed_answer(self):
         # BUG (low): runner.py:68 calls `clean(out, ...)` OUTSIDE the try block, and `clean`
         # iterates `out.get("intents") or []` and `out.get("cancels") or []`. A strategy that
@@ -453,7 +451,6 @@ class SlowRuns(BoxCase):
         self.assertGreaterEqual(elapsed, 4.5)
         self.assertLess(elapsed, self.WAIT)
 
-    @unittest.expectedFailure
     def test_an_endless_module_body_is_cut_off_in_needs_mode_too(self):
         # BUG (low): runner.py:97-107 `needs_of` executes the strategy's module body with NO alarm
         # (only `decide` arms one), so `while True: pass` at the top of a file hangs the runner in
