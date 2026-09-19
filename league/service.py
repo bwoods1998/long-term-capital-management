@@ -151,6 +151,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.astra = Astra(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house))
     if provider is not None:
         house.budget = Budget(house.ledger, lambda: provider.check_balance())
+    if not canary and REPO.parent.name == "releases" and config.get("auto_update", True):
+        # On the House box the code runs from <base>/releases/<id>: there, main is pulled every
+        # half hour and handed to the watchdog. On a developer's machine nothing updates itself.
+        from .updater import Updater
+
+        house.updater = Updater(REPO.parent.parent)
     if publish:
         # The balance chart is the REAL accounts whatever the agents are doing, so the publisher
         # reads them (balances only) even while every book is practice.

@@ -201,6 +201,10 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
         return f"Astra's change {p.get('branch')}: {p.get('status')}. {p.get('title') or ''}".strip()
     if kind == "ops.alert" and p.get("level") == "error":
         return f"House alert: {p.get('text')}"
+    if kind == "ops.deploy":
+        if p.get("action") == "deploying":
+            return f"New code on main: release {p.get('release')} is on the canary. The watchdog promotes it only if it stays healthy."
+        return f"New code on main was refused before the canary: {'; '.join(str(r) for r in (p.get('reasons') or [])[:2])}"
     if kind == "ops.recommendation":
         return f"Capital recommendation: {p.get('summary')}"
     return None

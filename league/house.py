@@ -111,6 +111,7 @@ class House:
         self.publisher = publisher
         self.budget = budget
         self.astra: Any = None  # set by the service: Astra's pull-request roles
+        self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
         self.books: dict[str, Book] = {}
         for name, broker in brokers.items():
@@ -423,6 +424,11 @@ class House:
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
         return intents, dropped
+
+    def _update(self) -> None:
+        outcome = self.updater.check()
+        if outcome.get("action") != "none":
+            self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files")})
 
     def _wake_safely(self, agent: Agent) -> dict[str, Any]:
         try:
@@ -796,6 +802,8 @@ class House:
                 with self._state_lock:
                     self._state["last_research"][agent.id] = self.clock()
                 self._background(f"research:{agent.id}", self.research, agent)
+        if self.updater is not None and self.updater.due():
+            self._background("update", self._update)
         if open_for_business and self.astra is not None:
             for role in self.astra.due():
                 self._background(f"astra:{role}", self.astra.run, role)
