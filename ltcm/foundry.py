@@ -675,6 +675,7 @@ class Foundry:
         config: Mapping[str, Any] | None = None,
         equity: Callable[[str], Any] | None = None,
         locked: Callable[[str], bool] | None = None,
+        is_live: Callable[[Any], bool] | None = None,
         halted: Callable[[], bool] | None = None,
     ):
         self.log = log
@@ -688,6 +689,11 @@ class Foundry:
         self.config = {**DEFAULTS, **dict(config or {})}
         self.equity = equity
         self.locked = locked
+        #: Whether a desk trades real money, promotions included. The service wires the
+        #: gateway's reading; a manifest's own mode misses a desk the committee promoted
+        #: (Sept 19, 2026: candidates went to an unfunded explorers book while the promoted
+        #: Mullins VIII read as shadow).
+        self.is_live: Callable[[Any], bool] = is_live or (lambda manifest: bool(getattr(manifest, "live", False)))
         #: True while the kill switch is engaged: a cycle that started before it keeps its
         #: backtests but moves nothing onto a live desk.
         self.halted = halted
@@ -828,7 +834,7 @@ class Foundry:
         under its learning size hands the candidates to the family's best-funded live book
         (Sept 19, 2026: the explorers book sat at -$50 of cash under its own settling
         positions while four adopted strategies could place nothing)."""
-        live = sorted((m for m in manifests.values() if m.family == family and m.live), key=lambda m: m.id)
+        live = sorted((m for m in manifests.values() if m.family == family and self.is_live(m)), key=lambda m: m.id)
         if not live:
             return None
         roles = dict((getattr(self.strategies, "config", None) or {}).get("book_roles") or {})
@@ -857,9 +863,8 @@ class Foundry:
                     return max(able, key=lambda d: free(d) or Decimal(0))
         return ordered[0]
 
-    @staticmethod
-    def shadow_desks(family: str, manifests: Mapping[str, Any]) -> list[Any]:
-        return sorted((m for m in manifests.values() if m.family == family and not m.live), key=lambda m: m.id)
+    def shadow_desks(self, family: str, manifests: Mapping[str, Any]) -> list[Any]:
+        return sorted((m for m in manifests.values() if m.family == family and not self.is_live(m)), key=lambda m: m.id)
 
     def subjects(self, family: str, manifests: Mapping[str, Any]) -> list[str]:
         """The family's house starter, then every other strategy its live desk runs. A strategy
@@ -877,18 +882,18 @@ class Foundry:
         # the explorers book alone would have left the house starters unmutated).
         # ...and the shadow desks after them: since 16:45 UTC a live book runs only the proven
         # strategies, so the search would otherwise stop the moment a family had none.
-        books = sorted((m for m in manifests.values() if m.family == family), key=lambda m: (m.id != (live.id if live else ""), not getattr(m, "live", False), m.id))
+        books = sorted((m for m in manifests.values() if m.family == family), key=lambda m: (m.id != (live.id if live else ""), not self.is_live(m), m.id))
         rows: dict[str, dict[str, Any]] = {}
         seen: set[str] = set()
         paused: set[str] = set()
         for book in books:
             for name, row in self.store().for_desk(book.id).items():
                 seen.add(name)
-                if getattr(book, "live", False) and not row.get("enabled", True) and not str(row.get("note") or "").startswith(("real money follows evidence", "explorers book")):
+                if self.is_live(book) and not row.get("enabled", True) and not str(row.get("note") or "").startswith(("real money follows evidence", "explorers book")):
                     paused.add(name)  # the desk's own verdict on it: not mutated again
                 # A shadow desk lends its house strategies only: a Foundry candidate there is
                 # still proving itself and is not a parent until it reaches a live book.
-                if not getattr(book, "live", False) and (row.get("foundry_code") or FOUNDRY_NAME.search(str(name))):
+                if not self.is_live(book) and (row.get("foundry_code") or FOUNDRY_NAME.search(str(name))):
                     continue
                 if row.get("enabled", True) and name not in rows:
                     rows[name] = row
@@ -1149,7 +1154,7 @@ class Foundry:
         best_reason = None if best is None else self.qualifies(best, reference)[1]
         deployment = None
         runners_up: list[str] = []
-        if bool(cfg.get("deploy_live")) and live is not None and live.live:
+        if bool(cfg.get("deploy_live")) and live is not None and self.is_live(live):
             # The arena (Sept 18, 2026): a candidate earns its forward record with real fills at
             # learning size on the live book, not with modelled fills on a shadow desk. The
             # winner goes; when nothing qualified, the best candidate that beat the baselines
@@ -1271,7 +1276,7 @@ class Foundry:
                 settled = int(record.get("settled") or 0)
                 if len(records) < 24:
                     records.append(
-                        f"- {desk.id}{' (live)' if desk.live else ''}/{name}: params {json.dumps(row.get('params') or {}, sort_keys=True)[:300]}, "
+                        f"- {desk.id}{' (live)' if self.is_live(desk) else ''}/{name}: params {json.dumps(row.get('params') or {}, sort_keys=True)[:300]}, "
                         f"{record.get('fills', 0)} fills, {settled} settled, {record.get('wins', 0)} won, "
                         f"P&L {record.get('settled_pnl_usd', '0')}, fees {record.get('fees_usd', '0')}, return per $ {ron if ron is not None else 'n/a'}"
                     )
@@ -1899,8 +1904,8 @@ class Foundry:
             d.get("desk_id") for d in deployments.values()
             if d.get("status") == "shadow" and now - _epoch(d.get("deployed_at")) < protect
         }
-        rows = {m.id: store.for_desk(m.id) for m in shadows if not m.live}
-        pool = [m for m in shadows if not m.live and m.id not in protected]
+        rows = {m.id: store.for_desk(m.id) for m in shadows if not self.is_live(m)}
+        pool = [m for m in shadows if not self.is_live(m) and m.id not in protected]
         # The worst desk is the one most likely to sit behind its daily-loss breaker, where the
         # winner could place nothing until the day turned (mullins-11 at 45% on Sept 18, 2026).
         if self.locked is not None:
@@ -2010,7 +2015,7 @@ class Foundry:
         if desk is None:
             problems.append(f"{winner['id']} qualified but no shadow desk of {family} can take it")
             return None
-        if desk.live:  # belt and braces: the target list never holds a live desk
+        if self.is_live(desk):  # belt and braces: the target list never holds a live desk
             return None
         store = self.store()
         manager = self.sandboxes()
@@ -2179,7 +2184,7 @@ class Foundry:
         horizon = float(cfg["forward_max_hours"]) * 3600.0
         out: list[dict[str, Any]] = []
         mine = {str(f) for f in (cfg.get("families") or [])}
-        for desk in [m for m in manifests.values() if getattr(m, "live", False) and (not mine or m.family in mine)]:
+        for desk in [m for m in manifests.values() if self.is_live(m) and (not mine or m.family in mine)]:
             for name, row in sorted(self.explorer_rows(desk.id).items()):
                 at = self.now()
                 since = row.get("promoted_at") or row.get("deployed_at")
@@ -2249,7 +2254,7 @@ class Foundry:
             at = self.now()
             desk = manifests.get(dep.get("desk_id"))
             name = str(dep.get("strategy") or "")
-            if desk is None or desk.live:
+            if desk is None or self.is_live(desk):
                 self._deployment(fid, status="gone", ended_at=at)
                 continue
             row = store.for_desk(desk.id).get(name)
@@ -2292,7 +2297,7 @@ class Foundry:
                     self._deployment(fid, status="expired", ended_at=at, forward=forward)
                 continue
             live = self.live_desk(str(dep.get("family")), manifests)
-            if live is None or not live.live:
+            if live is None or not self.is_live(live):
                 continue
             try:
                 result = self._adopt(dep, desk, live, name, record, at, store, manager, frozen)

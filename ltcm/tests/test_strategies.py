@@ -376,6 +376,20 @@ class BootstrapTests(StrategyCase):
         self.assertNotEqual(self.strategies.store.for_desk(self.manifest.id)["hourly_ranges"]["params"], {"min_edge": 0.9})
 
 
+    def test_a_live_books_allow_list_spares_a_row_the_fast_track_adopted(self):
+        # Sept 19, 2026: every adoption was switched off again on the next tick.
+        live = manifest(id="scholes", parent_id=None, capital={"mode": "live", "usd": "142"})
+        self.service.manifests["scholes"] = live
+        self.strategies.config["starters"] = True
+        self.strategies.config["live_allow"] = ["hourly_ranges"]
+        self.strategies.store.update("scholes", "hourly_quotes", enabled=True, foundry_id="fdy-324-x", promoted_from="scholes-2")
+        self.strategies.store.update("scholes", "hourly_quotes_f9", enabled=True, foundry_code=True)
+        self.strategies.bootstrap(self.service.manifests)
+        rows = self.strategies.store.for_desk("scholes")
+        self.assertTrue(rows["hourly_quotes"]["enabled"], "adopted on its forward record: the evidence path itself")
+        self.assertFalse(rows["hourly_quotes_f9"]["enabled"], "an unproven row still proves itself in shadow first")
+
+
 class CancelAndRecordTests(StrategyCase):
     def setUp(self):
         super().setUp()

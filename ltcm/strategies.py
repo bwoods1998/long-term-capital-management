@@ -1066,7 +1066,10 @@ class Strategies:
                 # strategies named in `strategies.live_allow`; everything else proves itself in
                 # shadow and reaches real money through promotion or the Foundry's fast track.
                 for name, row in existing.items():
-                    if name not in allow and row.get("enabled", True):
+                    # A row the Foundry's fast track adopted (`foundry_id`) came in on its
+                    # forward record: it is the evidence path, not an exception to it. Until
+                    # Sept 19, 2026 every adoption was switched off again on the next tick.
+                    if name not in allow and row.get("enabled", True) and not row.get("foundry_id"):
                         self.store.update(desk_id, name, enabled=False, note="real money follows evidence: proving itself in shadow first (Sept 18, 2026)")
                     elif name in allow and row.get("house") and not row.get("enabled", True) and str(row.get("note") or "").startswith("explorers book"):
                         self.store.update(desk_id, name, enabled=True, note="house starter (the explorers books were retired on Sept 18, 2026)")

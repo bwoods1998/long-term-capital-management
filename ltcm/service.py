@@ -1489,6 +1489,7 @@ class Service:
                     state_path=path,
                     equity=self._desk_equity,
                     locked=self._desk_locked,
+                    is_live=lambda manifest: bool(self.gateway.live_desk(manifest.id)),
                     halted=lambda: self.gateway.kill_switch_engaged(),
                 )
 
