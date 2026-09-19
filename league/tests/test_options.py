@@ -9,8 +9,9 @@ import unittest
 from decimal import Decimal
 from unittest import mock
 
-from league.book import Limits
+from league.book import Book, Limits
 from league.constitution import CONSTITUTION
+from league.fees import Fees
 from league.ledger import now_iso
 from league.tests.test_book import BookCase
 from league.tests.test_house import HouseCase
@@ -237,3 +238,61 @@ class InTheHouse(HouseCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FirstBaseline(BookCase):
+    """A book that has never traded re-reads a baseline it cannot reconcile.
+
+    Sept 19, 2026, on the league's first tick under the partners' names: a leftover bid from the
+    league before it filled between the cash read and the position read of the new book's first
+    baseline. The book froze $40 short with no agent having traded at all, and every Alpaca agent
+    was blocked from entering anything.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.btc = instrument_for(self.venue, {"symbol": "BTC/USD"})
+        self.broker.set_quote(self.btc, "79995", "80005")
+        self.book.limits["a"] = Limits(D("100"), D("75"))
+        self.book.stake("a", "200")
+
+    def test_a_book_that_has_never_traded_reads_the_venue_again(self):
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.cash -= D("40")  # the moment moved between two reads
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertFalse(self.book.frozen)
+        note = [e.payload for e in self.ledger.iter(kinds="book.baseline")][-1]
+        self.assertIn("never traded", note["note"])
+        self.assertIn("-40.0000", note["note"])
+        self.assertEqual(D(note["cash"]), D("99960"))
+
+    def test_once_it_has_traded_a_difference_freezes_it(self):
+        self.assertTrue(self.book.reconcile().ok)
+        outcome = self.book.submit([self.intent("a", self.btc, "buy", "0.0001")])[0]
+        self.assertEqual(outcome.status, "filled", outcome.detail)
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.cash -= D("40")
+        self.assertFalse(self.book.reconcile().ok)
+        self.assertEqual(len([e for e in self.ledger.iter(kinds="book.baseline") if "never traded" in e.payload["note"]]), 0)
+
+    def test_a_working_order_alone_counts_as_having_traded(self):
+        self.assertTrue(self.book.reconcile().ok)
+        rest = self.book.submit([self.intent("a", self.btc, "buy", "0.0001", order_type="limit", limit_price="76000")])[0]
+        self.assertEqual(rest.status, "resting", rest.detail)
+        self.broker.cash -= D("40")
+        self.assertFalse(self.book.reconcile().ok)
+
+    def test_the_baseline_waits_for_a_foreign_order_to_stop_working(self):
+        slept = []
+        book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=False, clock=self.clock, sleep=slept.append)
+        working = [object()]
+
+        def open_orders():
+            return [type("O", (), {"id": "foreign", "broker_order_id": "foreign"})()] if working else []
+
+        self.broker.open_orders = open_orders
+        self.broker.cancel = lambda _id: working.clear()
+        book.open_baseline()
+        self.assertEqual(slept, [])  # it stopped working at once
+        self.assertIsNotNone(book.baseline_cash)

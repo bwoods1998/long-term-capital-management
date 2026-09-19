@@ -368,6 +368,7 @@ class Book:
         clock=time.time,
         market_open: Any = None,
         resolves_at: Any = None,
+        sleep: Any = time.sleep,
         kill_switch: Any = None,
     ):
         self.name = name
@@ -379,6 +380,7 @@ class Book:
         self.clock = clock
         self.market_open = market_open  # callable(instrument, iso) -> bool | None
         self.resolves_at = resolves_at  # callable(instrument) -> epoch seconds | None: when an event market is expected to pay
+        self.sleep = sleep
         self.kill_switch = kill_switch  # callable() -> bool
         self.engine = RiskEngine()
         self.limits: dict[str, Limits] = {}
@@ -1367,6 +1369,13 @@ class Book:
                 raise BookError(f"{self.name} has {len(foreign)} open order(s) this book did not send; cancel them at the venue first")
             for order in foreign:
                 self.broker.cancel(order.broker_order_id or order.id)
+            for _ in range(10 if foreign else 0):
+                # A cancel is not instant, and an order can fill while it is being cancelled. The
+                # venue is read only once nothing of that kind is still working, so the baseline is
+                # not half of one moment and half of the next.
+                if not [o for o in self.broker.open_orders() if o.id not in self.orders]:
+                    break
+                self.sleep(1.0)
             venue_cash, venue_positions = self._venue()
             cash, positions, _ = self._ledger_totals()
             baseline = {
@@ -1427,6 +1436,25 @@ class Book:
         is booked to the House row as dust; anything larger freezes new entries until it clears."""
         with self._lock:
             self.open_baseline()
+            result = self._reconcile()
+            if result.ok or self._traded_yet():
+                return result
+            # A book that has never traded cannot have drifted: its first reading of the venue was
+            # taken across a moment that moved. (Sept 19, 2026: a leftover bid filled between the
+            # cash read and the position read of a new league's first baseline, and froze the book
+            # $40 short with no agent having traded at all.) It has nothing of its own to lose by
+            # reading again, and every later difference is still a freeze.
+            self._baseline_row(self.baseline_cash + result.cash_diff, self.baseline_positions,
+                               f"re-read: the book has never traded and the venue was {result.cash_diff:+.4f} against its first reading")
+            return self._reconcile()
+
+    def _traded_yet(self) -> bool:
+        """Whether this book has ever moved money of its own. A stake is not a trade."""
+        return bool(self.orders) or any(a.holdings or a.realized or a.fees
+                                        for name, a in self.accounts.items() if name != HOUSE)
+
+    def _reconcile(self) -> Reconciliation:
+        if True:
             venue_cash, venue_positions = self._venue()
             self.venue_cash = venue_cash
             cash, positions, instruments = self._ledger_totals()
