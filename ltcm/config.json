@@ -145,7 +145,7 @@
     "reasoning_effort": "high",
     "max_output_tokens": 16000,
     "budget_usd_per_day": "600",
-    "sandboxes": 24,
+    "sandboxes": 36,
     "backtest_timeout_seconds": 1500,
     "sandbox_daily_seconds": 86400,
     "window_days": 5,
@@ -196,11 +196,12 @@
         "families": [
           "kalshi"
         ],
-        "sandboxes": 10,
+        "sandboxes": 14,
         "sandbox_offset": 0,
-        "code_candidates": 8,
-        "originate": 4,
-        "deploy_top": 2
+        "code_candidates": 12,
+        "originate": 6,
+        "deploy_top": 2,
+        "interval_minutes": 6
       },
       {
         "name": "fast",
@@ -210,10 +211,10 @@
         "subjects": [
           "hourly_quotes"
         ],
-        "sandboxes": 10,
-        "sandbox_offset": 10,
-        "code_candidates": 6,
-        "originate": 2,
+        "sandboxes": 16,
+        "sandbox_offset": 14,
+        "code_candidates": 10,
+        "originate": 3,
         "family_step_minutes": {
           "kalshi": 5
         },
@@ -222,16 +223,16 @@
         },
         "deploy_top": 3,
         "protect_hours": 2,
-        "interval_minutes": 5
+        "interval_minutes": 4
       },
       {
         "name": "crypto",
         "families": [
           "crypto"
         ],
-        "sandboxes": 4,
-        "sandbox_offset": 20,
-        "code_candidates": 2,
+        "sandboxes": 6,
+        "sandbox_offset": 30,
+        "code_candidates": 3,
         "originate": 1
       }
     ],
