@@ -254,6 +254,21 @@ class InTheHouse(HouseCase):
         child = self.house.fork(parent)
         self.assertEqual((child.id, child.line, child.parent), ("meriwether-7", "meriwether", parent.id))
 
+    def test_an_architects_strategy_joins_a_desk_and_is_born_once(self):
+        from league import strategies
+        from league.tests.test_house import BUYER
+
+        rows = [{"name": "btc-gap-fade", "family": "gap-fade", "why": "a test strategy", "code": BUYER}]
+        real = strategies.all_strategies
+        strategies.all_strategies = lambda: rows
+        try:
+            born = self.house.enroll()
+            self.assertEqual([(a.id, a.line, a.founder, a.specialty) for a in born],
+                             [("rosenfeld", "rosenfeld", "btc-gap-fade", "alpaca-crypto-majors")])
+            self.assertEqual(self.house.enroll(), [])  # once, by the strategy's own name
+        finally:
+            strategies.all_strategies = real
+
     def test_a_full_specialty_has_no_more_children(self):
         parent = self.seated()
         self.house.economy.grant(parent.id, "10", "test")

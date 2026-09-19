@@ -284,12 +284,14 @@ class House:
         from . import strategies
 
         born = []
-        known = {a.name for a in self.registry.agents.values()} | set(self.registry.agents)
+        known = {a.founder for a in self.registry.agents.values()}
         for row in strategies.all_strategies():
             if row["name"] in known or len(self.registry.living()) >= int(self.game["economy"]["max_population"]):
                 continue
             try:
-                born.append(self.spawn(row["name"], row["family"], row["code"], reason="Merton, as architect: " + row["why"]))
+                # Named from the desk its NEEDS put it on, like every other agent: the strategy's
+                # own name in the registry is what says it has already been born.
+                born.append(self.spawn("", row["family"], row["code"], reason="Merton, as architect: " + row["why"], founder=row["name"]))
             except ValueError as exc:
                 self.alert("warning", f"the architect's strategy {row['name']} could not be born: {str(exc)[:200]}")
         return born
@@ -312,6 +314,9 @@ class House:
         return sum(1 for a in self.registry.living() if a.specialty == niche_id)
 
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
+              # `name` is the line the agent is numbered from. Empty means "the desk its NEEDS put
+              # it on": that is how the architect's strategies join a desk rather than arriving
+              # with a slug of their own.
               params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False,
               specialty: str | None = None, founder: str | None = None) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
@@ -340,7 +345,7 @@ class House:
                 self.sandbox.rest(PROBE_BOX)
             raise ValueError(f"{name}: {exc}") from exc
         agent = self.registry.born(
-            name=name, family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
+            name=name or (niche.desk if niche else ""), family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
             parent=parent, reason=reason, specialty=niche.id if niche else None, founder=founder,
         )
         if niche is not None and not niche.replay:
