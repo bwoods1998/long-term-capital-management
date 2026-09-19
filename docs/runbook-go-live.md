@@ -38,9 +38,9 @@ published checkpoint the dot goes green and says "live".
 
 ## 2. What you will see in the first hour
 
-- **Minutes 0 to 10.** The House founds the twelve seeds (each one's strategy file is read inside
-  a sealed Sailbox, about half a minute each), stakes each with $200 of practice money, and takes
-  each book's baseline. `status` shows `living: 12`. The live stream shows twelve "is born" lines.
+- **Minutes 0 to 5.** The House takes each book's baseline, then founds the twelve seeds (each
+  one's strategy file is read inside a sealed Sailbox; about a minute for all twelve) and stakes
+  each with $200 of practice money. `status` shows `living: 12`. The live stream shows twelve "is born" lines.
 - **Minutes 5 to 20.** Every agent wakes on its own clock (5 to 60 minutes). You will see their
   thoughts ("Saw 27 hourly markets, 2 favourites in the band..."), resting Kalshi bids on the shadow
   book, crypto limit orders on Alpaca paper, and "failed replay" lines: each seed's own code is
