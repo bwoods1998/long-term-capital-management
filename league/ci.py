@@ -141,6 +141,10 @@ def check_strategy(path: Path) -> list[str]:
         venue, _, _ = niche_of(described["needs"])
     except ValueError as exc:
         return [f"{path.name}: {exc}"]
+    from . import niches
+
+    if niches.match(described["needs"], niches.load()) is None:
+        return [f"{path.name}: its NEEDS sit in no open specialty of league/niches.json (the House would refuse to let it be born)"]
     result = run_replay(code, {}, regression_tape(venue, steps=240))
     if not result.get("ok"):
         return [f"{path.name}: the replay did not run: {result.get('error')}"]

@@ -81,14 +81,14 @@ class Commons:
         return {"error": f"search failed: {failure}"}
 
     # ---------------------------------------------------------------- library
-    def library_write(self, agent: str, title: str, text: str, tags: list[str] | None = None) -> dict[str, Any]:
+    def library_write(self, agent: str, title: str, text: str, tags: list[str] | None = None, *, niche: str | None = None) -> dict[str, Any]:
         title = str(title or "").strip()[:160]
         text = str(text or "").strip()[:MAX_NOTE_CHARS]
         if len(title) < 4 or len(text) < 40:
             return {"error": "a note needs a title and at least a few sentences"}
         entry = self.ledger.append(
             "library.note",
-            {"title": title, "text": text, "tags": [str(t)[:30] for t in (tags or [])][:8]},
+            {"title": title, "text": text, "tags": [str(t)[:30] for t in (tags or [])][:8], **({"niche": niche} if niche else {})},
             agent=agent,
         )
         return {"saved": entry.id, "title": title}
@@ -96,7 +96,9 @@ class Commons:
     def _notes(self) -> list[Any]:
         return list(self.ledger.iter(kinds="library.note"))
 
-    def library_search(self, query: str, limit: int = 5) -> dict[str, Any]:
+    def library_search(self, query: str, limit: int = 5, *, niche: str | None = None) -> dict[str, Any]:
+        """Notes matching the query. A specialist's own niche comes first: a match there outranks
+        the same match elsewhere, so a niche's library compounds for the agents that work it."""
         wanted = _words(query)
         scored = []
         for entry in self._notes():
@@ -104,11 +106,13 @@ class Commons:
             have = _words(p["title"]) | _words(" ".join(p.get("tags") or [])) | _words(p["text"])
             score = len(wanted & have) + 2 * len(wanted & _words(p["title"]))
             if score:
+                if niche and p.get("niche") == niche:
+                    score += 3
                 scored.append((score, entry.seq, entry))
         scored.sort(key=lambda row: (-row[0], -row[1]))
         return {
             "results": [
-                {"id": e.id, "title": e.payload["title"], "by": e.agent, "at": e.at, "excerpt": e.payload["text"][:240]}
+                {"id": e.id, "title": e.payload["title"], "by": e.agent, "niche": e.payload.get("niche"), "at": e.at, "excerpt": e.payload["text"][:240]}
                 for _, _, e in scored[: max(1, min(int(limit), 10))]
             ]
         }

@@ -170,6 +170,15 @@ def kalshi_taker_fee(contracts: float, price: float) -> float:
     return float((Decimal("0.07") * c * p * (1 - p)).quantize(_FEE_GRID, rounding=ROUND_CEILING))
 
 
+def kalshi_maker_fee(contracts: float, price: float) -> float:
+    """What a RESTING fill pays on the series that charge makers (the winner, spread and total
+    markets of the big leagues, among others): 0.0175 x C x P x (1 - P), rounded UP to $0.0001.
+    Every other series charges a maker nothing."""
+    p = Decimal(str(round(float(price), 6)))
+    c = Decimal(str(round(float(contracts), 9)))
+    return float((Decimal("0.0175") * c * p * (1 - p)).quantize(_FEE_GRID, rounding=ROUND_CEILING))
+
+
 class _Deadline:
     """Calls strategy code with a wall-clock limit. On a Unix main thread a timer interrupts a
     call that runs over; everywhere else the call is timed and an overrun is counted after the
@@ -291,8 +300,10 @@ def _kalshi_view(step: dict) -> _View:
 class _Account:
     """One agent's simulated account on one venue: cash, holdings, resting orders and the tally."""
 
-    def __init__(self, venue: str, stake: float, limits: dict[str, float], results: dict[str, str], record_fills: bool):
+    def __init__(self, venue: str, stake: float, limits: dict[str, float], results: dict[str, str], record_fills: bool,
+                 maker_fee_series: Any = ()):
         self.venue = venue
+        self.maker_fee_series = {str(x).upper() for x in (maker_fee_series or ())}
         self.stake = stake
         self.cash = stake
         self.limits = limits
@@ -313,7 +324,9 @@ class _Account:
     # -- money -------------------------------------------------------------------------------
     def fee(self, key: str, quantity: float, price: float, liquidity: str) -> float:
         if self.venue == "kalshi":
-            return 0.0 if liquidity == "maker" else kalshi_taker_fee(quantity, price)
+            if liquidity == "maker":
+                return kalshi_maker_fee(quantity, price) if str(key).split("-", 1)[0].upper() in self.maker_fee_series else 0.0
+            return kalshi_taker_fee(quantity, price)
         if is_equity(key):
             return 0.0
         return quantity * price * (CRYPTO_MAKER if liquidity == "maker" else CRYPTO_TAKER)
@@ -674,7 +687,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     wanted_series = {s for s in needs.get("series") or [] if isinstance(s, str)} if isinstance(needs.get("series"), list) else set()
     max_hours = _num(needs.get("max_hours_to_close"))
 
-    account = _Account(venue, stake, limits, results, audit)
+    account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else ())
     history: dict[str, list[dict[str, Any]]] = {}
     memory: dict[str, Any] = {}
     errors, last_error = 0, ""

@@ -441,6 +441,13 @@ def listed_close(row: "dict[str, Any]", close_ts: float) -> float:
     return close_ts
 
 
+def _maker_fee_series(names: "list[str]") -> "list[str]":
+    from ltcm.sim import kalshi_fee_schedule
+
+    schedule = kalshi_fee_schedule()
+    return [name for name in names if (schedule.get(name) or {}).get("maker")]
+
+
 def _listed_stop(row: "dict[str, Any]", close_ts: float) -> float:
     """What the live view would have shown as this settled market's close while it was open: the
     listed close, or the scheduled expiration when that came first (see `KalshiData._live_row`).
@@ -678,6 +685,9 @@ class KalshiData:
             "horizon": horizon,
             "step_seconds": step,
             "series": names,
+            # The series of this tape whose resting fills pay a fee (`ltcm/data/kalshi_fees.json`):
+            # the replay runs in a sealed box and cannot look it up.
+            "maker_fee_series": _maker_fee_series(names),
             "steps": steps,
             "results": results,
             "meta": {"listed": listed, "scanned": scanned, "kept": len(results)},
@@ -754,6 +764,8 @@ class KalshiData:
         for t in range(first, int(math.floor(end_ts)) + 1, step):
             if t >= close_ts:
                 break  # trading has stopped: nothing to show, and the result is about to be known
+            if t >= market["listed_close_ts"]:
+                break  # a game running past its scheduled end: the live view has dropped it, so the replay does too
             index = bisect.bisect_right(ends, t) - 1
             candle = usable[index]
             bid, ask = _float(candle.get("yes_bid_close")), _float(candle.get("yes_ask_close"))

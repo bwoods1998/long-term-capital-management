@@ -55,7 +55,11 @@ BRIEFS: dict[str, str] = {
 table and the graveyard and write NEW STRATEGY PROGRAMS that cheap agents then run, mutate and are judged on.
 A new strategy is born on rung 0 and must pass a mechanical replay (deflated Sharpe against every trial its
 family has run) before it is forward-tested on paper, then audited, then given $1 to $10 positions.
-Write at most two strategies a pass. Aim at niches (venue/horizon/style) that are empty or where everything has
+Every agent is a SPECIALIST: it belongs for life to one specialty of `specialties` below (a venue, a universe of
+series or symbols, a brief of what is known there), and a strategy is placed by what its NEEDS ask to see, so name
+series or symbols from ONE specialty's universe (a strategy that sits in none is refused). Entries on Kalshi must
+resolve within 12 hours (hourly strategies) or 48 (daily); a crypto position is closed after 48 hours.
+Write at most two strategies a pass. Aim at specialties that are empty, thinly worked, or where everything has
 died for a reason you can name and avoid. Prefer structural edges that survive fees (maker fills, favourites,
 settlement mechanics, calendar effects) to pattern-fitting. Each strategy is one file
 `league/strategies/<name>.py` that follows the strategy contract EXACTLY, plus the WHOLE updated
@@ -344,6 +348,9 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
             from . import seeds, strategies
 
             base.update(replay_trials=trials, occupied_niches=sorted({a.niche for a in house.registry.living()}),
+                        specialties=[{"id": n.id, "title": n.title, "venue": n.venue, "horizons": list(n.horizons), "open": not n.dormant,
+                                      "members": house.members(n.id), "universe": list(n.universe[:24]), "brief": n.brief[:700]}
+                                     for n in house.niches.values()],
                         founding_seeds=[{k: s[k] for k in ("name", "family", "why")} for s in seeds.SEEDS],
                         registry=strategies.registry(), library=house.commons.library_search("edge evidence fees maker", 8)["results"])
         elif role == "toolsmith":

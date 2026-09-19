@@ -35,7 +35,7 @@ from ltcm.broker import Instrument, money
 
 from . import seeds as seeds_module
 from .agents import Agent, Registry, niche_of
-from . import capital
+from . import capital, niches as niches_module
 from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
 from .constitution import CONSTITUTION, digest as constitution_digest
@@ -72,6 +72,8 @@ class Settings:
     slow_workers: int = 2  # replays and research passes run beside the tick, never inside it
     kalshi_replay_days: int = 7
     kalshi_replay_markets: int = 2000
+    specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
+    niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
 
 
 class House:
@@ -127,6 +129,10 @@ class House:
             )
         self._state_path = self.root / "house.json"
         self._state = self._load_state()
+        self.niches = niches_module.load()
+        for niche_id, live in (self._state.get("niche_live") or {}).items():
+            if niche_id in self.niches:
+                self.niches[niche_id].live = tuple(live)
         self._data_cache: dict[str, tuple[float, Any]] = {}
         self._tapes: dict[str, tuple[float, dict[str, Any]]] = {}
         self._tape_lock = threading.Lock()
@@ -141,6 +147,7 @@ class House:
                 ledger=self.ledger, provider=provider, commons=self.commons, economy=self.economy,
                 rules=rules_text(self.game), contract=CONTRACT_PATH.read_text(encoding="utf-8"),
                 run_replay=self._candidate_replay, settings=self.game.get("research") or {}, clock=clock,
+                specialty=lambda agent: (self.niche_of(agent).text() if self.niche_of(agent) else ""),
             )
         self._record_start()
         # Every book's baseline is taken now, before anything can trade: what the venue holds at
@@ -163,7 +170,7 @@ class House:
             state = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             state = {}
-        for key in ("next_wake", "memory", "last_research", "tried", "last_mark", "settled"):
+        for key in ("next_wake", "memory", "last_research", "tried", "last_mark", "settled", "niche_live", "series_category"):
             state.setdefault(key, {})
         return state
 
@@ -189,14 +196,30 @@ class House:
         return (self.root / "STOP").exists()
 
     # ------------------------------------------------------------ population
+    def founders(self) -> list[dict[str, Any]]:
+        """Every founder of every open specialty: a seed's program pointed at the niche's markets."""
+        rows = {row["name"]: row for row in seeds_module.SEEDS}
+        out = []
+        for niche in self.niches.values():
+            if niche.dormant:
+                continue
+            for founder in niche.founders:
+                seed = rows[founder["seed"]]
+                # One family a program a specialty: trials are counted, and real-money records
+                # pooled, among agents that run the same idea on the same kind of market.
+                family = seed["family"] if founder["name"] == founder["seed"] else f"{niche.id.split('-', 1)[1]}-{seed['family'].split('-', 1)[-1]}"
+                out.append({"name": founder["name"], "family": family, "niche": niche.id, "why": seed["why"],
+                            "code": niches_module.founder_code(seeds_module.load(founder["seed"]), niche, founder)})
+        return out
+
     def found(self, names: list[str] | None = None) -> list[Agent]:
-        """Seed the first population (idempotent: a seed already born is not born again)."""
+        """Seed the first population (idempotent: a founder already born is not born again)."""
         born = []
         existing = {a.name for a in self.registry.agents.values()} | set(self.registry.agents)
-        wanted = [s for s in seeds_module.all_seeds() if (names is None or s["name"] in names) and s["name"] not in existing]
+        wanted = [f for f in self.founders() if (names is None or f["name"] in names) and f["name"] not in existing]
         for index, seed in enumerate(wanted):
             # The probe box stays awake between seeds: most of reading a strategy's NEEDS is the box waking.
-            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], keep_probe_awake=index < len(wanted) - 1)
+            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], specialty=seed["niche"], keep_probe_awake=index < len(wanted) - 1)
             # The founders are the owner's priors (what the first run measured, and published
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still
@@ -233,8 +256,15 @@ class House:
                 added += 1
         return added
 
+    def niche_of(self, agent: Agent | None) -> niches_module.Niche | None:
+        return self.niches.get(agent.specialty) if agent is not None and agent.specialty else None
+
+    def members(self, niche_id: str) -> int:
+        return sum(1 for a in self.registry.living() if a.specialty == niche_id)
+
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
-              params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False) -> Agent:
+              params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False,
+              specialty: str | None = None) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
         # sealed probe box the House keeps for the purpose, never the House's own process.
         described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
@@ -244,9 +274,25 @@ class House:
                 self.sandbox.rest(PROBE_BOX)
             raise ValueError(f"{name}: {info.get('error')}")
         niche_of(info["needs"])
+        needs = dict(info["needs"])
+        # A child is of its parent's specialty; a strategy that arrives with none (the architect's)
+        # joins the open specialty its NEEDS sit in, or is not born.
+        inherited = self.registry.get(parent).specialty if parent and self.registry.get(parent) else None
+        niche = self.niches.get(specialty or inherited or "") or (None if (specialty or inherited) else niches_module.match(needs, self.niches))
+        try:
+            if niche is None and (specialty or parent is None) and self.settings.specialists:
+                raise ValueError("its NEEDS sit in no open specialty of league/niches.json")
+            if niche is not None:
+                if niche.dormant:
+                    raise ValueError(f"the {niche.id} specialty is not open yet: {niche.dormant_reason}")
+                needs = niches_module.constrain(needs, niche)
+        except ValueError as exc:
+            if keep_probe_awake:
+                self.sandbox.rest(PROBE_BOX)
+            raise ValueError(f"{name}: {exc}") from exc
         agent = self.registry.born(
-            name=name, family=family, code=code, needs=info["needs"], params={**info.get("params", {}), **dict(params or {})},
-            parent=parent, reason=reason,
+            name=name, family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
+            parent=parent, reason=reason, specialty=niche.id if niche else None,
         )
         if parent is None or endowment is not None:
             # A seed, or a newcomer the House stakes itself. (A fork is endowed by its parent.)
@@ -359,6 +405,13 @@ class House:
             series = [str(s) for s in (needs.get("series") or [])][:12]
             hours = float(needs.get("max_hours_to_close") or 24)
             ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}", 50, lambda: self.kalshi_data.markets(series, max_hours_to_close=hours))
+            niche = self.niche_of(agent)
+            if not ctx["markets"] and niche is not None and niche.live:
+                # Its own series are dark (a season ended, a quiet night): the busiest live series of its specialty.
+                busiest = [x for x in niche.live if x not in series][: niches_module.MAX_UNIVERSE]
+                if busiest:
+                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}", 120, lambda: self.kalshi_data.markets(busiest, max_hours_to_close=hours))
+                    ctx["note"] = "None of the series your strategy names has a market open inside your window, so these are the busiest live series of your specialty."
         return ctx
 
     # ------------------------------------------------------------------- wake
@@ -416,6 +469,9 @@ class House:
             try:
                 instrument = instrument_for(book.broker.venue, dict(row))
                 side = str(row.get("side") or "").lower()
+                niche = self.niche_of(agent)
+                if niche is not None and side == "buy" and not niche.holds(instrument):
+                    raise ValueError(f"{instrument.market_id or instrument.symbol} is outside the {niche.id} specialty")
                 order_type = str(row.get("type") or "market").lower()
                 limit = None if row.get("limit_price") is None else money(str(row["limit_price"]))
                 if row.get("quantity") is not None:
@@ -549,6 +605,9 @@ class House:
             venue, horizon, _ = niche_of(info["needs"])
             if (venue, horizon) != (agent.venue, agent.horizon):
                 return {"passed": False, "error": "a candidate must stay on your venue and horizon", "numbers": {}}
+            niche = self.niche_of(agent)
+            if niche is not None:
+                info["needs"] = niches_module.constrain(info["needs"], niche)
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
             return {"passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
@@ -591,6 +650,37 @@ class House:
         self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
         if rung == 1 and old is not None:
             self._move_books(agent, old)
+
+    # ---------------------------------------------------------------- seasons
+    def survey_due(self) -> bool:
+        every = float(self.settings.niche_survey_hours)
+        if every <= 0 or self.kalshi_data is None or not hasattr(getattr(self.kalshi_data, "market_data", None), "markets"):
+            return False
+        return self.clock() - float(self._state.get("last_niche_survey") or 0) >= every * 3600
+
+    def _series_category(self, series: str) -> str | None:
+        known = self._state["series_category"]
+        if series not in known:
+            try:
+                raw = self.kalshi_data.market_data._get(f"/series/{series}", what=f"kalshi series {series}")
+                known[series] = str((raw.get("series") or raw).get("category") or "")
+            except Exception:  # noqa: BLE001 - not knowing keeps a stranger out
+                return None
+        return known[series]
+
+    def survey_niches(self) -> dict[str, list[str]]:
+        """Survey the venue and let every Kalshi specialty's universe follow what is trading now."""
+        volumes = niches_module.survey(self.kalshi_data.market_data, clock=self.clock)
+        if not volumes:
+            return {}
+        live = niches_module.apply_survey(self.niches, volumes, self._series_category)
+        with self._state_lock:
+            self._state["niche_live"] = live
+            self._state["last_niche_survey"] = self.clock()
+        joined = {nid: [x for x in rows if x not in self.niches[nid].listed] for nid, rows in live.items()}
+        self.ledger.append("ops.budget", {"what": "niche survey", "series_trading": len(volumes),
+                                          "live": {nid: len(rows) for nid, rows in live.items()}, "joined": {k: v[:20] for k, v in joined.items() if v}})
+        return live
 
     # ---------------------------------------------------------------- horizon
     def _enforce_horizon(self) -> int:
@@ -752,6 +842,9 @@ class House:
         rules = self.game["economy"]
         if len(self.registry.living()) >= int(rules["max_population"]) or not self.economy.can_fork(parent.id):
             return None
+        niche = self.niche_of(parent)
+        if niche is not None and self.members(niche.id) >= niche.max_members:
+            return None  # its specialty is full: no niche may crowd out the rest
         child_code = code or parent.code
         child_params = dict(params) if params is not None else (parent.params if code else mutate(parent.params, seed=f"{parent.id}:{len(self.registry.agents)}"))
         child = self.spawn(parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent")
@@ -901,6 +994,10 @@ class House:
                 with self._state_lock:
                     self._state["last_research"][agent.id] = self.clock()
                 self._background(f"research:{agent.id}", self.research, agent)
+        if open_for_business and self.survey_due():
+            with self._state_lock:
+                self._state["last_niche_survey"] = self.clock()  # claimed now, so a slow survey is not started twice
+            self._background("niche-survey", self.survey_niches)
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
         if open_for_business and self.astra is not None:

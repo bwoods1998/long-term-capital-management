@@ -90,7 +90,7 @@ class HouseTest(HouseCase):
 
     def test_spawn_reads_needs_in_the_box_endows_and_charges(self):
         agent = self.house.spawn("buyer", "test-family", BUYER, reason="test")
-        self.assertEqual(agent.niche, "alpaca/hour/test-buyer")
+        self.assertEqual((agent.specialty, agent.niche), ("alpaca-crypto-majors", "alpaca-crypto-majors"))  # placed by what its NEEDS ask to see
         self.assertEqual(agent.wake_minutes, 5)
         self.assertEqual(agent.params, {"notional": 20.0})
         balance = self.house.economy.balance(agent.id)

@@ -13,8 +13,8 @@
     "endowment_usd": "1.00",
     "fork_threshold_usd": "3.00",
     "fork_endowment_usd": "1.00",
-    "max_population": 16,
-    "min_population": 8,
+    "max_population": 36,
+    "min_population": 12,
     "replay_deadline_epochs": 3,
     "box_usd_per_hour": "0.04",
     "box_creation_usd": "0.005"
@@ -42,11 +42,11 @@
     ],
     "max_population": [
       8,
-      24
+      48
     ],
     "min_population": [
       4,
-      12
+      24
     ]
   },
   "audit": {
@@ -56,9 +56,9 @@
   "research": {
     "profile": "flash_flex",
     "fast_profile": "flash_asap",
-    "max_turns": 6,
+    "max_turns": 8,
     "max_output_tokens": 4096,
-    "min_hours_between": 6,
+    "min_hours_between": 4,
     "min_credits_usd": "0.10"
   },
   "horizon": {

@@ -28,7 +28,7 @@ ZERO = Decimal(0)
 TOOLS: list[dict[str, Any]] = [
     {"name": "web_search", "description": "Search the web. Costs credits. Use it to check a fact or find evidence for an idea, not to browse.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-    {"name": "library_search", "description": "Search the research library every agent shares. Free. Look here before paying for a web search.",
+    {"name": "library_search", "description": "Search the research library every agent shares. Free. Notes written by your own specialty come first. Look here before paying for a web search.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "library_read", "description": "Read one library note by id or exact title.",
      "parameters": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}},
@@ -70,6 +70,7 @@ class Researcher:
         run_replay: Callable[[Agent, str], dict[str, Any]],  # (agent, code) -> {"verdict", "numbers", "needs", "params", "seconds"}
         settings: Mapping[str, Any],
         clock=time.time,
+        specialty: Callable[[Agent], str] | None = None,  # (agent) -> what is known of its niche
     ):
         self.ledger = ledger
         self.provider = provider
@@ -80,6 +81,7 @@ class Researcher:
         self.run_replay = run_replay
         self.settings = dict(settings)
         self.clock = clock
+        self.specialty = specialty
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -93,9 +95,11 @@ class Researcher:
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
+        brief = self.specialty(agent) if self.specialty else ""
         return (
             f"You are {agent.id} (family {agent.family}, niche {agent.niche}, generation {agent.generation}).\n"
-            f"Your standing: {json.dumps(standing, default=str)}\n\n"
+            + (f"\n{brief}\n\n" if brief else "")
+            + f"Your standing: {json.dumps(standing, default=str)}\n\n"
             f"Your current strategy file:\n```python\n{agent.code}\n```\n"
             f"Your parameters: {json.dumps(agent.params)}\n"
             "Decide what, if anything, is worth your credits right now."
@@ -176,11 +180,11 @@ class Researcher:
             self.economy.charge(agent.id, SEARCH_CHARGE_USD, "web search", detail={"query": str(args.get("query"))[:200]})
             return self.commons.web_search(str(args.get("query") or ""))
         if name == "library_search":
-            return self.commons.library_search(str(args.get("query") or ""))
+            return self.commons.library_search(str(args.get("query") or ""), niche=agent.specialty)
         if name == "library_read":
             return self.commons.library_read(str(args.get("title") or ""))
         if name == "library_write":
-            return self.commons.library_write(agent.id, str(args.get("title") or ""), str(args.get("text") or ""), list(args.get("tags") or []))
+            return self.commons.library_write(agent.id, str(args.get("title") or ""), str(args.get("text") or ""), list(args.get("tags") or []), niche=agent.specialty)
         if name == "playbook_read":
             return self.commons.playbook_read(str(args.get("query") or ""))
         if name == "request_tool":
