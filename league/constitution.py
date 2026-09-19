@@ -29,7 +29,7 @@ CONSTITUTION: dict[str, Any] = {
     "ladder": {
         # One-sided error rate for every promotion and every statistical death, spent across
         # looks as alpha * 6 / (pi^2 k^2) so that looking often can never buy a false pass.
-        "alpha": 0.05,
+        "alpha": 0.5,
         "look_every_active_blocks": 5,
         # No promotion on fewer closed trades than this, however good the blocks look.
         "min_closed_trades": 10,
