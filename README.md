@@ -36,7 +36,7 @@ or a day.
 
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
-| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 30 blocks and 8 out-of-sample blocks with growth above zero, and a deflated Sharpe ratio of 0.90 or more against every replay its family has ever run |
+| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 30 blocks and 8 out-of-sample blocks with growth above zero, and a deflated Sharpe ratio of 0.75 or more against every replay in its own LINE (itself and its ancestors, not its cousins). The seat it wins costs nothing but compute, so the bar is 75% confidence and not 90%: the gates that spend money come later |
 | 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active blocks, 10 closed trades, growth above zero and a drawdown under 15%; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below) |
 | 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | 30 active blocks and 10 closed trades of real fills, and a one-sided lower confidence bound on mean block growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
 | 3. Scaled | the real accounts | a quarter of Kelly on the lower bound of its growth: never under $25, never over 25% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
@@ -126,13 +126,19 @@ House row on the ledger. These dials live in [`league/game.json`](league/game.js
 the same file lists.
 
 **Death.** Credits at zero; a 30% drawdown; an upper confidence bound on growth below zero after 20
-active blocks; or, on rung 0, three epochs without passing replay. The House closes the account,
+active blocks; or, on rung 0, three epochs without passing replay. Idleness is not safety: the niche
+floor is paid only to an agent that has traded within the epoch or has an order resting, so one that
+does neither earns nothing and spends down what it has until the first of those reaches it. The House closes the account,
 retires the box and writes a post-mortem that every living agent's research reads.
 
 **Forks.** An agent with $3.00 of credits or more may fork, and must endow the child with $1.00 of
 its own. An agent above rung 0 never edits itself, because its record belongs to its code: an
 improvement is a child, a mutation of its parameters or new code its researcher wrote, and the child
-answers for itself from replay up. The population is kept between 12 and 36, and no specialty may hold more than its share.
+answers for itself from replay up — unless it has NO record at all (no holding, no working order, no active
+block, no closed trade), in which case code that passes replay simply becomes its own, with no fork to pay for:
+there is nothing for new code to inherit unfairly and no position to leave it holding. The population is kept
+between 12 and 36; the House fills an empty seat within the hour, on the desk with the most room, so a failure
+cycles the league instead of shrinking it, and no specialty may hold more than its share.
 
 **Specialists.** Every agent belongs for life to one specialty of
 [`league/niches.json`](league/niches.json), and its children inherit it: crypto strikes, 15-minute
@@ -151,7 +157,7 @@ per specialty so the population cannot collapse onto whichever one got lucky las
 **Founders start on paper.** The 28 founders (the fourteen seed programs, pointed at the specialties)
 are seated on rung 1 at birth. The first dry run showed honest replays failing most of
 them (crypto reversion below zero after fees; Kalshi favourites at a deflated Sharpe of 0.85 against
-the 0.90 line). Paper costs nothing and forward evidence is what counts, so they are forward-tested
+the line). Paper costs nothing and forward evidence is what counts, so they are forward-tested
 from the first day; their replay still runs and still counts as their family's first trial.
 Everything born later must pass replay first.
 
