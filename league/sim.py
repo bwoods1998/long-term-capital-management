@@ -392,7 +392,14 @@ class SimBroker:
         """Equity is cash plus positions at cost: no quote is read, so it never fails."""
         with self._lock:
             at_cost = sum((held["cost"] for held in self._positions.values()), ZERO)
-            return Balance(self.venue, self._cash, self._cash + at_cost, self._free_cash(), self._now())
+            # As measured on the real paper venue: the cash behind a resting crypto bid is taken out
+            # of `cash` while the order rests, and returned on a cancel.
+            reserved = sum(
+                (o.remaining * o.limit_price * o.instrument.multiplier for o in self._orders.values()
+                 if not o.terminal and o.side == "buy" and o.limit_price is not None and o.instrument.asset_class == "crypto"),
+                ZERO,
+            )
+            return Balance(self.venue, self._cash - reserved, self._cash + at_cost, self._free_cash(), self._now())
 
     def positions(self) -> list[Position]:
         """In Alpaca's spelling: a crypto pair comes back without its slash (`BTCUSD`)."""

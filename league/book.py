@@ -1220,6 +1220,15 @@ class Book:
     # --------------------------------------------------------------- reconcile
     def _venue(self) -> tuple[Decimal, dict[str, Decimal]]:
         balance = self.broker.balance()
+        cash = money(balance.cash)
+        if self.fees.family == "alpaca":
+            # Measured on the paper account (Sept 19, 2026): Alpaca takes the cash behind an open
+            # crypto buy order out of `cash` while the order rests ($80.00 for two $40 bids, to the
+            # cent) and gives it back on a cancel. It is still the account's money, so it is added
+            # back before comparing, or every resting bid would look like a missing $40.
+            for order in self.broker.open_orders():
+                if order.instrument.asset_class == "crypto" and order.side == "buy" and order.limit_price is not None:
+                    cash += money(order.remaining) * money(order.limit_price) * order.instrument.multiplier
         positions: dict[str, Decimal] = {}
         for position in self.broker.positions():
             instrument, quantity = position.instrument, money(position.quantity)
@@ -1229,7 +1238,7 @@ class Book:
                 quantity = -quantity
             key = position_key(instrument)
             positions[key] = positions.get(key, ZERO) + quantity
-        return money(balance.cash), positions
+        return cash, positions
 
     def _ledger_totals(self) -> tuple[Decimal, dict[str, Decimal], dict[str, Instrument]]:
         """The book's own cash (profit and loss, fees, dust: stakes are slices, not deposits) and

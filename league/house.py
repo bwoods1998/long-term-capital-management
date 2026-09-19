@@ -71,7 +71,7 @@ class Settings:
     wake_workers: int = 6
     slow_workers: int = 2  # replays and research passes run beside the tick, never inside it
     kalshi_replay_days: int = 7
-    kalshi_replay_markets: int = 300
+    kalshi_replay_markets: int = 2000
 
 
 class House:
@@ -141,6 +141,14 @@ class House:
                 run_replay=self._candidate_replay, settings=self.game.get("research") or {}, clock=clock,
             )
         self._record_start()
+        # Every book's baseline is taken now, before anything can trade: what the venue holds at
+        # this moment is what is not the book's. (Taken later, a resting order's reserved cash or a
+        # first fill would be folded into the baseline and come back as a mismatch.)
+        for name, book in self.books.items():
+            try:
+                book.open_baseline()
+            except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
+                self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
 
     # ------------------------------------------------------------------ state
     def _load_state(self) -> dict[str, Any]:
@@ -433,7 +441,9 @@ class House:
         venue, horizon, _ = niche_of(needs)
         end = self.clock()
         if venue == "kalshi":
-            days = self.settings.kalshi_replay_days * (3 if horizon == "day" else 1)
+            # The first dry run's agents asked for this themselves: one day of hourly markets is 17
+            # active blocks and a week of daily ones is 7, against the 30 the replay gate needs.
+            days = self.settings.kalshi_replay_days * (7 if horizon == "day" else 1)
         else:
             days = self.settings.replay_days * (6 if horizon == "day" else 1)
         start_iso, end_iso = now_iso(lambda: end - days * 86400), now_iso(lambda: end)

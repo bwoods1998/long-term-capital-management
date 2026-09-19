@@ -19,12 +19,15 @@ Every pass and every change is a row on the ledger and a line on the public tape
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -64,7 +67,9 @@ you maintain. Agents file requests in plain words. Build what is asked when it c
 the data a strategy already receives (indicators, estimators, pricing formulas, calendars). A request that
 needs new data cannot be met by you: say so in the summary. Each tool is `league/tools/<name>.py` (same safety
 rules as a strategy: whitelisted imports only, no files, no network, no attribute assignment) with a docstring
-an agent can learn it from, plus `league/tests/test_tool_<name>.py` (unittest) proving it right on known values.""",
+an agent can learn it from, plus `league/tests/test_tool_<name>.py` (unittest) proving it right on known values.
+Also answer every request you read, in an extra key of your JSON:
+"answers": [{"request": "<the request's id>", "outcome": "built as tools/<name>.py: how to use it" | "cannot be a pure tool: why, and who could do it"}]""",
     "operator": """You are the operator of a small trading league's House process. You read its alerts, health and budget.
 You may propose changes ONLY to the operating dials in `league/config.json`: tick_seconds (30-600),
 mark_every_seconds (60-1800), replay_days (7-60), inference_daily_cap_usd (0.5-5). Give the WHOLE file back with
@@ -116,6 +121,59 @@ class GatewayForge:
         return self._call("GET", f"{self.base}/{int(number)}")
 
 
+class GhForge:
+    """The same forge from the owner's own machine, through `git` and the `gh` CLI he is signed in
+    to. It is how a pass is run by hand, and how the flow was proven before the gateway held a
+    GitHub token. It is never used on Sail: nothing there holds a GitHub credential."""
+
+    def __init__(self, repo: Path = REPO, *, remote: str = "origin", base: str = "main"):
+        self.repo, self.remote, self.base = Path(repo), remote, base
+
+    def _git(self, *args: str, cwd: Path | None = None) -> str:
+        done = subprocess.run(["git", *args], cwd=cwd or self.repo, capture_output=True, text=True)
+        if done.returncode != 0:
+            raise ForgeError(f"git {args[0]} failed: {done.stderr.strip()[:300]}")
+        return done.stdout.strip()
+
+    def propose(self, *, role: str, slug: str, title: str, body: str, files: list[dict[str, str]]) -> dict[str, Any]:
+        digest = hashlib.sha256(json.dumps(sorted((f["path"], f["content"]) for f in files)).encode("utf-8")).hexdigest()[:8]
+        branch = f"astra/{role}/{slug}-{digest}"
+        self._git("fetch", "--quiet", self.remote, self.base)
+        work = Path(tempfile.mkdtemp(prefix="astra-"))
+        try:
+            self._git("worktree", "add", "--quiet", "-b", branch, str(work), f"{self.remote}/{self.base}")
+            for row in files:
+                target = work / row["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(row["content"], encoding="utf-8")
+                self._git("add", "--", row["path"], cwd=work)
+            message = f"{title}\n\n{body}\n\nOpened by Astra ({role}).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+            self._git("commit", "--quiet", "-m", message, cwd=work)
+            head = self._git("rev-parse", "HEAD", cwd=work)
+            self._git("push", "--quiet", "-u", self.remote, branch, cwd=work)
+        finally:
+            subprocess.run(["git", "worktree", "remove", "--force", str(work)], cwd=self.repo, capture_output=True)
+        made = subprocess.run(["gh", "pr", "create", "--base", self.base, "--head", branch, "--title", title,
+                               "--body", body + f"\n\nOpened by Astra ({role}).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"],
+                              cwd=self.repo, capture_output=True, text=True)
+        if made.returncode != 0:
+            raise ForgeError(f"gh pr create failed: {made.stderr.strip()[:300]}")
+        url = made.stdout.strip().splitlines()[-1]
+        return {"ok": True, "branch": branch, "number": int(url.rstrip("/").rsplit("/", 1)[1]), "url": url, "head": head}
+
+    def status(self, number: int) -> dict[str, Any]:
+        done = subprocess.run(["gh", "pr", "view", str(int(number)), "--json", "state,mergedAt,headRefOid,statusCheckRollup"], cwd=self.repo, capture_output=True, text=True)
+        if done.returncode != 0:
+            raise ForgeError(f"gh pr view failed: {done.stderr.strip()[:300]}")
+        row = json.loads(done.stdout)
+        runs = [r for r in row.get("statusCheckRollup") or [] if r.get("status")]
+        finished = [r for r in runs if r.get("status") == "COMPLETED"]
+        failed = [r for r in finished if r.get("conclusion") not in ("SUCCESS", "SKIPPED", "NEUTRAL")]
+        conclusion = "failure" if failed else ("success" if runs and len(finished) == len(runs) else "pending")
+        return {"number": int(number), "state": str(row.get("state") or "").lower(), "merged": bool(row.get("mergedAt")), "head": row.get("headRefOid"),
+                "checks": {"total": len(runs), "completed": len(finished), "failed": len(failed), "conclusion": conclusion}}
+
+
 @dataclass
 class Proposal:
     role: str
@@ -126,6 +184,7 @@ class Proposal:
     files: list[dict[str, str]]
     dropped: list[str]
     cost_usd: Decimal
+    answers: list[dict[str, Any]] = field(default_factory=list)
 
 
 def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Proposal:
@@ -154,8 +213,9 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
         else:
             files.append({"path": path, "content": content})
     slug = re.sub(r"[^a-z0-9-]+", "-", str(answer.get("slug") or role).lower()).strip("-")[:48] or role
+    answers = [a for a in (answer.get("answers") if isinstance(answer.get("answers"), list) else []) if isinstance(a, dict)][:20]
     return Proposal(role, str(answer.get("summary") or "")[:1500], slug, str(answer.get("title") or f"Astra ({role})")[:110],
-                    str(answer.get("body") or "")[:7000], files, dropped, cost)
+                    str(answer.get("body") or "")[:7000], files, dropped, cost, answers)
 
 
 class Astra:
@@ -201,6 +261,13 @@ class Astra:
         except FrontierError as exc:
             return self._record(role, {"summary": f"the pass could not run: {exc}", "cost_usd": "0", "files": 0, "error": True})
         row = {"summary": proposal.summary, "cost_usd": format(proposal.cost_usd, "f"), "files": len(proposal.files), "dropped": proposal.dropped[:10]}
+        if role == "toolsmith":
+            # Every request gets an answer the agents can read, so the queue does not fill with
+            # things that will never be built.
+            waiting = {r["id"] for r in evidence.get("open_requests") or []}
+            for item in proposal.answers:
+                if item.get("request") in waiting and str(item.get("outcome") or "").strip():
+                    self.ledger.append("tool.fulfilled", {"request": item["request"], "outcome": str(item["outcome"])[:1200], "change": None})
         if proposal.files:
             try:
                 made = self.forge.propose(role=role, slug=proposal.slug, title=proposal.title, body=proposal.body, files=proposal.files)

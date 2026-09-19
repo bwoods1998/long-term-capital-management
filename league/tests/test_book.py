@@ -342,6 +342,26 @@ class PaperBookTest(BookCase):
         again = self.new_book()  # and a restart knows the instrument too
         self.assertTrue(again.reconcile().ok)
 
+    def test_cash_reserved_behind_a_resting_crypto_bid_is_not_missing_cash(self):
+        """Measured on the paper account: two resting $40 crypto bids took exactly $80.00 out of the
+        venue's `cash`. It comes back on a cancel and turns into coins on a fill."""
+        self.broker.reserve_open_buys = True
+        self.book.reconcile()
+        self.seat("a1")
+        self.broker.set_quote(BTC, "80000", "80010")
+        rest = self.book.submit([self.intent("a1", BTC, "buy", "0.0005", order_type="limit", limit_price="79000")])[0]
+        self.assertEqual(rest.status, "resting")
+        self.assertEqual(self.broker.balance().cash, D("100000") - D("39.5"))
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.book.cancel("a1", rest.order_id)
+        self.assertTrue(self.book.reconcile().ok)
+        again = self.book.submit([self.intent("a1", BTC, "buy", "0.0005", order_type="limit", limit_price="79000")])[0]
+        self.broker.fill_resting(again.order_id, "0.0005")
+        self.book.poll()
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+
     def test_the_ledger_verifies_after_all_of_it(self):
         self.seat("a1")
         self.broker.set_quote(BTC, "80000", "80010")

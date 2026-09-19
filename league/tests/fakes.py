@@ -51,6 +51,7 @@ class FakeBroker:
         #: position comes back as `BTCUSD` though the order was for `BTC/USD`.
         self.asynchronous = False
         self.rename_crypto = False
+        self.reserve_open_buys = False
         self._pending: dict[str, tuple] = {}
         self.clock_iso = "2026-09-10T00:26:40.000Z"
         self._n = 0
@@ -68,7 +69,10 @@ class FakeBroker:
         return set(self.caps)
 
     def balance(self) -> Balance:
-        return Balance(self.venue, self.cash, self.cash, self.cash, self.clock_iso)
+        cash = self.cash
+        if self.reserve_open_buys:  # Alpaca's habit: the cash behind a resting crypto bid leaves `cash` until it fills or is cancelled
+            cash -= sum((o.remaining * o.limit_price for o in self.open_orders() if o.instrument.asset_class == "crypto" and o.side == "buy" and o.limit_price), ZERO)
+        return Balance(self.venue, cash, cash, cash, self.clock_iso)
 
     def positions(self) -> list[Position]:
         out = []

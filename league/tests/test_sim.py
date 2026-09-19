@@ -269,7 +269,8 @@ class PersistenceTest(SimCase):
         self.assertEqual([p.name for p in self.path.parent.iterdir()], [self.path.name])  # no temp file left behind
 
         again = self.open(starting_cash="1")  # starting cash only matters when there is no file
-        self.assertEqual(again.balance().cash, D("100000") - D("40.005"))
+        # The $40.005 it paid, and (as the real paper venue does) the $39.50 behind the resting bid.
+        self.assertEqual(again.balance().cash, D("100000") - D("40.005") - D("39.5"))
         self.assertEqual(self.held(again), {"BTCUSD": D("0.00049875")})
         self.assertEqual(again.fills(), self.broker.fills())
         self.assertEqual(again.submit(pending).broker_order_id, "sim-3")  # idempotent across the restart

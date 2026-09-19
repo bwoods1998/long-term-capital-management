@@ -112,6 +112,14 @@ class AstraTest(unittest.TestCase):
         self.assertTrue(row["skipped"])
         self.assertEqual(frontier.asked, [])
 
+    def test_the_toolsmith_answers_the_queue_even_when_it_builds_nothing(self):
+        self.ledger.append("tool.request", {"name": "longer_tape", "description": "a longer replay tape for hourly markets"}, agent="a1", id="req-1")
+        answer = {"summary": "needs data, not a tool", "files": [], "answers": [{"request": "req-1", "outcome": "cannot be a pure tool: it needs more recorded history"}, {"request": "made-up", "outcome": "x"}]}
+        astra = self.astra(FakeFrontier(answer), FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1", "name": "longer_tape"}]})
+        astra.run("toolsmith")
+        rows = [e.payload for e in self.ledger.iter(kinds="tool.fulfilled")]
+        self.assertEqual([(r["request"], r["outcome"][:20]) for r in rows], [("req-1", "cannot be a pure too")])
+
     def test_each_role_is_due_on_its_own_clock(self):
         astra = self.astra(FakeFrontier({"files": []}), FakeForge())
         self.assertEqual(set(astra.due()), {"architect", "toolsmith", "operator", "designer", "teacher"})
