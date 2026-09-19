@@ -755,6 +755,8 @@ class House:
         every = float(self.settings.niche_survey_hours)
         if every <= 0 or self.kalshi_data is None or not hasattr(getattr(self.kalshi_data, "market_data", None), "markets"):
             return False
+        if not self._state.get("niche_live"):
+            return self.clock() - float(self._state.get("last_niche_try") or 0) >= 1800  # never surveyed yet: every half hour until one works
         return self.clock() - float(self._state.get("last_niche_survey") or 0) >= every * 3600
 
     def _series_category(self, series: str) -> str | None:
@@ -769,6 +771,8 @@ class House:
 
     def survey_niches(self) -> dict[str, list[str]]:
         """Survey the venue and let every Kalshi specialty's universe follow what is trading now."""
+        with self._state_lock:
+            self._state["last_niche_try"] = self.clock()
         paced = getattr(self.kalshi_data, "_paced", None)  # the survey shares the agents' pace limit with Kalshi
         source = type("Paced", (), {"markets": staticmethod(paced)})() if paced else self.kalshi_data.market_data
         volumes = niches_module.survey(source, clock=self.clock)
@@ -1035,7 +1039,11 @@ class House:
             "can_fork": self.economy.can_fork(agent.id),
             "recent_trades": self._recent_trades(agent.id),
         }
-        outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")
+        try:
+            outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")
+        finally:
+            with self._state_lock:
+                self._state["last_research"][agent.id] = self.clock()  # however it ended: a failing provider is not retried every tick
         candidate = outcome.candidate
         if candidate:
             if rung == 0:
@@ -1160,13 +1168,12 @@ class House:
                     self._sweep(agent.id, book)
         for agent in self.registry.living() if open_for_business else []:
             if self.research_due(agent):
-                with self._state_lock:
-                    self._state["last_research"][agent.id] = self.clock()
+                # Stamped when the pass ENDS (in `research`), not when it is queued: on the first
+                # production day every agent was stamped at 18:02, queued, and lost to a restart,
+                # so nobody researched for an hour and a half. A pass in hand is not queued twice.
                 self._background(f"research:{agent.id}", self.research, agent)
         if open_for_business and self.survey_due():
-            with self._state_lock:
-                self._state["last_niche_survey"] = self.clock()  # claimed now, so a slow survey is not started twice
-            self._background("niche-survey", self.survey_niches)
+            self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
         if self.updater is not None and self.updater.due():

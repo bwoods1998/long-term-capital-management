@@ -171,3 +171,50 @@ class HouseStakedChildren(HouseCase):
         self.assertIsNone(self.house.fork(parent, code=BUYER.replace("20.0", "22.0"), passed_replay=False, staked_by_house=True))
         self.assertIsNone(self.house.fork(parent, staked_by_house=True))
         self.assertIsNotNone(self.house.fork(parent, code=BUYER.replace("20.0", "22.0"), passed_replay=True, staked_by_house=True))
+
+
+class LostWork(HouseCase):
+    def expedition(self):
+        from league.ledger import now_iso
+
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": now_iso(self.clock)[:10], "days": 10, "sail_usd": "50", "openai_usd": "50"})
+
+    def test_a_research_pass_lost_to_a_restart_is_due_again_at_once(self):
+        # Regression (the first production day): every agent was stamped as researched when its pass was
+        # QUEUED; the queue was lost to a restart and nobody researched for an hour and a half.
+        import threading
+
+        self.house.researcher = type("R", (), {"research": lambda self, agent, standing, session: type("P", (), {"candidate": None})()})()
+        self.house.settings.research = True
+        agent = self.seated()
+        self.expedition()
+        self.house._lanes["research"] = threading.Semaphore(0)  # the pass is queued and never runs
+        self.house._background(f"research:{agent.id}", self.house.research, agent)
+        try:
+            self.assertTrue(self.house.research_due(agent))  # queued is not done
+            self.assertFalse(self.house._background(f"research:{agent.id}", self.house.research, agent))  # and is not queued twice
+        finally:
+            self.house._lanes["research"].release()
+        self.house._jobs[f"research:{agent.id}"].join(5)
+        self.assertFalse(self.house.research_due(agent))  # done is done, until the interval has passed
+
+    def test_a_failed_pass_is_not_retried_every_tick(self):
+        def boom(agent, standing, session):
+            raise RuntimeError("the provider is down")
+
+        self.house.researcher = type("R", (), {"research": staticmethod(boom)})()
+        self.house.settings.research = True
+        agent = self.seated()
+        self.expedition()
+        self.assertTrue(self.house.research_due(agent))
+        with self.assertRaises(RuntimeError):
+            self.house.research(agent)
+        self.assertFalse(self.house.research_due(agent))
+
+    def test_a_league_that_has_never_been_surveyed_tries_every_half_hour_not_once_a_day(self):
+        self.house.kalshi_data = type("K", (), {"market_data": type("M", (), {"markets": lambda self, **kw: {"markets": []}})()})()
+        self.assertTrue(self.house.survey_due())
+        self.house.survey_niches()  # nothing trading: no live universe came of it
+        self.assertFalse(self.house.survey_due())
+        self.clock.advance(1801)
+        self.assertTrue(self.house.survey_due())
