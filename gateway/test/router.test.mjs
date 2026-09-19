@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { route, parseRoute } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
-import { rsaKey, memoryStore, recorder, bearer, TOKEN } from './helpers.mjs';
+import { rsaKey, memoryStore, recorder, bearer, fakeGitHub, TOKEN, GITHUB_REPO, GITHUB_TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-09-15T16:00:00Z');
 const GATEWAY = 'https://ltcm-gateway.workers.dev';
@@ -572,3 +572,214 @@ test('the paper account is its own venue: paper keys, paper host, no caps, no ki
   assert.equal((await call(ask('POST', '/v1/alpaca-paper/v2/account/configurations'), { settings })).response.status, 403);
   assert.equal((await call(ask('GET', '/v1/alpaca-paper/v2/account'), { settings: { ALPACA_PAPER_SECRET_KEY: '' } })).response.status, 503);
 });
+
+// --- pull requests -------------------------------------------------------------------------------
+
+const GITHUB = { GITHUB_TOKEN, GITHUB_REPO };
+const PROPOSAL = {
+  role: 'architect', slug: 'kalshi-weather-favorites', title: 'Add the Kalshi weather favorites strategy',
+  body: 'Favorites above 90 cents settled yes 97% of the time in the replay.',
+  files: [{ path: 'league/strategies/kalshi_weather_favorites.py', content: 'EDGE = 0.04\n' }],
+};
+const numbered = n => ({ ...PROPOSAL, slug: `candidate-${n}`, files: [{ path: `league/strategies/candidate_${n}.py`, content: `N = ${n}\n` }] });
+
+test('a proposal becomes a branch and a pull request, and the reply is all the VM ever holds of GitHub', async () => {
+  const hub = fakeGitHub();
+  const { response, body, gate } = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, fetcher: hub.fetcher });
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.deepEqual(Object.keys(body), ['ok', 'branch', 'number', 'url', 'head']);
+  assert.match(body.branch, /^astra\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
+  assert.equal(body.number, 41);
+  assert.equal(body.url, `https://github.com/${GITHUB_REPO}/pull/41`);
+  assert.equal(body.head, hub.refs.get(body.branch));
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.equal(JSON.stringify(body).includes(GITHUB_TOKEN), false);
+
+  assert.equal(hub.calls.at(-1).key, 'POST /pulls');
+  assert.deepEqual(hub.calls.at(-1).body, {
+    title: PROPOSAL.title, head: body.branch, base: 'main',
+    body: `${PROPOSAL.body}\n\n---\n\nOpened by Astra (architect) through the LTCM gateway.`,
+  });
+  assert.ok(hub.calls.every(made => made.headers.Authorization === `Bearer ${GITHUB_TOKEN}`), 'GitHub sees the GitHub token');
+  assert.ok(hub.calls.every(made => !JSON.stringify(made).includes(TOKEN)), 'and never the gateway s own');
+  assert.deepEqual((await gate.status()).github, { day: '2026-09-15', pull_requests: 1, cap: 12 });
+  assert.deepEqual((await gate.status()).today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' }, 'a proposal is not an order');
+});
+
+test('the GitHub routes need the gateway token like every other route, and no other', async () => {
+  const hub = fakeGitHub();
+  for (const token of [null, 'wrong', TOKEN.slice(0, -1), GITHUB_TOKEN, TOKEN + '-owner']) {
+    for (const request of [ask('POST', '/v1/github/pr', { body: PROPOSAL, token }), ask('GET', '/v1/github/pr/41', { token })]) {
+      const { response, body } = await call(request, { settings: GITHUB, fetcher: hub.fetcher });
+      assert.equal(response.status, 401, String(token));
+      assert.deepEqual(body, { error: 'Unauthorized.' });
+    }
+  }
+  assert.equal(hub.calls.length, 0, 'GitHub heard nothing');
+});
+
+test('without the token or the repository the GitHub routes are a 503 and nothing is sent', async () => {
+  for (const settings of [{}, { GITHUB_TOKEN }, { GITHUB_REPO }, { GITHUB_TOKEN: '', GITHUB_REPO }, { GITHUB_TOKEN, GITHUB_REPO: 'not-a-repository' }]) {
+    const hub = fakeGitHub();
+    for (const request of [ask('POST', '/v1/github/pr', { body: PROPOSAL }), ask('GET', '/v1/github/pr/41')]) {
+      const { response, body, gate } = await call(request, { settings, fetcher: hub.fetcher });
+      assert.equal(response.status, 503);
+      assert.deepEqual(body, { error: 'GitHub is not configured.' });
+      assert.equal((await gate.status()).github.pull_requests, 0);
+    }
+    assert.equal(hub.calls.length, 0);
+  }
+});
+
+test('a proposal is refused before GitHub hears of it: the path by name, the rest by shape', async () => {
+  const hub = fakeGitHub();
+  const send = body => call(ask('POST', '/v1/github/pr', { body }), { settings: GITHUB, fetcher: hub.fetcher });
+  for (const [role, path] of [
+    ['architect', 'league/ci.py'], ['architect', 'league/strategies/../constitution.py'], ['architect', 'gateway/worker.mjs'],
+    ['toolsmith', '.github/workflows/ci.yml'], ['operator', 'league/game.json'], ['designer', 'league/ledger.py'], ['teacher', 'league/strategies/x.py'],
+  ]) {
+    // The architect's bad file rides behind a good one: one refused path refuses the proposal.
+    const files = [...(role === 'architect' ? PROPOSAL.files : []), { path, content: 'x\n' }];
+    const { response, body, gate } = await send({ ...PROPOSAL, role, files });
+    assert.equal(response.status, 403, `${role} ${path}`);
+    assert.equal(body.path, path);
+    assert.ok(body.error.includes(`"${path}"`), body.error);
+    assert.equal((await gate.status()).github.pull_requests, 0, 'a refused proposal takes no place in the day');
+  }
+  assert.equal((await send({ ...PROPOSAL, role: 'janitor' })).response.status, 400);
+  assert.equal((await send({ ...PROPOSAL, slug: 'No Spaces' })).response.status, 400);
+  assert.equal((await send({ ...PROPOSAL, files: [] })).response.status, 400);
+  assert.equal((await send({ ...PROPOSAL, files: Array.from({ length: 13 }, (_, n) => numbered(n).files[0]) })).response.status, 400);
+  assert.equal((await send({ ...PROPOSAL, files: [{ ...PROPOSAL.files[0], content: 'x'.repeat(64 * 1024 + 1) }] })).response.status, 400);
+  assert.equal((await send('not json')).response.status, 400);
+  assert.equal((await send([PROPOSAL])).response.status, 400);
+  // Five files, each inside its own ceiling, are together over the request s 256 KiB.
+  const heavy = { ...PROPOSAL, files: [0, 1, 2, 3, 4].map(n => ({ path: `league/strategies/heavy_${n}.py`, content: 'x'.repeat(60 * 1024) })) };
+  assert.equal((await send(heavy)).response.status, 413);
+  assert.equal(hub.calls.length, 0, 'GitHub heard none of it');
+
+  assert.equal((await call(ask('GET', '/v1/github/pr'), { settings: GITHUB })).response.status, 405);
+  assert.equal((await call(ask('POST', '/v1/github/pr/41'), { settings: GITHUB })).response.status, 405);
+  // There is no merge route, and nothing else under /v1/github either.
+  for (const [method, path] of [['POST', '/v1/github/pr/41/merge'], ['PUT', '/v1/github/pr/41/merge'], ['POST', '/v1/github/merge'], ['GET', '/v1/github/pr/0'], ['GET', '/v1/github/pr/abc'], ['GET', '/v1/github/repos']]) {
+    assert.equal((await call(ask(method, path), { settings: GITHUB, fetcher: hub.fetcher })).response.status, 404, `${method} ${path}`);
+  }
+  assert.equal(hub.calls.length, 0);
+});
+
+test('twelve pull requests a UTC day, then 429; a retry and a GitHub outage take no place', async () => {
+  const hub = fakeGitHub();
+  const gate = gateFor(GITHUB);
+  const send = (body, options = {}) => call(ask('POST', '/v1/github/pr', { body }), { settings: GITHUB, gate, fetcher: hub.fetcher, ...options });
+  for (let n = 1; n <= 11; n += 1) assert.equal((await send(numbered(n))).response.status, 200, `proposal ${n}`);
+
+  // The same proposal again is the same pull request and is not counted twice.
+  const again = await send(numbered(3));
+  assert.equal(again.response.status, 200);
+  assert.equal(again.body.number, 43);
+  assert.equal((await gate.status()).github.pull_requests, 11);
+  // GitHub down before any branch exists: a 502, and the place is given back.
+  const down = await send(numbered(99), { fetcher: async () => { throw new Error('unreachable'); } });
+  assert.equal(down.response.status, 502);
+  assert.equal((await gate.status()).github.pull_requests, 11);
+
+  assert.equal((await send(numbered(12))).response.status, 200);
+  const before = hub.calls.length;
+  const over = await send(numbered(13));
+  assert.equal(over.response.status, 429);
+  assert.equal(over.body.cap, 'github_day');
+  assert.match(over.body.error, /cap of 12 pull requests/);
+  assert.equal(over.response.headers.get('Retry-After'), '3600');
+  assert.equal(hub.calls.length, before, 'the thirteenth never reached GitHub');
+  assert.equal((await send(numbered(3))).response.status, 429, 'at the cap even a retry waits: the check comes before the call');
+  // Watching is never capped.
+  assert.equal((await call(ask('GET', '/v1/github/pr/43'), { settings: GITHUB, gate, fetcher: hub.fetcher })).response.status, 200);
+
+  // The next UTC day starts at zero.
+  const tomorrow = await route(ask('POST', '/v1/github/pr', { body: numbered(13) }), env(GITHUB), { gate, fetcher: hub.fetcher, now: () => NOW + 24 * 3600000 });
+  assert.equal(tomorrow.status, 200);
+  assert.equal(hub.pulls.length, 13);
+
+  // The owner s deploy may lower the day, to nothing if need be.
+  const off = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: { ...GITHUB, GITHUB_MAX_PULLS_PER_DAY: '0' }, fetcher: hub.fetcher });
+  assert.equal(off.response.status, 429);
+});
+
+test('a branch that was made is counted even when its pull request failed, and the retry is free', async () => {
+  const gate = gateFor(GITHUB);
+  let broken = true;
+  const hub = fakeGitHub({ script: key => (broken && key === 'POST /pulls' ? new Response(JSON.stringify({ message: `Server Error ${GITHUB_TOKEN}` }), { status: 500 }) : undefined) });
+  const failed = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate, fetcher: hub.fetcher });
+  assert.equal(failed.response.status, 502);
+  assert.match(failed.body.error, /^GitHub answered HTTP 500 \(pull request\): Server Error \[redacted\]$/);
+  assert.equal((await failed.response.text()).includes(GITHUB_TOKEN), false);
+  assert.equal((await gate.status()).github.pull_requests, 1);
+
+  broken = false;
+  const healed = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate, fetcher: hub.fetcher });
+  assert.equal(healed.response.status, 200);
+  assert.equal(healed.body.head, hub.refs.get(healed.body.branch));
+  assert.equal((await gate.status()).github.pull_requests, 1, 'one branch, one place');
+});
+
+test('the kill switch does not stop a proposal or the watching of one: they move no money', async () => {
+  const hub = fakeGitHub();
+  const gate = gateFor(GITHUB);
+  await call(ask('POST', '/v1/kill'), { gate });
+  assert.equal((await gate.status()).kill_switch, true);
+  assert.equal((await call(ask('POST', '/v1/kalshi/portfolio/events/orders', { body: KALSHI_ORDER }), { gate })).response.status, 423);
+
+  const opened = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate, fetcher: hub.fetcher });
+  assert.equal(opened.response.status, 200);
+  const watched = await call(ask('GET', `/v1/github/pr/${opened.body.number}`), { settings: GITHUB, gate, fetcher: hub.fetcher });
+  assert.equal(watched.response.status, 200);
+  assert.equal((await gate.status()).kill_switch, true, 'and neither of them released it');
+});
+
+test('the VM watches CI through the gateway: one pull request, its head and its checks', async () => {
+  const hub = fakeGitHub();
+  const gate = gateFor(GITHUB);
+  const opened = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate, fetcher: hub.fetcher });
+  const watch = () => call(ask('GET', `/v1/github/pr/${opened.body.number}`), { settings: GITHUB, gate, fetcher: hub.fetcher });
+
+  const waiting = await watch();
+  assert.equal(waiting.response.status, 200);
+  assert.deepEqual(waiting.body, {
+    number: 41, state: 'open', merged: false, mergeable_state: 'clean', head: opened.body.head,
+    checks: { total: 0, completed: 0, failed: 0, conclusion: 'pending' },
+  });
+  hub.checks = { total_count: 3, check_runs: [{ status: 'completed', conclusion: 'success' }, { status: 'in_progress', conclusion: null }, { status: 'queued', conclusion: null }] };
+  assert.deepEqual((await watch()).body.checks, { total: 3, completed: 1, failed: 0, conclusion: 'pending' });
+  hub.checks = { total_count: 3, check_runs: [{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'skipped' }, { status: 'completed', conclusion: 'success' }] };
+  assert.deepEqual((await watch()).body.checks, { total: 3, completed: 3, failed: 0, conclusion: 'success' });
+  hub.checks.check_runs[2].conclusion = 'failure';
+  assert.deepEqual((await watch()).body.checks, { total: 3, completed: 3, failed: 1, conclusion: 'failure' });
+
+  // The workflow merged it: the VM learns that here too, since nothing here can merge.
+  Object.assign(hub.pulls[0], { state: 'closed', merged: true, mergeable_state: 'unknown' });
+  const merged = await watch();
+  assert.equal(merged.body.state, 'closed');
+  assert.equal(merged.body.merged, true);
+  assert.equal((await gate.status()).github.pull_requests, 1, 'watching is free');
+
+  assert.equal((await call(ask('GET', '/v1/github/pr/999'), { settings: GITHUB, fetcher: hub.fetcher })).response.status, 404);
+  const down = await call(ask('GET', '/v1/github/pr/41'), { settings: GITHUB, fetcher: async () => { throw new Error(GITHUB_TOKEN); } });
+  assert.equal(down.response.status, 502);
+  assert.deepEqual(down.body, { error: 'GitHub did not answer (pull request).' });
+});
+
+test('the Durable Object exposes the pull request counter, each step in one transaction', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../worker.mjs', import.meta.url), 'utf8');
+  for (const name of ['pullReserve', 'pullRefund']) {
+    assert.match(source, new RegExp(`\\b${name}\\(request\\) \\{ return this\\.ctx\\.storage\\.transactionSync\\(\\(\\) => this\\.gate\\.${name}\\(request\\)\\); \\}`));
+  }
+  // The router awaits them, so the stub s promises work as well as the gate s plain values.
+  const local = gateFor(GITHUB);
+  const stub = Object.fromEntries(['pullReserve', 'pullRefund', 'status'].map(name => [name, async (...args) => local[name](...args)]));
+  const hub = fakeGitHub();
+  assert.equal((await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate: stub, fetcher: hub.fetcher })).response.status, 200);
+  assert.equal((await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate: stub, fetcher: hub.fetcher })).response.status, 200);
+  assert.equal(local.status(NOW).github.pull_requests, 1);
+});
+

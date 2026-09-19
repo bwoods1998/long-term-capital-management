@@ -8,6 +8,7 @@
 
 import { caps, venueOrderCap } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
+import { dayCap as pullDayCap } from './github.mjs';
 import { formatUsd } from './money.mjs';
 import { iso } from './http.mjs';
 
@@ -21,6 +22,7 @@ export const SAIL_KEY = 'sail';
 export const ALERTS_KEY = 'alerts';
 const NOTICES_KEY = 'notices';
 export const FRONTIER_KEY = 'frontier';
+export const PULLS_KEY = 'pulls';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -170,6 +172,34 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: true, cost_usd: formatUsd(cost) };
     },
 
+    /**
+     * Pull requests opened today. The day is a UTC calendar day, GitHub's own, and starts at
+     * zero. `pullReserve` takes one of the day's places or refuses, in the same step, so two
+     * proposals at once cannot both take the last; `pullRefund` gives a place back, and is only
+     * ever called for an attempt that made no new branch.
+     */
+    pullsToday(at = now()) {
+      const row = read(store, PULLS_KEY, {});
+      return row.day === iso(at).slice(0, 10) ? Number(row.count) || 0 : 0;
+    },
+
+    pullReserve({ at = now() } = {}) {
+      const cap = pullDayCap(env);
+      const count = this.pullsToday(at);
+      if (count + 1 > cap) {
+        return { ok: false, status: 429, cap: 'github_day', error: `Today's cap of ${cap} pull requests is already reached.` };
+      }
+      const day = iso(at).slice(0, 10);
+      write(store, PULLS_KEY, { day, count: count + 1 });
+      return { ok: true, day, count: count + 1 };
+    },
+
+    pullRefund({ day, at = now() } = {}) {
+      if (day !== iso(at).slice(0, 10)) return { ok: false };
+      write(store, PULLS_KEY, { day, count: Math.max(0, this.pullsToday(at) - 1) });
+      return { ok: true };
+    },
+
     watchdog: () => read(store, WATCHDOG_KEY, { last_check_at: null, last_action: null, last_action_at: null }),
 
     recordWatchdog(patch) {
@@ -254,6 +284,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
             by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
           };
         })(),
+        github: { day: iso(at).slice(0, 10), pull_requests: this.pullsToday(at), cap: pullDayCap(env) },
         watchdog: {
           last_check_at: watch.last_check_at ?? null,
           last_action: watch.last_action ?? null,

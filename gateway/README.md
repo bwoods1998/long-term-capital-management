@@ -34,6 +34,8 @@ characters.
 | `GET`/`POST`/`DELETE` | `/v1/alpaca/<path>` | Adds `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY` and forwards to `https://api.alpaca.markets/<path>`, or to `https://data.alpaca.markets/<path>` when the path is a market-data one (`v2/stocks/`, `v1beta3/`). One venue name, two hosts, one credential. |
 | `POST` | `/v1/frontier/responses` | One metered call to the frontier model (OpenAI Responses API) with `OPENAI_SECRET_KEY`. Priced twice: reserved at its worst case before it leaves, settled at the provider's reported usage after. Refused when the month's `FRONTIER_MONTH_USD` cannot cover the worst case, when the model has no price in `FRONTIER_MODELS`, when it streams or runs in the background, or when `max_output_tokens` is missing. `X-LTCM-Agent` attributes the cost. |
 | `GET` | `/v1/frontier/models` | The model ids the key can reach, and which are priced. Free. |
+| `POST` | `/v1/github/pr` | Opens one pull request from a proposal `{role, slug, title, body, files}`: blobs, a tree on `main`, a commit, the branch `astra/<role>/<slug>-<8 hex>`, the pull request. See [Pull requests](#pull-requests). Not stopped by the kill switch: it moves no money. |
+| `GET` | `/v1/github/pr/<number>` | That pull request's `state`, `merged`, `mergeable_state`, `head` and its check runs counted into `success`, `failure` or `pending`, so the VM watches CI with no GitHub credential. Free. |
 | `GET` | `/v1/health` | Caps, today's counters, kill switch, watchdog record, Sail balance and box state, and when each alert last went out. |
 | `POST` | `/v1/kill` | Runtime token may engage the kill switch. |
 | `POST` | `/v1/unkill` | Only the separate owner token may release it. |
@@ -66,6 +68,47 @@ arithmetic throughout and every partial cent rounds **against** the order.
 A reservation is returned only when the forward never reached the venue. A venue that answered at
 all keeps its reservation, however it answered: an unconfirmed write is an order until
 reconciliation says otherwise.
+
+## Pull requests
+
+The frontier model proposes changes to the floor: a strategy, a tool, a game dial, a lesson. A
+change reaches the repository **only as a pull request**, and the credential that can open one
+lives only here, like the venue keys. CI on GitHub judges each pull request and a repository
+workflow merges the ones that pass. **There is deliberately no merge route**, and nothing in the
+gateway approves, closes, force-pushes or deletes.
+
+Every rule is enforced here first and by the repository's own CI again:
+
+| Role | May write |
+| --- | --- |
+| `architect` | `league/strategies/…` |
+| `toolsmith` | `league/tools/…`, `league/tests/test_tool_…` |
+| `operator` | exactly `league/config.json` |
+| `designer` | exactly `league/game.json` |
+| `teacher` | `league/playbook/…` |
+
+- A path is relative and normalized: no `..`, no `.`, no empty segment, no leading `/`, no
+  backslash, no control character, no `.git…` segment, at most 200 characters. Any other path is a
+  `403` that names it.
+- Refused for every role, by name, even if a role's paths were loosened later:
+  `league/constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`,
+  `auditor.py`, `watchdog.py`, and anything under `gateway/` or `.github/`.
+- 1 to 12 files of UTF-8 text, 64 KiB each, 256 KiB a request; `slug` is
+  `^[a-z0-9][a-z0-9-]{1,48}$`; the title is one line of 120 characters, the body 8000. The pull
+  request's body ends `Opened by Astra (<role>) through the LTCM gateway.`
+- The branch is `astra/<role>/<slug>-<first 8 hex of sha256 over the files>`, so a retry of the
+  same proposal is the same branch. A retry that finds its branch (the same tree, or the same
+  files when `main` has moved since) and its open pull request makes nothing and returns them. A
+  branch of that name holding anything else is a `409`, never overwritten; so is a proposal that
+  changes nothing on `main`.
+- `GITHUB_MAX_PULLS_PER_DAY` (12) a UTC day, counted in the `Gate` in one step; over it is `429`.
+  What is counted is a branch made: a refused proposal, a GitHub outage before the branch, and a
+  retry cost nothing, and a branch request that never answered is counted as made.
+- Without `GITHUB_TOKEN` or `GITHUB_REPO` both routes are `503 {"error": "GitHub is not
+  configured."}`. Any GitHub failure is a `502` with one short line that names the step; the
+  token is stripped from it even if GitHub echoed it.
+
+The reply is `{"ok": true, "branch", "number", "url", "head"}`.
 
 ## The watchdog, and the mail
 
@@ -116,7 +159,21 @@ npx wrangler secret put ALPACA_SECRET_KEY
 
 # Sail, for the watchdog: the API key. Without it the watchdog only reports.
 npx wrangler secret put SAIL_API_KEY
+
+# GitHub, for /v1/github/pr: a FINE-GRAINED personal access token (github.com/settings/
+# personal-access-tokens), never a classic one. Repository access: "Only select repositories",
+# this one repository (the GITHUB_REPO var). Repository permissions: Contents read and write,
+# Pull requests read and write, and nothing else (Metadata read is added by GitHub and cannot be
+# removed). No Workflows, no Administration, no Actions: the token must not be able to edit CI
+# or the branch rules, and with no Workflows permission GitHub itself refuses any push that
+# touches .github/workflows. Without it the two GitHub routes answer 503.
+npx wrangler secret put GITHUB_TOKEN
 ```
+
+The check runs the status route counts are readable with the permissions above on a public
+repository. On a private one GitHub asks for Checks read as well; if
+`GET /v1/github/pr/<n>` answers `502 … (check runs)`, add that one read permission and nothing
+more.
 
 Provision the separate owner credential with `python3 scripts/gateway_admin.py provision`
 from the repository root. It is stored mode 600 under `.data/ltcm/keys/`, never uploaded to

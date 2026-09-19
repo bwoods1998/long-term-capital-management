@@ -7,11 +7,17 @@
 //   GET             /v1/kalshi/ws-auth    handshake headers for the Kalshi WebSocket, 30 s of life
 //   GET             /v1/health            caps, counters, kill switch, watchdog
 //   POST            /v1/kill /v1/unkill   the kill switch, which lives outside the trading VM
+//   POST            /v1/github/pr         a proposal becomes a branch and a pull request, never a push
+//   GET             /v1/github/pr/<n>     that pull request and its CI, so the VM can watch it
 //
 // The ws-auth route is the only one that hands the VM credential material, and what it hands
 // over is short-lived and read-only: Kalshi accepts no order over its WebSocket. A POST to
 // `/v1/kalshi/account/api_usage_level/upgrade` passes as an ordinary forwarded write; it creates
 // no order, so the caps do not see it (`caps.createsOrder`).
+//
+// The GitHub routes move no money, so the kill switch does not stop them: a halted floor may still
+// propose its own repair. There is deliberately no merge route. CI judges a pull request and a
+// repository workflow merges it; the most this gateway can do to `main` is ask.
 //
 // `gate` is the Durable Object stub (or, in tests, the gate itself): every method is awaited, so
 // the same router works against both.
@@ -22,6 +28,7 @@ import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenueP
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
+import * as github from './github.mjs';
 
 export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
 //: Venues that hold no real money. Their orders are never metered and the kill switch does not
@@ -121,6 +128,20 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/frontier/responses') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return frontierCall(request, env, { gate, fetcher, now });
+  }
+
+  if (path === '/v1/github/pr') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return proposePull(request, env, { gate, fetcher, now });
+  }
+  const watched = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})$/.exec(path);
+  if (watched) {
+    // Read-only and free: the VM holds no GitHub credential, so this is how it learns CI's verdict.
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    const account = github.configured(env);
+    if (!account) return fail('GitHub is not configured.', 503);
+    const status = await github.pullStatus({ ...account, number: Number(watched[1]), fetcher });
+    return status.error ? fail(status.error, status.status) : json(status);
   }
 
   const target = parseRoute(path);
@@ -304,4 +325,31 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
       ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
     },
   });
+}
+
+/**
+ * One proposal from the frontier model, opened as a pull request. The proposal is checked against
+ * its role's paths before GitHub hears of it, and takes one of the day's places before the first
+ * call; the place is given back when the attempt made no new branch, so a retry of a proposal
+ * that is already open costs nothing and a GitHub outage does not spend the day.
+ */
+async function proposePull(request, env, { gate, fetcher, now }) {
+  const account = github.configured(env);
+  if (!account) return fail('GitHub is not configured.', 503);
+  const body = await readBody(request, github.MAX_REQUEST_BYTES);
+  if (body.error) return fail(body.error, 413);
+  let parsed;
+  try {
+    parsed = JSON.parse(body.text || '');
+  } catch {
+    return fail('The proposal must be JSON.', 400);
+  }
+  const proposal = github.admit(parsed);
+  if (proposal.error) return json({ error: proposal.error, ...(proposal.path !== undefined ? { path: proposal.path } : {}) }, proposal.status);
+  const hold = await gate.pullReserve({ at: now() });
+  if (!hold.ok) return json({ error: hold.error, cap: hold.cap }, hold.status, { 'Retry-After': '3600' });
+  const result = await github.openPullRequest({ ...account, proposal, fetcher });
+  if (!result.created) await gate.pullRefund({ day: hold.day, at: now() });
+  if (result.error) return fail(result.error, result.status);
+  return json({ ok: true, branch: result.branch, number: result.number, url: result.url, head: result.head });
 }

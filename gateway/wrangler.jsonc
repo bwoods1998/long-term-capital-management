@@ -5,7 +5,8 @@
   //
   // Secrets, set with `npx wrangler secret put <NAME>` and never written to this file:
   //   KALSHI_KEY_ID, KALSHI_PRIVATE_KEY, ALPACA_KEY_ID, ALPACA_SECRET_KEY,
-  //   GATEWAY_TOKEN, GATEWAY_ADMIN_TOKEN, SAIL_API_KEY.
+  //   GATEWAY_TOKEN, GATEWAY_ADMIN_TOKEN, SAIL_API_KEY,
+  //   GITHUB_TOKEN (fine-grained, this one repository, Contents and Pull requests read/write).
   //
   // It is also the floor's supervisor. Every five minutes it reads the published checkpoint, the
   // Sail credit balance and the state of the box, resumes and restarts the box when it can, and
@@ -48,6 +49,11 @@
     // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
     // cache-write rate, the dearest an input token can be, so the meter errs high.
     "FRONTIER_MODELS": "{\"gpt-6-astra\": {\"input\": 12.5, \"cached\": 1.0, \"output\": 50}, \"gpt-5.6-sol\": {\"input\": 5.0, \"cached\": 0.4, \"output\": 20}, \"gpt-5.6-terra\": {\"input\": 2.5, \"cached\": 0.2, \"output\": 12}}",
+    // Where the frontier model's proposals become pull requests, and how many may open in one
+    // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
+    // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.
+    "GITHUB_REPO": "bwoods1998/long-term-capital-management",
+    "GITHUB_MAX_PULLS_PER_DAY": "12",
     // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's
     // notices from noon on once three live favorites desks were filling.
     "NOTIFY_MAX_PER_DAY": "300",
