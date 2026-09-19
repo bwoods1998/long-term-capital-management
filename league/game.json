@@ -1,0 +1,33 @@
+{
+  "_about": "The tunable rules of the game. Astra, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
+  "economy": {
+    "epoch_seconds": 86400,
+    "daily_pool_usd": "2.00",
+    "niche_floor_share": "0.40",
+    "rung_weights": {"0": "0", "1": "0.2", "2": "1.0", "3": "1.0"},
+    "endowment_usd": "1.00",
+    "fork_threshold_usd": "3.00",
+    "fork_endowment_usd": "1.00",
+    "max_population": 16,
+    "min_population": 8,
+    "box_usd_per_hour": "0.04",
+    "box_creation_usd": "0.005"
+  },
+  "bounds": {
+    "daily_pool_usd": ["0.50", "3.00"],
+    "niche_floor_share": ["0.10", "0.70"],
+    "endowment_usd": ["0.25", "2.00"],
+    "fork_threshold_usd": ["1.50", "10.00"],
+    "fork_endowment_usd": ["0.50", "3.00"],
+    "max_population": [8, 24],
+    "min_population": [4, 12]
+  },
+  "research": {
+    "profile": "flash_flex",
+    "fast_profile": "flash_asap",
+    "max_turns": 6,
+    "max_output_tokens": 4096,
+    "min_hours_between": 6,
+    "min_credits_usd": "0.10"
+  }
+}

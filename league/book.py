@@ -382,6 +382,10 @@ class Book:
         self.baseline_positions: dict[str, Decimal] = {}
         self.venue_cash: Decimal | None = None
         self._fills_since_reconcile = 0
+        #: How far the venue may fairly differ from the book since the last reconciliation because
+        #: a limit order was booked as a taker and may have been a maker: dollars, and units by key.
+        self._fee_slack_usd = ZERO
+        self._fee_slack_units: dict[str, Decimal] = {}
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -461,6 +465,11 @@ class Book:
         if working is not None and p.get("source") == "venue":
             self._fills_since_reconcile += 1
             traded = money(p["quantity"])
+            if working.order_type == "limit" and self.fees.family == "alpaca":
+                self._fee_slack_usd += money(p.get("fee_usd") or 0)
+                if money(p.get("fee_quantity") or 0) > 0:
+                    key = position_key(working.instrument)
+                    self._fee_slack_units[key] = self._fee_slack_units.get(key, ZERO) + money(p["fee_quantity"])
             working.filled += traded
             working.notional += traded * money(p["price"])
             working.fees_seen += money(p.get("venue_fee") or 0)
@@ -727,6 +736,19 @@ class Book:
                 reasons.append(
                     f"position of ${held_value + notional:.2f} would be over this rung's ${limits.max_position_usd}"
                 )
+        if intent.side == "buy" and intent.instrument.asset_class == "event":
+            other = "no" if (intent.instrument.right or "yes") == "yes" else "yes"
+            market = market_key(intent.instrument)
+            held = any(
+                market_key(h.instrument) == market and (h.instrument.right or "yes") == other
+                for a in self.accounts.values() for h in a.holdings.values()
+            )
+            bidding = any(
+                w.open and w.side == "buy" and market_key(w.instrument) == market and (w.instrument.right or "yes") == other
+                for w in self.orders.values()
+            )
+            if held or bidding:
+                reasons.append(f"the House already holds or bids the {other} leg of this market; one account cannot hold both")
         crossing = self._would_cross_own(intent, quote)
         if crossing:
             reasons.append(crossing)
@@ -915,11 +937,21 @@ class Book:
         else:
             cash_delta = gross - charge.usd
             position_delta = -quantity
+        realized = None
+        held = None
+        if side == "sell":
+            # What this sale made against what the units cost, fees included: one closed trade.
+            held = self._account(agent).holdings.get(instrument.key)
+            if held is not None and held.quantity > 0:
+                realized = q_cash(cash_delta - held.cost * min(quantity, held.quantity) / held.quantity)
         payload = {
             "book": self.name,
             "source": source,
             "order_id": order_id,
             "intent_id": intent_id or (intent.id if intent else None),
+            "realized": text(realized),
+            "opened_at": held.opened_at if held is not None else None,
+            "entry_reason": held.reason if held is not None else None,
             "instrument": instrument.to_dict(),
             "side": side,
             "quantity": text(quantity),
@@ -986,18 +1018,13 @@ class Book:
         return Outcome(first.id, first.agent, status, order.reason or "", order_id, working.filled)
 
     def _liquidity(self, intent: Intent) -> str:
-        """A market order takes. A limit order makes unless it crossed the touch when it was sent
-        (Alpaca accepts every order asynchronously, so "it was still open" says nothing)."""
-        if intent.order_type == "market":
-            return "taker"
-        if intent.post_only:
+        """What the book assumes a fill of this order costs. Kalshi reports each order's fee, so
+        this only matters on Alpaca, which reports none: there every order is booked at the
+        taker's fee (a limit order may really have made, which only the venue knows), and
+        reconciliation hands the difference to the House row within a known allowance."""
+        if self.fees.family == "kalshi" and intent.order_type == "limit" and intent.post_only:
             return "maker"
-        quote = self._quote(intent.instrument)
-        if quote is None or intent.limit_price is None:
-            return "taker"
-        if intent.side == "buy":
-            return "taker" if quote.ask is not None and intent.limit_price >= quote.ask else "maker"
-        return "taker" if quote.bid is not None and intent.limit_price <= quote.bid else "maker"
+        return "taker"
 
     def _order_row(self, base: Mapping[str, Any], status: str, broker_order_id: str | None, *, suffix: str, reason: str = "", rested: bool | None = None) -> None:
         payload = {**base, "status": status, "broker_order_id": broker_order_id, "reason": reason}
@@ -1040,8 +1067,10 @@ class Book:
             for share, part, venue_fee in zip(list(working.shares), parts, fee_parts):
                 if part <= 0:
                     continue
-                if self.fees.family == "kalshi" and self.real_money:
-                    charge = Charge(usd=venue_fee)  # the venue's own number
+                if self.fees.family == "kalshi":
+                    # The venue's own number: the real adapter and the shadow book both report each
+                    # order's fees, and they decide maker or taker at the moment of the fill.
+                    charge = Charge(usd=venue_fee)
                 else:
                     charge = self.fees.charge(
                         working.instrument, working.side, part, price, liquidity=liquidity, filled_before=before
@@ -1179,8 +1208,13 @@ class Book:
         balance = self.broker.balance()
         positions: dict[str, Decimal] = {}
         for position in self.broker.positions():
-            key = position_key(position.instrument)
-            positions[key] = positions.get(key, ZERO) + money(position.quantity)
+            instrument, quantity = position.instrument, money(position.quantity)
+            if instrument.asset_class == "event" and quantity < 0:
+                # The real Kalshi adapter reports NO contracts as a negative count on the market.
+                instrument = Instrument("event", instrument.symbol, instrument.venue, market_id=instrument.market_id, right="no")
+                quantity = -quantity
+            key = position_key(instrument)
+            positions[key] = positions.get(key, ZERO) + quantity
         return money(balance.cash), positions
 
     def _ledger_totals(self) -> tuple[Decimal, dict[str, Decimal], dict[str, Instrument]]:
@@ -1283,17 +1317,21 @@ class Book:
                     continue
                 instrument = instruments.get(key)
                 mark = self.marks.get(instrument.key) if instrument is not None else None
-                if instrument is None or mark is None or abs(diff) * mark * instrument.multiplier >= DUST_USD:
-                    diffs[key] = text(diff)
-                else:
+                small = instrument is not None and mark is not None and abs(diff) * mark * instrument.multiplier < DUST_USD
+                # The venue kept fewer coins than the taker's fee the book assumed: a maker's fill.
+                refund = instrument is not None and ZERO < diff <= self._fee_slack_units.get(key, ZERO)
+                if small or refund:
                     self._position_dust(instrument, diff)
+                else:
+                    diffs[key] = text(diff)
             pending = any(w.status in ("new", "unknown") for w in self.orders.values())
             # A venue shows cash to the cent and rounds each fill's fee its own way: allow a cent
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
-            ok = abs(cash_diff) < tolerance and not diffs and not pending
+            within = abs(cash_diff) < tolerance or ZERO < cash_diff <= self._fee_slack_usd + tolerance
+            ok = within and not diffs and not pending
             problems = []
-            if abs(cash_diff) >= tolerance:
+            if not within:
                 problems.append(f"cash differs by {cash_diff:.4f}")
             if diffs:
                 problems.append("positions differ: " + ", ".join(f"{k} {v}" for k, v in diffs.items()))
@@ -1322,6 +1360,8 @@ class Book:
             self.frozen = None if ok else detail
             if ok:
                 self._fills_since_reconcile = 0
+                self._fee_slack_usd = ZERO
+                self._fee_slack_units = {}
             head_seq, head_digest = self.ledger.head()
             self.ledger.append(
                 "book.reconciled",

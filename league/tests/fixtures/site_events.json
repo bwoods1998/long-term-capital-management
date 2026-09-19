@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "events": [
+    {
+      "id": "ops:floor.mark:2026-09-19T04:56:53.000Z",
+      "stream": "ops",
+      "kind": "floor.mark",
+      "at": "2026-09-19T04:56:53.000Z",
+      "payload": {
+        "account_equity": "1021.9251",
+        "account_cash": "1021.9251",
+        "as_of": "2026-09-19T04:56:53.000Z",
+        "venues": [
+          {
+            "venue": "kalshi",
+            "equity": "512.0051",
+            "cash": "512.0051",
+            "as_of": "2026-09-19T04:56:53.000Z"
+          },
+          {
+            "venue": "alpaca",
+            "equity": "509.92",
+            "cash": "509.92",
+            "as_of": "2026-09-19T04:56:53.000Z"
+          }
+        ]
+      },
+      "digest": "abacbd45752c7ef320963c21b23026c09c937f5af86f7997bb7f5dde6ec29ecf"
+    },
+    {
+      "id": "desk:favorites-maker:outcome:KXBTCD-26SEP1902-T80499.99",
+      "stream": "desk:favorites-maker",
+      "kind": "desk.outcome",
+      "at": "2026-09-19T06:00:05.000Z",
+      "payload": {
+        "market_id": "KXBTCD-26SEP1902-T80499.99",
+        "result": "yes",
+        "pnl": "0.14",
+        "real_money": true,
+        "held_for_hours": 0.8,
+        "rationale_excerpt": "BTC sat $600 above the 80,499.99 strike with 48 minutes left. YES at 97 cents was a favorite priced under its odds.",
+        "entry_price": "0.97",
+        "exit_price": "1",
+        "quantity": "5",
+        "instrument": {
+          "symbol": "KXBTCD-26SEP1902-T80499.99",
+          "asset_class": "event",
+          "venue": "kalshi",
+          "market_id": "KXBTCD-26SEP1902-T80499.99",
+          "right": "yes"
+        }
+      },
+      "digest": "d4d32326b7f10466bc44f4fa9c16bdc0a465d296cece9b92d205170bcf48510d"
+    },
+    {
+      "id": "desk:crypto-reversion:20260919-0610:tool:0001",
+      "stream": "desk:crypto-reversion",
+      "kind": "desk.tool_call",
+      "at": "2026-09-19T06:10:12.000Z",
+      "payload": {
+        "session_id": "crypto-reversion:20260919-0610",
+        "tool": "web_search",
+        "arguments": {
+          "query": "bitcoin price drop September 19"
+        }
+      },
+      "digest": "12a884cdb0e3ef2916594a063f24d08c03f95c0e0e48831a70689f86ab12f321"
+    },
+    {
+      "id": "desk:crypto-reversion:20260919-0610:thought:0002",
+      "stream": "desk:crypto-reversion",
+      "kind": "desk.thought",
+      "at": "2026-09-19T06:10:40.000Z",
+      "payload": {
+        "session_id": "crypto-reversion:20260919-0610",
+        "text": "BTC is 2.1 standard deviations under its 24-bar mean on 5-minute bars, the spread is one tick and no news explains the drop. Buying $35 for the reversion; out at the mean or in two hours."
+      },
+      "digest": "09df65a77feab5d77c4eb93e471eb0480d2e126eda4ca2c6beee5e9a15f6fb6d"
+    },
+    {
+      "id": "broker:alpaca:fill:9f1c2ab4-0001",
+      "stream": "broker:alpaca",
+      "kind": "broker.fill",
+      "at": "2026-09-19T06:11:02.000Z",
+      "payload": {
+        "desk_id": "crypto-reversion",
+        "instrument": {
+          "symbol": "BTC/USD",
+          "asset_class": "crypto",
+          "venue": "alpaca"
+        },
+        "side": "buy",
+        "quantity": "0.000437",
+        "price": "80950.00",
+        "fee": "0.09",
+        "real_money": true,
+        "order_id": "ord-9f1c2ab4",
+        "reason": "Two deviations under the 24-bar mean; buying the reversion."
+      },
+      "digest": "62c73827dbfdab8b914f47c95c86f557ff4df6ad485b1e140bb84201143a2afd"
+    },
+    {
+      "id": "lab:progress:20260919-0615",
+      "stream": "lab",
+      "kind": "lab.progress",
+      "at": "2026-09-19T06:15:00.000Z",
+      "payload": {
+        "stage": "test",
+        "message": "Replayed 3 variants of crypto-reversion against 30 days of 5-minute bars; 1 passed rung 0 and starts on paper."
+      },
+      "digest": "80e2551cb00338c7010ecc84d9f6c2d369c0a5e0675f702af0371c390bbec98a"
+    },
+    {
+      "id": "ops:floor.mark:2026-09-19T06:20:00.000Z",
+      "stream": "ops",
+      "kind": "floor.mark",
+      "at": "2026-09-19T06:20:00.000Z",
+      "payload": {
+        "account_equity": "1022.19",
+        "account_cash": "967.96",
+        "as_of": "2026-09-19T06:20:00.000Z",
+        "venues": [
+          {
+            "venue": "kalshi",
+            "equity": "512.21",
+            "cash": "493.41",
+            "as_of": "2026-09-19T06:19:58.000Z"
+          },
+          {
+            "venue": "alpaca",
+            "equity": "509.98",
+            "cash": "474.55",
+            "as_of": "2026-09-19T06:19:59.000Z"
+          }
+        ]
+      },
+      "digest": "d1b1b14bed5b8fc53a9a2c4f816e33618d5d342faea137140cbc63137c4b75e1"
+    }
+  ]
+}

@@ -198,6 +198,7 @@ class PaperBookTest(BookCase):
         self.assertEqual(above.status, "resting")
 
     def test_a_resting_fill_arrives_on_a_later_poll_as_a_maker(self):
+        self.book.reconcile()  # the House opens every book's baseline before anything trades
         self.seat("a1")
         self.broker.set_quote(BTC, "80000", "80010")
         out = self.book.submit([self.intent("a1", BTC, "buy", "0.0005", order_type="limit", limit_price="79000")])[0]
@@ -206,8 +207,13 @@ class PaperBookTest(BookCase):
         self.broker.fill_resting(out.order_id, "0.0005")
         self.book.poll()
         holding = self.book.account("a1").holdings[BTC.key]
-        self.assertEqual(holding.quantity, D("0.0005") - D("0.00000075"))  # the 0.15% maker fee
+        # Alpaca reports no fee, so the book assumes the taker's 0.25%; the venue charged a maker's
+        # 0.15%. Reconciliation finds the extra coins, inside the known allowance, for the House.
+        self.assertEqual(holding.quantity, D("0.0005") - D("0.00000125"))
         self.assertEqual(self.book.open_orders("a1"), [])
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual(self.book.account(HOUSE).holdings[BTC.key].quantity, D("0.0000005"))
         self.assertTrue(self.book.reconcile().ok)
 
     def test_reserved_cash_counts_against_the_next_order(self):
@@ -361,7 +367,20 @@ class KalshiBookTest(BookCase):
         cross = self.book.submit([self.intent("a2", event("no"), "buy", "5", order_type="limit", limit_price="0.40")])[0]
         self.assertEqual(cross.status, "refused")
         clear = self.book.submit([self.intent("a2", event("no"), "buy", "5", order_type="limit", limit_price="0.39", post_only=True)])[0]
-        self.assertEqual(clear.status, "resting")
+        self.assertEqual(clear.status, "refused")  # one account never holds both legs of a market
+        self.assertIn("cannot hold both", clear.detail)
+
+    def test_a_no_holding_reported_as_a_negative_count_reconciles(self):
+        self.book.reconcile()
+        self.seat("a1", usd="100", position="50", order="50")
+        self.broker.set_quote(event("no"), "0.90", "0.92")
+        out = self.book.submit([self.intent("a1", event("no"), "buy", "5")])[0]
+        self.assertEqual(out.status, "filled")
+        inst, held = self.broker.held.pop(event("no").key)
+        bare = Instrument("event", inst.symbol, inst.venue, market_id=inst.market_id)  # as the real adapter reports it
+        self.broker.held[bare.key] = (bare, -held)
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
 
     def test_maker_fill_then_settlement_pays_the_winning_leg(self):
         self.book.reconcile()
