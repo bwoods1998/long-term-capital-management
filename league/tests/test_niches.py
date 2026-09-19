@@ -79,11 +79,17 @@ class TheFile(unittest.TestCase):
             self.assertFalse(sports.fits(series), series)
         self.assertGreaterEqual(sports.max_members, 8)
 
-    def test_options_are_defined_and_closed(self):
+    def test_options_are_open_long_premium_only_and_paper_is_their_replay(self):
         options = self.niches["alpaca-options"]
-        self.assertTrue(options.dormant)
-        self.assertEqual(options.founders, ())
-        self.assertIn("quotes", options.dormant_reason)
+        self.assertFalse(options.dormant)
+        self.assertFalse(options.replay)
+        self.assertEqual([f["name"] for f in options.founders], ["options-breakout", "options-pullback"])
+        self.assertIn("LONG PREMIUM ONLY", options.brief)
+        call = instrument_for("alpaca", {"occ": "F260925C00013000"})
+        self.assertTrue(options.holds(call))
+        self.assertFalse(options.holds(instrument_for("alpaca", {"symbol": "F"})))  # the stock itself is not the specialty
+        self.assertFalse(options.holds(instrument_for("alpaca", {"occ": "NVDA260925C00200000"})))
+        self.assertFalse(self.niches["alpaca-megacaps"].holds(instrument_for("alpaca", {"occ": "NVDA260925C00200000"})))
 
     def test_the_brief_tells_a_member_which_series_charge_makers(self):
         text = self.niches["kalshi-sports"].text()
@@ -119,7 +125,9 @@ class Constrain(unittest.TestCase):
         self.assertEqual(niches.match({"venue": "kalshi", "horizon": "day", "series": ["KXEPLGAME"]}, self.niches).id, "kalshi-sports")
         self.assertIsNone(niches.match({"venue": "kalshi", "horizon": "day", "series": ["KXFEDDECISION"]}, self.niches))
         self.assertIsNone(niches.match({"venue": "kalshi", "horizon": "hour", "series": ["KXEPLGAME"]}, self.niches))  # sports is judged by the day
-        self.assertIsNone(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["F", "SOFI"]}, self.niches))  # only options hold those
+        self.assertIsNone(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["F", "SOFI"]}, self.niches))  # only options hold those, and it did not say options
+        self.assertEqual(niches.match({"venue": "alpaca", "horizon": "day", "asset_class": "option", "symbols": ["SPY", "F"]}, self.niches).id, "alpaca-options")
+        self.assertEqual(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["SPY"]}, self.niches).id, "alpaca-index-etfs")  # the same ticker, as shares
 
     def test_holds(self):
         sports, etfs, majors = self.niches["kalshi-sports"], self.niches["alpaca-index-etfs"], self.niches["alpaca-crypto-majors"]
@@ -216,7 +224,8 @@ class InTheHouse(HouseCase):
         nowhere = BUYER.replace('"symbols": ["BTC/USD"]', '"symbols": ["ZZZZ"]')
         with self.assertRaisesRegex(ValueError, "no open specialty"):
             self.house.spawn("nowhere", "test-family", nowhere, reason="test")
-        with self.assertRaisesRegex(ValueError, "not open yet"):
+        self.house.niches["alpaca-options"].dormant, self.house.niches["alpaca-options"].dormant_reason = True, "closed for the test"
+        with self.assertRaisesRegex(ValueError, "not open yet: closed for the test"):
             self.house.spawn("optioneer", "test-family", BUYER, reason="test", specialty="alpaca-options")
 
     def test_an_entry_outside_the_specialty_is_dropped_and_said_so(self):

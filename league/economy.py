@@ -183,6 +183,13 @@ class Economy:
         if total > 0:
             for agent, score in scores.items():
                 out[agent] += performance_pool * score / total
+        elif self.rules.get("unearned_share_to_floors") and niches:
+            # Nobody has earned the performance share yet (the first days of any league). During
+            # the expedition the owner wants the budget USED, so it follows the floors instead of
+            # going unspent; the day somebody performs, it is theirs again.
+            for members in niches.values():
+                for s in members:
+                    out[s.agent] += performance_pool / len(niches) / len(members)
         return {agent: amount.quantize(PLACES, rounding=ROUND_DOWN) for agent, amount in out.items()}
 
     def last_payout_at(self) -> float | None:

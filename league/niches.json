@@ -787,26 +787,40 @@
    "id": "alpaca-options",
    "venue": "alpaca",
    "horizons": [
-    "hour",
     "day"
    ],
    "asset_class": "option",
-   "status": "dormant",
-   "title": "Listed options on Alpaca (level 3)",
+   "title": "Listed options on Alpaca: long calls and puts",
    "symbols": [
-    "SPY",
-    "QQQ",
-    "IWM",
     "F",
     "SOFI",
     "AAL",
     "T",
     "PFE",
-    "INTC"
+    "INTC",
+    "RIVN",
+    "SNAP",
+    "CCL",
+    "BAC",
+    "VALE",
+    "HOOD",
+    "PLTR",
+    "SPY",
+    "QQQ",
+    "IWM"
    ],
-   "dormant_reason": "The account is approved for level 3 and the order path is proven (a paper contract was accepted and cancelled on Sept 19, 2026), but the gateway does not yet serve Alpaca's option chains or quotes, so the House cannot price, size or mark a contract. It opens when that is built and checked against a live market.",
-   "brief": "Long calls and puts and defined-risk spreads, with no limit on how long a position is held. One contract is 100 shares and cannot be cut smaller: under the $75 order cap that means premiums up to 75 cents, which is short-dated index options slightly out of the money, or at-the-money weeklies on stocks under about $15.",
-   "founders": []
+   "brief": "Calls and puts on sixteen liquid underlyings, LONG PREMIUM ONLY: you open by buying and close by selling, so the most a position can lose is what was paid. The account is approved for level 3, but spreads and anything written are refused by the gateway itself: a short leg can be assigned into a hundred shares this account cannot carry, with nobody awake to see it. One contract is 100 shares and cannot be cut smaller. An order is capped at $75 on paper and $20 with real money, so the premiums in reach are under 75 cents (20 cents with real money): at-the-money weeklies on stocks under about $20 (F, SOFI, AAL, RIVN, SNAP, VALE), and out-of-the-money contracts on the rest. Measured Sept 19, 2026: these sixteen list between 60 and 900 contracts each inside four weeks, 8 to 100 of them with a spread under 15% and a premium in reach. WHAT THE HOUSE SHOWS: `ctx[\"chain\"]`, contracts on your underlyings expiring after today, within a fifth of the stock's price, two-sided and affordable, with bid, ask, implied volatility and delta where the feed has them; daily bars and the touch of each underlying. The option quotes are FIFTEEN MINUTES OLD (the live feed needs an agreement the owner has not signed), so every order is a limit order: a stale price costs a fill, never more. No entry in a contract that expires today; the House sells anything still held at 14:30 New York on its last day. No hold limit otherwise. THERE IS NO REPLAY HERE (no recorded chains): paper is this specialty's replay, a newcomer starts forward-testing at once, and the `replay` tool only checks that a candidate runs. What is known: nothing by this firm. Published: option BUYERS lose on average, because they pay the spread and the variance premium (implied volatility runs above realised). A long-premium strategy must be right about a MOVE, soon: direction after breakouts, bounces after pullbacks, drift after earnings, and implied volatility that is cheap against what the stock has really been doing. A specialist should learn: which underlyings keep spreads tight enough to trade a 40-cent contract, how much of the premium time decay takes per day at each days-to-expiry, how implied compares with realised volatility before and after earnings, and the earnings dates of these sixteen names.",
+   "founders": [
+    {
+     "seed": "options-breakout",
+     "name": "options-breakout"
+    },
+    {
+     "seed": "options-pullback",
+     "name": "options-pullback"
+    }
+   ],
+   "replay": false
   }
  ]
 }

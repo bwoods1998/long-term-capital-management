@@ -49,7 +49,7 @@ FORBIDDEN: tuple[str, ...] = (
 )
 #: The only keys of league/config.json the operator may move, with their bounds.
 CONFIG_DIALS: dict[str, tuple[float, float]] = {
-    "tick_seconds": (30, 600), "mark_every_seconds": (60, 1800), "replay_days": (7, 60), "inference_daily_cap_usd": (0.5, 5.0),
+    "tick_seconds": (30, 600), "mark_every_seconds": (60, 1800), "replay_days": (7, 60), "inference_daily_cap_usd": (0.5, 10.0),
 }
 
 

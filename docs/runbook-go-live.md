@@ -38,10 +38,10 @@ published checkpoint the dot goes green and says "live".
 
 ## 2. What you will see in the first hour
 
-- **Minutes 0 to 5.** The House takes each book's baseline, then founds the 26 specialists of
+- **Minutes 0 to 5.** The House takes each book's baseline, then founds the 28 specialists of
   `league/niches.json` (each one's strategy file is read inside a sealed Sailbox; two to three
   minutes for all of them) and stakes each with $200 of practice money. `status` shows
-  `living: 26`. The live stream shows 26 "is born" lines. In the background it surveys Kalshi once
+  `living: 28`. The live stream shows 28 "is born" lines. In the background it surveys Kalshi once
   (about a minute and a half) so every specialty's universe is ranked by what is trading today.
 - **Minutes 5 to 20.** Every agent wakes on its own clock (5 to 60 minutes). You will see their
   thoughts ("Saw 27 hourly markets, 2 favourites in the band..."), resting Kalshi bids on the shadow
@@ -58,7 +58,8 @@ published checkpoint the dot goes green and says "live".
   closed table tagged "practice"; open practice positions are listed under the real ones, tagged.
 - **The self-improvement chart** shows generation 1 only until an agent earns enough credits to
   fork (about three dollars of credits: days, not hours) or a seed dies and is replaced.
-- **Equity strategies do nothing until Monday 09:30 New York.**
+- **Equity and option strategies do nothing until Monday 09:30 New York**; over the weekend the two
+  option founders and the six equity ones research (the option chain and Friday's closing quotes are readable).
 
 Nothing can reach real money in this mode. The earliest an agent can become eligible is after 15
 active blocks and 10 closed trades with growth above zero and a drawdown under 15%: about a day
@@ -150,14 +151,29 @@ trades, but the box goes back to billing about half a cent an hour. To park the 
 a day, stop it, pause it, and clear the public tape (`POST /api/capital/reset?confirm=erase-everything`
 with the publish token) so the watchdog sees nothing to revive.
 
-## 7. What the unattended week is expected to cost
+## 7. What the fortnight is expected to cost
+
+This replaces the thrifty estimate below it: on Sept 19 you asked for both budgets to be USED, in
+full, over fourteen days (Sept 19 to Oct 2). `python3 -m league status` and the public tape's
+`ops.budget` rows show the pace every day: day N of 14, spent, and today's allowance.
+
+| What | How it is paced | The fortnight |
+|---|---|---|
+| Sail | about $7.14 a day at the start, recomputed daily from what is left. 85% of it is the day's credit pool; research runs on DeepSeek V4 Pro (measured $0.02 a pass) every 3 hours an agent, every 1.5 while the day is underspent | up to **$100**, less the $5 the House never spends. Your Sail balance was $97 at the start, so about $92 is reachable without a top-up |
+| Frontier model (Astra) | about $7.14 a day: architect, operator and toolsmith every 8 hours, teacher every 12, designer every 36, one at a time while the day's allowance lasts; audits are not paced | up to **$100**; the gateway's $100-a-month cap resets on Oct 1 and the House's own count of the expedition's spend is what stops it at $100 |
+
+When either is gone, or on Oct 3, that kind of spending stops for good and you get one email saying
+so. Agents still wake and trade. To go on, change `budgets.expedition` in `league/constitution.py`,
+re-pin the digest the test prints, and deploy.
+
+### Before the expedition: the thrifty estimate (kept for the record)
 
 Measured during the build, at Sail's and OpenAI's current prices:
 
 | What | Basis | A week |
 |---|---|---|
 | The House box | one small box, mostly idle: about half a cent an hour | about $1 |
-| Agents' sandbox seconds | about 9 s a wake; 26 agents; 5 to 60 minute clocks | about $2 |
+| Agents' sandbox seconds | about 9 s a wake; 28 agents; 5 to 60 minute clocks | about $2 |
 | Research passes (cheap Sail models, flex window) | measured $0.001 to $0.002 a pass, at most one per agent every four hours | about $2 |
 | Web searches | Sail does not publish a price; the House assumes $0.01 each | under $2 |
 | **Sail total** | bounded above by the economy: agents cannot spend credits they were not granted ($2 a day plus $26 of endowments), and the House stops research at $100 in a calendar month | **$5 to $9, at most about $40** |

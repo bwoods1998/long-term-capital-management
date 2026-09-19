@@ -256,7 +256,10 @@ class Evaluator:
             p = entry.payload
             if entry.seq <= since_seq or p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
                 continue
-            key = str((p.get("instrument") or {}).get("market_id") or (p.get("instrument") or {}).get("symbol")) + ":" + str((p.get("instrument") or {}).get("right"))
+            inst = p.get("instrument") or {}
+            # One trade is one instrument gone flat: for an option that is the contract (its expiry
+            # and strike), not every contract on the same underlying and side.
+            key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
             if entry.kind == "book.settle":
                 returns.append((running.pop(key, 0.0) + float(p["pnl"])) / staked)
             elif p.get("realized") is not None and p.get("source") != "dust":

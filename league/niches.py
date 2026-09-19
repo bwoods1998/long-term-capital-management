@@ -50,6 +50,9 @@ class Niche:
     patterns: tuple[str, ...] = ()
     category: str = ""
     max_members: int = 5
+    #: False where the House cannot replay history (options: no recorded chains). Paper is then
+    #: the specialty's replay: a newcomer starts its forward test at once, on practice money.
+    replay: bool = True
     #: The daily survey's answer: the series of this niche trading now, busiest first.
     live: tuple[str, ...] = field(default=())
 
@@ -72,6 +75,8 @@ class Niche:
             return ticker.split("-", 1)[0] in self.universe
         if getattr(instrument, "asset_class", "") != self.asset_class:
             return False
+        if self.asset_class == "option":
+            return str(instrument.symbol).upper() in self.universe  # an option's symbol is its underlying
         name = str(getattr(instrument, "market_id", None) or instrument.symbol).upper().replace("-", "/")
         return name in self.universe or str(instrument.symbol).upper() in self.universe
 
@@ -104,6 +109,7 @@ def load(path: Path | None = None) -> dict[str, Niche]:
         out[row["id"]] = Niche(
             id=str(row["id"]), title=str(row["title"]), venue=venue, horizons=horizons, listed=universe, brief=str(row["brief"]),
             patterns=tuple(row.get("patterns") or ()), category=str(row.get("category") or ""), max_members=int(row.get("max_members") or 5),
+            replay=bool(row.get("replay", True)),
             founders=tuple(row.get("founders") or ()), asset_class=str(row.get("asset_class") or ("event" if venue == "kalshi" else "crypto")),
             maker_fee_series=tuple(row.get("maker_fee_series") or ()), dormant=row.get("status") == "dormant",
             dormant_reason=str(row.get("dormant_reason") or ""),
@@ -121,6 +127,8 @@ def constrain(needs: Mapping[str, Any], niche: Niche) -> dict[str, Any]:
         raise ValueError(f"the {niche.id} specialty trades {niche.venue}, not {venue or 'nothing'}")
     if horizon not in niche.horizons:
         raise ValueError(f"the {niche.id} specialty is judged by the {' or '.join(niche.horizons)}, not by the {horizon or '?'}")
+    if niche.asset_class == "option":
+        out["asset_class"] = "option"
     asked = [str(x).upper() for x in (out.get(niche.key) or [])]
     inside = [x for x in dict.fromkeys(asked) if x in niche.universe]
     out[niche.key] = (inside or list(niche.universe))[:MAX_UNIVERSE]
@@ -132,9 +140,12 @@ def match(needs: Mapping[str, Any], niches: Mapping[str, Niche]) -> Niche | None
     asks to see (the architect's strategies arrive with NEEDS and no specialty)."""
     venue, horizon = str(needs.get("venue") or "").lower(), str(needs.get("horizon") or "").lower()
     best, score = None, 0
+    wants_options = str(needs.get("asset_class") or "").lower() == "option"
     for niche in niches.values():
         if niche.dormant or niche.venue != venue or horizon not in niche.horizons:
             continue
+        if (niche.asset_class == "option") != wants_options:
+            continue  # an options strategy says so in NEEDS: the same tickers are an equity specialty's too
         asked = {str(x).upper() for x in (needs.get(niche.key) or [])}
         inside = len(asked & set(niche.universe))
         if inside > score:

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from league.book import Limits
 from league.economy import load_game
 from league.house import House, Settings, mutate
+from league.ledger import now_iso
 from league.sandbox import LocalSandbox
 from league.tests.fakes import Clock, FakeBroker
 from league.venues import instrument_for
@@ -202,9 +203,9 @@ class HouseTest(HouseCase):
         self.assertEqual(child.generation, 2)
         self.assertNotEqual(child.params, agent.params)
         self.assertEqual(self.house.evaluator.rung(child.id), 0)  # a mutation answers for itself from replay up
-        self.assertGreaterEqual(self.house.economy.balance(child.id), D("0.99"))
+        self.assertGreaterEqual(self.house.economy.balance(child.id), D(self.house.game["economy"]["fork_endowment_usd"]) - D("0.01"))
         transfer = self.house.ledger.last("credit.transfer", agent=agent.id).payload
-        self.assertEqual((transfer["to"], transfer["usd"]), (child.id, "1.00000000"))
+        self.assertEqual((transfer["to"], D(transfer["usd"])), (child.id, D(self.house.game["economy"]["fork_endowment_usd"])))
         self.assertIn((agent.id, child.id), self.house.sandbox.forks)
         self.assertEqual(self.house.ledger.last("agent.forked", agent=agent.id).payload["child"], child.id)
         self.house.tick()
@@ -214,10 +215,23 @@ class HouseTest(HouseCase):
         agent = self.seated()
         before = self.house.economy.balance(agent.id)
         self.house.tick()
-        # Nobody has a record yet, so only the niche floor (40% of $2) is paid; the rest is not spent.
+        # Nobody has a record yet. Before the expedition's first day the pool is the game file's $2; the
+        # unearned performance share follows the floors (the owner wants the budget used), so all of it is paid.
         gained = self.house.economy.balance(agent.id) - before
-        self.assertGreater(gained, D("0.79"))
-        self.assertLess(gained, D("0.81"))
+        self.assertGreater(gained, D("1.99"))
+        self.assertLess(gained, D("2.01"))
+
+    def test_during_the_expedition_the_days_pool_is_the_days_sail_allowance(self):
+        from league.pacer import Pacer
+
+        agent = self.seated()
+        today = now_iso(self.clock)[:10]
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50"})
+        self.house.tick()
+        payout = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "payout"][-1]
+        self.assertEqual((D(payout["pool_usd"]), D(payout["paid_usd"]).quantize(D("0.01"))), (D("4.25"), D("4.25")))  # 85% of $50 over ten days, all of it paid
+        report = self.house.ledger.last("ops.budget").payload
+        self.assertEqual((report["what"], report["day"], report["of"], report["sail"]["budget_usd"]), ("expedition", 1, 10, "50"))
 
     def test_a_restart_resumes_the_same_floor(self):
         agent = self.seated()

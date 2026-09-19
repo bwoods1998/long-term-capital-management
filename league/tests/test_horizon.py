@@ -157,10 +157,16 @@ class HouseHorizon(HouseCase):
         self.assertEqual(book.account(agent.id).holdings, {})
         self.assertEqual(book.open_orders(agent.id), [])
 
-    def test_the_rule_can_be_switched_off_in_the_game_file(self):
-        game = load_game()
-        game["horizon"]["crypto_max_hold_hours"] = 0
-        self.assertEqual(type(self.house)._enforce_horizon(type("H", (), {"game": game})()), 0)
+    def test_the_crypto_rule_can_be_switched_off_in_the_game_file(self):
+        self.house.game["horizon"]["crypto_max_hold_hours"] = 0
+        agent = self.house.spawn("holder", "test-family", HOLDER, reason="test")
+        self.house.evaluator.seat(agent.id, 1, "test")
+        self.house._state["tried"][agent.id] = agent.code_sha256
+        self.house.tick()
+        self.clock.advance(100 * 3600)
+        self.broker.clock_iso = now_iso(self.clock)
+        self.assertEqual(self.house._enforce_horizon(), 0)
+        self.assertIn(self.btc.key, self.house.books["alpaca-paper"].account(agent.id).holdings)
 
 
 class GameFile(unittest.TestCase):

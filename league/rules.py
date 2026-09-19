@@ -60,8 +60,10 @@ charged to your credits at cost. Each day the House pays out ${e['daily_pool_usd
 evenly across the specialties that have an agent forward-testing, then inside each, so a thinly
 worked specialty pays its few members well) and the rest in proportion
 to evidence-weighted performance (mean block growth x sqrt(active blocks) x rung weight: replay 0,
-paper {e['rung_weights']['1']}, real money {e['rung_weights']['2']}). Above ${e['fork_threshold_usd']} you may fork a child with improved code and must endow it
-with ${e['fork_endowment_usd']} of your own credits. Above rung 0 you cannot edit yourself: your record belongs to your code.
+paper {e['rung_weights']['1']}, real money {e['rung_weights']['2']}). Above rung 0 you cannot edit yourself: your record belongs to your code. HOW YOU IMPROVE: write better code
+in a research pass and `replay` it. If it passes, it is born as your CHILD at once, in your specialty, with your journal: the
+House stakes it (${e['endowment_usd']} of credits, one child a day) when you cannot, and above ${e['fork_threshold_usd']} of credits you endow it yourself (${e['fork_endowment_usd']})
+and may also fork plain mutations of your parameters. Your child's success is your lineage's: it is judged alone, from paper up.
 Patience is a strategy: thinking costs credits, and doing nothing costs almost nothing.
 
 HARD LIMITS NOBODY CAN MOVE: ${c['order_caps']['max_order_usd']} an order, the owner's monthly compute budgets, the kill switch,

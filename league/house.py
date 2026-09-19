@@ -44,6 +44,7 @@ from .evaluator import Evaluator, Verdict
 from .fees import Fees
 from .ledger import HOUSE, Ledger, now_iso
 from .researcher import Researcher
+from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxError
 from .venues import family_of, instrument_for, market_hours
@@ -104,6 +105,7 @@ class House:
         self.registry = Registry(self.ledger)
         self.economy = Economy(self.ledger, self.game, clock=clock)
         self.evaluator = Evaluator(self.ledger, clock=clock)
+        self.pacer = Pacer(self.ledger, clock=clock)
         self.commons = commons or Commons(self.ledger)
         self.sandbox = sandbox
         self.alpaca_data = alpaca_data
@@ -113,6 +115,7 @@ class House:
         self.publisher = publisher
         self.budget = budget
         self.astra: Any = None  # set by the service: Astra's pull-request roles
+        self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
         self.books: dict[str, Book] = {}
@@ -148,6 +151,7 @@ class House:
                 rules=rules_text(self.game), contract=CONTRACT_PATH.read_text(encoding="utf-8"),
                 run_replay=self._candidate_replay, settings=self.game.get("research") or {}, clock=clock,
                 specialty=lambda agent: (self.niche_of(agent).text() if self.niche_of(agent) else ""),
+                look=lambda agent: self.snapshot(agent, self.book_of(agent)), lineage=self.registry.lineage,
             )
         self._record_start()
         # Every book's baseline is taken now, before anything can trade: what the venue holds at
@@ -158,6 +162,29 @@ class House:
                 book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
                 self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
+
+    def _chain(self, symbols: list[str], days: int, afford: float, quotes: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """The option contracts an agent may consider: its underlyings, expiring after today and
+        within `days`, within a fifth of the underlying's price, two-sided, and affordable in one
+        order. At most 40 an underlying, nearest the money first. Empty where the venue cannot list."""
+        broker = next((b.broker for name, b in self.books.items() if family_of(name) == "alpaca" and hasattr(b.broker, "option_chain")), None)
+        if broker is None:
+            return []
+        today = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+        first, last = _plus_days(today, 1), _plus_days(today, days)
+        rows: list[dict[str, Any]] = []
+        for symbol in symbols:
+            touch = quotes.get(symbol) or {}
+            spot = ((touch.get("bid") or 0) + (touch.get("ask") or 0)) / 2 or None
+            try:
+                chain = broker.option_chain(symbol, expiry_from=first, expiry_to=last)
+            except Exception as exc:  # noqa: BLE001 - one underlying's outage is not the wake's
+                self.alert("warning", f"option chain {symbol}: {type(exc).__name__}: {str(exc)[:120]}")
+                continue
+            near = [c for c in chain if c["ask"] <= afford and (spot is None or abs(c["strike"] / spot - 1) <= 0.20)]
+            near.sort(key=lambda c: (abs(c["strike"] / spot - 1) if spot else 0, c["expiry"]))
+            rows += [{**c, "occ": c["symbol"], "underlying_price": spot} for c in near[:40]]
+        return rows
 
     def _markets(self, series: list[str], hours: float, max_age: float) -> list[dict[str, Any]]:
         try:
@@ -230,7 +257,8 @@ class House:
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still
             # counts as their family's first trial. Everything born later must pass replay first.
-            self.evaluator.seat(agent.id, 1, "a founding seed: forward-tested from the first day")
+            if self.evaluator.rung(agent.id) < 1:
+                self.evaluator.seat(agent.id, 1, "a founding seed: forward-tested from the first day")
             self.seat(agent)
             born.append(agent)
         return born
@@ -300,6 +328,10 @@ class House:
             name=name, family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
             parent=parent, reason=reason, specialty=niche.id if niche else None,
         )
+        if niche is not None and not niche.replay:
+            # The House cannot replay this specialty (no recorded option chains): paper is its replay.
+            self.evaluator.seat(agent.id, 1, f"paper is the {niche.id} specialty's replay")
+            self._state["tried"][agent.id] = agent.code_sha256
         if parent is None or endowment is not None:
             # A seed, or a newcomer the House stakes itself. (A fork is endowed by its parent.)
             self.economy.grant(agent.id, self.game["economy"]["endowment_usd"] if endowment is None else endowment, "endowment", id=f"endow:{agent.id}")
@@ -322,7 +354,13 @@ class House:
         position, order = Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"])
         if rung >= 3 and staked is not None:
             position, order = capital.scaled_limits(staked)  # rung 3's limits follow its stake
-        return Limits(position, order, max_hours_to_resolve=self.horizon_hours(agent))
+        niche = self.niche_of(agent)
+        classes = Limits.__dataclass_fields__["asset_classes"].default
+        if niche is not None and niche.asset_class == "option":
+            classes = ("option",)
+            if rung == 2:  # one contract cannot be cut smaller: the micro rung's option cap
+                position = order = Decimal(row["option_max_position_usd"])
+        return Limits(position, order, asset_classes=classes, max_hours_to_resolve=self.horizon_hours(agent))
 
     def horizon_hours(self, agent: Agent | None) -> float | None:
         """The horizon rule for this agent's entries: Kalshi only (hours by its block length)."""
@@ -384,6 +422,8 @@ class House:
             }
             if inst.asset_class == "event":
                 row.update(market=inst.market_id or inst.symbol, leg=inst.right or "yes")
+            elif inst.asset_class == "option":
+                row.update(occ=occ_symbol(inst), symbol=inst.symbol, expiry=inst.expiry, strike=float(inst.strike), right=inst.right)
             else:
                 row["symbol"] = inst.market_id or inst.symbol
             ctx["positions"].append(row)
@@ -396,6 +436,8 @@ class House:
             }
             if inst.asset_class == "event":
                 row.update(market=inst.market_id or inst.symbol, leg=inst.right or "yes")
+            elif inst.asset_class == "option":
+                row.update(occ=occ_symbol(inst), symbol=inst.symbol)
             else:
                 row["symbol"] = inst.market_id or inst.symbol
             ctx["open_orders"].append(row)
@@ -407,6 +449,11 @@ class House:
             key = f"bars:{','.join(symbols)}:{timeframe}:{limit}"
             ctx["bars"] = self._cached(key, 50, lambda: self.alpaca_data.bars(symbols, timeframe, limit=limit))
             ctx["quotes"] = self._cached(f"quotes:{','.join(symbols)}", 20, lambda: self.alpaca_data.quotes(symbols))
+            niche = self.niche_of(agent)
+            if niche is not None and niche.asset_class == "option":
+                days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
+                afford = float(limits.max_order_usd) / 100.0  # a contract is 100 shares: what one order can pay a share
+                ctx["chain"] = self._cached(f"chain:{','.join(symbols)}:{days}:{afford}", 120, lambda: self._chain(symbols[:8], days, afford, ctx["quotes"]))
         else:
             series = [str(s) for s in (needs.get("series") or [])][:12]
             hours = float(needs.get("max_hours_to_close") or 24)
@@ -615,11 +662,22 @@ class House:
             niche = self.niche_of(agent)
             if niche is not None:
                 info["needs"] = niches_module.constrain(info["needs"], niche)
+            if niche is not None and not niche.replay:
+                # No history to walk: the candidate must at least decide on what its parent sees now.
+                # It is not a counted trial and proves no edge; its child answers on paper.
+                book = self.book_of(agent)
+                run = self.sandbox.decide(agent.id, code, self.snapshot(agent, book)) if book is not None else None
+                if run is not None:
+                    self._charge_box(agent.id, run, note="a candidate's smoke run")
+                ok = bool(run is not None and run.result.get("ok"))
+                return {"passed": ok, "error": None if ok else (run.result.get("error") if run else "no book"), "needs": info["needs"], "params": info.get("params") or {},
+                        "numbers": {"passed": ok, "reasons": [] if ok else ["it did not run on the live view"], "note": "this specialty has no replay: paper is the test"}}
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
             return {"passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False)
-        return {"passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {}}
+        return {"passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
+                "digest": result.get("digest")}
 
     # ----------------------------------------------------------------- judging
     def judge(self, agent: Agent) -> Verdict | None:
@@ -657,6 +715,23 @@ class House:
         self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
         if rung == 1 and old is not None:
             self._move_books(agent, old)
+
+    def _run_backup(self) -> None:
+        row = self.backup.run()
+        if not row.get("ok"):
+            self.alert("error", f"The daily backup of the House box failed ({row.get('error')}). The ledger lives on one disk until one succeeds.")
+
+    # -------------------------------------------------------------- expedition
+    def _expedition_notices(self) -> None:
+        """Tell the owner, once each, when a budget is gone or the expedition's last day is over."""
+        told = self._state.setdefault("expedition_told", {})
+        for kind, name in (("sail", "Sail"), ("openai", "frontier model")):
+            if self.pacer.over(kind) and not told.get(kind):
+                told[kind] = True
+                spent, budget = self.pacer.spent(kind), self.pacer.budget[kind]
+                why = "its budget is spent" if spent >= budget else f"day {self.pacer.days} is over with ${budget - spent:.2f} unspent"
+                self.alert("error", f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
+                                    + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Astra's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
 
     # ---------------------------------------------------------------- seasons
     def survey_due(self) -> bool:
@@ -698,7 +773,7 @@ class House:
         the whole holding is free to sell; a position is closed by the House, at the market."""
         hours = float((self.game.get("horizon") or {}).get("crypto_max_hold_hours") or 0)
         if hours <= 0:
-            return 0
+            hours = float("inf")  # the crypto rule is off; the option expiry rule below is not a dial
         closed = 0
         for book in self.books.values():
             if family_of(book.name) != "alpaca":
@@ -723,8 +798,30 @@ class House:
                         reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
                         created_at=now, nonce=f"horizon:{holding.opened_at}",
                     ))
+            # A long option is sold before it can expire: in the money at the bell it would be
+            # exercised into a hundred shares this account cannot carry. From 14:30 New York on
+            # its last day the House sells it at the bid, again each tick until it is gone; one
+            # with no bid left is worthless and is written off once the venue has cleared it.
+            today, hour = _new_york(self.clock)
+            for agent_id in book.agents():
+                for holding in list(book.account(agent_id).holdings.values()):
+                    inst = holding.instrument
+                    if inst.asset_class != "option" or holding.quantity <= 0 or str(inst.expiry or "9999") > today or hour < 14.5:
+                        continue
+                    for working in book.open_orders(agent_id):
+                        if working.instrument.key == inst.key:
+                            book.cancel(agent_id, working.order_id)
+                    quote = book.broker.quote(inst)
+                    if quote.bid is None or quote.bid <= 0:
+                        continue
+                    exits.append(Intent.new(
+                        agent=agent_id, instrument=inst, side="sell", quantity=holding.quantity, order_type="limit", limit_price=quote.bid,
+                        reason="The House's expiry rule: a long option is sold on its last afternoon, never left to be exercised.",
+                        created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}",
+                    ))
             if exits:
                 closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
+            closed += book.expire_options()
         return closed
 
     # ---------------------------------------------------------------- tuition
@@ -844,26 +941,43 @@ class House:
         return " ".join(lines)
 
     # ------------------------------------------------------------------- forks
-    def fork(self, parent: Agent, *, code: str | None = None, params: Mapping[str, Any] | None = None, reason: str = "", passed_replay: bool = False) -> Agent | None:
+    def fork(self, parent: Agent, *, code: str | None = None, params: Mapping[str, Any] | None = None, reason: str = "", passed_replay: bool = False,
+             staked_by_house: bool = False) -> Agent | None:
         """A rich agent has a child and endows it. With no new code the child is a mechanical
         mutation of the parent's parameters; either way it answers for itself from replay up,
-        unless its code already passed replay as its parent's candidate."""
+        unless its code already passed replay as its parent's candidate.
+
+        `staked_by_house`: the child's code is a research candidate that PASSED replay and its
+        parent cannot afford the endowment. The House stakes it from the pool instead (at most one
+        a parent a day): an agent above rung 0 cannot edit itself, so without this an improvement
+        that research found and replay confirmed would wait weeks for its parent to save up."""
         rules = self.game["economy"]
-        if len(self.registry.living()) >= int(rules["max_population"]) or not self.economy.can_fork(parent.id):
+        if len(self.registry.living()) >= int(rules["max_population"]):
+            return None
+        if staked_by_house:
+            last = float(self._state.setdefault("last_staked", {}).get(parent.id) or 0)
+            if not (code and passed_replay) or self.clock() - last < float(rules["epoch_seconds"]):
+                return None
+        elif not self.economy.can_fork(parent.id):
             return None
         niche = self.niche_of(parent)
         if niche is not None and self.members(niche.id) >= niche.max_members:
             return None  # its specialty is full: no niche may crowd out the rest
         child_code = code or parent.code
         child_params = dict(params) if params is not None else (parent.params if code else mutate(parent.params, seed=f"{parent.id}:{len(self.registry.agents)}"))
-        child = self.spawn(parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent")
-        self.economy.transfer(parent.id, child.id, rules["fork_endowment_usd"], "fork endowment")
+        child = self.spawn(parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
+                           endowment=rules["endowment_usd"] if staked_by_house else None)
+        if staked_by_house:
+            self._state["last_staked"][parent.id] = self.clock()
+        else:
+            self.economy.transfer(parent.id, child.id, rules["fork_endowment_usd"], "fork endowment")
         forked = False
         try:
             forked = bool(self.sandbox.fork(parent.id, child.id))
         except SandboxError as exc:
             self.alert("warning", f"{child.id}: could not fork its parent's box, starting from the clean image ({str(exc)[:160]})")
-        self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["fork_endowment_usd"], "box_forked": forked, "reason": reason, "new_code": bool(code)}, agent=parent.id)
+        self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd" if staked_by_house else "fork_endowment_usd"], "box_forked": forked,
+                                            "reason": reason, "new_code": bool(code), "staked_by": "house" if staked_by_house else "parent"}, agent=parent.id)
         if passed_replay:
             self.evaluator.seat(child.id, 1, "its code passed replay as its parent's candidate")
             self._state["tried"][child.id] = child.code_sha256
@@ -877,8 +991,22 @@ class House:
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
+        if not self.pacer.may_spend("sail"):
+            return False  # today's share of the expedition's Sail budget is spent (or the expedition is over)
         last = float(self._state["last_research"].get(agent.id) or 0)
-        return self.clock() - last >= float(rules.get("min_hours_between", 6)) * 3600
+        return self.clock() - last >= self.research_interval_hours() * 3600
+
+    def research_interval_hours(self) -> float:
+        """How long an agent waits between research passes. The game file's number, halved (never
+        under an hour) while today's Sail spending is running behind the clock: the owner wants
+        the expedition's budget used, and an allowance still unspent at noon is research not done."""
+        base = float((self.game.get("research") or {}).get("min_hours_between", 6))
+        allowance = self.pacer.allowance("sail")
+        if allowance <= 0:
+            return base
+        day_gone = (self.clock() % 86400) / 86400.0
+        behind = float(1 - self.pacer.room("sail") / allowance) < 0.6 * day_gone
+        return max(1.0, base / 2) if behind and day_gone > 0.25 else base
 
     def research(self, agent: Agent) -> Any:
         rung = self.evaluator.rung(agent.id)
@@ -888,6 +1016,7 @@ class House:
             "last_trial": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.trial", agent=agent.id)))), None),
             "last_look": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.verdict", agent=agent.id))) if e.payload.get("decision") == "look"), None),
             "can_fork": self.economy.can_fork(agent.id),
+            "recent_trades": self._recent_trades(agent.id),
         }
         outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")
         candidate = outcome.candidate
@@ -898,8 +1027,22 @@ class House:
                 self.evaluator.promote(agent.id, 1, "its new code passed replay against every trial its family has run", candidate["numbers"])
                 self.seat(self.registry.get(agent.id))
             else:
-                self.fork(agent, code=candidate["code"], params=candidate["params"], reason=candidate["purpose"], passed_replay=True)
+                self.fork(agent, code=candidate["code"], params=candidate["params"], reason=candidate["purpose"], passed_replay=True,
+                          staked_by_house=not self.economy.can_fork(agent.id))
         return outcome
+
+    def _recent_trades(self, agent_id: str, limit: int = 12) -> list[dict[str, Any]]:
+        """Its own last closed trades, forward-tested or real: what research should learn from first."""
+        rows = []
+        for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent_id):
+            p = entry.payload
+            pnl = p.get("pnl") if entry.kind == "book.settle" else p.get("realized")
+            if pnl is None or p.get("source") == "dust":
+                continue
+            inst = p.get("instrument") or {}
+            rows.append({"at": entry.at[:16], "what": inst.get("market_id") or inst.get("symbol"), "leg": inst.get("right"), "pnl_usd": str(pnl),
+                         "result": p.get("result") or "sold", "real_money": bool(p.get("real_money")), "why": str(p.get("reason") or p.get("entry_reason") or "")[:160]})
+        return rows[-limit:]
 
     # ----------------------------------------------------------------- economy
     def standings(self) -> list[Standing]:
@@ -1007,11 +1150,18 @@ class House:
             with self._state_lock:
                 self._state["last_niche_survey"] = self.clock()  # claimed now, so a slow survey is not started twice
             self._background("niche-survey", self.survey_niches)
+        if self.backup is not None and self.backup.due():
+            self._background("backup", self._run_backup)
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
+        if self.budget is not None and getattr(self.budget, "pacer", None) is None:
+            self.budget.pacer = self.pacer
         if open_for_business and self.astra is not None:
             for role in self.astra.due():
-                self._background(f"astra:{role}", self.astra.run, role)
+                # One role at a time against today's allowance: a pass is a dime to a few dollars,
+                # and its cost is only known when it ends.
+                if self.pacer.may_spend("openai") and not any(key.startswith("astra:") and key != "astra:follow" and job.is_alive() for key, job in self._jobs.items()):
+                    self._background(f"astra:{role}", self.astra.run, role)
             self._background("astra:follow", self.astra.follow)
         if open_for_business and self.economy.payout_due():
             self.learn()
@@ -1019,7 +1169,11 @@ class House:
                 if self.evaluator.rung(agent.id) >= 3:
                     capital.resize(self, agent)
             capital.recommend(self, {name: (book.venue_cash or ZERO) for name, book in self.books.items() if book.real_money})
-            self.economy.payout(self.standings())
+            # During the expedition the day's pool IS the day's Sail allowance: what the owner wants
+            # spent is what the agents are given to spend.
+            self.economy.payout(self.standings(), pool=self.pacer.credit_pool() if self.pacer.running() else None)
+            self.ledger.append("ops.budget", {"what": "expedition", **self.pacer.report()})
+            self._expedition_notices()
             if self.auditor is not None:
                 self.auditor.score()
         try:
@@ -1077,3 +1231,25 @@ def mutate(params: Mapping[str, Any], *, seed: str, scale: float = 0.2) -> dict[
         else:
             out[key] = round(value * (1 + rng.uniform(-scale, scale)), 6)
     return out
+
+
+def occ_symbol(instrument: Any) -> str:
+    """`F260925C00013000`: root, YYMMDD, C or P, the strike in thousandths."""
+    expiry = str(instrument.expiry or "").replace("-", "")
+    right = "C" if str(instrument.right or "").lower() == "call" else "P"
+    return f"{str(instrument.symbol).upper()}{expiry[2:]}{right}{int(Decimal(str(instrument.strike)) * 1000):08d}"
+
+
+def _plus_days(date: str, days: int) -> str:
+    from datetime import date as _date, timedelta
+
+    return (_date.fromisoformat(date) + timedelta(days=days)).isoformat()
+
+
+def _new_york(clock: Callable[[], float]) -> tuple[str, float]:
+    """(date, hour of the day as a decimal) in New York now."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    moment = datetime.fromtimestamp(clock(), tz=timezone.utc).astimezone(ZoneInfo("America/New_York"))
+    return moment.strftime("%Y-%m-%d"), moment.hour + moment.minute / 60.0

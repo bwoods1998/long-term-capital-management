@@ -26,6 +26,7 @@ class Budget:
         self.every = every_seconds
         self.cap = Decimal(CONSTITUTION["budgets"]["sail_month_usd"])
         self.reserve = Decimal(CONSTITUTION["budgets"]["sail_reserve_usd"])
+        self.pacer: Any = None  # set by the House: the expedition's own ceiling on Sail
         self._last_check = 0.0
         self._mode = "open"
 
@@ -56,7 +57,8 @@ class Budget:
         previous = self._last_balance()
         spent = max(previous - balance, ZERO) if previous is not None else ZERO
         month = self.month_spend() + spent
-        mode = "stopped" if month >= self.cap or balance <= self.reserve else "open"
+        over = self.pacer is not None and self.pacer.budget["sail"] - self.pacer.spent("sail") - spent <= 0
+        mode = "stopped" if month >= self.cap or balance <= self.reserve or over else "open"
         self.ledger.append(
             "ops.budget",
             {"what": "sail", "balance_usd": format(balance, "f"), "spent_usd": format(spent, "f"), "month_usd": format(month, "f"),

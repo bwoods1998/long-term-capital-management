@@ -87,6 +87,7 @@ class LadderTest(unittest.TestCase):
         self.data = FakeAlpacaData()
         game = load_game()
         game["economy"]["min_population"] = 0
+        game["audit"]["cooldown_hours"] = 72  # the mechanism is what is tested here, not the expedition's dial (24)
         self.auditor = FakeAuditor()
         self.house = House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.paper, "alpaca": self.real}, sandbox=InProcessSandbox(),

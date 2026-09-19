@@ -11,18 +11,19 @@
       "3": "1.0"
     },
     "endowment_usd": "1.00",
-    "fork_threshold_usd": "3.00",
-    "fork_endowment_usd": "1.00",
+    "fork_threshold_usd": "4.00",
+    "fork_endowment_usd": "1.50",
     "max_population": 36,
     "min_population": 12,
     "replay_deadline_epochs": 3,
     "box_usd_per_hour": "0.04",
-    "box_creation_usd": "0.005"
+    "box_creation_usd": "0.005",
+    "unearned_share_to_floors": true
   },
   "bounds": {
     "daily_pool_usd": [
       "0.50",
-      "3.00"
+      "8.00"
     ],
     "niche_floor_share": [
       "0.10",
@@ -50,16 +51,17 @@
     ]
   },
   "audit": {
-    "cooldown_hours": 72,
+    "cooldown_hours": 24,
     "min_credits_usd": "0.60"
   },
   "research": {
-    "profile": "flash_flex",
-    "fast_profile": "flash_asap",
-    "max_turns": 8,
-    "max_output_tokens": 4096,
-    "min_hours_between": 4,
-    "min_credits_usd": "0.10"
+    "profile": "pro_flex",
+    "fast_profile": "pro_asap",
+    "max_turns": 10,
+    "max_output_tokens": 6000,
+    "min_hours_between": 3,
+    "min_credits_usd": "0.10",
+    "reasoning_effort": "medium"
   },
   "horizon": {
     "_about": "Fast feedback: no Kalshi entry expected to resolve later than this, and no crypto position held longer. Equities and options are not bounded.",
@@ -80,5 +82,29 @@
       6,
       168
     ]
+  },
+  "astra": {
+    "_about": "How often each of Astra's roles sits down, in hours, during the expedition. The pacer still gates every pass on the day's allowance, so this is how often a role MAY run, not how often it must.",
+    "schedule_hours": {
+      "operator": 8,
+      "toolsmith": 8,
+      "teacher": 12,
+      "designer": 36,
+      "architect": 8
+    },
+    "first_after_hours": {
+      "operator": 3,
+      "toolsmith": 4,
+      "teacher": 12,
+      "architect": 6,
+      "designer": 24
+    },
+    "effort": {
+      "architect": "high",
+      "toolsmith": "high",
+      "designer": "high",
+      "operator": "medium",
+      "teacher": "medium"
+    }
   }
 }

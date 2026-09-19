@@ -7,6 +7,7 @@ meters it and lets it through the kill switch, because no money is behind it.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from ltcm.adapters import AlpacaCredentials, GatewaySigner, KalshiCredentials, VenueClient
@@ -49,7 +50,7 @@ def instrument_for(venue: str, spec: dict[str, Any]) -> Instrument:
     """An agent names what it wants to trade in plain data; this is the only parser of it.
 
     `{"symbol": "BTC/USD"}` crypto, `{"symbol": "SPY"}` equity,
-    `{"symbol": "SPY", "expiry": "2026-10-16", "strike": "650", "right": "call"}` option,
+    `{"symbol": "SPY", "expiry": "2026-10-16", "strike": "650", "right": "call"}` or `{"occ": "SPY261016C00650000"}` option,
     `{"market": "KXBTCD-...", "leg": "yes"}` a Kalshi contract.
     """
     if family_of(venue) == "kalshi":
@@ -58,6 +59,15 @@ def instrument_for(venue: str, spec: dict[str, Any]) -> Instrument:
         if not ticker or leg not in ("yes", "no"):
             raise ValueError("a Kalshi instrument is {market, leg: yes|no}")
         return Instrument("event", ticker, venue, market_id=ticker, right=leg)
+    occ = str(spec.get("occ") or "").strip().upper()
+    if occ:
+        # The chain names a contract by its OCC symbol (`F260925C00013000`): the shortest way to say which.
+        if not re.fullmatch(r"[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}", occ):
+            raise ValueError(f"not an OCC option symbol: {occ!r}")
+        from decimal import Decimal
+
+        return Instrument("option", occ[:-15], venue, multiplier=100, expiry=f"20{occ[-15:-13]}-{occ[-13:-11]}-{occ[-11:-9]}",
+                          strike=Decimal(int(occ[-8:])) / 1000, right="call" if occ[-9] == "C" else "put")
     symbol = str(spec.get("symbol") or "").strip().upper()
     if not symbol:
         raise ValueError("an Alpaca instrument needs a symbol")

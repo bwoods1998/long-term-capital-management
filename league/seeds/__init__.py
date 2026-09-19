@@ -1,4 +1,4 @@
-"""The founding population: twelve strategy files the league starts from.
+"""The founding programs: fourteen strategy files the league starts from.
 
 Each file follows `league/CONTRACT.md` and passes `league.safety.check_code`. They are data, not
 modules: the House reads a seed's source with `load()` and runs it through `league.runner` or
@@ -39,6 +39,10 @@ SEEDS: list[dict] = [
      "why": "Connors' RSI(2) pullback (published): in an uptrend, index ETFs that fall hard for two days tend to bounce within a week."},
     {"name": "equity-vwap", "family": "equity-intraday", "file": "equity_vwap.py",
      "why": "Intraday prices are pulled toward the session VWAP that large orders are benchmarked to: buy 0.4% under it, sell at it, flat by 15:50; a desk heuristic on trial."},
+    {"name": "options-breakout", "family": "options-breakout", "file": "options_breakout.py",
+     "why": "Leverage with the loss capped at the premium: one near-the-money call on a 20-day high above a rising 50-day mean, one put on the mirror image. Unmeasured; option buyers pay the spread and the variance premium."},
+    {"name": "options-pullback", "family": "options-pullback", "file": "options_pullback.py",
+     "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
 ]
 
 _HERE = Path(__file__).resolve().parent

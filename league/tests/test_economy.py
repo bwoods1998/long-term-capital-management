@@ -56,7 +56,8 @@ class EconomyTest(unittest.TestCase):
             self.economy.transfer("a1", "a2", "1", "fork")
 
     def test_fork_threshold(self):
-        self.economy.grant("a1", "2.99", "x")
+        threshold = D(self.economy.rules["fork_threshold_usd"])
+        self.economy.grant("a1", threshold - D("0.01"), "x")
         self.assertFalse(self.economy.can_fork("a1"))
         self.economy.grant("a1", "0.01", "x")
         self.assertTrue(self.economy.can_fork("a1"))
@@ -79,9 +80,23 @@ class EconomyTest(unittest.TestCase):
         self.assertAlmostEqual(float(shares["k1"] - floor / 2), float((D("1.20")) * 5 / 6), places=6)
 
     def test_nobody_performed_means_the_performance_share_is_not_spent(self):
+        game = load_game()
+        game["economy"]["unearned_share_to_floors"] = False  # the design before the expedition
+        economy = Economy(self.ledger, game, clock=self.clock)
         standings = [Standing("a1", "n1", 1, -0.01, 30), Standing("a2", "n2", 1, 0.0, 0)]
+        self.assertEqual(sum(economy.shares(standings, "2.00").values()), D("0.80"))
+
+    def test_during_the_expedition_an_unearned_performance_share_follows_the_floors(self):
+        self.assertTrue(self.economy.rules["unearned_share_to_floors"])  # the owner wants the budget used
+        standings = [Standing("a1", "n1", 1, -0.01, 30), Standing("a2", "n1", 1, 0.0, 0), Standing("b1", "n2", 1, 0.0, 5), Standing("r0", "n3", 0, 0.0, 0)]
         shares = self.economy.shares(standings, "2.00")
-        self.assertEqual(sum(shares.values()), D("0.80"))
+        self.assertEqual(sum(shares.values()), D("2.00"))
+        self.assertEqual((shares["a1"], shares["a2"], shares["b1"], shares["r0"]), (D("0.5"), D("0.5"), D("1"), D("0")))  # by specialty, then inside it; replay earns nothing
+
+    def test_the_day_somebody_performs_the_performance_share_is_theirs_again(self):
+        standings = [Standing("a1", "n1", 1, 0.002, 30), Standing("b1", "n2", 1, 0.0, 5)]
+        shares = self.economy.shares(standings, "2.00")
+        self.assertEqual((shares["a1"], shares["b1"]), (D("0.4") + D("1.2"), D("0.4")))
 
     def test_payout_is_due_once_an_epoch_and_is_recorded(self):
         standings = [Standing("a1", "n1", 1, 0.001, 30)]

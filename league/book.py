@@ -312,6 +312,9 @@ DEFAULT_RULES: dict[str, Any] = {
     "max_limit_deviation_pct": "0.10",
     "floor_max_daily_loss_pct": "0.08",
     "max_quote_age_seconds": 900,
+    # Alpaca's free option feed is fifteen minutes delayed (the live one needs the OPRA agreement
+    # signed). An option entry is a LIMIT order, so a stale quote can cost a fill, not a price.
+    "max_option_quote_age_seconds": 1500,
     "market_slippage_pct": "0.005",
 }
 
@@ -391,6 +394,7 @@ class Book:
         self.baseline_cash: Decimal | None = None
         self.baseline_positions: dict[str, Decimal] = {}
         self.venue_cash: Decimal | None = None
+        self.baseline_at: str | None = None
         self._fills_since_reconcile = 0
         #: How far the venue may fairly differ from the book since the last reconciliation because
         #: a limit order was booked as a taker and may have been a maker: dollars, and units by key.
@@ -441,6 +445,8 @@ class Book:
             else:
                 self._apply_fill(agent, p, at)
         elif kind == "book.baseline":
+            if self.baseline_at is None:
+                self.baseline_at = at  # when this book first looked at its venue: fees from before it are not its own
             self.baseline_cash = money(p["cash"])
             self.baseline_positions = {k: money(v) for k, v in dict(p.get("positions") or {}).items()}
         elif kind == "book.settle":
@@ -742,7 +748,8 @@ class Book:
             notional = intent.quantity * reference * intent.instrument.multiplier
         if quote is not None and not reducing:
             age = _age_seconds(quote.as_of, now)
-            if age is not None and age > int(self.rules["max_quote_age_seconds"]):
+            oldest = self.rules["max_option_quote_age_seconds" if intent.instrument.asset_class == "option" else "max_quote_age_seconds"]
+            if age is not None and age > int(oldest):
                 reasons.append(f"the quote is {int(age)}s old")
         if notional is not None and intent.side == "buy" and reference is not None:
             # No leverage, to the cent: the fee and a market order's slippage must be covered too.
@@ -775,6 +782,11 @@ class Book:
             )
             if held or bidding:
                 reasons.append(f"the House already holds or bids the {other} leg of this market; one account cannot hold both")
+        if intent.instrument.asset_class == "option":
+            if intent.order_type != "limit" or intent.limit_price is None:
+                reasons.append("an option order must be a limit order")
+            if intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
+                reasons.append("an option entry must expire after today: what expires today is a coin held to the bell")
         if intent.side == "buy" and intent.instrument.asset_class == "event" and limits.max_hours_to_resolve is not None:
             try:
                 due = self.resolves_at(intent.instrument) if self.resolves_at else None
@@ -1216,6 +1228,34 @@ class Book:
                     settled += 1
         return settled
 
+    def expire_options(self, *, at: str | None = None) -> int:
+        """Write off long options that have expired and that the venue no longer shows: they paid
+        nothing. One the venue still shows is left alone (it clears overnight); one that was
+        exercised into shares shows up as a position the book does not know, and freezes it."""
+        now = at or now_iso(self.clock)
+        today = _new_york_date(now)
+        with self._lock:
+            due = [(agent, key, holding) for agent, account in self.accounts.items() for key, holding in account.holdings.items()
+                   if holding.instrument.asset_class == "option" and str(holding.instrument.expiry or "9999") < today]
+            if not due:
+                return 0
+            shown = {position_key(p.instrument) for p in self.broker.positions() if money(p.quantity) != 0}
+            expired = 0
+            for agent, key, holding in due:
+                inst = holding.instrument
+                if position_key(inst) in shown:
+                    continue
+                payload = {
+                    "book": self.name, "instrument": inst.to_dict(), "result": "expired", "quantity": text(holding.quantity),
+                    "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)),
+                    "reason": holding.reason, "opened_at": holding.opened_at, "real_money": self.real_money,
+                }
+                entry = self.ledger.append("book.settle", payload, agent=agent, id=f"expire:{self.name}:{agent}:{key}", at=at)
+                self._apply(entry.kind, agent, entry.payload, entry.at)
+                self.marks.pop(key, None)
+                expired += 1
+            return expired
+
     # -------------------------------------------------------------------- mark
     def mark(self) -> dict[str, Decimal]:
         """Re-quote every held instrument and record each agent's equity. Returns agent -> equity."""
@@ -1271,6 +1311,32 @@ class Book:
             key = position_key(instrument)
             positions[key] = positions.get(key, ZERO) + quantity
         return cash, positions
+
+    def _book_venue_fees(self, shortfall: Decimal) -> Decimal:
+        """Book venue fee activities not yet on the ledger, oldest first, while they fit inside the
+        shortfall (a fee from before the baseline is already in the baseline and explains nothing).
+        They are the House's cost: a day's fees are one rounded-up cent or two across every agent."""
+        read = getattr(self.broker, "fee_activities", None)
+        if read is None:
+            return ZERO
+        try:
+            since = (self.baseline_at or "")[:10] or None
+            rows = read(since)
+        except Exception:  # noqa: BLE001 - not knowing leaves the shortfall standing, which freezes entries
+            return ZERO
+        booked = ZERO
+        for row in rows:
+            fee = money(row["usd"])
+            entry_id = f"venue-fee:{self.name}:{row['id']}"
+            if fee <= 0 or self.ledger.get(entry_id) is not None or booked + fee > shortfall + DUST_USD:
+                continue
+            payload = {"book": self.name, "source": "venue-fee", "side": "fee", "instrument": None, "quantity": "0", "price": "0",
+                       "cash_delta": text(-fee), "position_delta": "0", "fee_usd": text(fee), "realized": None,
+                       "detail": f"{row.get('date')} {row.get('description') or 'regulatory fees'}".strip(), "real_money": self.real_money}
+            entry = self.ledger.append("book.fill", payload, agent=HOUSE, id=entry_id)
+            self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+            booked += fee
+        return booked
 
     def _ledger_totals(self) -> tuple[Decimal, dict[str, Decimal], dict[str, Instrument]]:
         """The book's own cash (profit and loss, fees, dust: stakes are slices, not deposits) and
@@ -1375,6 +1441,15 @@ class Book:
                         self._baseline_row(self.baseline_cash + paid, remaining, f"baseline position {key} settled")
             expected = self.baseline_cash + cash
             cash_diff = venue_cash - expected
+            if cash_diff <= -DUST_USD:
+                # The venue holds less than the book says. Alpaca passes on the regulators' fees
+                # (on equity sales and on every option contract) as one FEE activity at the end of
+                # the day, which no fill ever showed: book the ones that explain the shortfall.
+                booked = self._book_venue_fees(-cash_diff)
+                if booked:
+                    cash, positions, instruments = self._ledger_totals()
+                    expected = self.baseline_cash + cash
+                    cash_diff = venue_cash - expected
             diffs: dict[str, str] = {}
             for key in sorted(set(venue_positions) | set(positions) | set(self.baseline_positions)):
                 diff = venue_positions.get(key, ZERO) - positions.get(key, ZERO) - self.baseline_positions.get(key, ZERO)
@@ -1403,6 +1478,14 @@ class Book:
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
             within = abs(cash_diff) < tolerance or ZERO < cash_diff <= self._fee_slack_usd + tolerance
+            if not within and self.fees.family == "alpaca":
+                # Not yet measured (options first trade on Monday Sept 21, 2026): whether Alpaca
+                # takes the premium behind a resting option bid out of `cash`, as it does for a
+                # resting crypto bid. If it does, the shortfall is exactly that premium.
+                held = sum((money(o.remaining) * money(o.limit_price) * o.instrument.multiplier for o in self.broker.open_orders()
+                            if o.instrument.asset_class == "option" and o.side == "buy" and o.limit_price is not None), ZERO)
+                if held > 0 and abs(cash_diff + held) < tolerance:
+                    within, cash_diff = True, ZERO
             ok = within and not diffs and not pending
             problems = []
             if not within:
@@ -1489,3 +1572,15 @@ def _epoch_seconds(now: str) -> float:
     if moment is None:
         raise ValueError(f"not a timestamp: {now!r}")
     return moment.timestamp()
+
+
+def _new_york_date(now: str) -> str:
+    """The calendar date in New York at this instant (options expire by New York's calendar)."""
+    from zoneinfo import ZoneInfo
+
+    from ltcm.broker import instant
+
+    moment = instant(now)
+    if moment is None:
+        raise ValueError(f"not a timestamp: {now!r}")
+    return moment.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")

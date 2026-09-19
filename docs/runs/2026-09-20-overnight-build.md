@@ -34,6 +34,21 @@ suite is now 923) and recorded as deviations 22 to 27 in `docs/design/2026-09-19
 **Not built:** options. The gateway refuses Alpaca's option chain and quote paths, and nothing
 about pricing a contract can be checked against a live market before Monday's open.
 
+### Later on Sept 19: options, the expedition, and how agents learn
+
+Four more instructions from the owner, all built (league suite 978 + the new files, first-run 1,759,
+gateway 109, site 65) and recorded as deviations 28 to 33 in the architecture record:
+
+- The ownership and advice line is gone from the foot of the public page.
+- **Listed options** are open as a specialty: long premium only, enforced by the gateway; two
+  founders; verified on paper by an option order accepted and cancelled through the gateway.
+  NOT yet seen: a fill, the venue's end-of-day fees, cash behind a resting option bid (Monday).
+- **The expedition:** both $100 budgets paced to be spent in full by Oct 2.
+- **Learning:** a journal on the ledger that children inherit, a live view and replay digests for
+  research, House-staked children for candidates that pass replay, a daily backup of the box.
+  One real research pass on the stronger model: 5 turns, $0.02, it used the live view, wrote its
+  journal and a niche-tagged library note, and named the flaw that House-staked children fix.
+
 ### State everything was left in
 
 - Gateway kill switch **engaged**. No real-money order was placed tonight (gateway counter: 0

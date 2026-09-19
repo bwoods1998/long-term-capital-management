@@ -319,6 +319,7 @@ class _Account:
         self.unresolved = 0
         self.expired_orders = 0
         self.trade_returns: list[float] = []
+        self.trade_log: list[dict[str, Any]] = []  # one row a closed trade, for `digest`
         self.fill_log: list[dict[str, Any]] | None = [] if record_fills else None
 
     # -- money -------------------------------------------------------------------------------
@@ -350,6 +351,13 @@ class _Account:
     def _resting(self, key: str, side: str) -> list[dict[str, Any]]:
         return [o for o in self.orders.values() if o["key"] == key and o["side"] == side]
 
+    def _closed(self, position: dict[str, Any], how: str, now: str) -> None:
+        if len(self.trade_log) < 2000:
+            name = str(position.get("market") or position.get("symbol") or position.get("key"))
+            self.trade_log.append({"name": name, "group": name.split("-", 1)[0] if position.get("market") else name, "leg": position.get("leg"),
+                                   "pnl": position["pnl"], "entry": position.get("entry"), "opened_at": position.get("opened_at"),
+                                   "closed_at": now, "close_time": position.get("close_time"), "how": how})
+
     # -- fills -------------------------------------------------------------------------------
     def _fill(self, ident: dict[str, Any], key: str, side: str, quantity: float, price: float,
               liquidity: str, now: str, reason: str, close: tuple[float | None, Any]) -> None:
@@ -361,7 +369,7 @@ class _Account:
             if position is None:
                 position = self.positions[key] = {
                     **ident, "key": key, "quantity": 0.0, "cost": 0.0, "pnl": 0.0, "mark": price,
-                    "opened_at": now, "reason": reason, "close_ts": close[0], "close_time": close[1],
+                    "opened_at": now, "reason": reason, "close_ts": close[0], "close_time": close[1], "entry": price,
                 }
             position["quantity"] = round(position["quantity"] + quantity, 9)
             position["cost"] += notional
@@ -375,6 +383,7 @@ class _Account:
             position["cost"] = average * position["quantity"]
             if position["quantity"] <= 0:
                 self.trade_returns.append(position["pnl"] / self.stake)
+                self._closed(position, "sold", now)
                 del self.positions[key]
         self.fills += 1
         self.maker_fills += 1 if liquidity == "maker" else 0
@@ -413,6 +422,7 @@ class _Account:
                 self.cash += payout
                 position["pnl"] += payout - position["cost"]
                 self.trade_returns.append(position["pnl"] / self.stake)
+                self._closed(position, "won" if payout > 0 else "lost", now)
             else:  # no recorded result: hand back the price paid and count it; not a trade
                 self.cash += position["cost"]
                 self.unresolved += 1
@@ -838,10 +848,47 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         "params": effective,
         "code_sha256": sha,
     }
+    result["digest"] = digest(account.trade_log)
     if audit:
         result["fill_log"] = account.fill_log
         result["final_memory"] = memory
     return result
+
+
+def digest(trades: list) -> dict:
+    """What a strategy's closed trades say, small enough to hand a research model: the record by
+    series (or symbol), by how long before the market's end it got IN (on Kalshi, where a bid
+    left resting into the last hours is the one that gets picked off), and the worst of them.
+    A replay's headline number says a strategy lost; this says where."""
+    def hours(row):
+        try:
+            a = datetime.fromisoformat(str(row["opened_at"]).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(row["close_time"]).replace("Z", "+00:00"))
+            return (b - a).total_seconds() / 3600.0
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def tally(rows):
+        return {"trades": len(rows), "wins": sum(1 for r in rows if r["pnl"] > 0), "losses": sum(1 for r in rows if r["pnl"] <= 0),
+                "pnl_usd": round(sum(r["pnl"] for r in rows), 4),
+                "mean_entry": round(sum(r["entry"] for r in rows if r.get("entry")) / max(1, sum(1 for r in rows if r.get("entry"))), 4)}
+
+    groups: dict = {}
+    timing: dict = {}
+    for row in trades:
+        groups.setdefault(row["group"], []).append(row)
+        h = hours(row)
+        if h is not None:
+            bucket = "under 1h" if h < 1 else "1 to 3h" if h < 3 else "3 to 12h" if h < 12 else "over 12h"
+            timing.setdefault(bucket, []).append(row)
+    ranked = sorted(groups.items(), key=lambda kv: -len(kv[1]))[:12]
+    worst = sorted(trades, key=lambda r: r["pnl"])[:5]
+    return {
+        "all": tally(trades),
+        "by_group": {name: tally(rows) for name, rows in ranked},
+        "by_hours_from_entry_to_the_markets_end": {name: tally(rows) for name, rows in timing.items()},
+        "worst": [{"name": r["name"], "leg": r.get("leg"), "pnl_usd": round(r["pnl"], 4), "entry": r.get("entry"), "opened_at": r.get("opened_at"), "how": r["how"]} for r in worst if r["pnl"] < 0],
+    }
 
 
 # ------------------------------------------------------------------------------ the box's entry

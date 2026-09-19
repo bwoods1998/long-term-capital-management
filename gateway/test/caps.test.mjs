@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createsOrder, notional, caps, normalizePath, allowedVenuePath } from '../lib/caps.mjs';
+import { createsOrder, notional, caps, normalizePath, allowedVenuePath, isOptionSymbol } from '../lib/caps.mjs';
 import { formatUsd, parsePico, mulPico, picoToMicro } from '../lib/money.mjs';
 
 const usd = micro => formatUsd(micro);
@@ -112,4 +112,46 @@ test('funding history is read-only and cannot move money', () => {
     for (const method of ['POST', 'PUT', 'DELETE']) assert.equal(allowedVenuePath(venue, method, path), false);
     assert.equal(createsOrder(venue, 'GET', path), false);
   }
+});
+
+// ---------------------------------------------------------------------------------- options
+const CALL = 'SPY261016C00740000';
+const option = extra => ({ symbol: CALL, qty: '1', side: 'buy', type: 'limit', limit_price: '0.70', position_intent: 'buy_to_open', time_in_force: 'day', ...extra });
+
+test('an option contract is a hundred shares: one contract at 0.70 spends $70, not 70 cents', () => {
+  // Measured Sept 19, 2026: this was priced at qty x limit with no multiplier.
+  assert.equal(usd(notional('alpaca', option()).micro), '70.00');
+  assert.equal(usd(notional('alpaca', option({ qty: '3', limit_price: '0.25' })).micro), '75.00');
+  assert.equal(usd(notional('alpaca', option({ side: 'sell', position_intent: 'sell_to_close', limit_price: '1.10' })).micro), '110.00');
+});
+
+test('an option order is long premium only: it opens by buying and closes by selling', () => {
+  for (const bad of [
+    { side: 'sell', position_intent: 'sell_to_open' },
+    { side: 'sell', position_intent: 'buy_to_open' },
+    { side: 'sell' , position_intent: undefined },
+    { side: 'buy', position_intent: 'buy_to_close' },
+    { position_intent: undefined },
+  ]) assert.match(notional('alpaca', option(bad)).error, /long premium only/, JSON.stringify(bad));
+});
+
+test('an option order is one leg, a limit order, in whole contracts', () => {
+  assert.match(notional('alpaca', option({ order_class: 'mleg' })).error, /Multi-leg/);
+  assert.match(notional('alpaca', option({ legs: [] })).error, /Multi-leg/);
+  assert.match(notional('alpaca', option({ type: 'market', limit_price: undefined })).error, /limit order/);
+  assert.match(notional('alpaca', option({ limit_price: undefined })).error, /limit price/);
+  assert.match(notional('alpaca', option({ qty: '0.5' })).error, /whole number/);
+  assert.match(notional('alpaca', option({ qty: undefined, notional: '50' })).error, /contracts, not dollars/);
+});
+
+test('only an OCC symbol is an option', () => {
+  for (const yes of [CALL, 'F260925P00012000', 'BRKB261016C00500000']) assert.ok(isOptionSymbol(yes), yes);
+  for (const no of ['SPY', 'BTC/USD', 'SPY261016X00740000', 'spy261016c00740000', '', null, 'SPY261016C0074000']) assert.ok(!isOptionSymbol(no), String(no));
+});
+
+test('the gateway signs reads of option contracts and option data, and nothing that writes them', () => {
+  for (const path of ['v2/options/contracts', 'v2/options/contracts/SPY261016C00740000', 'v1beta1/options/snapshots/SPY', 'v1beta1/options/snapshots',
+    'v1beta1/options/quotes/latest', 'v1beta1/options/trades/latest', 'v1beta1/options/bars']) assert.ok(allowedVenuePath('alpaca', 'GET', path), path);
+  for (const [method, path] of [['POST', 'v2/options/contracts'], ['POST', 'v2/positions/SPY261016C00740000/exercise'], ['GET', 'v1beta1/options/meta/exchanges/../x'],
+    ['DELETE', 'v2/positions'], ['GET', 'v1beta1/options/snapshots/SPY/extra']]) assert.ok(!allowedVenuePath('alpaca', method, path), `${method} ${path}`);
 });

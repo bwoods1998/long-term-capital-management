@@ -153,10 +153,10 @@ class SeedCase(unittest.TestCase):
 
 # ------------------------------------------------------------------------------- the registry
 class RegistryTests(unittest.TestCase):
-    def test_twelve_seeds_with_unique_names_and_files(self):
-        self.assertEqual(len(SEEDS), 12)
-        self.assertEqual(len({row["name"] for row in SEEDS}), 12)
-        self.assertEqual(len({row["file"] for row in SEEDS}), 12)
+    def test_fourteen_seeds_with_unique_names_and_files(self):
+        self.assertEqual(len(SEEDS), 14)  # the twelve of the overnight build, and two for listed options (Sept 19, 2026)
+        self.assertEqual(len({row["name"] for row in SEEDS}), 14)
+        self.assertEqual(len({row["file"] for row in SEEDS}), 14)
         for row in SEEDS:
             self.assertEqual(set(row), {"name", "family", "file", "why"})
             self.assertGreater(len(row["why"]), 40)
@@ -167,7 +167,8 @@ class RegistryTests(unittest.TestCase):
             "favorites-maker": "kalshi-favorites", "favorites-no": "kalshi-favorites", "favorites-daily": "kalshi-favorites",
             "hourly-quotes": "kalshi-quotes", "crypto-reversion": "crypto-reversion", "crypto-trend": "crypto-trend",
             "crypto-dip-limit": "crypto-reversion", "crypto-pairs": "crypto-pairs", "equity-overnight": "equity-overnight",
-            "equity-trend": "equity-trend", "equity-rsi2": "equity-reversion", "equity-vwap": "equity-intraday"})
+            "equity-trend": "equity-trend", "equity-rsi2": "equity-reversion", "equity-vwap": "equity-intraday",
+            "options-breakout": "options-breakout", "options-pullback": "options-pullback"})
 
     def test_load_and_all_seeds(self):
         rows = all_seeds()
@@ -202,7 +203,8 @@ class RegistryTests(unittest.TestCase):
             "crypto-reversion": ("alpaca", "hour", "reversion"), "crypto-trend": ("alpaca", "hour", "trend"),
             "crypto-dip-limit": ("alpaca", "hour", "maker-reversion"), "crypto-pairs": ("alpaca", "hour", "pairs"),
             "equity-overnight": ("alpaca", "day", "overnight"), "equity-trend": ("alpaca", "day", "trend"),
-            "equity-rsi2": ("alpaca", "day", "reversion"), "equity-vwap": ("alpaca", "hour", "intraday-reversion")}
+            "equity-rsi2": ("alpaca", "day", "reversion"), "equity-vwap": ("alpaca", "hour", "intraday-reversion"),
+            "options-breakout": ("alpaca", "day", "options-breakout"), "options-pullback": ("alpaca", "day", "options-pullback")}
         for row in all_seeds():
             with self.subTest(row["name"]):
                 found = runner.needs_of(row["code"])
@@ -225,7 +227,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_the_niches_are_all_different(self):
         niches = [tuple(runner.needs_of(r["code"])["needs"][k] for k in ("venue", "horizon", "style")) for r in all_seeds()]
-        self.assertEqual(len(set(niches)), 12)
+        self.assertEqual(len(set(niches)), 14)
 
     def test_spec_details_of_needs(self):
         needs = {row["name"]: runner.needs_of(row["code"])["needs"] for row in all_seeds()}

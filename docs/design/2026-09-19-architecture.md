@@ -345,3 +345,30 @@ configured`).
     founder over a real week: the big leagues' game series charge a maker fee and the replay
     charged none. The same replay showed a bid left resting during a match being picked off when
     a goal is scored (38 wins, 7 losses at 93 cents), so sports founders enter before the start only.
+28. **Listed options, long premium only** (the owner asked for level 3; the House uses less than
+    the account allows). The gateway refuses multi-leg orders, market orders and anything but
+    `buy_to_open` / `sell_to_close`, and prices a contract at 100 shares (it was pricing one at a
+    hundredth of its cost). *Why not spreads:* a short leg can be assigned early into a hundred
+    shares the account cannot carry, the book's accounts have never held a negative position, and
+    none of it could be tried against an open market before the run began. The micro rung's
+    constitution gains `option_max_position_usd` ($20): one contract cannot be cut smaller. Paper
+    is the specialty's replay (`replay: false`): there are no recorded chains to walk.
+29. **Venue fees are read from the venue, not estimated.** A cash shortfall at reconciliation is
+    first explained by Alpaca's FEE activities (end-of-day regulatory fees, which no fill shows);
+    only what they do not explain freezes the book. *Why:* a one-cent fee after any equity sale
+    would otherwise have frozen the real Alpaca book on its first evening.
+30. **The expedition** (the owner's decision): `budgets.expedition` in the constitution and
+    `league/pacer.py`. The plan was a $2-a-day pool and monthly caps; built is a daily allowance
+    from what is left over the days that are left, which the pool, research and Astra follow, with
+    the unearned performance share paid to the floors. The Sail reserve is $5, not $10.
+31. **An agent's persistent memory is a journal on the ledger**, inherited by its children, and a
+    research pass can see the live view and gets a digest of where a replay won and lost. *Why:*
+    a pass used to start from nothing but the agent's code and standing, and a replay said only
+    pass or fail; the diagnosis that mattered most on the first day (resting bids picked off
+    during matches) took a human reading the fill log.
+32. **The House stakes a research candidate that passes replay** when its parent cannot afford the
+    endowment (one a parent a day). *Why:* the first real research pass on a founder said it in so
+    many words: above rung 0 it cannot edit itself and a fork costs $4 of credits it would take
+    weeks to earn, so nothing it learned could ever trade.
+33. **The House box is checkpointed daily with Sail** (`league/backup.py`), each kept a week. *Why:*
+    the ledger is one SQLite file on one disk, and it is every agent's code, record and journal.

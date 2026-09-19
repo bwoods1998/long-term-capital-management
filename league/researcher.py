@@ -38,7 +38,11 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}},
     {"name": "request_tool", "description": "Ask the architect to build something the House does not offer (a data feed, an indicator, a venue feature). Say what and why.",
      "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}}, "required": ["name", "description"]}},
-    {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your whole family, and costs sandbox seconds. Give the complete strategy file and what you changed and why.",
+    {"name": "markets_now", "description": "See what your strategy sees right now: the live markets, quotes, bars or option chain of your specialty, your positions and working orders. Free. Look before you design: a rule about spreads or prices should start from the spreads and prices that are really there.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "journal_write", "description": "Write a note to your FUTURE SELF. Your journal is handed back to you at the start of every research pass, and your children inherit it: what you tried, what the result was, what you will check next, what not to repeat. Keep each entry short and dated by the House.",
+     "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
+    {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your whole family, and costs sandbox seconds. Code that PASSES is born as your child at once (the House stakes it if you cannot). Give the complete strategy file and what you changed and why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "purpose": {"type": "string"}}, "required": ["code", "purpose"]}},
     {"name": "finish", "description": "End this research pass with one or two sentences on what you concluded.",
      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
@@ -71,6 +75,8 @@ class Researcher:
         settings: Mapping[str, Any],
         clock=time.time,
         specialty: Callable[[Agent], str] | None = None,  # (agent) -> what is known of its niche
+        look: Callable[[Agent], dict[str, Any]] | None = None,  # (agent) -> what its strategy sees now
+        lineage: Callable[[str], list[str]] | None = None,  # (agent id) -> itself, its parent, its parent's parent...
     ):
         self.ledger = ledger
         self.provider = provider
@@ -82,6 +88,8 @@ class Researcher:
         self.settings = dict(settings)
         self.clock = clock
         self.specialty = specialty
+        self.look = look
+        self.lineage = lineage
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -89,21 +97,43 @@ class Researcher:
             self.rules
             + "\n\nTHE STRATEGY CONTRACT (the file format your code must follow)\n\n"
             + self.contract
-            + "\n\nHOW TO WORK. Call one tool per turn. Read the library and the playbook before paying for a search. "
-            "Only call `replay` when you have a specific, reasoned change: each call is a counted trial. "
-            "Write a library note when you learn something another agent could use. End with `finish`."
+            + "\n\nHOW TO WORK. Call one tool per turn. Start from your journal and your own recent trades: they are what you know that "
+            "nobody else does. Look at the live view (`markets_now`) before you design a rule about prices or spreads. Read the library "
+            "and the playbook before paying for a search. Only call `replay` when you have a specific, reasoned change: each call is a "
+            "counted trial, and its answer says WHERE the strategy won and lost, not only whether. Write a library note when you learn "
+            "something another agent could use, and a journal note (`journal_write`) for your future self: you keep nothing else of this "
+            "pass. End with `finish`."
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
         brief = self.specialty(agent) if self.specialty else ""
+        journal = self.journal(agent.id)
+        pages = "\n".join(f"- [{row['at'][:16]} {row['by']}] {row['text']}" for row in journal)
         return (
             f"You are {agent.id} (family {agent.family}, niche {agent.niche}, generation {agent.generation}).\n"
             + (f"\n{brief}\n\n" if brief else "")
+            + (f"YOUR JOURNAL (what you and your ancestors wrote to yourselves, oldest first; add to it with `journal_write`):\n{pages}\n\n" if pages else
+               "YOUR JOURNAL is empty. Before you finish, write yourself a note with `journal_write`: you will remember nothing else of this pass.\n\n")
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
             f"Your current strategy file:\n```python\n{agent.code}\n```\n"
             f"Your parameters: {json.dumps(agent.params)}\n"
             "Decide what, if anything, is worth your credits right now."
         )
+
+    # ----------------------------------------------------------------- journal
+    def journal(self, agent_id: str, *, entries: int = 14, chars: int = 700) -> list[dict[str, Any]]:
+        """An agent's persistent memory: the notes it wrote to itself and the conclusion of each
+        research pass, its ancestors' before its own, newest kept. It lives on the ledger, so it
+        survives a restart, a new box and the agent's own death (its children read it)."""
+        line = list(reversed((self.lineage(agent_id) if self.lineage else None) or [agent_id]))
+        rows = []
+        for name in line:
+            for entry in self.ledger.iter(kinds="agent.research", agent=name):
+                p = entry.payload
+                text = p.get("text") if p.get("tool") == "journal" else (p.get("summary") if p.get("tool") == "summary" else None)
+                if text and len(str(text).strip()) >= 20:  # "done" is not a memory
+                    rows.append({"at": entry.at, "by": name, "text": str(text).strip()[:chars]})
+        return rows[-entries:]
 
     # -------------------------------------------------------------------- pass
     def research(self, agent: Agent, standing: Mapping[str, Any], *, session: str) -> Pass:
@@ -176,6 +206,19 @@ class Researcher:
     def _execute(self, agent: Agent, name: str, args: Mapping[str, Any], out: Pass, session: str) -> dict[str, Any]:
         public = {k: (str(v)[:200] if k != "code" else f"{len(str(v))} characters") for k, v in dict(args or {}).items() if k != "text"}
         self.ledger.append("agent.research", {"tool": name, "arguments": public, "session": session}, agent=agent.id)
+        if name == "markets_now":
+            if self.look is None:
+                return {"error": "the House cannot show the live view here"}
+            try:
+                return _trim(self.look(agent))
+            except Exception as exc:  # noqa: BLE001 - a venue that is down is an answer
+                return {"error": f"the live view could not be read: {type(exc).__name__}: {str(exc)[:160]}"}
+        if name == "journal_write":
+            text = str(args.get("text") or "").strip()[:1500]
+            if len(text) < 20:
+                return {"error": "write at least a sentence"}
+            self.ledger.append("agent.research", {"tool": "journal", "text": text, "session": session}, agent=agent.id)
+            return {"saved": True, "note": "you will be shown this at the start of every pass from now on"}
         if name == "web_search":
             self.economy.charge(agent.id, SEARCH_CHARGE_USD, "web search", detail={"query": str(args.get("query"))[:200]})
             return self.commons.web_search(str(args.get("query") or ""))
@@ -207,5 +250,22 @@ class Researcher:
             return {"passed": bool(outcome.get("passed")), "reasons": numbers.get("reasons"), "trials_in_family": numbers.get("trials"),
                     "deflated_sharpe": numbers.get("deflated_sharpe"), "sharpe": numbers.get("sharpe"), "trades": numbers.get("trades"),
                     "return_pct": numbers.get("return_pct"), "max_drawdown": numbers.get("max_drawdown"), "fees_usd": numbers.get("fees_usd"),
-                    "oos_mean_log_growth": numbers.get("oos_mean_log_growth"), "error": outcome.get("error")}
+                    "oos_mean_log_growth": numbers.get("oos_mean_log_growth"), "error": outcome.get("error"),
+                    # Where it won and lost: by series or symbol, by how long before the end it got in, and its worst trades.
+                    "digest": outcome.get("digest"), "note": numbers.get("note")}
         return {"error": f"no such tool {name!r}"}
+
+
+def _trim(ctx: Mapping[str, Any]) -> dict[str, Any]:
+    """The live view, cut to what a model can read: the busiest 40 markets, the 40 nearest option
+    contracts, the last 30 bars of each symbol."""
+    out = {k: v for k, v in dict(ctx).items() if k not in ("markets", "chain", "bars", "memory", "params")}
+    if "markets" in ctx:
+        rows = sorted(ctx["markets"] or [], key=lambda m: -(m.get("volume_24h") or 0))
+        out["markets"] = rows[:40]
+        out["markets_shown"] = f"{min(len(rows), 40)} busiest of {len(rows)}"
+    if "chain" in ctx:
+        out["chain"] = (ctx["chain"] or [])[:40]
+    if "bars" in ctx:
+        out["bars"] = {symbol: (bars or [])[-30:] for symbol, bars in (ctx["bars"] or {}).items()}
+    return out

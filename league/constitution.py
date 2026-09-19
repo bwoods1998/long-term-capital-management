@@ -23,7 +23,12 @@ CONSTITUTION: dict[str, Any] = {
         "sail_month_usd": "100",
         "openai_month_usd": "100",
         # Never spend the last of the credit: the House box itself must stay up.
-        "sail_reserve_usd": "10",
+        "sail_reserve_usd": "5",
+        # The expedition (the owner's decision of Sept 19, 2026): both budgets are to be USED, in
+        # full, over fourteen days, so the game's design can be judged on a fortnight of real
+        # work rather than a thrifty month. `league/pacer.py` spends them evenly; these are
+        # ceilings as well as targets, and the monthly caps above still stand behind them.
+        "expedition": {"start": "2026-09-19", "days": 14, "sail_usd": "100", "openai_usd": "100"},
     },
     "order_caps": {"max_order_usd": "75", "max_day_usd": "4000", "max_day_orders": 2000},
     "ladder": {
@@ -67,7 +72,11 @@ CONSTITUTION: dict[str, Any] = {
     "rungs": {
         # Paper agents are held to the live account's real limits, not the paper account's.
         "1": {"stake_usd": "200", "max_position_usd": "100", "max_order_usd": "75"},
-        "2": {"stake_usd": "25", "max_position_usd": "10", "max_order_usd": "10"},
+        # One option contract is 100 shares and cannot be cut smaller, so on this rung an option
+        # position is ONE contract of at most `option_max_position_usd` in premium. Options are
+        # long premium only (the gateway refuses anything else): what is paid is all that can be lost,
+        # and the tuition cap above counts it like any other loss.
+        "2": {"stake_usd": "25", "max_position_usd": "10", "max_order_usd": "10", "option_max_position_usd": "20"},
         "3": {"max_order_usd": "75", "kelly_fraction": 0.25, "max_share_of_venue": 0.25},
     },
 }
@@ -81,4 +90,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "23d82d9559a197ebd502c836884cc068ced56e4d773136adb7a80742040154b5"
+PINNED_DIGEST = "05fa30176f211e8751f93b3706b9fe16486636e78c6c215fea9228018521f04c"

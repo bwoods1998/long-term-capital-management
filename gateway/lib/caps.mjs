@@ -59,6 +59,12 @@ export const VENUE_PATHS = {
     ['GET', new RegExp(`^v2\\/stocks(\\/${SEGMENT})?\\/(quotes|trades|bars|snapshots?)(\\/latest)?$`)],
     ['GET', /^v2\/stocks\/snapshots$/],
     ['GET', /^v1beta3\/crypto\/[a-z]{2,4}\/(latest\/)?(quotes|trades|bars|snapshots)$/],
+    // Listed options (Sept 19, 2026), read only: the contracts an underlying lists, and their
+    // quotes, greeks and bars. Option ORDERS go through `v2/orders` like any other, under the
+    // rules of `alpacaNotional` below (long premium only, a limit price, one leg).
+    ['GET', /^v2\/options\/contracts(\/[A-Za-z0-9._~%-]+)?$/],
+    ['GET', /^v1beta1\/options\/(quotes\/latest|trades\/latest|bars|snapshots)$/],
+    ['GET', /^v1beta1\/options\/snapshots\/[A-Za-z0-9.]{1,12}$/],
   ],
 };
 
@@ -126,7 +132,38 @@ function kalshiNotional(body) {
 // with its own limit price where there is one and otherwise with the reference the router reads
 // from the venue's own quote -- never from the VM that is asking us to authorize the spend.
 // A short sale is worth what it sells, so the sign of the position never enters the notional.
+/** An OCC option symbol: root, YYMMDD, C or P, strike x 1000 in eight digits (`SPY261016C00740000`). */
+export const isOptionSymbol = symbol => /^[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}$/.test(String(symbol || ''));
+
+//: One listed option contract is 100 shares: its premium is quoted per share and paid a hundredfold.
+const OPTION_MULTIPLIER = 100n;
+
+// An option order is held to four rules the venue would not enforce for us. It is one leg (a
+// multi-leg order's worth cannot be read from one price). It carries its own limit price (there
+// is no independent quote to price a market order with). It is sized in contracts, never in
+// dollars. And it is LONG PREMIUM ONLY: it opens by buying and closes by selling, which Alpaca
+// itself then enforces from `position_intent` (a sell_to_close with nothing to close is rejected),
+// so no order through this gateway can write an option, and the most an option position can lose
+// is what was paid for it. Measured Sept 19, 2026: before this rule an option order was priced
+// at qty x limit with no multiplier, a hundredth of what it spends.
+function optionNotional(body) {
+  if (body.order_class || Array.isArray(body.legs)) return { error: 'Multi-leg option orders are not allowed through this gateway.' };
+  if (parsePico(body.notional) !== null) return { error: 'An option order is sized in contracts, not dollars.' };
+  const intent = String(body.position_intent || '');
+  const side = String(body.side || '');
+  if (!((side === 'buy' && intent === 'buy_to_open') || (side === 'sell' && intent === 'sell_to_close'))) {
+    return { error: 'An option order must be buy with position_intent buy_to_open, or sell with sell_to_close: long premium only.' };
+  }
+  if (String(body.type || '') !== 'limit') return { error: 'An option order must be a limit order.' };
+  const qty = parsePico(body.qty);
+  if (qty === null || qty <= 0n || qty % PICO !== 0n) return { error: 'Option qty must be a whole number of contracts.' };
+  const limit = parsePico(body.limit_price);
+  if (limit === null || limit <= 0n) return { error: 'An option order needs a positive limit price.' };
+  return { micro: picoToMicro(mulPico(qty, limit) * OPTION_MULTIPLIER) };
+}
+
 function alpacaNotional(body, reference) {
+  if (isOptionSymbol(body.symbol)) return optionNotional(body);
   const dollars = parsePico(body.notional);
   if (dollars !== null && dollars > 0n) return { micro: picoToMicro(dollars) };
   const qty = parsePico(body.qty);

@@ -26,6 +26,7 @@ beside a `symbol` key) while the crypto wrapper is `quotes`, a map keyed by symb
 
 from __future__ import annotations
 
+import re
 import urllib.parse
 from decimal import Decimal
 from typing import Any
@@ -147,10 +148,14 @@ class AlpacaBroker:
         feed: str = DEFAULT_FEED,
         base_url: "str | None" = None,
         data_url: str = DATA_BASE,
+        option_feed: str = "indicative",
     ):
         self.credentials = credentials
         self.venue = venue
         self.feed = feed
+        #: `indicative` is free and fifteen minutes delayed; `opra` is live and needs the OPRA
+        #: agreement signed on the account (measured Sept 19, 2026: HTTP 403 without it).
+        self.option_feed = option_feed
         self.base = (base_url or (PAPER_BASE if credentials.paper else LIVE_BASE)).rstrip("/")
         self.data = data_url.rstrip("/")
         self.client = client or VenueClient(transport, timeout=timeout)
@@ -237,6 +242,17 @@ class AlpacaBroker:
             quotes = payload.get("quotes") if isinstance(payload, dict) else None
             row = quotes.get(symbol) if isinstance(quotes, dict) else None
             source = "alpaca:crypto"
+        elif instrument.asset_class == "option":
+            payload = self._call(
+                "GET",
+                "/v1beta1/options/quotes/latest",
+                params={"symbols": symbol, "feed": self.option_feed},
+                base=self.data,
+                what=f"alpaca option quote {symbol}",
+            )
+            quotes = payload.get("quotes") if isinstance(payload, dict) else None
+            row = quotes.get(symbol) if isinstance(quotes, dict) else None
+            source = f"alpaca:options:{self.option_feed}"
         else:
             payload = self._call(
                 "GET",
@@ -260,7 +276,7 @@ class AlpacaBroker:
             source=source,
             # IEX is a real-time single-venue feed; it is not the consolidated tape, but it is
             # not a delayed feed either. SIP under a paid plan is likewise real time.
-            delayed=self.feed not in ("iex", "sip") ,
+            delayed=(self.option_feed != "opra") if instrument.asset_class == "option" else self.feed not in ("iex", "sip"),
         )
 
     # ----------------------------------------------------------------- orders
@@ -284,6 +300,16 @@ class AlpacaBroker:
         }
         if intent.limit_price is not None:
             body["limit_price"] = text(intent.limit_price)
+        if intent.instrument.asset_class == "option":
+            # Long premium only: an option is opened by buying it and closed by selling it. The
+            # venue enforces the intent (a sell_to_close with nothing to close is rejected), and
+            # the gateway refuses any other, so no order from here can write an option.
+            if intent.order_type != "limit" or intent.limit_price is None:
+                raise RejectedOrder("alpaca: an option order must be a limit order")
+            if money(intent.quantity) % 1 != 0:
+                raise RejectedOrder("alpaca: options trade in whole contracts")
+            body["position_intent"] = "buy_to_open" if intent.side == "buy" else "sell_to_close"
+            body["time_in_force"] = "day"  # the only one Alpaca takes for options
         try:
             payload = self._call("POST", "/v2/orders", body=body, what="alpaca submit")
         except TransportError as exc:
@@ -392,6 +418,70 @@ class AlpacaBroker:
                     at=iso(row.get("transaction_time") or 0),
                 )
             )
+        return out
+
+    def fee_activities(self, since_date: "str | None" = None) -> "list[dict[str, Any]]":
+        """`GET /v2/account/activities/FEE`, oldest first: what the venue took that no fill shows.
+
+        Alpaca charges no commission, and passes on the regulators' fees (SEC and TAF on equity
+        sales, ORF and OCC on option contracts): it adds a day's up, rounds UP to a cent and takes
+        it at the end of the day as one FEE activity. `{"id", "usd" (positive: money taken), "date",
+        "description"}` for each."""
+        rows = self._call(
+            "GET",
+            "/v2/account/activities/FEE",
+            params={"after": since_date, "direction": "asc", "page_size": 100},
+            what="alpaca fees",
+            ok=(200,),
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows if isinstance(rows, list) else []:
+            amount = dec(row.get("net_amount")) if isinstance(row, dict) else None
+            if amount is None or amount >= 0 or not row.get("id"):
+                continue
+            out.append({"id": str(row["id"]), "usd": -amount, "date": str(row.get("date") or ""), "description": str(row.get("description") or "")})
+        return out
+
+    def option_chain(self, underlying: str, *, expiry_from: str, expiry_to: str, limit: int = 1000) -> "list[dict[str, Any]]":
+        """The contracts of one underlying expiring in [expiry_from, expiry_to] with a two-sided
+        quote, nearest expiry and lowest strike first: `{"symbol" (OCC), "underlying", "expiry",
+        "strike", "right", "bid", "ask", "as_of", "iv", "delta", "volume"}` (floats; greeks are
+        None when the feed does not carry them)."""
+        rows: dict[str, Any] = {}
+        token = None
+        for _ in range(10):
+            payload = self._call(
+                "GET",
+                f"/v1beta1/options/snapshots/{urllib.parse.quote(underlying.upper())}",
+                params={"feed": self.option_feed, "limit": min(int(limit), 1000), "expiration_date_gte": expiry_from,
+                        "expiration_date_lte": expiry_to, "page_token": token},
+                base=self.data,
+                what=f"alpaca option chain {underlying}",
+            )
+            if not isinstance(payload, dict):
+                break
+            rows.update(payload.get("snapshots") or {})
+            token = payload.get("next_page_token")
+            if not token or len(rows) >= limit:
+                break
+        out = []
+        for occ, snap in rows.items():
+            quote = (snap or {}).get("latestQuote") or {}
+            bid, ask = dec(quote.get("bp")), dec(quote.get("ap"))
+            if bid is None or ask is None or bid <= 0 or ask <= bid:
+                continue
+            if not re.fullmatch(r"[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}", str(occ)):
+                continue
+            inst = instrument_for({"symbol": occ, "asset_class": "us_option"}, venue=self.venue)
+            greeks = (snap or {}).get("greeks") or {}
+            number = lambda v: None if v is None else float(v)  # noqa: E731
+            out.append({
+                "symbol": occ, "underlying": inst.symbol, "expiry": inst.expiry, "strike": float(inst.strike), "right": inst.right,
+                "bid": float(bid), "ask": float(ask), "as_of": iso(quote.get("t") or 0),
+                "iv": number((snap or {}).get("impliedVolatility")), "delta": number(greeks.get("delta")),
+                "volume": number(((snap or {}).get("dailyBar") or {}).get("v")),
+            })
+        out.sort(key=lambda r: (r["expiry"], r["strike"], r["right"]))
         return out
 
     # ---------------------------------------------------------------- parsing

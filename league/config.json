@@ -11,6 +11,9 @@
   "tick_seconds": 60,
   "mark_every_seconds": 300,
   "replay_days": 21,
-  "inference_daily_cap_usd": "3.00",
-  "performance": {"start_at": "2026-09-19T04:56:53.000Z", "start_equity": "1021.9251"}
+  "inference_daily_cap_usd": "9.00",
+  "performance": {
+    "start_at": "2026-09-19T04:56:53.000Z",
+    "start_equity": "1021.9251"
+  }
 }

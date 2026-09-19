@@ -117,6 +117,21 @@ def hours_between(start: str | None, end: str) -> float | None:
 
 
 # --------------------------------------------------------------------------------- events
+def option_label(instrument: Mapping[str, Any]) -> str:
+    """`F 10-09 13C`: the underlying, the expiry's month and day, the strike and C or P."""
+    try:
+        strike = f"{float(instrument.get('strike')):g}"
+    except (TypeError, ValueError):
+        strike = str(instrument.get("strike"))
+    return f"{instrument.get('symbol')} {str(instrument.get('expiry') or '')[5:]} {strike}{str(instrument.get('right') or '?')[:1].upper()}"
+
+
+def _shown(instrument: Mapping[str, Any]) -> dict[str, Any]:
+    shown = {k: instrument.get(k) for k in ("symbol", "asset_class", "market_id", "right") if instrument.get(k) is not None}
+    if instrument.get("asset_class") == "option":
+        shown["symbol"] = option_label(instrument)
+    return shown
+
 def to_events(entry: Entry) -> list[dict[str, Any]]:
     """The site events one ledger row becomes (usually one, sometimes none, a closing fill two)."""
     if not entry.public:
@@ -136,7 +151,7 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
     elif kind == "book.fill" and agent != HOUSE and p.get("source") in ("venue", "cross"):
         instrument = p.get("instrument") or {}
         venue = re.sub(r"[^a-z0-9-]", "-", str(p.get("book") or "book"))[:40]
-        shown = {k: instrument.get(k) for k in ("symbol", "asset_class", "market_id", "right") if instrument.get(k) is not None}
+        shown = _shown(instrument)
         out.append(("", f"broker:{venue}", "broker.fill", {
             "desk_id": agent, "instrument": shown, "side": p.get("side"), "quantity": p.get("quantity"),
             "price": money(p.get("price") or 0, 8).rstrip("0").rstrip(".") or "0", "real_money": bool(p.get("real_money")),
@@ -151,7 +166,7 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
             }))
     elif kind == "book.settle" and agent != HOUSE:
         instrument = p.get("instrument") or {}
-        shown = {k: instrument.get(k) for k in ("symbol", "asset_class", "market_id", "right") if instrument.get(k) is not None}
+        shown = _shown(instrument)
         out.append(("", desk, "desk.outcome", {
             "market_id": instrument.get("market_id") or instrument.get("symbol"), "instrument": shown, "result": p.get("result"),
             "pnl": money(p.get("pnl") or 0, 4, signed=True), "rationale_excerpt": str(p.get("reason") or "")[:240],
@@ -445,7 +460,7 @@ class Publisher:
                 mark = book.marks.get(inst.key) or holding.average_cost
                 value = holding.quantity * mark * inst.multiplier
                 positions.append({
-                    "instrument": {"symbol": inst.market_id or inst.symbol, "asset_class": inst.asset_class, "venue": "kalshi" if agent.venue == "kalshi" else "alpaca",
+                    "instrument": {"symbol": option_label(inst.to_dict()) if inst.asset_class == "option" else (inst.market_id or inst.symbol), "asset_class": inst.asset_class, "venue": "kalshi" if agent.venue == "kalshi" else "alpaca",
                                    **({"market_id": inst.market_id} if inst.market_id else {}), **({"right": inst.right} if inst.right else {})},
                     "side": (inst.right or "yes") if inst.asset_class == "event" else "long",
                     "quantity": money(holding.quantity, 8), "entry_price": money(holding.average_cost, 6), "mark_price": money(mark, 6),

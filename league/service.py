@@ -154,9 +154,17 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if astra:
         from .astra import Astra, GatewayForge, evidence_from
 
-        house.astra = Astra(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house))
+        pace = house.game.get("astra") or {}
+        house.astra = Astra(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
+                            schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"))
     if provider is not None:
         house.budget = Budget(house.ledger, lambda: provider.check_balance())
+    if not canary and REPO.parent.name == "releases" and not local_sandbox:
+        # On the House box only: a daily checkpoint of the box itself, so the ledger (every agent's
+        # code, record and journal) outlives the one disk it lives on.
+        from .backup import Backup
+
+        house.backup = Backup(SailboxClient(), house.ledger)
     if not canary and REPO.parent.name == "releases" and config.get("auto_update", True):
         # On the House box the code runs from <base>/releases/<id>: there, main is pulled every
         # half hour and handed to the watchdog. On a developer's machine nothing updates itself.

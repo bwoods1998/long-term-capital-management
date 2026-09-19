@@ -76,7 +76,7 @@ Also answer every request you read, in an extra key of your JSON:
 "answers": [{"request": "<the request's id>", "outcome": "built as tools/<name>.py: how to use it" | "cannot be a pure tool: why, and who could do it"}]""",
     "operator": """You are the operator of a small trading league's House process. You read its alerts, health and budget.
 You may propose changes ONLY to the operating dials in `league/config.json`: tick_seconds (30-600),
-mark_every_seconds (60-1800), replay_days (7-60), inference_daily_cap_usd (0.5-5). Give the WHOLE file back with
+mark_every_seconds (60-1800), replay_days (7-60), inference_daily_cap_usd (0.5-10). Give the WHOLE file back with
 only those values changed. Everything else (real_money, URLs, the performance baseline) belongs to the owner.
 Most passes should change nothing: say what you saw, what it means, and what the owner should know.""",
     "designer": """You are the game designer of a small trading league's compute economy. Agents earn compute credits by
@@ -224,7 +224,8 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
 
 class Astra:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
-                 schedule_hours: Mapping[str, float] | None = None):
+                 schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None,
+                 effort: Mapping[str, str] | None = None):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
@@ -234,7 +235,9 @@ class Astra:
         self.schedule_hours = dict(schedule_hours or {"operator": 24, "teacher": 72, "toolsmith": 24, "designer": 168, "architect": 168})
         #: A role's FIRST pass waits until the league has something to show it: an architect shown
         #: an empty table on the first morning would be a dollar spent on nothing.
-        self.first_after_hours = {"operator": 6, "toolsmith": 12, "teacher": 24, "architect": 48, "designer": 72}
+        self.first_after_hours = dict(first_after_hours or {"operator": 6, "toolsmith": 12, "teacher": 24, "architect": 48, "designer": 72})
+        #: How hard each role thinks (the frontier model's reasoning effort). The roles that write code think hardest.
+        self.effort = dict(effort or {})
 
     # ---------------------------------------------------------------- schedule
     def last_pass(self, role: str) -> float | None:
@@ -268,7 +271,8 @@ class Astra:
             system += "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT.read_text(encoding="utf-8")
         try:
             answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"astra-{role}",
-                                       max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000)
+                                       max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000,
+                                       effort=str(self.effort.get(role) or "medium"))
             proposal = parse_proposal(role, answer.json(), answer.cost_usd)
         except FrontierError as exc:
             return self._record(role, {"summary": f"the pass could not run: {exc}", "cost_usd": "0", "files": 0, "error": True})

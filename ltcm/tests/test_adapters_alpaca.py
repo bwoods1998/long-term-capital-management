@@ -221,6 +221,64 @@ class QuoteTests(unittest.TestCase):
             client.quote(AAPL)
 
 
+class OptionTests(unittest.TestCase):
+    OCC = "AAPL261016C00200000"
+
+    def test_an_option_quote_reads_the_symbol_keyed_map_from_the_indicative_feed_and_says_it_is_delayed(self):
+        payload = {"quotes": {self.OCC: {"ap": 1.32, "as": 4, "bp": 1.25, "bs": 9, "t": "2026-09-18T19:44:59Z"}}}
+        client, transport = broker({DATA_BASE + "/v1beta1/options/quotes/latest*": payload})
+        quote = client.quote(CALL)
+        self.assertEqual((quote.bid, quote.ask), (Decimal("1.25"), Decimal("1.32")))
+        self.assertEqual((quote.source, quote.delayed), ("alpaca:options:indicative", True))
+        self.assertEqual(transport.last["query"], {"symbols": self.OCC, "feed": "indicative"})
+
+    def test_an_option_order_is_a_day_limit_that_opens_by_buying_and_closes_by_selling(self):
+        client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): {**ORDER, "symbol": self.OCC, "asset_class": "us_option", "qty": "1"}})
+        client.submit(intent(CALL, quantity="1", order_type="limit", limit_price="0.70", time_in_force="gtc"))
+        body = transport.last["body"]
+        self.assertEqual((body["symbol"], body["qty"], body["type"], body["limit_price"]), (self.OCC, "1", "limit", "0.70"))
+        self.assertEqual((body["position_intent"], body["time_in_force"]), ("buy_to_open", "day"))
+        client.submit(intent(CALL, quantity="1", side="sell", order_type="limit", limit_price="0.90"))
+        self.assertEqual(transport.last["body"]["position_intent"], "sell_to_close")
+
+    def test_a_market_option_order_or_a_part_contract_is_refused_before_anything_is_sent(self):
+        client, transport = broker({})
+        with self.assertRaisesRegex(RejectedOrder, "limit order"):
+            client.submit(intent(CALL, quantity="1"))
+        with self.assertRaisesRegex(RejectedOrder, "whole contracts"):
+            client.submit(intent(CALL, quantity="0.5", order_type="limit", limit_price="0.70"))
+        self.assertEqual(transport.calls, [])
+
+    def test_an_equity_order_carries_no_position_intent(self):
+        client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): ORDER})
+        client.submit(intent(order_type="limit", limit_price="230.50", time_in_force="day"))
+        self.assertNotIn("position_intent", transport.last["body"])
+
+    def test_the_chain_keeps_two_sided_contracts_in_order_with_what_the_feed_knows(self):
+        snapshots = {
+            "F260925C00013000": {"latestQuote": {"bp": 0.41, "ap": 0.44, "t": "2026-09-18T19:59:59Z"}, "impliedVolatility": 0.31, "greeks": {"delta": 0.52}, "dailyBar": {"v": 812}},
+            "F260925P00013000": {"latestQuote": {"bp": 0.30, "ap": 0.33, "t": "2026-09-18T19:59:59Z"}},
+            "F260925C00020000": {"latestQuote": {"bp": 0, "ap": 0.01, "t": "2026-09-18T19:59:59Z"}},   # no bid
+            "F260925C00012000": {"latestQuote": {"bp": 1.10, "ap": 1.05, "t": "2026-09-18T19:59:59Z"}},  # crossed
+            "junk": {"latestQuote": {"bp": 1, "ap": 2}},
+        }
+        client, transport = broker({DATA_BASE + "/v1beta1/options/snapshots/F*": {"snapshots": snapshots, "next_page_token": None}})
+        chain = client.option_chain("f", expiry_from="2026-09-19", expiry_to="2026-10-02")
+        self.assertEqual([row["symbol"] for row in chain], ["F260925C00013000", "F260925P00013000"])
+        self.assertEqual(chain[0], {"symbol": "F260925C00013000", "underlying": "F", "expiry": "2026-09-25", "strike": 13.0, "right": "call",
+                                    "bid": 0.41, "ask": 0.44, "as_of": "2026-09-18T19:59:59Z", "iv": 0.31, "delta": 0.52, "volume": 812.0})
+        self.assertEqual((chain[1]["iv"], chain[1]["delta"]), (None, None))
+        self.assertEqual(transport.last["query"]["feed"], "indicative")
+
+    def test_fee_activities_are_what_the_venue_took_as_positive_dollars(self):
+        rows = [{"id": "20260921::fee1", "activity_type": "FEE", "date": "2026-09-21", "net_amount": "-0.03", "description": "ORF fee"},
+                {"id": "20260921::rebate", "activity_type": "FEE", "date": "2026-09-21", "net_amount": "0.01"},
+                {"activity_type": "FEE", "net_amount": "-1"}, "junk"]
+        client, transport = broker({PAPER_BASE + "/v2/account/activities/FEE*": rows})
+        self.assertEqual(client.fee_activities("2026-09-20"), [{"id": "20260921::fee1", "usd": Decimal("0.03"), "date": "2026-09-21", "description": "ORF fee"}])
+        self.assertEqual(transport.last["query"]["after"], "2026-09-20")
+
+
 class SubmitTests(unittest.TestCase):
     def test_the_request_body_is_exactly_what_alpaca_expects(self):
         client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): ORDER})

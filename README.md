@@ -67,7 +67,44 @@ position after 48 hours. Equities, and options when they open, are not bounded. 
 close two days after kickoff and really closes when a winner is declared, so markets are shown and
 judged by their scheduled expiration.
 
-**Compute credits.** The owner funds a fixed research pool, $2.00 a day. Profit decides an agent's
+**Listed options** (built Sept 19, 2026; first trades possible Monday the 21st). Long calls and puts
+on sixteen liquid underlyings. The account is approved for level 3, but the gateway itself refuses
+anything but long premium: an option order must be one leg, a limit order, in whole contracts, and
+`buy_to_open` or `sell_to_close`, so nothing through it can write an option and the most a position
+can lose is what was paid. (A short leg can be assigned into a hundred shares this account cannot
+carry, with nobody awake to see it.) The gateway also prices a contract at 100 shares: before this
+an option order would have been capped at a hundredth of what it spends. One contract cannot be cut
+smaller, so the micro rung allows an option position of one contract up to $20. No entry in a
+contract that expires today; the House sells anything still held at 14:30 New York on its last
+day. Option quotes are fifteen minutes old (the live feed needs the OPRA agreement signed on the
+account), which is why every option order is a limit order. There is no replay (no recorded
+chains): paper is this specialty's replay. Not yet measured, because the market was closed: a
+filled option order, Alpaca's end-of-day regulatory fees (the book now books any FEE activity
+that explains a cash shortfall), and whether Alpaca holds cash behind a resting option bid (the
+book accepts either). An unexplained difference freezes entries, never exits.
+
+**The expedition.** The owner's decision of Sept 19: both compute budgets, $100 of Sail and $100 of
+the frontier model, are to be USED in full over fourteen days from that date, so the design can be
+judged on a fortnight of real work. `league/pacer.py` turns each into a daily allowance (what is
+left, over the days that are left, so a quiet day rolls forward and a dear one is paid back). The
+day's credit pool is 85% of the day's Sail allowance; a performance share nobody has earned yet
+follows the floors instead of going unspent; research runs on a stronger model (DeepSeek V4 Pro,
+about two cents a pass, measured) every three hours, twice as often while the day is underspent;
+Astra's roles sit down every 8 to 36 hours, one at a time, while the day's allowance lasts. When a
+budget or the fourteenth day is gone that spending stops for good and the owner is told. The
+monthly caps still stand behind it.
+
+**How an agent learns, and what it remembers.** A research pass starts from the agent's JOURNAL
+(notes it wrote to its future self and the conclusion of every earlier pass, its ancestors' before
+its own: it lives on the ledger, so it survives a restart, a new box and the agent's death), its own
+recent trades, and its specialty's brief. It can look at exactly what its strategy sees now
+(`markets_now`), search the web, read and write its niche's library, read the graveyard, ask the
+toolsmith for a tool, and replay candidate code; a replay answers with WHERE the strategy won and
+lost (by series, by how long before a market's end it got in, its worst trades). An agent above
+rung 0 cannot edit itself, so code that passes replay is born as its child at once: the House
+stakes the child when the parent cannot. The House box is checkpointed daily with Sail, kept a week.
+
+**Compute credits.** Outside the expedition the owner funds a fixed research pool, $2.00 a day. Profit decides an agent's
 share of it, never its size. Each epoch (a day) 40% of the pool is a floor split evenly across the
 occupied niches, paid only to agents that have reached paper, and 60% is paid in proportion to mean
 block growth x the square root of active blocks x the rung's weight (replay 0, paper 0.2, real
@@ -90,7 +127,7 @@ answers for itself from replay up. The population is kept between 12 and 36, and
 [`league/niches.json`](league/niches.json), and its children inherit it: crypto strikes, 15-minute
 crypto, weather, sports results, player props, slow prices (gasoline, oil, gold, currencies),
 counts and ratings on Kalshi; bitcoin and ether, alternative coins, index ETFs and large stocks on
-Alpaca; listed options, defined and closed until the House can quote them. The House shows an agent
+Alpaca; and listed options, long premium only (below). The House shows an agent
 only its specialty's markets, refuses an entry outside it, hands its research loop a brief of what
 is known there (including which series charge makers) and files its notes under it, so a niche's
 library compounds. The universes are real tickers from a survey of the venue (Sept 19, 2026: 736
@@ -100,7 +137,7 @@ its strategy names, the House re-surveys the venue daily so a new season joins b
 category, and an agent whose series have gone dark is shown the busiest live ones. The floor is paid
 per specialty so the population cannot collapse onto whichever one got lucky last week.
 
-**Founders start on paper.** The 26 founders (the twelve seed programs, pointed at the specialties)
+**Founders start on paper.** The 28 founders (the fourteen seed programs, pointed at the specialties)
 are seated on rung 1 at birth. The first dry run showed honest replays failing most of
 them (crypto reversion below zero after fees; Kalshi favourites at a deflated Sharpe of 0.85 against
 the 0.90 line). Paper costs nothing and forward evidence is what counts, so they are forward-tested
@@ -210,7 +247,9 @@ The `league/` modules:
 | `commons.py` | What agents share: web search, the research library, the tool-request queue, the playbook. |
 | `researcher.py` | The research loop a cheap Sail model runs for one agent, at that agent's expense. |
 | `rules.py` | The text every agent is told, generated from the constitution and the game file. |
-| `seeds/` | The twelve founding programs. |
+| `seeds/` | The fourteen founding programs. |
+| `pacer.py` | The expedition's pace: the owner's two budgets turned into a daily allowance that the credit pool, research and Astra follow. |
+| `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
 | `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season. |
 | `strategies/`, `tools/`, `playbook/` | What Astra adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop. |
