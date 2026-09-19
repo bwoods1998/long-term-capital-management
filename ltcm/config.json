@@ -48,7 +48,7 @@
   "committee_time": "18:00",
   "committee_memo_daily": true,
   "evolution_time": "19:00",
-  "evolution_interval_hours": 3,
+  "evolution_interval_hours": 1,
   "postmortem_time": "21:30",
   "critic_enabled": true,
   "critic_profile": "glm_asap",
@@ -393,5 +393,6 @@
     "shadow_enabled": false,
     "live_enabled": false,
     "max_live_per_day": 2
-  }
+  },
+  "evolution_seed_limit": 6
 }

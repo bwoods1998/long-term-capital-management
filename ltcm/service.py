@@ -1002,6 +1002,7 @@ class Service:
             },
         )
         self.evolution.ledger_provider = lambda desk_id: self.ledgers.get(desk_id)
+        self.evolution.protected = self._trial_desks
         # leap: lab -- the forecast record and the research lab share the roster by reference,
         # so a desk bred tonight is scored and judged tomorrow without a restart.
         self.calibration = CalibrationLedger(self.log, self.manifests, clock=clock)
@@ -1537,6 +1538,19 @@ class Service:
             return ledger.state(self.now()).equity
         except Exception:
             return None
+
+    def _trial_desks(self) -> set[str]:
+        """Shadow desks carrying an active Foundry trial, across every lane: selection must not
+        retire the desk under a candidate's forward record."""
+        out: set[str] = set()
+        for foundry in list(getattr(self, "foundries", None) or ([self.foundry] if getattr(self, "foundry", None) else [])):
+            try:
+                for dep in dict(foundry.state().get("deployments") or {}).values():
+                    if isinstance(dep, Mapping) and dep.get("status") == "shadow" and dep.get("desk_id"):
+                        out.add(str(dep["desk_id"]))
+            except Exception:
+                continue
+        return out
 
     def _desk_locked(self, desk_id: str) -> bool:
         """Whether the desk's daily-loss breaker refuses new risk right now, as `rule_daily_loss`
@@ -3492,6 +3506,13 @@ class Service:
             evolution_due = self._due(local, self.config["evolution_time"], state.get("last_evolution_day"), day)
         if not stopped and evolution_due:
             actions = list(self.evolution.select(at)) + list(self.evolution.promote(at))
+            # Breed every family up to `target_variants` (Sept 19, 2026: `seed` existed and
+            # nothing called it; a fast-lane cycle qualified eighteen and trialled none for
+            # want of a free desk). Bounded per run: each child is a playbook rewrite.
+            try:
+                actions += list(self.evolution.seed(at, limit=int(self.config.get("evolution_seed_limit", 6))))
+            except Exception as exc:
+                self.alert("warning", f"evolution seeding failed: {type(exc).__name__}: {str(exc)[:120]}")
             self.reload_manifests()
             self._save_state(last_evolution_day=day, last_evolution_at=at)
             result["evolution"] = actions

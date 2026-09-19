@@ -230,6 +230,10 @@ class Evolution:
         self.config = {**DEFAULT_CONFIG, **dict(config or {})}
         self._ledgers: dict[str, DeskLedger] = {}
         self.ledger_provider: Callable[[str], DeskLedger | None] | None = None
+        #: Desks that must not be retired right now, beyond `protected_desks`: the service
+        #: names the shadow desks carrying an active Foundry trial (Sept 19, 2026: selection
+        #: retired mullins-11 under a two-hour-old trial).
+        self.protected: Callable[[], set[str]] | None = None
         #: When set, a spawn writes the parent's playbook as a stand-in and hands the model
         #: rewrite to this scheduler instead of waiting on it: the floor's tick must not hold
         #: for a five-minute generation. The service runs the job on a worker and applies the
@@ -365,10 +369,21 @@ class Evolution:
         return actions
 
     # ------------------------------------------------------------------ selection
+    def protected_now(self) -> set[str]:
+        """`protected_desks` (config) plus whatever the service protects for the moment."""
+        fixed = {str(x) for x in (self.config.get("protected_desks") or ())}
+        if self.protected is None:
+            return fixed
+        try:
+            return fixed | {str(x) for x in (self.protected() or ())}
+        except Exception:
+            return fixed
+
     def select(self, now: Any = None) -> list[dict[str, Any]]:
         """Retire underperforming shadow variants and spawn their replacements."""
         at = iso_time(now) if now is not None else self.now()
         actions: list[dict[str, Any]] = []
+        protected = self.protected_now()
         modes = promoted_desks(self.log)
         min_days = int(self.config["min_days"])
         min_decisions = int(self.config["min_decisions"])
@@ -389,7 +404,7 @@ class Evolution:
                 m
                 for m in mature
                 if capital_mode(m, modes) != "live"
-                and m.id not in self.config.get("protected_desks", ())
+                and m.id not in protected
                 and states[m.id].decisions >= min_decisions
                 and scores[m.id] < median - margin
             ]
@@ -399,7 +414,7 @@ class Evolution:
                 m
                 for m in mature
                 if capital_mode(m, modes) != "live" and states[m.id].decisions == 0
-                and m.id not in self.config.get("protected_desks", ())
+                and m.id not in protected
             ]
             if duds and not candidates:
                 worst = min(duds, key=lambda m: m.id)
@@ -423,7 +438,7 @@ class Evolution:
     def retire(
         self, manifest: DeskManifest, at: str, *, median: Decimal, reason: str
     ) -> dict[str, Any]:
-        if manifest.id in self.config.get("protected_desks", []):
+        if manifest.id in self.protected_now():
             return {"action": "protected", "desk_id": manifest.id, "reason": "persistent control"}
         payload = {
             "desk_id": manifest.id,

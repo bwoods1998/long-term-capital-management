@@ -257,6 +257,16 @@ class SelectionTests(EvolveCase):
         self.assertEqual(parent["generation"], 1)
         self.assertEqual(parent["capital"]["mode"], "shadow")
 
+    def test_a_desk_under_a_foundry_trial_is_not_retired(self):
+        # Sept 19, 2026: selection retired mullins-11 under a two-hour-old trial.
+        self.run_variant("earnings-01", exit_price="130")
+        self.run_variant("earnings-02", exit_price="90")
+        evolution = self.evolution(margin="1")
+        evolution.protected = lambda: {"earnings-02"}
+        self.assertEqual(evolution.select("2026-09-30T20:00:00.000Z"), [], "the loser carries a trial; nobody else lost the race")
+        evolution.protected = lambda: set()
+        self.assertEqual([a["action"] for a in evolution.select("2026-09-30T20:00:00.000Z")], ["retired", "spawned"])
+
     def test_a_retired_familys_loser_goes_and_nothing_takes_its_place(self):
         self.run_variant("earnings-01", exit_price="130")
         self.run_variant("earnings-02", exit_price="90")
