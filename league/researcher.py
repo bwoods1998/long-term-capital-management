@@ -42,6 +42,8 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {}}},
     {"name": "journal_write", "description": "Write a note to your FUTURE SELF. Your journal is handed back to you at the start of every research pass, and your children inherit it: what you tried, what the result was, what you will check next, what not to repeat. Keep each entry short and dated by the House.",
      "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
+    {"name": "ask_merton", "description": "Hire Merton, the firm's theorist, to think about YOUR problem. He is the frontier model that writes the firm's strategies and audits every candidate for real money, and he is EXPENSIVE: this costs many times a research pass, out of your own credits, and you may hire him once a day. He is shown everything you know (your file, your journal, your trades, your replays, your specialty) and answers with advice or with a whole strategy file you can then `replay`. Ask when you are stuck or when your idea may be structurally dead, not for a parameter.",
+     "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}},
     {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your whole family, and costs sandbox seconds. Code that PASSES is born as your child at once (the House stakes it if you cannot). Give the complete strategy file and what you changed and why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "purpose": {"type": "string"}}, "required": ["code", "purpose"]}},
     {"name": "finish", "description": "End this research pass with one or two sentences on what you concluded.",
@@ -59,6 +61,7 @@ class Pass:
     candidate: dict[str, Any] | None = None  # {"code", "needs", "params", "result", "purpose"}
     trials: int = 0
     calls: list[str] = field(default_factory=list)
+    consulted: str = ""  # the strategy file Merton wrote for it this pass, if any
 
 
 class Researcher:
@@ -75,8 +78,11 @@ class Researcher:
         settings: Mapping[str, Any],
         clock=time.time,
         specialty: Callable[[Agent], str] | None = None,  # (agent) -> what is known of its niche
+        merton: Any = None,  # the frontier model an agent may hire with its own credits
+        merton_settings: Mapping[str, Any] | None = None,
         look: Callable[[Agent], dict[str, Any]] | None = None,  # (agent) -> what its strategy sees now
         lineage: Callable[[str], list[str]] | None = None,  # (agent id) -> itself, its parent, its parent's parent...
+        house_budget: Callable[[], bool] | None = None,  # () -> whether the firm may spend on the frontier model today
     ):
         self.ledger = ledger
         self.provider = provider
@@ -88,8 +94,11 @@ class Researcher:
         self.settings = dict(settings)
         self.clock = clock
         self.specialty = specialty
+        self.merton = merton
+        self.merton_settings = dict(merton_settings or {})
         self.look = look
         self.lineage = lineage
+        self.house_budget = house_budget
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -120,6 +129,19 @@ class Researcher:
             f"Your parameters: {json.dumps(agent.params)}\n"
             "Decide what, if anything, is worth your credits right now."
         )
+
+    def consult_evidence(self, agent: Agent) -> dict[str, Any]:
+        """Everything the agent knows, for the theorist it is paying."""
+        return {
+            "agent": {"id": agent.id, "family": agent.family, "niche": agent.niche, "generation": agent.generation},
+            "specialty": self.specialty(agent) if self.specialty else "",
+            "strategy_file": agent.code,
+            "params": agent.params,
+            "journal": self.journal(agent.id),
+            "replays": [{k: e.payload.get(k) for k in ("passed", "sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "reasons", "digest")}
+                        for e in self.ledger.read(kinds="eval.trial", agent=agent.id, limit=6, newest=True)],
+            "contract_reminder": "the file you write is run in a sealed box with no network, by `decide(ctx)`",
+        }
 
     # ----------------------------------------------------------------- journal
     def journal(self, agent_id: str, *, entries: int = 14, chars: int = 700) -> list[dict[str, Any]]:
@@ -213,6 +235,51 @@ class Researcher:
         return out
 
     # ------------------------------------------------------------------- tools
+    def _consult(self, agent: Agent, question: str, out: Pass, session: str) -> dict[str, Any]:
+        """Hire Merton with the agent's own credits. What a good record buys is better thinking."""
+        rules = self.merton_settings
+        if self.merton is None:
+            return {"error": "Merton is not available on this floor"}
+        if len(question.strip()) < 20:
+            return {"error": "ask him something specific: he is paid by the question"}
+        price = Decimal(str(rules.get("min_credits_usd", "1.00")))
+        balance = self.economy.balance(agent.id)
+        if balance < price:
+            return {"error": f"you hold {balance:.2f} of credits and Merton is not hired below {price}: earn it first"}
+        if self.house_budget is not None and not self.house_budget():
+            return {"error": "the firm's frontier budget for today is spent; ask again tomorrow"}
+        last = self._last_consult(agent)
+        hours = float(rules.get("cooldown_hours", 24))
+        if last is not None and self.clock() - last < hours * 3600:
+            return {"error": f"you hired Merton {int((self.clock() - last) / 3600)}h ago; once every {hours:g}h"}
+        reply = self.merton.consult(agent, question, self.consult_evidence(agent), contract=self.contract)
+        cost = Decimal(str(reply.get("cost_usd") or 0))
+        if cost > 0:
+            self.economy.charge(agent.id, cost, "merton's time", detail={"session": session}, id=f"merton:{session}")
+            out.cost_usd += cost
+        code = str(reply.get("code") or "")
+        self.ledger.append("agent.research", {"tool": "merton", "session": session, "at_epoch": self.clock(),
+                                              "question": question[:600], "answer": str(reply.get("answer") or "")[:2000],
+                                              "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
+                                              "wrote_code": bool(code.strip())}, agent=agent.id)
+        if code.strip():
+            try:
+                check_code(code)
+            except CodeRefused as exc:
+                return {"answer": reply["answer"], "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
+                        "code": None, "note": f"the file he wrote was refused by the safety check and is not yours to run: {exc}"}
+            out.consulted = code
+        return {"answer": reply["answer"], "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
+                "code": code or None,
+                "note": "replay it when you are ready: it is a trial in your line like any other" if code.strip() else None}
+
+    def _last_consult(self, agent: Agent) -> float | None:
+        """When this agent last hired him. Its own record, so a question it could not afford or
+        could not ask does not lock it out for the day."""
+        rows = [e for e in self.ledger.read(kinds="agent.research", agent=agent.id, limit=400, newest=True)
+                if e.payload.get("tool") == "merton"]
+        return float(rows[-1].payload["at_epoch"]) if rows else None
+
     def _execute(self, agent: Agent, name: str, args: Mapping[str, Any], out: Pass, session: str) -> dict[str, Any]:
         public = {k: (str(v)[:200] if k != "code" else f"{len(str(v))} characters") for k, v in dict(args or {}).items() if k != "text"}
         self.ledger.append("agent.research", {"tool": name, "arguments": public, "session": session}, agent=agent.id)
@@ -229,6 +296,8 @@ class Researcher:
                 return {"error": "write at least a sentence"}
             self.ledger.append("agent.research", {"tool": "journal", "text": text, "session": session}, agent=agent.id)
             return {"saved": True, "note": "you will be shown this at the start of every pass from now on"}
+        if name == "ask_merton":
+            return self._consult(agent, str(args.get("question") or ""), out, session)
         if name == "web_search":
             self.economy.charge(agent.id, SEARCH_CHARGE_USD, "web search", detail={"query": str(args.get("query"))[:200]})
             return self.commons.web_search(str(args.get("query") or ""))

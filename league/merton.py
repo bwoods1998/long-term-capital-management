@@ -222,6 +222,28 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
                     str(answer.get("body") or "")[:7000], files, dropped, cost, answers)
 
 
+CONSULT = """You are Merton, the firm's theorist. One of its trading agents is paying you, out of the compute
+credits it earned by performing, to think about ITS problem. It cannot do this often: the better it trades the
+more it can afford you, so treat its question as expensive and answer the question it asked.
+
+You are given everything it knows: its strategy file, its parameters, its specialty's brief (what is measured in
+its markets, and what is known not to work), its journal, its own recent trades, and where its replays won and
+lost. You are NOT given the power to trade, to promote it, or to change the rules.
+
+Answer in one of two ways.
+- ADVICE, when what it needs is a judgement: name the one thing it should change and why, in terms of its own
+  evidence. Say plainly when its idea is structurally dead and it should ask for something different instead.
+- A WHOLE STRATEGY FILE, when you can write one that is better for a reason you can state. It must follow the
+  strategy contract exactly, keep the agent inside its specialty (the same venue, the same block length, series
+  or symbols from its own universe), and be a REASONED change, not a tuned parameter. Remember what a replay
+  costs it: every replay in its own line deflates the next, and it has about five to nine in total.
+
+Answer with ONE JSON object and nothing else:
+{"answer": "what you concluded, in plain words, addressed to the agent",
+ "code": "the whole strategy file, or an empty string when you are giving advice only",
+ "confidence": "high | medium | low: how sure you are that this beats what it runs now"}"""
+
+
 class Merton:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
                  schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None,
@@ -238,6 +260,32 @@ class Merton:
         self.first_after_hours = dict(first_after_hours or {"operator": 6, "toolsmith": 12, "teacher": 24, "architect": 48, "designer": 72})
         #: How hard each role thinks (the frontier model's reasoning effort). The roles that write code think hardest.
         self.effort = dict(effort or {})
+
+    # ---------------------------------------------------------------- consult
+    def consult(self, agent: Any, question: str, evidence: Mapping[str, Any], *, contract: str) -> dict[str, Any]:
+        """One agent hires Merton with its own credits. Returns `{"answer", "code", "confidence",
+        "cost_usd"}`; `code` is empty unless Merton wrote a whole strategy file. Never raises: a
+        frontier failure is an answer that says so and costs the agent nothing."""
+        system = CONSULT + "\n\nTHE STRATEGY CONTRACT (the file format any code you write must follow)\n\n" + contract
+        try:
+            reply = self.frontier.ask(system=system, user=json.dumps(evidence, default=str),
+                                      agent=f"consult-{agent.id}", max_output_tokens=12000, effort="high")
+            answer = reply.json()
+        except FrontierError as exc:
+            row = {"answer": f"Merton could not be reached ({exc}).", "code": "", "confidence": "low", "cost_usd": "0", "error": True}
+            self.ledger.append("merton.pass", {"role": "consultant", "agent": agent.id, "at_epoch": self.clock(), **row})
+            return row
+        code = str(answer.get("code") or "")
+        row = {
+            "answer": str(answer.get("answer") or "")[:4000],
+            "code": code,
+            "confidence": str(answer.get("confidence") or "")[:10],
+            "cost_usd": format(reply.cost_usd, "f"),
+        }
+        self.ledger.append("merton.pass", {"role": "consultant", "agent": agent.id, "at_epoch": self.clock(),
+                                           "question": str(question)[:600], "wrote_code": bool(code.strip()),
+                                           **{k: v for k, v in row.items() if k != "code"}})
+        return row
 
     # ---------------------------------------------------------------- schedule
     def last_pass(self, role: str) -> float | None:

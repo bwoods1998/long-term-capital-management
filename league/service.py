@@ -158,6 +158,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         pace = house.game.get("merton") or {}
         house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"))
+    if house.researcher is not None and frontier is not None:
+        # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
+        # what a good record buys is better thinking.
+        from .merton import Merton as _Merton
+
+        house.researcher.merton = house.merton or _Merton(frontier, None, house.ledger, evidence=lambda role: {})
     if provider is not None:
         house.budget = Budget(house.ledger, lambda: provider.check_balance())
     if not canary and REPO.parent.name == "releases" and not local_sandbox:

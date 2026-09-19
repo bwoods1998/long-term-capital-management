@@ -117,7 +117,7 @@ class House:
         self.auditor = auditor
         self.publisher = publisher
         self.budget = budget
-        self.merton: Any = None  # set by the service: Merton's pull-request roles
+        self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
@@ -159,6 +159,7 @@ class House:
                 run_replay=self._candidate_replay, settings=self.game.get("research") or {}, clock=clock,
                 specialty=lambda agent: (self.niche_of(agent).text() if self.niche_of(agent) else ""),
                 look=lambda agent: self.snapshot(agent, self.book_of(agent)), lineage=self.registry.lineage,
+                merton_settings=self.game.get("consult") or {}, house_budget=lambda: self.pacer.may_spend("openai"),
             )
         self._born_at = self.clock()
         self._record_start()
@@ -1055,6 +1056,8 @@ class House:
             with self._state_lock:
                 self._state["last_research"][agent.id] = self.clock()  # however it ended: a failing provider is not retried every tick
         candidate = outcome.candidate
+        if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
+            candidate = {**candidate, "purpose": "Merton wrote this file for it: " + candidate["purpose"]}
         if candidate:
             if rung == 0:
                 self.registry.adopt(agent.id, code=candidate["code"], needs=candidate["needs"], params=candidate["params"], reason=candidate["purpose"])

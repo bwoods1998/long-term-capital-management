@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 from league.merton import Merton, ForgeError, parse_proposal
 from league.frontier import Answer, FrontierError
@@ -149,3 +150,53 @@ class MertonTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Consulting(unittest.TestCase):
+    """Merton for hire: one agent pays him, out of credits it earned, to think about its problem."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+        self.agent = SimpleNamespace(id="meriwether-3", family="sports-favorites", niche="kalshi-sports", generation=1)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def merton(self, answer=None, error=None):
+        self.frontier = FakeFrontier(answer, error)
+        return Merton(self.frontier, None, self.ledger, evidence=lambda role: {}, clock=self.clock)
+
+    def test_advice_is_recorded_with_its_price_and_no_code(self):
+        merton = self.merton({"answer": "Enter before kickoff; a resting bid is picked off on a goal.", "code": "", "confidence": "high"})
+        out = merton.consult(self.agent, "Why do my fills lose?", {"strategy_file": "x"}, contract="C")
+        self.assertEqual((out["answer"][:20], out["code"], out["confidence"], out["cost_usd"]), ("Enter before kickoff", "", "high", "1.25"))
+        row = self.ledger.last("merton.pass").payload
+        self.assertEqual((row["role"], row["agent"], row["wrote_code"]), ("consultant", "meriwether-3", False))
+        self.assertEqual(row["question"], "Why do my fills lose?")
+        self.assertNotIn("code", row)  # the file is the agent's to run, not a line on the public record
+        asked = self.frontier.asked[0]
+        self.assertEqual((asked["agent"], asked["effort"]), ("consult-meriwether-3", "high"))
+        self.assertIn("THE STRATEGY CONTRACT", asked["system"])
+
+    def test_a_whole_file_comes_back_whole(self):
+        code = "NEEDS = {}\nPARAMS = {}\n\ndef decide(ctx):\n    return {}\n"
+        merton = self.merton({"answer": "Here.", "code": code, "confidence": "medium"})
+        out = merton.consult(self.agent, "Write me one that only enters before the start.", {}, contract="C")
+        self.assertEqual(out["code"], code)
+        self.assertTrue(self.ledger.last("merton.pass").payload["wrote_code"])
+
+    def test_a_frontier_failure_costs_the_agent_nothing_and_says_so(self):
+        merton = self.merton(error=FrontierError("the gateway refused it"))
+        out = merton.consult(self.agent, "Anything?", {}, contract="C")
+        self.assertEqual((out["cost_usd"], out["code"], out["error"]), ("0", "", True))
+        self.assertIn("could not be reached", out["answer"])
+        self.assertTrue(self.ledger.last("merton.pass").payload["error"])
+
+    def test_he_is_told_what_he_may_not_do(self):
+        from league.merton import CONSULT
+
+        self.assertIn("NOT given the power to trade, to promote it, or to change the rules", CONSULT)
+        self.assertIn("keep the agent inside its specialty", CONSULT)

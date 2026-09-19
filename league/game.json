@@ -111,5 +111,10 @@
       "operator": "medium",
       "teacher": "medium"
     }
+  },
+  "consult": {
+    "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits. A good record earns credits, and credits buy better thinking: that is the whole flywheel.",
+    "min_credits_usd": "1.00",
+    "cooldown_hours": 24
   }
 }

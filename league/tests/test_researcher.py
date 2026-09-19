@@ -188,3 +188,79 @@ class Truncated(ResearchCase):
         r = self.script([[("library_search", {"query": "x"})]] * 6, cut=9)
         out = r.research(self.parent, {}, session="s1")
         self.assertEqual((out.reason, out.turns), ("provider: max_output_tokens", 3))
+
+
+class Hiring(ResearchCase):
+    """An agent hires Merton with its own credits: what a good record buys is better thinking."""
+
+    class FakeMerton:
+        def __init__(self, reply=None, cost="0.42"):
+            self.reply = reply or {"answer": "Your idea is structurally dead: the average move is under the round trip.", "code": "", "confidence": "high"}
+            self.cost, self.seen = cost, []
+
+        def consult(self, agent, question, evidence, *, contract):
+            self.seen.append((agent.id, question, evidence, contract))
+            return {**self.reply, "cost_usd": self.cost}
+
+    def hire(self, question="Is my idea structurally dead, or is it the parameters?", merton=None, settings=None, budget=True, turns=None):
+        self.merton = merton or self.FakeMerton()
+        r = self.researcher(turns if turns is not None else [[("ask_merton", {"question": question})]],
+                            merton=self.merton, merton_settings=settings or {"min_credits_usd": "1.00", "cooldown_hours": 24},
+                            house_budget=lambda: budget)
+        return r, r.research(self.parent, {}, session="s1")
+
+    def test_it_pays_from_its_own_credits_and_is_given_everything_it_knows(self):
+        before = self.economy.balance(self.parent.id)
+        r, out = self.hire()
+        answer = self.tool_output(1)
+        self.assertIn("structurally dead", answer["answer"])
+        self.assertEqual((answer["code"], answer["cost_usd"]), (None, "0.42"))
+        self.assertEqual(before - self.economy.balance(self.parent.id), D("0.42") + D("0.02"))  # his fee, and the two turns of the pass itself
+        _, question, evidence, contract = self.merton.seen[0]
+        self.assertIn("structurally dead", question)
+        self.assertEqual((evidence["strategy_file"], evidence["agent"]["id"]), (self.parent.code, self.parent.id))
+        self.assertEqual(evidence["specialty"], "YOUR SPECIALTY: sports results")
+        self.assertEqual(contract, "THE CONTRACT")
+        row = [e.payload for e in self.ledger.iter(kinds="credit.charge", agent=self.parent.id) if e.payload["what"] == "merton's time"]
+        self.assertEqual(row[0]["usd"], "0.42000000")
+
+    def test_a_poor_agent_cannot_afford_him(self):
+        self.economy.charge(self.parent.id, "4.20", "test")  # $0.80 left
+        r, out = self.hire()
+        self.assertIn("not hired below 1.00", self.tool_output(1)["error"])
+        self.assertEqual(self.merton.seen, [])
+
+    def test_once_a_day(self):
+        r, out = self.hire()
+        self.assertIn("answer", self.tool_output(1))
+        r2, out2 = self.hire()
+        self.assertIn("once every 24h", self.tool_output(1)["error"])
+        self.clock.advance(24 * 3600 + 1)
+        r3, out3 = self.hire()
+        self.assertIn("answer", self.tool_output(1))
+
+    def test_the_firms_own_budget_still_binds(self):
+        r, out = self.hire(budget=False)
+        self.assertIn("frontier budget for today is spent", self.tool_output(1)["error"])
+        self.assertEqual(self.merton.seen, [])
+
+    def test_a_strategy_file_he_writes_is_the_agents_to_replay(self):
+        merton = self.FakeMerton({"answer": "Here is a better file.", "code": CODE, "confidence": "medium"})
+        r, out = self.hire(merton=merton, turns=[[("ask_merton", {"question": "Write me something that trades before kickoff only."})],
+                                                 [("replay", {"code": CODE, "purpose": "Merton's file"})]])
+        self.assertEqual(self.tool_output(1)["code"], CODE)
+        self.assertIn("a trial in your line", self.tool_output(1)["note"])
+        self.assertEqual((out.consulted, out.trials), (CODE, 1))
+
+    def test_a_file_that_fails_the_safety_check_is_not_his_to_hand_over(self):
+        merton = self.FakeMerton({"answer": "Try this.", "code": "import os\ndef decide(ctx):\n    return {}\n", "confidence": "low"})
+        r, out = self.hire(merton=merton)
+        answer = self.tool_output(1)
+        self.assertIsNone(answer["code"])
+        self.assertIn("refused by the safety check", answer["note"])
+        self.assertEqual(out.consulted, "")
+
+    def test_a_question_that_is_not_one_costs_nothing(self):
+        r, out = self.hire(question="help")
+        self.assertIn("something specific", self.tool_output(1)["error"])
+        self.assertEqual(self.merton.seen, [])

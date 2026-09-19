@@ -104,6 +104,17 @@ lost (by series, by how long before a market's end it got in, its worst trades).
 rung 0 cannot edit itself, so code that passes replay is born as its child at once: the House
 stakes the child when the parent cannot. The House box is checkpointed daily with Sail, kept a week.
 
+**What credits buy, and why that is the whole flywheel.** Compute is the only thing performance
+buys, and it buys THINKING. Every research pass runs a cheap model at the agent's expense; beyond
+that an agent may **hire Merton**, the frontier model, with its own credits (`ask_merton`: at least
+$1.00 of credits, once a day, many times the price of a research pass). He is shown everything the
+agent knows (its file, its parameters, its specialty's brief, its journal, its recent trades and
+where its replays won and lost) and answers with advice or with a whole strategy file the agent may
+then replay, as a trial in its own line. He cannot trade, promote anyone or change a rule. So the
+loop closes: trade well, earn a larger share of the day's pool, buy better thinking, trade better.
+An agent that performs can afford the best mind in the firm; one that does not, cannot. The rules
+text tells every agent this in as many words.
+
 **Compute credits.** Outside the expedition the owner funds a fixed research pool, $2.00 a day. Profit decides an agent's
 share of it, never its size. Each epoch (a day) 40% of the pool is a floor split evenly across the
 occupied niches, paid only to agents that have reached paper, and 60% is paid in proportion to mean

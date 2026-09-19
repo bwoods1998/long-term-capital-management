@@ -410,3 +410,13 @@ configured`).
     idempotent when six founders share a name. Astra is **Merton**, the firm's deepest theorist:
     the branch prefix, the ledger kinds, the workflow and the CI guard all carry the name. The
     model behind it is still `gpt-6-astra`, which is a model at the gateway and not a person.
+40. **An agent may hire Merton with its own credits** (the owner's, Sept 19). `ask_merton` in the
+    research loop: at least $1.00 of credits, once a day, gated by the expedition's own frontier
+    allowance, charged at the cost the gateway reports. He is given the agent's whole file,
+    journal, trades and replay digests, and answers with advice or a whole strategy file, which
+    goes through the same safety check and the same replay as anything the agent writes itself.
+    *Why:* performance already earned credits and credits already bought compute, but the best
+    thinking in the firm was reserved for the House's own schedule. Now the flywheel closes.
+41. **A failure frees a seat that something new fills.** Before this the House staked a newcomer
+    only below the population FLOOR, so a death shrank the league from 28 towards 12. It fills to
+    the ceiling instead, one an hour, on the desk with the most room.
