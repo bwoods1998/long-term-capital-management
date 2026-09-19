@@ -364,6 +364,83 @@ def live(ticker, bid, ask, close, **extra):
     return row
 
 
+class SharedListingTest(unittest.TestCase):
+    """Measured Sept 19, 2026: 26 agents waking together drew HTTP 429 from Kalshi."""
+
+    def rows(self):
+        return {"KXBTCD": [[live("KXBTCD-26SEP1011-T81099.99", "0.40", "0.44", "2026-09-10T15:00:00Z")]]}
+
+    def test_a_series_is_read_once_and_shared_until_it_is_a_minute_old(self):
+        now = [NOW]
+        source = FakeMarketData(self.rows())
+        data = KalshiData(source, clock=lambda: now[0], sleep=lambda s: None)
+        for hours in (12, 6, 30):  # an hourly agent, another, and a daily one
+            self.assertEqual(len(data.markets(["KXBTCD"], max_hours_to_close=hours)), 1)
+        self.assertEqual(len(source.calls), 1)
+        now[0] += 61
+        data.markets(["KXBTCD"], max_hours_to_close=12)
+        self.assertEqual(len(source.calls), 2)
+
+    def test_a_daily_caller_may_accept_an_older_listing(self):
+        now = [NOW]
+        source = FakeMarketData(self.rows())
+        data = KalshiData(source, clock=lambda: now[0], sleep=lambda s: None)
+        data.markets(["KXBTCD"], max_hours_to_close=12)
+        now[0] += 200
+        data.markets(["KXBTCD"], max_hours_to_close=12, max_age=300)
+        self.assertEqual(len(source.calls), 1)
+        data.markets(["KXBTCD"], max_hours_to_close=12)  # an hourly caller wants it fresh
+        self.assertEqual(len(source.calls), 2)
+
+    def test_a_longer_window_than_the_shared_read_covers_is_read_again(self):
+        source = FakeMarketData(self.rows())
+        data = KalshiData(source, clock=clock, sleep=lambda s: None)
+        data.markets(["KXBTCD"], max_hours_to_close=12)
+        data.markets(["KXBTCD"], max_hours_to_close=60)
+        self.assertEqual(len(source.calls), 2)
+
+    def test_a_rate_limit_is_waited_out_and_asked_again(self):
+        waits = []
+
+        class Busy(FakeMarketData):
+            def markets(self, **kwargs):
+                if len(self.calls) < 2:
+                    self.calls.append(kwargs)
+                    raise RuntimeError("kalshi markets: HTTP 429 from https://api.elections.kalshi.com/...")
+                return super().markets(**kwargs)
+
+        source = Busy(self.rows())
+        data = KalshiData(source, clock=clock, sleep=waits.append, min_interval=0)
+        self.assertEqual(len(data.markets(["KXBTCD"], max_hours_to_close=12)), 1)
+        self.assertEqual([w for w in waits if w >= 1], [1.0, 2.0])
+
+    def test_a_rate_limit_that_does_not_lift_is_an_error_and_other_errors_are_not_retried(self):
+        class Down(FakeMarketData):
+            def __init__(self, text):
+                super().__init__({})
+                self.text = text
+
+            def markets(self, **kwargs):
+                self.calls.append(kwargs)
+                raise RuntimeError(self.text)
+
+        limited = Down("HTTP 429")
+        with self.assertRaises(TapeError):
+            KalshiData(limited, clock=clock, sleep=lambda s: None).markets(["KXBTCD"], max_hours_to_close=12)
+        self.assertEqual(len(limited.calls), 4)
+        broken = Down("HTTP 500")
+        with self.assertRaises(TapeError):
+            KalshiData(broken, clock=clock, sleep=lambda s: None).markets(["KXBTCD"], max_hours_to_close=12)
+        self.assertEqual(len(broken.calls), 1)
+
+    def test_reads_are_paced(self):
+        waits = []
+        source = FakeMarketData({"KXBTCD": [[]], "KXETHD": [[]], "KXSOLD": [[]]})
+        KalshiData(source, clock=clock, sleep=waits.append, min_interval=5.0).markets(["KXBTCD", "KXETHD", "KXSOLD"], max_hours_to_close=12)
+        self.assertEqual(len(waits), 2)  # nothing before the first read, a wait before each of the others
+        self.assertTrue(all(4.9 < w <= 5.0 for w in waits), waits)
+
+
 class ListedStopTest(unittest.TestCase):
     """What a replay shows as a settled market's close must be what the live view showed while it
     was open, never the moment the result was really declared."""
@@ -462,7 +539,7 @@ class KalshiMarketsTest(unittest.TestCase):
         first, second, third = data.calls
         self.assertEqual(first, {
             "series_ticker": "KXBTCD", "status": "open", "limit": 1000, "cursor": None,
-            "min_close_ts": int(NOW), "max_close_ts": int(NOW + 24 * 3600) + 72 * 3600, "mve_filter": "exclude",  # further: a game lists a late close
+            "min_close_ts": int(NOW), "max_close_ts": int(NOW + 48 * 3600) + 72 * 3600, "mve_filter": "exclude",  # two days (one read serves hourly and daily agents), and further: a game lists a late close
         })
         self.assertEqual(second["cursor"], "1")
         self.assertEqual(third["series_ticker"], "KXETHD")

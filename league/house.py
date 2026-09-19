@@ -159,6 +159,12 @@ class House:
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
                 self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
 
+    def _markets(self, series: list[str], hours: float, max_age: float) -> list[dict[str, Any]]:
+        try:
+            return self.kalshi_data.markets(series, max_hours_to_close=hours, max_age=max_age)
+        except TypeError:  # a data source that does not share listings
+            return self.kalshi_data.markets(series, max_hours_to_close=hours)
+
     def _resolves_at(self, instrument: Any) -> float | None:
         if self.kalshi_data is None:
             return None
@@ -404,13 +410,14 @@ class House:
         else:
             series = [str(s) for s in (needs.get("series") or [])][:12]
             hours = float(needs.get("max_hours_to_close") or 24)
-            ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}", 50, lambda: self.kalshi_data.markets(series, max_hours_to_close=hours))
+            age = 300.0 if agent.horizon == "day" else 60.0  # how old a shared listing may be: a daily strategy is not racing anyone
+            ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}", 50, lambda: self._markets(series, hours, age))
             niche = self.niche_of(agent)
             if not ctx["markets"] and niche is not None and niche.live:
                 # Its own series are dark (a season ended, a quiet night): the busiest live series of its specialty.
                 busiest = [x for x in niche.live if x not in series][: niches_module.MAX_UNIVERSE]
                 if busiest:
-                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}", 120, lambda: self.kalshi_data.markets(busiest, max_hours_to_close=hours))
+                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}", 120, lambda: self._markets(busiest, hours, age))
                     ctx["note"] = "None of the series your strategy names has a market open inside your window, so these are the busiest live series of your specialty."
         return ctx
 
@@ -670,7 +677,9 @@ class House:
 
     def survey_niches(self) -> dict[str, list[str]]:
         """Survey the venue and let every Kalshi specialty's universe follow what is trading now."""
-        volumes = niches_module.survey(self.kalshi_data.market_data, clock=self.clock)
+        paced = getattr(self.kalshi_data, "_paced", None)  # the survey shares the agents' pace limit with Kalshi
+        source = type("Paced", (), {"markets": staticmethod(paced)})() if paced else self.kalshi_data.market_data
+        volumes = niches_module.survey(source, clock=self.clock)
         if not volumes:
             return {}
         live = niches_module.apply_survey(self.niches, volumes, self._series_category)

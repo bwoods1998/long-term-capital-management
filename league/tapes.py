@@ -46,6 +46,7 @@ import bisect
 import hashlib
 import math
 import re
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -500,11 +501,71 @@ class KalshiData:
     Only `tape()` needs a history. `seed` orders the events a capped tape keeps.
     """
 
-    def __init__(self, market_data: Any, history: Any = None, *, clock: Callable[[], float] = time.time, seed: Any = 7):
+    def __init__(self, market_data: Any, history: Any = None, *, clock: Callable[[], float] = time.time, seed: Any = 7,
+                 listing_ttl: float = 60.0, min_interval: float = 0.12, sleep: Callable[[float], None] = time.sleep):
         self.market_data = market_data
         self.history = history
         self.clock = clock
         self.seed = seed
+        # Measured Sept 19, 2026: 26 agents waking together, each asking for its own dozen series,
+        # drew HTTP 429 from Kalshi on most of them. A series' open listing is therefore read once
+        # and shared by every agent for `listing_ttl` seconds, venue reads are paced, and a 429
+        # is waited out and asked again.
+        self.listing_ttl = float(listing_ttl)
+        self.min_interval = float(min_interval)
+        self.sleep = sleep
+        self._listings: dict[str, tuple[float, float, list[Any]]] = {}  # series -> (read at, window end, raw rows)
+        self._listing_locks: dict[str, threading.Lock] = {}
+        self._pace = threading.Lock()
+        self._last_call = 0.0
+
+    def _paced(self, **query: Any) -> Any:
+        """One venue read: never sooner than `min_interval` after the last, and a rate-limit
+        answer is waited out (1, 2, 4 seconds) before it is an error."""
+        for attempt in range(4):
+            with self._pace:
+                wait = self.min_interval - (time.monotonic() - self._last_call)
+                if wait > 0:
+                    self.sleep(wait)
+                self._last_call = time.monotonic()
+            try:
+                return self.market_data.markets(**query)
+            except Exception as exc:
+                if "429" not in str(exc) or attempt == 3:
+                    raise
+                self.sleep(2.0 ** attempt)
+        raise AssertionError("unreachable")
+
+    def _listing(self, name: str, now: float, horizon_ts: float, max_age: "float | None" = None) -> "list[Any]":
+        """The raw open markets of one series out to at least `horizon_ts` (plus the early-close
+        slack), shared between callers for `listing_ttl` seconds (or the caller's `max_age`: a
+        daily strategy that wakes every half hour does not need a listing a minute old)."""
+        lock = self._listing_locks.setdefault(name, threading.Lock())
+        with lock:
+            hit = self._listings.get(name)
+            if hit is not None and now - hit[0] < (self.listing_ttl if max_age is None else float(max_age)) and hit[1] >= horizon_ts:
+                return hit[2]
+            # Read at least two days out, so an hourly agent and a daily one share one read.
+            window_end = max(horizon_ts, now + 48 * 3600.0)
+            rows: list[Any] = []
+            cursor = None
+            for _ in range(MAX_MARKET_PAGES):
+                try:
+                    page = self._paced(
+                        series_ticker=name, status="open", limit=1000, cursor=cursor, min_close_ts=int(now),
+                        max_close_ts=int(math.ceil(window_end)) + EARLY_CLOSE_SLACK_SECONDS, mve_filter="exclude",
+                    )
+                except Exception as exc:
+                    raise TapeError(f"kalshi markets {name}: {type(exc).__name__}: {exc}") from exc
+                listed = page.get("markets") if isinstance(page, dict) else None
+                if not isinstance(listed, list):
+                    raise TapeError(f"kalshi markets {name}: no markets array")
+                rows.extend(listed)
+                cursor = page.get("cursor")
+                if not cursor or not listed:
+                    break
+            self._listings[name] = (now, window_end, rows)
+            return rows
 
     @staticmethod
     def _series(series: Iterable[str]) -> "list[str]":
@@ -537,7 +598,7 @@ class KalshiData:
         return cache[ticker]
 
     # ---------------------------------------------------------------- snapshot
-    def markets(self, series: "list[str]", *, max_hours_to_close: float = 24.0, limit: int = 200) -> "list[dict[str, Any]]":
+    def markets(self, series: "list[str]", *, max_hours_to_close: float = 24.0, limit: int = 200, max_age: "float | None" = None) -> "list[dict[str, Any]]":
         """The open markets of these series that stop trading or resolve within
         `max_hours_to_close`, soonest first, in the CONTRACT.md shape. Only a market with a
         two-sided touch is shown; at most `limit` rows (the soonest to close)."""
@@ -549,30 +610,10 @@ class KalshiData:
         horizon_ts = now + hours * 3600.0
         rows: dict[str, tuple[float, dict[str, Any]]] = {}
         for name in names:
-            cursor = None
-            for _ in range(MAX_MARKET_PAGES):
-                try:
-                    page = self.market_data.markets(
-                        series_ticker=name,
-                        status="open",
-                        limit=1000,
-                        cursor=cursor,
-                        min_close_ts=int(now),
-                        max_close_ts=int(math.ceil(horizon_ts)) + EARLY_CLOSE_SLACK_SECONDS,
-                        mve_filter="exclude",
-                    )
-                except Exception as exc:
-                    raise TapeError(f"kalshi markets {name}: {type(exc).__name__}: {exc}") from exc
-                listed = page.get("markets") if isinstance(page, dict) else None
-                if not isinstance(listed, list):
-                    raise TapeError(f"kalshi markets {name}: no markets array")
-                for raw in listed:
-                    shown = self._live_row(raw, name, now, horizon_ts)
-                    if shown is not None:
-                        rows[shown[1]["market"]] = shown
-                cursor = page.get("cursor")
-                if not cursor or not listed:
-                    break
+            for raw in self._listing(name, now, horizon_ts, max_age):
+                shown = self._live_row(raw, name, now, horizon_ts)
+                if shown is not None:
+                    rows[shown[1]["market"]] = shown
         ordered = sorted(rows.values(), key=lambda pair: (pair[0], pair[1]["market"]))
         return [row for _, row in ordered[: max(0, int(limit))]]
 
