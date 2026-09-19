@@ -2,15 +2,13 @@
 // the venue credentials are added on the way out and never come back. The whole surface is:
 //
 //   GET|POST|DELETE /v1/kalshi/<path>     signed with the Kalshi key, forwarded to the venue
-//   GET|POST|DELETE /v1/coinbase/<path>   signed with the Coinbase key, forwarded to the venue
 //   GET|POST|DELETE /v1/alpaca/<path>     keyed with the Alpaca headers, forwarded to the venue
 //   GET             /v1/kalshi/ws-auth    handshake headers for the Kalshi WebSocket, 30 s of life
-//   GET             /v1/coinbase/ws-jwt   a JWT for the Coinbase user WebSocket, 120 s of life
 //   GET             /v1/health            caps, counters, kill switch, watchdog
 //   POST            /v1/kill /v1/unkill   the kill switch, which lives outside the trading VM
 //
-// The two ws-* routes are the only ones that hand the VM credential material, and what they hand
-// over is short-lived and read-only: neither venue accepts an order over its WebSocket. A POST to
+// The ws-auth route is the only one that hands the VM credential material, and what it hands
+// over is short-lived and read-only: Kalshi accepts no order over its WebSocket. A POST to
 // `/v1/kalshi/account/api_usage_level/upgrade` passes as an ordinary forwarded write; it creates
 // no order, so the caps do not see it (`caps.createsOrder`).
 //
@@ -19,13 +17,12 @@
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
-import { createsOrder, notional, isCoinbaseFuture, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath } from './caps.mjs';
+import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
-import * as coinbase from './coinbase.mjs';
 import * as alpaca from './alpaca.mjs';
 
-export const VENUES = ['kalshi', 'coinbase', 'alpaca'];
-//: A venue product listing (price, contract size) reused across orders for this long.
+export const VENUES = ['kalshi', 'alpaca'];
+//: A venue quote reused across orders for this long.
 const PRODUCT_CACHE_MS = 60_000;
 const productCache = new Map();
 const METHODS = ['GET', 'POST', 'DELETE'];
@@ -33,7 +30,7 @@ const ALLOW = METHODS.join(', ');
 
 /** The venue and venue path a gateway path names, or `null` when it names neither. */
 export function parseRoute(pathname) {
-  const match = /^\/v1\/(kalshi|coinbase|alpaca)\/(.+)$/.exec(pathname);
+  const match = /^\/v1\/(kalshi|alpaca)\/(.+)$/.exec(pathname);
   if (!match) return null;
   const path = match[2].replace(/^\/+/, '');
   // No traversal, no empty segments: a forwarded path is a venue path, not a filesystem one.
@@ -41,7 +38,7 @@ export function parseRoute(pathname) {
   return { venue: match[1], path };
 }
 
-export async function route(request, env, { gate, fetcher = fetch, now = Date.now, nonce, mailer = null } = {}) {
+export async function route(request, env, { gate, fetcher = fetch, now = Date.now, mailer = null } = {}) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -89,10 +86,10 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     return json({ sent: true, subject: message.subject, notices_today: count });
   }
 
-  if (path === '/v1/kalshi/ws-auth' || path === '/v1/coinbase/ws-jwt') {
+  if (path === '/v1/kalshi/ws-auth') {
     if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
     try {
-      return json(await wsCredential(path, env, { now: now(), nonce }));
+      return json(await wsCredential(path, env, { now: now() }));
     } catch (error) {
       return fail(`Gateway credentials are unusable: ${error.message}`, 503);
     }
@@ -118,53 +115,6 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       return fail('An order body must be JSON.', 400);
     }
     let reference = request.headers.get(REFERENCE_HEADER);
-    let contractSize = null;
-    if (target.venue === 'coinbase') {
-      const leg = Object.values(parsed?.order_configuration || {}).find(v => v && typeof v === 'object');
-      const product = String(parsed?.product_id || '');
-      const future = isCoinbaseFuture(product);
-      if ((leg?.base_size && !leg.quote_size && !leg.limit_price) || future) {
-        // A market order has no enforceable limit. Its reference must come from the venue,
-        // never from the trading VM that is asking us to authorize the spend. A futures order
-        // also needs the venue's contract size, whatever the caller says its notional is.
-        if (!/^[A-Z0-9-]{3,80}$/.test(product)) return fail('Invalid product id.', 400);
-        // Sept 18, 2026: the venue rate-limited the Worker's bare product fetch (HTTP 429) and
-        // a live order was refused for it. The lookup is signed like every other venue call,
-        // and a product's listing is kept for PRODUCT_CACHE_MS across orders.
-        const cacheMs = Number(env.PRODUCT_CACHE_MS ?? PRODUCT_CACHE_MS);
-        let data = cacheMs > 0 ? productCache.get(product) : null;
-        if (!data || data.expires < Date.now()) {
-          let quote = null;
-          try {
-            const productPath = `api/v3/brokerage/market/products/${product}`;
-            let headers = { 'User-Agent': 'ltcm-gateway/1.0', Accept: 'application/json' };
-            try {
-              const signed = await sign({ venue: 'coinbase', path: productPath }, new Request(`https://x/${productPath}`, { method: 'GET' }), env, { now: now(), nonce });
-              headers = signed.headers;
-            } catch { /* unsigned when the venue key is not configured */ }
-            quote = await fetcher(`https://api.coinbase.com/${productPath}`, {
-              method: 'GET', signal: AbortSignal.timeout(8000), redirect: 'follow', headers,
-            });
-          } catch (error) {
-            return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
-          }
-          if (!quote.ok) return fail(`Cannot independently price this order: venue HTTP ${quote.status}.`, 503);
-          try {
-            data = { ...(await quote.json()), expires: Date.now() + cacheMs };
-          } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
-          if (cacheMs > 0) productCache.set(product, data);
-          if (productCache.size > 256) productCache.clear();
-        }
-        try {
-          if (!(Number(data.price) > 0)) return fail('Cannot independently price this order: no venue price.', 503);
-          if (!leg?.limit_price) reference = String(Number(data.price) * 1.10);
-          if (future) {
-            contractSize = String(data?.future_product_details?.contract_size ?? '');
-            if (!(Number(contractSize) > 0)) return fail('Cannot price this futures order: the venue lists no contract size.', 503);
-          }
-        } catch { return fail('Cannot independently price this order: unreadable venue answer.', 503); }
-      }
-    }
     if (target.venue === 'alpaca' && !parsed?.notional && !parsed?.limit_price && !parsed?.stop_price) {
       // A market order has no enforceable limit, so its reference comes from the venue's own
       // quote, signed like every other call. An unpriceable order is refused, never passed.
@@ -181,7 +131,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
         let quote = null;
         try {
           const [bare, query = ''] = quotePath.split('?');
-          const signed = await sign({ venue: 'alpaca', path: bare }, new Request(`https://x/${bare}${query ? '?' + query : ''}`, { method: 'GET' }), env, { now: now(), nonce });
+          const signed = await sign({ venue: 'alpaca', path: bare }, new Request(`https://x/${bare}${query ? '?' + query : ''}`, { method: 'GET' }), env, { now: now() });
           quote = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'follow' });
         } catch (error) {
           return fail(`Cannot independently price this order: ${error?.name || 'fetch failed'}.`, 503);
@@ -201,7 +151,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       if (!(price > 0)) return fail('Cannot independently price this order: no venue quote.', 503);
       reference = String(price * 1.10);  // a market order may fill through the touch
     }
-    const priced = notional(target.venue, parsed, { reference, contractSize });
+    const priced = notional(target.venue, parsed, { reference });
     if (priced.error) return fail(priced.error, 400);
     const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
     const decision = await gate.reserve({ micro: String(priced.micro), exit });
@@ -212,7 +162,7 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   // --- sign and forward ------------------------------------------------------------------------
   let outbound;
   try {
-    outbound = await sign(target, request, env, { now: now(), nonce });
+    outbound = await sign(target, request, env, { now: now() });
   } catch (error) {
     if (reservation) await gate.refund(reservation);
     return fail(`Gateway credentials for ${target.venue} are unusable: ${error.message}`, 503);
@@ -241,21 +191,15 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   }
 }
 
-/** Short-lived WebSocket credential material for the VM: handshake headers, or a socket JWT. */
-async function wsCredential(path, env, { now, nonce }) {
-  if (path === '/v1/kalshi/ws-auth') {
-    if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error('kalshi not configured');
-    const headers = await kalshi.wsAuthHeaders({ keyId: env.KALSHI_KEY_ID, privateKeyPem: env.KALSHI_PRIVATE_KEY, now });
-    return { headers, path: kalshi.WS_PATH, expires_in: kalshi.WS_AUTH_TTL_SECONDS };
-  }
-  if (!env.COINBASE_KEY_NAME || !env.COINBASE_API_SECRET) throw new Error('coinbase not configured');
-  const jwt = await coinbase.mintWsJwt({
-    keyName: env.COINBASE_KEY_NAME, secret: env.COINBASE_API_SECRET, now, ...(nonce ? { nonce } : {}),
-  });
-  return { jwt, expires_in: coinbase.LIFETIME_SECONDS };
+/** Short-lived WebSocket credential material for the VM: the Kalshi handshake headers. */
+async function wsCredential(path, env, { now }) {
+  if (path !== '/v1/kalshi/ws-auth') throw new Error('unknown credential route');
+  if (!env.KALSHI_KEY_ID || !env.KALSHI_PRIVATE_KEY) throw new Error('kalshi not configured');
+  const headers = await kalshi.wsAuthHeaders({ keyId: env.KALSHI_KEY_ID, privateKeyPem: env.KALSHI_PRIVATE_KEY, now });
+  return { headers, path: kalshi.WS_PATH, expires_in: kalshi.WS_AUTH_TTL_SECONDS };
 }
 
-async function sign({ venue, path }, request, env, { now, nonce }) {
+async function sign({ venue, path }, request, env, { now }) {
   const search = new URL(request.url).search;
   const headers = {
     Accept: 'application/json',
@@ -274,10 +218,5 @@ async function sign({ venue, path }, request, env, { now, nonce }) {
     }));
     return { url: kalshi.target(path, search), headers };
   }
-  if (!env.COINBASE_KEY_NAME || !env.COINBASE_API_SECRET) throw new Error('not configured');
-  const token = await coinbase.mintJwt({
-    keyName: env.COINBASE_KEY_NAME, secret: env.COINBASE_API_SECRET, method: request.method, path, now,
-    ...(nonce ? { nonce } : {}),
-  });
-  return { url: coinbase.target(path, search), headers: { ...headers, Authorization: `Bearer ${token}` } };
+  throw new Error(`unknown venue ${String(venue)}`);
 }

@@ -1,12 +1,12 @@
-// The two signing recipes, checked the only way that means anything: sign with the gateway's own
+// The venue credentials, checked the only way that means anything: sign with the gateway's own
 // code, then verify with the public half of the key it signed under.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import * as kalshi from '../lib/kalshi.mjs';
-import * as coinbase from '../lib/coinbase.mjs';
-import { rsaKey, ed25519Key, ecKey, decodeSegment, pem } from './helpers.mjs';
+import * as alpaca from '../lib/alpaca.mjs';
+import { rsaKey, pem } from './helpers.mjs';
 
 const NOW = 1789480800000; // 2026-09-15T14:00:00Z
 const encode = text => new TextEncoder().encode(text);
@@ -54,69 +54,13 @@ test('kalshi forwards to the elections host under the v2 prefix, query intact', 
   );
 });
 
-test('coinbase mints an EdDSA JWT from a 32-byte Ed25519 seed', async () => {
-  const key = await ed25519Key();
-  const token = await coinbase.mintJwt({
-    keyName: 'organizations/o/apiKeys/k', secret: key.seed32,
-    method: 'get', path: 'api/v3/brokerage/accounts', now: NOW, nonce: 'ab'.repeat(16),
-  });
-  const [head, claims, signature] = token.split('.');
-  assert.deepEqual(decodeSegment(head), {
-    alg: 'EdDSA', kid: 'organizations/o/apiKeys/k', nonce: 'ab'.repeat(16), typ: 'JWT',
-  });
-  assert.deepEqual(decodeSegment(claims), {
-    sub: 'organizations/o/apiKeys/k', iss: 'cdp', nbf: NOW / 1000, exp: NOW / 1000 + 120,
-    uri: 'GET api.coinbase.com/api/v3/brokerage/accounts',
-  });
-  const verified = await crypto.subtle.verify(
-    { name: 'Ed25519' }, key.publicKey,
-    Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
-    encode(`${head}.${claims}`),
-  );
-  assert.equal(verified, true);
-});
-
-test('coinbase accepts the 64-byte seed||public form and an Ed25519 PEM', async () => {
-  for (const key of [await ed25519Key(), await ed25519Key()]) {
-    for (const secret of [key.seed64, key.pkcs8Pem]) {
-      const token = await coinbase.mintJwt({
-        keyName: 'k', secret, method: 'POST', path: '/api/v3/brokerage/orders', now: NOW,
-      });
-      const [head, claims, signature] = token.split('.');
-      assert.equal(decodeSegment(head).alg, 'EdDSA');
-      assert.equal(decodeSegment(claims).uri, 'POST api.coinbase.com/api/v3/brokerage/orders');
-      assert.equal(
-        await crypto.subtle.verify(
-          { name: 'Ed25519' }, key.publicKey,
-          Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
-          encode(`${head}.${claims}`),
-        ),
-        true,
-      );
-    }
-  }
-});
-
-test('coinbase signs ES256 as raw r||s for a PKCS#8, SEC1 or DER key', async () => {
-  const key = await ecKey();
-  for (const secret of [key.pkcs8, key.sec1, key.der]) {
-    const token = await coinbase.mintJwt({ keyName: 'k', secret, method: 'GET', path: 'api/v3/brokerage/accounts', now: NOW });
-    const [head, claims, signature] = token.split('.');
-    assert.equal(decodeSegment(head).alg, 'ES256');
-    const raw = Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-    assert.equal(raw.length, 64, 'a JWS signature is r||s, never a DER sequence');
-    assert.equal(
-      await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key.publicKey, raw, encode(`${head}.${claims}`)),
-      true,
-    );
-  }
-});
-
-test('coinbase gives every request a fresh nonce and refuses an unusable secret', async () => {
-  assert.notEqual(coinbase.randomNonce(), coinbase.randomNonce());
-  assert.match(coinbase.randomNonce(), /^[0-9a-f]{32}$/);
-  await assert.rejects(() => coinbase.importSecret(''), /empty/);
-  await assert.rejects(() => coinbase.importSecret('!!!not base64!!!'), /neither PEM nor base64/);
-  assert.equal(coinbase.target('api/v3/brokerage/accounts', '?limit=250'),
-    'https://api.coinbase.com/api/v3/brokerage/accounts?limit=250');
+test('alpaca is two headers, and the path chooses the trading or the data host', () => {
+  assert.deepEqual(alpaca.authHeaders({ keyId: ' AK1 ', secretKey: 's3cret\n' }),
+    { 'APCA-API-KEY-ID': 'AK1', 'APCA-API-SECRET-KEY': 's3cret' });
+  assert.throws(() => alpaca.authHeaders({ keyId: '', secretKey: 's' }), /key id/);
+  assert.throws(() => alpaca.authHeaders({ keyId: 'k', secretKey: ' ' }), /secret key/);
+  assert.equal(alpaca.target('v2/orders', '?status=open'), 'https://api.alpaca.markets/v2/orders?status=open');
+  assert.equal(alpaca.target('/v2/stocks/AAPL/quotes/latest'), 'https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest');
+  assert.equal(alpaca.target('v1beta3/crypto/us/latest/quotes', '?symbols=BTC%2FUSD'),
+    'https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD');
 });

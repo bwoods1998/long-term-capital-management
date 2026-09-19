@@ -12,10 +12,9 @@ export const REFERENCE_HEADER = 'X-LTCM-Reference-Price';
 // entry an exit: the order count cap still counts every order, and the owner accepts the risk.
 export const PURPOSE_HEADER = 'X-LTCM-Purpose';
 
-/** The three paths that create an order, by venue. Everything else passes the caps untouched. */
+/** The paths that create an order, by venue. Everything else passes the caps untouched. */
 export const ORDER_PATHS = {
   kalshi: ['portfolio/events/orders', 'portfolio/orders'],
-  coinbase: ['api/v3/brokerage/orders'],
   alpaca: ['v2/orders'],
 };
 
@@ -40,19 +39,6 @@ export const VENUE_PATHS = {
     ['POST', /^portfolio\/orders$/],
     ['POST', /^account\/api_usage_level\/upgrade$/],
     ['DELETE', /^portfolio\/(events\/)?orders\/[A-Za-z0-9._~%-]+$/],
-  ],
-  coinbase: [
-    // Funding reconciliation only; no deposit, withdrawal or transfer creation is exposed.
-    ['GET', /^v2\/accounts(\/[A-Za-z0-9._~%-]+\/transactions)?$/],
-    ['GET', /^api\/v3\/brokerage\/transaction_summary$/],
-    ['GET', /^api\/v3\/brokerage\/accounts(\/[A-Za-z0-9._~%-]+)?$/],
-    // Read-only derivatives state: whether the account can hold futures, and what it holds.
-    ['GET', /^api\/v3\/brokerage\/cfm\/(balance_summary|positions(\/[A-Za-z0-9._~%-]+)?|intraday\/margin_setting)$/],
-    ['GET', /^api\/v3\/brokerage\/best_bid_ask$/],
-    ['GET', new RegExp(`^api\\/v3\\/brokerage\\/market\\/(products(\\/${SEGMENT}(\\/(candles|ticker))?)?|product_book)$`)],
-    ['GET', /^api\/v3\/brokerage\/orders\/historical\/(fills|batch|[A-Za-z0-9._~%-]+)$/],
-    ['POST', /^api\/v3\/brokerage\/orders$/],
-    ['POST', /^api\/v3\/brokerage\/orders\/batch_cancel$/],
   ],
   // Alpaca (Sept 19, 2026). Trading and market data share the credential and the allow-list;
   // the host follows the path. No transfers, no journals, no account configuration: the floor
@@ -102,16 +88,11 @@ export function caps(env = {}) {
  * What one order is worth, in micro-dollars.
  * `{ micro }` when it can be priced, `{ error }` when it cannot -- which is a refusal, not a pass.
  */
-export function notional(venue, body, { reference = null, contractSize = null } = {}) {
+export function notional(venue, body, { reference = null } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
   if (venue === 'kalshi') return kalshiNotional(body);
   if (venue === 'alpaca') return alpacaNotional(body, reference);
-  return coinbaseNotional(body, reference, contractSize);
-}
-
-/** True for a Coinbase Financial Markets futures product id (`BIP-20DEC30-CDE`). */
-export function isCoinbaseFuture(productId) {
-  return /^[A-Z0-9]{1,12}-[0-9]{2}[A-Z]{3}[0-9]{2}-CDE$/.test(String(productId || '').toUpperCase());
+  return { error: `Cannot price an order for an unknown venue: ${String(venue)}.` };
 }
 
 // Kalshi: count x price, in dollars. The v2 surface quotes decimal dollars (`price`); the legacy
@@ -152,35 +133,4 @@ function alpacaNotional(body, reference) {
     return { error: `Cannot price this order: send a ${REFERENCE_HEADER} header, a limit price or a notional.` };
   }
   return { micro: picoToMicro(mulPico(qty, price)) };
-}
-
-// Coinbase: a `quote_size` already is the dollar amount. A `base_size` is a quantity of the base
-// asset, so it is priced with the reference the caller sends, falling back to its own limit price.
-// A CDE futures contract's `base_size` counts contracts, each `contractSize` of the underlying
-// (nano BTC: 0.01), so the notional is size x contract size x price. The router reads the size
-// from the venue's own product listing and refuses to price a future without it.
-function coinbaseNotional(body, reference, contractSize = null) {
-  const configuration = body.order_configuration;
-  if (isCoinbaseFuture(body.product_id)) {
-    const size = parsePico(contractSize);
-    if (size === null || size <= 0n) return { error: 'Cannot price this futures order: the contract size is unknown.' };
-  }
-  if (!configuration || typeof configuration !== 'object') {
-    return { error: 'Order configuration is missing.' };
-  }
-  const leg = Object.values(configuration).find(value => value && typeof value === 'object');
-  if (!leg) return { error: 'Order configuration is empty.' };
-  const quote = parsePico(leg.quote_size);
-  if (quote !== null && quote > 0n) return { micro: picoToMicro(quote) };
-  const size = parsePico(leg.base_size);
-  if (size === null || size <= 0n) return { error: 'Order size is missing or not positive.' };
-  let price = parsePico(reference);
-  const limit = parsePico(leg.limit_price);
-  if (limit !== null && limit > 0n && (price === null || limit > price)) price = limit;
-  if (price === null || price <= 0n) {
-    return { error: `Cannot price this order: send a ${REFERENCE_HEADER} header or a quote_size.` };
-  }
-  let units = size;
-  if (isCoinbaseFuture(body.product_id)) units = mulPico(size, parsePico(contractSize));
-  return { micro: picoToMicro(mulPico(units, price)) };
 }

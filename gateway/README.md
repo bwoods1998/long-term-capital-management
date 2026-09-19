@@ -2,7 +2,7 @@
 
 The desks run in a Sail cloud VM. The venue private keys do not.
 
-This Worker holds the Kalshi, Coinbase and Alpaca credentials as Worker secrets, authenticates
+This Worker holds the Kalshi and Alpaca credentials as Worker secrets, authenticates
 every request itself, enforces hard caps and a kill switch **before** it forwards anything, and
 watches the floor from outside. The VM holds one bearer token. So the worst a compromised, confused or
 runaway VM can do is *ask* for an order — it cannot sign one, it cannot exceed the caps, and it
@@ -16,7 +16,6 @@ step the design admits.
 ```
 ltcm runtime (Sail VM)                 this Worker                        the venues
   GatewaySigner: a bearer token   ->   KALSHI_PRIVATE_KEY (RSA-PSS)  ->   api.elections.kalshi.com
-                                       COINBASE_API_SECRET (CDP JWT) ->   api.coinbase.com
                                        ALPACA_KEY_ID + _SECRET_KEY   ->   api.alpaca.markets
                                                                           data.alpaca.markets
                                        caps + kill switch (Durable Object)
@@ -32,27 +31,28 @@ characters.
 | Method | Path | What it does |
 | --- | --- | --- |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
-| `GET`/`POST`/`DELETE` | `/v1/coinbase/<path>` | Mints a CDP JWT bound to `METHOD api.coinbase.com/<path>` and forwards to `https://api.coinbase.com/<path>`. |
 | `GET`/`POST`/`DELETE` | `/v1/alpaca/<path>` | Adds `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY` and forwards to `https://api.alpaca.markets/<path>`, or to `https://data.alpaca.markets/<path>` when the path is a market-data one (`v2/stocks/`, `v1beta3/`). One venue name, two hosts, one credential. |
 | `GET` | `/v1/health` | Caps, today's counters, kill switch, watchdog record, Sail balance and box state, and when each alert last went out. |
 | `POST` | `/v1/kill` | Runtime token may engage the kill switch. |
 | `POST` | `/v1/unkill` | Only the separate owner token may release it. |
 
+The gateway serves exactly two venues; any other venue name is a `404`.
+The Coinbase route was removed on Sept 19, 2026, when the owner closed that account.
+
 Private keys are imported straight into WebCrypto: Kalshi accepts PKCS#8 (`BEGIN PRIVATE KEY`)
-or PKCS#1 (`BEGIN RSA PRIVATE KEY`); Coinbase accepts an Ed25519 secret as base64 (the 32-byte
-seed or the 64-byte seed-then-public form), a DER blob, or an ECDSA PEM in PKCS#8 or SEC1 form,
-signing `ES256` as raw `r || s`.
+or PKCS#1 (`BEGIN RSA PRIVATE KEY`). Alpaca has no private key: its key id and secret are two
+headers, added inside the Worker.
 
 ## The caps
 
 Enforced atomically inside the `Gate` Durable Object before anything is signed, and only for the
 three calls that can create an order — Kalshi `POST portfolio/events/orders` and
-`POST portfolio/orders`, Coinbase `POST api/v3/brokerage/orders`. **Reads and cancels always
+`POST portfolio/orders`, Alpaca `POST v2/orders`. **Reads and cancels always
 pass**, whatever the counters say.
 
 | Var | Default | Meaning |
 | --- | --- | --- |
-| `MAX_ORDER_USD` | `50` | Per-order notional. Kalshi: `count x price` in dollars (legacy cent prices and `buy_max_cost` are understood; an unpriced contract is charged its $1.00 settlement ceiling). Coinbase: `quote_size`, else `base_size x` the `X-LTCM-Reference-Price` header the caller sends, else `base_size x limit_price`. |
+| `MAX_ORDER_USD` | `50` | Per-order notional. Kalshi: `count x price` in dollars (legacy cent prices and `buy_max_cost` are understood; an unpriced contract is charged its $1.00 settlement ceiling). Alpaca: `notional`, else `qty x` the dearest of its `limit_price`, its `stop_price` and the `X-LTCM-Reference-Price` header; a market order with none of these is priced from the venue's own quote plus 10%, never from the caller. |
 | `MAX_DAY_USD` | `400` | Notional for the whole trading day. |
 | `MAX_DAY_ORDERS` | `60` | Order count for the whole trading day. |
 | `CAP_TIMEZONE` | `America/New_York` | The calendar the day rolls on: the floor's own. |
@@ -108,10 +108,9 @@ npx wrangler secret put GATEWAY_TOKEN
 npx wrangler secret put KALSHI_KEY_ID
 npx wrangler secret put KALSHI_PRIVATE_KEY
 
-# Coinbase CDP: the key id (organizations/.../apiKeys/...) and the secret, either the base64
-# Ed25519 secret or the full ECDSA PEM.
-npx wrangler secret put COINBASE_KEY_NAME
-npx wrangler secret put COINBASE_API_SECRET
+# Alpaca: the key id and the secret key of the trading account.
+npx wrangler secret put ALPACA_KEY_ID
+npx wrangler secret put ALPACA_SECRET_KEY
 
 # Sail, for the watchdog: the API key. Without it the watchdog only reports.
 npx wrangler secret put SAIL_API_KEY
@@ -120,8 +119,8 @@ npx wrangler secret put SAIL_API_KEY
 Provision the separate owner credential with `python3 scripts/gateway_admin.py provision`
 from the repository root. It is stored mode 600 under `.data/ltcm/keys/`, never uploaded to
 the trading VM. Release an external kill explicitly with `python3 scripts/gateway_admin.py unkill`.
-The runtime credential cannot release it. Coinbase base-sized market orders use an independent
-public venue price plus a 10% reservation buffer; caller references cannot lower a limit order's
+The runtime credential cannot release it. Alpaca market orders use an independent
+venue quote plus a 10% reservation buffer; caller references cannot lower a limit order's
 notional. A network timeout after dispatch retains its cap reservation because acceptance is unknown.
 
 Then set the box id in `wrangler.jsonc` and redeploy:
@@ -145,10 +144,10 @@ In `ltcm/config.json`:
 ```
 
 and put `GATEWAY_TOKEN=<the same token>` in the VM's `.env`. `service._make_live_broker` then
-builds Kalshi and Coinbase in gateway mode: a `GatewaySigner` that carries only the bearer token,
+builds each live venue in gateway mode: a `GatewaySigner` that carries only the bearer token and
 a `VenueClient` that rewrites every call onto `<gateway_url>/v1/<venue>/...` and drops the venue
-auth headers, and a Coinbase order POST that adds `X-LTCM-Reference-Price` from the desk's own
-quote so the gateway can price it against the caps. No key file, no key id and no venue secret is
+auth headers. An order POST may add `X-LTCM-Reference-Price` from the desk's own quote; the
+gateway uses it only to raise, never to lower, what the order is worth against the caps. No key file, no key id and no venue secret is
 read in that mode — `.data/ltcm/keys/` can be deleted from the VM entirely.
 
 Setting `gateway_url` back to `null` restores direct, key-in-process mode. Both paths are covered

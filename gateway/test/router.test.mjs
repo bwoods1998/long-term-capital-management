@@ -6,20 +6,18 @@ import test from 'node:test';
 
 import { route, parseRoute } from '../lib/router.mjs';
 import { createGate } from '../lib/gate.mjs';
-import { rsaKey, ed25519Key, decodeSegment, memoryStore, recorder, bearer, TOKEN } from './helpers.mjs';
+import { rsaKey, memoryStore, recorder, bearer, TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-09-15T16:00:00Z');
 const GATEWAY = 'https://ltcm-gateway.workers.dev';
 
-const keys = { kalshi: await rsaKey(), coinbase: await ed25519Key() };
+const keys = { kalshi: await rsaKey() };
 
 const env = (extra = {}) => ({
   GATEWAY_TOKEN: TOKEN,
   GATEWAY_ADMIN_TOKEN: TOKEN + '-owner',
   KALSHI_KEY_ID: 'a1b2c3',
   KALSHI_PRIVATE_KEY: keys.kalshi.pkcs8,
-  COINBASE_KEY_NAME: 'organizations/o/apiKeys/k',
-  COINBASE_API_SECRET: keys.coinbase.seed32,
   ALPACA_KEY_ID: 'AK-TEST-KEY',
   ALPACA_SECRET_KEY: 'alpaca-secret-that-never-leaves-the-worker',
   MAX_ORDER_USD: '50', MAX_DAY_USD: '400', MAX_DAY_ORDERS: '60', CAP_TIMEZONE: 'America/New_York', PRODUCT_CACHE_MS: '0',
@@ -42,38 +40,44 @@ const call = async (request, { settings, gate = gateFor(settings), reply, fetche
 };
 
 const KALSHI_ORDER = { ticker: 'KXTEST-26', side: 'bid', count: '3.00', price: '0.6500', client_order_id: 'oi-1' };
-const COINBASE_ORDER = {
-  client_order_id: 'oi-2', product_id: 'BTC-USD', side: 'BUY',
-  order_configuration: { limit_limit_gtc: { base_size: '0.0001', limit_price: '64050.11' } },
-};
+const ALPACA_ORDER = { symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '6.00', client_order_id: 'oi-2' };
+const ALPACA_MARKET = { symbol: 'AAPL', qty: '2', side: 'buy', type: 'market', time_in_force: 'day' };
 
 test('a caller cannot underprice a limit order with its reference header', async () => {
-  const order = { ...COINBASE_ORDER, order_configuration: { limit_limit_gtc: { base_size: '1', limit_price: '60000' } } };
-  const { response, calls } = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: order, headers: { 'X-LTCM-Reference-Price': '0.01' } }));
+  const order = { ...ALPACA_ORDER, limit_price: '60.00' };
+  const { response, body, calls } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: order, headers: { 'X-LTCM-Reference-Price': '0.01' } }));
   assert.equal(response.status, 403);
+  assert.equal(body.cap, 'order');
   assert.equal(calls.length, 0);
 });
 
-test('base-size market orders use an independent buffered venue price', async () => {
-  const order = { ...COINBASE_ORDER, order_configuration: { market_market_ioc: { base_size: '0.0001' } } };
+test('market orders use an independent buffered venue price', async () => {
   const calls = [];
   const fetcher = async (url, options) => {
     calls.push({ url, options });
-    return new Response(JSON.stringify(options.method === 'GET' ? { price: '60000' } : { success: true }));
+    return new Response(JSON.stringify(options.method === 'GET' ? { symbol: 'AAPL', quote: { ap: 3, bp: 2.9 } } : { id: 'o1' }));
   };
-  const { response, gate } = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: order, headers: { 'X-LTCM-Reference-Price': '0.01' } }), { fetcher });
+  const { response, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_MARKET, headers: { 'X-LTCM-Reference-Price': '0.01' } }), { fetcher });
   assert.equal(response.status, 200);
   assert.equal(calls.length, 2);
-  assert.match(calls[0].url, /market\/products\/BTC-USD$/);
+  assert.match(calls[0].url, /data\.alpaca\.markets\/v2\/stocks\/AAPL\/quotes\/latest$/);
+  assert.equal(calls[0].options.headers['APCA-API-KEY-ID'], 'AK-TEST-KEY', 'the quote is fetched with the venue credential');
   assert.equal((await gate.status()).today.notional_usd, '6.60');
 });
 
 test('market quote failure refuses the order before dispatch or reservation', async () => {
-  const order = { ...COINBASE_ORDER, order_configuration: { market_market_ioc: { base_size: '0.0001' } } };
-  const { response, calls, gate } = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: order }), { reply: { status: 503, body: '{}' } });
+  const { response, calls, gate } = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_MARKET }), { reply: { status: 503, body: '{}' } });
   assert.equal(response.status, 503);
   assert.equal(calls.length, 1);
   assert.equal((await gate.status()).today.orders, 0);
+
+  // A quote with no price in it is no quote, and a symbol that is not one is never looked up.
+  const empty = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_MARKET }), { reply: { status: 200, body: '{"quote":{}}' } });
+  assert.equal(empty.response.status, 503);
+  assert.equal((await empty.gate.status()).today.orders, 0);
+  const odd = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_MARKET, symbol: 'AAPL?x=1' } }));
+  assert.equal(odd.response.status, 400);
+  assert.equal(odd.calls.length, 0);
 });
 
 test('a request without the right bearer token learns nothing else', async () => {
@@ -125,15 +129,6 @@ test('a kalshi read is signed and forwarded verbatim, query and all', async () =
   assert.equal(await response.text(), '{"orders":[]}');
 });
 
-test('a coinbase read carries a JWT bound to that one method and path', async () => {
-  const { calls } = await call(ask('GET', '/v1/coinbase/api/v3/brokerage/accounts?limit=250'));
-  assert.equal(calls[0].url, 'https://api.coinbase.com/api/v3/brokerage/accounts?limit=250');
-  const [head, claims] = calls[0].headers.Authorization.slice('Bearer '.length).split('.');
-  assert.equal(decodeSegment(head).alg, 'EdDSA');
-  assert.equal(decodeSegment(claims).uri, 'GET api.coinbase.com/api/v3/brokerage/accounts');
-  assert.equal(decodeSegment(claims).sub, 'organizations/o/apiKeys/k');
-});
-
 test('the venue s own status and body come back untouched', async () => {
   const { response, body } = await call(
     ask('GET', '/v1/kalshi/portfolio/balance'),
@@ -170,31 +165,65 @@ test('an exit order passes the per-order cap when the header says so', async () 
   assert.equal(calls.length, 1, 'the exit reached the venue');
 });
 
-test('coinbase orders are priced from the reference header the caller sends', async () => {
+test('a reference header can raise what a limit order is worth, never lower it', async () => {
   const gate = gateFor();
   const priced = await call(
-    ask('POST', '/v1/coinbase/api/v3/brokerage/orders', {
-      body: COINBASE_ORDER, headers: { 'X-LTCM-Reference-Price': '64050.11' },
-    }),
+    ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER, headers: { 'X-LTCM-Reference-Price': '6.41' } }),
     { gate },
   );
   assert.equal(priced.response.status, 200);
   assert.equal(gate.status(NOW).today.notional_usd, '6.41');
 
-  // The same order at a price that puts it over the cap is refused.
+  // The same order at a size that puts it over the cap is refused.
   const refused = await call(
-    ask('POST', '/v1/coinbase/api/v3/brokerage/orders', {
-      body: { ...COINBASE_ORDER, order_configuration: { limit_limit_gtc: { base_size: '0.01', limit_price: '64050.11' } } },
-      headers: { 'X-LTCM-Reference-Price': '64050.11' },
-    }),
+    ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_ORDER, qty: '10' }, headers: { 'X-LTCM-Reference-Price': '6.41' } }),
     { gate },
   );
   assert.equal(refused.response.status, 403);
 
   // A limit supplies its own enforceable ceiling without trusting a header.
-  const unpriced = await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: COINBASE_ORDER }), { gate });
+  const unpriced = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER }), { gate });
   assert.equal(unpriced.response.status, 200);
   assert.equal(unpriced.calls.length, 1);
+  assert.equal(gate.status(NOW).today.notional_usd, '12.41');
+});
+
+test('the caps, the exit purpose and the kill switch are the same on every venue', async () => {
+  const big = { ...ALPACA_ORDER, qty: '100', limit_price: '0.99' };
+  const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body: big }));
+  assert.equal(refused.response.status, 403);
+  assert.match(refused.body.error, /\$99\.00 exceeds the per-order cap of \$50\.00/);
+  const exit = await call(ask('POST', '/v1/alpaca/v2/orders', { body: big, headers: { 'X-LTCM-Purpose': 'exit' } }));
+  assert.equal(exit.response.status, 200);
+  assert.equal(exit.calls.length, 1, 'the exit reached the venue');
+  assert.equal((await exit.gate.status()).today.orders, 1, 'and still counts as an order');
+
+  const gate = gateFor();
+  await call(ask('POST', '/v1/kill'), { gate });
+  const killed = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER }), { gate });
+  assert.equal(killed.response.status, 423);
+  assert.equal(killed.calls.length, 0);
+  assert.equal((await call(ask('DELETE', '/v1/alpaca/v2/orders/abc-123'), { gate })).response.status, 200, 'a cancel still passes');
+});
+
+test('a reservation is refunded when signing fails, and kept when the venue does not answer', async () => {
+  for (const [path, body, settings] of [
+    ['/v1/alpaca/v2/orders', ALPACA_ORDER, { ALPACA_SECRET_KEY: '' }],
+    ['/v1/kalshi/portfolio/events/orders', KALSHI_ORDER, { KALSHI_PRIVATE_KEY: 'not a key' }],
+  ]) {
+    const unsigned = await call(ask('POST', path, { body }), { settings });
+    assert.equal(unsigned.response.status, 503, path);
+    assert.match(unsigned.body.error, /credentials for (alpaca|kalshi) are unusable/);
+    assert.equal(unsigned.calls.length, 0);
+    assert.deepEqual((await unsigned.gate.status()).today, { day: '2026-09-15', orders: 0, notional_usd: '0.00' }, 'nothing was dispatched, so nothing is spent');
+  }
+
+  const gate = gateFor();
+  const silent = await call(ask('POST', '/v1/alpaca/v2/orders', { body: ALPACA_ORDER }),
+    { gate, fetcher: async () => { throw Object.assign(new Error('nope'), { name: 'TimeoutError' }); } });
+  assert.equal(silent.response.status, 502);
+  assert.match(silent.body.error, /alpaca API did not answer/);
+  assert.deepEqual(gate.status(NOW).today, { day: '2026-09-15', orders: 1, notional_usd: '6.00' });
 });
 
 test('reads and cancels always pass, whatever the counters say', async () => {
@@ -203,8 +232,8 @@ test('reads and cancels always pass, whatever the counters say', async () => {
     ['GET', '/v1/kalshi/portfolio/balance'],
     ['DELETE', '/v1/kalshi/portfolio/events/orders/abc-123?market_ticker=KXBTC-26SEP1523-B75950&exchange_index=-1'],
     ['POST', '/v1/kalshi/portfolio/intra_exchange_instance_transfer'],  // a shard move is not an order
-    ['GET', '/v1/coinbase/api/v3/brokerage/orders/historical/batch'],
-    ['POST', '/v1/coinbase/api/v3/brokerage/orders/batch_cancel'],
+    ['GET', '/v1/alpaca/v2/orders?status=open'],
+    ['DELETE', '/v1/alpaca/v2/orders/abc-123'],
   ]) {
     const { response, calls } = await call(ask(method, path, { body: method === 'POST' ? { order_ids: ['x'] } : undefined }),
       { gate, settings: { MAX_DAY_ORDERS: '0' } });
@@ -261,10 +290,11 @@ test('an order body that is not JSON is refused, and so is a missing credential'
   assert.equal(bad.response.status, 400);
   assert.match(bad.body.error, /must be JSON/);
 
-  const unconfigured = await call(ask('GET', '/v1/coinbase/api/v3/brokerage/accounts'),
-    { settings: { COINBASE_API_SECRET: '' } });
+  const unconfigured = await call(ask('GET', '/v1/kalshi/portfolio/balance'),
+    { settings: { KALSHI_PRIVATE_KEY: '' } });
   assert.equal(unconfigured.response.status, 503);
-  assert.match(unconfigured.body.error, /credentials for coinbase are unusable/);
+  assert.match(unconfigured.body.error, /credentials for kalshi are unusable/);
+  assert.equal(unconfigured.calls.length, 0);
 });
 
 test('the VM can fetch Kalshi WebSocket handshake headers, signed over the ws path, never the key', async () => {
@@ -286,36 +316,7 @@ test('the VM can fetch Kalshi WebSocket handshake headers, signed over the ws pa
   assert.equal((await call(ask('GET', '/v1/kalshi/ws-auth', { token: 'wrong' }))).response.status, 401);
 });
 
-test('the VM can fetch a Coinbase socket JWT with no uri claim and two minutes of life', async () => {
-  const { response, body } = await call(ask('GET', '/v1/coinbase/ws-jwt'));
-  assert.equal(response.status, 200);
-  assert.equal(body.expires_in, 120);
-  const [header, payload, signature] = body.jwt.split('.');
-  const head = decodeSegment(header);
-  const claims = decodeSegment(payload);
-  assert.equal(head.alg, 'EdDSA');
-  assert.equal(head.kid, 'organizations/o/apiKeys/k');
-  assert.equal(typeof head.nonce, 'string');
-  assert.deepEqual(Object.keys(claims).sort(), ['exp', 'iss', 'nbf', 'sub']);
-  assert.equal(claims.iss, 'cdp');
-  assert.equal(claims.sub, 'organizations/o/apiKeys/k');
-  assert.equal(claims.exp - claims.nbf, 120);
-  assert.equal(claims.nbf, Math.floor(NOW / 1000));
-  const verified = await crypto.subtle.verify(
-    { name: 'Ed25519' },
-    keys.coinbase.publicKey,
-    Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64'),
-    new TextEncoder().encode(`${header}.${payload}`),
-  );
-  assert.equal(verified, true);
-  // Two fetches are two tokens: a nonce per mint, never a reused JWT.
-  const again = (await call(ask('GET', '/v1/coinbase/ws-jwt'))).body;
-  assert.notEqual(again.jwt, body.jwt);
-});
-
 test('a missing credential turns a ws route into a 503, not a crash', async () => {
-  const { response } = await call(ask('GET', '/v1/coinbase/ws-jwt'), { settings: { COINBASE_API_SECRET: '' } });
-  assert.equal(response.status, 503);
   const kalshi = await call(ask('GET', '/v1/kalshi/ws-auth'), { settings: { KALSHI_PRIVATE_KEY: '' } });
   assert.equal(kalshi.response.status, 503);
 });
@@ -388,6 +389,13 @@ test('only the documented routes and methods exist', async () => {
   assert.equal(parseRoute('/v1/kalshi/'), null);
   assert.deepEqual(parseRoute('/v1/alpaca/v2/account'), { venue: 'alpaca', path: 'v2/account' });
   assert.equal(parseRoute('/v1/schwab/accounts'), null, 'a venue this gateway holds no key for');
+  // The Coinbase venue was removed on Sept 19, 2026: its paths are not routes any more.
+  assert.equal(parseRoute('/v1/coinbase/api/v3/brokerage/accounts'), null);
+  const gone = await call(ask('GET', '/v1/coinbase/api/v3/brokerage/accounts'));
+  assert.equal(gone.response.status, 404);
+  assert.equal(gone.calls.length, 0);
+  assert.equal((await call(ask('GET', '/v1/coinbase/ws-jwt'))).response.status, 404);
+  assert.equal((await call(ask('POST', '/v1/coinbase/api/v3/brokerage/orders', { body: {} }))).response.status, 404);
   assert.equal(parseRoute('/v1/kalshi/../../secret'), null, 'no traversal out of the venue path');
 
   assert.equal((await call(ask('GET', '/v1/unknown'))).response.status, 404);
@@ -461,8 +469,8 @@ test('the gateway signs only the venue paths the floor uses; everything else is 
   const gate = gateFor();
   const refused = [
     ['POST', '/v1/kalshi/portfolio/orders/batched', KALSHI_ORDER],
-    ['POST', '/v1/coinbase/api/v3/brokerage/portfolios/move_funds', { amount: '1' }],
-    ['GET', '/v1/coinbase/api/v3/brokerage/key_permissions', undefined],
+    ['POST', '/v1/alpaca/v2/account/configurations', { suspend_trade: false }],
+    ['GET', '/v1/alpaca/v2/wallets/transfers', undefined],
     ['DELETE', '/v1/kalshi/portfolio/positions', undefined],
     ['POST', '/v1/kalshi/portfolio/balance', {}],
   ];
@@ -472,8 +480,8 @@ test('the gateway signs only the venue paths the floor uses; everything else is 
   }
   for (const [method, path] of [
     ['GET', '/v1/kalshi/portfolio/balance'], ['GET', '/v1/kalshi/markets?status=open&limit=5'],
-    ['GET', '/v1/kalshi/markets/KXTEST-26/orderbook'], ['GET', '/v1/coinbase/api/v3/brokerage/accounts'],
-    ['GET', '/v1/coinbase/api/v3/brokerage/market/products/BTC-USD/candles?granularity=ONE_HOUR'],
+    ['GET', '/v1/kalshi/markets/KXTEST-26/orderbook'], ['GET', '/v1/alpaca/v2/account'],
+    ['GET', '/v1/alpaca/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD'],
     ['DELETE', '/v1/kalshi/portfolio/orders/ord_1'], ['POST', '/v1/kalshi/account/api_usage_level/upgrade'],
   ]) {
     const { response } = await call(ask(method, path), { gate });

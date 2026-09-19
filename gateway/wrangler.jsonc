@@ -1,11 +1,11 @@
 {
-  // The order gateway. It holds the Kalshi and Coinbase private keys and the Alpaca key and
-  // secret as Worker secrets so the Sail VM that runs the desks never has them: the VM can ask
+  // The order gateway. It holds the Kalshi private key and the Alpaca key and secret
+  // as Worker secrets so the Sail VM that runs the desks never has them: the VM can ask
   // for an order, but only this Worker can authenticate one, and only within the caps below.
   //
   // Secrets, set with `npx wrangler secret put <NAME>` and never written to this file:
-  //   KALSHI_KEY_ID, KALSHI_PRIVATE_KEY, COINBASE_KEY_NAME, COINBASE_API_SECRET,
-  //   ALPACA_KEY_ID, ALPACA_SECRET_KEY, GATEWAY_TOKEN, GATEWAY_ADMIN_TOKEN, SAIL_API_KEY.
+  //   KALSHI_KEY_ID, KALSHI_PRIVATE_KEY, ALPACA_KEY_ID, ALPACA_SECRET_KEY,
+  //   GATEWAY_TOKEN, GATEWAY_ADMIN_TOKEN, SAIL_API_KEY.
   //
   // It is also the floor's supervisor. Every five minutes it reads the published checkpoint, the
   // Sail credit balance and the state of the box, resumes and restarts the box when it can, and

@@ -8,15 +8,17 @@ import { formatUsd, parsePico, mulPico, picoToMicro } from '../lib/money.mjs';
 
 const usd = micro => formatUsd(micro);
 
-test('only the three order-creating calls are metered', () => {
+test('only the order-creating calls are metered', () => {
   assert.equal(createsOrder('kalshi', 'POST', 'portfolio/events/orders'), true);
   assert.equal(createsOrder('kalshi', 'POST', '/portfolio/orders/'), true);
-  assert.equal(createsOrder('coinbase', 'POST', 'api/v3/brokerage/orders'), true);
+  assert.equal(createsOrder('alpaca', 'POST', 'v2/orders'), true);
   // Reads and cancels always pass.
   assert.equal(createsOrder('kalshi', 'GET', 'portfolio/orders'), false);
   assert.equal(createsOrder('kalshi', 'DELETE', 'portfolio/events/orders/abc'), false);
-  assert.equal(createsOrder('coinbase', 'POST', 'api/v3/brokerage/orders/batch_cancel'), false);
-  assert.equal(createsOrder('coinbase', 'GET', 'api/v3/brokerage/accounts'), false);
+  assert.equal(createsOrder('alpaca', 'DELETE', 'v2/orders/abc'), false);
+  assert.equal(createsOrder('alpaca', 'GET', 'v2/orders'), false);
+  // A venue this gateway does not serve creates nothing here.
+  assert.equal(createsOrder('schwab', 'POST', 'v2/orders'), false);
   assert.equal(normalizePath('/a/b/'), 'a/b');
 });
 
@@ -39,47 +41,35 @@ test('kalshi refuses a body it cannot price', () => {
   assert.match(notional('kalshi', null).error, /body/);
 });
 
-test('coinbase prices base_size with the reference header the caller sends', () => {
-  const body = { order_configuration: { market_market_ioc: { base_size: '0.00015' } } };
-  assert.equal(usd(notional('coinbase', body, { reference: '64050.11' }).micro), '9.61');
-  assert.match(notional('coinbase', body).error, /X-LTCM-Reference-Price/);
+test('alpaca prices qty with the reference the router supplies', () => {
+  const body = { symbol: 'BTC/USD', qty: '0.00015', side: 'buy', type: 'market' };
+  assert.equal(usd(notional('alpaca', body, { reference: '64050.11' }).micro), '9.61');
+  assert.match(notional('alpaca', body).error, /X-LTCM-Reference-Price/);
 });
 
-test('coinbase uses quote_size directly and falls back to a limit price', () => {
-  assert.equal(usd(notional('coinbase', { order_configuration: { market_market_ioc: { quote_size: '25' } } }).micro), '25.00');
-  assert.equal(
-    usd(notional('coinbase', { order_configuration: { limit_limit_gtc: { base_size: '0.5', limit_price: '60' } } }).micro),
-    '30.00',
-  );
-  // The header wins over the order's own limit price: it is the live market, not the desk's wish.
-  assert.equal(
-    usd(notional('coinbase', { order_configuration: { limit_limit_gtc: { base_size: '0.5', limit_price: '60' } } },
-      { reference: '80' }).micro),
-    '40.00',
-  );
+test('alpaca uses notional directly and falls back to a limit or stop price', () => {
+  assert.equal(usd(notional('alpaca', { symbol: 'AAPL', notional: '25' }).micro), '25.00');
+  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60' }).micro), '30.00');
+  assert.equal(usd(notional('alpaca', { qty: '0.5', stop_price: '60' }).micro), '30.00');
+  // The dearest of the reference and the order's own prices: a header cannot underprice a limit.
+  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60' }, { reference: '0.01' }).micro), '30.00');
+  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60' }, { reference: '70' }).micro), '35.00');
+  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60', stop_price: '80' }).micro), '40.00');
+  // A short sale is worth what it sells.
+  assert.equal(usd(notional('alpaca', { qty: '2', side: 'sell', limit_price: '10' }).micro), '20.00');
 });
 
-// Sept 17, 2026: a resting entry the venue should cancel at a stated time is sent as
-// limit_limit_gtd with an end_time. The caps must price it exactly as the same order sent GTC.
-test('coinbase prices a limit_limit_gtd order the same as the same order GTC', () => {
-  const gtc = { order_configuration: { limit_limit_gtc: { base_size: '0.0003', limit_price: '76000', post_only: true } } };
-  const gtd = {
-    order_configuration: {
-      limit_limit_gtd: { base_size: '0.0003', limit_price: '76000', end_time: '2026-09-17T01:20:00Z', post_only: true },
-    },
-  };
-  assert.equal(usd(notional('coinbase', gtd).micro), '22.80');
-  assert.equal(notional('coinbase', gtd).micro, notional('coinbase', gtc).micro);
-  assert.equal(
-    notional('coinbase', gtd, { reference: '75000' }).micro,
-    notional('coinbase', gtc, { reference: '75000' }).micro,
-  );
-});
-
-test('coinbase refuses a configuration it cannot read', () => {
-  assert.match(notional('coinbase', {}).error, /configuration/);
-  assert.match(notional('coinbase', { order_configuration: {} }).error, /empty/);
-  assert.match(notional('coinbase', { order_configuration: { market_market_ioc: {} } }).error, /size/);
+test('alpaca refuses a body it cannot price, and an unknown venue is never priced', () => {
+  assert.match(notional('alpaca', {}).error, /qty/);
+  assert.match(notional('alpaca', { qty: '0', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { qty: '-1', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { qty: '1', limit_price: '0' }).error, /Cannot price/);
+  assert.match(notional('alpaca', null).error, /body/);
+  for (const venue of ['schwab', 'binance', '', undefined]) {
+    const priced = notional(venue, { count: '1', price: '0.5', qty: '1', limit_price: '1', notional: '1' });
+    assert.match(priced.error, /unknown venue/);
+    assert.equal(priced.micro, undefined);
+  }
 });
 
 test('caps come from vars, and a nonsense value falls back to the documented default', () => {
@@ -104,29 +94,22 @@ test('money is exact, and a partial cent always rounds against the order', () =>
   assert.equal(parsePico(Number.NaN), null);
 });
 
-test('derivatives state is readable and never an order path', () => {
-  assert.equal(allowedVenuePath('coinbase', 'GET', 'api/v3/brokerage/cfm/balance_summary'), true);
-  assert.equal(allowedVenuePath('coinbase', 'GET', 'api/v3/brokerage/cfm/positions'), true);
-  assert.equal(allowedVenuePath('coinbase', 'GET', 'api/v3/brokerage/cfm/positions/BIP-20DEC30-CDE'), true);
-  assert.equal(allowedVenuePath('coinbase', 'POST', 'api/v3/brokerage/cfm/sweeps/schedule'), false);
-  assert.equal(createsOrder('coinbase', 'GET', 'api/v3/brokerage/cfm/balance_summary'), false);
+test('account state is readable and never an order path', () => {
+  assert.equal(allowedVenuePath('alpaca', 'GET', 'v2/account'), true);
+  assert.equal(allowedVenuePath('alpaca', 'GET', 'v2/positions'), true);
+  assert.equal(allowedVenuePath('alpaca', 'GET', 'v2/positions/AAPL'), true);
+  assert.equal(allowedVenuePath('alpaca', 'POST', 'v2/account/configurations'), false);
+  assert.equal(allowedVenuePath('alpaca', 'DELETE', 'v2/positions'), false);
+  assert.equal(createsOrder('alpaca', 'GET', 'v2/account'), false);
+  // A venue that is not served has no allowed path at all.
+  assert.equal(allowedVenuePath('schwab', 'GET', 'v2/account'), false);
 });
 
 test('funding history is read-only and cannot move money', () => {
   for (const [venue, path] of [['kalshi', 'portfolio/deposits'], ['kalshi', 'portfolio/withdrawals'],
-    ['coinbase', 'v2/accounts'], ['coinbase', 'v2/accounts/account-id/transactions']]) {
+    ['alpaca', 'v2/account/activities'], ['alpaca', 'v2/account/activities/FILL']]) {
     assert.equal(allowedVenuePath(venue, 'GET', path), true);
     for (const method of ['POST', 'PUT', 'DELETE']) assert.equal(allowedVenuePath(venue, method, path), false);
     assert.equal(createsOrder(venue, 'GET', path), false);
   }
-});
-
-test('coinbase futures notional is contracts x contract size x price, and never priced without the size', () => {
-  const body = { product_id: 'BIP-20DEC30-CDE', order_configuration: { limit_limit_gtc: { base_size: '2', limit_price: '76000' } } };
-  assert.equal(usd(notional('coinbase', body, { contractSize: '0.01' }).micro), '1520.00');
-  assert.match(notional('coinbase', body).error, /contract size/);
-  assert.match(notional('coinbase', body, { contractSize: '0' }).error, /contract size/);
-  // A spot product ignores a contract size.
-  const spot = { product_id: 'BTC-USD', order_configuration: { limit_limit_gtc: { base_size: '0.5', limit_price: '60' } } };
-  assert.equal(usd(notional('coinbase', spot, { contractSize: '0.01' }).micro), '30.00');
 });
