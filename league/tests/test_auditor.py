@@ -301,7 +301,7 @@ class Packet(AuditorCase):
         auditor.audit(self.agent, self.verdict)
         (request,) = self.opener.requests
         headers = {k.lower(): v for k, v in request.header_items()}
-        self.assertEqual(headers[AGENT_HEADER.lower()], "audit:fav-1")
+        self.assertEqual(headers[AGENT_HEADER.lower()], "audit-fav-1")
         self.assertEqual(headers["authorization"], "Bearer " + SECRET)  # the only place the token may appear
         body = json.loads(request.data.decode("utf-8"))
         self.assertEqual(body["model"], "gpt-6-astra")

@@ -255,7 +255,7 @@ class Astra:
         if role in ("architect", "toolsmith"):
             system += "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT.read_text(encoding="utf-8")
         try:
-            answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"astra:{role}",
+            answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"astra-{role}",
                                        max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000)
             proposal = parse_proposal(role, answer.json(), answer.cost_usd)
         except FrontierError as exc:

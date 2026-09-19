@@ -85,7 +85,8 @@ class RequestShape(unittest.TestCase):
         self.assertEqual(timeout, 123.0)
         headers = opener.headers()
         self.assertEqual(headers["authorization"], "Bearer " + SECRET)
-        self.assertEqual(headers[AGENT_HEADER.lower()], "audit:alpha")
+        # The gateway files a name with a colon under "unattributed": it is sent as the gateway spells it.
+        self.assertEqual(headers[AGENT_HEADER.lower()], "audit-alpha")
         self.assertEqual(headers["content-type"], "application/json")
         body = opener.body()
         self.assertEqual(body["model"], "gpt-6-astra")
@@ -110,10 +111,12 @@ class RequestShape(unittest.TestCase):
             self.assertEqual(opener.body()["max_output_tokens"], sent, asked)
         self.assertEqual(MAX_OUTPUT_TOKENS, 16000)
 
-    def test_the_agent_header_is_cut_to_sixty_characters(self):
+    def test_the_agent_header_is_a_name_the_gateway_will_attribute(self):
         opener = FakeOpener(ok())
-        frontier(opener).ask(system="s", user="u", agent="audit:" + "x" * 200)
-        self.assertEqual(len(opener.headers()[AGENT_HEADER.lower()]), 60)
+        frontier(opener).ask(system="s", user="u", agent="Audit:" + "x" * 200)
+        sent = opener.headers()[AGENT_HEADER.lower()]
+        self.assertRegex(sent, r"^[a-z0-9][a-z0-9_-]{0,63}$")  # the gateway's own rule; anything else is filed as "unattributed"
+        self.assertTrue(sent.startswith("audit-x"))
 
     def test_the_token_is_read_for_every_call_so_a_rotated_token_is_used(self):
         tokens = iter(["first", "second"])

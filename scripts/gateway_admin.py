@@ -3,6 +3,8 @@
 
 `provision` generates an owner credential once and installs it as a Worker secret.
 `unkill` explicitly releases the external switch; provisioning does not change its state.
+`kill` engages it (any holder of the ordinary gateway token may: stopping is never gated).
+`status` prints the switch, today's counters, the frontier month and the Sail balance.
 No credential value is printed, passed in argv, or included in deployment archives.
 """
 import argparse
@@ -19,7 +21,7 @@ KEY = ROOT / '.data' / 'ltcm' / 'keys' / 'gateway-admin.token'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['provision', 'unkill'])
+    parser.add_argument('command', choices=['provision', 'unkill', 'kill', 'status'])
     args = parser.parse_args()
     if args.command == 'provision':
         KEY.parent.mkdir(parents=True, exist_ok=True)
@@ -39,6 +41,22 @@ def main():
         if result.returncode:
             raise SystemExit(result.returncode)
         print('Owner credential provisioned; trading VM has no copy. Kill-switch state unchanged.')
+        return
+    if args.command in ('kill', 'status'):
+        config = json.loads((ROOT/'league/config.json').read_text())
+        url = str(config.get('gateway_url') or '').rstrip('/')
+        token = os.environ.get('GATEWAY_TOKEN', '')
+        if not token:
+            for line in (ROOT/'.env').read_text().splitlines():
+                if line.startswith('GATEWAY_TOKEN='):
+                    token = line.split('=', 1)[1].strip().strip('"').strip("'")
+        path, method = ('/v1/kill', 'POST') if args.command == 'kill' else ('/v1/health', 'GET')
+        request = urllib.request.Request(url+path, data=b'' if method == 'POST' else None, method=method, headers={'Authorization': 'Bearer '+token, 'User-Agent': 'ltcm-floor/1.0'})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = json.load(response)
+        sail = data.get('sail') or {}
+        print(json.dumps({'kill_switch': data.get('kill_switch'), 'today': data.get('today'), 'frontier': data.get('frontier'), 'github': data.get('github'),
+                          'sail_balance_usd': sail.get('balance_usd'), 'box_status': sail.get('box_status')}, indent=1))
         return
     token = KEY.read_text().strip()
     config = json.loads((ROOT/'ltcm/config.json').read_text())

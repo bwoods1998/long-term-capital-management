@@ -84,7 +84,7 @@ class Auditor:
     def audit(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
         packet = self.packet(agent, verdict)
         try:
-            answer = self.frontier.ask(system=SYSTEM, user=json.dumps(packet, default=str), agent=f"audit:{agent.id}", max_output_tokens=6000)
+            answer = self.frontier.ask(system=SYSTEM, user=json.dumps(packet, default=str), agent=f"audit-{agent.id}", max_output_tokens=6000)
         except FrontierError as exc:
             # No audit, no promotion: a gate that fails open is not a gate.
             self.ledger.append("audit.verdict", {"approve": False, "error": str(exc)[:300], "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)

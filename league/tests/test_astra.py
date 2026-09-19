@@ -87,7 +87,7 @@ class AstraTest(unittest.TestCase):
         self.assertEqual(forge.proposed[0]["role"], "architect")
         self.assertEqual(row["number"], 7)
         self.assertEqual(row["cost_usd"], "1.25")
-        self.assertEqual(frontier.asked[0]["agent"], "astra:architect")
+        self.assertEqual(frontier.asked[0]["agent"], "astra-architect")
         self.assertIn("THE STRATEGY CONTRACT", frontier.asked[0]["system"])
         change = self.ledger.last("astra.change").payload
         self.assertEqual((change["status"], change["paths"]), ("opened", ["league/strategies/idea.py"]))

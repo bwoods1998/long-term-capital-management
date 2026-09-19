@@ -10,6 +10,7 @@ not here, so nothing on Sail can spend past the line.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -38,6 +39,14 @@ class Answer:
     def json(self) -> dict[str, Any]:
         """The first JSON object in the answer. Raises FrontierError when there is none."""
         return extract_json(self.text)
+
+
+def attribution(name: str) -> str:
+    """The name the gateway files this call's cost under. It accepts `^[a-z0-9][a-z0-9_-]{0,63}$`
+    and files anything else under "unattributed" (found on the night of the build: `audit:<agent>`
+    was unattributed for its colon)."""
+    clean = re.sub(r"[^a-z0-9_-]+", "-", str(name or "").lower()).strip("-_")[:64]
+    return clean or "house"
 
 
 def extract_json(text: str) -> dict[str, Any]:
@@ -85,7 +94,7 @@ class Frontier:
         request = urllib.request.Request(
             self.url, data=json.dumps(body).encode("utf-8"), method="POST",
             headers={"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json",
-                     AGENT_HEADER: agent[:60], "User-Agent": "ltcm-floor/1.0"},
+                     AGENT_HEADER: attribution(agent), "User-Agent": "ltcm-floor/1.0"},
         )
         try:
             with self.opener(request, timeout=self.timeout) as response:
