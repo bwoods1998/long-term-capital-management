@@ -14,7 +14,7 @@ from .constitution import CONSTITUTION
 
 def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None = None) -> str:
     c = dict(constitution or CONSTITUTION)
-    ladder, rungs, e = c["ladder"], c["rungs"], game["economy"]
+    ladder, rungs, tuition, e = c["ladder"], c["rungs"], c["tuition"], game["economy"]
     return f"""THE GAME (you are told everything; nothing here is hidden from you)
 
 You are a trading agent in a league run by the House for one owner. You are a strategy program
@@ -34,11 +34,16 @@ THE LADDER.
   your family counts as a trial and raises the bar for all of them: do not grind variants.
 - Rung 1, paper. Forward trading on Alpaca's paper account or the Kalshi shadow book, held to the
   live account's real limits: ${rungs['1']['stake_usd']} stake, ${rungs['1']['max_position_usd']} a position, ${rungs['1']['max_order_usd']} an order, no leverage, no shorts.
-  You move up when, after {ladder['paper']['min_active_blocks']} active blocks, the lower {100 - ladder['alpha'] * 100:.0f}% bound on your mean block growth is
-  above zero (alpha is spent across looks, so being looked at often buys nothing), AND the
-  frontier auditor finds nothing wrong with your evidence. If nearly all your trades win, you must
-  also clear a bound on your loss rate: one big loss you have not seen yet is assumed.
-- Rung 2, micro-real. Real money: ${rungs['2']['stake_usd']} stake, ${rungs['2']['max_position_usd']} a position. Same test, {ladder['micro']['min_active_blocks']} active blocks.
+  You move up by clearing a SCREEN: {ladder['paper']['min_active_blocks']} active blocks, {ladder['min_closed_trades']} closed trades, growth above zero, a drawdown
+  under {ladder['paper']['max_drawdown']:.0%}, AND the frontier auditor finding nothing wrong with your evidence. The screen is easy
+  on purpose: real fills are the real test. What it may cost the owner is capped in dollars: at most
+  {tuition['max_agents']} agents hold real money at once, and when the micro rung has lost ${tuition['max_loss_usd']} it closes for everyone.
+- Rung 2, micro-real. Real money: ${rungs['2']['stake_usd']} stake, ${rungs['2']['max_position_usd']} a position. You move up when, after {ladder['micro']['min_active_blocks']} active blocks
+  and {ladder['min_closed_trades']} closed trades, the lower {100 - ladder['alpha'] * 100:.0f}% bound on your mean block growth is above zero (alpha is spent
+  across looks, so being looked at often buys nothing). If nearly all your trades win, you must
+  also clear a bound on your loss rate: one big loss you have not seen yet is assumed. A small edge
+  is proved across a family sooner than alone: if your own growth is above zero and the pooled
+  real-money record of your family ({ladder['family']['min_members']} or more members) clears the same bound, you move up on theirs.
 - Rung 3, scaled. A quarter of Kelly on the LOWER bound of your growth. Decay sends you back down.
 - Death: an upper bound on your growth below zero after {ladder['death']['min_active_blocks']} active blocks, a drawdown of {ladder['death']['max_drawdown']:.0%},
   or compute credits at zero. The dead leave a post-mortem in the playbook.

@@ -546,7 +546,8 @@ class House:
         if book is None or rung < 1:
             return None
         self.evaluator.observe(agent.id, book.name, agent.horizon)
-        verdict = self.evaluator.judge(agent.id, book.name)
+        peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
+        verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family)
         if verdict.decision == "die":
             self.kill(agent, "evidence", verdict.reason)
         elif verdict.decision == "eligible":
@@ -563,6 +564,8 @@ class House:
         if rung == 1:
             if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
                 return  # it stays eligible on paper until the owner turns real money on
+            if not self.tuition()["room"]:
+                return  # the micro rung is full, or its tuition is spent: it waits on paper
             if self.auditor is None or not self._audit_due(agent):
                 return
             audit = self.auditor.audit(agent, verdict)
@@ -572,6 +575,50 @@ class House:
         self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
         if rung == 1 and old is not None:
             self._move_books(agent, old)
+
+    # ---------------------------------------------------------------- tuition
+    def tuition(self) -> dict[str, Any]:
+        """What the micro rung has cost so far, and whether it may take another agent.
+
+        The paper screen lets through agents with no proven edge, on purpose: real fills are the
+        test. What that may cost is a number in the constitution, not a statistic. The cost is
+        the net loss of every real-money account that has never earned rung 3 (a swept account
+        counts what it lost: its equity is zero and what was not returned is still staked). A
+        new agent is seated only while the loss so far, plus what the agents already seated
+        and this one could lose before the drawdown rule stops them, fits under the line."""
+        rules = CONSTITUTION["tuition"]
+        pnl, seated = ZERO, 0
+        for book in self.books.values():
+            if not book.real_money:
+                continue
+            for agent_id in book.agents():
+                if self.evaluator.max_rung(agent_id) < 3:
+                    pnl += book.equity(agent_id) - book.account(agent_id).staked
+        for agent in self.registry.living():
+            if self.evaluator.rung(agent.id) == 2:
+                seated += 1
+        spent = max(-pnl, ZERO)
+        limit = Decimal(rules["max_loss_usd"])
+        at_risk = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]) * Decimal(str(CONSTITUTION["ladder"]["death"]["max_drawdown"]))
+        room = seated < int(rules["max_agents"]) and spent + at_risk * (seated + 1) <= limit
+        return {"pnl_usd": pnl, "spent_usd": spent, "limit_usd": limit, "seated": seated, "max_agents": int(rules["max_agents"]), "room": room, "closed": spent >= limit}
+
+    def _enforce_tuition(self) -> None:
+        """At the line the micro rung closes: everyone on it goes back to paper, once."""
+        state = self.tuition()
+        if not state["closed"]:
+            self._state["tuition_closed"] = False
+            return
+        for agent in self.registry.living():
+            if self.evaluator.rung(agent.id) == 2:
+                old = self.book_of(agent)
+                self.evaluator.demote(agent.id, f"the micro rung's tuition of ${state['limit_usd']} is spent", {"spent_usd": str(state["spent_usd"])})
+                if old is not None:
+                    self._move_books(agent, old)
+        if not self._state.get("tuition_closed"):
+            self._state["tuition_closed"] = True
+            self.alert("error", f"The micro rung has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition and is closed. "
+                                "No agent is promoted to real money until the owner raises `tuition.max_loss_usd` in the constitution.")
 
     def _audit_due(self, agent: Agent) -> bool:
         """An audit is about a quarter of a dollar, charged to the agent. A vetoed agent is not
@@ -817,6 +864,8 @@ class House:
             self.economy.payout(self.standings())
             if self.auditor is not None:
                 self.auditor.score()
+        if self.settings.real_money:
+            self._enforce_tuition()
         if open_for_business:
             self.keep_population()
         summary["deaths"] = sorted(living_before - {a.id for a in self.registry.living()})

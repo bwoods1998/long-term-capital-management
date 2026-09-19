@@ -32,7 +32,7 @@ from typing import Any, Mapping, Sequence
 
 from . import stats
 from .constitution import CONSTITUTION
-from .ledger import Ledger, now_iso
+from .ledger import HOUSE, Ledger, now_iso
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,11 @@ class Evaluator:
             if entry.payload.get("decision") in ("promote", "demote", "seat"):
                 return int(entry.payload["to_rung"])
         return 0
+
+    def max_rung(self, agent: str) -> int:
+        """The highest rung the agent has ever stood on."""
+        return max((int(e.payload["to_rung"]) for e in self.ledger.iter(kinds="eval.verdict", agent=agent)
+                    if e.payload.get("decision") in ("promote", "demote", "seat")), default=0)
 
     def _rung_entered(self, agent: str) -> int:
         """The ledger sequence number at which the agent entered its current rung."""
@@ -229,16 +234,27 @@ class Evaluator:
                 out.append(e.payload)
         return out
 
-    def trade_returns(self, agent: str, book: str, *, since_seq: int = 0) -> tuple[list[float], float]:
-        """Closed trades as a fraction of the stake, and the average fraction put at risk."""
-        staked = sum(float(e.payload["usd"]) for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book)
+    def trade_returns(self, agent: str, book: str, *, since_seq: int = 0, until_seq: int | None = None) -> tuple[list[float], float]:
+        """Closed trades as a fraction of the stake, and the average fraction put at risk.
+
+        With `until_seq` the record is a finished stay, whose account may since have been swept:
+        the stake is then the most the agent was ever lent up to that point, not what is left."""
+        stakes = [(e.seq, float(e.payload["usd"])) for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
+        if until_seq is None:
+            staked = sum(usd for _, usd in stakes)
+        else:
+            staked = running_stake = 0.0
+            for seq, usd in stakes:
+                if seq <= until_seq:
+                    running_stake += usd
+                    staked = max(staked, running_stake)
         if staked <= 0:
             return [], 0.0
         returns, risked = [], []
         running: dict[str, float] = {}  # a position sold in ten fills is one trade, closed when it is flat
         for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent):
             p = entry.payload
-            if entry.seq <= since_seq or p.get("book") != book:
+            if entry.seq <= since_seq or p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
                 continue
             key = str((p.get("instrument") or {}).get("market_id") or (p.get("instrument") or {}).get("symbol")) + ":" + str((p.get("instrument") or {}).get("right"))
             if entry.kind == "book.settle":
@@ -252,8 +268,17 @@ class Evaluator:
         # With no entry seen since the rung began (contracts carried in), assume all of it was at risk.
         return returns, (sum(risked) / len(risked) if risked else 1.0)
 
-    def judge(self, agent: str, book: str) -> Verdict:
-        """Look at an agent on the book of its current rung and say what the rules say."""
+    def judge(self, agent: str, book: str, *, peers: Sequence[str] = (), family: str = "") -> Verdict:
+        """Look at an agent on the book of its current rung and say what the rules say.
+
+        Two tests share the looks and nothing else. Death (an upper bound on growth below zero)
+        and promotion (a lower bound above it) are errors in opposite directions, so each spends
+        its own alpha across the looks where it was really tested: a look that could only kill
+        spends none of promotion's. A rung whose gate is a `screen` promotes on plain conditions
+        and spends no alpha at all; what it lets through is bounded in dollars by the House.
+
+        `peers` are the other agents of this agent's `family`: on a `bound` rung an agent whose own
+        record is positive but not yet decisive may pass on the family's pooled record."""
         rung = self.rung(agent)
         if rung == 0:
             return Verdict(agent, 0, "hold", "rung 0 is judged by replay")
@@ -271,39 +296,118 @@ class Evaluator:
         if drawdown >= death["max_drawdown"]:
             return self._decide(agent, rung, "die", f"drawdown of {drawdown:.0%} is past the {death['max_drawdown']:.0%} limit", numbers)
         looks = [
-            e for e in self.ledger.iter(kinds="eval.verdict", agent=agent)
+            e.payload for e in self.ledger.iter(kinds="eval.verdict", agent=agent)
             if e.seq > entered and e.payload.get("decision") == "look"
         ]
+        gate = self._gate(rung)
         every = int(self.ladder["look_every_active_blocks"])
-        needed = min(death["min_active_blocks"], self._promotion_blocks(rung))
-        last_look_active = int(looks[-1].payload.get("active_blocks") or 0) if looks else 0
+        needed = min([death["min_active_blocks"]] + ([int(gate["min_active_blocks"])] if gate else []))
+        last_look_active = int(looks[-1].get("active_blocks") or 0) if looks else 0
         if active < needed or active - last_look_active < every and looks:
             return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {max(needed, last_look_active + every)}", numbers)
-        k = len(looks) + 1
-        alpha = stats.spend(float(self.ladder["alpha"]), k)
-        bounds = stats.mean_bounds(growth, alpha)
-        if bounds is None:
+        alpha = float(self.ladder["alpha"])
+        tests_death = active >= death["min_active_blocks"]
+        tests_bound = bool(gate) and gate.get("gate", "bound") == "bound" and active >= int(gate["min_active_blocks"])
+        # A row written before the tests were told apart tested both whenever it looked.
+        k_death = 1 + sum(1 for row in looks if row.get("tested_death", True))
+        k_promote = 1 + sum(1 for row in looks if row.get("tested_promotion", True))
+        alpha_death, alpha_promote = stats.spend(alpha, k_death), stats.spend(alpha, k_promote)
+        lower, upper = stats.mean_bounds(growth, alpha_promote), stats.mean_bounds(growth, alpha_death)
+        if lower is None or upper is None:
             return Verdict(agent, rung, "hold", "not enough blocks for a bound", numbers)
         returns, risk = self.trade_returns(agent, book, since_seq=entered)
         lopsided = stats.lopsided(returns, float(self.ladder["lopsided_win_rate"]))
-        gate = stats.lopsided_growth_lcb(returns, risk, alpha) if lopsided else None
+        loss_gate = stats.lopsided_growth_lcb(returns, risk, alpha_promote) if lopsided else None
+        # `lcb` and `ucb` are always shown, at the alpha their test would spend at this look;
+        # `alpha_spent` and `alpha_death` say which of the two tests this look really ran.
         numbers.update(
-            look=k, alpha_spent=alpha, mean=bounds["mean"], sd=bounds["sd"], lcb=bounds["lcb"], ucb=bounds["ucb"],
-            trades=len(returns), lopsided=lopsided, loss_gate_lcb=gate,
+            look=len(looks) + 1, tested_death=tests_death, tested_promotion=tests_bound,
+            alpha_spent=alpha_promote if tests_bound else None, alpha_death=alpha_death if tests_death else None,
+            mean=lower["mean"], sd=lower["sd"], lcb=lower["lcb"], ucb=upper["ucb"],
+            trades=len(returns), lopsided=lopsided, loss_gate_lcb=loss_gate,
         )
         self.ledger.append("eval.verdict", {"decision": "look", "rung": rung, **numbers}, agent=agent)
-        if active >= death["min_active_blocks"] and bounds["ucb"] < 0:
+        if tests_death and upper["ucb"] < 0:
             return self._decide(agent, rung, "die", "the upper bound on its growth is below zero", numbers)
+        if not gate or active < int(gate["min_active_blocks"]):
+            return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
         if len(returns) < int(self.ladder["min_closed_trades"]):
             return Verdict(agent, rung, "hold", f"{len(returns)} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
-        if bounds["sd"] <= 0:
+        if gate.get("gate", "bound") == "screen":
+            limit = float(gate["max_drawdown"])
+            if level > 0 and drawdown < limit:
+                return Verdict(agent, rung, "eligible", f"it cleared the screen: {active} active blocks, {len(returns)} closed trades, growth above zero and a drawdown under {limit:.0%}", numbers)
+            why = "its growth is not above zero" if level <= 0 else f"its drawdown of {drawdown:.0%} is not under {limit:.0%}"
+            return Verdict(agent, rung, "hold", f"it has not cleared the screen: {why}", numbers)
+        if lower["sd"] <= 0:
             return Verdict(agent, rung, "hold", "its block growth has no variance yet: nothing to bound", numbers)
-        if rung < 3 and active >= self._promotion_blocks(rung) and bounds["lcb"] > 0 and (gate is None or gate > 0):
+        if lower["lcb"] > 0 and (loss_gate is None or loss_gate > 0):
             return Verdict(agent, rung, "eligible", "the lower bound on its growth is above zero", numbers)
+        if lower["mean"] > 0 and peers:
+            pooled = self._judge_family(agent, family, [agent, *peers], book, numbers)
+            if pooled is not None:
+                return pooled
         return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
 
+    def _gate(self, rung: int) -> Mapping[str, Any] | None:
+        """The promotion rule out of this rung, or None from the top."""
+        return None if rung >= 3 else self.ladder["paper" if rung == 1 else "micro"]
+
     def _promotion_blocks(self, rung: int) -> int:
-        return int(self.ladder["paper" if rung == 1 else "micro"]["min_active_blocks"])
+        return int(self._gate(min(rung, 2))["min_active_blocks"])
+
+    # ------------------------------------------------------------------ family
+    def family_record(self, members: Sequence[str], book: str) -> tuple[list[float], list[float], float, int]:
+        """The pooled real-money record of a family on one book: block by block, the mean growth
+        of the members that were on a real-money rung in that block (one series, so members that
+        trade the same hour are one observation, not several); their closed trades; the average
+        fraction they put at risk; and how many members had enough blocks to count."""
+        rules = self.ladder["family"]
+        by_block: dict[str, list[float]] = {}
+        trades: list[float] = []
+        risks: list[float] = []
+        counted = 0
+        for member in dict.fromkeys(members):
+            changes = [e for e in self.ledger.iter(kinds="eval.verdict", agent=member) if e.payload.get("decision") in ("promote", "demote", "seat")]
+            rows: list[dict[str, Any]] = []
+            for index, change in enumerate(changes):
+                if int(change.payload["to_rung"]) < 2:
+                    continue
+                until = changes[index + 1].seq if index + 1 < len(changes) else None
+                rows += self.blocks(member, since_seq=change.seq, until_seq=until, book=book)
+                returns, risk = self.trade_returns(member, book, since_seq=change.seq, until_seq=until)
+                trades += returns
+                risks += [risk] * len(returns)
+            if sum(1 for r in rows if r.get("active")) < int(rules["min_member_active_blocks"]):
+                continue
+            counted += 1
+            for row in rows:
+                by_block.setdefault(str(row["key"]), []).append(float(row["log_growth"]))
+        series = [sum(values) / len(values) for _, values in sorted(by_block.items())]
+        return series, trades, (sum(risks) / len(risks) if risks else 1.0), counted
+
+    def _judge_family(self, agent: str, family: str, members: Sequence[str], book: str, own: Mapping[str, Any]) -> Verdict | None:
+        rules = self.ladder["family"]
+        series, trades, risk, counted = self.family_record(members, book)
+        if counted < int(rules["min_members"]) or len(series) < self._promotion_blocks(2):
+            return None
+        looks = [e.payload for e in self.ledger.iter(kinds="eval.verdict", agent=HOUSE)
+                 if e.payload.get("decision") == "family-look" and e.payload.get("family") == family and e.payload.get("book") == book]
+        if looks and len(series) - int(looks[-1].get("blocks") or 0) < int(self.ladder["look_every_active_blocks"]):
+            return None
+        alpha = stats.spend(float(rules["alpha"]), len(looks) + 1)
+        bounds = stats.mean_bounds(series, alpha)
+        if bounds is None or bounds["sd"] <= 0:
+            return None
+        lopsided = stats.lopsided(trades, float(self.ladder["lopsided_win_rate"]))
+        loss_gate = stats.lopsided_growth_lcb(trades, risk, alpha) if lopsided else None
+        pooled = {"family": family, "book": book, "look": len(looks) + 1, "alpha_spent": alpha, "members": counted, "blocks": len(series),
+                  "mean": bounds["mean"], "sd": bounds["sd"], "lcb": bounds["lcb"], "trades": len(trades), "lopsided": lopsided, "loss_gate_lcb": loss_gate}
+        self.ledger.append("eval.verdict", {"decision": "family-look", **pooled}, agent=HOUSE)
+        if bounds["lcb"] > 0 and (loss_gate is None or loss_gate > 0):
+            return Verdict(agent, 2, "eligible", f"its own growth is above zero and the lower bound on its family's pooled growth ({counted} members) is above zero",
+                           {**own, "via": "family", "family_lcb": bounds["lcb"], "family_blocks": len(series), "family_members": counted})
+        return None
 
     def _decide(self, agent: str, rung: int, decision: str, reason: str, numbers: Mapping[str, Any]) -> Verdict:
         self.ledger.append("eval.verdict", {"decision": decision, "rung": rung, "reason": reason, **numbers}, agent=agent)

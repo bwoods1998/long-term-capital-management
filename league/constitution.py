@@ -35,10 +35,21 @@ CONSTITUTION: dict[str, Any] = {
         "min_closed_trades": 10,
         # Rung 0 -> 1: mechanical replay. Every replay ever run for the family is a trial.
         "replay": {"min_trades": 20, "min_blocks": 30, "min_deflated_sharpe": 0.90, "min_oos_blocks": 8},
-        # Rung 1 -> 2: forward paper test, then the frontier audit.
-        "paper": {"min_active_blocks": 30},
-        # Rung 2 -> 3: real fills at $1 to $10 a position.
-        "micro": {"min_active_blocks": 30},
+        # Rung 1 -> 2: a SCREEN, then the frontier audit. Not a confidence bound: a bound strict
+        # enough to mean something needs hundreds of trades (the first run's one measured edge
+        # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
+        # micro rung is capped in dollars instead: see `tuition`.
+        "paper": {"gate": "screen", "min_active_blocks": 15, "max_drawdown": 0.15},
+        # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
+        # this is the gate that protects real size. Promotion spends its own alpha: the looks
+        # that can only kill (before `min_active_blocks`) spend none of it.
+        "micro": {"gate": "bound", "min_active_blocks": 30},
+        # A small edge proves itself across a family sooner than in one agent (the first run's
+        # favourites edge was only ever measurable pooled). An agent on rung 2 whose own record is
+        # positive but not yet decisive may be scaled on its family's pooled real-money record:
+        # one series, the mean growth of the family's rung-2 agents block by block, tested at its
+        # own alpha with its own looks.
+        "family": {"alpha": 0.05, "min_members": 2, "min_member_active_blocks": 10},
         # Death at any rung above 0: evidence that growth is negative, or the stake is going.
         "death": {"min_active_blocks": 20, "max_drawdown": 0.30},
         # Drift at rungs 2 and 3: a CUSUM on block growth against the record that earned the rung.
@@ -48,6 +59,11 @@ CONSTITUTION: dict[str, Any] = {
         # of its loss rate as well, because a t-interval flatters it until the first loss arrives.
         "lopsided_win_rate": 0.80,
     },
+    # What the micro rung may cost, in dollars, whatever the statistics say. `max_loss_usd` is the
+    # net loss of every real-money account that has not yet earned rung 3; at the line, promotions
+    # to real money stop and the agents on rung 2 are sent back to paper. `max_agents` bounds how
+    # much can be at risk at once. Only the owner refills it (by raising this number).
+    "tuition": {"max_loss_usd": "50", "max_agents": 4},
     "rungs": {
         # Paper agents are held to the live account's real limits, not the paper account's.
         "1": {"stake_usd": "200", "max_position_usd": "100", "max_order_usd": "75"},
@@ -65,4 +81,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "e07748b44146f659515d97307ee5a97f712d06b195eec8e1e0eefd58bd742063"
+PINNED_DIGEST = "23d82d9559a197ebd502c836884cc068ced56e4d773136adb7a80742040154b5"

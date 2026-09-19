@@ -24,6 +24,12 @@ from league.ledger import Ledger
 BASE = datetime(2026, 9, 20, 0, 0, tzinfo=timezone.utc)
 ALPHA = float(CONSTITUTION["ladder"]["alpha"])
 
+#: The confidence bound is the gate out of the micro rung. These tests of the bound seat their
+#: agents on paper (as they did when paper used it too), under a constitution whose paper gate is
+#: the bound as well: the rule under test is the same code at either rung.
+BOUND = copy.deepcopy(CONSTITUTION)
+BOUND["ladder"]["paper"] = {"gate": "bound", "min_active_blocks": 30}
+
 WINNER = [1.2, 1.0, -0.4]  # dollars a block on a $200 stake: mean +0.3%, two wins in three
 LOSER = [-1.2, -1.0, 0.4]
 
@@ -37,7 +43,7 @@ class EvalCase(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.ledger = Ledger(Path(self.dir.name) / "ledger.db")
-        self.ev = Evaluator(self.ledger)
+        self.ev = Evaluator(self.ledger, constitution=BOUND)
         self._keys = 0
         self._equity: dict[tuple[str, str], float] = {}
 
@@ -504,12 +510,16 @@ class Judge(EvalCase):
         looks = self.looks("a")
         self.assertEqual([row["active_blocks"] for row in looks], [20, 25, 30])
         for k, row in enumerate(looks, start=1):
-            self.assertEqual(row["alpha_spent"], stats.spend(ALPHA, k))
+            # Death is tested at every look and spends its own series. Promotion cannot happen
+            # before 30 active blocks, so the looks at 20 and 25 spend none of ITS alpha: the look
+            # at 30 is promotion's first, with the largest share.
+            self.assertEqual((row["tested_death"], row["alpha_death"]), (True, stats.spend(ALPHA, k)))
+            self.assertEqual((row["tested_promotion"], row["alpha_spent"]), ((True, stats.spend(ALPHA, 1)) if k == 3 else (False, None)))
             growth = [0.006 if i % 2 else -0.001 for i in range(1, row["blocks"] + 1)]
-            bounds = stats.mean_bounds(growth, stats.spend(ALPHA, k))
-            self.assertAlmostEqual(row["lcb"], bounds["lcb"], places=15)
-            self.assertAlmostEqual(row["ucb"], bounds["ucb"], places=15)
-        self.assertLess(sum(row["alpha_spent"] for row in looks), ALPHA)
+            self.assertAlmostEqual(row["lcb"], stats.mean_bounds(growth, stats.spend(ALPHA, 1))["lcb"], places=15)
+            self.assertAlmostEqual(row["ucb"], stats.mean_bounds(growth, stats.spend(ALPHA, k))["ucb"], places=15)
+        self.assertLess(sum(row["alpha_death"] for row in looks), ALPHA)
+        self.assertLess(sum(row["alpha_spent"] or 0 for row in looks), ALPHA)
 
     def test_a_late_first_look_moves_the_cadence_with_it(self):
         self.ev.seat("a", 1, "test")
@@ -532,18 +542,18 @@ class Judge(EvalCase):
         self.assertEqual(len(self.looks("a")), 1)
 
     def test_alpha_spending_decides_a_record_that_full_alpha_would_pass(self):
-        """t is about 2.3 on 30 blocks: past the 5% line (1.70) but not the third look's 0.34% line (2.9)."""
+        """t is about 1.9 on 30 blocks: past the 5% line (1.70) but not the 3.04% line of promotion's first look (1.95)."""
         self.ev.seat("a", 1, "test")
         self.stake("a", 200, at())
         self.mixed_trades("a")
-        growth = [0.01 if i % 2 == 0 else -0.004 for i in range(30)]
+        growth = [0.01 if i % 2 == 0 else -0.0048 for i in range(30)]
         verdict = None
         for i, g in enumerate(growth, start=1):
             self.block("a", g)
             if i in (20, 25, 30):
                 verdict = self.ev.judge("a", "paper")
         self.assertGreater(stats.mean_bounds(growth, ALPHA)["lcb"], 0)  # an unspent alpha would promote
-        self.assertEqual(verdict.numbers["look"], 3)
+        self.assertEqual((verdict.numbers["look"], verdict.numbers["alpha_spent"]), (3, stats.spend(ALPHA, 1)))
         self.assertLess(verdict.numbers["lcb"], 0)
         self.assertEqual(verdict.numbers["trades"], 12)  # enough trades: it is the bound that holds it
         self.assertEqual((verdict.decision, verdict.reason), ("hold", "the evidence does not decide yet"))
@@ -747,7 +757,8 @@ class Judge(EvalCase):
             self.block("a", 0.004 if i % 2 else -0.002)
         verdict = self.ev.judge("a", "paper")
         self.assertEqual(verdict.numbers["look"], 1)  # the first look of THIS rung, with a full alpha share
-        self.assertEqual(verdict.numbers["alpha_spent"], stats.spend(ALPHA, 1))
+        self.assertEqual(verdict.numbers["alpha_death"], stats.spend(ALPHA, 1))
+        self.assertIsNone(verdict.numbers["alpha_spent"])  # 20 blocks: it could only have died
         self.assertEqual(verdict.numbers["blocks"], 20)
         self.assertEqual(verdict.numbers["trades"], 0)
 
@@ -1328,6 +1339,204 @@ class WithARealBook(unittest.TestCase):
         Evaluator(self.ledger).observe("a", "alpaca-paper", "hour")
         self.assertEqual(rows, [(e.seq, e.payload) for e in self.ledger.iter(kinds="eval.block")])
         self.assertEqual(self.ledger.verify(), self.ledger.count())
+
+
+# =================================================================================================
+# The paper screen (the constitution as it stands), and the family's pooled record
+# =================================================================================================
+class Screen(EvalCase):
+    """Paper to micro-real is a screen, not a bound: what it lets through is capped in dollars."""
+
+    def setUp(self):
+        super().setUp()
+        self.ev = Evaluator(self.ledger)  # the real constitution
+        self.assertEqual(CONSTITUTION["ladder"]["paper"], {"gate": "screen", "min_active_blocks": 15, "max_drawdown": 0.15})
+
+    def run_blocks(self, growth, *, trades=12, judge_at=None):
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        self.mixed_trades("a", n=trades)
+        verdict = None
+        for i, g in enumerate(growth, start=1):
+            self.block("a", g)
+            if judge_at is None or i in judge_at:
+                verdict = self.ev.judge("a", "paper")
+        return verdict
+
+    def test_a_modest_record_no_bound_would_pass_is_eligible_at_fifteen_active_blocks(self):
+        growth = [0.004 if i % 2 == 0 else -0.003 for i in range(15)]  # t is about 0.5: nowhere near any bound
+        self.assertLess(stats.mean_bounds(growth, ALPHA)["lcb"], 0)
+        verdict = self.run_blocks(growth)
+        self.assertEqual(verdict.decision, "eligible")
+        self.assertIn("cleared the screen", verdict.reason)
+        self.assertEqual((verdict.numbers["active_blocks"], verdict.numbers["trades"]), (15, 12))
+
+    def test_the_screen_spends_no_alpha(self):
+        verdict = self.run_blocks([0.004 if i % 2 == 0 else -0.003 for i in range(15)])
+        self.assertEqual((verdict.numbers["tested_promotion"], verdict.numbers["alpha_spent"]), (False, None))
+        self.assertEqual((verdict.numbers["tested_death"], verdict.numbers["alpha_death"]), (False, None))
+
+    def test_no_look_before_fifteen_active_blocks(self):
+        verdict = self.run_blocks([0.004] * 14)
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("next look is at 15", verdict.reason)
+        self.assertEqual(self.looks("a"), [])
+
+    def test_growth_at_or_below_zero_does_not_clear_it(self):
+        growth = [0.004 if i % 2 == 0 else -0.0047 for i in range(15)]  # eight small wins, seven slightly larger losses
+        self.assertLess(sum(growth), 0)
+        verdict = self.run_blocks(growth, judge_at=(15,))
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("growth is not above zero", verdict.reason)
+
+    def test_a_drawdown_of_fifteen_percent_does_not_clear_it_though_growth_is_positive(self):
+        growth = [0.10, 0.10, -0.17] + [0.002] * 12  # up 20%, then down 16% from the peak, still up overall
+        verdict = self.run_blocks(growth, judge_at=(15,))
+        self.assertGreater(sum(growth), 0)
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("drawdown", verdict.reason)
+
+    def test_fewer_than_ten_closed_trades_holds(self):
+        verdict = self.run_blocks([0.004] * 15, trades=9)
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("9 closed trades", verdict.reason)
+
+    def test_paper_still_kills(self):
+        verdict = self.run_blocks([-0.004 if i % 3 else 0.001 for i in range(20)])
+        self.assertEqual((verdict.decision, verdict.reason), ("die", "the upper bound on its growth is below zero"))
+        self.assertEqual(self.looks("a")[-1]["alpha_death"], stats.spend(ALPHA, 1))  # the look at 15 could not kill, so spent none
+
+    def test_a_thirty_percent_drawdown_kills_on_paper(self):
+        verdict = self.run_blocks([-0.2, -0.2])
+        self.assertEqual(verdict.decision, "die")
+
+    def test_the_micro_rung_is_still_the_bound(self):
+        self.ev.seat("a", 2, "test")
+        self.stake("a", 25, at(), book="real")
+        self.trades("a", [0.2, -0.1] * 6, book="real", cost=5.0)
+        modest = [0.004 if i % 2 == 0 else -0.003 for i in range(30)]
+        for i, g in enumerate(modest, start=1):
+            self.block("a", g, book="real", start=25.0)
+            if i in (20, 25, 30):
+                verdict = self.ev.judge("a", "real")
+        self.assertEqual((verdict.decision, verdict.reason), ("hold", "the evidence does not decide yet"))
+        self.assertEqual((verdict.numbers["tested_promotion"], verdict.numbers["alpha_spent"]), (True, stats.spend(ALPHA, 1)))
+
+    def test_a_look_row_from_before_the_tests_were_told_apart_counts_against_both(self):
+        self.ev.seat("a", 2, "test")
+        self.ledger.append("eval.verdict", {"decision": "look", "rung": 2, "active_blocks": 20, "look": 1, "alpha_spent": stats.spend(ALPHA, 1)}, agent="a")
+        self.stake("a", 25, at(), book="real")
+        self.trades("a", [0.2, -0.1] * 6, book="real", cost=5.0)
+        for i in range(30):
+            self.block("a", 0.004 if i % 2 == 0 else -0.003, book="real", start=25.0)
+        numbers = self.ev.judge("a", "real").numbers
+        self.assertEqual((numbers["alpha_spent"], numbers["alpha_death"]), (stats.spend(ALPHA, 2), stats.spend(ALPHA, 2)))
+
+
+class Family(EvalCase):
+    """A small edge is proved across a family before it is proved in any one member."""
+
+    def setUp(self):
+        super().setUp()
+        self.ev = Evaluator(self.ledger)
+        self.hours = 0
+
+    def member(self, name, growth, *, pnls=(0.2, -0.1) * 6):
+        self.ev.seat(name, 2, "test")
+        self.stake(name, 25, at(), book="real")
+        self.trades(name, list(pnls), book="real", cost=5.0)
+        for i, g in enumerate(growth):
+            self.ledger.append(
+                "eval.block",
+                {"book": "real", "key": f"2026-09-20T{i:03d}", "horizon": "hour", "start_equity": 25.0, "end_equity": 25.0 * math.exp(g),
+                 "flow": 0.0, "log_growth": g, "active": True},
+                agent=name,
+            )
+
+    #: Three members with the same small edge and independent noise: none decisive alone.
+    NOISE = {
+        "a": [0.012, -0.010, 0.011, -0.006, 0.002, 0.009, -0.011, 0.010, -0.004, 0.003],
+        "b": [-0.009, 0.012, -0.007, 0.010, 0.004, -0.010, 0.013, -0.006, 0.008, 0.001],
+        "c": [0.003, 0.004, 0.002, 0.001, 0.002, 0.006, 0.003, 0.002, 0.001, 0.004],
+    }
+
+    def series(self, name):
+        return [self.NOISE[name][i % 10] for i in range(30)]
+
+    def test_one_agent_alone_is_held_and_the_family_carries_it(self):
+        for name in "abc":
+            self.member(name, self.series(name))
+        alone = self.ev.judge("a", "real")
+        self.assertEqual((alone.decision, alone.reason), ("hold", "the evidence does not decide yet"))
+        self.assertGreater(alone.numbers["mean"], 0)
+        self.assertLess(alone.numbers["lcb"], 0)
+        self.ledger.append("eval.verdict", {"decision": "promote", "from_rung": 1, "to_rung": 2, "reason": "again"}, agent="b")  # b looks afresh
+        for name in "b":
+            self.member(name, self.series(name))
+        pooled = self.ev.judge("b", "real", peers=["a", "c"], family="favorites")
+        self.assertEqual(pooled.decision, "eligible")
+        self.assertEqual((pooled.numbers["via"], pooled.numbers["family_members"]), ("family", 3))
+        self.assertGreater(pooled.numbers["family_lcb"], 0)
+        looks = [e.payload for e in self.rows("eval.verdict", "house") if e.payload["decision"] == "family-look"]
+        self.assertEqual([(row["family"], row["look"], row["alpha_spent"]) for row in looks], [("favorites", 1, stats.spend(ALPHA, 1))])
+
+    def test_the_pooled_series_is_one_observation_a_block_not_one_a_member(self):
+        for name in "abc":
+            self.member(name, self.series(name))
+        series, trades, risk, counted = self.ev.family_record(["a", "b", "c"], "real")
+        self.assertEqual((len(series), counted, len(trades)), (30, 3, 36))
+        self.assertAlmostEqual(series[0], (0.012 - 0.009 + 0.003) / 3, places=12)
+
+    def test_a_member_with_a_losing_record_of_its_own_is_never_carried(self):
+        self.member("a", self.series("a"))
+        self.member("c", self.series("c"))
+        self.member("loser", [-x for x in self.series("a")])
+        verdict = self.ev.judge("loser", "real", peers=["a", "c"], family="favorites")
+        self.assertNotEqual(verdict.decision, "eligible")
+        self.assertEqual([e for e in self.rows("eval.verdict", "house")], [])  # the family was not even looked at
+
+    def test_one_member_is_not_a_family(self):
+        self.member("a", self.series("a"))
+        self.member("thin", self.series("c")[:5])  # under ten active blocks: it does not count
+        verdict = self.ev.judge("a", "real", peers=["thin"], family="favorites")
+        self.assertEqual(verdict.decision, "hold")
+
+    def test_paper_blocks_are_not_pooled(self):
+        self.member("a", self.series("a"))
+        self.ev.seat("paper-only", 1, "test")
+        for i in range(30):
+            self.ledger.append("eval.block", {"book": "real", "key": f"2026-09-20T{i:03d}", "horizon": "hour", "log_growth": 0.05, "active": True}, agent="paper-only")
+        series, _, _, counted = self.ev.family_record(["a", "paper-only"], "real")
+        self.assertEqual(counted, 1)
+        self.assertAlmostEqual(series[0], 0.012, places=12)
+
+    def test_a_lopsided_family_must_clear_the_loss_gate_too(self):
+        for name in "abc":
+            self.member(name, self.series(name), pnls=(0.05,) * 12)  # every trade a small win: one unseen loss is assumed
+        verdict = self.ev.judge("a", "real", peers=["b", "c"], family="favorites")
+        self.assertEqual(verdict.decision, "hold")
+        look = [e.payload for e in self.rows("eval.verdict", "house")][-1]
+        self.assertTrue(look["lopsided"])
+        self.assertLess(look["loss_gate_lcb"], 0)
+
+    def test_the_family_is_looked_at_once_per_five_new_blocks(self):
+        for name in "abc":
+            self.member(name, self.series(name), pnls=(0.05,) * 12)
+        for _ in range(3):
+            self.ev.judge("a", "real", peers=["b", "c"], family="favorites")
+            self.ledger.append("eval.verdict", {"decision": "promote", "from_rung": 1, "to_rung": 2, "reason": "again"}, agent="a")
+            self.member("a", self.series("a"), pnls=(0.05,) * 12)
+        self.assertEqual(len([e for e in self.rows("eval.verdict", "house")]), 1)
+
+    def test_a_finished_stay_is_measured_against_what_was_lent_not_what_is_left(self):
+        self.ev.seat("a", 2, "test")
+        self.stake("a", 25, at(), book="real")
+        self.trades("a", [1.0, -0.5], book="real", cost=5.0)
+        end = self.ledger.append("eval.verdict", {"decision": "demote", "from_rung": 2, "to_rung": 1, "reason": "test"}, agent="a").seq
+        self.stake("a", -24, at(), book="real")  # the House swept the account
+        self.trades("a", [9.0], book="real")  # and a later trade is not part of the stay
+        returns, _ = self.ev.trade_returns("a", "real", until_seq=end)
+        self.assertEqual(returns, [1.0 / 25, -0.5 / 25])
 
 
 if __name__ == "__main__":
