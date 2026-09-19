@@ -483,9 +483,13 @@ class Committee:
             if not is_live:
                 # A shadow desk is never funded. Its "allocation" is the notional book its
                 # proposals are scored against, so the scoreboard compares like with like.
-                targets[desk_id] = _quantize(base)
+                # `shadow_sleeve_usd` (config) is the floor of that budget: on Sept 19, 2026 a
+                # Foundry trial on a $200 shadow desk had its every quote refused for cash
+                # while the desk's house rows held the sleeve in positions awaiting settlement.
+                sleeve = money(self.config.get("shadow_sleeve_usd") or 0)
+                targets[desk_id] = _quantize(max(base, sleeve))
                 shadow[desk_id] = True
-                reasons[desk_id] = "shadow sleeve: notional scoring budget at manifest capital"
+                reasons[desk_id] = "shadow sleeve: notional scoring budget at manifest capital" if sleeve <= base else f"shadow sleeve: notional scoring budget at the floor's {sleeve} (manifest {base})"
                 continue
             if bool(self.config.get("venue_book", False)):
                 # The arena (Sept 18, 2026): a live desk is its venue's book. Its sleeve is the

@@ -208,7 +208,6 @@
           "kalshi"
         ],
         "subjects": [
-          "hourly_ranges",
           "hourly_quotes"
         ],
         "sandboxes": 10,
@@ -386,7 +385,8 @@
     "gate_max_breakers": 1,
     "resize_interval_hours": 3,
     "resize_interval_days": 1,
-    "venue_book": true
+    "venue_book": true,
+    "shadow_sleeve_usd": "600"
   },
   "sessions": {
     "shadow_enabled": false,

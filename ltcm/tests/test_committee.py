@@ -230,6 +230,19 @@ class AllocationTests(CommitteeCase):
         # The live sleeve keeps the whole floor: the notional budget never competed for it.
         self.assertEqual(targets["live-01"], Decimal("4000.00"))
         self.assertEqual(targets["earnings-01"], Decimal("1000.00"))
+
+    def test_the_floor_can_raise_every_shadow_sleeve_above_its_manifest(self):
+        # Sept 19, 2026: a Foundry trial on a $200 shadow desk had every quote refused for cash.
+        self.add(manifest("earnings-01"))
+        self.add(live_manifest("live-01", capital="4000"))
+        committee = self.committee(floor_capital_usd="4000", bandit_enabled=False, shadow_sleeve_usd="2500")
+        targets = committee.allocate("2026-09-14T22:00:00.000Z")
+        self.assertEqual(targets["earnings-01"], Decimal("2500.00"))
+        self.assertEqual(targets["live-01"], Decimal("4000.00"), "the notional budget never competes for the floor's money")
+        event = self.log.last("committee", "committee.allocation")
+        self.assertIn("2500", event.payload["reasons"]["earnings-01"])
+        lower = self.committee(floor_capital_usd="4000", bandit_enabled=False, shadow_sleeve_usd="500")
+        self.assertEqual(lower.allocate("2026-09-14T22:00:00.000Z")["earnings-01"], Decimal("1000.00"), "a floor below the manifest changes nothing")
         self.assertNotIn("scaled to the floor", event.payload["reasons"]["live-01"])
 
     def test_an_unchanged_allocation_is_not_republished(self):
