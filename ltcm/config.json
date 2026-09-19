@@ -189,7 +189,7 @@
     "fill_model": "touch",
     "deploy_live": false,
     "explorers": true,
-    "max_explorers_per_desk": 4,
+    "max_explorers_per_desk": 6,
     "lanes": [
       {
         "name": "kalshi",
@@ -213,7 +213,7 @@
         "sandboxes": 10,
         "sandbox_offset": 10,
         "code_candidates": 6,
-        "originate": 0,
+        "originate": 2,
         "family_step_minutes": {
           "kalshi": 5
         },
