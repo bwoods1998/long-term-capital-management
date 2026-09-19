@@ -1,1 +1,8 @@
-[]
+[
+ {
+  "name": "deliberately-broken",
+  "family": "test",
+  "file": "deliberately_broken.py",
+  "why": "a deliberately broken pull request, to prove CI refuses it"
+ }
+]
