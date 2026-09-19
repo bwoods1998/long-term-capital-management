@@ -163,7 +163,9 @@ class HouseTest(HouseCase):
         self.assertEqual(self.house.found(["crypto-reversion"]), [])  # idempotent
         self.house.tick()
         self.house.wait()
-        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent="crypto-reversion"), 1)
+        # Seen failing once on a slow CI runner (Sept 19, 2026) and never locally: if it does again, say why.
+        alerts = [e.payload.get("text") for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent="crypto-reversion"), 1, alerts)
 
     def test_an_agent_that_never_qualifies_is_retired(self):
         agent = self.house.spawn("idle", "test-family", IDLE, reason="test")
