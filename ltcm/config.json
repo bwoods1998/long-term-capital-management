@@ -265,8 +265,8 @@
     "protected_desks": [],
     "min_days": 1,
     "min_decisions": 5,
-    "target_variants": 12,
-    "max_variants": 14,
+    "target_variants": 18,
+    "max_variants": 20,
     "playbook_profile": "k3",
     "playbook_reasoning_effort": "high",
     "playbook_budget_usd_per_day": "40.00"
