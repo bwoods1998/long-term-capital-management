@@ -150,3 +150,41 @@ class Looking(ResearchCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Truncated(ResearchCase):
+    """An answer cut short by the output budget (reasoning tokens included) still holds work."""
+
+    def script(self, turns, *, cut=2, **kw):
+        """A provider whose first `cut` answers are cut short by the output budget."""
+        r = self.researcher(turns, **kw)
+        original = self.script.respond
+
+        def respond(profile, conversation, **kwargs):
+            reply = original(profile, conversation, **kwargs)
+            reply.incomplete = len(self.script.seen) <= cut
+            reply.incomplete_reason = "max_output_tokens"
+            return reply
+
+        self.script.respond = respond
+        return r
+
+    def test_the_tool_calls_a_cut_short_answer_made_are_still_run(self):
+        r = self.script([[("journal_write", {"text": "The chain's spreads are widest in the first ten minutes."})],
+                         [("library_search", {"query": "spreads"})],
+                         [("finish", {"summary": "Wrote what I found about spreads at the open."})]], cut=2)
+        out = r.research(self.parent, {}, session="s1")
+        self.assertEqual((out.reason, out.turns), ("finished", 3))
+        self.assertIn("widest in the first ten minutes", self.researcher([]).journal(self.parent.id)[0]["text"])
+        cut = [e.payload for e in self.ledger.iter(kinds="agent.research") if e.payload.get("tool") == "truncated"]
+        self.assertEqual([(row["reason"], row["calls"]) for row in cut], [("max_output_tokens", ["journal_write"]), ("max_output_tokens", ["library_search"])])
+
+    def test_an_answer_cut_short_with_nothing_in_it_ends_the_pass_and_says_why(self):
+        r = self.script([[]], cut=9)
+        out = r.research(self.parent, {}, session="s1")
+        self.assertEqual((out.reason, out.turns), ("provider: max_output_tokens", 1))
+
+    def test_three_cut_answers_end_the_pass_however_much_they_carried(self):
+        r = self.script([[("library_search", {"query": "x"})]] * 6, cut=9)
+        out = r.research(self.parent, {}, session="s1")
+        self.assertEqual((out.reason, out.turns), ("provider: max_output_tokens", 3))

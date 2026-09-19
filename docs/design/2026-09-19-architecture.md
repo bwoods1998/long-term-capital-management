@@ -386,3 +386,20 @@ configured`).
     was ROLLED BACK by the in-box watchdog, correctly, because its first tick re-read every venue
     listing for sixteen agents and did not finish within the watchdog's five minutes. The floor
     came back on the previous release by itself within a minute.
+36. **A replay is deflated by the candidate's own LINE, not by its cousins** (measured in the first
+    hours of production). Six sports founders shared one family, so their six founding replays
+    spent the family's whole trial budget, and then every agent that researched refused to
+    experiment at all: three of three passes said in so many words that a replay "would waste a
+    counted trial". A deflated Sharpe corrects for picking the best of several tries at ONE idea;
+    six different rules tested once each are six hypotheses, not a selection. Trials are now
+    counted along the agent's lineage, a child inherits its parent's count, and the rules text
+    gives agents the measured budget (a Sharpe-0.20 strategy still passes at 5 trials, fails by
+    10) instead of the old flat "do not grind variants". The family is still what pools a real-money
+    record at the scaled gate.
+37. **The paper screen counts a week, not fifteen blocks** (`min_active_blocks_day`: 5). A block is
+    a calendar day for a daily strategy, so fifteen of them is longer than the whole expedition and
+    seventeen of the twenty-eight founders could never have reached real money inside one.
+38. **An answer cut short by the output budget still carries its work.** Five of the first eight
+    research passes ended as "incomplete" after two turns and everything the model had done was
+    thrown away. The tool calls it managed are now run, the reason is recorded, and the research
+    budget is 16,000 output tokens (reasoning tokens count toward it).

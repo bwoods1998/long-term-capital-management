@@ -45,12 +45,13 @@ Approve only if you found no blocker. When in doubt, veto: a vetoed agent keeps 
 
 
 class Auditor:
-    def __init__(self, frontier: Frontier, ledger: Ledger, economy: Any, evaluator: Any, *, live_agents=lambda: []):
+    def __init__(self, frontier: Frontier, ledger: Ledger, economy: Any, evaluator: Any, *, live_agents=lambda: [], lineage=None):
         self.frontier = frontier
         self.ledger = ledger
         self.economy = economy
         self.evaluator = evaluator
         self.live_agents = live_agents  # () -> [{"agent", "family", "niche"}] already on real money
+        self.lineage = lineage  # (agent id) -> itself, its parent, its parent's parent...
 
     # ----------------------------------------------------------------- packet
     def packet(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
@@ -71,7 +72,7 @@ class Auditor:
             "needs": agent.needs,
             "test_passed": verdict.numbers,
             "thresholds": CONSTITUTION["ladder"],
-            "family_trials": len(self.evaluator.family_trials(agent.family)),
+            "trials_in_its_line": len(self.evaluator.family_trials(agent.family, self.lineage(agent.id) if self.lineage else None)),
             "replay_trials": [{k: t.get(k) for k in ("sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "max_drawdown", "passed", "reasons")} for t in trials][-10:],
             "paper_blocks": [{"key": b["key"], "log_growth": b["log_growth"], "active": b["active"]} for b in blocks][-200:],
             "paper_fills": fills[-120:],

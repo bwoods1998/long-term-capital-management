@@ -150,6 +150,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
+        lineage=house.registry.lineage,
     )
     if astra:
         from .astra import Astra, GatewayForge, evidence_from

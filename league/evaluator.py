@@ -95,23 +95,36 @@ class Evaluator:
         )
 
     # ------------------------------------------------------------------ rung 0
-    def family_trials(self, family: str) -> list[float | None]:
-        """One entry for every replay ever run for this family, passed, failed or crashed: its
-        Sharpe ratio, or None when it had none. A failed replay is still a try, so it still raises
-        the bar; only the defined Sharpes feed the variance."""
+    def family_trials(self, family: str, lineage: Sequence[str] | None = None) -> list[float | None]:
+        """One entry for every replay in this candidate's SELECTION PATH, passed, failed or crashed:
+        its Sharpe ratio, or None when it had none. A failed replay is still a try, so it still
+        raises the bar; only the defined Sharpes feed the variance.
+
+        The path is the agent's lineage: itself, its parent, its parent's parent. That is what a
+        deflated Sharpe corrects for: picking the best of several tries at ONE idea. Six founders
+        of one family testing six different rules once each are six hypotheses, not a selection,
+        and deflating each by six is a correction for something that did not happen (measured
+        Sept 19, 2026: the six sports founders burned their family's whole trial budget on their
+        own first replays, and every agent then refused to experiment at all). Grinding variants
+        down one lineage still raises that lineage's bar, and a child inherits its parent's count,
+        so there is no way to spend the budget and start again.
+
+        With no lineage the family is the path, which is what it was before and what tests use."""
+        wanted = set(lineage) if lineage else None
         return [
             (float(entry.payload["sharpe"]) if entry.payload.get("sharpe") is not None else None)
             for entry in self.ledger.iter(kinds="eval.trial")
-            if entry.payload.get("family") == family
+            if (entry.agent in wanted if wanted is not None else entry.payload.get("family") == family)
         ]
 
-    def record_trial(self, agent: str, family: str, result: Mapping[str, Any], *, tape_id: str = "", promote: bool = True) -> Verdict:
+    def record_trial(self, agent: str, family: str, result: Mapping[str, Any], *, tape_id: str = "", promote: bool = True,
+                     lineage: Sequence[str] | None = None) -> Verdict:
         """Score one replay. It is recorded as a trial whatever it shows, and it is judged against
-        every trial the family has run, this one included."""
+        every trial in its selection path (`family_trials`), this one included."""
         rules = self.ladder["replay"]
         growth = [float(b["log_growth"]) for b in result.get("blocks") or []]
         sharpe = stats.sharpe(growth) if result.get("ok") else None
-        trials = self.family_trials(family) + [sharpe]
+        trials = self.family_trials(family, lineage) + [sharpe]
         defined = [t for t in trials if t is not None]
         deflated = stats.deflated_sharpe(growth, defined, n_trials=len(trials)) if sharpe is not None else None
         oos = result.get("out_of_sample") or {}
@@ -148,7 +161,7 @@ class Evaluator:
         }
         self.ledger.append("eval.trial", numbers, agent=agent)
         if passed and promote and self.rung(agent) == 0:
-            return self.promote(agent, 1, "passed replay against every trial its family has run", numbers)
+            return self.promote(agent, 1, "passed replay against every trial in its own line", numbers)
         return Verdict(agent, self.rung(agent), "hold", "; ".join(reasons) or "passed replay; no promotion was asked for or due", numbers)
 
     # ------------------------------------------------------------ rungs 1 to 3
@@ -271,7 +284,7 @@ class Evaluator:
         # With no entry seen since the rung began (contracts carried in), assume all of it was at risk.
         return returns, (sum(risked) / len(risked) if risked else 1.0)
 
-    def judge(self, agent: str, book: str, *, peers: Sequence[str] = (), family: str = "") -> Verdict:
+    def judge(self, agent: str, book: str, *, peers: Sequence[str] = (), family: str = "", horizon: str = "hour") -> Verdict:
         """Look at an agent on the book of its current rung and say what the rules say.
 
         Two tests share the looks and nothing else. Death (an upper bound on growth below zero)
@@ -303,14 +316,15 @@ class Evaluator:
             if e.seq > entered and e.payload.get("decision") == "look"
         ]
         gate = self._gate(rung)
+        blocks_needed = self._gate_blocks(rung, horizon)
         every = int(self.ladder["look_every_active_blocks"])
-        needed = min([death["min_active_blocks"]] + ([int(gate["min_active_blocks"])] if gate else []))
+        needed = min([death["min_active_blocks"]] + ([blocks_needed] if gate else []))
         last_look_active = int(looks[-1].get("active_blocks") or 0) if looks else 0
         if active < needed or active - last_look_active < every and looks:
             return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {max(needed, last_look_active + every)}", numbers)
         alpha = float(self.ladder["alpha"])
         tests_death = active >= death["min_active_blocks"]
-        tests_bound = bool(gate) and gate.get("gate", "bound") == "bound" and active >= int(gate["min_active_blocks"])
+        tests_bound = bool(gate) and gate.get("gate", "bound") == "bound" and active >= blocks_needed
         # A row written before the tests were told apart tested both whenever it looked.
         k_death = 1 + sum(1 for row in looks if row.get("tested_death", True))
         k_promote = 1 + sum(1 for row in looks if row.get("tested_promotion", True))
@@ -332,14 +346,14 @@ class Evaluator:
         self.ledger.append("eval.verdict", {"decision": "look", "rung": rung, **numbers}, agent=agent)
         if tests_death and upper["ucb"] < 0:
             return self._decide(agent, rung, "die", "the upper bound on its growth is below zero", numbers)
-        if not gate or active < int(gate["min_active_blocks"]):
+        if not gate or active < blocks_needed:
             return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
         if len(returns) < int(self.ladder["min_closed_trades"]):
             return Verdict(agent, rung, "hold", f"{len(returns)} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
         if gate.get("gate", "bound") == "screen":
             limit = float(gate["max_drawdown"])
             if level > 0 and drawdown < limit:
-                return Verdict(agent, rung, "eligible", f"it cleared the screen: {active} active blocks, {len(returns)} closed trades, growth above zero and a drawdown under {limit:.0%}", numbers)
+                return Verdict(agent, rung, "eligible", f"it cleared the screen: {active} active {horizon} blocks, {len(returns)} closed trades, growth above zero and a drawdown under {limit:.0%}", numbers)
             why = "its growth is not above zero" if level <= 0 else f"its drawdown of {drawdown:.0%} is not under {limit:.0%}"
             return Verdict(agent, rung, "hold", f"it has not cleared the screen: {why}", numbers)
         if lower["sd"] <= 0:
@@ -347,7 +361,7 @@ class Evaluator:
         if lower["lcb"] > 0 and (loss_gate is None or loss_gate > 0):
             return Verdict(agent, rung, "eligible", "the lower bound on its growth is above zero", numbers)
         if lower["mean"] > 0 and peers:
-            pooled = self._judge_family(agent, family, [agent, *peers], book, numbers)
+            pooled = self._judge_family(agent, family, [agent, *peers], book, numbers, horizon)
             if pooled is not None:
                 return pooled
         return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
@@ -356,8 +370,14 @@ class Evaluator:
         """The promotion rule out of this rung, or None from the top."""
         return None if rung >= 3 else self.ladder["paper" if rung == 1 else "micro"]
 
-    def _promotion_blocks(self, rung: int) -> int:
-        return int(self._gate(min(rung, 2))["min_active_blocks"])
+    def _gate_blocks(self, rung: int, horizon: str = "hour") -> int:
+        """The active blocks this rung's gate asks for, by the strategy's block length."""
+        gate = self._gate(rung) or self._gate(2)
+        key = "min_active_blocks_day" if horizon == "day" and "min_active_blocks_day" in gate else "min_active_blocks"
+        return int(gate[key])
+
+    def _promotion_blocks(self, rung: int, horizon: str = "hour") -> int:
+        return self._gate_blocks(min(rung, 2), horizon)
 
     # ------------------------------------------------------------------ family
     def family_record(self, members: Sequence[str], book: str) -> tuple[list[float], list[float], float, int]:
@@ -389,10 +409,10 @@ class Evaluator:
         series = [sum(values) / len(values) for _, values in sorted(by_block.items())]
         return series, trades, (sum(risks) / len(risks) if risks else 1.0), counted
 
-    def _judge_family(self, agent: str, family: str, members: Sequence[str], book: str, own: Mapping[str, Any]) -> Verdict | None:
+    def _judge_family(self, agent: str, family: str, members: Sequence[str], book: str, own: Mapping[str, Any], horizon: str = "hour") -> Verdict | None:
         rules = self.ladder["family"]
         series, trades, risk, counted = self.family_record(members, book)
-        if counted < int(rules["min_members"]) or len(series) < self._promotion_blocks(2):
+        if counted < int(rules["min_members"]) or len(series) < self._promotion_blocks(2, horizon):
             return None
         looks = [e.payload for e in self.ledger.iter(kinds="eval.verdict", agent=HOUSE)
                  if e.payload.get("decision") == "family-look" and e.payload.get("family") == family and e.payload.get("book") == book]

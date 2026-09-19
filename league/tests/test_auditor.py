@@ -86,10 +86,10 @@ class AuditorCase(unittest.TestCase):
                      parent="fav-0", code=CODE, params={"floor": 0.93}, wake_minutes=15, born_at="2026-09-20T00:00:00.000Z",
                      needs={"venue": "kalshi", "horizon": "hour", "series": ["KXBTC"]})
 
-    def auditor(self, *script, live_agents=lambda: []):
+    def auditor(self, *script, live_agents=lambda: [], lineage=None):
         self.opener = FakeOpener(*script)
         frontier = Frontier(GATEWAY, lambda: SECRET, opener=self.opener)
-        return Auditor(frontier, self.ledger, self.economy, self.evaluator, live_agents=live_agents)
+        return Auditor(frontier, self.ledger, self.economy, self.evaluator, live_agents=live_agents, lineage=lineage)
 
     def verdict_rows(self, agent=None):
         return [e.payload for e in self.ledger.iter(kinds="audit.verdict", agent=agent)]
@@ -266,7 +266,10 @@ class Packet(AuditorCase):
         self.assertEqual(packet["thresholds"], CONSTITUTION["ladder"])
         self.assertEqual(packet["micro_real_limits"], CONSTITUTION["rungs"]["2"])
         self.assertEqual(packet["test_passed"], self.verdict.numbers)
-        self.assertEqual(packet["family_trials"], 2)  # the cousin's trial counts against the family
+        # A cousin's trial is not this candidate's selection path: what deflates it is its own line.
+        self.assertEqual(packet["trials_in_its_line"], 2)  # no lineage given: the family, as it was before
+        lined = self.auditor(live_agents=lambda: live, lineage=lambda a: ["fav-1", "fav-0"]).packet(self.agent, self.verdict)
+        self.assertEqual(lined["trials_in_its_line"], 1)  # the House always gives one: only its own line
         self.assertEqual([t["sharpe"] for t in packet["replay_trials"]], [0.4])  # but only its own are listed
         self.assertEqual([b["key"] for b in packet["paper_blocks"]], [f"2026-09-20T{i:02d}" for i in range(4)])
         self.assertEqual(packet["paper_blocks"][1], {"key": "2026-09-20T01", "log_growth": 0.001, "active": True})

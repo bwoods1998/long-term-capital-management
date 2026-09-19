@@ -58,7 +58,7 @@
     "profile": "pro_flex",
     "fast_profile": "pro_asap",
     "max_turns": 10,
-    "max_output_tokens": 6000,
+    "max_output_tokens": 16000,
     "min_hours_between": 3,
     "min_credits_usd": "0.10",
     "reasoning_effort": "medium"

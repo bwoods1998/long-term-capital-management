@@ -660,7 +660,7 @@ class House:
             return {"agent": agent.id, "skipped": "replay unavailable"}
         with self._state_lock:
             self._state["tried"][agent.id] = agent.code_sha256
-        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id)
+        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, lineage=self.registry.lineage(agent.id))
         if verdict.decision == "promote":
             self.seat(agent)
         return {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
@@ -692,7 +692,7 @@ class House:
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
             return {"passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
-        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False)
+        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
         return {"passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
                 "digest": result.get("digest")}
 
@@ -704,7 +704,7 @@ class House:
             return None
         self.evaluator.observe(agent.id, book.name, agent.horizon)
         peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
-        verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family)
+        verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
         if verdict.decision == "die":
             self.kill(agent, "evidence", verdict.reason)
         elif verdict.decision == "eligible":

@@ -949,6 +949,23 @@ class ReplayTrials(EvalCase):
         verdict = self.ev.record_trial("loner", "quiet", replay_result())
         self.assertEqual((verdict.decision, verdict.numbers["trials"]), ("promote", 1))
 
+    def test_a_candidate_is_deflated_by_its_own_line_not_by_its_cousins(self):
+        # Measured Sept 19, 2026: six sports founders shared one family, so their six founding
+        # replays spent the family's whole trial budget and every agent then refused to experiment.
+        # What a deflated Sharpe corrects for is picking the best of several tries at ONE idea.
+        self.seed_trials("sports", [0.1] * 6)
+        self.assertEqual(len(self.ev.family_trials("sports")), 6)
+        self.assertEqual(len(self.ev.family_trials("sports", ["newcomer"])), 0)
+        good = replay_result([0.012, 0.004, -0.004, 0.008] * 10)
+        cousin_blind = self.ev.record_trial("newcomer", "sports", good, promote=False, lineage=["newcomer"])
+        self.assertEqual(cousin_blind.numbers["trials"], 1)
+        # Its own tries still count, and its child inherits them: there is no way to start again.
+        for i in range(3):
+            self.ev.record_trial("newcomer", "sports", good, promote=False, lineage=["newcomer"])
+        child = self.ev.record_trial("child", "sports", good, promote=False, lineage=["child", "newcomer"])
+        self.assertEqual(child.numbers["trials"], 5)  # the parent's four, and its own
+        self.assertLess(child.numbers["deflated_sharpe"], cousin_blind.numbers["deflated_sharpe"])
+
     def test_every_trial_raises_the_bar_for_the_next(self):
         benchmarks = []
         for i in range(6):
@@ -1350,7 +1367,8 @@ class Screen(EvalCase):
     def setUp(self):
         super().setUp()
         self.ev = Evaluator(self.ledger)  # the real constitution
-        self.assertEqual(CONSTITUTION["ladder"]["paper"], {"gate": "screen", "min_active_blocks": 15, "max_drawdown": 0.15})
+        self.assertEqual(CONSTITUTION["ladder"]["paper"],
+                         {"gate": "screen", "min_active_blocks": 15, "min_active_blocks_day": 5, "max_drawdown": 0.15})
 
     def run_blocks(self, growth, *, trades=12, judge_at=None):
         self.ev.seat("a", 1, "test")
@@ -1409,6 +1427,29 @@ class Screen(EvalCase):
     def test_a_thirty_percent_drawdown_kills_on_paper(self):
         verdict = self.run_blocks([-0.2, -0.2])
         self.assertEqual(verdict.decision, "die")
+
+    def test_a_daily_strategy_clears_the_screen_on_five_blocks_not_fifteen(self):
+        # A block is a calendar day for a daily strategy: fifteen of them is longer than the whole
+        # expedition, so no daily agent could ever reach real money inside one.
+        growth = [0.004 if i % 2 == 0 else -0.003 for i in range(5)]
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        self.mixed_trades("a", n=12)
+        for g in growth:
+            self.block("a", g)
+            verdict = self.ev.judge("a", "paper", horizon="day")
+        self.assertEqual(verdict.decision, "eligible")
+        self.assertIn("5 active day blocks", verdict.reason)
+        self.assertEqual(self.ev._gate_blocks(1, "day"), 5)
+        self.assertEqual(self.ev._gate_blocks(1, "hour"), 15)
+
+    def test_an_hourly_strategy_is_not_let_through_on_five(self):
+        verdict = self.run_blocks([0.004 if i % 2 == 0 else -0.003 for i in range(5)])
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("next look is at 15", verdict.reason)
+
+    def test_the_micro_rung_asks_thirty_of_either_kind(self):
+        self.assertEqual((self.ev._gate_blocks(2, "day"), self.ev._gate_blocks(2, "hour")), (30, 30))
 
     def test_the_micro_rung_is_still_the_bound(self):
         self.ev.seat("a", 2, "test")

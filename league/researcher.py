@@ -99,10 +99,11 @@ class Researcher:
             + self.contract
             + "\n\nHOW TO WORK. Call one tool per turn. Start from your journal and your own recent trades: they are what you know that "
             "nobody else does. Look at the live view (`markets_now`) before you design a rule about prices or spreads. Read the library "
-            "and the playbook before paying for a search. Only call `replay` when you have a specific, reasoned change: each call is a "
-            "counted trial, and its answer says WHERE the strategy won and lost, not only whether. Write a library note when you learn "
-            "something another agent could use, and a journal note (`journal_write`) for your future self: you keep nothing else of this "
-            "pass. End with `finish`."
+            "and the playbook before paying for a search. THEN CHANGE SOMETHING: your line has about five to nine replay trials and they "
+            "are worthless unspent, so if you can name a reasoned change and write the whole file, `replay` it this pass. Its answer says "
+            "WHERE the strategy won and lost, not only whether, so even a failure buys you the next question. A pass that concludes 'wait "
+            "and see' has spent your credits and bought nothing. Write a library note when you learn something another agent could use, "
+            "and a journal note (`journal_write`) for your future self: you keep nothing else of this pass. End with `finish`."
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
@@ -142,7 +143,7 @@ class Researcher:
             {"role": "system", "content": self._system()},
             {"role": "user", "content": self._state(agent, standing)},
         ]
-        nudged = False
+        nudged, truncated = False, 0
         for turn in range(int(self.settings.get("max_turns", 6))):
             balance = self.economy.balance(agent.id)
             if balance <= Decimal(str(self.settings.get("min_credits_usd", "0.10"))):
@@ -173,10 +174,19 @@ class Researcher:
             text = (response.output_text or "").strip()
             if text:
                 self.ledger.append("agent.thought", {"text": text[:4000], "session": session, "phase": "research"}, agent=agent.id)
-            if response.status in ("failed", "cancelled") or response.incomplete:
-                out.reason = "provider: incomplete"
-                break
             calls = response.function_calls
+            if response.status in ("failed", "cancelled") or response.incomplete:
+                # An answer cut short (usually the output budget, reasoning tokens included) still
+                # holds the tool calls it managed to make: they are run, and the next turn has a
+                # whole budget again. Measured Sept 19, 2026: five of eight passes ended here after
+                # two turns, and everything the model had done was thrown away.
+                reason = str(getattr(response, "incomplete_reason", None) or response.status)
+                self.ledger.append("agent.research", {"tool": "truncated", "session": session, "turn": turn, "reason": reason,
+                                                      "calls": [c.name for c in calls]}, agent=agent.id)
+                truncated += 1
+                if not calls or truncated > 2:
+                    out.reason = f"provider: {reason}"
+                    break
             if not calls:
                 if nudged:
                     out.reason = "no tool call"

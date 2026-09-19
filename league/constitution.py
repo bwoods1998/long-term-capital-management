@@ -44,7 +44,11 @@ CONSTITUTION: dict[str, Any] = {
         # enough to mean something needs hundreds of trades (the first run's one measured edge
         # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
         # micro rung is capped in dollars instead: see `tuition`.
-        "paper": {"gate": "screen", "min_active_blocks": 15, "max_drawdown": 0.15},
+        # `min_active_blocks` is in BLOCKS, and a block is an hour or a calendar day by the
+        # strategy's own declared horizon: 15 days is the whole expedition, so a daily strategy
+        # could never reach real money inside one. What the screen really asks for is a week of
+        # honest forward trading, which is 15 hourly blocks or 5 daily ones.
+        "paper": {"gate": "screen", "min_active_blocks": 15, "min_active_blocks_day": 5, "max_drawdown": 0.15},
         # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
         # this is the gate that protects real size. Promotion spends its own alpha: the looks
         # that can only kill (before `min_active_blocks`) spend none of it.
@@ -90,4 +94,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "05fa30176f211e8751f93b3706b9fe16486636e78c6c215fea9228018521f04c"
+PINNED_DIGEST = "036ff7c6301085a1c1a549a9f131a624e5bf71dfe845b647349de453f865490a"
