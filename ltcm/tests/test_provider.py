@@ -903,3 +903,23 @@ class SailBurnTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToolChoiceTest(ProviderCase):
+    """A caller whose every turn must end in a tool call may say so."""
+
+    ITEMS = [{"role": "user", "content": "hi"}]
+    TOOLS = [{"name": "finish", "description": "d", "parameters": {"type": "object"}}]
+
+    def test_auto_by_default_and_required_when_asked(self):
+        provider = self.provider(FakeTransport())
+        self.assertEqual(provider.build_body("pro_flex", self.ITEMS, tools=self.TOOLS)["tool_choice"], "auto")
+        self.assertEqual(provider.build_body("pro_flex", self.ITEMS, tools=self.TOOLS, tool_choice="required")["tool_choice"], "required")
+
+    def test_a_choice_that_is_not_one_is_refused(self):
+        provider = self.provider(FakeTransport())
+        with self.assertRaises(ProviderError):
+            provider.build_body("pro_flex", self.ITEMS, tools=self.TOOLS, tool_choice="insist")
+
+    def test_no_tools_means_no_choice_at_all(self):
+        self.assertNotIn("tool_choice", self.provider(FakeTransport()).build_body("pro_flex", self.ITEMS))

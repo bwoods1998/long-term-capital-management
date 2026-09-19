@@ -63,10 +63,11 @@
     "profile": "pro_flex",
     "fast_profile": "pro_asap",
     "max_turns": 10,
-    "max_output_tokens": 16000,
+    "max_output_tokens": 32000,
     "min_hours_between": 3,
     "min_credits_usd": "0.10",
-    "reasoning_effort": "medium"
+    "reasoning_effort": "medium",
+    "tool_choice": "required"
   },
   "horizon": {
     "_about": "Fast feedback: no Kalshi entry expected to resolve later than this, and no crypto position held longer. Equities and options are not bounded.",
@@ -98,11 +99,11 @@
       "architect": 8
     },
     "first_after_hours": {
-      "operator": 3,
-      "toolsmith": 4,
-      "teacher": 12,
-      "architect": 6,
-      "designer": 24
+      "operator": 2,
+      "toolsmith": 1,
+      "teacher": 8,
+      "architect": 3,
+      "designer": 18
     },
     "effort": {
       "architect": "high",

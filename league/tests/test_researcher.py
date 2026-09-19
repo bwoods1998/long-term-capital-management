@@ -291,3 +291,29 @@ class Hiring(ResearchCase):
                              merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
         r3.research(self.parent, {}, session="s3")
         self.assertIn("answer", self.tool_output(1))
+
+
+class Acting(ResearchCase):
+    """A pass that reasons until its budget is gone and calls no tool has bought nothing.
+
+    Measured Sept 19, 2026: nine of fifteen passes ended as `max_output_tokens` at turn one or two
+    with no tool call at all, each costing about three cents.
+    """
+
+    def test_the_research_loop_requires_a_tool_call_when_the_game_file_says_so(self):
+        r = self.researcher([])
+        r.settings.update(tool_choice="required", max_output_tokens=32000)
+        r.research(self.parent, {}, session="s1")
+        self.assertEqual((self.script.kwargs[0]["tool_choice"], self.script.kwargs[0]["max_output_tokens"]), ("required", 32000))
+
+    def test_it_asks_for_nothing_special_by_default(self):
+        r = self.researcher([])
+        r.settings.pop("tool_choice", None)
+        r.research(self.parent, {}, session="s1")
+        self.assertEqual(self.script.kwargs[0]["tool_choice"], "auto")
+
+    def test_the_shipped_game_file_requires_one(self):
+        from league.economy import load_game
+
+        research = load_game()["research"]
+        self.assertEqual((research["tool_choice"], research["max_output_tokens"]), ("required", 32000))

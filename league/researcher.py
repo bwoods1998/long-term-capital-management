@@ -183,6 +183,7 @@ class Researcher:
                     request_key=f"{session}:{turn}",
                     reasoning_effort=str(self.settings.get("reasoning_effort", "low")),
                     max_output_tokens=int(self.settings.get("max_output_tokens", 4096)),
+                    tool_choice=str(self.settings.get("tool_choice", "auto")),
                     desk_cap_usd_per_day=balance,  # an agent can never spend credits it does not have
                     cache_key=f"league:{agent.family}",
                 )

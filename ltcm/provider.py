@@ -706,8 +706,14 @@ class Provider:
         reasoning_effort: str = "medium",
         max_output_tokens: int = 8192,
         cache_key: str | None = None,
+        tool_choice: str = "auto",
     ) -> dict[str, Any]:
-        """Assemble the Responses API request body for a profile. Pure; no I/O."""
+        """Assemble the Responses API request body for a profile. Pure; no I/O.
+
+        `tool_choice` is "auto" for the first run's desk loop, which may answer in prose. A caller
+        whose every turn must end in a tool call passes "required": measured Sept 19, 2026, nine
+        of fifteen research passes spent their whole output budget reasoning and returned no tool
+        call at all. (Sail does not guarantee it for `openai/gpt-oss-*`; the league runs DeepSeek.)"""
         if profile not in PROFILES:
             raise ProviderError("provider_unknown_profile")
         if reasoning_effort not in EFFORTS:
@@ -731,7 +737,9 @@ class Provider:
         }
         if tools:
             body["tools"] = [self._tool_entry(tool) for tool in tools]
-            body["tool_choice"] = "auto"
+            if tool_choice not in ("auto", "required", "none"):
+                raise ProviderError("provider_bad_tool_choice")
+            body["tool_choice"] = tool_choice
         if cache_key:
             if not isinstance(cache_key, str) or not 1 <= len(cache_key) <= 128:
                 raise ProviderError("provider_bad_cache_key")
@@ -1040,6 +1048,7 @@ class Provider:
         max_output_tokens: int = 8192,
         desk_cap_usd_per_day: Any,
         cache_key: str | None = None,
+        tool_choice: str = "auto",
     ) -> ProviderResponse:
         """Run one model call within budget, deduped on `request_key`, and settle its cost.
 
@@ -1058,6 +1067,7 @@ class Provider:
             reasoning_effort=reasoning_effort,
             max_output_tokens=max_output_tokens,
             cache_key=cache_key,
+            tool_choice=tool_choice,
         )
         with self._lock:
             row = self._db.execute(
