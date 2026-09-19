@@ -1,19 +1,30 @@
 // The gateway's routing table. Every request arrives here with a bearer token and nothing else;
 // the venue credentials are added on the way out and never come back. The whole surface is:
 //
-//   GET|POST|DELETE /v1/kalshi/<path>     signed with the Kalshi key, forwarded to the venue
-//   GET|POST|DELETE /v1/alpaca/<path>     keyed with the Alpaca headers, forwarded to the venue
+//   GET             /v1/health               caps, counters, kill switch, frontier month, pulls, watchdog
+//   POST            /v1/kill                 engage the kill switch: the runtime token may
+//   POST            /v1/unkill               release it: GATEWAY_ADMIN_TOKEN only, the owner's
+//   GET|POST|DELETE /v1/kalshi/<path>        signed with the Kalshi key, forwarded to the venue
+//   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue
 //   GET|POST|DELETE /v1/alpaca-paper/<path>  the paper account: same paths, simulated money, no caps
-//   GET             /v1/kalshi/ws-auth    handshake headers for the Kalshi WebSocket, 30 s of life
-//   GET             /v1/health            caps, counters, kill switch, watchdog
-//   POST            /v1/kill /v1/unkill   the kill switch, which lives outside the trading VM
-//   POST            /v1/github/pr         a proposal becomes a branch and a pull request, never a push
-//   GET             /v1/github/pr/<n>     that pull request and its CI, so the VM can watch it
+//   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
+//   POST            /v1/notify               one trade notice mailed to the owner, capped per day
+//   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
+//   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
+//   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
+//   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
+//
+// Anything else is a 404, and so is any venue name but these three (Coinbase was removed on
+// Sept 19, 2026). A venue path outside `caps.VENUE_PATHS` is a 403 before any key is touched.
 //
 // The ws-auth route is the only one that hands the VM credential material, and what it hands
 // over is short-lived and read-only: Kalshi accepts no order over its WebSocket. A POST to
 // `/v1/kalshi/account/api_usage_level/upgrade` passes as an ordinary forwarded write; it creates
 // no order, so the caps do not see it (`caps.createsOrder`).
+//
+// The kill switch is checked where an order is reserved, so it stops every order-creating call
+// on a real venue and nothing else: reads and cancels pass, and the paper venue never reaches
+// the gate at all.
 //
 // The GitHub routes move no money, so the kill switch does not stop them: a halted floor may still
 // propose its own repair. There is deliberately no merge route. CI judges a pull request and a

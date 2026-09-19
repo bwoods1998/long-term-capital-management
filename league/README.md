@@ -50,7 +50,7 @@ code.
 | `venues.py` | `gateway_broker(name, ...)`: the first run's Alpaca and Kalshi adapters in gateway mode. `alpaca-paper` is the same adapter signed with the paper keys. `market_hours` for equities. |
 | `constitution.py` | `CONSTITUTION`, `digest()`, `PINNED_DIGEST`. Changing it means changing the pinned digest too, in a commit the owner makes. |
 | `stats.py` | Pure functions: `log_growth`, `mean_bounds` (one-sided t bounds, with its own `t_quantile`), `spend` (alpha per look), `lopsided` and `lopsided_growth_lcb` (the exact Clopper-Pearson loss-rate gate), `deflated_sharpe`, `cusum_decay`, `quarter_kelly`, `max_drawdown`. Degenerate data returns `None`, never raises. |
-| `evaluator.py` | `Evaluator`: `record_trial` (scores a replay and counts it against the family), `observe` (turns equity marks into blocks of log growth), `judge` (looks, promotion eligibility, death), `drift` (CUSUM per unit of exposure on rungs 2 and 3), `promote`/`demote`/`seat`. It reads the ledger and writes `eval.*` rows; the House acts on the verdicts. |
+| `evaluator.py` | `Evaluator`: `record_trial` (scores a replay and counts it against the family), `observe` (turns equity marks into blocks of log growth), `judge` (looks, promotion eligibility, death), `drift` (a CUSUM on the edge per closed trade against the record of the rung below, on rungs 2 and 3), `promote`/`demote`/`seat`. It reads the ledger and writes `eval.*` rows; the House acts on the verdicts. |
 | `replay.py` | Rung 0: walks a strategy over a tape one step at a time with conservative fills (a resting order fills only when a later step trades strictly through it). Self-contained (standard library plus `safety.py`): it is uploaded into the agent's box as it is. |
 | `tapes.py` | `AlpacaData` and `KalshiData`: recorded tapes for replay and live snapshots of the same shape. A bar is stamped with the moment it closed; a Kalshi row carries only what was on the screen; a capped board is a seeded draw that never looks at volume or results. |
 | `paper.py` | `KalshiShadowBroker`: a simulated Kalshi account over live quotes. Holds no credential and sends nothing. State in `kalshi-shadow.json`. |
@@ -79,6 +79,7 @@ code.
 | `service.py` | `build(root, ...)`: the real House from `config.json` and three secrets (`GATEWAY_TOKEN`, `SAIL_API_KEY`, `CAPITAL_PUBLISH_TOKEN`), read from the environment or a 0600 `.env`. `canary=True` builds a House that can hurt nothing. |
 | `__main__.py` | `python3 -m league run | tick | found | status | verify | stop | start`. |
 | `watchdog.py` | `python3 -m league.watchdog deploy | status | rollback | prune`: releases on the box, the canary, promotion, the watch, the rollback. Imports nothing else from the package at import time. |
+| `updater.py` | How merged code reaches the House box with no human step: every half hour it downloads `main` (public, no credential), unpacks the release trees, runs the running release's content checks (`ci.py`) on them, refuses any change to `real_money`, and hands a changed tree to the watchdog for canary, promotion, watch and rollback. A tree judged once is never tried again. |
 | `CONTRACT.md` | The strategy contract. |
 | `config.json` | Gateway and site URLs, the agent image checkpoint, `real_money`, the operating dials, the performance baseline. |
 
@@ -147,7 +148,7 @@ Everything the House keeps is under one directory, `--root` (default `.data/leag
 ## Tests
 
 ```sh
-python3 -m unittest discover -s league/tests -t .        # 839 tests, about 75 s
+python3 -m unittest discover -s league/tests -t .        # 847 tests, about 75 s
 python3 -m unittest league.tests.test_book               # one module
 python3 -m league.ci --no-tests                          # the content checks alone
 ```

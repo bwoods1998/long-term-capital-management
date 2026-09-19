@@ -71,7 +71,10 @@ def resize(house: Any, agent: Any) -> dict[str, Any] | None:
     from .book import Limits
 
     cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
-    book.limits[agent.id] = Limits(max_position_usd=(target / 2).quantize(CENT), max_order_usd=min(cap, (target / 2).quantize(CENT)))
+    # A position must always be closable in ONE order under the gateway's cap, even after it has
+    # appreciated by a quarter: so no position is opened above four fifths of the order cap.
+    ceiling = (cap * Decimal("0.8")).quantize(CENT)
+    book.limits[agent.id] = Limits(max_position_usd=min((target / 2).quantize(CENT), ceiling), max_order_usd=min(cap, (target / 2).quantize(CENT), ceiling))
     row = {"agent": agent.id, "book": book.name, "stake_usd": str(target), "moved_usd": str(delta), **numbers}
     house.ledger.append("eval.verdict", {"decision": "size", "rung": 3, **{k: v for k, v in row.items() if k != "agent"}}, agent=agent.id)
     return row

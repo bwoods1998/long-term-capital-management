@@ -40,6 +40,7 @@ export const ROLES = {
 export const FORBIDDEN_FILES = [
   'league/constitution.py', 'league/ci.py', 'league/ledger.py', 'league/book.py',
   'league/evaluator.py', 'league/stats.py', 'league/auditor.py', 'league/watchdog.py',
+  'league/safety.py', 'league/replay.py', 'league/updater.py',
 ];
 export const FORBIDDEN_TREES = ['gateway/', '.github/'];
 

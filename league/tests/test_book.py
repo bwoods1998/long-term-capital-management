@@ -373,6 +373,28 @@ class PaperBookTest(BookCase):
         self.assertTrue(self.book.reconcile().ok)
         self.assertEqual(self.broker.open_orders(), [])
 
+    def test_a_pool_larger_than_the_order_cap_is_sent_as_its_parts(self):
+        """Each intent is checked against the $75 cap alone; the gateway checks each ORDER. Three $40
+        buys netted into one $120 order would be refused there, so they go as three orders."""
+        for agent in ("a1", "a2", "a3"):
+            self.seat(agent)
+        self.broker.set_quote(BTC, "80000", "80010")
+        out = self.book.submit([self.intent(agent, BTC, "buy", "0.0005") for agent in ("a1", "a2", "a3")])
+        self.assertEqual([o.status for o in out], ["filled"] * 3)
+        self.assertEqual(len(self.broker.submitted), 3)
+        self.assertTrue(all(i.quantity * D("80010") <= D("75") for i in self.broker.submitted))
+        small = self.book.submit([self.intent(agent, BTC, "buy", "0.0002") for agent in ("a1", "a2")])
+        self.assertEqual(len(self.broker.submitted), 4)  # $32 together: still one pooled order
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_every_sell_is_sent_as_an_exit(self):
+        self.seat("a1")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.book.submit([self.intent("a1", BTC, "buy", "0.0005")])
+        held = self.book.account("a1").holdings[BTC.key].quantity
+        self.book.submit([self.intent("a1", BTC, "sell", str(held))])
+        self.assertEqual([i.purpose for i in self.broker.submitted], ["entry", "exit"])
+
     def test_the_ledger_verifies_after_all_of_it(self):
         self.seat("a1")
         self.broker.set_quote(BTC, "80000", "80010")

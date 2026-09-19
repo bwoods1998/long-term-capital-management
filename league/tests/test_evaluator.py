@@ -560,7 +560,7 @@ class Judge(EvalCase):
         self.assertEqual((numbers["look"], numbers["active_blocks"], numbers["trades"]), (3, 30, 31))
         self.assertGreater(numbers["lcb"], 0)
         self.assertFalse(numbers["lopsided"])
-        self.assertIsNone(numbers["wilson_lcb"])
+        self.assertIsNone(numbers["loss_gate_lcb"])
         self.assertLess(numbers["drawdown"], 0.01)
 
     def test_eligible_is_not_promotion(self):
@@ -663,7 +663,7 @@ class Judge(EvalCase):
         self.assertEqual(fav.numbers["lcb"], mix.numbers["lcb"])
         self.assertGreater(fav.numbers["lcb"], 0)
         self.assertTrue(fav.numbers["lopsided"])
-        self.assertLess(fav.numbers["wilson_lcb"], 0)
+        self.assertLess(fav.numbers["loss_gate_lcb"], 0)
         self.assertEqual(fav.numbers["trades"], 12)  # past the minimum: only the exact-bound gate is in its way
         self.assertEqual((fav.decision, fav.reason), ("hold", "the evidence does not decide yet"))
         self.assertFalse(mix.numbers["lopsided"])
@@ -677,7 +677,7 @@ class Judge(EvalCase):
             self.block("a", 0.006 if i % 3 else -0.001)
         verdict = self.ev.judge("a", "paper")
         expected = stats.lopsided_growth_lcb([1.0 / 200] * 12, 90.0 / 200, stats.spend(ALPHA, 1))
-        self.assertAlmostEqual(verdict.numbers["wilson_lcb"], expected, places=15)
+        self.assertAlmostEqual(verdict.numbers["loss_gate_lcb"], expected, places=15)
 
     def test_fewer_than_ten_closed_trades_holds_and_the_tenth_unlocks(self):
         self.ev.seat("a", 1, "test")
@@ -1123,12 +1123,13 @@ class Drift(EvalCase):
         self.earn_rung_two()
         for _ in range(6):
             self.block("a", -0.01, book="real", start=25.0)  # an alarm, were it read now
-        for i in range(40):
+        window = int(self.ev.ladder["drift"]["window_blocks"])
+        for i in range(window):
             self.block("a", 0.006 if i % 2 else 0.0, book="real", start=25.0)
         verdict = self.ev.drift("a", "real")
         self.assertEqual(verdict.decision, "hold")
         self.assertEqual(verdict.numbers["statistic"], verdict.numbers["statistic"])
-        self.assertIsNone(verdict.numbers["at"])  # the six bad blocks are outside the 40-block window
+        self.assertIsNone(verdict.numbers["at"])  # the six bad blocks are outside the window of recent blocks
 
     def test_blocks_of_the_other_book_are_not_recent_growth(self):
         self.earn_rung_two()

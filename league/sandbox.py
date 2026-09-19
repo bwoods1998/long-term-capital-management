@@ -112,8 +112,11 @@ class LocalSandbox:
     def decide(self, agent: str, code: str, ctx: Mapping[str, Any]) -> Run:
         return self._run(agent, "runner.py", {"code": code, "ctx": ctx}, runner_module.MARKER, 30)
 
-    def needs(self, agent: str, code: str) -> Run:
+    def needs(self, agent: str, code: str, *, keep_awake: bool = False) -> Run:
         return self._run(agent, "runner.py", {"code": code, "mode": "needs"}, runner_module.MARKER, 30)
+
+    def rest(self, agent: str) -> None:
+        pass
 
     def replay(self, agent: str, code: str, params: Mapping[str, Any], tape: Mapping[str, Any], *, stake: float, limits: Mapping[str, Any], timeout: float = 600) -> Run:
         spec = {"code": code, "params": dict(params), "tape": tape, "stake": stake, "limits": dict(limits)}
@@ -231,7 +234,7 @@ class SailSandbox:
     def kit_dir() -> str:
         return f"{REMOTE_DIR}/kit-{_kit_digest()}"
 
-    def _run(self, agent: str, command: str, spec: Mapping[str, Any], marker: str, timeout: int) -> Run:
+    def _run(self, agent: str, command: str, spec: Mapping[str, Any], marker: str, timeout: int, *, keep_awake: bool = False) -> Run:
         with self._agent_lock(agent):
             started = time.monotonic()
             try:
@@ -244,7 +247,8 @@ class SailSandbox:
             except Exception as exc:  # noqa: BLE001 - the Sail API failing is not the strategy failing
                 raise SandboxError(f"{agent}: {type(exc).__name__}: {str(exc)[:300]}") from exc
             finally:
-                self._sleep(agent)
+                if not keep_awake:
+                    self._sleep(agent)
             seconds = time.monotonic() - started
             result = runner_module.parse_result(done.stdout, token, marker)
             if result is None:
@@ -262,8 +266,13 @@ class SailSandbox:
     def decide(self, agent: str, code: str, ctx: Mapping[str, Any]) -> Run:
         return self._run(agent, "runner.py spec.json", {"code": code, "ctx": ctx}, runner_module.MARKER, 30)
 
-    def needs(self, agent: str, code: str) -> Run:
-        return self._run(agent, "runner.py spec.json", {"code": code, "mode": "needs"}, runner_module.MARKER, 30)
+    def needs(self, agent: str, code: str, *, keep_awake: bool = False) -> Run:
+        """`keep_awake` leaves the box running for the next call (a founding reads twelve files in a
+        row, and most of each call is the box waking); the caller then calls `rest`."""
+        return self._run(agent, "runner.py spec.json", {"code": code, "mode": "needs"}, runner_module.MARKER, 30, keep_awake=keep_awake)
+
+    def rest(self, agent: str) -> None:
+        self._sleep(agent)
 
     def replay(self, agent: str, code: str, params: Mapping[str, Any], tape: Mapping[str, Any], *, stake: float, limits: Mapping[str, Any], timeout: float = 600) -> Run:
         spec = {"code": code, "params": dict(params), "tape": tape, "stake": stake, "limits": dict(limits)}

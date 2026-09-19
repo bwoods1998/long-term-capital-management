@@ -1,19 +1,42 @@
-# Long Term Capital Management runtime
+# `ltcm`: the first run's runtime
 
-`ltcm` is the second-generation runtime of this repository: a roster of autonomous
-portfolio-manager **desks** that research, argue and trade across several venues, a deterministic
-**risk engine** between every desk and every broker, a second-model **critic** on every real-money
-order, a rules-based **committee** (the agent is called Meriwether) that allocates capital by track
-record, an **evolution** loop that breeds and retires desk variants on forward results, and a
-**publisher** that streams every thought, tool call, memo, order, fill and mark to the public site.
+**This package is not run any more.** It is the runtime of the project's first run, September 15 to
+19, 2026: a roster of chat **desks** named after the 1998 fund's partners, a deterministic risk
+engine, a second-model critic, a rules-based committee (Meriwether), an evolution loop, a Foundry
+and a research lab. The floor was stopped and wiped on September 19 and rebuilt as the
+[`league/`](../league/README.md) package, where the unit is a strategy program, not a desk, and
+the venues are Kalshi and Alpaca only (the Coinbase account was closed on September 19 and the
+gateway's Coinbase route removed). What runs now is described in the
+[repository README](../README.md).
 
-There is no paper trading here. A desk is either **live** -- its orders go to a real venue and its
-losses are the owner's -- or **shadow**: it runs full sessions, proposes orders through the same
-risk engine, and its proposals are scored against real market prices as hypothetical trades, but
-nothing is ever sent and no notional balance is presented as the floor's equity. A shadow desk
-competes to take over a live sleeve, and Meriwether's gates decide when it does.
+Two things keep this package in the tree:
 
-Design rules, inherited from the first generation and kept on purpose:
+1. **The league uses parts of it as a library.** `league/` imports exactly these modules:
+   `ltcm.broker`, `ltcm.risk`, `ltcm.sim`, `ltcm.provider`, `ltcm.sailbox`, `ltcm.history`,
+   `ltcm.performance`, `ltcm.adapters` (with `ltcm.adapters.alpaca` and `ltcm.adapters.kalshi`),
+   `ltcm.data` (with `ltcm.data.kalshi`, `ltcm.data.news` and the data file
+   `ltcm/data/kalshi_fees.json`). Those in turn import `ltcm.events` (the provider's cost log) and
+   `ltcm.manifest` (the risk engine's types); `ltcm.data.yahoo` and `ltcm.data.coinbase` are
+   reachable only through a lazy import the league never takes. `scripts/floor_box.py` uses
+   `ltcm.sailbox` too. [`league/README.md`](../league/README.md#what-the-league-imports-from-ltcm)
+   says what each is used for.
+2. **The rest is the first run's record in code.** Desks, committee, evolution, Foundry, lab, Firm
+   Mind, service loop and the Coinbase adapter are kept for history. Nothing starts them. Their
+   tests still pass (`python3 -m unittest discover -s ltcm/tests -t .`, 1,753 tests, which also
+   cover the modules the league depends on), and CI still runs them. Removing the unused part
+   safely is a job of its own.
+
+The written record of the run is in [`docs/runs/`](../docs/runs/) (launch, the arena nights, the fee
+recovery, the pause and reset) and [`docs/history/`](../docs/history/2026-09-first-run-readme.md)
+(the README as it stood while the run was live). `python3 -m ltcm run` was how that floor was
+started; it is not how anything is started now. The run's state (`/workspace/.data/ltcm` on the
+box: the event tape, the ledgers, the strategy store) was archived and emptied on September 19
+([the pause and the clean slate](../docs/runs/2026-09-19-pause-and-reset.md)).
+
+## The first run's design rules
+
+Written for the first run and kept on purpose. The league follows the same ones
+(see [`league/README.md`](../league/README.md#design-rules)).
 
 - **Standard library only.** `sqlite3`, `urllib`, `decimal`, `hashlib`, `json`, `threading`.
   Tests are `unittest`. No async framework, no ORM, no third-party HTTP client.
@@ -28,46 +51,68 @@ Design rules, inherited from the first generation and kept on purpose:
   and licensed quotes never leave the box.
 - **Decimal money.** Prices, quantities and cash are `Decimal`, serialized as strings.
 
+The first run had no paper trading. A desk was either **live** (its orders went to a real venue and
+its losses were the owner's) or **shadow**: it ran full sessions, proposed orders through the same
+risk engine, and its proposals were scored against real market prices as hypothetical trades, but
+nothing was sent and no notional balance was presented as the floor's equity. The league replaced
+shadow desks with a paper rung (Alpaca's paper account and a Kalshi shadow book).
+
 ## Layout
 
-| Module | Responsibility |
-|---|---|
-| `events.py` | The shared append-only event log (`EventLog`): streams, kinds, hash chain, public projection. |
-| `broker.py` | Venue-neutral contracts: `Instrument`, `Quote`, `OrderIntent`, `Order`, `Fill`, `Position`, `Balance`, the `Broker` protocol and errors. |
-| `manifest.py` | `DeskManifest`: the declarative description of a desk (mandate, venues, instruments, limits, model, cadence, tools, budget, capital, lineage, playbook). |
-| `risk.py` | Deterministic pre-trade rules and circuit breakers. Returns a `Decision`; never a model call. |
-| `ledger.py` | `DeskLedger`: each desk's book folded from allocations, fills and marks; time-weighted return, drawdown, daily P&L. |
-| `gateway.py` | The only path from an intent to a venue: risk check, critic review, submission, fills, reconciliation, deferred-event release. |
-| `critic.py` | The live-order critic: one cheap model call reads every real-money order against the desk's own rationale and can block it. Fails open. |
-| `sim.py` | `ShadowBook`: the scoring engine for a shadow desk. Same `Broker` surface as a live adapter, filled at the real venue's quote with the real fee model, over any `MarketData` source. |
-| `provider.py` | Sail Responses API client with function tools, background polling, idempotency, frozen rate card, per-request cost records and budget hooks. |
-| `tools.py` | The research and action tools a desk may call, each with a JSON schema and an executor. |
-| `desk.py` | The desk runtime: builds context, runs the tool-calling loop within budget, emits events, writes memory and memos, proposes orders. |
-| `committee.py` | Meriwether: rules-based capital allocation across desks (weekly), the daily public memo, promotion and demotion by the fixed gates. |
-| `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. A child is born with its parent's playbook; the model's rewrite runs on the service's worker thread and lands as a versioned `desk.playbook_updated` on a later tick (`evolution.deferred_rewrites`, default on), so a spawn never stalls the loop. A family in `evolution.excluded_families` (ranges, since Sept 17, 2026) is never seeded, never replaced and never promoted. |
-| `evidence.py` | The evidence gate on a strategy's settled record: a Wilson bound on the loss rate for lopsided favorites, a day-block bootstrap for everything else. Promotion, earned size and the Foundry's fast-track all read it. |
-| `calibration.py` | Every probability a desk states (`record_forecast`), scored at resolution: Brier, reliability by decile, by desk, family, generation and floor. |
-| `sandbox.py` | One forked Sailbox per desk for the code it writes (`run_code`): the lab image, a toolbox that persists, a daily fuse, data-only egress. |
-| `history.py` | Public venue history for backtests: settled Kalshi markets, Kalshi candlesticks (batched), Coinbase candles; throttled, byte-capped disk cache. |
-| `backtest.py` | Replays a strategy's `decide(kit, params)` over past days against a conservative simulator; `python3 -m ltcm.backtest --spec` prints one `BACKTEST-RESULT` line. |
-| `runclock.py` | The public run clock: how long the desks have worked, sessions and decisions, Sail spend, profit per Sail dollar. |
-| `exits.py` | The exit plans the floor keeps: stops, targets and time stops enforced every tick as exposure-reducing orders; Coinbase brackets ride on the order. |
-| `watch.py` | The night desk: triggers over held markets, fills, new markets and headlines, one flash-model verdict on whether to wake a desk. |
-| `notify.py` | Trade notices: one email per live fill and per settlement, folded from the log and sent through the gateway. |
-| `runway.py` | The spend policy: open, throttled or stopped against the Sail credit; no daily cap. |
-| `sailbox.py` | The Sailbox API client the operator scripts and the sandboxes use: create, fork, exec, egress, checkpoints. |
-| `hostinfo.py` | What machine the floor runs on and for how long, for the checkpoint's infra block. |
-| `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence, adopted into the genome. |
-| `mind.py` | The Firm Mind: every desk's closed positions scored into evidence-gated rules, proposed hourly by one model call from the older part of the tape and admitted only on the newest part it never read, retired in code, read as evidence by every session prompt and strategy generator. |
-| `founding.py` | The firm hires itself: one model call a night proposes a new family from what the venues list and the floor does not trade, validated in code and born shadow; founded families that fail are wound down whole. |
-| `publish.py` | Batches public events and leaderboard rows to the site API. |
-| `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results for any window, renders the markdown lab report and publishes the daily `lab.result`. |
-| `service.py` | The always-on loop: schedule desk sessions, tick simulators, mark ledgers, run risk breakers, run the committee and evolution on their cadences, publish. |
-| `adapters/` | Live venue adapters (`alpaca.py`, `kalshi.py`, `coinbase.py`, later `schwab.py`, `tastytrade.py`). |
-| `data/ws.py` | A standard-library RFC 6455 WebSocket client: TLS, handshake with extra headers, masked frames out, control frames answered, fragmentation reassembled, read deadlines. |
-| `feeds/` | The floor's ears: `FeedHub` keeps venue sockets open on their own threads (Kalshi `fill`, `market_lifecycle_v2`, `ticker`; Coinbase `ticker` and `user`), caches fresh prices for `Service.quote`, and hands the tick fill candidates and resolutions. The REST sweeps stay the record; the sockets make them run sooner. Credential material comes from the gateway (`GET /v1/kalshi/ws-auth`, `GET /v1/coinbase/ws-jwt`). |
-| `data/` | Market and document sources (`yahoo.py`, `alpaca.py`, `kalshi.py`, `coinbase.py`, `edgar.py`, `news.py`, `weather.py` for the National Weather Service forecasts and readings the weather desk prices from). |
-| `desks/` | Desk manifests (JSON). `playbooks/` at the repository root holds the versioned playbooks desks edit. |
+The last column says whether the league still uses the module: **yes** (imported by `league/`),
+**indirectly** (imported by a module the league imports), or blank (the first run only).
+
+| Module | Responsibility | League |
+|---|---|---|
+| `events.py` | The shared append-only event log (`EventLog`): streams, kinds, hash chain, public projection. `league/ledger.py` copies its mechanics. | indirectly (`provider.py`) |
+| `broker.py` | Venue-neutral contracts: `Instrument`, `Quote`, `OrderIntent`, `Order`, `Fill`, `Position`, `Balance`, the `Broker` protocol and errors. | **yes** |
+| `manifest.py` | `DeskManifest`: the declarative description of a desk (mandate, venues, instruments, limits, model, cadence, tools, budget, capital, lineage, playbook). | indirectly (`risk.py`) |
+| `risk.py` | Deterministic pre-trade rules and circuit breakers. Returns a `Decision`; never a model call. The league's book runs all 21 rules unchanged. | **yes** |
+| `ledger.py` | `DeskLedger`: each desk's book folded from allocations, fills and marks; time-weighted return, drawdown, daily P&L. | |
+| `gateway.py` | The first run's only path from an intent to a venue: risk check, critic review, submission, fills, reconciliation, deferred-event release. (Not the Cloudflare gateway, which is `gateway/` at the repository root.) | |
+| `critic.py` | The live-order critic: one cheap model call read every real-money order against the desk's own rationale and could block it. Failed open. | |
+| `sim.py` | `ShadowBook`: the scoring engine for a shadow desk, and `FeeModel`, the venues' fee arithmetic. The league uses `FeeModel` only. | **yes** (`FeeModel`) |
+| `provider.py` | Sail Responses API client with function tools, background polling, idempotency, frozen rate card, per-request cost records and budget hooks. The league's researcher calls cheap models through it. | **yes** |
+| `tools.py` | The research and action tools a desk could call, each with a JSON schema and an executor. | |
+| `desk.py` | The desk runtime: built context, ran the tool-calling loop within budget, emitted events, wrote memory and memos, proposed orders. | |
+| `committee.py` | Meriwether: rules-based capital allocation across desks, the daily public memo, promotion and demotion by the fixed gates. | |
+| `evolve.py` | Variant populations per desk family: spawn, score on forward results, retire, mutate playbooks; the house genome of adopted changes. A child is born with its parent's playbook; the model's rewrite runs on the service's worker thread and lands as a versioned `desk.playbook_updated` on a later tick (`evolution.deferred_rewrites`, default on), so a spawn never stalls the loop. A family in `evolution.excluded_families` (ranges, since Sept 17, 2026) is never seeded, never replaced and never promoted. | |
+| `evidence.py` | The evidence gate on a strategy's settled record: a Wilson bound on the loss rate for lopsided favorites, a day-block bootstrap for everything else. (The league's gate is `league/stats.py`, which uses an exact bound instead.) | |
+| `calibration.py` | Every probability a desk stated (`record_forecast`), scored at resolution: Brier, reliability by decile. | |
+| `sandbox.py` | One forked Sailbox per desk for the code it wrote (`run_code`). (The league's is `league/sandbox.py`: no network at all.) | |
+| `history.py` | Public venue history: settled Kalshi markets, Kalshi candlesticks (batched), Coinbase candles; throttled, byte-capped disk cache. The league's Kalshi tapes read it. | **yes** |
+| `backtest.py` | Replayed a strategy's `decide(kit, params)` over past days against a conservative simulator. (The league's is `league/replay.py`.) | |
+| `strategies.py` | Strategies: code a desk deployed to trade for it between sessions, run every few minutes in the desk's sandbox. | |
+| `foundry.py` | The Foundry: a half-hourly mutate, backtest, shadow, adopt loop. Its code-safety check was ported to `league/safety.py`. | |
+| `starters/` | House starter strategies a family's desks were born with (Kalshi favorites, hourly quotes and ranges, spot quotes, perps, temperatures). | |
+| `runclock.py` | The public run clock: how long the desks had worked, sessions and decisions, Sail spend, profit per Sail dollar. | |
+| `exits.py` | The exit plans the floor kept: stops, targets and time stops enforced every tick as exposure-reducing orders. | |
+| `watch.py` | The night desk: triggers over held markets, fills, new markets and headlines, one flash-model verdict on whether to wake a desk. | |
+| `notify.py` | Trade notices: one email per live fill and per settlement, sent through the gateway. | |
+| `runway.py` | The first run's spend policy: open, throttled or stopped against the Sail credit. (The league's is `league/budget.py`: a $100 month.) | |
+| `sailbox.py` | The Sailbox API client: create, fork, exec, egress, checkpoints. The league's sandbox and `scripts/floor_box.py` use it. | **yes** |
+| `performance.py` | `AccountPerformance`: owner-account profit from the venues' funding records, independent of any virtual ledger. The league's publisher uses it. | **yes** |
+| `hostinfo.py` | What machine the floor ran on and for how long, for the checkpoint's infra block. | |
+| `arena.py` | Factual execution telemetry: live fills, paused entries and shadow research told apart. | |
+| `research_cache.py` | Restart-safe reuse of exact, successful historical experiments. | |
+| `lab.py` | The research lab: nightly directed experiments in a bounded vocabulary, bred as shadow variants, judged on gate evidence. | |
+| `mind.py` | The Firm Mind: every desk's closed positions scored into evidence-gated rules every session read. | |
+| `founding.py` | The firm hired itself: one model call a night proposed a new family, validated in code and born shadow. | |
+| `publish.py` | Batched public events and leaderboard rows to the site API. (The league's is `league/publish.py`.) | |
+| `analytics.py` | `ResultsLedger`: folds the log into per-desk, per-family and per-profile results; renders the lab report. | |
+| `service.py` | The first run's always-on loop. Nothing starts it now. | |
+| `adapters/` | Venue adapters implementing `Broker`: `alpaca.py`, `kalshi.py`, `coinbase.py`. The league uses the first two in gateway mode (the gateway signs; the box holds no venue key). `coinbase.py` is retired with the account. | **yes** (`alpaca.py`, `kalshi.py`) |
+| `data/` | Market and document sources: the shared contracts, US equity calendar and HTTP transport (`__init__.py`), `kalshi.py`, `news.py`, `yahoo.py`, `coinbase.py`, `edgar.py`, `weather.py`, `openmeteo.py`, `polymarket.py`, `derivs.py`, `macro.py`, `sports.py`, and `ws.py`, a standard-library WebSocket client. | **yes** (`__init__.py`, `kalshi.py`, `news.py`, `kalshi_fees.json`) |
+| `feeds/` | The first run's ears: `FeedHub` kept venue sockets open on their own threads (Kalshi `fill`, `market_lifecycle_v2`, `ticker`; Coinbase `ticker` and `user`), cached fresh prices for `Service.quote`, and handed the tick fill candidates and resolutions. The REST sweeps stayed the record; the sockets made them run sooner. Credential material came from the gateway: `GET /v1/kalshi/ws-auth` is still served and the league does not use it; `GET /v1/coinbase/ws-jwt` was removed with the Coinbase route. | |
+| `desks/` | Desk manifests (JSON). `playbooks/` at the repository root holds the versioned playbooks the desks edited. | |
+
+---
+
+**Everything below this line is the first run's design document, as it was written while the floor
+was live.** It is kept unedited for the record, in the present tense of its day. Read "the floor",
+"live" and every Coinbase detail as history: none of it runs today, the Coinbase account is closed,
+and the commands shown (`python3 -m ltcm ...`, `scripts/mind_pass.py`, `scripts/backtest.py`)
+operate on first-run state that was archived on September 19, 2026.
 
 ## Streams and event kinds
 
@@ -813,7 +858,8 @@ position-disclosure notice.
 ## Migration from `portfolio_runtime`
 
 The first-generation `portfolio_runtime` ran one S&P 500 paper portfolio. That was a different
-system with a different purpose, and it is retired.
+system with a different purpose, and it is retired. The plan below was carried out on September 15,
+2026; its record is [`docs/history/portfolio-agent/`](../docs/history/portfolio-agent/README.md).
 
 1. Until the scheduled week completes, `portfolio_runtime` and the Sailbox bundle are frozen.
 2. The filings desk (`merton`) imports the research bank -- the written case and the open questions

@@ -24,7 +24,9 @@ value() { grep "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 
 
 echo "== gateway secrets"
 ( cd gateway
-  for name in GATEWAY_TOKEN KALSHI_KEY_ID COINBASE_KEY_NAME COINBASE_API_SECRET SAIL_API_KEY; do
+  # Coinbase left the project on Sept 19, 2026. The Alpaca, OpenAI and GitHub secrets are placed by
+  # the owner by hand with `npx wrangler secret put NAME` (see gateway/README.md): they are not kept in .env.
+  for name in GATEWAY_TOKEN KALSHI_KEY_ID SAIL_API_KEY; do
     v="$(value "$name")"
     if [ -z "$v" ]; then echo "  $name: missing in .env, skipped"; continue; fi
     printf '%s' "$v" | npx wrangler secret put "$name" >/dev/null 2>&1 && echo "  $name: set" || echo "  $name: FAILED"

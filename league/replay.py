@@ -24,7 +24,7 @@ Fills are conservative:
   recorded result; a market with no recorded result refunds the price paid (fees stay paid).
 
 This file is self-contained on purpose: standard library plus `safety.py`. It is uploaded as it is
-into the agent's box and run there as `python3 replay.py < spec.json`; the House reads the last
+into the agent's box and run there as `python3 replay.py --spec spec.json`; the House reads the last
 `REPLAY-RESULT <token> <json>` line and nothing else (`parse_result`). Floats are fine here: this
 is statistics, not the money ledger.
 """
@@ -850,7 +850,7 @@ def parse_result(stdout: str, token: str) -> dict | None:
 
 
 def main(argv: list[str] | None = None, *, hard_exit: bool = True) -> int:
-    """`python3 replay.py < spec.json`: run the spec and print one `REPLAY-RESULT <token> <json>`
+    """`python3 replay.py --spec spec.json`: run the spec and print one `REPLAY-RESULT <token> <json>`
     line, the last thing on the real stdout. Everything else the run prints goes nowhere, and the
     process ends with `os._exit` so nothing a strategy left behind can print after the result.
     (`hard_exit=False` returns instead, for a caller in the same process.)"""

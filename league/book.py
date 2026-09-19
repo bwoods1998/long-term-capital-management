@@ -647,7 +647,12 @@ class Book:
         )
 
     def _order_intent(self, intent: Intent, *, quantity: Decimal | None = None, nonce: str = "") -> OrderIntent:
+        # Nobody can short, so every sell reduces a holding: it is an exit, and says so. The risk
+        # engine then checks that it reduces without reversing, and the gateway (which lets an
+        # exit through its dollar caps) does not count closing a position against the day.
+        closing = {"purpose": "exit", "exit_reason": "desk", "exit_of": intent.id} if intent.side == "sell" else {}
         return OrderIntent.new(
+            **closing,
             desk_id=f"book-{self.name}"[:60],
             instrument=intent.instrument,
             side=intent.side,
@@ -851,11 +856,19 @@ class Book:
                 if part > 0:
                     self._cross(intent, part, quote, now)
                 residual[intent.id] = intent.quantity - part
+        cap = money(self.rules["max_order_usd"])
+        touch = {"buy": quote.ask, "sell": quote.bid}
         for intents in (buys, sells):
             rest = [i for i in intents if residual[i.id] > 0]
-            if rest:
-                result = self._route(rest, [residual[i.id] for i in rest], now)
-                for intent in rest:
+            pooled = sum((residual[i.id] for i in rest), ZERO) * (touch[intents[0].side] if intents else ZERO) * instrument.multiplier
+            # The gateway refuses any order over the cap, and each intent was checked against it
+            # alone: a pool that would be larger is sent as its parts, one venue order each.
+            batches = [rest] if pooled <= cap else [[i] for i in rest]
+            for batch in batches:
+                if not batch:
+                    continue
+                result = self._route(batch, [residual[i.id] for i in batch], now)
+                for intent in batch:
                     outcomes.append(
                         Outcome(intent.id, intent.agent, result.status, result.detail, result.order_id, result.filled)
                     )

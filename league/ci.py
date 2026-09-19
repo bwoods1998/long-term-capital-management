@@ -44,7 +44,7 @@ ROLE_PATHS: dict[str, tuple[str, ...]] = {
 #: Never, for any role, whatever the table above comes to say.
 FORBIDDEN: tuple[str, ...] = (
     "league/constitution.py", "league/ci.py", "league/ledger.py", "league/book.py", "league/evaluator.py",
-    "league/stats.py", "league/auditor.py", "league/watchdog.py", "league/safety.py", "league/replay.py",
+    "league/stats.py", "league/auditor.py", "league/watchdog.py", "league/safety.py", "league/replay.py", "league/updater.py",
     "gateway/", ".github/",
 )
 #: The only keys of league/config.json the operator may move, with their bounds.

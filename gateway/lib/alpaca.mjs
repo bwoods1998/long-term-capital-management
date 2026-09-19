@@ -6,8 +6,9 @@
 // `data.alpaca.markets`. The paths do not overlap, so the path chooses the host and the floor's
 // adapter needs no second venue name.
 //
-// There is a paper host too (`paper-api.alpaca.markets`). This gateway signs for the production
-// account the owner funded; a paper account would be a second set of secrets and a second venue.
+// There is a paper host too (`paper-api.alpaca.markets`). It is the venue `alpaca-paper`: the same
+// paths, a second pair of secrets (`ALPACA_PAPER_*`), never metered and never stopped by the kill
+// switch, because no money is behind it.
 
 export const TRADING_HOST = 'https://api.alpaca.markets';
 //: The paper account's trading host (venue `alpaca-paper`): the same API, simulated money.

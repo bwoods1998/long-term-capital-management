@@ -228,6 +228,9 @@ class Astra:
         self.clock = clock
         #: How often each role sits down. One architect pass is about $1.25 of the $100 month.
         self.schedule_hours = dict(schedule_hours or {"operator": 24, "teacher": 72, "toolsmith": 24, "designer": 168, "architect": 168})
+        #: A role's FIRST pass waits until the league has something to show it: an architect shown
+        #: an empty table on the first morning would be a dollar spent on nothing.
+        self.first_after_hours = {"operator": 6, "toolsmith": 12, "teacher": 24, "architect": 48, "designer": 72}
 
     # ---------------------------------------------------------------- schedule
     def last_pass(self, role: str) -> float | None:
@@ -236,10 +239,15 @@ class Astra:
 
     def due(self) -> list[str]:
         now = self.clock()
+        started = self.ledger.read(kinds="ops.started", limit=1)
+        running_hours = (now - _epoch(started[0].at)) / 3600 if started else 0.0
         out = []
         for role in ROLES:
             last = self.last_pass(role)
-            if last is None or now - last >= self.schedule_hours[role] * 3600:
+            if last is None:
+                if running_hours >= self.first_after_hours.get(role, 0):
+                    out.append(role)
+            elif now - last >= self.schedule_hours[role] * 3600:
                 out.append(role)
         return out
 
@@ -305,6 +313,13 @@ class Astra:
                 self.ledger.append("astra.change", row)
                 out.append(row)
         return out
+
+
+def _epoch(iso: str) -> float:
+    from ltcm.broker import instant
+
+    parsed = instant(iso)
+    return parsed.timestamp() if parsed else 0.0
 
 
 def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:

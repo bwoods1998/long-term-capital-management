@@ -122,6 +122,11 @@ class AstraTest(unittest.TestCase):
 
     def test_each_role_is_due_on_its_own_clock(self):
         astra = self.astra(FakeFrontier({"files": []}), FakeForge())
+        self.ledger.append("ops.started", {"release": "test"})
+        self.assertEqual(astra.due(), [])  # nobody sits down on the first morning: there is nothing to read yet
+        self.clock.advance(7 * 3600)
+        self.assertEqual(astra.due(), ["operator"])
+        self.clock.advance(66 * 3600)
         self.assertEqual(set(astra.due()), {"architect", "toolsmith", "operator", "designer", "teacher"})
         astra.run("operator")
         astra.run("architect")

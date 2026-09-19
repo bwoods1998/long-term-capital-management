@@ -12,8 +12,8 @@ slippage are all inside the number.
 - **Promotion** needs a lower confidence bound on mean block growth above zero. Looks are taken
   every few active blocks, and look k spends alpha * 6 / (pi^2 k^2), so an agent that is looked at
   a hundred times gets no more than alpha of false-pass chance in total. A record that wins
-  nearly every trade (favourites) must ALSO clear a Wilson bound on its loss rate: a t-interval
-  flatters that shape until the first loss arrives.
+  nearly every trade (favourites) must ALSO clear an exact (Clopper-Pearson) bound on its loss
+  rate: a t-interval flatters that shape until the first loss arrives.
 - **Death** is the mirror: an upper bound below zero, or a drawdown past the limit. (The economy
   adds the third way to die: compute credits at zero.)
 - **Replay** counts every run as a trial. A family that tried two hundred variants must beat the
@@ -286,10 +286,10 @@ class Evaluator:
             return Verdict(agent, rung, "hold", "not enough blocks for a bound", numbers)
         returns, risk = self.trade_returns(agent, book, since_seq=entered)
         lopsided = stats.lopsided(returns, float(self.ladder["lopsided_win_rate"]))
-        wilson = stats.lopsided_growth_lcb(returns, risk, alpha) if lopsided else None
+        gate = stats.lopsided_growth_lcb(returns, risk, alpha) if lopsided else None
         numbers.update(
             look=k, alpha_spent=alpha, mean=bounds["mean"], sd=bounds["sd"], lcb=bounds["lcb"], ucb=bounds["ucb"],
-            trades=len(returns), lopsided=lopsided, wilson_lcb=wilson,
+            trades=len(returns), lopsided=lopsided, loss_gate_lcb=gate,
         )
         self.ledger.append("eval.verdict", {"decision": "look", "rung": rung, **numbers}, agent=agent)
         if active >= death["min_active_blocks"] and bounds["ucb"] < 0:
@@ -298,7 +298,7 @@ class Evaluator:
             return Verdict(agent, rung, "hold", f"{len(returns)} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
         if bounds["sd"] <= 0:
             return Verdict(agent, rung, "hold", "its block growth has no variance yet: nothing to bound", numbers)
-        if rung < 3 and active >= self._promotion_blocks(rung) and bounds["lcb"] > 0 and (wilson is None or wilson > 0):
+        if rung < 3 and active >= self._promotion_blocks(rung) and bounds["lcb"] > 0 and (gate is None or gate > 0):
             return Verdict(agent, rung, "eligible", "the lower bound on its growth is above zero", numbers)
         return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
 
@@ -355,16 +355,61 @@ class Evaluator:
         return Verdict(agent, rung - 1, "demote", reason, dict(numbers or {}))
 
     # ------------------------------------------------------------------- drift
-    def drift(self, agent: str, book: str) -> Verdict:
-        """At rungs 2 and 3, compare recent growth with the record that earned the rung. A
-        sustained fall (a one-sided CUSUM alarm) sends the agent down a rung: promotion is not tenure."""
+    def trade_edges(self, agent: str, book: str, horizon: str, *, since_seq: int = 0, until_seq: int | None = None) -> list[list[float]]:
+        """The edge of each closed trade (what it made over what the units sold had cost, fees
+        in), grouped by the block it closed in. An edge does not depend on how large the position
+        was against the stake, so it can be compared across rungs, where the same strategy has a
+        fifth of its stake at work on paper and a third on the micro-real rung."""
+        by_block: dict[str, list[float]] = {}
+        for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=since_seq):
+            p = entry.payload
+            if p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
+                continue
+            if entry.kind == "book.settle":
+                made, cost = float(p["pnl"]), float(p["cost"])
+            elif p.get("realized") is not None and p.get("source") in ("venue", "cross"):
+                made = float(p["realized"])
+                cost = float(p["cash_delta"]) - made
+            else:
+                continue
+            if cost > 0:
+                by_block.setdefault(block_key(entry.at, horizon), []).append(made / cost)
+        return [v for _, v in sorted(by_block.items())]
+
+    def drift(self, agent: str, book: str, horizon: str = "hour") -> Verdict:
+        """At rungs 2 and 3, compare the agent's recent edge per trade with the edge of the record
+        that earned the rung. A sustained fall (a one-sided CUSUM alarm) sends the agent down a rung:
+        promotion is not tenure. Real fills that are worse than the paper fills that earned rung 2
+        are exactly such a fall, and are meant to be caught here."""
         rung = self.rung(agent)
         if rung < 2:
             return Verdict(agent, rung, "hold", "drift is watched on real-money rungs only")
         entered = self._rung_entered(agent)
-        earned = _per_exposure(self._record_below(agent, rung))
-        recent = _per_exposure(self.blocks(agent, since_seq=entered, book=book))
+        below = self._record_below(agent, rung)
+        minimum = int(self.ladder["drift"].get("min_reference_blocks", 10))
         rules = self.ladder["drift"]
+        if below and any(r.get("first_mark_seq") for r in below):
+            start = min(int(r["first_mark_seq"]) for r in below if r.get("first_mark_seq"))
+            earned_blocks = self.trade_edges(agent, str(below[0].get("book")), horizon, since_seq=max(start - 1, 0), until_seq=entered)
+            recent_blocks = self.trade_edges(agent, book, horizon, since_seq=entered)[-int(rules["window_blocks"]):]
+            trades = [edge for block in earned_blocks for edge in block]
+            reference = stats.mean_bounds(trades, 0.5)
+            if len(earned_blocks) >= minimum and recent_blocks and reference is not None and reference["sd"] > 0:
+                # Each recent block is one observation: the mean edge of the trades it closed, in
+                # units of its own standard error (a block that closed one trade is a noisier
+                # reading than one that closed six, and is weighed as such).
+                scores = [(sum(b) / len(b) - reference["mean"]) * (len(b) ** 0.5) / reference["sd"] for b in recent_blocks]
+                result = stats.cusum_decay(scores, 0.0, 1.0, k=float(rules["k"]), h=float(rules["h"]))
+                numbers = {"book": book, "measure": "edge per trade", "reference_mean": reference["mean"], "reference_sd": reference["sd"],
+                           "reference_trades": len(trades), "recent_blocks": len(recent_blocks), **result}
+                self.ledger.append("eval.drift", {"rung": rung, **numbers}, agent=agent)
+                if result["alarm"]:
+                    return self.demote(agent, "its edge per trade has decayed from the record that earned this rung", numbers)
+                return Verdict(agent, rung, "hold", "no decay", numbers)
+        # No trade-by-trade record to compare (older rows, or a stay too short): block growth per
+        # unit of exposure is the fallback.
+        earned = _per_exposure(below)
+        recent = _per_exposure(self.blocks(agent, since_seq=entered, book=book))
         recent = recent[-int(rules["window_blocks"]):]
         reference = stats.mean_bounds(earned, 0.5)
         if reference is None or not recent or reference["sd"] <= 0:

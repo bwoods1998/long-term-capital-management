@@ -187,12 +187,10 @@ class House:
         """Seed the first population (idempotent: a seed already born is not born again)."""
         born = []
         existing = {a.name for a in self.registry.agents.values()} | set(self.registry.agents)
-        for seed in seeds_module.all_seeds():
-            if names is not None and seed["name"] not in names:
-                continue
-            if seed["name"] in existing:
-                continue
-            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"])
+        wanted = [s for s in seeds_module.all_seeds() if (names is None or s["name"] in names) and s["name"] not in existing]
+        for index, seed in enumerate(wanted):
+            # The probe box stays awake between seeds: most of reading a strategy's NEEDS is the box waking.
+            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], keep_probe_awake=index < len(wanted) - 1)
             # The founders are the owner's priors (what the first run measured, and published
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still
@@ -230,12 +228,14 @@ class House:
         return added
 
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
-              params: Mapping[str, Any] | None = None, endowment: Any | None = None) -> Agent:
+              params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
         # sealed probe box the House keeps for the purpose, never the House's own process.
-        described = self.sandbox.needs(PROBE_BOX, code)
+        described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
         info = described.result
         if not info.get("ok"):
+            if keep_probe_awake:
+                self.sandbox.rest(PROBE_BOX)
             raise ValueError(f"{name}: {info.get('error')}")
         niche_of(info["needs"])
         agent = self.registry.born(
@@ -552,7 +552,7 @@ class House:
         elif verdict.decision == "eligible":
             self._promote(agent, verdict)
         elif rung >= 2:
-            drift = self.evaluator.drift(agent.id, book.name)
+            drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
             if drift.decision == "demote":
                 self._move_books(agent, book)
                 return drift

@@ -42,9 +42,10 @@ CONSTITUTION: dict[str, Any] = {
         # Death at any rung above 0: evidence that growth is negative, or the stake is going.
         "death": {"min_active_blocks": 20, "max_drawdown": 0.30},
         # Drift at rungs 2 and 3: a CUSUM on block growth against the record that earned the rung.
-        "drift": {"k": 0.5, "h": 4.0, "window_blocks": 40},
-        # A record with this share of winning trades is judged on a Wilson bound of its loss rate
-        # as well, because a t-interval flatters it until the first loss arrives.
+        # h = 6 is about one false alarm in 1,300 blocks (h = 4 would be one a week on hourly blocks).
+        "drift": {"k": 0.5, "h": 6.0, "window_blocks": 60, "min_reference_blocks": 10},
+        # A record with this share of winning trades is judged on an exact (Clopper-Pearson) bound
+        # of its loss rate as well, because a t-interval flatters it until the first loss arrives.
         "lopsided_win_rate": 0.80,
     },
     "rungs": {
@@ -64,4 +65,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "822954a80cdf848109b51c958f538cf9b45b63f9a1070aaacd47d00b25d38c98"
+PINNED_DIGEST = "e07748b44146f659515d97307ee5a97f712d06b195eec8e1e0eefd58bd742063"
