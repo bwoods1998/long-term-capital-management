@@ -40,8 +40,8 @@ class PacerCase(unittest.TestCase):
         self.ledger.append("ops.budget", {"what": "sail", "spent_usd": str(usd), "balance_usd": "50"})
         self.pacer._cache.clear()
 
-    def astra(self, usd, kind="astra.pass"):
-        self.ledger.append(kind, {"role": "architect", "cost_usd": str(usd)}, agent="house" if kind == "astra.pass" else "a1")
+    def merton(self, usd, kind="merton.pass"):
+        self.ledger.append(kind, {"role": "architect", "cost_usd": str(usd)}, agent="house" if kind == "merton.pass" else "a1")
         self.pacer._cache.clear()
 
     def test_the_constitution_funds_a_fortnight_from_the_nineteenth(self):
@@ -54,15 +54,15 @@ class PacerCase(unittest.TestCase):
         self.assertTrue(self.pacer.may_spend("sail"))
 
     def test_spending_uses_up_todays_room_and_not_tomorrows(self):
-        self.astra("3")
+        self.merton("3")
         self.assertEqual((self.pacer.room("openai"), self.pacer.allowance("openai")), (D(2), D(5)))  # the allowance does not shrink as it is used
-        self.astra("2.5", kind="audit.verdict")
+        self.merton("2.5", kind="audit.verdict")
         self.assertFalse(self.pacer.may_spend("openai"))
         self.at("2026-09-20T00:05:00")
         self.assertTrue(self.pacer.may_spend("openai"))
 
     def test_an_overspent_day_is_paid_back_and_a_quiet_day_rolls_forward(self):
-        self.astra("12")  # a dear first day: 7 over
+        self.merton("12")  # a dear first day: 7 over
         self.at("2026-09-20T09:00:00")
         self.assertAlmostEqual(float(self.pacer.allowance("openai")), (70 - 12) / 13, places=9)
         self.at("2026-09-25T09:00:00")  # five quiet days later the unspent share has rolled forward
@@ -94,9 +94,9 @@ class PacerCase(unittest.TestCase):
         self.assertEqual(self.pacer.credit_pool(), D(0))
 
     def test_garbage_on_the_ledger_is_not_money(self):
-        self.ledger.append("astra.pass", {"role": "operator", "cost_usd": "not a number"})
-        self.ledger.append("astra.pass", {"role": "operator", "cost_usd": "-4"})
-        self.ledger.append("astra.pass", {"role": "operator"})
+        self.ledger.append("merton.pass", {"role": "operator", "cost_usd": "not a number"})
+        self.ledger.append("merton.pass", {"role": "operator", "cost_usd": "-4"})
+        self.ledger.append("merton.pass", {"role": "operator"})
         self.assertEqual(self.pacer.spent("openai"), D(0))
 
 

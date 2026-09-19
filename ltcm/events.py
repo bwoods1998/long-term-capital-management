@@ -1,4 +1,4 @@
-"""Append-only, hash-chained event log shared by every Long Term Capital Management component.
+"""Append-only, hash-chained event log shared by every Long-Term Capital Management component.
 
 One SQLite file holds every stream. Each stream is its own hash chain: an event's digest covers
 its identity, content and the previous digest in the same stream, so any edit or deletion is

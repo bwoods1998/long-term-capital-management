@@ -72,11 +72,11 @@ def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, tt
 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
-          astra: bool = True, canary: bool = False) -> House:
+          merton: bool = True, canary: bool = False) -> House:
     """`canary=True` is a House that can hurt nothing: a simulated Alpaca account instead of the
     shared paper one (the real House reconciles that account to the cent, and a second trader on it
     would break the reconciliation), its own Kalshi shadow state, no real venues, no publishing,
-    no research, no Astra. The watchdog runs new code this way before the House runs it."""
+    no research, no Merton. The watchdog runs new code this way before the House runs it."""
     from ltcm.adapters import GatewaySigner, VenueClient
     from ltcm.data.kalshi import KalshiMarketData
     from ltcm.data.news import News
@@ -99,7 +99,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .economy import load_game
 
         config.update(real_money=False, replay_days=2)
-        research = publish = astra = False
+        research = publish = merton = False
         name_prefix = "canary"
         # Two agents are enough to exercise every path: the canary does not refill itself to the
         # league's population floor (the first canary on the box founded all twelve seeds).
@@ -152,11 +152,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
         lineage=house.registry.lineage,
     )
-    if astra:
-        from .astra import Astra, GatewayForge, evidence_from
+    if merton:
+        from .merton import Merton, GatewayForge, evidence_from
 
-        pace = house.game.get("astra") or {}
-        house.astra = Astra(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
+        pace = house.game.get("merton") or {}
+        house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"))
     if provider is not None:
         house.budget = Budget(house.ledger, lambda: provider.check_balance())

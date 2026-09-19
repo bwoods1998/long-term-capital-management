@@ -322,7 +322,7 @@ test('the MIME envelope is well formed and carries a non-ASCII subject safely', 
     subject: 'LTCM: Sail balance $15.00 — top up', text: 'line one\nline two\n',
     at: Date.parse('2026-09-15T16:00:00Z'), id: 'fixed',
   });
-  assert.match(body, /^From: Long Term Capital Management <agent@blakewoods\.us>\r\n/);
+  assert.match(body, /^From: Long-Term Capital Management <agent@blakewoods\.us>\r\n/);
   assert.match(body, /\r\nTo: <blakewoods98@gmail\.com>\r\n/);
   assert.match(body, /\r\nSubject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=\r\n/);
   assert.match(body, /\r\nMessage-ID: <fixed@blakewoods\.us>\r\n/);

@@ -45,6 +45,11 @@ class Agent:
     cause: str | None = None
     needs: dict[str, Any] = field(default_factory=dict)
     specialty: str | None = None  # its niche in league/niches.json, for life; None for an agent born before niches
+    #: The name its line is numbered from. Six agents of one desk are `meriwether`, `meriwether-2`
+    #: ..., and a child of any of them is the next free number in that line, as the first run's
+    #: desks were Mullins VI and VIII. Defaults to the id, for an agent born before lines.
+    line: str = ""
+    founder: str | None = None  # which founder of its specialty it was born from (`league/niches.json`)
 
     @property
     def niche(self) -> str:
@@ -98,6 +103,7 @@ class Registry:
                 style=p["style"], generation=int(p["generation"]), parent=p.get("parent"), code=p["_code"],
                 params=dict(p.get("params") or {}), wake_minutes=int(p.get("wake_minutes") or 15), born_at=at,
                 needs=dict(p.get("needs") or {}), specialty=p.get("specialty"),
+                line=str(p.get("line") or p["name"]), founder=p.get("founder"),
             )
         elif kind == "agent.strategy" and agent_id in self.agents:
             agent = self.agents[agent_id]
@@ -134,14 +140,14 @@ class Registry:
 
     # ----------------------------------------------------------------- writes
     def born(self, *, name: str, family: str, code: str, needs: Mapping[str, Any], params: Mapping[str, Any] | None = None,
-             parent: str | None = None, reason: str = "", specialty: str | None = None) -> Agent:
+             parent: str | None = None, reason: str = "", specialty: str | None = None, founder: str | None = None) -> Agent:
         if not NAME.match(name):
             raise ValueError(f"agent name {name!r} must be lowercase letters, digits and dashes")
         venue, horizon, style = niche_of(needs)
         with self._lock:
-            return self._born(name, family, code, needs, params, parent, reason, venue, horizon, style, specialty)
+            return self._born(name, family, code, needs, params, parent, reason, venue, horizon, style, specialty, founder)
 
-    def _born(self, name, family, code, needs, params, parent, reason, venue, horizon, style, specialty=None) -> Agent:
+    def _born(self, name, family, code, needs, params, parent, reason, venue, horizon, style, specialty=None, founder=None) -> Agent:
         generation = (self.agents[parent].generation + 1) if parent and parent in self.agents else 1
         taken = {a.id for a in self.agents.values()}
         agent_id, n = name, 1
@@ -153,7 +159,8 @@ class Registry:
             {
                 "name": agent_id, "family": family, "venue": venue, "horizon": horizon, "style": style,
                 "generation": generation, "parent": parent, "code_sha256": code_sha(code), "params": dict(params or {}),
-                "needs": dict(needs), "wake_minutes": wake_minutes_of(needs), "reason": reason, "specialty": specialty, "_code": code,
+                "needs": dict(needs), "wake_minutes": wake_minutes_of(needs), "reason": reason, "specialty": specialty,
+                "line": name, "founder": founder, "_code": code,
             },
             agent=agent_id,
             id=f"born:{agent_id}",

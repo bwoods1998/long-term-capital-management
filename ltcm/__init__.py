@@ -1,4 +1,4 @@
-"""Long Term Capital Management: autonomous portfolio-manager desks with deterministic guardrails.
+"""Long-Term Capital Management: autonomous portfolio-manager desks with deterministic guardrails.
 
 Standard library only. See README.md in this package for the design rules.
 """

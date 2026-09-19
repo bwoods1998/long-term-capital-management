@@ -47,7 +47,7 @@ export const FORBIDDEN_TREES = ['gateway/', '.github/'];
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 
-export const footer = role => `Opened by Astra (${role}) through the LTCM gateway.`;
+export const footer = role => `Opened by Merton (${role}) through the LTCM gateway.`;
 
 /** `{ repo, token }` when both are set and the repository name is one, else `null`. */
 export function configured(env = {}) {
@@ -92,10 +92,10 @@ export function canonicalFiles(files) {
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-/** `astra/<role>/<slug>-<8 hex>`: a retry of the same proposal is the same branch. */
+/** `merton/<role>/<slug>-<8 hex>`: a retry of the same proposal is the same branch. */
 export function branchName(role, slug, files) {
   const canonical = JSON.stringify(canonicalFiles(files).map(file => [file.path, file.content]));
-  return `astra/${role}/${slug}-${createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 8)}`;
+  return `merton/${role}/${slug}-${createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 8)}`;
 }
 
 /**

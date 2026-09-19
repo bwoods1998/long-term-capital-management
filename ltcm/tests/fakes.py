@@ -1,4 +1,4 @@
-"""Injected doubles for the Long Term Capital Management tests.
+"""Injected doubles for the Long-Term Capital Management tests.
 
 Nothing under `ltcm/tests/` opens a socket, reads a credential or looks at a wall clock.
 Every source of nondeterminism in the runtime is an injected object, and these are the fakes the

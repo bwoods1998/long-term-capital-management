@@ -4,7 +4,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from league.astra import Astra, ForgeError, parse_proposal
+from league.merton import Merton, ForgeError, parse_proposal
 from league.frontier import Answer, FrontierError
 from league.ledger import Ledger
 from league.tests.fakes import Clock
@@ -37,7 +37,7 @@ class FakeForge:
         if self.fail:
             raise ForgeError("HTTP 503: GitHub is not configured.")
         self.proposed.append(kw)
-        return {"ok": True, "branch": f"astra/{kw['role']}/{kw['slug']}-abcd1234", "number": 7, "url": "https://github.com/x/y/pull/7"}
+        return {"ok": True, "branch": f"merton/{kw['role']}/{kw['slug']}-abcd1234", "number": 7, "url": "https://github.com/x/y/pull/7"}
 
     def status(self, number):
         return self.statuses[number]
@@ -67,7 +67,7 @@ class ProposalTest(unittest.TestCase):
         self.assertEqual(parse_proposal("teacher", {"files": [1, {"path": 3}]}, Decimal(0)).files, [])
 
 
-class AstraTest(unittest.TestCase):
+class MertonTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
@@ -77,74 +77,74 @@ class AstraTest(unittest.TestCase):
         self.ledger.close()
         self.dir.cleanup()
 
-    def astra(self, frontier, forge, evidence=None):
-        return Astra(frontier, forge, self.ledger, evidence=evidence or (lambda role: {"league_table": [], "open_requests": [{"name": "x"}]}), clock=self.clock)
+    def merton(self, frontier, forge, evidence=None):
+        return Merton(frontier, forge, self.ledger, evidence=evidence or (lambda role: {"league_table": [], "open_requests": [{"name": "x"}]}), clock=self.clock)
 
     def test_a_pass_with_a_change_becomes_a_pull_request_and_two_ledger_rows(self):
         answer = {"summary": "an empty niche", "slug": "idea", "title": "A new strategy", "body": "why", "files": [{"path": "league/strategies/idea.py", "content": GOOD}]}
         frontier, forge = FakeFrontier(answer), FakeForge()
-        row = self.astra(frontier, forge).run("architect")
+        row = self.merton(frontier, forge).run("architect")
         self.assertEqual(forge.proposed[0]["role"], "architect")
         self.assertEqual(row["number"], 7)
         self.assertEqual(row["cost_usd"], "1.25")
-        self.assertEqual(frontier.asked[0]["agent"], "astra-architect")
+        self.assertEqual(frontier.asked[0]["agent"], "merton-architect")
         self.assertIn("THE STRATEGY CONTRACT", frontier.asked[0]["system"])
-        change = self.ledger.last("astra.change").payload
+        change = self.ledger.last("merton.change").payload
         self.assertEqual((change["status"], change["paths"]), ("opened", ["league/strategies/idea.py"]))
 
     def test_doing_nothing_is_recorded_and_opens_nothing(self):
         forge = FakeForge()
-        row = self.astra(FakeFrontier({"summary": "nothing new", "files": []}), forge).run("teacher")
+        row = self.merton(FakeFrontier({"summary": "nothing new", "files": []}), forge).run("teacher")
         self.assertEqual(forge.proposed, [])
         self.assertEqual(row["files"], 0)
-        self.assertEqual(self.ledger.count(kinds="astra.change"), 0)
+        self.assertEqual(self.ledger.count(kinds="merton.change"), 0)
 
     def test_a_failed_call_or_an_unconfigured_forge_is_a_row_not_a_crash(self):
-        row = self.astra(FakeFrontier(error=FrontierError("HTTP 402", status=402)), FakeForge()).run("designer")
+        row = self.merton(FakeFrontier(error=FrontierError("HTTP 402", status=402)), FakeForge()).run("designer")
         self.assertTrue(row["error"])
         answer = {"summary": "s", "slug": "x", "title": "t", "body": "b", "files": [{"path": "league/playbook/2026-09-20-x.md", "content": "a lesson"}]}
-        row = self.astra(FakeFrontier(answer), FakeForge(fail=True)).run("teacher")
+        row = self.merton(FakeFrontier(answer), FakeForge(fail=True)).run("teacher")
         self.assertIn("not configured", row["forge_error"])
 
     def test_the_toolsmith_does_not_spend_money_on_an_empty_queue(self):
         frontier = FakeFrontier({"files": []})
-        row = self.astra(frontier, FakeForge(), evidence=lambda role: {"open_requests": []}).run("toolsmith")
+        row = self.merton(frontier, FakeForge(), evidence=lambda role: {"open_requests": []}).run("toolsmith")
         self.assertTrue(row["skipped"])
         self.assertEqual(frontier.asked, [])
 
     def test_the_toolsmith_answers_the_queue_even_when_it_builds_nothing(self):
         self.ledger.append("tool.request", {"name": "longer_tape", "description": "a longer replay tape for hourly markets"}, agent="a1", id="req-1")
         answer = {"summary": "needs data, not a tool", "files": [], "answers": [{"request": "req-1", "outcome": "cannot be a pure tool: it needs more recorded history"}, {"request": "made-up", "outcome": "x"}]}
-        astra = self.astra(FakeFrontier(answer), FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1", "name": "longer_tape"}]})
-        astra.run("toolsmith")
+        merton = self.merton(FakeFrontier(answer), FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1", "name": "longer_tape"}]})
+        merton.run("toolsmith")
         rows = [e.payload for e in self.ledger.iter(kinds="tool.fulfilled")]
         self.assertEqual([(r["request"], r["outcome"][:20]) for r in rows], [("req-1", "cannot be a pure too")])
 
     def test_each_role_is_due_on_its_own_clock(self):
-        astra = self.astra(FakeFrontier({"files": []}), FakeForge())
+        merton = self.merton(FakeFrontier({"files": []}), FakeForge())
         self.ledger.append("ops.started", {"release": "test"})
-        self.assertEqual(astra.due(), [])  # nobody sits down on the first morning: there is nothing to read yet
+        self.assertEqual(merton.due(), [])  # nobody sits down on the first morning: there is nothing to read yet
         self.clock.advance(7 * 3600)
-        self.assertEqual(astra.due(), ["operator"])
+        self.assertEqual(merton.due(), ["operator"])
         self.clock.advance(66 * 3600)
-        self.assertEqual(set(astra.due()), {"architect", "toolsmith", "operator", "designer", "teacher"})
-        astra.run("operator")
-        astra.run("architect")
-        self.assertNotIn("operator", astra.due())
+        self.assertEqual(set(merton.due()), {"architect", "toolsmith", "operator", "designer", "teacher"})
+        merton.run("operator")
+        merton.run("architect")
+        self.assertNotIn("operator", merton.due())
         self.clock.advance(25 * 3600)
-        self.assertIn("operator", astra.due())
-        self.assertNotIn("architect", astra.due())
+        self.assertIn("operator", merton.due())
+        self.assertNotIn("architect", merton.due())
 
     def test_following_records_what_ci_decided(self):
         answer = {"summary": "s", "slug": "idea", "title": "t", "body": "b", "files": [{"path": "league/strategies/idea.py", "content": GOOD}]}
         forge = FakeForge()
-        astra = self.astra(FakeFrontier(answer), forge)
-        astra.run("architect")
+        merton = self.merton(FakeFrontier(answer), forge)
+        merton.run("architect")
         forge.statuses[7] = {"merged": False, "state": "open", "checks": {"conclusion": "pending"}}
-        self.assertEqual(astra.follow(), [])
+        self.assertEqual(merton.follow(), [])
         forge.statuses[7] = {"merged": False, "state": "open", "checks": {"conclusion": "failure"}}
-        self.assertEqual(astra.follow()[0]["status"], "refused by CI")
-        self.assertEqual(astra.follow(), [])  # recorded once
+        self.assertEqual(merton.follow()[0]["status"], "refused by CI")
+        self.assertEqual(merton.follow(), [])  # recorded once
 
 
 if __name__ == "__main__":

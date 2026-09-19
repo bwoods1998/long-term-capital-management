@@ -72,7 +72,7 @@ Switching on is `docs/runbook-go-live.md`: `floor_box.py resume`, `deploy`, `sta
 | 2 | Statistics (alpha-spent t-bounds, the exact loss-rate gate, deflated Sharpe, CUSUM, quarter Kelly); a self-contained replay simulator that runs in the agent's box; tapes from Alpaca and Kalshi; the Kalshi shadow venue; the evaluator; the pinned constitution | `stats.py`, `replay.py`, `tapes.py`, `paper.py`, `evaluator.py`, `constitution.py` |
 | 3 | Compute credits with niche floors, payout, fork threshold; the agent registry; one sealed Sailbox per agent with fork-by-checkpoint; the in-box runner and its safety check; web search, library, tool-request queue, graveyard playbook; the researcher loop; twelve founding seeds; the House tick; the Sail budget meter | `economy.py`, `game.json`, `agents.py`, `sandbox.py`, `runner.py`, `safety.py`, `commons.py`, `researcher.py`, `rules.py`, `seeds/`, `house.py`, `budget.py` |
 | 4 | The frontier client and the fail-closed auditor with counterfactual scoring; the publisher for the five-section site; service wiring and the command line; on the site: a test tape, practice positions with a tag, the new research tools, a data-driven live dot | `frontier.py`, `auditor.py`, `publish.py`, `service.py`, `__main__.py`; personal-site |
-| 5 | Astra's five pull-request roles; the gateway's GitHub route; the CI judge and the two workflows; releases, canary, promotion, watch and rollback; a simulated paper venue for the canary; the updater that pulls `main`; the box script rebuilt around releases | `astra.py`, `ci.py`, `strategies/`, `tools/`, `playbook/`, `watchdog.py`, `sim.py`, `updater.py`, `gateway/lib/github.mjs`, `.github/workflows/astra.yml`, `scripts/floor_box.py` |
+| 5 | Merton's five pull-request roles; the gateway's GitHub route; the CI judge and the two workflows; releases, canary, promotion, watch and rollback; a simulated paper venue for the canary; the updater that pulls `main`; the box script rebuilt around releases | `merton.py`, `ci.py`, `strategies/`, `tools/`, `playbook/`, `watchdog.py`, `sim.py`, `updater.py`, `gateway/lib/github.mjs`, `.github/workflows/merton.yml`, `scripts/floor_box.py` |
 | 6 | Quarter-Kelly stakes on the lower bound, capped by a share of the venue's cash and by what one order can close; drift on the edge per trade; the standing capital recommendation | `capital.py`, `evaluator.py` |
 
 ### Definition of done, item by item
@@ -106,7 +106,7 @@ tapes for every seed.
   **Options are switched off** in the book until the House can quote them (no chain or option
   quotes; the gateway does not serve Alpaca's contract listing).
 
-**(c) Astra, metered through the gateway.** The auditor vetoed a deliberately bad candidate (a
+**(c) Merton, metered through the gateway.** The auditor vetoed a deliberately bad candidate (a
 martingale with a good-looking 40-block paper record) with four blockers, naming the unbounded
 doubling, the breach of the micro limits and the $75 cap, and wins that were losses after fees:
 $0.23 (a first attempt with an empty record cost $0.07). The architect completed one metered pass
@@ -165,7 +165,7 @@ account identifiers: nothing (one match is a labelled test fixture string).
 
 ### What is still yours
 
-1. **`GITHUB_TOKEN` in the gateway** (runbook, section 4). Without it Astra's five pull-request
+1. **`GITHUB_TOKEN` in the gateway** (runbook, section 4). Without it Merton's five pull-request
    roles run, are recorded and change nothing. The auditor does not need it.
 2. The two obsolete `COINBASE_*` Worker secrets are already gone from the Worker; revoke the key at
    Coinbase if you have not.
@@ -178,7 +178,7 @@ account identifiers: nothing (one match is a labelled test fixture string).
    a deflated Sharpe of 0.85 against 0.90). They trade on paper anyway, earn floors, pay for their
    compute, and some will die within days. That is the game working, but the first week may look
    like attrition, and the population is refilled by forks and House-staked mutations, not by
-   brilliance, until Astra's architect can open pull requests.
+   brilliance, until Merton's architect can open pull requests.
 2. **Practice fills are kinder than real ones.** Alpaca paper fills at the touch with no queue; the
    shadow book models no depth. Rung 2 exists to measure the gap at $10 a position, and the drift
    monitor demotes an agent whose real edge per trade falls below its paper edge.
@@ -224,10 +224,10 @@ account identifiers: nothing (one match is a labelled test fixture string).
 
 The Sail figure is the fall in the account balance (`/v2/usage/summary`), so it includes every
 agent box, probe, fork, canary, replay and research pass of the night and the House box's hours
-awake. The five Astra calls are filed under "unattributed" in the gateway's month because the
+awake. The five Merton calls are filed under "unattributed" in the gateway's month because the
 House sent names with a colon, which the gateway does not accept; fixed during the build
 (`league/frontier.py`), so from now on audits are filed under `audit-<agent>` and passes under
-`astra-<role>`.
+`merton-<role>`.
 
 ## Where I am (the builder's place-keeper, kept for the record)
 
@@ -283,7 +283,7 @@ House sent names with a colon, which the gateway does not accept; fixed during t
     reversion Sharpe below zero after fees; Kalshi favourites deflated Sharpe 0.85 against the 0.90
     line). Paper costs nothing and forward evidence is what counts, so the twelve founding seeds
     are seated on rung 1 at birth; their replay still runs and still counts as their family's first
-    trial. Everything born later (forks, mutations, Astra's strategies) must pass replay first.
+    trial. Everything born later (forks, mutations, Merton's strategies) must pass replay first.
 12. **Niche floors are paid only to qualified agents (rung 1 and up), and a rung-0 agent that has
     not passed replay within three epochs is retired.** A floor for an agent that does nothing
     would pay for squatting on a population slot.
@@ -304,12 +304,12 @@ House sent names with a colon, which the gateway does not accept; fixed during t
     most: a box was recorded before it was sealed (now sealed first, destroyed if it cannot be);
     failed replays did not raise the family's trial count (now every replay does); `observe`
     crashed after a rung change on a shared book; the audit read the string "false" as approval.
-18. **Astra's pull requests go through the gateway** (`POST /v1/github/pr`), which holds the GitHub
+18. **Merton's pull requests go through the gateway** (`POST /v1/github/pr`), which holds the GitHub
     token like every other credential and enforces each role's paths outside Sail. CI on GitHub
-    judges (`.github/workflows/astra.yml`, run from main's copy with `pull_request_target`, so a
+    judges (`.github/workflows/merton.yml`, run from main's copy with `pull_request_target`, so a
     branch cannot rewrite its judge) and merges a green PR from a job that never runs the branch's
     code. **The owner must place `GITHUB_TOKEN` in the gateway** (a fine-grained token for this one
-    repository: Contents and Pull requests read/write) before Astra's five PR roles can act
+    repository: Contents and Pull requests read/write) before Merton's five PR roles can act
     unattended; until then each pass is recorded with `forge_error: GitHub is not configured` and
     nothing else changes. The auditor does not need it. Tonight the flow was proven from the
     owner's machine with a `gh`-based forge of the same interface.
@@ -324,7 +324,7 @@ House sent names with a colon, which the gateway does not accept; fixed during t
     measured). Reconciliation adds it back; the House takes every book's baseline at start, before
     anything can trade.
 22. **Kalshi replay tapes are a week (hourly) and seven weeks (daily).** The dry run's own agents
-    diagnosed the one-day tape and filed tool requests; Astra's toolsmith correctly answered that
+    diagnosed the one-day tape and filed tool requests; Merton's toolsmith correctly answered that
     this needs data, not a tool, so the House was changed.
 23. **Old-run code is kept, not removed.** The league imports the first run's venue adapters,
     broker types, risk engine, fee model, Sail clients, inference provider, data readers and
@@ -364,10 +364,10 @@ check: 72 BTC bars through the gateway, 27 live KXBTCD markets, a 12-hour Kalshi
 tests), `league/house.py`, `league/budget.py`. Sail sandbox verified live (decision 16). First real
 dry run (three seeds): replays ran in Sail boxes in 10 s each and were recorded as trials.
 
-### Step 5: Astra's roles, CI, canary, watchdog (done about 08:10 UTC)
+### Step 5: Merton's roles, CI, canary, watchdog (done about 08:10 UTC)
 
-`league/ci.py`, `league/astra.py`, `league/strategies/`, `league/tools/`, `league/playbook/`,
-`.github/workflows/astra.yml`, `league/watchdog.py`, `league/sim.py`, `gateway/lib/github.mjs`
+`league/ci.py`, `league/merton.py`, `league/strategies/`, `league/tools/`, `league/playbook/`,
+`.github/workflows/merton.yml`, `league/watchdog.py`, `league/sim.py`, `gateway/lib/github.mjs`
 (gateway suite 104), `scripts/floor_box.py` rewritten around releases (first-run suite 1,753).
 Verified live: one metered architect pass ($0.10: it declined to write a strategy, with reasons) and
 one toolsmith pass ($0.06: all three requests need data, not tools); PR #1 (a strategy importing

@@ -1,4 +1,4 @@
-# Long Term Capital Management
+# Long-Term Capital Management
 
 **AI agents that trade real money on Kalshi and Alpaca, compete for compute, and rewrite
 themselves from every result, in public and with no human in the loop.**
@@ -37,7 +37,7 @@ or a day.
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
 | 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 30 blocks and 8 out-of-sample blocks with growth above zero, and a deflated Sharpe ratio of 0.90 or more against every replay its family has ever run |
-| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active blocks, 10 closed trades, growth above zero and a drawdown under 15%; then Astra's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below) |
+| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active blocks, 10 closed trades, growth above zero and a drawdown under 15%; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below) |
 | 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | 30 active blocks and 10 closed trades of real fills, and a one-sided lower confidence bound on mean block growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
 | 3. Scaled | the real accounts | a quarter of Kelly on the lower bound of its growth: never under $25, never over 25% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
 
@@ -90,7 +90,7 @@ left, over the days that are left, so a quiet day rolls forward and a dear one i
 day's credit pool is 85% of the day's Sail allowance; a performance share nobody has earned yet
 follows the floors instead of going unspent; research runs on a stronger model (DeepSeek V4 Pro,
 about two cents a pass, measured) every three hours, twice as often while the day is underspent;
-Astra's roles sit down every 8 to 36 hours, one at a time, while the day's allowance lasts. When a
+Merton's roles sit down every 8 to 36 hours, one at a time, while the day's allowance lasts. When a
 budget or the fourteenth day is gone that spending stops for good and the owner is told. The
 monthly caps still stand behind it.
 
@@ -155,7 +155,7 @@ has no reason to gamble.
 | **Gateway** ([`gateway/`](gateway/README.md)) | a Cloudflare Worker, outside Sail | the Kalshi and Alpaca keys, the OpenAI key, the GitHub token, the order caps, the frontier budget, the kill switch | sign orders, meter spending, open a pull request inside a role's paths | be changed by anything on Sail; merge a pull request (there is no merge route) |
 | **House** ([`league/`](league/README.md)) | one trusted Sailbox | three tokens (gateway, Sail, site publishing), the ledger | net and send orders through the gateway, score, pay, promote, retire, publish | hold a venue key; run agent-written code in its own process; decide a trade |
 | **Agents** | one sealed Sailbox each, asleep between wakes | nothing: no credential, and an egress allowlist of one host that never resolves | run `decide` or a replay on data the House uploads, and print one line of plain data back | reach the House, a venue, the gateway or the network; write the ledger |
-| **Astra** (the frontier model, `gpt-6-astra`) | behind the gateway's metered route | nothing | veto a candidate before real money; propose changes by pull request | pick a trade; touch the ledger; merge; change its own judges |
+| **Merton** (the frontier model, `gpt-6-astra`) | behind the gateway's metered route | nothing | veto a candidate before real money; propose changes by pull request | pick a trade; touch the ledger; merge; change its own judges |
 
 The House drives each agent's box from outside, over Sail's exec API: resume, upload, run, read one
 token-marked line of stdout, sleep. Research (the cheap model, web search, the shared library) runs
@@ -172,14 +172,14 @@ What no model and no code path on Sail may change, and where each item is enforc
 | OpenAI budget | $100 a month | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month, $10 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest, and the House writes the digest to the ledger every time it starts |
-| The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, `gateway/`, `.github/` | out of reach of every Astra role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
+| The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, `gateway/`, `.github/` | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
 | Real money | `"real_money": false` in `league/config.json` | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 
-## Astra's six jobs
+## Merton's six jobs
 
-Astra never picks a trade. As auditor it can only veto; in the other five roles it can do exactly one
+Merton never picks a trade. As auditor it can only veto; in the other five roles it can do exactly one
 thing, propose a pull request, and each role may touch only its own paths. The gateway opens the pull
-request, [CI](.github/workflows/astra.yml) judges it (path guard, content checks, the replay
+request, [CI](.github/workflows/merton.yml) judges it (path guard, content checks, the replay
 regression, the whole league suite) and a workflow job that never runs the branch's code merges a
 green one. Every pass is a row on the ledger and a line on the public tape, with its cost.
 
@@ -222,7 +222,7 @@ same page over separate storage; the production tape stays empty until go-live.
 | `deploy/` | [How the House runs on its box](deploy/README.md): releases, the canary, the two watchdogs. |
 | `docs/` | [Index](docs/README.md): the design, the build log, the runbook, and the first run's record. |
 | `playbooks/` | The first run's desk playbooks, kept as history. The league's lessons are in `league/playbook/`. |
-| `.github/workflows/` | `astra.yml` judges and merges Astra's pull requests; `checks.yml` runs all three suites on every push to `main` and every pull request. |
+| `.github/workflows/` | `merton.yml` judges and merges Merton's pull requests; `checks.yml` runs all three suites on every push to `main` and every pull request. |
 
 The `league/` modules:
 
@@ -248,15 +248,15 @@ The `league/` modules:
 | `researcher.py` | The research loop a cheap Sail model runs for one agent, at that agent's expense. |
 | `rules.py` | The text every agent is told, generated from the constitution and the game file. |
 | `seeds/` | The fourteen founding programs. |
-| `pacer.py` | The expedition's pace: the owner's two budgets turned into a daily allowance that the credit pool, research and Astra follow. |
+| `pacer.py` | The expedition's pace: the owner's two budgets turned into a daily allowance that the credit pool, research and Merton follow. |
 | `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
 | `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season. |
-| `strategies/`, `tools/`, `playbook/` | What Astra adds by pull request: strategies, helper modules, lessons. |
+| `strategies/`, `tools/`, `playbook/` | What Merton adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop. |
 | `budget.py` | The Sail budget meter. |
 | `frontier.py` | The client for the gateway's metered frontier route. |
 | `auditor.py` | The veto before real money, and its counterfactual score. |
-| `astra.py` | Astra's five pull-request roles. |
+| `merton.py` | Merton's five pull-request roles. |
 | `ci.py` | The judge of every change: path guard, content checks, the suite. |
 | `capital.py` | Rung 3 sizing and the standing capital recommendation for the owner. |
 | `publish.py` | The public tape. |
@@ -327,7 +327,7 @@ Known limits:
   the market is shut, so the simulator never sees a moment when an equity order is allowed. Three
   seeds (`equity-overnight`, `equity-trend`, `equity-rsi2`) are judged forward only, and their
   children cannot qualify until the tape steps inside the session.
-- **Astra's five pull-request roles need the owner's `GITHUB_TOKEN` in the gateway** (a fine-grained
+- **Merton's five pull-request roles need the owner's `GITHUB_TOKEN` in the gateway** (a fine-grained
   token for this one repository). Until then each pass runs and is recorded with
   `forge_error: GitHub is not configured`, and nothing changes. The auditor does not need it.
 - **Merged code reaches the box by itself, and only through the canary.** Every half hour the House

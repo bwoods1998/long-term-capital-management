@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from ltcm.broker import Instrument, money
 
@@ -73,7 +73,7 @@ class Settings:
     wake_workers: int = 6
     slow_workers: int = 3  # replays at once, beside the tick and never inside it
     research_workers: int = 5  # research passes at once: each is minutes of WAITING on Sail's flex window, not work
-    ops_workers: int = 3  # the backup, the survey, the updater and Astra: never queued behind a replay
+    ops_workers: int = 3  # the backup, the survey, the updater and Merton: never queued behind a replay
     kalshi_replay_days: int = 7
     kalshi_replay_markets: int = 2000
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
@@ -117,7 +117,7 @@ class House:
         self.auditor = auditor
         self.publisher = publisher
         self.budget = budget
-        self.astra: Any = None  # set by the service: Astra's pull-request roles
+        self.merton: Any = None  # set by the service: Merton's pull-request roles
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
@@ -248,21 +248,26 @@ class House:
                 continue
             for founder in niche.founders:
                 seed = rows[founder["seed"]]
-                # One family a program a specialty: trials are counted, and real-money records
-                # pooled, among agents that run the same idea on the same kind of market.
-                family = seed["family"] if founder["name"] == founder["seed"] else f"{niche.id.split('-', 1)[1]}-{seed['family'].split('-', 1)[-1]}"
-                out.append({"name": founder["name"], "family": family, "niche": niche.id, "why": seed["why"],
+                # One family a program a specialty: real-money records are pooled among agents that
+                # run the same idea on the same kind of market. (Replay trials are counted by line.)
+                family = seed["family"] if founder["key"] == founder["seed"] else f"{niche.id.split('-', 1)[1]}-{seed['family'].split('-', 1)[-1]}"
+                out.append({"name": niche.desk, "key": founder["key"], "family": family, "niche": niche.id, "why": seed["why"],
                             "code": niches_module.founder_code(seeds_module.load(founder["seed"]), niche, founder)})
         return out
 
     def found(self, names: list[str] | None = None) -> list[Agent]:
-        """Seed the first population (idempotent: a founder already born is not born again)."""
+        """Seed the first population (idempotent: a founder already born is not born again).
+
+        Founders of one desk share a name and number themselves: the six of the Meriwether desk are
+        `meriwether`, `meriwether-2` ... `meriwether-6`. So what says a founder is already born is
+        its `key` (the role it plays on that desk), not the name it ends up with."""
         born = []
-        existing = {a.name for a in self.registry.agents.values()} | set(self.registry.agents)
-        wanted = [f for f in self.founders() if (names is None or f["name"] in names) and f["name"] not in existing]
+        existing = {a.founder for a in self.registry.agents.values()}
+        wanted = [f for f in self.founders() if (names is None or names_match(f, names)) and f["key"] not in existing]
         for index, seed in enumerate(wanted):
             # The probe box stays awake between seeds: most of reading a strategy's NEEDS is the box waking.
-            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], specialty=seed["niche"], keep_probe_awake=index < len(wanted) - 1)
+            agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], specialty=seed["niche"],
+                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1)
             # The founders are the owner's priors (what the first run measured, and published
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still
@@ -284,7 +289,7 @@ class House:
             if row["name"] in known or len(self.registry.living()) >= int(self.game["economy"]["max_population"]):
                 continue
             try:
-                born.append(self.spawn(row["name"], row["family"], row["code"], reason="Astra, as architect: " + row["why"]))
+                born.append(self.spawn(row["name"], row["family"], row["code"], reason="Merton, as architect: " + row["why"]))
             except ValueError as exc:
                 self.alert("warning", f"the architect's strategy {row['name']} could not be born: {str(exc)[:200]}")
         return born
@@ -308,7 +313,7 @@ class House:
 
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
               params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False,
-              specialty: str | None = None) -> Agent:
+              specialty: str | None = None, founder: str | None = None) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
         # sealed probe box the House keeps for the purpose, never the House's own process.
         described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
@@ -336,7 +341,7 @@ class House:
             raise ValueError(f"{name}: {exc}") from exc
         agent = self.registry.born(
             name=name, family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
-            parent=parent, reason=reason, specialty=niche.id if niche else None,
+            parent=parent, reason=reason, specialty=niche.id if niche else None, founder=founder,
         )
         if niche is not None and not niche.replay:
             # The House cannot replay this specialty (no recorded option chains): paper is its replay.
@@ -748,7 +753,7 @@ class House:
                 spent, budget = self.pacer.spent(kind), self.pacer.budget[kind]
                 why = "its budget is spent" if spent >= budget else f"day {self.pacer.days} is over with ${budget - spent:.2f} unspent"
                 self.alert("error", f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
-                                    + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Astra's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
+                                    + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Merton's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
 
     # ---------------------------------------------------------------- seasons
     def survey_due(self) -> bool:
@@ -986,7 +991,7 @@ class House:
             return None  # its specialty is full: no niche may crowd out the rest
         child_code = code or parent.code
         child_params = dict(params) if params is not None else (parent.params if code else mutate(parent.params, seed=f"{parent.id}:{len(self.registry.agents)}"))
-        child = self.spawn(parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
+        child = self.spawn(parent.line or parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
                            endowment=rules["endowment_usd"] if staked_by_house else None)
         if staked_by_house:
             self._state["last_staked"][parent.id] = self.clock()
@@ -1105,7 +1110,7 @@ class House:
             last = float(self._state.setdefault("last_newcomer", {}).get("at") or 0)
             if self.clock() - last >= float(rules["epoch_seconds"]) / 4:
                 self._state["last_newcomer"]["at"] = self.clock()
-                child = self.spawn(best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
+                child = self.spawn(best.line or best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
                                    params=mutate(best.params, seed=f"newcomer:{len(self.registry.agents)}"),
                                    reason=f"a House-staked mutation of {best.id}: the population was below its floor")
                 self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False, "reason": "population floor", "new_code": False}, agent=best.id)
@@ -1180,13 +1185,13 @@ class House:
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
             self.budget.pacer = self.pacer
-        if open_for_business and self.astra is not None:
-            for role in self.astra.due():
+        if open_for_business and self.merton is not None:
+            for role in self.merton.due():
                 # One role at a time against today's allowance: a pass is a dime to a few dollars,
                 # and its cost is only known when it ends.
-                if self.pacer.may_spend("openai") and not any(key.startswith("astra:") and key != "astra:follow" and job.is_alive() for key, job in self._jobs.items()):
-                    self._background(f"astra:{role}", self.astra.run, role)
-            self._background("astra:follow", self.astra.follow)
+                if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
+                    self._background(f"merton:{role}", self.merton.run, role)
+            self._background("merton:follow", self.merton.follow)
         if open_for_business and self.economy.payout_due():
             self.learn()
             for agent in self.registry.living():
@@ -1255,6 +1260,11 @@ def mutate(params: Mapping[str, Any], *, seed: str, scale: float = 0.2) -> dict[
         else:
             out[key] = round(value * (1 + rng.uniform(-scale, scale)), 6)
     return out
+
+
+def names_match(founder: Mapping[str, Any], names: Sequence[str]) -> bool:
+    """`league found --seeds` takes either the desk name or the founder's role key."""
+    return founder["key"] in names or founder["name"] in names
 
 
 def occ_symbol(instrument: Any) -> str:

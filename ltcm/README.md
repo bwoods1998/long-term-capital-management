@@ -867,4 +867,4 @@ system with a different purpose, and it is retired. The plan below was carried o
    One entry per company, idempotent, `kind` `research`, tags `portfolio-agent` and `2026-09`.
 3. `portfolio_runtime` moves to `docs/history/` with its run records; its market calendar,
    Yahoo adapter and evidence capture are ported into `ltcm/data/`.
-4. Repository, package, site section and docs take the Long Term Capital Management name in one commit.
+4. Repository, package, site section and docs take the Long-Term Capital Management name in one commit.

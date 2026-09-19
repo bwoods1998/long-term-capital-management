@@ -187,7 +187,7 @@ export function mime({ from = FROM, to = TO, subject, text, at = Date.now(), id 
   const messageId = id || `ltcm-${at}-${Math.random().toString(36).slice(2, 10)}`;
   const domain = from.split('@')[1] || 'blakewoods.us';
   return [
-    `From: Long Term Capital Management <${from}>`,
+    `From: Long-Term Capital Management <${from}>`,
     `To: <${to}>`,
     `Subject: ${encodeHeader(subject)}`,
     `Message-ID: <${messageId}@${domain}>`,

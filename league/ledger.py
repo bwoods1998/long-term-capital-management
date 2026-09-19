@@ -91,8 +91,8 @@ KINDS: dict[str, bool] = {
     # The frontier model's jobs.
     "audit.verdict": True,
     "audit.counterfactual": True,
-    "astra.pass": True,  # one architect, toolsmith, operator, designer or teacher pass
-    "astra.change": True,  # a pull request it opened and what CI said
+    "merton.pass": True,  # one architect, toolsmith, operator, designer or teacher pass
+    "merton.change": True,  # a pull request it opened and what CI said
     # The commons.
     "library.note": True,
     "tool.request": True,

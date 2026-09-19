@@ -1,4 +1,4 @@
-"""Strategies written after the founding: by Astra as architect, through pull requests.
+"""Strategies written after the founding: by Merton as architect, through pull requests.
 
 A founding seed starts on paper. A strategy from this directory does not: it is born on rung 0
 and must pass replay, against every trial its family has run, before it is forward-tested.

@@ -37,7 +37,7 @@ code.
   any agent traded; a test pins its digest and the House writes the digest to the ledger at every
   start. `game.json` holds the economy's tunable dials, inside bounds the file itself lists.
   `config.json` holds where things are and four operating dials; it never holds a secret.
-- **Slow work runs beside the tick, never inside it.** Replays, research passes and Astra's passes
+- **Slow work runs beside the tick, never inside it.** Replays, research passes and Merton's passes
   run on background threads (two at a time); the first real tick took six minutes before this rule.
 
 ## Modules
@@ -65,14 +65,14 @@ code.
 | `researcher.py` | `Researcher`: a cheap Sail model's tool loop for one agent, every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. |
 | `rules.py` | `rules_text(game)`: what every agent is told, generated from the constitution and `game.json` so it cannot drift from what is enforced. |
 | `seeds/` | The twelve founding strategy files and `all_seeds()`. They are data, not modules: nothing imports them. |
-| `strategies/` | Strategies Astra adds as architect; `registry.json` lists them and the House enrolls each once, on rung 0. Empty at the start. |
-| `tools/` | Pure helper modules Astra adds as toolsmith; uploaded beside the strategy so it may `from tools.<name> import ...`. Empty at the start. |
-| `playbook/` | Lessons Astra adds as teacher, one markdown file each; the House loads them into the ledger's playbook. |
+| `strategies/` | Strategies Merton adds as architect; `registry.json` lists them and the House enrolls each once, on rung 0. Empty at the start. |
+| `tools/` | Pure helper modules Merton adds as toolsmith; uploaded beside the strategy so it may `from tools.<name> import ...`. Empty at the start. |
+| `playbook/` | Lessons Merton adds as teacher, one markdown file each; the House loads them into the ledger's playbook. |
 | `house.py` | `House`: `found`, `spawn`, `seat`, `wake`, `judge`, `kill`, `fork`, `research`, `keep_population`, `tick`. `Settings` are the House's own dials. |
 | `budget.py` | `Budget`: reads Sail's credit balance, counts a month's spend as the sum of its falls, returns `open` or `stopped`. |
 | `frontier.py` | `Frontier.ask`: one metered call through the gateway's `/v1/frontier/responses`; the cost comes back in `X-LTCM-Cost-USD`. Model `gpt-6-astra`. |
 | `auditor.py` | `Auditor.audit` (the evidence packet, the veto, charged to the agent) and `score` (what each veto cost or saved, scaled to the micro stake). |
-| `astra.py` | `Astra`: the schedule and one pass of each pull-request role; `GatewayForge` (production) and `GhForge` (the owner's machine, through `gh`); `evidence_from(house)`. |
+| `merton.py` | `Merton`: the schedule and one pass of each pull-request role; `GatewayForge` (production) and `GhForge` (the owner's machine, through `gh`); `evidence_from(house)`. |
 | `ci.py` | `python3 -m league.ci`: the path guard (`ROLE_PATHS`, `FORBIDDEN`, `CONFIG_DIALS`), content checks for strategies, tools, `game.json` and `config.json`, then the suite. Also makes the canned regression tapes. |
 | `capital.py` | `kelly_stake` and `resize` (rung 3), `recommend` (the standing capital recommendation, an `ops.recommendation` row). |
 | `publish.py` | `Publisher`: cleans ledger rows into the site's exact event and checkpoint shapes and posts them. Cursor in `publish.json`. |
@@ -91,7 +91,7 @@ code.
    shadow orders the market has traded through), poll resting orders for fills, apply new Kalshi
    settlements. One venue's outage is an alert and does not stop the others.
 2. **Check the budget.** `open` or `stopped`. When stopped, only agents holding real-money positions
-   or orders are woken, so they can exit; research, Astra, payouts and births wait.
+   or orders are woken, so they can exit; research, Merton, payouts and births wait.
 3. **Wake each agent that is due** (at most 16 a tick, 6 side by side; its own `wake_minutes`, 5 to
    1,440). If its code has not had its replay, one is started in the background. A rung-0 agent
    stops here. Otherwise the House seats it (limits and stake for its rung), builds its snapshot
@@ -103,19 +103,19 @@ code.
 5. **Every `mark_every_seconds` (300), per book:** poll, mark every account, reconcile to the venue
    (a mismatch is an error alert and freezes new entries). Then judge each living agent on that
    book: close finished blocks of log growth, take a look if one is due, and act on the verdict:
-   `die` kills; `eligible` promotes (from paper only through Astra's audit, and only when real money
+   `die` kills; `eligible` promotes (from paper only through Merton's audit, and only when real money
    is on); on rungs 2 and 3 a drift alarm demotes and moves the agent back to the practice book.
    Dead agents' free cash is swept back to the House row.
 6. **Start due research passes** in the background (at least six hours apart, and only for an agent
    with more than twice the minimum credits). A candidate that passes replay is adopted on rung 0 or
    becomes a fork above it.
-7. **Start Astra's due roles** in the background, and ask the gateway what CI made of each open
+7. **Start Merton's due roles** in the background, and ask the gateway what CI made of each open
    pull request.
 8. **Once an epoch:** load new lessons from `playbook/`, resize rung-3 stakes, write the capital
    recommendation, pay the pool, score the auditor's vetoes.
 9. **Keep the population:** kill agents at zero credits and rung-0 agents past the replay deadline;
    fork agents above the fork threshold (rung 1 and up, once an epoch); re-found any seed never born
-   if the population is under its floor; enroll Astra's registered strategies; if every seed has had
+   if the population is under its floor; enroll Merton's registered strategies; if every seed has had
    its life and the floor is still not met, stake a mutation of whoever stands highest.
 10. **Save `house.json`, publish, write `health.json`.** A publishing failure is a warning: the site
     is downstream of the floor, never upstream.
@@ -124,7 +124,7 @@ code.
 
 [`CONTRACT.md`](CONTRACT.md): the file's shape (`NEEDS`, `PARAMS`, `decide(ctx)`), the allowed
 imports, everything in `ctx`, what `decide` returns, and how replay scores it. The same file runs
-in replay, on paper and with real money. It is handed to the researcher model and to Astra as
+in replay, on paper and with real money. It is handed to the researcher model and to Merton as
 architect and toolsmith, so a change to it changes what they write.
 
 ## State on disk

@@ -20,8 +20,8 @@ bounds no model can move.
 | **Gateway** (Cloudflare Worker, `gateway/`) | venue keys (Kalshi, Alpaca real and paper), OpenAI key, GitHub token, order caps, frontier budget, pull-request cap, kill switch, the external watchdog | sign orders, meter spend, open a pull request, resume and restart the House box | be changed by anything on Sail; merge, approve or push |
 | **House** (one Sailbox, trusted, `python3 -m league run`) | ledger, books, evaluator, economy, researcher loop, publisher, in-box release watchdog | decide promotion, death and budgets; send netted orders to the gateway; drive each agent's box over Sail's exec API; make every model call and web search on an agent's behalf | run agent-written code in its own process; hold a venue key, the OpenAI key or the GitHub token |
 | **Agents** (one Sailbox each, untrusted) | a strategy program, run by `runner.py` or `replay.py` | return plain data (intents, cancels, a thought, a memory) on stdout when the House runs them | hold **any** credential; reach the House, a venue, the gateway or any host at all; write the ledger |
-| **Astra** (frontier model, via gateway) | reads the evidence the House gathers for its role | audit a candidate (a veto); propose a pull request inside one role's paths | pick a trade; touch the constitution, ledger, book, evaluator, statistics, auditor, watchdog, CI, gateway or workflows; merge |
-| **GitHub CI** (`.github/workflows/astra.yml`) | the path guard, content checks, the replay regression and the whole league suite | squash-merge a green `astra/…` pull request | be rewritten by the branch it judges (`pull_request_target` runs `main`'s copy) |
+| **Merton** (frontier model, via gateway) | reads the evidence the House gathers for its role | audit a candidate (a veto); propose a pull request inside one role's paths | pick a trade; touch the constitution, ledger, book, evaluator, statistics, auditor, watchdog, CI, gateway or workflows; merge |
+| **GitHub CI** (`.github/workflows/merton.yml`) | the path guard, content checks, the replay regression and the whole league suite | squash-merge a green `merton/…` pull request | be rewritten by the branch it judges (`pull_request_target` runs `main`'s copy) |
 
 The House box holds exactly three secrets, in a mode-600 `.env`: `GATEWAY_TOKEN`, `SAIL_API_KEY`
 and `CAPITAL_PUBLISH_TOKEN`. An agent's box is a fork of a clean image, sealed before it is ever
@@ -90,7 +90,7 @@ The agents:
 - `league/niches.py`, `league/niches.json`: the specialties. Every agent belongs to one for life;
   the 26 founders are the seeds' programs pointed at them; a Kalshi universe follows the season
   through a daily survey of the venue.
-- `league/strategies/`, `league/tools/`, `league/playbook/`: what Astra adds by pull request as
+- `league/strategies/`, `league/tools/`, `league/playbook/`: what Merton adds by pull request as
   architect, toolsmith and teacher. `strategies/registry.json` lists what the House should spawn.
 
 The economy:
@@ -106,7 +106,7 @@ The economy:
 - `league/rules.py`: what every agent is told, generated from the constitution and `game.json`
   so it cannot drift from what is enforced.
 - `league/budget.py`: the Sail month, metered from falls in Sail's credit balance.
-- `league/game.json` and `league/config.json`: the tunable dials (Astra may propose changes
+- `league/game.json` and `league/config.json`: the tunable dials (Merton may propose changes
   inside `bounds`) and where the House finds things. `"real_money": true` is a line only the
   owner changes.
 
@@ -115,7 +115,7 @@ The frontier model and change control:
 - `league/frontier.py`: the client for the gateway's `/v1/frontier/responses`.
 - `league/auditor.py`: the veto before real money, charged to the agent; every veto is scored
   afterwards as if it had been taken.
-- `league/astra.py`: the five pull-request roles (architect, toolsmith, operator, game designer,
+- `league/merton.py`: the five pull-request roles (architect, toolsmith, operator, game designer,
   teacher) and the forge that opens the pull request through the gateway.
 - `league/ci.py`: the judge. Path guard, content checks, the replay regression and the whole
   suite. It asks no model anything.
@@ -127,7 +127,7 @@ The frontier model and change control:
 The process:
 
 - `league/house.py`: the one trusted process and its `tick()`: settle and poll, wake due agents,
-  net and send, mark, reconcile, judge, research, pay, publish. Replays, research, Astra and
+  net and send, mark, reconcile, judge, research, pay, publish. Replays, research, Merton and
   updates run beside the tick, never inside it.
 - `league/publish.py`: the public tape the site's five sections are drawn from, cleaned to the
   site's own schema.
@@ -173,7 +173,7 @@ checks are in the build log.
 4. **Rung 2 behind the auditor, and the publisher.** The auditor vetoed a deliberately bad
    candidate live; the publisher's output passes the site's own validators and was shown on a
    test tape. No real-money order was placed during the build.
-5. **Astra's five pull-request roles, CI, the canary and the in-box watchdog.** Proven live on
+5. **Merton's five pull-request roles, CI, the canary and the in-box watchdog.** Proven live on
    GitHub: a strategy importing `os` refused by the `judge` job, a designer branch editing the
    constitution refused by the `guard` job, a lesson merged by the `merge` job with no human step.
 6. **Rung 3 sizing, drift monitors, the standing capital recommendation**, and a whole-ladder
@@ -188,7 +188,7 @@ sealed first, destroyed if it cannot be); failed replays did not raise the famil
 
 Not yet done: the first run's unused code (`ltcm/` desks, committee, evolution, Foundry, lab,
 mind, service) is kept, not removed, because removing it safely is a job of its own; and the
-owner has still to place `GITHUB_TOKEN` in the gateway before Astra's five roles can open pull
+owner has still to place `GITHUB_TOKEN` in the gateway before Merton's five roles can open pull
 requests unattended (until then each pass is recorded with `forge_error: GitHub is not
 configured`).
 
@@ -240,7 +240,7 @@ configured`).
    (Alpaca takes it out of `cash`).
 8. **Founders start on paper.** The plan had every agent pass replay first. The twelve founding
    seeds are seated on rung 1 at birth; their replay still runs and still counts as their
-   family's first trial. Everything born later (forks, mutations, Astra's strategies) must pass
+   family's first trial. Everything born later (forks, mutations, Merton's strategies) must pass
    replay first. *Why:* the first dry run showed honest replays failing most seeds (crypto
    reversion Sharpe below zero after fees; Kalshi favourites at a deflated Sharpe of 0.85 against
    the 0.90 line). Paper costs nothing, and forward evidence is what counts.
@@ -263,10 +263,10 @@ configured`).
     real fills that are worse than the paper fills that earned rung 2 are exactly the fall it is
     there to catch. Block growth per unit of exposure remains the fallback when a stay has no
     trade-by-trade record.
-12. **Astra has five pull-request roles, not one architect.** The plan had `league/architect.py`
+12. **Merton has five pull-request roles, not one architect.** The plan had `league/architect.py`
     opening changes to `strategies/` only. Built: architect (`league/strategies/`), toolsmith
     (`league/tools/`, tool tests), operator (`league/config.json`), game designer
-    (`league/game.json`, inside its bounds) and teacher (`league/playbook/`), in `league/astra.py`.
+    (`league/game.json`, inside its bounds) and teacher (`league/playbook/`), in `league/merton.py`.
     Pull requests go **through a gateway GitHub route** (`POST /v1/github/pr`), which holds the
     token like every other credential and enforces each role's paths outside Sail. They are
     **judged by a `pull_request_target` workflow**, run from `main`'s copy so a branch cannot
@@ -307,7 +307,7 @@ configured`).
 19. **Replays and research run beside the tick, never inside it.** *Why:* the first real tick took
     six minutes because a Kalshi tape build and a flex-window model call ran inline.
 20. **Kalshi replay tapes are a week (hourly) and seven weeks (daily), not a day.** *Why:* the dry
-    run's own agents diagnosed the one-day tape and filed tool requests; Astra's toolsmith
+    run's own agents diagnosed the one-day tape and filed tool requests; Merton's toolsmith
     correctly answered that this needed data, not a tool, so the House was changed.
 21. **The site got a test tape** (`/api/capital/t/test/…`, viewed at `/capital/?tape=test`): the
     same Durable Object class under another name, allow-listed to `test` and `canary`. *Why:* the
@@ -359,7 +359,7 @@ configured`).
     would otherwise have frozen the real Alpaca book on its first evening.
 30. **The expedition** (the owner's decision): `budgets.expedition` in the constitution and
     `league/pacer.py`. The plan was a $2-a-day pool and monthly caps; built is a daily allowance
-    from what is left over the days that are left, which the pool, research and Astra follow, with
+    from what is left over the days that are left, which the pool, research and Merton follow, with
     the unearned performance share paid to the floors. The Sail reserve is $5, not $10.
 31. **An agent's persistent memory is a journal on the ledger**, inherited by its children, and a
     research pass can see the live view and gets a digest of where a replay won and lost. *Why:*
@@ -403,3 +403,10 @@ configured`).
     research passes ended as "incomplete" after two turns and everything the model had done was
     thrown away. The tool calls it managed are now run, the reason is recorded, and the research
     budget is 16,000 output tokens (reasoning tokens count toward it).
+39. **The names are the firm's** (the owner's, Sept 19). Each specialty is one partner's DESK and
+    every agent of it is numbered from that name, as the first run's were Mullins VI and VIII:
+    `meriwether`, `meriwether-2` ... and a child takes the next free number in the line. A founder
+    is now keyed by the role it plays on its desk (`favorites-maker`), which is what makes founding
+    idempotent when six founders share a name. Astra is **Merton**, the firm's deepest theorist:
+    the branch prefix, the ledger kinds, the workflow and the CI guard all carry the name. The
+    model behind it is still `gpt-6-astra`, which is a model at the gateway and not a person.

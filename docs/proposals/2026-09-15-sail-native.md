@@ -1,4 +1,4 @@
-# Sail-native Long Term Capital Management
+# Sail-native Long-Term Capital Management
 
 *Written September 15, 2026, after the owner asked for the floor to leave the MacBook, drop paper
 trading, and use Sail's infrastructure to the limit. This is the design being built the same day.*

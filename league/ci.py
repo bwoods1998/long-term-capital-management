@@ -1,10 +1,10 @@
-"""The judge of every change Astra proposes. It runs in GitHub Actions on every pull request,
+"""The judge of every change Merton proposes. It runs in GitHub Actions on every pull request,
 and again on the House box before a merged change is staged, and it decides alone: nothing here
 asks a model anything.
 
-    python3 -m league.ci --base origin/main [--branch astra/architect/some-slug]
+    python3 -m league.ci --base origin/main [--branch merton/architect/some-slug]
 
-1. **Path guard.** A branch named `astra/<role>/...` may touch only that role's paths. The
+1. **Path guard.** A branch named `merton/<role>/...` may touch only that role's paths. The
    constitution, the ledger, the book, the evaluator, the statistics, the auditor, the watchdog,
    this file, the gateway and the workflows are out of reach of every role. (The gateway enforces
    the same list before a branch exists; this is the second wall, and it also covers a branch
@@ -55,7 +55,7 @@ CONFIG_DIALS: dict[str, tuple[float, float]] = {
 
 def role_of(branch: str) -> str | None:
     parts = str(branch or "").split("/")
-    return parts[1] if len(parts) >= 3 and parts[0] == "astra" and parts[1] in ROLE_PATHS else None
+    return parts[1] if len(parts) >= 3 and parts[0] == "merton" and parts[1] in ROLE_PATHS else None
 
 
 def guard(paths: Iterable[str], role: str | None) -> list[str]:
@@ -223,7 +223,7 @@ def guard_branch(base: str, head: str, branch: str, *, root: Path = REPO) -> lis
     request's commits, so a branch cannot loosen the guard that judges it."""
     role = role_of(branch)
     if role is None:
-        return [f"{branch}: not a branch name of the form astra/<role>/<slug>"]
+        return [f"{branch}: not a branch name of the form merton/<role>/<slug>"]
     paths = changed_paths(base, head, cwd=root)
     if not paths:
         return ["the branch changes nothing"]
@@ -234,14 +234,14 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
     problems: list[str] = []
     role = role_of(branch or "")
     paths = changed_paths(base, head, cwd=root) if base else []
-    if (branch or "").startswith("astra/"):
+    if (branch or "").startswith("merton/"):
         if role is None:
-            problems.append(f"{branch}: not a branch name of the form astra/<role>/<slug>")
+            problems.append(f"{branch}: not a branch name of the form merton/<role>/<slug>")
         problems.extend(guard(paths, role))
     problems.extend(check_strategies(root))
     problems.extend(check_tools(root))
     problems.extend(check_game(root))
-    problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith("astra/") else None, root))
+    problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith("merton/") else None, root))
     if tests and not problems:
         problems.extend(run_tests(root))
     return problems

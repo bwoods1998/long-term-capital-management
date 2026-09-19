@@ -31,10 +31,10 @@ class GuardTest(unittest.TestCase):
         self.assertTrue(ci.guard(["/etc/passwd"], "architect"))
 
     def test_role_comes_from_the_branch_name(self):
-        self.assertEqual(ci.role_of("astra/architect/new-idea-abcd1234"), "architect")
-        self.assertIsNone(ci.role_of("astra/owner/x"))
+        self.assertEqual(ci.role_of("merton/architect/new-idea-abcd1234"), "architect")
+        self.assertIsNone(ci.role_of("merton/owner/x"))
         self.assertIsNone(ci.role_of("main"))
-        self.assertIsNone(ci.role_of("astra/architect"))
+        self.assertIsNone(ci.role_of("merton/architect"))
 
 
 class ContentTest(unittest.TestCase):

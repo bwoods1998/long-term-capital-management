@@ -51,7 +51,7 @@ class CommonsTest(unittest.TestCase):
         self.assertIn("error", commons.request_tool("a1", "x", "short"))
         queued = commons.request_tool("a1", "Option Chains!", "I need option chain quotes for SPY to price defined-risk spreads around events.")
         self.assertEqual([r["name"] for r in commons.open_requests()], ["option_chains"])
-        commons.fulfil(queued["queued"], "built as ctx['chains']", change="astra/toolsmith-1")
+        commons.fulfil(queued["queued"], "built as ctx['chains']", change="merton/toolsmith-1")
         self.assertEqual(commons.open_requests(), [])
 
     def test_the_playbook_keeps_the_graveyards_lessons(self):

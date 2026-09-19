@@ -1,7 +1,7 @@
-name: Astra
+name: Merton
 
-# Pull requests opened by Astra (branches astra/<role>/<slug>) are judged here and merged here.
-# Nothing else merges them, and Astra holds no way to.
+# Pull requests opened by Merton (branches merton/<role>/<slug>) are judged here and merged here.
+# Nothing else merges them, and Merton holds no way to.
 #
 # `pull_request_target` runs THIS file as it is on main, never the branch's copy, so a branch
 # cannot rewrite its own judge. The jobs that touch the branch's code hold a read-only token and
@@ -15,13 +15,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: astra-${{ github.event.pull_request.number }}
+  group: merton-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   guard:
     # The path guard, from main's copy of league/ci.py, against the branch's commits.
-    if: startsWith(github.head_ref, 'astra/') && github.event.pull_request.head.repo.full_name == github.repository
+    if: startsWith(github.head_ref, 'merton/') && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

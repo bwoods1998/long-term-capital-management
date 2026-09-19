@@ -139,7 +139,7 @@ reservation, because unknown is not free.
 The frontier model proposes changes to the floor: a strategy, a tool, a game dial, a lesson. A
 change reaches the repository **only as a pull request**, and the credential that can open one
 lives only here, like the venue keys. CI on GitHub judges each pull request
-(`.github/workflows/astra.yml`) and that workflow merges the ones that pass. **There is
+(`.github/workflows/merton.yml`) and that workflow merges the ones that pass. **There is
 deliberately no merge route**, and nothing in the gateway approves, closes, force-pushes or deletes.
 
 Every rule is enforced here first and by the repository's own CI (`league/ci.py`) again:
@@ -161,8 +161,8 @@ Every rule is enforced here first and by the repository's own CI (`league/ci.py`
   `gateway/` or `.github/`.
 - 1 to 12 files of UTF-8 text, 64 KiB each, 256 KiB a request; `slug` is
   `^[a-z0-9][a-z0-9-]{1,48}$`; the title is one line of 120 characters, the body 8000. The pull
-  request's body ends `Opened by Astra (<role>) through the LTCM gateway.`
-- The branch is `astra/<role>/<slug>-<first 8 hex of sha256 over the files>`, so a retry of the
+  request's body ends `Opened by Merton (<role>) through the LTCM gateway.`
+- The branch is `merton/<role>/<slug>-<first 8 hex of sha256 over the files>`, so a retry of the
   same proposal is the same branch. A retry that finds its branch (the same tree, or the same
   files when `main` has moved since) and its open pull request makes nothing and returns them. A
   branch of that name holding anything else is a `409`, never overwritten; so is a proposal that
@@ -288,7 +288,7 @@ mail.
 
 Check what is placed with `npx wrangler secret list`: it prints names, never values, and should
 show exactly the eleven names above. On Sept 20, 2026 it showed ten: **`GITHUB_TOKEN` was not yet
-placed**, so Astra's five pull-request roles record `GitHub is not configured` until the owner
+placed**, so Merton's five pull-request roles record `GitHub is not configured` until the owner
 places it.
 
 The first run's Coinbase secrets (`COINBASE_KEY_NAME`, `COINBASE_API_SECRET`) are obsolete:
@@ -318,7 +318,7 @@ curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" https://ltcm-gateway.<subdomai
 that carries only the bearer token and a `VenueClient` (both from `ltcm/adapters`) that rewrites
 every call onto `<gateway_url>/v1/<venue>/...` and drops the venue auth headers. There is no
 direct, key-in-process mode in the league: no key file, key id or venue secret exists on Sail.
-`league/frontier.py` calls `/v1/frontier/responses`, `league/astra.py` calls `/v1/github/pr`, and
+`league/frontier.py` calls `/v1/frontier/responses`, `league/merton.py` calls `/v1/github/pr`, and
 `league/service.py` reads `/v1/health` so the House knows the kill switch is engaged and can refuse
 first. The adapters' gateway mode is covered by `ltcm/tests/test_adapters_gateway.py`.
 

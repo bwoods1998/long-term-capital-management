@@ -1,5 +1,5 @@
 {
- "_about": "The specialties of the league. An agent belongs to one for life and its children inherit it: the House shows it only this universe, refuses entries outside it, tags its research with it and pays niche floors by it. A Kalshi universe is the series listed here (real tickers, ranked by the 24-hour volume of their markets that resolve within 48 hours; surveyed Sept 19, 2026: 736 series, $63M a day) plus any series the House's daily survey finds that matches `patterns` (and `category`, which Kalshi reports per series), so a universe follows the sporting calendar without an edit.",
+ "_about": "The specialties of the league. An agent belongs to one for life and its children inherit it: the House shows it only this universe, refuses entries outside it, tags its research with it and pays niche floors by it. A Kalshi universe is the series listed here (real tickers, ranked by the 24-hour volume of their markets that resolve within 48 hours; surveyed Sept 19, 2026: 736 series, $63M a day) plus any series the House's daily survey finds that matches `patterns` (and `category`, which Kalshi reports per series), so a universe follows the sporting calendar without an edit. Each specialty is one partner's DESK, named for a figure of the firm the league is named after; every agent of a desk is numbered from that name (meriwether, meriwether-2 ...) and a child takes the next free number in the line, as the first run's desks were Mullins VI and VIII.",
  "niches": [
   {
    "id": "kalshi-crypto-strikes",
@@ -28,22 +28,24 @@
    "founders": [
     {
      "seed": "favorites-maker",
-     "name": "favorites-maker"
+     "key": "favorites-maker"
     },
     {
      "seed": "favorites-no",
-     "name": "favorites-no"
+     "key": "favorites-no"
     },
     {
      "seed": "hourly-quotes",
-     "name": "hourly-quotes"
+     "key": "hourly-quotes"
     }
    ],
    "maker_fee_series": [],
    "patterns": [
     "^KX(BTC|ETH|SOL|XRP|DOGE|HYPE|BNB|ADA|LTC|ZEC|NEAR)D?$"
    ],
-   "category": "Crypto"
+   "category": "Crypto",
+   "desk": "hilibrand",
+   "desk_note": "Larry Hilibrand, the arbitrageur who pressed the firm's one measured edge hardest"
   },
   {
    "id": "kalshi-crypto-15m",
@@ -68,7 +70,6 @@
    "founders": [
     {
      "seed": "favorites-maker",
-     "name": "quarter-hour-favorites",
      "params": {
       "min_hours": 0.03,
       "max_hours": 0.2,
@@ -79,14 +80,17 @@
      "needs": {
       "wake_minutes": 5,
       "max_hours_to_close": 1
-     }
+     },
+     "key": "quarter-hour-favorites"
     }
    ],
    "maker_fee_series": [],
    "patterns": [
     "^KX[A-Z]+15M$"
    ],
-   "category": "Crypto"
+   "category": "Crypto",
+   "desk": "huang",
+   "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm"
   },
   {
    "id": "kalshi-weather",
@@ -139,11 +143,10 @@
    "founders": [
     {
      "seed": "favorites-daily",
-     "name": "favorites-daily"
+     "key": "favorites-daily"
     },
     {
      "seed": "favorites-no",
-     "name": "weather-no",
      "params": {
       "min_hours": 1.0,
       "max_hours": 30.0,
@@ -155,14 +158,17 @@
       "horizon": "day",
       "wake_minutes": 60,
       "max_hours_to_close": 30
-     }
+     },
+     "key": "weather-no"
     }
    ],
    "maker_fee_series": [],
    "patterns": [
     "^KX(HIGH|LOWT|RAIN|SNOW)[A-Z]*$"
    ],
-   "category": "Climate and Weather"
+   "category": "Climate and Weather",
+   "desk": "mullins",
+   "desk_note": "David Mullins, Vice Chairman of the Federal Reserve before he joined"
   },
   {
    "id": "kalshi-sports",
@@ -292,7 +298,6 @@
    "founders": [
     {
      "seed": "favorites-daily",
-     "name": "football-favorites",
      "params": {
       "min_volume_24h": 5000,
       "max_hours": 30.0,
@@ -309,11 +314,11 @@
        "KXNFLTOTAL"
       ],
       "wake_minutes": 30
-     }
+     },
+     "key": "football-favorites"
     },
     {
      "seed": "favorites-no",
-     "name": "football-longshot-no",
      "params": {
       "min_hours": 7.0,
       "max_hours": 30.0,
@@ -333,11 +338,11 @@
        "KXNCAAFTOTAL",
        "KXNFLTOTAL"
       ]
-     }
+     },
+     "key": "football-longshot-no"
     },
     {
      "seed": "favorites-daily",
-     "name": "soccer-favorites",
      "params": {
       "min_volume_24h": 3000,
       "max_hours": 30.0,
@@ -356,11 +361,11 @@
        "KXLIGAMXGAME"
       ],
       "wake_minutes": 30
-     }
+     },
+     "key": "soccer-favorites"
     },
     {
      "seed": "favorites-no",
-     "name": "soccer-totals-no",
      "params": {
       "min_hours": 4.0,
       "max_hours": 30.0,
@@ -383,11 +388,11 @@
        "KXMLSTOTAL",
        "KXEPLBTTS"
       ]
-     }
+     },
+     "key": "soccer-totals-no"
     },
     {
      "seed": "favorites-daily",
-     "name": "leagues-favorites",
      "params": {
       "min_volume_24h": 2000,
       "max_hours": 30.0,
@@ -406,11 +411,11 @@
        "KXNBASPREAD"
       ],
       "wake_minutes": 30
-     }
+     },
+     "key": "leagues-favorites"
     },
     {
      "seed": "favorites-daily",
-     "name": "matches-favorites",
      "params": {
       "min_volume_24h": 2000,
       "max_hours": 30.0,
@@ -431,9 +436,12 @@
        "KXLOLMAP",
        "KXVALORANTGAME"
       ]
-     }
+     },
+     "key": "matches-favorites"
     }
-   ]
+   ],
+   "desk": "meriwether",
+   "desk_note": "John Meriwether, who founded the firm and hired everyone in it"
   },
   {
    "id": "kalshi-sports-props",
@@ -464,7 +472,6 @@
    "founders": [
     {
      "seed": "favorites-no",
-     "name": "props-longshot-no",
      "params": {
       "min_hours": 7.0,
       "max_hours": 30.0,
@@ -476,7 +483,8 @@
       "horizon": "day",
       "wake_minutes": 30,
       "max_hours_to_close": 30
-     }
+     },
+     "key": "props-longshot-no"
     }
    ],
    "maker_fee_series": [
@@ -485,7 +493,9 @@
    "category": "Sports",
    "patterns": [
     "^KX(NFL|NCAAF|NBA|WNBA|MLB|NHL|EPL|LALIGA|SERIEA|MLS)[A-Z0-9]*(TD|FIRSTTD|ANYTD|REC|RECYDS|RSHYDS|RSHATT|PASSYDS|PASSTDS|HR|KS|HIT|OUTS|GOAL|PTS|REB|AST|3PT|SOG)$"
-   ]
+   ],
+   "desk": "hufschmid",
+   "desk_note": "Hans Hufschmid, who worked the thin and awkward corners of the book"
   },
   {
    "id": "kalshi-prices",
@@ -533,21 +543,23 @@
    "founders": [
     {
      "seed": "favorites-daily",
-     "name": "prices-favorites",
      "params": {
       "min_volume_24h": 500,
       "max_hours": 40.0
      },
      "needs": {
       "max_hours_to_close": 40
-     }
+     },
+     "key": "prices-favorites"
     }
    ],
    "maker_fee_series": [],
    "patterns": [
     "^KX(AAAGAS|DIESEL)[A-Z]*$",
     "^KX(WTI|BRENT|NATGAS|GOLD|SILVER|EURUSD|USDJPY|GBPUSD|INX|NASDAQ100)[A-Z]?$"
-   ]
+   ],
+   "desk": "hawkins",
+   "desk_note": "Greg Hawkins, the arbitrageur who worked the slow, published numbers"
   },
   {
    "id": "kalshi-attention",
@@ -576,21 +588,23 @@
    "founders": [
     {
      "seed": "favorites-daily",
-     "name": "attention-favorites",
      "params": {
       "min_volume_24h": 500,
       "max_hours": 40.0
      },
      "needs": {
       "max_hours_to_close": 40
-     }
+     },
+     "key": "attention-favorites"
     }
    ],
    "maker_fee_series": [],
    "patterns": [
     "^KX[A-Z]+SHARE$",
     "^KX(RT|TRUMPAPPROVE|TRUMPSAY|TRUTHSOCIAL|TRUMPACT|TOKENUSE|TSAW)$"
-   ]
+   ],
+   "desk": "leahy",
+   "desk_note": "Dick Leahy, the partner who sold the firm to the world: attention is his market"
   },
   {
    "id": "alpaca-crypto-majors",
@@ -608,29 +622,31 @@
    "founders": [
     {
      "seed": "crypto-reversion",
-     "name": "crypto-reversion",
      "needs": {
       "symbols": [
        "BTC/USD",
        "ETH/USD"
       ]
-     }
+     },
+     "key": "crypto-reversion"
     },
     {
      "seed": "crypto-trend",
-     "name": "crypto-trend",
      "needs": {
       "symbols": [
        "BTC/USD",
        "ETH/USD"
       ]
-     }
+     },
+     "key": "crypto-trend"
     },
     {
      "seed": "crypto-pairs",
-     "name": "crypto-pairs"
+     "key": "crypto-pairs"
     }
-   ]
+   ],
+   "desk": "rosenfeld",
+   "desk_note": "Eric Rosenfeld, the relative-value man who left Harvard for Salomon's arbitrage desk"
   },
   {
    "id": "alpaca-crypto-alts",
@@ -658,7 +674,6 @@
    "founders": [
     {
      "seed": "crypto-dip-limit",
-     "name": "alts-dip-limit",
      "needs": {
       "symbols": [
        "SOL/USD",
@@ -668,11 +683,11 @@
        "LINK/USD",
        "AVAX/USD"
       ]
-     }
+     },
+     "key": "alts-dip-limit"
     },
     {
      "seed": "crypto-trend",
-     "name": "alts-trend",
      "needs": {
       "symbols": [
        "SOL/USD",
@@ -681,9 +696,12 @@
        "LINK/USD",
        "AVAX/USD"
       ]
-     }
+     },
+     "key": "alts-trend"
     }
-   ]
+   ],
+   "desk": "haghani",
+   "desk_note": "Victor Haghani, who ran the firm's book in London where the spreads were widest"
   },
   {
    "id": "alpaca-index-etfs",
@@ -712,21 +730,23 @@
    "founders": [
     {
      "seed": "equity-overnight",
-     "name": "equity-overnight"
+     "key": "equity-overnight"
     },
     {
      "seed": "equity-trend",
-     "name": "equity-trend"
+     "key": "equity-trend"
     },
     {
      "seed": "equity-rsi2",
-     "name": "equity-rsi2"
+     "key": "equity-rsi2"
     },
     {
      "seed": "equity-vwap",
-     "name": "equity-vwap"
+     "key": "equity-vwap"
     }
-   ]
+   ],
+   "desk": "scholes",
+   "desk_note": "Myron Scholes, Nobel 1997, whose formula priced the options the equity desks live on"
   },
   {
    "id": "alpaca-megacaps",
@@ -755,7 +775,6 @@
    "founders": [
     {
      "seed": "equity-rsi2",
-     "name": "megacap-rsi2",
      "needs": {
       "symbols": [
        "NVDA",
@@ -767,11 +786,11 @@
        "TSLA",
        "AVGO"
       ]
-     }
+     },
+     "key": "megacap-rsi2"
     },
     {
      "seed": "equity-vwap",
-     "name": "megacap-vwap",
      "needs": {
       "symbols": [
        "NVDA",
@@ -779,9 +798,12 @@
        "TSLA",
        "AMD"
       ]
-     }
+     },
+     "key": "megacap-vwap"
     }
-   ]
+   ],
+   "desk": "mcentee",
+   "desk_note": "James McEntee, the old-school bond trader who traded on feel and not on models"
   },
   {
    "id": "alpaca-options",
@@ -813,14 +835,16 @@
    "founders": [
     {
      "seed": "options-breakout",
-     "name": "options-breakout"
+     "key": "options-breakout"
     },
     {
      "seed": "options-pullback",
-     "name": "options-pullback"
+     "key": "options-pullback"
     }
    ],
-   "replay": false
+   "replay": false,
+   "desk": "krasker",
+   "desk_note": "William Krasker, the model builder: nothing is priced here without one"
   }
  ]
 }

@@ -32,25 +32,26 @@ class TheFile(unittest.TestCase):
                 code = niches.founder_code(seeds.load(founder["seed"]), niche, founder)
                 check_code(code)
                 info = needs_of(code)
-                self.assertTrue(info["ok"], (founder["name"], info))
+                self.assertTrue(info["ok"], (founder["key"], info))
                 needs = info["needs"]
                 self.assertEqual(needs["venue"], niche.venue)
-                self.assertIn(needs["horizon"], niche.horizons, founder["name"])
-                self.assertTrue(needs[niche.key] and set(needs[niche.key]) <= set(niche.universe), founder["name"])
+                self.assertIn(needs["horizon"], niche.horizons, founder["key"])
+                self.assertTrue(needs[niche.key] and set(needs[niche.key]) <= set(niche.universe), founder["key"])
                 self.assertLessEqual(len(needs[niche.key]), niches.MAX_UNIVERSE)
                 self.assertEqual(niches.constrain(needs, niche)[niche.key], needs[niche.key])  # already inside: unchanged
-                self.assertTrue(NAME.match(founder["name"]), founder["name"])
-                names.append(founder["name"])
+                self.assertTrue(NAME.match(niche.desk), niche.desk)
+                names.append(founder["key"])
         self.assertEqual(len(names), len(set(names)))
         self.assertGreaterEqual(len(names), 20)
 
     def test_a_founders_program_is_its_seeds_below_the_literals(self):
         niche = self.niches["kalshi-sports"]
-        founder = next(f for f in niche.founders if f["name"] == "football-favorites")
+        founder = next(f for f in niche.founders if f["key"] == "football-favorites")
         seed = seeds.load(founder["seed"])
         code = niches.founder_code(seed, niche, founder)
         self.assertEqual(code.split("def decide(ctx):", 1)[1], seed.split("def decide(ctx):", 1)[1] + ("" if seed.endswith("\n") else "\n"))
         self.assertTrue(code.startswith("# SPECIALTY: kalshi-sports"))
+        self.assertIn("# Founder football-favorites of the Meriwether desk", code)
         self.assertEqual(needs_of(code)["needs"]["series"][:2], ["KXNCAAFGAME", "KXNFLGAME"])
         self.assertEqual(needs_of(code)["params"]["min_volume_24h"], 5000)
 
@@ -83,7 +84,8 @@ class TheFile(unittest.TestCase):
         options = self.niches["alpaca-options"]
         self.assertFalse(options.dormant)
         self.assertFalse(options.replay)
-        self.assertEqual([f["name"] for f in options.founders], ["options-breakout", "options-pullback"])
+        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback"])
+        self.assertEqual(options.desk, "krasker")
         self.assertIn("LONG PREMIUM ONLY", options.brief)
         call = instrument_for("alpaca", {"occ": "F260925C00013000"})
         self.assertTrue(options.holds(call))
@@ -209,10 +211,13 @@ class InTheHouse(HouseCase):
     def test_the_founders_are_the_niches_founders_with_a_family_a_program_a_specialty(self):
         rows = self.house.founders()
         self.assertEqual(len(rows), sum(len(n.founders) for n in self.house.niches.values()))
-        by_name = {r["name"]: r for r in rows}
-        self.assertEqual((by_name["favorites-daily"]["family"], by_name["favorites-daily"]["niche"]), ("kalshi-favorites", "kalshi-weather"))
-        self.assertEqual((by_name["football-favorites"]["family"], by_name["soccer-favorites"]["family"]), ("sports-favorites", "sports-favorites"))
-        self.assertEqual(by_name["alts-trend"]["family"], "crypto-alts-trend")
+        by_key = {r["key"]: r for r in rows}
+        self.assertEqual((by_key["favorites-daily"]["family"], by_key["favorites-daily"]["niche"]), ("kalshi-favorites", "kalshi-weather"))
+        self.assertEqual((by_key["football-favorites"]["family"], by_key["soccer-favorites"]["family"]), ("sports-favorites", "sports-favorites"))
+        self.assertEqual(by_key["alts-trend"]["family"], "crypto-alts-trend")
+        # Every agent of a desk is numbered from one partner's name.
+        self.assertEqual({r["name"] for r in rows if r["niche"] == "kalshi-sports"}, {"meriwether"})
+        self.assertEqual(by_key["options-breakout"]["name"], "krasker")
 
     def test_a_birth_is_placed_by_its_needs_and_a_child_inherits(self):
         parent = self.seated()
@@ -236,6 +241,18 @@ class InTheHouse(HouseCase):
         self.assertEqual(summary["orders"], 0)
         woke = [e.payload for e in self.house.ledger.iter(kinds="agent.woke", agent=agent.id)]
         self.assertIn("outside the alpaca-crypto-majors specialty", json.dumps(woke))
+
+    def test_a_desk_numbers_its_agents_and_a_child_takes_the_next_number(self):
+        born = self.house.found(["meriwether"])
+        self.assertEqual([a.id for a in born], ["meriwether", "meriwether-2", "meriwether-3", "meriwether-4", "meriwether-5", "meriwether-6"])
+        self.assertEqual({a.line for a in born}, {"meriwether"})
+        self.assertEqual([a.founder for a in born][:2], ["football-favorites", "football-longshot-no"])
+        self.assertEqual(self.house.found(["meriwether"]), [])  # idempotent, though six share the name
+        parent = born[2]
+        self.house.economy.grant(parent.id, "10", "test")
+        self.house.niches["kalshi-sports"].max_members = 20
+        child = self.house.fork(parent)
+        self.assertEqual((child.id, child.line, child.parent), ("meriwether-7", "meriwether", parent.id))
 
     def test_a_full_specialty_has_no_more_children(self):
         parent = self.seated()

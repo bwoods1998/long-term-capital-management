@@ -49,7 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "headline_check_seconds": 600,
 }
 
-INSTRUCTIONS = """You are the night watch for one trading desk on the Long Term Capital Management floor.
+INSTRUCTIONS = """You are the night watch for one trading desk on the Long-Term Capital Management floor.
 The desk is not in session. Something happened. Your one job: decide whether it justifies
 waking the desk for a full session, which costs real money and a few minutes of the model's
 time. Wake it when the event could change a position it holds or open an opportunity inside

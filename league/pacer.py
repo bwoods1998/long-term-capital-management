@@ -10,13 +10,13 @@ next week. So the House paces from what was really spent:
 
 recomputed every day, so a quiet day's unspent share rolls forward and a dear day is paid back.
 Three things follow the allowance: the day's pool of compute credits (what agents can spend on
-research), whether another research pass may start now, and whether Astra may sit down again.
+research), whether another research pass may start now, and whether Merton may sit down again.
 When a budget is gone, or the last day is over, that kind of spending stops for good and the
 owner is told once. The monthly caps (the gateway's for the frontier model, the House's meter for
 Sail) stand behind this as before.
 
 Sail is metered from the falls in its credit balance (`league/budget.py`); the frontier model from
-the cost the gateway reports on each call, which the ledger records on `astra.pass` and
+the cost the gateway reports on each call, which the ledger records on `merton.pass` and
 `audit.verdict` rows.
 """
 
@@ -71,7 +71,7 @@ class Pacer:
         if kind == "sail":
             rows = ((e.at, e.payload.get("spent_usd")) for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "sail")
         else:
-            rows = ((e.at, e.payload.get("cost_usd")) for e in self.ledger.iter(kinds=("astra.pass", "audit.verdict")))
+            rows = ((e.at, e.payload.get("cost_usd")) for e in self.ledger.iter(kinds=("merton.pass", "audit.verdict")))
         for at, usd in rows:
             try:
                 amount = Decimal(str(usd or 0))

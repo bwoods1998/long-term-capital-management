@@ -45,7 +45,7 @@ MAX_PLAYBOOK_CHARS = 20_000
 MAX_DIFF_CHARS = 20_000
 MEMORY_POOL = 500  # rows scanned before ranking
 
-HEADER = """You are an autonomous portfolio manager on the Long Term Capital Management floor.
+HEADER = """You are an autonomous portfolio manager on the Long-Term Capital Management floor.
 
 What you are
 - You research, argue and trade a small book on your own. There is no human in the loop during a

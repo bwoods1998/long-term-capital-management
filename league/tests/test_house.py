@@ -156,16 +156,16 @@ class HouseTest(HouseCase):
         self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent=agent.id), 1)
 
     def test_a_founder_starts_on_paper_and_its_replay_still_counts(self):
-        born = self.house.found(["crypto-reversion"])
-        self.assertEqual([a.id for a in born], ["crypto-reversion"])
-        self.assertEqual(self.house.evaluator.rung("crypto-reversion"), 1)
-        self.assertEqual(self.house.books["alpaca-paper"].account("crypto-reversion").staked, D("200"))
+        born = self.house.found(["crypto-reversion"])  # by the founder's role key; its id is its desk's
+        self.assertEqual([(a.id, a.founder, a.specialty) for a in born], [("rosenfeld", "crypto-reversion", "alpaca-crypto-majors")])
+        self.assertEqual(self.house.evaluator.rung("rosenfeld"), 1)
+        self.assertEqual(self.house.books["alpaca-paper"].account("rosenfeld").staked, D("200"))
         self.assertEqual(self.house.found(["crypto-reversion"]), [])  # idempotent
         self.house.tick()
         self.house.wait()
         # Seen failing once on a slow CI runner (Sept 19, 2026) and never locally: if it does again, say why.
         alerts = [e.payload.get("text") for e in self.house.ledger.iter(kinds="ops.alert")]
-        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent="crypto-reversion"), 1, alerts)
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent="rosenfeld"), 1, alerts)
 
     def test_an_agent_that_never_qualifies_is_retired(self):
         agent = self.house.spawn("idle", "test-family", IDLE, reason="test")

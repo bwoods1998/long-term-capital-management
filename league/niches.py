@@ -49,6 +49,8 @@ class Niche:
     dormant_reason: str = ""
     patterns: tuple[str, ...] = ()
     category: str = ""
+    desk: str = ""  # the partner whose desk this is: every agent of it is numbered from this name
+    desk_note: str = ""  # who that partner was
     max_members: int = 5
     #: False where the House cannot replay history (options: no recorded chains). Paper is then
     #: the specialty's replay: a newcomer starts its forward test at once, on practice money.
@@ -82,7 +84,8 @@ class Niche:
 
     def text(self) -> str:
         """What a member's research loop is told about its specialty."""
-        lines = [f"YOUR SPECIALTY: {self.title} ({self.id}).", self.brief]
+        lines = [f"YOUR SPECIALTY: {self.title} ({self.id}). You are of the {self.desk.title()} desk"
+                 + (f", named for {self.desk_note}." if self.desk_note else "."), self.brief]
         if self.venue == "kalshi":
             if self.maker_fee_series:
                 lines.append("These series charge a MAKER fee as well as the taker fee, so a resting bid is not free there: "
@@ -109,6 +112,7 @@ def load(path: Path | None = None) -> dict[str, Niche]:
         out[row["id"]] = Niche(
             id=str(row["id"]), title=str(row["title"]), venue=venue, horizons=horizons, listed=universe, brief=str(row["brief"]),
             patterns=tuple(row.get("patterns") or ()), category=str(row.get("category") or ""), max_members=int(row.get("max_members") or 5),
+            desk=str(row["desk"]), desk_note=str(row.get("desk_note") or ""),
             replay=bool(row.get("replay", True)),
             founders=tuple(row.get("founders") or ()), asset_class=str(row.get("asset_class") or ("event" if venue == "kalshi" else "crypto")),
             maker_fee_series=tuple(row.get("maker_fee_series") or ()), dormant=row.get("status") == "dormant",
@@ -237,7 +241,7 @@ def founder_code(seed_code: str, niche: Niche, founder: Mapping[str, Any]) -> st
         tree = ast.parse("\n".join(lines))
     header = [
         f"# SPECIALTY: {niche.id} ({niche.title}).",
-        f"# Founder {founder['name']}: the {founder['seed']} seed's program, pointed at this specialty's markets. Where the notes",
+        f"# Founder {founder['key']} of the {niche.desk.title()} desk: the {founder['seed']} seed's program, pointed at this specialty's markets. Where the notes",
         "# below speak of other markets, fees or evidence, they are the seed's: this founder's own evidence starts at zero.",
         "",
     ]

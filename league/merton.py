@@ -1,4 +1,4 @@
-"""Astra's other five jobs. It is already the auditor; here it is architect, toolsmith, operator,
+"""Merton's other five jobs. It is already the auditor; here it is architect, toolsmith, operator,
 game designer and teacher, and in every one of them it can do exactly one thing: propose a pull
 request. It never picks a trade, never touches the ledger, and never merges.
 
@@ -6,10 +6,10 @@ One pass of one role:
 
 1. the House gathers that role's evidence from the ledger (the league table, the graveyard, the
    tool-request queue, the alerts, the economy's numbers);
-2. Astra answers, through the gateway's metered route, with a small set of whole files;
+2. Merton answers, through the gateway's metered route, with a small set of whole files;
 3. the House checks the proposal against the same path guard CI uses (`league/ci.py`) and drops
    anything outside the role's paths;
-4. the forge turns it into a branch `astra/<role>/<slug>` and a pull request. In production the
+4. the forge turns it into a branch `merton/<role>/<slug>` and a pull request. In production the
    forge is the gateway (`POST /v1/github/pr`: the GitHub credential lives there, not on Sail);
 5. CI judges the pull request; a repository workflow merges a green one; the House notices `main`
    move, and the watchdog stages the new code on a canary before the House runs it.
@@ -141,9 +141,9 @@ class GhForge:
 
     def propose(self, *, role: str, slug: str, title: str, body: str, files: list[dict[str, str]]) -> dict[str, Any]:
         digest = hashlib.sha256(json.dumps(sorted((f["path"], f["content"]) for f in files)).encode("utf-8")).hexdigest()[:8]
-        branch = f"astra/{role}/{slug}-{digest}"
+        branch = f"merton/{role}/{slug}-{digest}"
         self._git("fetch", "--quiet", self.remote, self.base)
-        work = Path(tempfile.mkdtemp(prefix="astra-"))
+        work = Path(tempfile.mkdtemp(prefix="merton-"))
         try:
             self._git("worktree", "add", "--quiet", "-b", branch, str(work), f"{self.remote}/{self.base}")
             for row in files:
@@ -151,14 +151,14 @@ class GhForge:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(row["content"], encoding="utf-8")
                 self._git("add", "--", row["path"], cwd=work)
-            message = f"{title}\n\n{body}\n\nOpened by Astra ({role}).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+            message = f"{title}\n\n{body}\n\nOpened by Merton ({role}).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
             self._git("commit", "--quiet", "-m", message, cwd=work)
             head = self._git("rev-parse", "HEAD", cwd=work)
             self._git("push", "--quiet", "-u", self.remote, branch, cwd=work)
         finally:
             subprocess.run(["git", "worktree", "remove", "--force", str(work)], cwd=self.repo, capture_output=True)
         made = subprocess.run(["gh", "pr", "create", "--base", self.base, "--head", branch, "--title", title,
-                               "--body", body + f"\n\nOpened by Astra ({role}).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"],
+                               "--body", body + f"\n\nOpened by Merton ({role}).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"],
                               cwd=self.repo, capture_output=True, text=True)
         if made.returncode != 0:
             raise ForgeError(f"gh pr create failed: {made.stderr.strip()[:300]}")
@@ -192,7 +192,7 @@ class Proposal:
 
 
 def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Proposal:
-    """Astra's answer, reduced to what the role may actually change. Anything else is dropped here,
+    """Merton's answer, reduced to what the role may actually change. Anything else is dropped here,
     refused again by the gateway, and refused a third time by CI."""
     files, dropped = [], []
     listed = answer.get("files") if isinstance(answer.get("files"), list) else []
@@ -218,11 +218,11 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
             files.append({"path": path, "content": content})
     slug = re.sub(r"[^a-z0-9-]+", "-", str(answer.get("slug") or role).lower()).strip("-")[:48] or role
     answers = [a for a in (answer.get("answers") if isinstance(answer.get("answers"), list) else []) if isinstance(a, dict)][:20]
-    return Proposal(role, str(answer.get("summary") or "")[:1500], slug, str(answer.get("title") or f"Astra ({role})")[:110],
+    return Proposal(role, str(answer.get("summary") or "")[:1500], slug, str(answer.get("title") or f"Merton ({role})")[:110],
                     str(answer.get("body") or "")[:7000], files, dropped, cost, answers)
 
 
-class Astra:
+class Merton:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
                  schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None,
                  effort: Mapping[str, str] | None = None):
@@ -241,7 +241,7 @@ class Astra:
 
     # ---------------------------------------------------------------- schedule
     def last_pass(self, role: str) -> float | None:
-        rows = [e for e in self.ledger.read(kinds="astra.pass", limit=500, newest=True) if e.payload.get("role") == role]
+        rows = [e for e in self.ledger.read(kinds="merton.pass", limit=500, newest=True) if e.payload.get("role") == role]
         return float(rows[-1].payload["at_epoch"]) if rows else None
 
     def due(self) -> list[str]:
@@ -270,7 +270,7 @@ class Astra:
         if role in ("architect", "toolsmith"):
             system += "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT.read_text(encoding="utf-8")
         try:
-            answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"astra-{role}",
+            answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"merton-{role}",
                                        max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000,
                                        effort=str(self.effort.get(role) or "medium"))
             proposal = parse_proposal(role, answer.json(), answer.cost_usd)
@@ -288,7 +288,7 @@ class Astra:
             try:
                 made = self.forge.propose(role=role, slug=proposal.slug, title=proposal.title, body=proposal.body, files=proposal.files)
                 row.update(branch=made.get("branch"), number=made.get("number"), url=made.get("url"))
-                self.ledger.append("astra.change", {"role": role, "branch": made.get("branch"), "number": made.get("number"), "title": proposal.title,
+                self.ledger.append("merton.change", {"role": role, "branch": made.get("branch"), "number": made.get("number"), "title": proposal.title,
                                                     "status": "opened", "paths": [f["path"] for f in proposal.files]})
             except ForgeError as exc:
                 row["forge_error"] = str(exc)[:300]
@@ -296,14 +296,14 @@ class Astra:
 
     def _record(self, role: str, row: Mapping[str, Any]) -> dict[str, Any]:
         payload = {"role": role, "at_epoch": self.clock(), **dict(row)}
-        self.ledger.append("astra.pass", payload)
+        self.ledger.append("merton.pass", payload)
         return payload
 
     # ------------------------------------------------------------------ follow
     def follow(self) -> list[dict[str, Any]]:
         """Ask the gateway what CI made of each open change, and record the verdicts."""
         latest: dict[int, dict[str, Any]] = {}
-        for entry in self.ledger.iter(kinds="astra.change"):
+        for entry in self.ledger.iter(kinds="merton.change"):
             if entry.payload.get("number") is not None:
                 latest[int(entry.payload["number"])] = dict(entry.payload)
         out = []
@@ -318,7 +318,7 @@ class Astra:
             verdict = "merged" if status.get("merged") else ("refused by CI" if checks == "failure" else ("closed" if status.get("state") == "closed" else "pending"))
             if verdict != row.get("status") and verdict != "pending":
                 row = {**row, "status": verdict}
-                self.ledger.append("astra.change", row)
+                self.ledger.append("merton.change", row)
                 out.append(row)
         return out
 

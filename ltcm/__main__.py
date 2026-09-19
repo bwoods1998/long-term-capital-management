@@ -1,4 +1,4 @@
-"""Command line for the Long Term Capital Management floor.
+"""Command line for the Long-Term Capital Management floor.
 
     python3 -m ltcm init                     prepare .data/ltcm and check the roster
     python3 -m ltcm run [--once]             the always-on loop

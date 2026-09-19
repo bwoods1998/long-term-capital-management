@@ -121,7 +121,7 @@ test('a proposal is checked whole before GitHub hears of it', () => {
 test('the branch is named from the role, the slug and the files, and the same proposal is the same branch', () => {
   const other = { path: 'league/strategies/alpha.py', content: 'A = 1\n' };
   const branch = github.branchName('architect', 'kalshi-weather-favorites', [STRATEGY, other]);
-  assert.match(branch, /^astra\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
+  assert.match(branch, /^merton\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
   // The hash is sha256 over the files in path order, as [path, content] pairs.
   const canonical = JSON.stringify([[other.path, other.content], [STRATEGY.path, STRATEGY.content]]);
   assert.equal(branch.slice(-8), createHash('sha256').update(canonical).digest('hex').slice(0, 8));
@@ -164,14 +164,14 @@ test('GitHub receives blobs, a tree on main, a commit, the branch and the pull r
     ['league/tests/test_tool_depth.py', '100644', 'blob'], ['league/tools/depth.py', '100644', 'blob'],
   ]);
   assert.deepEqual(commit.parents, [main]);
-  assert.equal(commit.message, 'Add the Kalshi weather favorites strategy\n\nOpened by Astra (toolsmith) through the LTCM gateway.');
+  assert.equal(commit.message, 'Add the Kalshi weather favorites strategy\n\nOpened by Merton (toolsmith) through the LTCM gateway.');
   assert.deepEqual(ref, { ref: `refs/heads/${branch}`, sha: result.head });
   assert.deepEqual(pull, {
     title: 'Add the Kalshi weather favorites strategy', head: branch, base: 'main',
-    body: 'Favorites above 90 cents settled yes 97% of the time in the replay.\n\n---\n\nOpened by Astra (toolsmith) through the LTCM gateway.',
+    body: 'Favorites above 90 cents settled yes 97% of the time in the replay.\n\n---\n\nOpened by Merton (toolsmith) through the LTCM gateway.',
   });
   assert.deepEqual(result, { ok: true, branch, number: 41, url: `https://github.com/${GITHUB_REPO}/pull/41`, head: hub.refs.get(branch), created: true });
-  assert.equal(github.pullBody('teacher', ''), '---\n\nOpened by Astra (teacher) through the LTCM gateway.', 'a proposal with no words still says who opened it');
+  assert.equal(github.pullBody('teacher', ''), '---\n\nOpened by Merton (teacher) through the LTCM gateway.', 'a proposal with no words still says who opened it');
 });
 
 test('a retry of the same proposal reuses its branch and returns its pull request', async () => {

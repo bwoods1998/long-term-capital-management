@@ -1,5 +1,5 @@
 {
-  "_about": "The tunable rules of the game. Astra, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
+  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
   "economy": {
     "epoch_seconds": 86400,
     "daily_pool_usd": "2.00",
@@ -83,8 +83,8 @@
       168
     ]
   },
-  "astra": {
-    "_about": "How often each of Astra's roles sits down, in hours, during the expedition. The pacer still gates every pass on the day's allowance, so this is how often a role MAY run, not how often it must.",
+  "merton": {
+    "_about": "How often each of Merton's roles sits down, in hours, during the expedition. The pacer still gates every pass on the day's allowance, so this is how often a role MAY run, not how often it must.",
     "schedule_hours": {
       "operator": 8,
       "toolsmith": 8,

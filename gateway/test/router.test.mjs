@@ -588,7 +588,7 @@ test('a proposal becomes a branch and a pull request, and the reply is all the V
   const { response, body, gate } = await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, fetcher: hub.fetcher });
   assert.equal(response.status, 200, JSON.stringify(body));
   assert.deepEqual(Object.keys(body), ['ok', 'branch', 'number', 'url', 'head']);
-  assert.match(body.branch, /^astra\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
+  assert.match(body.branch, /^merton\/architect\/kalshi-weather-favorites-[0-9a-f]{8}$/);
   assert.equal(body.number, 41);
   assert.equal(body.url, `https://github.com/${GITHUB_REPO}/pull/41`);
   assert.equal(body.head, hub.refs.get(body.branch));
@@ -598,7 +598,7 @@ test('a proposal becomes a branch and a pull request, and the reply is all the V
   assert.equal(hub.calls.at(-1).key, 'POST /pulls');
   assert.deepEqual(hub.calls.at(-1).body, {
     title: PROPOSAL.title, head: body.branch, base: 'main',
-    body: `${PROPOSAL.body}\n\n---\n\nOpened by Astra (architect) through the LTCM gateway.`,
+    body: `${PROPOSAL.body}\n\n---\n\nOpened by Merton (architect) through the LTCM gateway.`,
   });
   assert.ok(hub.calls.every(made => made.headers.Authorization === `Bearer ${GITHUB_TOKEN}`), 'GitHub sees the GitHub token');
   assert.ok(hub.calls.every(made => !JSON.stringify(made).includes(TOKEN)), 'and never the gateway s own');

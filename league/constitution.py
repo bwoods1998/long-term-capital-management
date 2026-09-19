@@ -1,7 +1,7 @@
 """The constitution: what no model and no code path on Sail may change.
 
 These numbers were written down before any agent traded, which is what makes the tests
-pre-registered. They are constants in a file that Astra's pull requests are refused for touching
+pre-registered. They are constants in a file that Merton's pull requests are refused for touching
 (`league/ci.py` guards the path), and the House records this file's digest on the ledger every
 time it starts, so a change is visible in the public record.
 

@@ -1,4 +1,4 @@
-"""Report which Long Term Capital Management credentials are present, without printing any secret.
+"""Report which Long-Term Capital Management credentials are present, without printing any secret.
 
 Usage: python3 scripts/check_keys.py
 

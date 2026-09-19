@@ -1,4 +1,4 @@
-// Long Term Capital Management order gateway.
+// Long-Term Capital Management order gateway.
 //
 // The desks run in a cloud VM. The venue private keys do not: they are Worker secrets here, and
 // the VM holds nothing but a bearer token. So the worst a compromised VM can do is ask this

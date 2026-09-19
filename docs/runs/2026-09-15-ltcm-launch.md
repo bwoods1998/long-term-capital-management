@@ -1,6 +1,6 @@
-# Long Term Capital Management launch record · September 15, 2026
+# Long-Term Capital Management launch record · September 15, 2026
 
-Overnight build from the Portfolio Agent repository into **Long Term Capital Management**: one
+Overnight build from the Portfolio Agent repository into **Long-Term Capital Management**: one
 project, one repository, one site section. This is the state at hand-off, written before the
 owner woke up.
 

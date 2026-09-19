@@ -85,7 +85,7 @@ python3 scripts/gateway_admin.py unkill
 
 What changes: the House opens a book on the real Kalshi and Alpaca accounts and records their
 baselines. **Still no order is sent** until an agent has (a) cleared the paper screen (15 active
-blocks, 10 closed trades, growth above zero, a drawdown under 15%) and (b) passed Astra's audit.
+blocks, 10 closed trades, growth above zero, a drawdown under 15%) and (b) passed Merton's audit.
 Then it gets a $25 real stake and positions of at most $10. The screen is easy on purpose, and what
 it may cost you is capped in dollars: at most 4 agents hold real money on that rung at once, and
 when the rung has lost $50 net it closes, everyone on it goes back to paper, and you get an email.
@@ -95,9 +95,9 @@ confidence bound on its growth above zero over 30 active blocks of REAL fills. T
 and 2,000 orders a day. If the real account has open orders the House did not send, it refuses to
 open that book and says so in `status`; cancel them at the venue.
 
-## 4. Letting Astra open pull requests (optional, one secret)
+## 4. Letting Merton open pull requests (optional, one secret)
 
-The auditor works now. Astra's other five jobs (architect, toolsmith, operator, game designer,
+The auditor works now. Merton's other five jobs (architect, toolsmith, operator, game designer,
 teacher) can only act through pull requests, and the credential for that lives in the gateway like
 every other. Create a fine-grained GitHub token for this one repository with **Contents: read and
 write** and **Pull requests: read and write**, then:
@@ -106,9 +106,9 @@ write** and **Pull requests: read and write**, then:
 cd gateway && npx wrangler secret put GITHUB_TOKEN    # paste the token at the prompt
 ```
 
-Until you do, each scheduled pass still runs and is recorded on the public tape with what Astra
+Until you do, each scheduled pass still runs and is recorded on the public tape with what Merton
 concluded, and any change it wanted is dropped with "GitHub is not configured". With the token, a
-proposal becomes a branch `astra/<role>/...` and a pull request; GitHub's `Astra` workflow judges it
+proposal becomes a branch `merton/<role>/...` and a pull request; GitHub's `Merton` workflow judges it
 (the path guard from main's copy, the content checks, the replay regression, the whole suite) and
 merges it only when everything is green. Merged code reaches the box by itself: every half hour the
 House downloads `main` (the repository is public, so the box needs no credential), runs the running
@@ -160,7 +160,7 @@ full, over fourteen days (Sept 19 to Oct 2). `python3 -m league status` and the 
 | What | How it is paced | The fortnight |
 |---|---|---|
 | Sail | about $7.14 a day at the start, recomputed daily from what is left. 85% of it is the day's credit pool; research runs on DeepSeek V4 Pro (measured $0.02 a pass) every 3 hours an agent, every 1.5 while the day is underspent | up to **$100**, less the $5 the House never spends. Your Sail balance was $97 at the start, so about $92 is reachable without a top-up |
-| Frontier model (Astra) | about $7.14 a day: architect, operator and toolsmith every 8 hours, teacher every 12, designer every 36, one at a time while the day's allowance lasts; audits are not paced | up to **$100**; the gateway's $100-a-month cap resets on Oct 1 and the House's own count of the expedition's spend is what stops it at $100 |
+| Frontier model (Merton) | about $7.14 a day: architect, operator and toolsmith every 8 hours, teacher every 12, designer every 36, one at a time while the day's allowance lasts; audits are not paced | up to **$100**; the gateway's $100-a-month cap resets on Oct 1 and the House's own count of the expedition's spend is what stops it at $100 |
 
 When either is gone, or on Oct 3, that kind of spending stops for good and you get one email saying
 so. Agents still wake and trade. To go on, change `budgets.expedition` in `league/constitution.py`,
@@ -177,8 +177,8 @@ Measured during the build, at Sail's and OpenAI's current prices:
 | Research passes (cheap Sail models, flex window) | measured $0.001 to $0.002 a pass, at most one per agent every four hours | about $2 |
 | Web searches | Sail does not publish a price; the House assumes $0.01 each | under $2 |
 | **Sail total** | bounded above by the economy: agents cannot spend credits they were not granted ($2 a day plus $26 of endowments), and the House stops research at $100 in a calendar month | **$5 to $9, at most about $40** |
-| Astra, auditor | $0.23 measured for one audit; an agent is audited at most once every 72 hours | $0 to $3 |
-| Astra, other roles (only with the GitHub token, but the passes run either way) | operator daily (about $0.10), toolsmith daily when the queue has requests ($0.06), teacher every three days, designer and architect weekly ($0.10 measured; up to $1.25 when it writes code) | $2 to $4 |
+| Merton, auditor | $0.23 measured for one audit; an agent is audited at most once every 72 hours | $0 to $3 |
+| Merton, other roles (only with the GitHub token, but the passes run either way) | operator daily (about $0.10), toolsmith daily when the queue has requests ($0.06), teacher every three days, designer and architect weekly ($0.10 measured; up to $1.25 when it writes code) | $2 to $4 |
 | **OpenAI total** | hard-capped by the gateway at $100 a month | **$2 to $7** |
 
 Real-money risk in the first week, if you turn it on: at most a handful of $1 to $10 positions,

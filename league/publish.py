@@ -192,7 +192,7 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
     else:
         message = league_news(entry.kind, agent, p)
         if message:
-            out.append(("", "lab", "lab.progress", {"message": message, "stage": "learn" if kind.startswith(("eval.", "audit.", "astra.")) else "test", "component": "league"}))
+            out.append(("", "lab", "lab.progress", {"message": message, "stage": "learn" if kind.startswith(("eval.", "audit.", "merton.")) else "test", "component": "league"}))
     events = []
     for prefix, stream, site_kind, payload in out:
         payload = payload if site_kind == "floor.mark" else clean({k: v for k, v in payload.items() if v is not None})
@@ -225,10 +225,10 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
         return f"{agent} {verb} from rung {p.get('from_rung')} to rung {p.get('to_rung')}: {p.get('reason')}."
     if kind == "audit.verdict":
         return f"The auditor {'approved' if p.get('approve') else 'vetoed'} {agent} for real money. {p.get('summary') or p.get('error') or ''}".strip()
-    if kind == "astra.pass":
-        return f"Astra ({p.get('role')}): {p.get('summary') or ''}".strip()
-    if kind == "astra.change":
-        return f"Astra's change {p.get('branch')}: {p.get('status')}. {p.get('title') or ''}".strip()
+    if kind == "merton.pass":
+        return f"Merton ({p.get('role')}): {p.get('summary') or ''}".strip()
+    if kind == "merton.change":
+        return f"Merton's change {p.get('branch')}: {p.get('status')}. {p.get('title') or ''}".strip()
     if kind == "ops.alert" and p.get("level") == "error":
         return f"House alert: {p.get('text')}"
     if kind == "ops.deploy":
@@ -467,7 +467,7 @@ class Publisher:
                 "sail_infra_spend_total_usd": money(spend["boxes"], 4), "sail_spend_total_usd": money(sail_total, 4),
                 "pnl_total_usd": money(pnl_total, 4, signed=True),
                 "pnl_per_sail_dollar": money(pnl_total / sail_total, 4, signed=True) if sail_total > 0 else None,
-                "models_used": ["DeepSeek V4 Flash", "GPT-6 Astra"],
+                "models_used": ["DeepSeek V4 Flash", "GPT-6 Merton"],
             },
             "lab": {"experiments": [], "curve": curve, "calibration": {"n": 0, "brier": None}},
         }

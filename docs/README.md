@@ -7,7 +7,7 @@ now; everything under "History" describes something that no longer runs.
 
 ## The system as it is now
 
-- [Project overview](../README.md): the game, the trust zones, the constitution, Astra's six jobs,
+- [Project overview](../README.md): the game, the trust zones, the constitution, Merton's six jobs,
   what is public, how to run things, status and known limits.
 - [The game](proposals/2026-09-19-the-game.md): the design memo for the rebuild. What the first run
   measured, what the venues reward, why the frontier model audits and never picks, and the game
@@ -20,7 +20,7 @@ now; everything under "History" describes something that no longer runs.
   [overnight-goal.txt](design/overnight-goal.txt) ([short form](design/overnight-goal-short.txt)).
 - [Switching the floor on](runbook-go-live.md): the owner's runbook. The state things were left
   in, starting the practice league, what the first hour looks like, turning real money on, giving
-  Astra its GitHub token, watching, stopping, and what an unattended week should cost.
+  Merton its GitHub token, watching, stopping, and what an unattended week should cost.
 - [The league package](../league/README.md): the developer's guide to the House. Design rules,
   modules, the life of one tick, state on disk, tests, the replay regression, what is imported
   from the first run's code.
