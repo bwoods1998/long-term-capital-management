@@ -58,8 +58,8 @@ class ResearchCase(unittest.TestCase):
         return Researcher(
             ledger=self.ledger, provider=self.script, commons=Commons(self.ledger), economy=self.economy, rules="THE GAME", contract="THE CONTRACT",
             run_replay=lambda agent, code: self.replays.append(code) or {"passed": False, "numbers": {"reasons": ["lost"], "trades": 43}, "digest": {"all": {"trades": 43, "wins": 38, "losses": 7}}},
-            settings={"max_turns": 6, "profile": "pro_flex", "reasoning_effort": "medium"}, clock=self.clock,
-            specialty=lambda agent: "YOUR SPECIALTY: sports results", lineage=self.registry.lineage, **kw)
+            clock=self.clock, specialty=lambda agent: "YOUR SPECIALTY: sports results", lineage=self.registry.lineage,
+            **{"settings": {"max_turns": 6, "profile": "pro_flex", "reasoning_effort": "medium"}, **kw})
 
     def first_prompt(self):
         return self.script.seen[0][1]["content"]
@@ -322,3 +322,38 @@ class Acting(ResearchCase):
 
         research = load_game()["research"]
         self.assertEqual((research["tool_choice"], research["max_output_tokens"]), ("required", 32000))
+
+
+class TheFlexQueue(ResearchCase):
+    """`pro_flex` is cheap because it waits in a queue. When the queue will not serve a turn inside
+    the deadline, the whole pass used to be thrown away with everything it had read still in hand."""
+
+    class Timeout(RuntimeError):
+        code = "provider_poll_timeout"
+
+    def script(self, fail_turns):
+        r = self.researcher([[("library_search", {"query": "x"})], [("finish", {"summary": "done"})]],
+                            settings={"max_turns": 6, "profile": "pro_flex", "fast_profile": "pro_asap", "reasoning_effort": "medium"})
+        original = self.script.respond
+        seen = []
+
+        def respond(profile, conversation, **kwargs):
+            seen.append(profile)
+            if len(seen) in fail_turns:
+                raise TheFlexQueue.Timeout("provider_poll_timeout")
+            return original(profile, conversation, **kwargs)
+
+        self.script.respond = respond
+        return r, seen
+
+    def test_a_queue_that_will_not_serve_buys_the_priority_tier_for_that_turn(self):
+        r, seen = self.script({1})
+        out = r.research(self.parent, {}, session="s1")
+        self.assertEqual((out.reason, seen), ("finished", ["pro_flex", "pro_asap", "pro_asap"]))
+        row = [e.payload for e in self.ledger.iter(kinds="agent.research") if e.payload.get("tool") == "queued"]
+        self.assertEqual([(r["was"], r["now"]) for r in row], [("pro_flex", "pro_asap")])
+
+    def test_the_priority_tier_timing_out_too_ends_the_pass(self):
+        r, seen = self.script({1, 2})
+        out = r.research(self.parent, {}, session="s1")
+        self.assertEqual((out.reason, seen), ("provider: provider_poll_timeout", ["pro_flex", "pro_asap"]))

@@ -172,6 +172,8 @@ class Researcher:
         ]
         nudged, truncated = False, 0
         effort = str(self.settings.get("reasoning_effort", "low"))
+        profile = str(self.settings.get("profile", "flash_flex"))
+        fast = str(self.settings.get("fast_profile") or "")
         for turn in range(int(self.settings.get("max_turns", 6))):
             balance = self.economy.balance(agent.id)
             if balance <= Decimal(str(self.settings.get("min_credits_usd", "0.10"))):
@@ -179,7 +181,7 @@ class Researcher:
                 break
             try:
                 response = self.provider.respond(
-                    str(self.settings.get("profile", "flash_flex")),
+                    profile,
                     conversation,
                     tools=TOOLS,
                     desk_id=agent.id,
@@ -192,7 +194,18 @@ class Researcher:
                     cache_key=f"league:{agent.family}",
                 )
             except Exception as exc:  # noqa: BLE001 - a provider failure ends the pass, not the House
-                out.reason = f"provider: {getattr(exc, 'code', type(exc).__name__)}"
+                code = str(getattr(exc, "code", None) or type(exc).__name__)
+                if code == "provider_poll_timeout" and fast and profile != fast:
+                    # The flex queue would not serve this turn inside its deadline -- twice in the
+                    # floor's first evening, and each time the whole pass was thrown away with
+                    # everything it had read still in hand. The priority tier is the same model at
+                    # twice the price: cheaper than losing the pass, and only for the turn that
+                    # waited.
+                    self.ledger.append("agent.research", {"tool": "queued", "session": session, "turn": turn,
+                                                          "was": profile, "now": fast}, agent=agent.id)
+                    profile = fast
+                    continue
+                out.reason = f"provider: {code}"
                 break
             out.turns = turn + 1
             cost = Decimal(str(response.cost_usd or 0))
