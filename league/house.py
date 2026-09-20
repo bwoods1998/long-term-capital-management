@@ -78,6 +78,7 @@ class Settings:
     research: bool = True
     max_wakes_per_tick: int = 16
     cold_wakes_per_tick: int = 5  # in a House's first five minutes (see `due`)
+    deploy_grace_seconds: int = 900  # no new research from the moment a release is staged (`deploying`)
     wake_workers: int = 6
     slow_workers: int = 3  # replays at once, beside the tick and never inside it
     research_workers: int = 5  # research passes at once: each is minutes of WAITING on Sail's flex window, not work
@@ -658,7 +659,19 @@ class House:
     def _update(self) -> None:
         outcome = self.updater.check()
         if outcome.get("action") != "none":
+            # A promotion signals this process and a fresh one comes up thirty seconds later, so
+            # every research pass still running is thrown away with everything it has read. The
+            # canary and its watch give about ten minutes of warning: stop STARTING passes now and
+            # the ones in flight finish on their own. Measured Sept 20, 2026: three deploys inside
+            # thirteen minutes killed eleven passes, which is most of an hour's research.
+            with self._state_lock:
+                self._state["deploying_at"] = self.clock()
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files")})
+
+    def deploying(self) -> bool:
+        """Is a release on its way in? True from the moment one is staged until the grace is up."""
+        since = float(self._state.get("deploying_at") or 0)
+        return bool(since) and self.clock() - since < float(self.settings.deploy_grace_seconds)
 
     def _wake_safely(self, agent: Agent) -> dict[str, Any]:
         try:
@@ -1184,6 +1197,8 @@ class House:
             return False
         if not self.pacer.may_spend("sail"):
             return False  # today's share of the expedition's Sail budget is spent (or the expedition is over)
+        if self.deploying():
+            return False  # a restart is minutes away and would throw the pass away half-read
         last = float(self._state["last_research"].get(agent.id) or 0)
         return self.clock() - last >= self.research_interval_hours(agent) * 3600
 

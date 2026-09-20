@@ -564,3 +564,30 @@ class TheOtherHalfOfTheBudget(HouseCase):
         day = pacer.credit_pool()
         self.assertEqual(pacer.credit_pool(per_seconds=21600), (day / 4).quantize(D("0.01")))
         self.assertEqual(pacer.credit_pool(per_seconds=86400), day)
+
+
+class ADeployInFlight(HouseCase):
+    """A promotion signals the loop and a fresh one comes up thirty seconds later, so every
+    research pass still running is thrown away with everything it has read. Three deploys inside
+    thirteen minutes killed eleven passes on Sept 20, 2026."""
+
+    def test_no_new_research_is_started_once_a_release_is_staged(self):
+        self.house.researcher = object()
+        self.house.settings.research = True
+        agent = self.seated()
+        self.house.economy.grant(agent.id, D("5"), "a purse")
+        today = __import__("league.ledger", fromlist=["now_iso"]).now_iso(self.clock)[:10]
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50"})
+        self.assertTrue(self.house.research_due(agent))
+        self.house.updater = SimpleNamespace(check=lambda: {"action": "deploying", "release": "main-abc"}, due=lambda: True)
+        self.house._update()
+        self.assertTrue(self.house.deploying())
+        self.assertFalse(self.house.research_due(agent))
+        self.clock.advance(self.house.settings.deploy_grace_seconds + 1)
+        self.assertFalse(self.house.deploying())
+        self.assertTrue(self.house.research_due(agent))
+
+    def test_a_quiet_check_changes_nothing(self):
+        self.house.updater = SimpleNamespace(check=lambda: {"action": "none"}, due=lambda: True)
+        self.house._update()
+        self.assertFalse(self.house.deploying())
