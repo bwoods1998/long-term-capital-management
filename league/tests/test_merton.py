@@ -325,3 +325,39 @@ class TheOperatorReadsTheRealBounds(unittest.TestCase):
             self.assertEqual(shown["permitted_dials"][key], {"min": low, "max": high})
         self.assertIn("inference_daily_cap_usd", shown["config"])
         self.assertNotIn("real_money", shown["permitted_dials"])
+
+
+class NoBriefMayCarryANumberTheCheckerOwns(unittest.TestCase):
+    """Three times on Sept 20, 2026 one number lived in two places and they drifted apart in
+    silence: the pacer's Sail allowance against the provider's fixed floor cap (research stopped
+    mid-morning); the updater's judge against GitHub's (no commit could reach the box); and the
+    operator's brief against the checker's bounds (a merged pull request put the cap back and
+    throttled the floor). Each time the second copy was the one nobody thought to update.
+
+    A brief is prose a model reasons from. Any threshold written into it is a copy of a number the
+    code enforces, and the code will move first."""
+
+    def test_no_brief_states_a_range_for_a_dial_the_checker_bounds(self):
+        import re
+
+        from league.ci import CONFIG_DIALS
+        from league.merton import BRIEFS
+
+        offences = []
+        for role, brief in BRIEFS.items():
+            for dial in CONFIG_DIALS:
+                # "tick_seconds (30-600)", "inference_daily_cap_usd 0.5 to 10", and the like
+                window = brief[brief.find(dial):brief.find(dial) + 60] if dial in brief else ""
+                if window and re.search(r"[\d.]+\s*(?:-|to|–)\s*[\d.]+", window):
+                    offences.append(f"{role}: {window.strip()[:60]}")
+        self.assertEqual(offences, [], "a brief must read the checker's bounds, never restate them")
+
+    def test_the_constitutions_money_thresholds_are_not_restated_either(self):
+        from league.constitution import CONSTITUTION
+        from league.merton import BRIEFS, CONSULT
+
+        owned = {str(CONSTITUTION["tuition"]["max_loss_usd"]), str(CONSTITUTION["rungs"]["2"]["stake_usd"]),
+                 str(CONSTITUTION["budgets"]["expedition"]["sail_usd"])}
+        for name, text in list(BRIEFS.items()) + [("consult", CONSULT)]:
+            for value in owned:
+                self.assertNotIn(f"${value} ", text, f"{name} restates a constitutional amount the code owns")
