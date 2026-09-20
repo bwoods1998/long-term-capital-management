@@ -865,8 +865,10 @@ class House:
             raise ValueError("campaign allowance is closed")
         tape_id, tape = self.tape_for(needs)
         observed = needs.get("observe") or {}
-        if needs.get("venue") == "kalshi" and any(not (tape.get("observed_bars") or {}).get(s) for s in observed.get("symbols") or []):
-            raise ValueError("unsupported input: required observed bars are missing")
+        missing = [s for s in observed.get('symbols') or [] if not (tape.get('observed_bars') or {}).get(s)]
+        if needs.get("venue") == "kalshi" and missing:
+            raise ValueError("unsupported input: required observed bars are missing for " + ', '.join(missing)
+                             + "; use replay_coverage with the candidate NEEDS to inspect each symbol")
         if needs.get("venue") == "alpaca" and observed.get("series"):
             raise ValueError("unsupported input: cross-venue event observations are not recorded on equity tapes")
         row = CONSTITUTION["rungs"]["1"]
@@ -1629,15 +1631,25 @@ class House:
         return describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
                         alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
 
-    def research_coverage(self, agent: Agent) -> dict[str, Any]:
-        from .capabilities import tape_coverage
+    def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        from .capabilities import coverage_needs, tape_coverage
         niche = self.niche_of(agent)
         if niche is not None and not niche.replay:
             return {'mode': 'smoke_only', 'counted_as_trial': False,
                     'note': 'No historical option-chain replay. A smoke check cannot measure edge or fills.'}
         try:
-            query, tape = self.tape_for(agent.needs)
-            return {'query': query, **tape_coverage(tape)}
+            effective = coverage_needs(agent, needs, niche)
+            if effective.get('asset_class') == 'option':
+                return {'mode': 'smoke_only', 'counted_as_trial': False,
+                        'note': 'No historical option-chain replay.'}
+            query, tape = self.tape_for(effective)
+            requested = (effective.get('observe') or {}).get('symbols') or []
+            missing = [s for s in requested if not (tape.get('observed_bars') or {}).get(s)] if agent.venue == 'kalshi' else []
+            return {'query': query, **tape_coverage(tape), 'effective_needs': effective,
+                    'proposed_inputs': needs is not None,
+                    'required_observed_symbols': list(requested), 'missing_observed_symbols': missing,
+                    'observed_inputs_available': not missing,
+                    'input_note': 'Missing required symbols block this configuration, not every symbol or every hypothesis. Bar presence alone does not prove complete coverage.'}
         except Exception as exc:
             return {'mode': 'unavailable', 'counted_as_trial': False,
                     'error': f'{type(exc).__name__}: {str(exc)[:200]}'}

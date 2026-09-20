@@ -106,8 +106,13 @@ order in any of them is refused here and by the House. That is how a Kalshi stra
 spot price its contracts settle against, or an Alpaca one reads a coin it does not trade.
 
 On a Kalshi **replay** tape the watched symbols arrive as `observed["bars"]` only -- there are no
-recorded quotes for them -- at five-minute bars for an hourly tape and fifteen for a daily one,
-and each step sees only the bars stamped at or before it. Watched series are not cut to your own
+recorded quotes for them -- at the timeframe in `NEEDS.bars` (default `1Hour`), with up to 200
+warmup bars and 4,000 bars per symbol. Each step sees only bars stamped at or before it. Use
+`replay_coverage` with complete candidate `needs` to inspect actual coverage and missing symbols
+before a replay. One unavailable symbol blocks that configuration; it does not mean every
+requested symbol has no data. Narrowing the symbol set tests a different, explicit hypothesis.
+The tool reports effective NEEDS after the usual specialty constraints and never adopts them.
+Watched series are not cut to your own
 horizon: you may read a market you could not enter. (Until Sept 20, 2026 a Kalshi tape carried no
 bars at all, so a strategy conditioned on its underlier could be written but never tested. If your
 journal or the library says otherwise, they are out of date; measure it yourself.)

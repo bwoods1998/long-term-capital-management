@@ -30,8 +30,8 @@ ZERO = Decimal(0)
 TOOLS: list[dict[str, Any]] = [
     {"name": "runtime_status", "description": "Read the House's current replay, data and research capabilities, limits and implementation revision. Free. Verify old journal or library blockers here before asking for a tool that may already be implemented. This reports support/configuration, not measured tape coverage.",
      "parameters": {"type": "object", "properties": {}}},
-    {"name": "replay_coverage", "description": "Inspect actual dates, counts, warmup and observed-bar coverage of the historical tape for your CURRENT strategy NEEDS. Fetches/caches the same input as replay, but runs no strategy, buys no sandbox replay and adds no selection trial. Verify a stale-data blocker here before repeating it. Counts do not demonstrate an edge or realistic fills.",
-     "parameters": {"type": "object", "properties": {}}},
+    {"name": "replay_coverage", "description": "Inspect actual tape dates, counts, warmup and missing observed symbols. Omit needs for your current strategy, or supply COMPLETE proposed NEEDS to preflight a candidate before writing code or buying a replay. Uses normal bounded data reads, no strategy execution, sandbox charge or selection trial. One missing required symbol can block a replay while others have data: inspect missing symbols and test a narrower hypothesis. Counts do not demonstrate an edge or realistic fills.",
+     "parameters": {"type": "object", "properties": {"needs": {"type": "object", "description": "Optional complete candidate NEEDS; same venue/horizon and specialty as the current agent."}}}},
     {"name": "web_search", "description": "Search the web. Costs credits. Use it to check a fact or find evidence for an idea, not to browse.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "library_search", "description": "Search the research library every agent shares. Free. Notes written by your own specialty come first. Look here before paying for a web search.",
@@ -105,7 +105,7 @@ class Researcher:
         jobs: Any = None,  # durable queue owned by the House; None for an in-memory pass
         may_continue: Callable[[Agent], str] | None = None,
         capabilities: Callable[[Agent], Mapping[str, Any]] | None = None,
-        coverage: Callable[[Agent], Mapping[str, Any]] | None = None,
+        coverage: Callable[..., Mapping[str, Any]] | None = None,
     ):
         self.ledger = ledger
         self.provider = provider
@@ -144,7 +144,9 @@ class Researcher:
             "A replay submits a candidate; it does not install code during this conversation. The House checks adoption or "
             "fork eligibility after the pass. Describe a submitted candidate as proposed, and do not claim it is installed. "
             "Your standing's runtime_capabilities and runtime_status describe the deployed House: check them before treating an "
-            "old journal or library note about missing infrastructure as current. All model turns cost credits, including abstention. End with `finish`."
+            "old journal or library note about missing infrastructure as current. Preflight proposed inputs with replay_coverage(needs=...) "
+            "before spending a replay to diagnose data. One unsupported symbol does not establish that a whole feed is absent. "
+            "A tool request answered as blocked is still unimplemented. All model turns cost credits, including abstention. End with `finish`."
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
@@ -486,7 +488,9 @@ class Researcher:
         if name == "runtime_status":
             return dict(self.capabilities(agent)) if self.capabilities else {"error": "runtime capabilities unavailable"}
         if name == "replay_coverage":
-            return dict(self.coverage(agent)) if self.coverage else {"error": "replay coverage unavailable", "counted_as_trial": False}
+            if not self.coverage:
+                return {"error": "replay coverage unavailable", "counted_as_trial": False}
+            return dict(self.coverage(agent, args['needs']) if 'needs' in args else self.coverage(agent))
         if name == "markets_now":
             if self.look is None:
                 return {"error": "the House cannot show the live view here"}

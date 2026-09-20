@@ -102,6 +102,7 @@ KINDS: dict[str, bool] = {
     "library.note": True,
     "tool.request": True,
     "tool.fulfilled": True,
+    "tool.blocked": True,  # reviewed but still unimplemented; retained for engineering
     "playbook.entry": True,
     # Operations.
     "ops.started": True,

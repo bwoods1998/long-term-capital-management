@@ -126,8 +126,9 @@ class MertonTest(unittest.TestCase):
         answer = {"summary": "needs data, not a tool", "files": [], "answers": [{"request": "req-1", "outcome": "cannot be a pure tool: it needs more recorded history"}, {"request": "made-up", "outcome": "x"}]}
         merton = self.merton(FakeFrontier(answer), FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1", "name": "longer_tape"}]})
         merton.run("toolsmith")
-        rows = [e.payload for e in self.ledger.iter(kinds="tool.fulfilled")]
+        rows = [e.payload for e in self.ledger.iter(kinds="tool.blocked")]
         self.assertEqual([(r["request"], r["outcome"][:20]) for r in rows], [("req-1", "cannot be a pure too")])
+        self.assertEqual(self.ledger.count(kinds='tool.fulfilled'), 0)
 
     def tool_proposal(self, forge):
         self.ledger.append("tool.request", {"name": "midpoint", "description": "price an existing two-sided quote"}, agent="a1", id="req-1")
@@ -187,8 +188,8 @@ class MertonTest(unittest.TestCase):
         merton = self.merton(frontier, FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1"}]})
         row = merton.run("toolsmith")
         self.assertEqual(row["cost_usd"], "1.25")
-        self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 1)
-        self.assertEqual(self.ledger.last("tool.fulfilled").payload["outcome"], "final answer")
+        self.assertEqual(self.ledger.count(kinds="tool.blocked"), 1)
+        self.assertEqual(self.ledger.last("tool.blocked").payload["outcome"], "final answer")
 
     def test_each_role_is_due_on_its_own_clock(self):
         merton = self.merton(FakeFrontier({"files": []}), FakeForge())
@@ -395,6 +396,7 @@ class TheOperatorReadsTheRealBounds(unittest.TestCase):
 
         house = SimpleNamespace(
             registry=SimpleNamespace(living=lambda: []),
+            commons=SimpleNamespace(blocked_requests=lambda **kw: []),
             ledger=SimpleNamespace(read=lambda **kw: []),
             evaluator=SimpleNamespace(blocks=lambda _: [], rung=lambda _: 1),
             economy=SimpleNamespace(balance=lambda _: 0),

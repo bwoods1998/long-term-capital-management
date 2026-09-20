@@ -34,6 +34,14 @@ def report(root: str | Path, *, now=None):
         rows = [(r['kind'], json.loads(r['payload'])) for r in db.execute(
             'SELECT kind,payload FROM ledger WHERE at>=? AND kind IN (?,?,?,?,?,?) ORDER BY seq',
             (since, 'experiment.started', 'experiment.finished', 'ops.job', 'eval.trial', 'agent.research', 'agent.mutation'))]
+        requests = {}
+        for r in db.execute("SELECT id,agent,at,kind,payload FROM ledger WHERE kind IN ('tool.request','tool.blocked','tool.fulfilled') ORDER BY seq"):
+            p = json.loads(r['payload'])
+            if r['kind'] == 'tool.request':
+                requests[r['id']] = {'id': r['id'], 'agent': r['agent'], 'at': r['at'], 'name': p.get('name'), 'status': 'open'}
+            elif p.get('request') in requests:
+                blocked = r['kind'] == 'tool.blocked' or (p.get('status') == 'answered' and str(p.get('outcome') or '').lower().startswith('cannot be a pure tool'))
+                requests[p['request']].update(status='blocked' if blocked else 'fulfilled', outcome=p.get('outcome'))
     finally:
         db.close()
     started = {p['attempt']: p for k,p in rows if k == 'experiment.started'}
@@ -86,6 +94,8 @@ def report(root: str | Path, *, now=None):
                        'passed': sum(bool(p.get('passed')) for p in trials)},
             'mutation_rejections': dict(Counter(p.get('reason', 'unknown') for k,p in rows
                                                 if k == 'agent.mutation' and p.get('status') == 'rejected')),
+            'tool_requests': {'by_status': dict(Counter(r['status'] for r in requests.values())),
+                              'blocked': [r for r in requests.values() if r['status'] == 'blocked']},
             'jobs_without_finish': sorted(begun_jobs - {p['job'] for p in jobs}), 'latency': latency, 'research': research,
             'recordings': {'kind': 'sampled_rest_snapshots', 'count': count, 'compressed_bytes': size,
                            'first_received': first, 'last_received': last, 'evicted': evicted},

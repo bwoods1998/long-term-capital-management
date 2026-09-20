@@ -45,6 +45,26 @@ class PhaseCase(unittest.TestCase):
         return guard
 
 
+class EngineeringBacklogReport(PhaseCase):
+    def test_report_recovers_legacy_advice_and_preserves_unresolved_work(self):
+        from league.phase1 import report
+        self.budget()
+        ledger = Ledger(self.root / 'ledger.sqlite', clock=self.clock)
+        self.addCleanup(ledger.close)
+        recorder = Recorder(self.root / 'recordings.sqlite')
+        self.addCleanup(recorder.close)
+        ledger.append('tool.request', {'name': 'feed'}, id='req')
+        ledger.append('tool.fulfilled', {'request': 'req', 'status': 'answered',
+                                        'outcome': 'cannot be a pure tool: missing observations'})
+        before = ledger.count()
+        row = report(self.root, now=self.clock())['tool_requests']
+        self.assertEqual(row['by_status'], {'blocked': 1})
+        self.assertEqual(row['blocked'][0]['id'], 'req')
+        self.assertEqual(ledger.count(), before)
+        ledger.append('tool.fulfilled', {'request': 'req', 'status': 'deployed', 'outcome': 'verified'})
+        self.assertEqual(report(self.root, now=self.clock())['tool_requests']['blocked'], [])
+
+
 class CampaignTests(PhaseCase):
     def test_concurrent_connections_cannot_overspend(self):
         guards = [self.budget(), self.budget()]

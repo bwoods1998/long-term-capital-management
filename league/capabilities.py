@@ -2,12 +2,44 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from copy import deepcopy
 import hashlib
+import json
 from pathlib import Path
 import time
 
 from .ledger import now_iso
 from .parameters import inspect as inspect_parameters
+
+
+def coverage_needs(agent, proposed, niche=None):
+    """Validate bounded candidate data reads without importing or adopting strategy code."""
+    from .agents import niche_of
+    from .niches import constrain
+    from .tapes import TIMEFRAME_SECONDS
+
+    needs = deepcopy(agent.needs if proposed is None else proposed)
+    if not isinstance(needs, dict) or len(json.dumps(needs)) > 16384:
+        raise ValueError('coverage needs must be a bounded complete NEEDS object')
+    venue, horizon, _ = niche_of(needs)
+    if (venue, horizon) != (agent.venue, agent.horizon):
+        raise ValueError('candidate coverage must keep the current venue and horizon')
+    watched, bars = needs.get('observe', {}), needs.get('bars', {})
+    if not isinstance(watched, dict) or not isinstance(bars, dict):
+        raise ValueError('observe and bars must be objects')
+    for source, maximum in ((needs, 12), (watched, 6)):
+        for key in ('symbols', 'series'):
+            values = source.get(key, [])
+            if (not isinstance(values, list) or len(values) > maximum
+                    or any(not isinstance(s, str) or not s.strip() or len(s) > 64 for s in values)):
+                raise ValueError(f'{key} must be a list of at most {maximum} nonempty names')
+    if bars:
+        limit = bars.get('limit', 60 if venue == 'kalshi' else 120)
+        if type(limit) is not int or not 1 <= limit <= (200 if venue == 'kalshi' else 500):
+            raise ValueError('bars.limit exceeds the supported candidate coverage bounds')
+        if bars.get('timeframe', '1Hour' if venue == 'kalshi' else '5Min') not in TIMEFRAME_SECONDS:
+            raise ValueError('unsupported bars.timeframe')
+    return constrain(needs, niche) if niche is not None else needs
 
 
 @lru_cache(maxsize=1)
@@ -51,7 +83,7 @@ def describe(agent, settings, niche, *, clock=time.time, alpaca=False, kalshi=Fa
             'not_supplied': ['perpetual funding/open-interest feed', 'point-in-time earnings-surprise panel', 'live sports score feed'],
             'recording': 'Shared sampled REST snapshots with receive times; not tick/depth history. Experiment inputs/results are archived separately.',
         },
-        'research': 'Model turns spend credits even when no replay or search is purchased. A retained candidate is proposed until the House records adoption/forking. Use runtime_status to check changed capabilities and replay_coverage to inspect your actual tape without buying a sandbox replay or adding a selection trial.',
+        'research': 'Model turns spend credits even when no replay or search is purchased. A retained candidate is proposed until the House records adoption/forking. Use runtime_status to check changed capabilities. replay_coverage accepts complete proposed NEEDS and reports each missing observed symbol before any sandbox replay or selection trial. One missing symbol does not mean the whole feed is absent. Toolsmith advice is not implementation; blocked requests remain in the engineering backlog.',
     }
 
 
