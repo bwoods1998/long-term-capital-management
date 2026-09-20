@@ -1432,7 +1432,7 @@ class House:
         idle = self.idle_run(agent)
         return bool(idle["shut"]) and not idle["barren"] and not idle["offered"]
 
-    def keep_population(self) -> None:
+    def keep_population(self, *, refill: bool = True) -> None:
         rules = self.game["economy"]
         deadline = float(rules.get("replay_deadline_epochs", 3)) * float(rules["epoch_seconds"])
         broke = Decimal(str((self.game.get("research") or {}).get("min_credits_usd", "0.10"))) * 2
@@ -1455,6 +1455,8 @@ class House:
                 if self.clock() - last >= float(rules["epoch_seconds"]):
                     self._state["last_fork"][agent.id] = self.clock()
                     self.fork(agent)
+        if not refill:
+            return
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
         self.enroll()
@@ -1600,17 +1602,22 @@ class House:
             self.economy.payout(self.standings(),
                                 pool=self.pacer.credit_pool(per_seconds=float(self.game["economy"]["epoch_seconds"])) if self.pacer.running() else None)
             self.ledger.append("ops.budget", {"what": "expedition", **self.pacer.report()})
-            self._expedition_notices()
             if self.auditor is not None:
                 self.auditor.score()
+        # Outside every gate, because this is the one thing that says a budget is gone and it used
+        # to sit inside the payout that a spent budget closes -- it could only be delivered while
+        # the condition it announces was false. It tells the owner once per kind; a tick is cheap.
+        self._expedition_notices()
         try:
             self._enforce_horizon()
         except Exception as exc:  # noqa: BLE001 - a venue that is down now is asked again next tick
             self.alert("warning", f"the horizon rule could not close a position ({type(exc).__name__}: {str(exc)[:160]})")
         if self.settings.real_money:
             self._enforce_tuition()
-        if open_for_business:
-            self.keep_population()
+        # Culling is not spending: an agent whose credits reached zero should still die, and its
+        # post-mortem still be written, when the meter has stopped the floor. Only the refill that
+        # follows it costs anything, and that waits for business.
+        self.keep_population(refill=open_for_business)
         summary["deaths"] = sorted(living_before - {a.id for a in self.registry.living()})
         self._save_state()
         if self.publisher is not None:

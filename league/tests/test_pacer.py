@@ -135,18 +135,38 @@ class InTheHouse(HouseCase):
         self.house.pacer._cache.clear()
         self.assertFalse(self.house.research_due(agent))
 
-    def test_the_sail_meter_stops_the_house_when_the_expeditions_sail_is_gone(self):
+    def test_a_spent_expedition_stops_the_spending_and_never_the_floor(self):
+        """The meter used to stop the House when the expedition's Sail was gone, and that was a
+        latch with no key: `Pacer.spent` only grows, nothing rebases the expedition's start, and
+        the test never asked whether the expedition was still running. The floor would have gone
+        silent FOR EVER once the fortnight's $100 was spent -- through restarts, rollbacks, into
+        new months, with the balance topped back up -- while reporting perfect health, because the
+        one notice that says a budget is gone sits inside the payout the same flag closes."""
         from league.budget import Budget
 
         balance = [D("90")]
         budget = Budget(self.house.ledger, lambda: balance[0], clock=self.clock, every_seconds=0)
         budget.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": "2026-09-10", "days": 14, "sail_usd": "3", "openai_usd": "3"})
         self.assertEqual(budget.check(force=True), "open")
-        balance[0] = D("88")
-        self.assertEqual(budget.check(force=True), "open")
+        balance[0] = D("86.9")   # the whole expedition's Sail, spent
         budget.pacer._cache.clear()
-        balance[0] = D("86.9")
+        self.assertEqual(budget.check(force=True), "open")          # the floor keeps trading
+        self.assertFalse(budget.pacer.may_spend("sail"))            # and the pacer stops the spending
+        self.clock.advance(400 * 86400)                             # long after the expedition is over
+        budget.pacer._cache.clear()
+        self.assertEqual(budget.check(force=True), "open")          # still not latched
+
+    def test_the_meter_still_guards_the_account_it_is_there_to_guard(self):
+        from league.budget import Budget
+
+        balance = [D("90")]
+        budget = Budget(self.house.ledger, lambda: balance[0], clock=self.clock, every_seconds=0)
+        self.assertEqual(budget.check(force=True), "open")
+        balance[0] = budget.reserve                                  # the House's own box is next
         self.assertEqual(budget.check(force=True), "stopped")
+        said = [e.payload for e in self.house.ledger.iter(kinds="ops.alert")][-1]
+        self.assertEqual(said["level"], "error")
+        self.assertIn("the Sail meter is stopped", said["text"])     # and it SAYS so, which it never did
 
 
 if __name__ == "__main__":
@@ -618,3 +638,21 @@ class OneBudgetOneNumber(HouseCase):
                                  expedition={"start": "2026-01-01", "days": 1, "sail_usd": "50", "openai_usd": "50"})
         self.house._pace_inference()
         self.assertEqual(provider.floor_cap, D("9.00"))
+
+    def test_the_owner_is_told_a_budget_is_gone_even_when_it_closed_the_payout(self):
+        """The notice sat inside the payout block, which a spent budget closes, so it could only
+        be delivered while the thing it announces was false."""
+        today = __import__("league.ledger", fromlist=["now_iso"]).now_iso(self.clock)[:10]
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock,
+                                 expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "1"})
+        self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "1.00"})
+        self.house.pacer._cache.clear()
+        self.house._expedition_notices()
+        said = [e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertTrue(any("frontier model" in t for t in said), said)
+
+    def test_an_agent_at_zero_credits_still_dies_when_the_meter_has_stopped(self):
+        agent = self.seated()
+        self.house.economy.charge(agent.id, self.house.economy.balance(agent.id), "spent it all")
+        self.house.keep_population(refill=False)
+        self.assertNotIn(agent.id, [a.id for a in self.house.registry.living()])
