@@ -46,7 +46,7 @@ FORBIDDEN: tuple[str, ...] = (
     "league/constitution.py", "league/ci.py", "league/ledger.py", "league/book.py", "league/evaluator.py",
     "league/stats.py", "league/auditor.py", "league/watchdog.py", "league/safety.py", "league/replay.py", "league/updater.py",
     "gateway/", ".github/",
-    "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py",
+    "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
 )
 #: The only keys of league/config.json the operator may move, with their bounds.
 CONFIG_DIALS: dict[str, tuple[float, float]] = {
@@ -149,6 +149,8 @@ def check_strategy(path: Path) -> list[str]:
         from .agents import niche_of
 
         venue, _, _ = niche_of(described["needs"])
+        from .parameters import require_valid
+        require_valid(described.get("params") or {}, described["needs"])
     except ValueError as exc:
         return [f"{path.name}: {exc}"]
     from . import niches

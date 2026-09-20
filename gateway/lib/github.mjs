@@ -41,7 +41,7 @@ export const FORBIDDEN_FILES = [
   'league/constitution.py', 'league/ci.py', 'league/ledger.py', 'league/book.py',
   'league/evaluator.py', 'league/stats.py', 'league/auditor.py', 'league/watchdog.py',
   'league/safety.py', 'league/replay.py', 'league/updater.py',
-  'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py', 'league/research_jobs.py', 'league/capabilities.py',
+  'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py', 'league/research_jobs.py', 'league/capabilities.py', 'league/parameters.py',
 ];
 export const FORBIDDEN_TREES = ['gateway/', '.github/'];
 

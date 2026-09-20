@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .ledger import Ledger
+from .parameters import require_valid
 
 NAME = re.compile(r"^[a-z][a-z0-9-]{1,33}$")  # the site takes ids up to 40 characters, and a fork appends -N
 
@@ -144,6 +145,7 @@ class Registry:
         if not NAME.match(name):
             raise ValueError(f"agent name {name!r} must be lowercase letters, digits and dashes")
         venue, horizon, style = niche_of(needs)
+        require_valid(params or {}, needs)
         with self._lock:
             return self._born(name, family, code, needs, params, parent, reason, venue, horizon, style, specialty, founder)
 
@@ -174,6 +176,7 @@ class Registry:
         venue, horizon, style = niche_of(needs)
         if (venue, horizon) != (agent.venue, agent.horizon):
             raise ValueError("a strategy change may not move the agent to another venue or horizon")
+        require_valid(params, needs)
         self.ledger.append(
             "agent.strategy",
             {"code_sha256": code_sha(code), "params": dict(params), "needs": dict(needs),

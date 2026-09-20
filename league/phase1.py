@@ -32,8 +32,8 @@ def report(root: str | Path, *, now=None):
     db = connect(root / 'ledger.sqlite')
     try:
         rows = [(r['kind'], json.loads(r['payload'])) for r in db.execute(
-            'SELECT kind,payload FROM ledger WHERE at>=? AND kind IN (?,?,?,?,?) ORDER BY seq',
-            (since, 'experiment.started', 'experiment.finished', 'ops.job', 'eval.trial', 'agent.research'))]
+            'SELECT kind,payload FROM ledger WHERE at>=? AND kind IN (?,?,?,?,?,?) ORDER BY seq',
+            (since, 'experiment.started', 'experiment.finished', 'ops.job', 'eval.trial', 'agent.research', 'agent.mutation'))]
     finally:
         db.close()
     started = {p['attempt']: p for k,p in rows if k == 'experiment.started'}
@@ -84,6 +84,8 @@ def report(root: str | Path, *, now=None):
                             'latest': list(finished.values())[-5:]},
             'trials': {'total': len(trials), 'with_manifest': sum(bool(p.get('experiment')) for p in trials),
                        'passed': sum(bool(p.get('passed')) for p in trials)},
+            'mutation_rejections': dict(Counter(p.get('reason', 'unknown') for k,p in rows
+                                                if k == 'agent.mutation' and p.get('status') == 'rejected')),
             'jobs_without_finish': sorted(begun_jobs - {p['job'] for p in jobs}), 'latency': latency, 'research': research,
             'recordings': {'kind': 'sampled_rest_snapshots', 'count': count, 'compressed_bytes': size,
                            'first_received': first, 'last_received': last, 'evicted': evicted},

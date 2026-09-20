@@ -7,13 +7,14 @@ from pathlib import Path
 import time
 
 from .ledger import now_iso
+from .parameters import inspect as inspect_parameters
 
 
 @lru_cache(maxsize=1)
 def revision():
     root = Path(__file__).resolve().parent
     digest = hashlib.sha256()
-    for name in ('capabilities.py', 'house.py', 'tapes.py', 'replay.py'):
+    for name in ('capabilities.py', 'house.py', 'tapes.py', 'replay.py', 'parameters.py'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes())
     return digest.hexdigest()
 
@@ -25,6 +26,8 @@ def describe(agent, settings, niche, *, clock=time.time, alpaca=False, kalshi=Fa
             if agent.venue == 'kalshi' else settings.replay_days * (6 if agent.horizon == 'day' else 1))
     return {
         'as_of': now_iso(clock), 'revision': revision(),
+        'parameters': {**inspect_parameters(agent.params, agent.needs),
+            'note': 'Invalid configurations are refused for new births, adoption and replay. Existing records remain intact; propose a validated candidate through research. House mutations change one bounded numeric knob. Unknown knobs are frozen until NEEDS.parameter_rules declares their bounds. Structural validity is not evidence of an edge.'},
         'scope': {'agent': agent.id, 'venue': agent.venue, 'horizon': agent.horizon},
         'authority': 'Current House implementation and configuration. Older journals/library notes may describe earlier releases. Support does not establish data coverage or profitability.',
         'replay': {

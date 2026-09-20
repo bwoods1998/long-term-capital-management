@@ -29,6 +29,45 @@ itertools json math random re statistics time typing zoneinfo`. No files, no net
 attribute assignment, no underscore attributes, no `eval`/`exec`/`open`/`getattr` tricks
 (`league/safety.py` is the check). `decide` must return within 5 seconds.
 
+## Valid parameters and mutations
+
+The House validates effective parameters before a birth, adoption or historical replay. A
+structural refusal adds no selection trial. Reading a candidate's module in the sealed probe
+still costs box time. Existing historical records are preserved, and `runtime_status` reports
+the current configuration's errors; repair a legacy configuration by proposing a new candidate.
+
+Standard names have units: Kalshi `bid_min`, `bid_max`, `no_bid_min`, `no_bid_max`,
+`yes_bid_min`, `yes_bid_max`, `underdog_ask_max` and `max_spread` lie in [0, 1]. RSI thresholds
+lie in [0, 100], and `target_delta` in [-1, 1]. Window/count parameters are positive integers;
+standard rolling windows cannot exceed `NEEDS.bars.limit` (at most 500). Intraday clock knobs
+are integer minutes after midnight in [0, 1439]. Notional, duration, volume, spread/return
+percentages and standard z/k thresholds are nonnegative. All numbers, including nested ones,
+must be finite. The declared minimum cannot exceed its maximum; fast cannot exceed slow;
+entry/buy/sell/action starts cannot exceed their ends, and entry end cannot exceed flat-at.
+See `league/parameters.py` for the exact standard names. These checks do not prove that a
+strategy fires on available data or has an edge.
+
+Declare custom numeric knobs and additional relationships in NEEDS:
+
+```python
+NEEDS = {
+    # ... venue, horizon and market inputs ...
+    "parameter_rules": {
+        "bounds": {"custom_threshold": [0.01, 0.8], "lookback": [10, 60]},
+        "ordered": [["custom_low", "custom_high"]],
+        "frozen": ["notional_usd"],
+    },
+}
+```
+
+Every named parameter must exist in PARAMS. Bounds are inclusive; `null`/Python `None` means
+no bound on that side. Custom rules can tighten standard domains, never widen them. Unknown
+numeric knobs, booleans and compound values remain fixed until numeric bounds are supplied.
+House mutations change **one** bounded numeric knob, preserve integer types, and reject
+invalid, unchanged or duplicate living configurations. Proposals are deterministic from their
+seed and stop after 64 attempts, without a sandbox, paid model call or counted experiment.
+An invalid parent or exhausted mutation space cannot receive a new child endowment.
+
 ## What `decide` is given
 
 `ctx` is plain JSON data. Money and prices are floats here (the House converts what comes back to
