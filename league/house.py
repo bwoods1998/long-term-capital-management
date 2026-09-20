@@ -49,6 +49,11 @@ from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxError
 from .venues import family_of, instrument_for, market_hours
+
+#: How many bars of a watched underlier a replay tape carries per symbol. A three-week window of
+#: one-minute bars is millions of rows and a box killed for memory (Sept 19, 2026); this is a few
+#: weeks of fifteen-minute bars, which is what a strike inside twelve hours is answered by.
+MAX_OBSERVED_BARS = 4000
 from ltcm.data import market_open_at
 
 ZERO = Decimal(0)
@@ -686,6 +691,12 @@ class House:
             build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon)  # noqa: E731
         else:
             series = sorted(str(s) for s in (needs.get("series") or []))[:12]
+            # What it watches rides on the tape too, so a replay sees what a wake sees: the series
+            # of another desk, and -- the thing six agents across four desks asked the toolsmith
+            # for, and that no strategy helper could ever supply -- the bars of the underlier its
+            # strikes are written on. Recorded once for the whole window and sliced per step.
+            series = sorted(set(series) | {str(s) for s in (watched.get("series") or [])[:niches_module.MAX_OBSERVED]})
+            under = sorted({str(s) for s in (watched.get("symbols") or [])})[:niches_module.MAX_OBSERVED]
             # A tape is JSON handed to a sealed box, and a seven-week sports tape at five-minute
             # steps is hundreds of megabytes: three agents of the sports desk had their replays
             # KILLED (exit 137) on Sept 19, 2026, and were charged a trial each for it. A strategy
@@ -693,13 +704,36 @@ class House:
             # the half hour and carries fewer markets.
             step = self.settings.kalshi_day_step_seconds if horizon == "day" else 300
             markets = self.settings.kalshi_replay_markets if horizon == "hour" else min(self.settings.kalshi_replay_markets, self.settings.kalshi_day_markets)
-            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}"
-            build = lambda: self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=markets, step_seconds=step)  # noqa: E731
+            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}:{','.join(under)}"
+
+            def build(series=series, under=under, step=step, markets=markets, start_iso=start_iso, end_iso=end_iso, horizon=horizon):
+                tape = self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=markets, step_seconds=step)
+                bars = self._underlier_bars(under, step, start_iso, end_iso)
+                if bars:
+                    tape["observed_bars"] = bars
+                return tape
         with self._tape_lock:  # one build at a time: two agents of one family want the same tape
             hit = self._tapes.get(key)
             if hit is None or end - hit[0] > 86400:
                 self._tapes[key] = (end, build())
             return key, self._tapes[key][1]
+
+    def _underlier_bars(self, symbols: Sequence[str], step: int, start_iso: str, end_iso: str) -> dict[str, list[dict[str, Any]]]:
+        """Bars of what a Kalshi strategy watches on Alpaca, over the same window as its tape.
+
+        A bar no coarser than the tape's own step, and no more of them than a replay can carry: a
+        three-week window of one-minute bars is millions of rows and a killed box, and an hourly
+        strike is answered by fifteen-minute bars just as well. A failure here is no bars, never a
+        failed replay: what it watches is not what it trades."""
+        if not symbols or self.alpaca_data is None:
+            return {}
+        timeframe = "5Min" if step <= 900 else ("15Min" if step <= 3600 else "1Hour")
+        try:
+            rows = self.alpaca_data.bars(list(symbols), timeframe, start=start_iso, end=end_iso, limit=MAX_OBSERVED_BARS)
+        except Exception as exc:  # noqa: BLE001
+            self.alert("warning", f"the underlier bars of {', '.join(symbols)} could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
+            return {}
+        return {s: list(bars)[-MAX_OBSERVED_BARS:] for s, bars in (rows or {}).items() if bars}
 
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
         tape_id, tape = self.tape_for(needs)

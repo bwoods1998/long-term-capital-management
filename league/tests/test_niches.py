@@ -378,3 +378,100 @@ def decide(ctx):
         self.assertTrue(result["ok"], result.get("error"))
         self.assertEqual(result["trades"], 0)
         self.assertGreater(result["refused"], 0)
+
+
+class TheUnderlierOnAKalshiTape(unittest.TestCase):
+    """Six agents across four desks asked the toolsmith for the spot price behind their strikes,
+    and it rightly answered that no strategy helper can put it in `ctx`. The House can: what a
+    Kalshi strategy watches on Alpaca rides on its replay tape, recorded once and sliced per step.
+    """
+
+    CODE = '''
+NEEDS = {"venue": "kalshi", "horizon": "hour", "style": "vol", "series": ["KXBTCD"],
+         "observe": {"symbols": ["BTC/USD"], "series": ["KXETHD"]}, "bars": {"limit": 3},
+         "max_hours_to_close": 12, "wake_minutes": 5}
+PARAMS = {}
+
+def decide(ctx):
+    seen = (ctx.get("observed") or {})
+    bars = (seen.get("bars") or {}).get("BTC/USD") or []
+    log = list((ctx.get("memory") or {}).get("log") or [])
+    log.append({"closes": [b["c"] for b in bars],
+                "watched": sorted({m["series"] for m in (seen.get("markets") or [])}),
+                "mine": sorted({m["series"] for m in (ctx.get("markets") or [])})})
+    return {"intents": [], "memory": {"log": log}, "thought": "watching"}
+'''
+
+    def test_each_step_sees_the_underliers_past_and_never_its_future(self):
+        from league.replay import run_replay
+        from league.tests.test_replay import kalshi_tape, market, t_at
+
+        tape = kalshi_tape([[market(0.91, 0.93), market(0.40, 0.42, ticker="KXETHD-1", series="KXETHD")] for _ in range(4)], {})
+        tape["observed_bars"] = {"BTC/USD": [{"t": t_at(i * 5), "o": 80000.0 + i, "h": 80000.0 + i, "l": 80000.0 + i, "c": 80000.0 + i, "v": 1.0}
+                                            for i in range(6)]}
+        result = run_replay(self.CODE, {}, tape, stake=200.0, limits={"max_position_usd": 100.0, "max_order_usd": 75.0}, audit=True)
+        self.assertTrue(result["ok"], result.get("error"))
+        steps = result["final_memory"]["log"]
+        self.assertEqual([row["closes"] for row in steps],
+                         [[80000.0], [80000.0, 80001.0], [80000.0, 80001.0, 80002.0], [80001.0, 80002.0, 80003.0]])
+        self.assertEqual(steps[1]["mine"], ["KXBTCD"])      # it trades only its own series
+        self.assertEqual(steps[1]["watched"], ["KXETHD"])   # and watches one it may not
+        self.assertEqual(steps[-1]["mine"], [])             # both markets have closed by the last step
+
+    def test_a_tape_without_the_underlier_still_runs(self):
+        from league.replay import run_replay
+        from league.tests.test_replay import kalshi_tape, market
+
+        tape = kalshi_tape([[market(0.91, 0.93)] for _ in range(3)], {})
+        result = run_replay(self.CODE, {}, tape, stake=200.0, limits={"max_position_usd": 100.0, "max_order_usd": 75.0}, audit=True)
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["final_memory"]["log"][-1]["closes"], [])
+
+    def test_the_house_records_the_underlier_over_the_tapes_own_window(self):
+        from league.tests.test_house import HouseCase
+
+        case = HouseCase("run"); case.setUp()
+        try:
+            asked = {}
+
+            class Alpaca:
+                def bars(self, symbols, timeframe, *, start=None, end=None, limit=120):
+                    asked.update(symbols=list(symbols), timeframe=timeframe, start=start, end=end, limit=limit)
+                    return {s: [{"t": "2026-09-19T00:00:00Z", "c": 1.0}] for s in symbols}
+
+            class Kalshi:
+                def tape(self, series, **kw):
+                    asked["series"] = list(series)
+                    return {"venue": "kalshi", "horizon": kw.get("horizon"), "step_seconds": kw.get("step_seconds"), "steps": [], "results": {}}
+
+            case.house.alpaca_data, case.house.kalshi_data = Alpaca(), Kalshi()
+            needs = {"venue": "kalshi", "horizon": "hour", "style": "vol", "series": ["KXBTCD"],
+                     "observe": {"symbols": ["BTC/USD", "ETH/USD"], "series": ["KXETHD"]}}
+            _, tape = case.house.tape_for(needs)
+            self.assertEqual(asked["series"], ["KXBTCD", "KXETHD"])       # what it watches is on the tape
+            self.assertEqual(asked["symbols"], ["BTC/USD", "ETH/USD"])    # and so is the underlier
+            self.assertEqual(asked["timeframe"], "5Min")                  # no coarser than the tape's own step
+            self.assertEqual(sorted(tape["observed_bars"]), ["BTC/USD", "ETH/USD"])
+        finally:
+            case.tearDown()
+
+    def test_a_feed_that_is_down_costs_the_bars_not_the_replay(self):
+        from league.tests.test_house import HouseCase
+
+        case = HouseCase("run"); case.setUp()
+        try:
+            class Broken:
+                def bars(self, *a, **kw):
+                    raise RuntimeError("the feed is down")
+
+            class Kalshi:
+                def tape(self, series, **kw):
+                    return {"venue": "kalshi", "horizon": "hour", "step_seconds": 300, "steps": [], "results": {}}
+
+            case.house.alpaca_data, case.house.kalshi_data = Broken(), Kalshi()
+            _, tape = case.house.tape_for({"venue": "kalshi", "horizon": "hour", "style": "v", "series": ["KXBTCD"],
+                                           "observe": {"symbols": ["BTC/USD"]}})
+            self.assertNotIn("observed_bars", tape)
+            self.assertIn("could not be recorded", case.house.ledger.last("ops.alert").payload["text"])
+        finally:
+            case.tearDown()

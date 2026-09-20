@@ -121,6 +121,24 @@ def _parse_ts(value: Any) -> float | None:
     return moment.timestamp()
 
 
+def _bars_until(bars: Any, now_ts: float | None) -> list[dict[str, Any]]:
+    """The recorded bars stamped at or before this step. A tape carries the whole window in one
+    piece -- far smaller than a copy per step -- and each step sees only its own past."""
+    if not isinstance(bars, (list, tuple)) or now_ts is None:
+        return []
+    out = []
+    for bar in bars:
+        if not isinstance(bar, dict):
+            continue
+        stamp = _parse_ts(bar.get("t"))
+        if stamp is None:
+            continue
+        if stamp > now_ts:
+            break  # the tape is in order: everything after this is the strategy's future
+        out.append(bar)
+    return out
+
+
 def _block_key(ts: float, horizon: str) -> str:
     """`t[:13]` for an hour block and `t[:10]` for a day block, taken in UTC."""
     moment = datetime.fromtimestamp(ts, timezone.utc)
@@ -707,6 +725,10 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     observe = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
     watched_symbols = [s for s in (observe.get("symbols") or []) if isinstance(s, str)][:6]
     watched_series = {s for s in (observe.get("series") or []) if isinstance(s, str)}
+    # Bars of what it watches on another venue, recorded once for the whole window and sliced at
+    # each step: a Kalshi tape carries no bars of its own, and an hourly BTC strike is a bet about
+    # a price the strategy could not see until now.
+    observed_bars = tape.get("observed_bars") if isinstance(tape.get("observed_bars"), dict) else {}
     max_hours = _num(needs.get("max_hours_to_close"))
 
     account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else ())
@@ -773,22 +795,40 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                         "quotes": {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in watched_symbols if s in view.quotes},
                     }
             else:
-                shown_markets = []
+                shown_markets, watched_markets = [], []
                 for market in view.markets.values():
                     close_ts = market["close_ts"]
                     if close_ts is not None and close_ts <= now_ts:
                         continue
-                    if wanted_series and market.get("series") not in wanted_series:
-                        continue
                     hours = None if close_ts is None else round((close_ts - now_ts) / 3600.0, 6)
-                    if max_hours is not None and (hours is None or hours > max_hours):
+                    mine = not wanted_series or market.get("series") in wanted_series
+                    watched = market.get("series") in watched_series
+                    if not mine and not watched:
                         continue
+                    if mine and max_hours is not None and (hours is None or hours > max_hours):
+                        mine = False  # past its horizon to trade, but still something it may watch
+                        if not watched:
+                            continue
                     row = {k: v if isinstance(v, _SCALARS) else copy.deepcopy(v) for k, v in market.items() if k != "close_ts"}
                     row["hours_to_close"] = hours
-                    shown_markets.append(row)
+                    if mine:
+                        shown_markets.append(row)
+                    if watched:
+                        watched_markets.append(row if mine else dict(row))
                 ctx["markets"] = shown_markets
-                if watched_series:
-                    ctx["observed"] = {"markets": [row for row in shown_markets if row.get("series") in watched_series]}
+                # A market it WATCHES is not one it trades, so it is not cut to its own series or
+                # its own horizon. Underlier bars ride on the tape (see `House.tape_for`): six of
+                # the floor's agents asked the toolsmith for the spot price behind their strikes,
+                # and it rightly answered that no strategy helper can put it there.
+                if watched_series or (watched_symbols and observed_bars):
+                    ctx["observed"] = {}
+                    if watched_series:
+                        ctx["observed"]["markets"] = watched_markets
+                    if watched_symbols and observed_bars:
+                        ctx["observed"]["bars"] = {
+                            s: [dict(b) for b in _bars_until(observed_bars.get(s) or (), now_ts)[-bar_limit:]]
+                            for s in watched_symbols
+                        }
 
             # (d) decide.
             answer, error = deadline.call(decide, ctx)
