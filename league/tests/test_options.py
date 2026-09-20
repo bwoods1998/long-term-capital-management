@@ -314,3 +314,34 @@ class FirstBaseline(BookCase):
         book.open_baseline()
         self.assertEqual(slept, [])  # it stopped working at once
         self.assertIsNotNone(book.baseline_cash)
+
+    def test_a_practice_book_takes_the_venues_word_rather_than_freeze_for_ever(self):
+        """Sept 20, 2026: an order to the paper account filled, its poll failed on a transport
+        error, and the book never learned. It held $40 of LTC the book did not know about and
+        froze -- which stops EVERY agent on that venue, and it had been frozen ninety minutes
+        before anybody looked. A lost order must cost the desk that lost it, not the venue."""
+        from league.book import ADOPT_AFTER
+
+        self.assertTrue(self.book.reconcile().ok)
+        self.book.submit([self.intent("a", self.btc, "buy", "0.0001")])
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.cash -= D("40")  # a fill the book never saw
+        for _ in range(ADOPT_AFTER - 1):
+            self.assertFalse(self.book.reconcile().ok)  # it is given time to settle itself first
+        self.assertTrue(self.book.reconcile().ok)
+        self.assertFalse(self.book.frozen)
+        note = [e.payload for e in self.ledger.iter(kinds="book.baseline")][-1]
+        self.assertIn("adopted the venue", note["note"])
+        self.assertIn("cash differs by -40.0000", note["note"])
+        self.assertEqual(self.book.account("a").realized, D("0"))  # no agent's record is flattered by it
+
+    def test_a_real_money_book_freezes_and_stays_frozen(self):
+        from league.book import ADOPT_AFTER
+
+        self.book.real_money = True
+        self.assertTrue(self.book.reconcile().ok)
+        self.book.submit([self.intent("a", self.btc, "buy", "0.0001")])
+        self.broker.cash -= D("40")
+        for _ in range(ADOPT_AFTER + 2):
+            self.assertFalse(self.book.reconcile().ok)
+        self.assertEqual([e for e in self.ledger.iter(kinds="book.baseline") if "adopted" in e.payload["note"]], [])

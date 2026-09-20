@@ -57,6 +57,10 @@ from .ledger import HOUSE, Ledger, now_iso
 ZERO = Decimal(0)
 ONE = Decimal(1)
 CASH_PLACES = Decimal("0.00000001")
+#: How many readings in a row a PRACTICE book may fail to reconcile before it takes the venue's
+#: word for what is held. Three is about a quarter of an hour: long enough for an order whose poll
+#: failed to be polled again and settle itself, short enough that no desk loses an afternoon.
+ADOPT_AFTER = 3
 DUST_USD = Decimal("0.01")
 
 #: What the adapters' open statuses look like to the book.
@@ -398,6 +402,7 @@ class Book:
         self.venue_cash: Decimal | None = None
         self.baseline_at: str | None = None
         self._fills_since_reconcile = 0
+        self._unreconciled = 0  # consecutive readings that did not reconcile (see `_adopt_the_venue`)
         #: How far the venue may fairly differ from the book since the last reconciliation because
         #: a limit order was booked as a taker and may have been a maker: dollars, and units by key.
         self._fee_slack_usd = ZERO
@@ -1437,8 +1442,12 @@ class Book:
         with self._lock:
             self.open_baseline()
             result = self._reconcile()
-            if result.ok or self._traded_yet():
+            if result.ok:
+                self._unreconciled = 0
                 return result
+            if self._traded_yet():
+                self._unreconciled += 1
+                return result if self.real_money or self._unreconciled < ADOPT_AFTER else self._adopt_the_venue(result)
             # A book that has never traded cannot have drifted: its first reading of the venue was
             # taken across a moment that moved. (Sept 19, 2026: a leftover bid filled between the
             # cash read and the position read of a new league's first baseline, and froze the book
@@ -1447,6 +1456,33 @@ class Book:
             self._baseline_row(self.baseline_cash + result.cash_diff, self.baseline_positions,
                                f"re-read: the book has never traded and the venue was {result.cash_diff:+.4f} against its first reading")
             return self._reconcile()
+
+    def _adopt_the_venue(self, result: Reconciliation) -> Reconciliation:
+        """Practice money: take the venue's word for what is held and carry on.
+
+        Sept 20, 2026: an order was sent to Alpaca's paper account, its poll failed on a transport
+        error, and the book never learned it had filled. The venue held $40 of LTC the book did not
+        know about, and the book froze -- which on this venue stops EVERY agent from entering
+        anything, and it had been frozen for ninety minutes before anyone looked. An unattended
+        floor cannot be stopped that way by practice money: a lost order must cost the agent that
+        lost it, not the thirteen desks that share its venue.
+
+        So after `ADOPT_AFTER` readings that do not reconcile, the difference joins the House's
+        baseline -- it is not credited to any agent, so no agent's record is flattered by it -- and
+        the ledger and the alert say exactly what was adopted. A real-money book never does this:
+        there the freeze is the point, and the owner is told."""
+        venue_cash, venue_positions = self._venue()
+        cash, positions, _ = self._ledger_totals()
+        baseline = {}
+        for key in set(venue_positions) | set(positions):
+            held = venue_positions.get(key, ZERO) - positions.get(key, ZERO)
+            if held != 0:
+                baseline[key] = held
+        self._baseline_row(venue_cash - cash, baseline,
+                           f"adopted the venue after {self._unreconciled} readings that did not reconcile ({result.detail}): "
+                           "practice money, and a frozen book stops every agent on the venue")
+        self._unreconciled = 0
+        return self._reconcile()
 
     def _traded_yet(self) -> bool:
         """Whether any money of the league's has moved on this book. A stake is not a trade, and
