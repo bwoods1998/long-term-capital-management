@@ -837,8 +837,10 @@ class Judge(EvalCase):
         for i in range(1, 7):
             self.block("a", -0.006 if i % 2 else -0.0055)  # so steady a loss that even look 1's bound is below zero
             decisions.append((ev.judge("a", "paper").decision, len(self.looks("a"))))
-        # Looks start at min(death, promotion) = 4 and come every 2; death waits for 6 active blocks.
-        self.assertEqual(decisions, [("hold", 0), ("hold", 0), ("hold", 0), ("hold", 1), ("hold", 1), ("die", 2)])
+        # Looks start at min(death, promotion) = 4. Below the death threshold a look runs only the
+        # SCREEN, which spends no alpha, so it is not rationed and happens every block; the every-2
+        # rationing applies from 6, where the statistical death test begins to cost something.
+        self.assertEqual(decisions, [("hold", 0), ("hold", 0), ("hold", 0), ("hold", 1), ("hold", 2), ("die", 3)])
 
     def test_judging_is_deterministic(self):
         def run(path):
@@ -1625,3 +1627,37 @@ class TheScreensDrawdownIsRecent(unittest.TestCase):
         verdict = self.evaluator.judge("a2", "kalshi-shadow", horizon="hour")
         self.assertEqual(verdict.decision, "die")
         self.assertIn("past the 30% limit", verdict.reason)
+
+
+class AFreeCheckIsNotRationed(unittest.TestCase):
+    """hilibrand-2 cleared every screen condition but cumulative growth at its first look on Sept
+    20, 2026 -- fifteen active blocks, sixteen closed trades, a 4.2% drawdown against a 15% bar --
+    and was 0.35% of one block's growth short. Rationed one look in five, it would not have been
+    looked at again for five hours, for a check that counts blocks and reads two numbers."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite")
+        self.evaluator = Evaluator(self.ledger)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def block(self, agent, growth, n):
+        self.ledger.append("eval.block", {"agent": agent, "log_growth": growth, "active": True,
+                                          "book": "kalshi-shadow", "block": f"b{n}"}, agent=agent)
+
+    def test_a_screen_is_looked_at_every_block_and_spends_nothing(self):
+        self.evaluator.seat("a1", 1, "test")
+        self.ledger.append("book.stake", {"book": "kalshi-shadow", "usd": "200"}, agent="a1")
+        for n in range(12):
+            self.ledger.append("book.fill", {"book": "kalshi-shadow", "realized": "-0.20", "quantity": "1", "price": "0.9",
+                                             "instrument": {"market_id": f"M{n}", "asset_class": "event"}}, agent="a1")
+        for n in range(16):
+            self.block("a1", -0.0002, n)
+            self.evaluator.judge("a1", "kalshi-shadow", horizon="hour")
+        looks = [e.payload for e in self.ledger.iter(kinds="eval.verdict", agent="a1") if e.payload.get("decision") == "look"]
+        self.assertGreater(len(looks), 1, "a free check must not wait five blocks between looks")
+        self.assertTrue(all(row["tested_promotion"] is False for row in looks))  # and none of them spent alpha
+        self.assertTrue(all(row["tested_death"] is False for row in looks))

@@ -328,9 +328,20 @@ class Evaluator:
         blocks_needed = self._gate_blocks(rung, horizon)
         every = int(self.ladder["look_every_active_blocks"])
         needed = min([death["min_active_blocks"]] + ([blocks_needed] if gate else []))
-        last_look_active = int(looks[-1].get("active_blocks") or 0) if looks else 0
-        if active < needed or active - last_look_active < every and looks:
-            return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {max(needed, last_look_active + every)}", numbers)
+        # Rationed by the looks that SPENT something, not by every look taken: a screen-only look
+        # costs no alpha, so letting it start the clock would push the death test out of reach.
+        spent_looks = [row for row in looks if row.get("tested_death", True) or row.get("tested_promotion", True)]
+        last_look_active = int(spent_looks[-1].get("active_blocks") or 0) if spent_looks else 0
+        # Looking often is rationed because each look that runs a STATISTICAL test spends alpha,
+        # and an agent looked at often enough would pass one by luck. A screen runs no such test --
+        # it counts blocks and trades and reads two numbers -- so it spends nothing, and rationing
+        # it only makes an agent wait. hilibrand-2 cleared everything but cumulative growth at its
+        # first look on Sept 20, 2026, was 0.35% of one block away, and would not have been looked
+        # at again for five hours. A free check is not rationed.
+        costs_alpha = active >= int(death["min_active_blocks"]) or (bool(gate) and gate.get("gate", "bound") == "bound")
+        if active < needed or (spent_looks and costs_alpha and active - last_look_active < every):
+            when = max(needed, last_look_active + every) if costs_alpha else needed
+            return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {when}", numbers)
         alpha = float(self.ladder["alpha"])
         tests_death = active >= death["min_active_blocks"]
         tests_bound = bool(gate) and gate.get("gate", "bound") == "bound" and active >= blocks_needed
