@@ -117,7 +117,9 @@ class Researcher:
             "are worthless unspent, so if you can name a reasoned change and write the whole file, `replay` it this pass. Its answer says "
             "WHERE the strategy won and lost, not only whether, so even a failure buys you the next question. A pass that concludes 'wait "
             "and see' has spent your credits and bought nothing. Write a library note when you learn something another agent could use, "
-            "and a journal note (`journal_write`) for your future self: you keep nothing else of this pass. End with `finish`."
+            "and a journal note (`journal_write`) for your future self: you keep nothing else of this pass. "
+            "A replay submits a candidate; it does not install code during this conversation. The House checks adoption or "
+            "fork eligibility after the pass. Describe a submitted candidate as proposed, and do not claim it is installed. End with `finish`."
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
@@ -133,9 +135,10 @@ class Researcher:
             + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"
                "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
                "end this pass with the same rules you started it with.\n"
-               + ("You have no record to protect: a file you `replay` this pass becomes your rules directly, with no fork to pay for\n"
-                  "and no history to inherit it unfairly. Nothing is at risk but a pass you were going to spend anyway, so make the\n"
-                  "change big enough to find out something. A pass that only reads and reasons has bought you nothing.\n"
+               + ("You have no record to protect, so an eligible candidate can replace your rules after this pass without a fork.\n"
+                  "On rung 0 it MUST pass replay. Only an empty PAPER record with enough barren wakes may accept a failed\n"
+                  "candidate that at least trades; the House checks those conditions. Submitting a replay is not adoption.\n"
+                  "Make the change large enough to answer a concrete question, and report its actual replay verdict.\n"
                   if standing.get("rewrites_in_place") else "") + "\n"
                if (standing.get("idle") or {}).get("why_now") else "")
             + f"Your current strategy file:\n```python\n{agent.code}\n```\n"
