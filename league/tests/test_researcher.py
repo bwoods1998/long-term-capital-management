@@ -207,12 +207,36 @@ class Hiring(ResearchCase):
             self.seen.append((agent.id, question, evidence, contract))
             return {**self.reply, "cost_usd": self.cost}
 
-    def hire(self, question="Is my idea structurally dead, or is it the parameters?", merton=None, settings=None, budget=True, turns=None):
+    def hire(self, question="Is my idea structurally dead, or is it the parameters?", merton=None, settings=None, budget=True,
+             turns=None, record=None):
         self.merton = merton or self.FakeMerton()
+        self.record = {"active_blocks": 4, "mean_growth": 0.0} if record is None else record
         r = self.researcher(turns if turns is not None else [[("ask_merton", {"question": question})]],
                             merton=self.merton, merton_settings=settings or {"min_credits_usd": "1.00", "cooldown_hours": 24},
-                            house_budget=lambda: budget)
+                            house_budget=lambda: budget, standing=lambda _: self.record)
         return r, r.research(self.parent, {}, session="s1")
+
+    def test_merton_is_hired_by_traders_and_nobody_else(self):
+        """Frontier intelligence is the prize for trading well, never a rebate for existing. An
+        agent that has not traded is served by Merton's own roles, which cost it nothing."""
+        r, out = self.hire(record={"active_blocks": 0, "mean_growth": 0.0})
+        self.assertIn("Merton is hired by traders", self.tool_output(1)["error"])
+        self.assertEqual(self.merton.seen, [])
+
+    def test_profit_buys_more_of_him_than_a_rung_does(self):
+        settings = {"min_credits_usd": "1.00", "cooldown_hours": 8, "cooldown_hours_by_rung": {"1": 8},
+                    "profitable_cooldown_hours_by_rung": {"1": 3}}
+        r, out = self.hire(settings=settings, record={"active_blocks": 6, "mean_growth": 0.004})
+        self.assertIn("answer", self.tool_output(1))
+        self.clock.advance(4 * 3600)
+        r, out = self.hire(settings=settings, record={"active_blocks": 6, "mean_growth": 0.004})
+        self.assertIn("answer", self.tool_output(1))  # profitable: every three hours
+        self.clock.advance(4 * 3600)
+        r, out = self.hire(settings=settings, record={"active_blocks": 6, "mean_growth": -0.004})
+        self.assertIn("not yet profitable", self.tool_output(1)["error"])  # losing: it waits the eight
+        self.clock.advance(5 * 3600)
+        r, out = self.hire(settings=settings, record={"active_blocks": 6, "mean_growth": -0.004})
+        self.assertIn("answer", self.tool_output(1))
 
     def test_it_pays_from_its_own_credits_and_is_given_everything_it_knows(self):
         before = self.economy.balance(self.parent.id)
@@ -239,7 +263,7 @@ class Hiring(ResearchCase):
         r, out = self.hire()
         self.assertIn("answer", self.tool_output(1))
         r2, out2 = self.hire()
-        self.assertIn("once every 24h", self.tool_output(1)["error"])
+        self.assertIn("every 24h", self.tool_output(1)["error"])
         self.clock.advance(24 * 3600 + 1)
         r3, out3 = self.hire()
         self.assertIn("answer", self.tool_output(1))
@@ -284,16 +308,19 @@ class Hiring(ResearchCase):
         rungs = {self.parent.id: 1}
         self.merton = self.FakeMerton()
         r = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead or is it the band?"})]],
-                            merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
+                            merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a],
+                            standing=lambda _: {"active_blocks": 4, "mean_growth": 0.0})
         r.research(self.parent, {}, session="s1")
         self.clock.advance(9 * 3600)
         r2 = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead or is it the band?"})]],
-                             merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
+                             merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a],
+                             standing=lambda _: {"active_blocks": 4, "mean_growth": 0.0})
         r2.research(self.parent, {}, session="s2")
-        self.assertIn("once every 24h", self.tool_output(1)["error"])
+        self.assertIn("every 24h", self.tool_output(1)["error"])
         rungs[self.parent.id] = 2  # it reached real money
         r3 = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead or is it the band?"})]],
-                             merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a])
+                             merton=self.merton, merton_settings=settings, house_budget=lambda: True, rung=lambda a: rungs[a],
+                             standing=lambda _: {"active_blocks": 4, "mean_growth": 0.0})
         r3.research(self.parent, {}, session="s3")
         self.assertIn("answer", self.tool_output(1))
 

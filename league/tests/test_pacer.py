@@ -46,13 +46,33 @@ class PacerCase(unittest.TestCase):
         self.pacer._cache.clear()
 
     def test_the_constitution_funds_a_fortnight_from_the_nineteenth(self):
-        self.assertEqual(CONSTITUTION["budgets"]["expedition"], {"start": "2026-09-19", "days": 14, "sail_usd": "100", "openai_usd": "100"})
+        self.assertEqual(CONSTITUTION["budgets"]["expedition"],
+                         {"start": "2026-09-19", "days": 14, "sail_usd": "100", "openai_usd": "100", "front_load": "2"})
 
     def test_the_first_days_allowance_is_the_budget_over_fourteen(self):
         self.assertEqual((self.pacer.day(), self.pacer.days_left(), self.pacer.running()), (0, 14, True))
         self.assertEqual(self.pacer.allowance("openai"), D(5))
         self.assertAlmostEqual(float(self.pacer.allowance("sail")), 100 / 14, places=9)
         self.assertTrue(self.pacer.may_spend("sail"))
+
+    def test_front_loading_lets_one_day_surge_and_still_cannot_overrun(self):
+        """Nine hours in, the frontier budget had spent $3 of $100 -- on pace for $92 over the
+        fortnight, but the owner wanted the progress sooner, and early learning is worth more than
+        late. A day may spend up to twice its even share; what it spends comes off every day after."""
+        hot = Pacer(self.ledger, clock=self.clock, expedition={**RULES, "front_load": "2"})
+        self.assertEqual(hot.allowance("openai"), D(10))           # twice the even $5
+        self.merton("10"); hot._cache.clear()
+        self.assertFalse(hot.may_spend("openai"))                  # and no more today
+        self.at("2026-09-20T12:00:00"); hot._cache.clear()
+        self.assertAlmostEqual(float(hot.allowance("openai")), 2 * (70 - 10) / 13, places=9)  # tomorrow pays for it
+        self.merton("60"); hot._cache.clear()
+        self.at("2026-10-01T12:00:00"); hot._cache.clear()
+        self.assertEqual(hot.allowance("openai"), D(0))            # the budget is the budget
+        self.assertEqual(hot.remaining("openai"), D(0))
+
+    def test_without_front_loading_the_share_is_even(self):
+        self.assertEqual(self.pacer.front_load, D(1))
+        self.assertEqual(self.pacer.allowance("openai"), D(5))
 
     def test_spending_uses_up_todays_room_and_not_tomorrows(self):
         self.merton("3")
@@ -89,10 +109,11 @@ class PacerCase(unittest.TestCase):
         self.ledger.append("ops.budget", {"what": "sail", "spent_usd": "9"}, at="2026-09-18T23:00:00.000Z")
         self.assertEqual(self.pacer.spent("sail"), D(0))
 
-    def test_the_credit_pool_is_most_of_the_days_sail_allowance(self):
-        """Sail alone: what an agent buys with these credits -- sandbox seconds, research tokens --
-        is a Sail cost. A consultation with Merton is the frontier's, and paced against it."""
-        self.assertEqual(self.pacer.credit_pool(), D("6.07"))  # 85% of 7.142857
+    def test_the_credit_pool_is_drawn_from_both_purses(self):
+        """Sandbox seconds and research tokens are Sail costs; Merton's time is the frontier's, and
+        an agent pays for all three from this one purse. Sized from Sail alone it could not buy a
+        consultation at all -- about twenty cents a day against a dollar a call."""
+        self.assertEqual(self.pacer.credit_pool(), D("9.57"))  # 85% of Sail's 7.142857 + 70% of the frontier's 5.00
         self.at("2026-10-05T00:00:00")
         self.assertEqual(self.pacer.credit_pool(), D(0))
 

@@ -72,31 +72,53 @@ class EconomyTest(unittest.TestCase):
         shares = self.economy.shares(standings, "2.00")
         self.assertLessEqual(sum(shares.values()), D("2.00"))
         self.assertGreater(sum(shares.values()), D("1.9999"))
-        # Two qualified niches share the 40% floor; an agent still in replay earns nothing at all.
-        floor = D("0.80") / 2
-        self.assertAlmostEqual(float(shares["a1"]), float(floor), places=6)
+        # Two qualified niches share the 25% floor; an agent still in replay earns nothing at all.
+        floor = D("0.50") / 2
+        self.assertAlmostEqual(float(shares["a1"]), float(floor), places=6)   # its whole niche's floor
         self.assertEqual(shares["r0"], D("0"))
-        self.assertGreater(shares["k1"], shares["k2"])  # same record, but real money weighs five times paper
-        self.assertAlmostEqual(float(shares["k1"] - floor / 2), float((D("1.20")) * 5 / 6), places=6)
+        # The same record, but real money weighs seven and a half times paper (1.5 against 0.2),
+        # and three quarters of the pool is won rather than shared.
+        self.assertAlmostEqual(float(shares["k1"] - floor / 2), float(D("1.50") * D("1.5") / D("1.7")), places=6)
+        self.assertAlmostEqual(float(shares["k2"] - floor / 2), float(D("1.50") * D("0.2") / D("1.7")), places=6)
+
+    def test_twice_as_profitable_earns_four_times_the_share(self):
+        """Ultra-aggressive on purpose: credits buy research and Merton's time, so the curve that
+        shares them is the curve that decides who gets the firm's intelligence."""
+        standings = [Standing("fast", "n1", 1, 0.004, 25), Standing("slow", "n2", 1, 0.002, 25)]
+        shares = self.economy.shares(standings, "2.00")
+        floor = D("0.50") / 2
+        self.assertAlmostEqual(float((shares["fast"] - floor) / (shares["slow"] - floor)), 4.0, places=6)
 
     def test_nobody_performed_means_the_performance_share_is_not_spent(self):
         game = load_game()
         game["economy"]["unearned_share_to_floors"] = False  # the design before the expedition
         economy = Economy(self.ledger, game, clock=self.clock)
         standings = [Standing("a1", "n1", 1, -0.01, 30), Standing("a2", "n2", 1, 0.0, 0)]
-        self.assertEqual(sum(economy.shares(standings, "2.00").values()), D("0.80"))
+        self.assertEqual(sum(economy.shares(standings, "2.00").values()), D("0.50"))  # the floors, and nothing else
 
-    def test_during_the_expedition_an_unearned_performance_share_follows_the_floors(self):
+    def test_before_anybody_is_profitable_the_performance_share_goes_to_the_least_bad_trader(self):
+        """It used to be split evenly, which paid an agent that had never placed an order exactly
+        what it paid the best trader on the floor -- and credits are how frontier intelligence is
+        bought. Ranked by how far above the WORST an agent is, among those that have traded."""
         self.assertTrue(self.economy.rules["unearned_share_to_floors"])  # the owner wants the budget used
         standings = [Standing("a1", "n1", 1, -0.01, 30), Standing("a2", "n1", 1, 0.0, 0), Standing("b1", "n2", 1, 0.0, 5), Standing("r0", "n3", 0, 0.0, 0)]
         shares = self.economy.shares(standings, "2.00")
         self.assertEqual(sum(shares.values()), D("2.00"))
-        self.assertEqual((shares["a1"], shares["a2"], shares["b1"], shares["r0"]), (D("0.5"), D("0.5"), D("1"), D("0")))  # by specialty, then inside it; replay earns nothing
+        self.assertEqual(shares["b1"], D("0.25") + D("1.50"))  # its floor, and the whole performance share
+        self.assertEqual((shares["a1"], shares["a2"]), (D("0.125"), D("0.125")))  # the worst, and one that never traded: floors only
+        self.assertEqual(shares["r0"], D("0"))  # still in replay: nothing
+
+    def test_with_nothing_at_all_to_rank_the_share_still_follows_the_floors(self):
+        """The first hours of a league: not one agent has an active block. The owner wants the
+        budget used, so it goes to the floors until somebody trades and there is a ranking."""
+        standings = [Standing("a1", "n1", 1, 0.0, 0), Standing("b1", "n2", 1, 0.0, 0)]
+        shares = self.economy.shares(standings, "2.00")
+        self.assertEqual((shares["a1"], shares["b1"]), (D("1.00"), D("1.00")))
 
     def test_the_day_somebody_performs_the_performance_share_is_theirs_again(self):
         standings = [Standing("a1", "n1", 1, 0.002, 30), Standing("b1", "n2", 1, 0.0, 5)]
         shares = self.economy.shares(standings, "2.00")
-        self.assertEqual((shares["a1"], shares["b1"]), (D("0.4") + D("1.2"), D("0.4")))
+        self.assertEqual((shares["a1"], shares["b1"]), (D("0.25") + D("1.50"), D("0.25")))
 
     def test_payout_is_due_once_an_epoch_and_is_recorded(self):
         standings = [Standing("a1", "n1", 1, 0.001, 30)]

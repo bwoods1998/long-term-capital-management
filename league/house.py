@@ -169,6 +169,7 @@ class House:
                 run_replay=self._candidate_replay, settings=self.game.get("research") or {}, clock=clock,
                 specialty=lambda agent: (self.niche_of(agent).text() if self.niche_of(agent) else ""),
                 look=lambda agent: self.snapshot(agent, self.book_of(agent)), lineage=self.registry.lineage,
+                standing=self.standing_of,
                 merton_settings=self.game.get("consult") or {}, house_budget=lambda: self.pacer.may_spend("openai"),
                 rung=self.evaluator.rung,
             )
@@ -1336,6 +1337,15 @@ class House:
         return rows[-limit:]
 
     # ----------------------------------------------------------------- economy
+    def standing_of(self, agent_id: str) -> dict[str, Any]:
+        """One agent's record at its current rung: what it has earned the right to ask for."""
+        agent = self.registry.get(agent_id)
+        rung = self.evaluator.rung(agent_id)
+        rows = self.evaluator.blocks(agent_id, since_seq=self.evaluator._rung_entered(agent_id)) if rung >= 1 else []
+        growth = [float(r["log_growth"]) for r in rows]
+        return {"rung": rung, "active_blocks": sum(1 for r in rows if r.get("active")),
+                "mean_growth": (sum(growth) / len(growth)) if growth else 0.0, "niche": agent.niche}
+
     def standings(self) -> list[Standing]:
         epoch = float(self.game["economy"]["epoch_seconds"])
         out = []

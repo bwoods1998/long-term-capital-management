@@ -28,7 +28,7 @@ CONSTITUTION: dict[str, Any] = {
         # full, over fourteen days, so the game's design can be judged on a fortnight of real
         # work rather than a thrifty month. `league/pacer.py` spends them evenly; these are
         # ceilings as well as targets, and the monthly caps above still stand behind them.
-        "expedition": {"start": "2026-09-19", "days": 14, "sail_usd": "100", "openai_usd": "100"},
+        "expedition": {"start": "2026-09-19", "days": 14, "sail_usd": "100", "openai_usd": "100", "front_load": "2"},
     },
     "order_caps": {"max_order_usd": "75", "max_day_usd": "4000", "max_day_orders": 2000},
     "ladder": {
@@ -98,4 +98,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "7cdaba125fc68a3da16275f24cf6f948ccc7d41b2f23d6d4935ab42c8e163c88"
+PINNED_DIGEST = "65f7691792da41b71bac8378af29274fb06d4d56f31369fd72220dd560a1327f"

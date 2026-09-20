@@ -180,22 +180,43 @@ class Economy:
             for s in members:
                 out[s.agent] += floor_pool / len(niches) / len(members)
         weights = self.rules["rung_weights"]
+        steep = int(self.rules.get("performance_exponent", 1))
         scores = {
-            s.agent: Decimal(str(max(s.mean_growth, 0.0))) * Decimal(str(max(s.active_blocks, 0))).sqrt() * usd(weights.get(str(s.rung), "0"))
+            s.agent: Decimal(str(max(s.mean_growth, 0.0))) ** steep * Decimal(str(max(s.active_blocks, 0))).sqrt() * usd(weights.get(str(s.rung), "0"))
             for s in standings
         }
         total = sum(scores.values(), ZERO)
+        if total <= 0:
+            scores = self._least_bad(standings, weights)
+            total = sum(scores.values(), ZERO)
         if total > 0:
             for agent, score in scores.items():
                 out[agent] += performance_pool * score / total
         elif self.rules.get("unearned_share_to_floors") and niches:
-            # Nobody has earned the performance share yet (the first days of any league). During
-            # the expedition the owner wants the budget USED, so it follows the floors instead of
-            # going unspent; the day somebody performs, it is theirs again.
+            # Not one agent has an active block yet -- the first hours of a league, and nothing to
+            # rank. The owner wants the budget USED, so it follows the floors rather than going
+            # unspent; the moment anybody trades at all, `_least_bad` has something to rank.
             for members in niches.values():
                 for s in members:
                     out[s.agent] += performance_pool / len(niches) / len(members)
         return {agent: amount.quantize(PLACES, rounding=ROUND_DOWN) for agent, amount in out.items()}
+
+    def _least_bad(self, standings: Sequence[Standing], weights: Mapping[str, Any]) -> dict[str, Decimal]:
+        """Who earns the performance share on a day when nobody is profitable yet.
+
+        Splitting it evenly, which is what the league did at first, paid an agent that had never
+        placed an order exactly what it paid the best trader on the floor -- and with credits
+        buying research and Merton's time, that is frontier intelligence handed to agents that have
+        shown nothing. Ranked instead by how far above the WORST an agent is, among those that have
+        actually traded this rung. The worst earns nothing, an agent with no active block earns
+        nothing, and the ranking is by the same rung weights as profit, so the day somebody is
+        profitable this vanishes and the real scores take over."""
+        traded = [s for s in standings if s.active_blocks > 0 and usd(weights.get(str(s.rung), "0")) > 0]
+        if len(traded) < 2:
+            return {}
+        worst = min(s.mean_growth for s in traded)
+        return {s.agent: Decimal(str(s.mean_growth - worst)) * Decimal(str(s.active_blocks)).sqrt() * usd(weights.get(str(s.rung), "0"))
+                for s in traded}
 
     def last_payout_at(self) -> float | None:
         rows = [e for e in self.ledger.read(kinds="ops.budget", limit=200, newest=True) if e.payload.get("what") == "payout"]

@@ -43,6 +43,7 @@ class Pacer:
         self.start = date.fromisoformat(str(rules["start"]))
         self.days = int(rules["days"])
         self.budget = {"sail": Decimal(str(rules["sail_usd"])), "openai": Decimal(str(rules["openai_usd"]))}
+        self.front_load = Decimal(str(rules.get("front_load", 1)))
         self._cache: dict[str, tuple[float, dict[str, Decimal]]] = {}
 
     # ------------------------------------------------------------------ calendar
@@ -97,13 +98,23 @@ class Pacer:
         return max(self.budget[kind] - self.spent(kind), ZERO)
 
     def allowance(self, kind: str) -> Decimal:
-        """What may be spent today: what is left, over the days that are left, counting today.
-        (What was already spent today is part of today's allowance, not taken from it twice.)"""
+        """What may be spent today: what is left over the days that are left, counting today, and
+        then the front-loading ceiling on top. (What was already spent today is part of today's
+        allowance, not taken from it twice.)
+
+        The even share alone spreads an unused day thinly across every day that is left, so a
+        budget that is behind takes the rest of the fortnight to catch up -- and early learning is
+        worth more than late, because everything after is built on what it found. The owner asked
+        for the budgets to be pushed harder after nine hours produced no promotion, so one day may
+        spend up to `front_load` times its even share. That is a CEILING, not a target: nothing
+        spends what nothing asks for, and because tomorrow's share is recomputed from what is
+        really left, a hot day is paid for by cooler ones and neither budget can be overrun."""
         if not self.running():
             return ZERO
         spend = self._spend(kind)
         left_this_morning = max(self.budget[kind] - (spend["total"] - spend["today"]), ZERO)
-        return left_this_morning / Decimal(self.days_left())
+        even = left_this_morning / Decimal(self.days_left())
+        return min(even * self.front_load, left_this_morning)
 
     def room(self, kind: str) -> Decimal:
         """How much of today's allowance is still unspent. Zero when the budget or the run is over."""
@@ -117,11 +128,17 @@ class Pacer:
         return self.day() >= self.days or self.remaining(kind) <= 0
 
     # ---------------------------------------------------------------------- uses
-    def credit_pool(self, *, share: Decimal = Decimal("0.85"), floor: Decimal = Decimal("0.50")) -> Decimal:
-        """The day's pool of compute credits: most of the day's Sail allowance. Sail alone, because
-        everything an agent pays for out of this pool -- its sandbox seconds and its research
-        tokens -- is a Sail cost; what an agent buys from the frontier model, a consultation with
-        Merton, is paced against the frontier budget where it is spent.
+    def credit_pool(self, *, share: Decimal = Decimal("0.85"), frontier_share: Decimal = Decimal("0.70"),
+                    floor: Decimal = Decimal("0.50")) -> Decimal:
+        """The day's pool of compute credits, out of both purses the owner funded.
+
+        Most of the day's Sail allowance -- what an agent buys is mostly its sandbox seconds and
+        its research tokens, and both are Sail costs -- and most of the day's frontier allowance,
+        because the other thing it buys is Merton's time, billed at the gateway. Sized from Sail
+        alone, a purse of about twenty cents a day could not buy a consultation priced at a dollar,
+        so the agents that had EARNED the right to ask the frontier model for help could not afford
+        to ask. Each kind of spending is still gated by its own budget (`may_spend`), so a wider
+        purse cannot overrun either; it only stops the purse from being the thing that decides.
 
         The share the House keeps is what no agent is charged for: its own box and the agents'
         boxes between wakes. Measured Sept 20, 2026 over four hours, that is about $2.80 a day
@@ -132,7 +149,7 @@ class Pacer:
         budget. Sleeping boxes cost nothing, so the count of retired ones does not enter this."""
         if not self.running():
             return ZERO
-        return max(self.allowance("sail") * share, floor).quantize(Decimal("0.01"))
+        return max(self.allowance("sail") * share + self.allowance("openai") * frontier_share, floor).quantize(Decimal("0.01"))
 
     def report(self) -> dict[str, Any]:
         return {"day": self.day() + 1, "of": self.days, "running": self.running(),

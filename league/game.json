@@ -3,12 +3,12 @@
   "economy": {
     "epoch_seconds": 86400,
     "daily_pool_usd": "2.00",
-    "niche_floor_share": "0.40",
+    "niche_floor_share": "0.25",
     "rung_weights": {
       "0": "0",
       "1": "0.2",
-      "2": "1.0",
-      "3": "1.0"
+      "2": "1.5",
+      "3": "3.0"
     },
     "endowment_usd": "1.00",
     "fork_threshold_usd": "4.00",
@@ -20,7 +20,8 @@
     "box_creation_usd": "0.005",
     "unearned_share_to_floors": true,
     "idle_broke_wakes": 30,
-    "newcomer_seconds": 3600
+    "newcomer_seconds": 3600,
+    "performance_exponent": 2
   },
   "bounds": {
     "daily_pool_usd": [
@@ -67,7 +68,11 @@
     "max_turns": 10,
     "max_output_tokens": 32000,
     "min_hours_between": 3,
-    "idle": {"barren_wakes": 10, "shut_wakes": 6, "min_hours_between": 1},
+    "idle": {
+      "barren_wakes": 10,
+      "shut_wakes": 6,
+      "min_hours_between": 1
+    },
     "min_credits_usd": "0.10",
     "reasoning_effort": "medium",
     "tool_choice": "required"
@@ -95,18 +100,18 @@
   "merton": {
     "_about": "How often each of Merton's roles sits down, in hours, during the expedition. The pacer still gates every pass on the day's allowance, so this is how often a role MAY run, not how often it must.",
     "schedule_hours": {
-      "operator": 8,
-      "toolsmith": 8,
-      "teacher": 12,
-      "designer": 36,
-      "architect": 8
+      "operator": 4,
+      "toolsmith": 3,
+      "teacher": 6,
+      "designer": 12,
+      "architect": 3
     },
     "first_after_hours": {
-      "operator": 2,
+      "operator": 1,
       "toolsmith": 1,
-      "teacher": 8,
-      "architect": 3,
-      "designer": 18
+      "teacher": 4,
+      "architect": 2,
+      "designer": 8
     },
     "effort": {
       "architect": "high",
@@ -117,13 +122,19 @@
     }
   },
   "consult": {
-    "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits. A good record earns credits, and credits buy better thinking: that is the whole flywheel. An agent that has climbed may have him oftener.",
-    "min_credits_usd": "1.00",
-    "cooldown_hours": 24,
+    "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits, and what it must have DONE to be allowed to. Frontier intelligence is the scarcest thing on the floor: it is the prize for trading well, never a rebate for existing. An agent that has not traded is served by Merton's own roles -- the architect who writes strategies, the toolsmith who builds what the queue asks for, the teacher who writes the lessons -- which cost it nothing and reach the whole firm.",
+    "min_credits_usd": "0.35",
+    "min_active_blocks": 1,
+    "cooldown_hours": 8,
     "cooldown_hours_by_rung": {
-      "1": 24,
-      "2": 8,
-      "3": 6
+      "1": 8,
+      "2": 3,
+      "3": 1
+    },
+    "profitable_cooldown_hours_by_rung": {
+      "1": 3,
+      "2": 1,
+      "3": 0.5
     }
   }
 }
