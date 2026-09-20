@@ -118,11 +118,18 @@ class Pacer:
 
     # ---------------------------------------------------------------------- uses
     def credit_pool(self, *, share: Decimal = Decimal("0.85"), floor: Decimal = Decimal("0.50")) -> Decimal:
-        """The day's pool of compute credits: most of the day's Sail allowance (the rest is the
-        House's own box and the boxes' idle minutes, which no agent is charged for). Sail alone,
-        because everything an agent pays for out of this pool -- its sandbox seconds and its
-        research tokens -- is a Sail cost. What agents buy from the frontier model, a consultation
-        with Merton, is paced against the frontier budget where it is spent."""
+        """The day's pool of compute credits: most of the day's Sail allowance. Sail alone, because
+        everything an agent pays for out of this pool -- its sandbox seconds and its research
+        tokens -- is a Sail cost; what an agent buys from the frontier model, a consultation with
+        Merton, is paced against the frontier budget where it is spent.
+
+        The share the House keeps is what no agent is charged for: its own box and the agents'
+        boxes between wakes. Measured Sept 20, 2026 over four hours, that is about $2.80 a day
+        (thirty agent boxes $0.89, the House's own $0.41, the rest creation fees) against a $7.14
+        allowance -- more than the 15% kept here. Deliberately so: over-granting early spends the
+        budget front-loaded, which is where the learning is, and the allowance recomputed from what
+        is really left pulls each later day down until the fortnight ends within a day of its
+        budget. Sleeping boxes cost nothing, so the count of retired ones does not enter this."""
         if not self.running():
             return ZERO
         return max(self.allowance("sail") * share, floor).quantize(Decimal("0.01"))
