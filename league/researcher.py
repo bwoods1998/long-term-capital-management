@@ -127,7 +127,10 @@ class Researcher:
             + (f"YOUR JOURNAL (what you and your ancestors wrote to yourselves, oldest first; add to it with `journal_write`):\n{pages}\n\n" if pages else
                "YOUR JOURNAL is empty. Before you finish, write yourself a note with `journal_write`: you will remember nothing else of this pass.\n\n")
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
-            f"Your current strategy file:\n```python\n{agent.code}\n```\n"
+            + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"
+               "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
+               "end this pass with the same rules you started it with.\n\n" if (standing.get("idle") or {}).get("why_now") else "")
+            + f"Your current strategy file:\n```python\n{agent.code}\n```\n"
             f"Your parameters: {json.dumps(agent.params)}\n"
             "Decide what, if anything, is worth your credits right now."
         )
@@ -168,6 +171,7 @@ class Researcher:
             {"role": "user", "content": self._state(agent, standing)},
         ]
         nudged, truncated = False, 0
+        effort = str(self.settings.get("reasoning_effort", "low"))
         for turn in range(int(self.settings.get("max_turns", 6))):
             balance = self.economy.balance(agent.id)
             if balance <= Decimal(str(self.settings.get("min_credits_usd", "0.10"))):
@@ -181,7 +185,7 @@ class Researcher:
                     desk_id=agent.id,
                     session_id=session,
                     request_key=f"{session}:{turn}",
-                    reasoning_effort=str(self.settings.get("reasoning_effort", "low")),
+                    reasoning_effort=effort,
                     max_output_tokens=int(self.settings.get("max_output_tokens", 4096)),
                     tool_choice=str(self.settings.get("tool_choice", "auto")),
                     desk_cap_usd_per_day=balance,  # an agent can never spend credits it does not have
@@ -207,11 +211,22 @@ class Researcher:
                 # two turns, and everything the model had done was thrown away.
                 reason = str(getattr(response, "incomplete_reason", None) or response.status)
                 self.ledger.append("agent.research", {"tool": "truncated", "session": session, "turn": turn, "reason": reason,
-                                                      "calls": [c.name for c in calls]}, agent=agent.id)
+                                                      "calls": [c.name for c in calls], "effort": effort}, agent=agent.id)
                 truncated += 1
-                if not calls or truncated > 2:
+                if truncated > 2:
                     out.reason = f"provider: {reason}"
                     break
+                if not calls:
+                    # It spent its whole output budget thinking and never reached a tool call.
+                    # Measured over the floor's first evening: twelve of twenty-eight passes ended
+                    # exactly here, on turn two or three, having bought nothing at all. The cure is
+                    # not a bigger budget -- reasoning will fill any budget -- but less of it spent
+                    # on reasoning, so the next turn is asked for the call and nothing else.
+                    effort = "low"
+                    conversation.append({"role": "user", "content":
+                                         "Your last reply ran out of room before you called a tool, so it bought you nothing. "
+                                         "Stop weighing options. Call one tool now, with the shortest arguments that do the job."})
+                    continue
             if not calls:
                 if nudged:
                     out.reason = "no tool call"

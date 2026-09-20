@@ -65,6 +65,7 @@
     "max_turns": 10,
     "max_output_tokens": 32000,
     "min_hours_between": 3,
+    "idle": {"barren_wakes": 10, "shut_wakes": 6, "min_hours_between": 1},
     "min_credits_usd": "0.10",
     "reasoning_effort": "medium",
     "tool_choice": "required"

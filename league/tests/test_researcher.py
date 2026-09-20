@@ -179,10 +179,15 @@ class Truncated(ResearchCase):
         cut = [e.payload for e in self.ledger.iter(kinds="agent.research") if e.payload.get("tool") == "truncated"]
         self.assertEqual([(row["reason"], row["calls"]) for row in cut], [("max_output_tokens", ["journal_write"]), ("max_output_tokens", ["library_search"])])
 
-    def test_an_answer_cut_short_with_nothing_in_it_ends_the_pass_and_says_why(self):
-        r = self.script([[]], cut=9)
+    def test_an_answer_that_thought_until_it_ran_out_is_asked_again_for_the_call_alone(self):
+        """Twelve of the floor's first twenty-eight passes died on exactly this, having bought
+        nothing: the model filled its whole output budget with reasoning and never reached a tool.
+        A bigger budget only buys more reasoning, so the next turn is asked to think less."""
+        r = self.script([[], [("finish", {"summary": "got there in the end"})]], cut=1)
         out = r.research(self.parent, {}, session="s1")
-        self.assertEqual((out.reason, out.turns), ("provider: max_output_tokens", 1))
+        self.assertEqual((out.reason, out.turns), ("finished", 2))
+        self.assertEqual([k["reasoning_effort"] for k in self.script.kwargs], ["medium", "low"])
+        self.assertIn("ran out of room", json.dumps(self.script.seen[-1], default=str))
 
     def test_three_cut_answers_end_the_pass_however_much_they_carried(self):
         r = self.script([[("library_search", {"query": "x"})]] * 6, cut=9)

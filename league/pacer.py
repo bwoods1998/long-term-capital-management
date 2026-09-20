@@ -16,8 +16,8 @@ owner is told once. The monthly caps (the gateway's for the frontier model, the 
 Sail) stand behind this as before.
 
 Sail is metered from the falls in its credit balance (`league/budget.py`); the frontier model from
-the cost the gateway reports on each call, which the ledger records on `merton.pass` and
-`audit.verdict` rows.
+the cost the gateway reports on each call, which the ledger records on `merton.pass`,
+`audit.verdict` and `agent.research` rows -- every kind of frontier call the floor makes.
 """
 
 from __future__ import annotations
@@ -71,7 +71,12 @@ class Pacer:
         if kind == "sail":
             rows = ((e.at, e.payload.get("spent_usd")) for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "sail")
         else:
-            rows = ((e.at, e.payload.get("cost_usd")) for e in self.ledger.iter(kinds=("merton.pass", "audit.verdict")))
+            # Every frontier dollar: Merton's own passes and the consultations agents buy from him
+            # (`merton.pass`), the auditor's verdicts, and — by far the largest of the three — the
+            # agents' own research passes. Measured on the first evening, research had spent $2.16
+            # against Merton's $1.05, and none of it was counted here: the budget the owner funded
+            # would have been overrun in silence while this meter read a third of the truth.
+            rows = ((e.at, e.payload.get("cost_usd")) for e in self.ledger.iter(kinds=("merton.pass", "audit.verdict", "agent.research")))
         for at, usd in rows:
             try:
                 amount = Decimal(str(usd or 0))

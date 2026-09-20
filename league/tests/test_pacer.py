@@ -135,15 +135,26 @@ class Catching(HouseCase):
         self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50", **kw})
 
     def test_research_comes_round_twice_as_often_while_the_day_is_underspent(self):
+        """Research is a frontier cost, so it is the frontier allowance that decides its pace."""
         self.expedition()
         self.clock.now = self.clock.now - self.clock.now % 86400 + 3 * 3600  # 03:00: too early to call the day behind
         self.assertEqual(self.house.research_interval_hours(), 3.0)
         self.clock.now += 12 * 3600  # 15:00 and nothing spent
         self.house.pacer._cache.clear()
         self.assertEqual(self.house.research_interval_hours(), 1.5)
-        self.house.ledger.append("ops.budget", {"what": "sail", "spent_usd": "3.00"})  # 60% of the day's $5 by 15:00: on pace
+        self.house.ledger.append("agent.research", {"tool": "summary", "cost_usd": "3.00"}, agent="a1")  # 60% of the day's $5 by 15:00: on pace
         self.house.pacer._cache.clear()
         self.assertEqual(self.house.research_interval_hours(), 3.0)
+
+    def test_an_agents_research_is_counted_against_the_frontier_budget(self):
+        """It is the floor's largest frontier cost. Left uncounted, as it was on the first evening,
+        the meter read a third of the truth and the owner's budget would have been overrun blind."""
+        self.expedition()
+        self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "1.05"})
+        self.house.ledger.append("agent.research", {"tool": "summary", "cost_usd": "2.16"}, agent="a1")
+        self.house.ledger.append("agent.research", {"tool": "replay", "session": "s"}, agent="a1")  # a turn, not a bill
+        self.house.pacer._cache.clear()
+        self.assertEqual(self.house.pacer.spent("openai"), D("3.21"))
 
     def test_outside_the_expedition_the_game_files_number_stands(self):
         self.assertEqual(self.house.research_interval_hours(), 3.0)
@@ -320,3 +331,102 @@ class CrashedReplays(HouseCase):
         self.assertEqual((asked["step_seconds"], asked["max_markets"]), (1800, 500))
         self.house.tape_for({**needs, "horizon": "hour"})
         self.assertEqual((asked["step_seconds"], asked["max_markets"]), (300, 2000))
+
+
+IDLER = '''
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "test-idler", "symbols": ["BTC/USD"],
+         "bars": {"timeframe": "5Min", "limit": 10}, "wake_minutes": 5}
+PARAMS = {}
+
+def decide(ctx):
+    return {"intents": [], "thought": "nothing meets my rules"}
+'''
+
+
+class IdleHands(HouseCase):
+    """An agent that cannot act is not learning, and the House should not leave it there."""
+
+    def setUp(self):
+        super().setUp()
+        self.house.researcher = object()
+        self.house.settings.research = True
+        self.agent = self.seated("idler", IDLER)
+        self.house.economy.grant(self.agent.id, D("5"), "a purse to research from")
+
+    def wakes(self, n):
+        for _ in range(n):
+            self.house._state["next_wake"][self.agent.id] = 0
+            self.house.wake(self.house.registry.get(self.agent.id))
+
+    def test_a_wake_records_what_it_was_offered_and_what_it_did_with_it(self):
+        self.wakes(1)
+        woke = self.house.ledger.last("agent.woke").payload
+        self.assertEqual((woke["intents"], woke["offered"], woke["barren"]), (0, 1, 1))
+        self.assertEqual(self.house.idle_run(self.agent), {"barren": 1, "shut": 0, "offered": 1})
+
+    def test_looking_at_a_live_market_and_doing_nothing_ten_times_brings_research_forward(self):
+        self.wakes(9)
+        self.assertEqual(self.house.research_interval_hours(self.agent), 3.0)
+        self.assertEqual(self.house.idle_reason(self.agent), "")
+        self.wakes(1)
+        self.assertIn("not meeting this market", self.house.idle_reason(self.agent))
+        self.assertEqual(self.house.research_interval_hours(self.agent), 1.0)
+        self.assertEqual(self.house.research_interval_hours(), 3.0)  # only for the agent that is stuck
+
+    def test_a_shut_market_is_bench_time_not_the_strategys_fault(self):
+        """Friday night to Monday morning is sixty hours in which no equity desk can act. The run
+        is counted apart from a barren one -- nothing was offered -- and it still buys a pass."""
+        agent = self.seated("closed", IDLER.replace("test-idler", "test-closed"))
+        self.house.economy.grant(agent.id, D("5"), "a purse")
+        self.data.quotes = lambda symbols: {}
+        for _ in range(6):
+            self.house._state["next_wake"][agent.id] = 0
+            self.house.wake(self.house.registry.get(agent.id))
+        self.assertEqual(self.house.idle_run(agent), {"barren": 0, "shut": 6, "offered": 0})
+        self.assertIn("bench time", self.house.idle_reason(agent))
+
+    def test_an_equity_desk_out_of_hours_is_offered_nothing_however_stale_the_quote(self):
+        """A quote still comes back at midnight; the session is what decides whether it can be hit."""
+        import dataclasses
+
+        agent = dataclasses.replace(self.seated("etfs", IDLER.replace("BTC/USD", "SPY")), specialty="alpaca-index-etfs")
+        ctx = {"now": "2026-09-19T23:00:00Z", "quotes": {"SPY": {"bid": 1.0, "ask": 1.1}}}
+        self.assertEqual(self.house._offered(agent, ctx), 0)
+        self.assertEqual(self.house._offered(agent, {**ctx, "now": "2026-09-18T17:00:00Z"}), 1)
+
+    def test_acting_clears_the_count(self):
+        from league.tests.test_house import BUYER
+
+        self.wakes(3)
+        self.assertEqual(self.house.idle_run(self.agent)["barren"], 3)
+        needs = {"venue": "alpaca", "horizon": "hour", "style": "test-buyer", "symbols": ["BTC/USD"], "bars": {"timeframe": "5Min", "limit": 10}, "wake_minutes": 5}
+        self.house.registry.adopt(self.agent.id, code=BUYER, needs=needs, params={"notional": 20.0}, reason="it found a rule that fires")
+        self.house._state["tried"][self.agent.id] = self.house.registry.get(self.agent.id).code_sha256
+        self.wakes(1)
+        self.assertEqual(self.house.idle_run(self.agent), {"barren": 0, "shut": 0, "offered": 1})
+
+    def test_the_brief_tells_a_stuck_agent_why_it_is_awake(self):
+        from types import SimpleNamespace
+
+        from league.researcher import Researcher
+
+        state = Researcher._state(SimpleNamespace(journal=lambda _: [], specialty=None),
+                                  SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}),
+                                  {"idle": {"barren": 12, "why_now": "twelve wakes in a row and nothing done"}})
+        self.assertIn("WHY YOU ARE AWAKE NOW: twelve wakes in a row and nothing done", state)
+        self.assertNotIn("WHY YOU ARE AWAKE", Researcher._state(SimpleNamespace(journal=lambda _: [], specialty=None),
+                                                                SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}), {}))
+
+    def test_a_shut_market_does_not_starve_the_desk_that_trades_it(self):
+        """Idleness costs; the calendar must not. A desk that would trade if its market were open
+        keeps its niche floor over the weekend, and that floor is what pays for the weekend's work."""
+        epoch = float(self.house.game["economy"]["epoch_seconds"])
+        self.clock.advance(epoch * 2)
+        self.assertFalse(self.house._working(self.agent, epoch))  # never traded, nothing offered yet
+        self.house._note_wake(self.agent, acted=False, offered=3)
+        self.assertFalse(self.house._working(self.agent, epoch))  # it looked at a live market and sat there
+        self.house._note_wake(self.agent, acted=False, offered=0)
+        self.assertFalse(self.house._working(self.agent, epoch))  # a barren run does not wash out
+        self.house._note_wake(self.agent, acted=True, offered=0)
+        self.house._note_wake(self.agent, acted=False, offered=0)
+        self.assertTrue(self.house._working(self.agent, epoch))  # its market is simply shut

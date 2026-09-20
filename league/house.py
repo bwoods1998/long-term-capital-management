@@ -49,6 +49,7 @@ from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxError
 from .venues import family_of, instrument_for, market_hours
+from ltcm.data import market_open_at
 
 ZERO = Decimal(0)
 CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
@@ -243,7 +244,7 @@ class House:
             state = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             state = {}
-        for key in ("next_wake", "memory", "last_research", "tried", "last_mark", "settled", "niche_live", "series_category"):
+        for key in ("next_wake", "memory", "last_research", "tried", "last_mark", "settled", "niche_live", "series_category", "idle"):
             state.setdefault(key, {})
         return state
 
@@ -567,12 +568,47 @@ class House:
             self.ledger.append("agent.thought", {"text": thought, "phase": "decide", "book": book.name}, agent=agent.id)
         cancelled = [book.cancel(agent.id, order_id).status for order_id in result.get("cancels") or []]
         intents, dropped = self._intents(agent, book, result.get("intents") or [])
+        offered = self._offered(agent, ctx)
+        idle = self._note_wake(agent, acted=bool(intents or cancelled or ctx["positions"] or ctx["open_orders"]), offered=offered)
         self.ledger.append(
             "agent.woke",
-            {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds")},
+            {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds"),
+             "offered": offered, **({"barren": idle["barren"]} if idle["barren"] else {}), **({"shut": idle["shut"]} if idle["shut"] else {})},
             agent=agent.id,
         )
-        return {"agent": agent.id, "book": book.name, "intents": intents, "dropped": dropped}
+        return {"agent": agent.id, "book": book.name, "intents": intents, "dropped": dropped, "offered": offered}
+
+    def _offered(self, agent: Agent, ctx: Mapping[str, Any]) -> int:
+        """How many live, tradeable things this wake actually put in front of the strategy.
+
+        Zero means there was nothing to act on -- a shut equity session, an empty Kalshi window --
+        and doing nothing was the only right answer. A number above zero with nothing done means
+        the strategy looked at a live market and its rules did not fire: that is the strategy's
+        problem to solve, and the House should hand it a research pass rather than wake it into
+        the same wall for hours."""
+        if family_of(agent.venue) == "kalshi":
+            return len(ctx.get("markets") or [])
+        niche = self.niche_of(agent)
+        if (niche.asset_class if niche else "") in ("equity", "option") and not market_open_at(ctx["now"]):
+            return 0
+        return sum(1 for quote in (ctx.get("quotes") or {}).values() if quote)
+
+    def _note_wake(self, agent: Agent, *, acted: bool, offered: int) -> dict[str, int]:
+        """Keep a running count of the wakes an agent has spent doing nothing, split by whose
+        fault it was: `barren` (it saw a live market and its rules did not fire) and `shut` (there
+        was nothing open). Either run is time the agent is not learning, and `research_due` reads
+        them; acting resets both."""
+        with self._state_lock:
+            idle = dict(self._state["idle"].get(agent.id) or {"barren": 0, "shut": 0})
+            if acted:
+                idle = {"barren": 0, "shut": 0}
+            elif offered > 0:
+                idle["barren"] = int(idle.get("barren") or 0) + 1
+            else:
+                idle["shut"] = int(idle.get("shut") or 0) + 1
+            idle["offered"] = offered
+            self._state["idle"][agent.id] = idle
+        return idle
 
     def _intents(self, agent: Agent, book: Book, rows: list[Mapping[str, Any]]) -> tuple[list[Intent], list[str]]:
         intents, dropped = [], []
@@ -1018,7 +1054,7 @@ class House:
             self.sandbox.retire(agent.id)
         except Exception as exc:  # noqa: BLE001
             self.alert("warning", f"{agent.id}: its box could not be retired ({type(exc).__name__})")
-        for key in ("next_wake", "memory", "last_research", "tried"):
+        for key in ("next_wake", "memory", "last_research", "tried", "idle"):
             self._state[key].pop(agent.id, None)
 
     def postmortem(self, agent: Agent, cause: str, detail: str) -> str:
@@ -1089,21 +1125,46 @@ class House:
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
-        if not self.pacer.may_spend("sail"):
-            return False  # today's share of the expedition's Sail budget is spent (or the expedition is over)
+        if not (self.pacer.may_spend("sail") and self.pacer.may_spend("openai")):
+            return False  # today's share of an expedition budget is spent (or the expedition is over)
         last = float(self._state["last_research"].get(agent.id) or 0)
-        return self.clock() - last >= self.research_interval_hours() * 3600
+        return self.clock() - last >= self.research_interval_hours(agent) * 3600
 
-    def research_interval_hours(self) -> float:
+    def idle_run(self, agent: Agent) -> dict[str, int]:
+        """This agent's unbroken run of wakes that did nothing, and why (see `_note_wake`)."""
+        row = self._state["idle"].get(agent.id) or {}
+        return {"barren": int(row.get("barren") or 0), "shut": int(row.get("shut") or 0), "offered": int(row.get("offered") or 0)}
+
+    def idle_reason(self, agent: Agent) -> str:
+        """Why this agent should research NOW rather than on its usual clock, or "" if it should not.
+
+        Measured over the floor's first evening: agents woke for hours into a wall -- the sports
+        desk saw live markets and found none inside the band it was born with, and every equity
+        desk answered "the session is closed" from Friday night until Monday. Both are wasted
+        learning time, and both are fixed in the same place: by the strategy, in a research pass.
+        So a run of either kind pulls the next pass forward to the idle interval."""
+        rules = dict((self.game.get("research") or {}).get("idle") or {})
+        idle = self.idle_run(agent)
+        if idle["barren"] >= int(rules.get("barren_wakes", 10)):
+            return f"{idle['barren']} wakes in a row with {idle['offered']} live markets in front of you and nothing done: your rules are not meeting this market"
+        if idle["shut"] >= int(rules.get("shut_wakes", 6)):
+            return f"{idle['shut']} wakes in a row with nothing open to trade: this is bench time, and the bench is where a better strategy is written"
+        return ""
+
+    def research_interval_hours(self, agent: Agent | None = None) -> float:
         """How long an agent waits between research passes. The game file's number, halved (never
-        under an hour) while today's Sail spending is running behind the clock: the owner wants
-        the expedition's budget used, and an allowance still unspent at noon is research not done."""
+        under an hour) while today's frontier spending is running behind the clock: the owner wants
+        the expedition's budget used, and an allowance still unspent at noon is research not done.
+        An agent that cannot act at all waits the idle interval instead -- it has nothing else to
+        spend its time on, and every wake it sits out is a wake it did not learn from."""
         base = float((self.game.get("research") or {}).get("min_hours_between", 6))
-        allowance = self.pacer.allowance("sail")
+        if agent is not None and self.idle_reason(agent):
+            base = min(base, float((self.game.get("research") or {}).get("idle", {}).get("min_hours_between", 1)))
+        allowance = self.pacer.allowance("openai")
         if allowance <= 0:
             return base
         day_gone = (self.clock() % 86400) / 86400.0
-        behind = float(1 - self.pacer.room("sail") / allowance) < 0.6 * day_gone
+        behind = float(1 - self.pacer.room("openai") / allowance) < 0.6 * day_gone
         return max(1.0, base / 2) if behind and day_gone > 0.25 else base
 
     def research(self, agent: Agent) -> Any:
@@ -1115,6 +1176,7 @@ class House:
             "last_look": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.verdict", agent=agent.id))) if e.payload.get("decision") == "look"), None),
             "can_fork": self.economy.can_fork(agent.id),
             "recent_trades": self._recent_trades(agent.id),
+            "idle": {**self.idle_run(agent), "why_now": self.idle_reason(agent)},
         }
         try:
             outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")
@@ -1134,6 +1196,7 @@ class House:
                 was = self.registry.get(agent.id).code_sha256
                 self.registry.adopt(agent.id, code=candidate["code"], needs=candidate["needs"], params=candidate["params"], reason=candidate["purpose"])
                 self._state["tried"][agent.id] = self.registry.get(agent.id).code_sha256
+                self._state["idle"].pop(agent.id, None)  # new rules, a fresh count of the wakes they sit out
                 if rung == 0:
                     self.evaluator.promote(agent.id, 1, "its new code passed replay against every trial in its own line", candidate["numbers"])
                 else:
@@ -1191,14 +1254,22 @@ class House:
 
     def _working(self, agent: Agent, epoch: float) -> bool:
         """Has it traded in the last epoch, or is it too new to have had the chance? An agent that
-        has done neither earns no niche floor and spends down what it has: idleness must cost."""
+        has done neither earns no niche floor and spends down what it has: idleness must cost.
+
+        Idleness, though, not the calendar. An equity desk is shut from Friday evening until Monday
+        morning, and an agent that would be trading if it could must not be starved to death over a
+        weekend for a market it does not control: its floor pays for the research that is the only
+        work the weekend has. Doing nothing in a market that IS open still costs, as it should."""
         if self.clock() - _epoch(agent.born_at) < epoch:
             return True
         book = self.book_of(agent)
         if book is not None and book.open_orders(agent.id):
             return True  # an order resting at the venue is work, even before it fills
         since = now_iso(lambda: self.clock() - epoch)
-        return any(e.at >= since for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent.id))
+        if any(e.at >= since for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent.id)):
+            return True
+        idle = self.idle_run(agent)
+        return bool(idle["shut"]) and not idle["barren"] and not idle["offered"]
 
     def keep_population(self) -> None:
         rules = self.game["economy"]
