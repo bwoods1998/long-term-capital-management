@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -76,6 +77,8 @@ class Settings:
     ops_workers: int = 3  # the backup, the survey, the updater and Merton: never queued behind a replay
     kalshi_replay_days: int = 7
     kalshi_replay_markets: int = 2000
+    kalshi_day_step_seconds: int = 1800  # a daily strategy is not judged on five-minute moves
+    kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
 
@@ -613,8 +616,15 @@ class House:
             build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon)  # noqa: E731
         else:
             series = sorted(str(s) for s in (needs.get("series") or []))[:12]
-            key = f"kalshi:{','.join(series)}:{horizon}:{start_iso[:10]}"
-            build = lambda: self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=self.settings.kalshi_replay_markets)  # noqa: E731
+            # A tape is JSON handed to a sealed box, and a seven-week sports tape at five-minute
+            # steps is hundreds of megabytes: three agents of the sports desk had their replays
+            # KILLED (exit 137) on Sept 19, 2026, and were charged a trial each for it. A strategy
+            # judged on daily blocks does not need five-minute resolution, so a daily tape steps by
+            # the half hour and carries fewer markets.
+            step = self.settings.kalshi_day_step_seconds if horizon == "day" else 300
+            markets = self.settings.kalshi_replay_markets if horizon == "hour" else min(self.settings.kalshi_replay_markets, self.settings.kalshi_day_markets)
+            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}"
+            build = lambda: self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=markets, step_seconds=step)  # noqa: E731
         with self._tape_lock:  # one build at a time: two agents of one family want the same tape
             hit = self._tapes.get(key)
             if hit is None or end - hit[0] > 86400:
@@ -660,6 +670,20 @@ class House:
         for thread in list(self._jobs.values()):
             thread.join(timeout)
 
+    @staticmethod
+    def _crashed(result: Mapping[str, Any]) -> str:
+        """The error when the replay HARNESS failed rather than the strategy: the process was
+        killed or timed out and printed no result at all. Such a run is not a hypothesis tested,
+        so it is not a trial and must not deflate the agent's line (measured Sept 19, 2026: three
+        agents of the sports desk were each charged a trial for a tape that exhausted its box)."""
+        if result.get("ok"):
+            return ""
+        error = str(result.get("error") or "")
+        if "timed out" in error or "Killed" in error:
+            return error
+        exit_code = re.search(r"no result line \(exit (-?\d+)\)", error)
+        return error if exit_code and exit_code.group(1) != "0" else ""
+
     def _replay_own(self, agent: Agent) -> dict[str, Any]:
         """An agent's own code gets one replay, counted as a trial. For an agent on rung 0 it is
         the way up; after it, only research can change its fate."""
@@ -670,6 +694,10 @@ class House:
         except Exception as exc:  # noqa: BLE001 - no tape or no box: try again next wake
             self.alert("warning", f"{agent.id}: replay could not run ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "replay unavailable"}
+        crash = self._crashed(result)
+        if crash:
+            self.alert("warning", f"{agent.id}: its replay was not run ({crash[:160]}); it is not counted as a trial and will be tried again")
+            return {"agent": agent.id, "skipped": f"the replay could not be run: {crash[:120]}"}
         with self._state_lock:
             self._state["tried"][agent.id] = agent.code_sha256
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, lineage=self.registry.lineage(agent.id))
@@ -704,6 +732,12 @@ class House:
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
             return {"passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
+        crash = self._crashed(result)
+        if crash:
+            self.alert("warning", f"{agent.id}: a candidate's replay was not run ({crash[:160]}); it is not counted as a trial")
+            return {"passed": False, "error": f"the replay could not be run and is NOT a trial against you: {crash[:160]}. "
+                                              "Ask for a smaller question of the tape, or tell the House with `request_tool`.",
+                    "numbers": {}, "needs": info["needs"], "params": info.get("params") or {}}
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
         return {"passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
                 "digest": result.get("digest")}

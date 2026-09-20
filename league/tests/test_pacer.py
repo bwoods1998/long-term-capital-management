@@ -271,3 +271,52 @@ class Incentives(HouseCase):
         self.house.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue", "side": "buy", "realized": None,
                                                "cash_delta": "-1.00", "position_delta": "0", "quantity": "0", "price": "1"}, agent=agent.id)
         self.assertTrue(self.house.standings()[0].working)
+
+
+class CrashedReplays(HouseCase):
+    """A replay the box could not run is a broken tool, not a hypothesis tested.
+
+    Sept 19, 2026: three agents of the sports desk had their replays KILLED (exit 137) on a
+    seven-week tape that exhausted the box, and each was charged a trial for it, which deflates
+    every later replay in its line. Merton, hired by one of them, named it: "Exit 137 indicates
+    process termination; it does not identify the cause."
+    """
+
+    def crashed(self, error):
+        return {"ok": False, "error": error, "blocks": [], "trades": 0}
+
+    def test_a_killed_or_timed_out_run_is_not_a_trial(self):
+        for error in ("no result line (exit 137): Killed\n", "the box timed out after 600s", "no result line (exit 1): Traceback"):
+            self.assertEqual(self.house._crashed(self.crashed(error)), error, error)
+
+    def test_a_clean_exit_with_no_result_and_a_strategy_that_raised_are_the_strategys_own(self):
+        self.assertEqual(self.house._crashed(self.crashed("no result line (exit 0): ")), "")
+        self.assertEqual(self.house._crashed({"ok": True, "error": None}), "")
+        self.assertEqual(self.house._crashed(self.crashed("decide raised ZeroDivisionError")), "")
+
+    def test_the_agent_is_told_and_charged_nothing(self):
+        agent = self.seated()
+        self.house._state["tried"].pop(agent.id, None)  # it has not had its replay yet
+        self.house._run_replay = lambda a, code, needs, params: (self.crashed("no result line (exit 137): Killed\n"), "tape")
+        out = self.house._replay_own(agent)
+        self.assertIn("could not be run", out["skipped"])
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent=agent.id), 0)
+        self.assertIn("not counted as a trial", self.house.ledger.last("ops.alert").payload["text"])
+        answer = self.house._candidate_replay(agent, self.house.registry.get(agent.id).code)
+        self.assertEqual((answer["passed"], self.house.ledger.count(kinds="eval.trial", agent=agent.id)), (False, 0))
+        self.assertIn("NOT a trial against you", answer["error"])
+
+    def test_a_daily_kalshi_tape_steps_by_the_half_hour_and_carries_fewer_markets(self):
+        asked = {}
+
+        class Kalshi:
+            def tape(self, series, *, start, end, horizon, max_markets, step_seconds):
+                asked.update(series=series, horizon=horizon, max_markets=max_markets, step_seconds=step_seconds)
+                return {"venue": "kalshi", "horizon": horizon, "steps": [], "results": {}}
+
+        self.house.kalshi_data = Kalshi()
+        needs = {"venue": "kalshi", "horizon": "day", "style": "t", "series": ["KXNFLGAME"], "max_hours_to_close": 30}
+        self.house.tape_for(needs)
+        self.assertEqual((asked["step_seconds"], asked["max_markets"]), (1800, 500))
+        self.house.tape_for({**needs, "horizon": "hour"})
+        self.assertEqual((asked["step_seconds"], asked["max_markets"]), (300, 2000))
