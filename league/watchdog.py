@@ -263,15 +263,28 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                 if since_seq is not None:
                     detail["since_seq"] = int(since_seq)
                     detail["started_since"] = int(db.execute("SELECT COUNT(*) FROM ledger WHERE kind = 'ops.started' AND seq > ?", (int(since_seq),)).fetchone()[0])
-                    errors = []
+                    errors, inherited_alerts = [], 0
                     for row_seq, payload in db.execute("SELECT seq, payload FROM ledger WHERE kind = 'ops.alert' AND seq > ? ORDER BY seq ASC", (int(since_seq),)):
                         try:
                             alert = json.loads(payload)
                         except ValueError:
                             alert = {"level": "error", "text": "an alert that is not JSON"}
                         if str(alert.get("level") or "").lower() in ("error", "critical", "fatal"):
-                            errors.append((row_seq, str(alert.get("text") or "")[:300]))
+                            text = str(alert.get("text") or "")[:300]
+                            # A book that was already failing to reconcile before this release goes
+                            # on saying so every few minutes, and those alerts are not the new
+                            # release's doing any more than the freeze itself is. Sept 20, 2026:
+                            # two releases in a row were rolled back on them -- including the one
+                            # carrying the fix for that very book, so the floor could not heal
+                            # itself and no release of any kind could land. A canary inherits
+                            # nothing and still catches everything it causes.
+                            if any(text.startswith(book) for book in inherited):
+                                inherited_alerts += 1
+                                continue
+                            errors.append((row_seq, text))
                     detail["error_alerts"] = len(errors)
+                    if inherited_alerts:
+                        detail["inherited_alerts"] = inherited_alerts
                     if errors:
                         reasons.append(f"{len(errors)} error alert(s) since seq {int(since_seq)}; the first, at seq {errors[0][0]}: {errors[0][1]}")
                 if verify:

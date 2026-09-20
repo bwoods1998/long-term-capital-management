@@ -873,6 +873,26 @@ class InheritedFreeze(ReadHealthTest):
         self.assertTrue(healthy.ok, healthy.reasons)
         self.assertEqual(healthy.detail["frozen_before"], ["alpaca-paper"])
 
+    def test_the_alerts_a_frozen_book_goes_on_making_are_inherited_too(self):
+        """Sept 20, 2026: two releases in a row were rolled back on these -- including the one
+        carrying the fix for that very book. The floor could not heal itself and no release of any
+        kind could land while the book kept saying, every five minutes, what was already true."""
+        ledger = self.ledger()
+        ledger.append("ops.started", {"books": []})
+        since = ledger.head()[0]
+        ledger.append("ops.alert", {"level": "error", "text": "alpaca-paper does not reconcile: cash differs by -40.0000"})
+        ledger.append("ops.alert", {"level": "error", "text": "alpaca-paper does not reconcile: cash differs by -40.0000"})
+        write_health(self.root, self.clock, seq=ledger.head()[0], frozen="cash differs by -40.0000")
+        loud = self.read(since_seq=since)
+        self.assertFalse(loud.ok)  # a canary inherits nothing and still catches them
+        quiet = self.read(since_seq=since, inherited_frozen=["alpaca-paper"])
+        self.assertTrue(quiet.ok, quiet.reasons)
+        self.assertEqual((quiet.detail["error_alerts"], quiet.detail["inherited_alerts"]), (0, 2))
+        ledger.append("ops.alert", {"level": "error", "text": "tick failed: KeyError: 'settled'"})
+        broke = self.read(since_seq=since, inherited_frozen=["alpaca-paper"])
+        self.assertFalse(broke.ok)  # what the release really did break still counts
+        self.assertIn("tick failed", broke.reasons[0])
+
     def test_a_book_that_freezes_under_the_release_is(self):
         write_health(self.root, self.clock, frozen="cash differs by 12.5000")
         health = self.read(inherited_frozen=["kalshi"])
