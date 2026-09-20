@@ -308,7 +308,16 @@ class Evaluator:
             level += value
             wealth.append(math.exp(max(level, -700.0)))
         drawdown = stats.max_drawdown(wealth)
-        numbers: dict[str, Any] = {"book": book, "blocks": len(rows), "active_blocks": active, "drawdown": drawdown}
+        # The screen asks a different question from death. Death asks what this agent has ever
+        # done, over its whole stay, and a high-water mark is exactly right for that. The screen
+        # asks whether it is fit to trade real money NOW -- and a lifetime high-water mark never
+        # falls, so one bad afternoon early on would have made promotion unreachable for the rest
+        # of the stay, whatever it did afterwards. An agent that drew down between the screen's
+        # limit and death's could then be neither promoted nor killed, for ever. So the screen
+        # reads the recent window, where "recent" is the window the gate itself asks for.
+        recent = stats.max_drawdown(wealth[-(int(self.ladder.get("screen_drawdown_blocks", 30)) + 1):])
+        numbers: dict[str, Any] = {"book": book, "blocks": len(rows), "active_blocks": active,
+                                   "drawdown": drawdown, "recent_drawdown": recent}
         if drawdown >= death["max_drawdown"]:
             return self._decide(agent, rung, "die", f"drawdown of {drawdown:.0%} is past the {death['max_drawdown']:.0%} limit", numbers)
         looks = [
@@ -352,9 +361,11 @@ class Evaluator:
             return Verdict(agent, rung, "hold", f"{len(returns)} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
         if gate.get("gate", "bound") == "screen":
             limit = float(gate["max_drawdown"])
-            if level > 0 and drawdown < limit:
-                return Verdict(agent, rung, "eligible", f"it cleared the screen: {active} active {horizon} blocks, {len(returns)} closed trades, growth above zero and a drawdown under {limit:.0%}", numbers)
-            why = "its growth is not above zero" if level <= 0 else f"its drawdown of {drawdown:.0%} is not under {limit:.0%}"
+            window = int(self.ladder.get("screen_drawdown_blocks", 30))
+            if level > 0 and recent < limit:
+                return Verdict(agent, rung, "eligible", f"it cleared the screen: {active} active {horizon} blocks, {len(returns)} closed trades, "
+                                                        f"growth above zero and a drawdown under {limit:.0%} over its last {window} blocks", numbers)
+            why = "its growth is not above zero" if level <= 0 else f"its drawdown of {recent:.0%} over its last {window} blocks is not under {limit:.0%}"
             return Verdict(agent, rung, "hold", f"it has not cleared the screen: {why}", numbers)
         if lower["sd"] <= 0:
             return Verdict(agent, rung, "hold", "its block growth has no variance yet: nothing to bound", numbers)

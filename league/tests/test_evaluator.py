@@ -1582,3 +1582,46 @@ class Family(EvalCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheScreensDrawdownIsRecent(unittest.TestCase):
+    """A lifetime high-water mark never falls. One bad afternoon early in a stay would have barred
+    an agent from real money for the rest of it, whatever it did afterwards -- and an agent that
+    drew down between the screen's 15% and death's 30% could then be neither promoted nor killed,
+    for ever. Found by the stall audit, Sept 20, 2026."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite")
+        self.evaluator = Evaluator(self.ledger)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def blocks(self, agent, growths, *, book="kalshi-shadow"):
+        for n, g in enumerate(growths):
+            self.ledger.append("eval.block", {"agent": agent, "log_growth": g, "active": True, "book": book,
+                                              "block": f"b{n}", "horizon": "hour"}, agent=agent)
+
+    def test_a_bad_afternoon_early_does_not_bar_an_agent_for_ever(self):
+        self.evaluator.seat("a1", 1, "test")
+        window = int(self.evaluator.ladder["screen_drawdown_blocks"])
+        self.blocks("a1", [-0.18])                      # a 16.5% hole on the first block
+        self.blocks("a1", [0.02] * (window + 6))        # then a long, steady climb out of it
+        for n in range(12):                             # and the closed trades the screen wants
+            self.ledger.append("book.fill", {"book": "kalshi-shadow", "realized": "0.40", "quantity": "1", "price": "0.9",
+                                             "instrument": {"market_id": f"M{n}", "asset_class": "event"}}, agent="a1")
+        self.ledger.append("book.stake", {"book": "kalshi-shadow", "usd": "200"}, agent="a1")
+        verdict = self.evaluator.judge("a1", "kalshi-shadow", horizon="hour")
+        self.assertGreaterEqual(verdict.numbers["drawdown"], 0.15)      # its life still records the hole
+        self.assertLess(verdict.numbers["recent_drawdown"], 0.15)       # its recent record does not
+        self.assertEqual(verdict.decision, "eligible", verdict.reason)
+        self.assertIn("over its last", verdict.reason)
+
+    def test_death_still_reads_the_whole_stay(self):
+        self.evaluator.seat("a2", 1, "test")
+        self.blocks("a2", [-0.40] + [0.01] * 40)
+        verdict = self.evaluator.judge("a2", "kalshi-shadow", horizon="hour")
+        self.assertEqual(verdict.decision, "die")
+        self.assertIn("past the 30% limit", verdict.reason)

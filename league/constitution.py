@@ -36,6 +36,10 @@ CONSTITUTION: dict[str, Any] = {
         # looks as alpha * 6 / (pi^2 k^2) so that looking often can never buy a false pass.
         "alpha": 0.05,
         "look_every_active_blocks": 5,
+        # The screen's drawdown is read over this many most recent blocks, not the whole stay: a
+        # lifetime high-water mark never falls, and one bad afternoon would otherwise bar an agent
+        # from real money for the rest of its life. Death still reads the whole stay.
+        "screen_drawdown_blocks": 30,
         # No promotion on fewer closed trades than this, however good the blocks look.
         "min_closed_trades": 10,
         # Rung 0 -> 1: mechanical replay, and the only gate before a PAPER seat, which costs the
@@ -98,4 +102,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "65f7691792da41b71bac8378af29274fb06d4d56f31369fd72220dd560a1327f"
+PINNED_DIGEST = "ce94a5abab8c2f161628bd7695d75823382b2df27827940d05f169834584dbfd"
