@@ -591,3 +591,30 @@ class ADeployInFlight(HouseCase):
         self.house.updater = SimpleNamespace(check=lambda: {"action": "none"}, due=lambda: True)
         self.house._update()
         self.assertFalse(self.house.deploying())
+
+
+class OneBudgetOneNumber(HouseCase):
+    """Two numbers for one budget end with the tighter winning silently. Sept 20, 2026: the pacer
+    allowed $14.29 of Sail a day, the provider's fixed cap was $9.00, and ten research passes in a
+    row were refused `provider_floor_cap_exceeded` with the budget half unspent."""
+
+    def test_the_providers_daily_cap_follows_the_allowance_under_the_owners_ceiling(self):
+        provider = SimpleNamespace(floor_cap=D("20.00"))
+        self.house.researcher = SimpleNamespace(provider=provider)
+        today = __import__("league.ledger", fromlist=["now_iso"]).now_iso(self.clock)[:10]
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock,
+                                 expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50", "front_load": "2"})
+        self.house._pace_inference()
+        self.assertEqual(provider.floor_cap, D("10"))          # twice the even $5, under the $20 ceiling
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock,
+                                 expedition={"start": today, "days": 10, "sail_usd": "500", "openai_usd": "50", "front_load": "2"})
+        self.house._pace_inference()
+        self.assertEqual(provider.floor_cap, D("20.00"))       # the owner's ceiling still binds
+
+    def test_outside_the_expedition_the_owners_number_stands(self):
+        provider = SimpleNamespace(floor_cap=D("9.00"))
+        self.house.researcher = SimpleNamespace(provider=provider)
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock,
+                                 expedition={"start": "2026-01-01", "days": 1, "sail_usd": "50", "openai_usd": "50"})
+        self.house._pace_inference()
+        self.assertEqual(provider.floor_cap, D("9.00"))

@@ -175,6 +175,7 @@ class House:
                 rung=self.evaluator.rung,
             )
         self._born_at = self.clock()
+        self._inference_ceiling: Decimal | None = None  # the config's hard cap, read once (`_pace_inference`)
         # Written once, on the first ever start, and persisted: `_refill` paces newcomers from it
         # when none has been born yet (see there for why this must outlive a restart).
         self._state.setdefault("last_newcomer", {}).setdefault("since", self._born_at)
@@ -655,6 +656,23 @@ class House:
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
         return intents, dropped
+
+    def _pace_inference(self) -> None:
+        """The provider's own daily cap on the floor's inference follows the expedition's allowance.
+
+        Two numbers for one budget always end with the tighter one winning silently. Measured Sept
+        20, 2026: the pacer allowed $14.29 of Sail a day and the provider's fixed cap was $9.00, so
+        every research pass on the floor stopped at nine dollars -- ten in a row refused as
+        `provider_floor_cap_exceeded` -- with the owner's budget half unspent and nothing saying
+        why. The config number stays on as a CEILING, so a pacer that miscomputes still cannot
+        spend past what the owner set by hand."""
+        provider = getattr(self.researcher, "provider", None) if self.researcher is not None else None
+        if provider is None or not hasattr(provider, "floor_cap"):
+            return
+        if self._inference_ceiling is None:
+            self._inference_ceiling = Decimal(str(provider.floor_cap))
+        allowance = self.pacer.allowance("sail") if self.pacer.running() else ZERO
+        provider.floor_cap = min(self._inference_ceiling, allowance) if allowance > 0 else self._inference_ceiling
 
     def _update(self) -> None:
         outcome = self.updater.check()
@@ -1563,6 +1581,7 @@ class House:
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
             self.budget.pacer = self.pacer
+        self._pace_inference()
         if open_for_business and self.merton is not None:
             for role in self.merton.due():
                 # One role at a time against today's allowance: a pass is a dime to a few dollars,
