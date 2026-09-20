@@ -384,3 +384,25 @@ class TheFlexQueue(ResearchCase):
         r, seen = self.script({1, 2})
         out = r.research(self.parent, {}, session="s1")
         self.assertEqual((out.reason, seen), ("provider: provider_poll_timeout", ["pro_flex", "pro_asap"]))
+
+
+class TheDeskCapDoesNotRatchet(ResearchCase):
+    """The provider counts a desk's CUMULATIVE spend for the day against the cap it is handed.
+    Handing it the balance alone was a ratchet: every charge lowered the cap and raised the total,
+    and once the total passed the balance the agent was locked out until midnight UTC however many
+    credits it was later granted. Sept 20, 2026: research on the floor fell to nothing."""
+
+    def test_the_cap_is_what_it_has_spent_today_plus_what_it_still_holds(self):
+        self.economy.charge(self.parent.id, "3.00", "an earlier pass today")
+        held = self.economy.balance(self.parent.id)
+        self.researcher([[("finish", {"summary": "done"})]]).research(self.parent, {}, session="s1")
+        cap = Decimal(str(self.script.kwargs[0]["desk_cap_usd_per_day"]))
+        self.assertEqual(cap, held + D("3.00"))
+        self.assertGreater(cap, D("3.00"))  # strictly above what it has already spent, or it is locked out
+
+    def test_yesterdays_spending_is_not_counted_against_today(self):
+        before = self.economy.balance(self.parent.id)
+        self.clock.advance(3 * 86400)
+        self.economy.charge(self.parent.id, "1.00", "today")
+        self.researcher([[("finish", {"summary": "done"})]]).research(self.parent, {}, session="s2")
+        self.assertEqual(Decimal(str(self.script.kwargs[0]["desk_cap_usd_per_day"])), before - D("1.00") + D("1.00"))

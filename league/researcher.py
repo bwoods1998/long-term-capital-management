@@ -20,7 +20,7 @@ from typing import Any, Callable, Mapping
 
 from .agents import Agent
 from .commons import SEARCH_CHARGE_USD, Commons
-from .ledger import Ledger
+from .ledger import Ledger, now_iso
 from .safety import CodeRefused, check_code
 
 ZERO = Decimal(0)
@@ -200,7 +200,15 @@ class Researcher:
                     reasoning_effort=effort,
                     max_output_tokens=int(self.settings.get("max_output_tokens", 4096)),
                     tool_choice=str(self.settings.get("tool_choice", "auto")),
-                    desk_cap_usd_per_day=balance,  # an agent can never spend credits it does not have
+                    # What it may spend today: what it has already spent today PLUS what it still
+                    # holds. The provider compares this against the desk's CUMULATIVE spend for the
+                    # day, so passing the balance alone was a ratchet -- every charge lowered the
+                    # cap and raised the total, and the moment the total passed the balance the
+                    # agent was locked out until midnight UTC however many credits it was granted.
+                    # Measured Sept 20, 2026: research on the floor fell to nothing on
+                    # `provider_desk_cap_exceeded` with agents holding credits they could not use.
+                    # It still cannot spend credits it does not have: the balance is the headroom.
+                    desk_cap_usd_per_day=balance + self._charged_today(agent.id),
                     cache_key=f"league:{agent.family}",
                 )
             except Exception as exc:  # noqa: BLE001 - a provider failure ends the pass, not the House
@@ -276,6 +284,19 @@ class Researcher:
         return out
 
     # ------------------------------------------------------------------- tools
+    def _charged_today(self, agent_id: str) -> Decimal:
+        """What this agent has already been charged since midnight UTC, which the provider counts
+        against its daily desk cap whether or not the credits behind it have since been spent."""
+        today = now_iso(self.clock)[:10]
+        total = ZERO
+        for entry in self.ledger.iter(kinds="credit.charge", agent=agent_id):
+            if entry.at[:10] == today:
+                try:
+                    total += Decimal(str(entry.payload.get("usd") or 0))
+                except ArithmeticError:
+                    continue
+        return total
+
     def _consult(self, agent: Agent, question: str, out: Pass, session: str) -> dict[str, Any]:
         """Hire Merton with the agent's own credits. What a good record buys is better thinking."""
         rules = self.merton_settings
