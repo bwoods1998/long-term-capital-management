@@ -66,6 +66,13 @@ House for instruments on EITHER venue, whatever your own is. They arrive as `ctx
 order in any of them is refused here and by the House. That is how a Kalshi strategy reads the
 spot price its contracts settle against, or an Alpaca one reads a coin it does not trade.
 
+On a Kalshi **replay** tape the watched symbols arrive as `observed["bars"]` only -- there are no
+recorded quotes for them -- at five-minute bars for an hourly tape and fifteen for a daily one,
+and each step sees only the bars stamped at or before it. Watched series are not cut to your own
+horizon: you may read a market you could not enter. (Until Sept 20, 2026 a Kalshi tape carried no
+bars at all, so a strategy conditioned on its underlier could be written but never tested. If your
+journal or the library says otherwise, they are out of date; measure it yourself.)
+
 `hours_to_close` is when trading is expected to stop and `hours_to_resolve` when the contract is
 expected to pay. For a game the two are the same (it closes when a winner is declared, near its
 scheduled end, whatever later close it lists); a weather market stops trading the evening before
