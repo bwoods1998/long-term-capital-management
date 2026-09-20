@@ -50,6 +50,8 @@ ANSWER = """Answer with ONE JSON object and nothing else:
 Give "files": [] when the evidence does not justify a change. Doing nothing is a respectable answer:
 every change you propose costs the owner money to test and may cost more if it is wrong."""
 
+CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+
 BRIEFS: dict[str, str] = {
     "architect": """You are the architect of a small real-money trading league. You do not pick trades. You read the league
 table and the graveyard and write NEW STRATEGY PROGRAMS that cheap agents then run, mutate and are judged on.
@@ -80,9 +82,11 @@ an agent can learn it from, plus `league/tests/test_tool_<name>.py` (unittest) p
 Also answer every request you read, in an extra key of your JSON:
 "answers": [{"request": "<the request's id>", "outcome": "built as tools/<name>.py: how to use it" | "cannot be a pure tool: why, and who could do it"}]""",
     "operator": """You are the operator of a small trading league's House process. You read its alerts, health and budget.
-You may propose changes ONLY to the operating dials in `league/config.json`: tick_seconds (30-600),
-mark_every_seconds (60-1800), replay_days (7-60), inference_daily_cap_usd (0.5-10). Give the WHOLE file back with
-only those values changed. Everything else (real_money, URLs, the performance baseline) belongs to the owner.
+You may propose changes ONLY to the operating dials in `league/config.json`, and only inside the bounds listed in
+your evidence as `permitted_dials` -- those are read from the checker that will judge your pull request, so they
+are the real ones. Do not carry any bound in your head: on Sept 20, 2026 this brief named a maximum that the
+checker had since raised, and you proposed the same change three times, one of which merged and throttled the
+floor's research below what the owner's budget funds. Give the WHOLE file back with only those values changed. Everything else (real_money, URLs, the performance baseline) belongs to the owner.
 Most passes should change nothing: say what you saw, what it means, and what the owner should know.""",
     "designer": """You are the game designer of a small trading league's compute economy. Agents earn compute credits by
 evidence-weighted performance, pay for every token and sandbox second, die at zero and may fork when rich. You
@@ -468,8 +472,14 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
         elif role == "operator":
             alerts = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.alert", limit=60, newest=True)]
             budget = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.budget", limit=20, newest=True)]
+            from .ci import CONFIG_DIALS
+
             base = {"alerts": alerts, "budget": budget, "books": {n: {"frozen": b.frozen, "open_orders": len(b.open_orders())} for n, b in house.books.items()},
-                    "config": json.loads((Path(__file__).resolve().parent / "config.json").read_text(encoding="utf-8")), "living": len(house.registry.living())}
+                    "config": json.loads(CONFIG_PATH.read_text(encoding="utf-8")), "living": len(house.registry.living()),
+                    # The bounds from the checker that will judge the pull request, never from the
+                    # brief: two places held this number, they disagreed, and the operator proposed
+                    # the same reduction three times until one merged and throttled the floor.
+                    "permitted_dials": {key: {"min": low, "max": high} for key, (low, high) in CONFIG_DIALS.items()}}
         elif role == "designer":
             base.update(game=house.game, deaths=[{"agent": a.id, "cause": a.cause, "niche": a.niche} for a in house.registry.dead()][-30:],
                         payouts=[e.payload for e in ledger.read(kinds="ops.budget", limit=30, newest=True) if e.payload.get("what") == "payout"])

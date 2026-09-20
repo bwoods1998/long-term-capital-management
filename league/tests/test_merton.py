@@ -289,3 +289,39 @@ class WhereANewStrategyIsWorthWriting(unittest.TestCase):
                          {"barren_agents": 1, "trading_agents": 2, "losing_agents": 1, "best_mean_growth": 0.003})
         self.assertEqual(_how_the_desk_is_doing(house, "nobody"),
                          {"barren_agents": 0, "trading_agents": 0, "losing_agents": 0, "best_mean_growth": None})
+
+
+class TheOperatorReadsTheRealBounds(unittest.TestCase):
+    """This brief named `inference_daily_cap_usd (0.5-10)` in its own text. When the checker's
+    bound was raised to 25 and the cap set to 20, the operator went on reading its brief, proposed
+    the same reduction three times, and one of them merged at 11:36 on Sept 20, 2026 -- throttling
+    the floor's research below what the owner's budget funds. Two places held the same number and
+    they disagreed."""
+
+    def test_the_brief_carries_no_bound_of_its_own(self):
+        from league.merton import BRIEFS
+
+        brief = BRIEFS["operator"]
+        self.assertIn("permitted_dials", brief)
+        self.assertNotIn("(0.5-10)", brief)
+        self.assertNotIn("(30-600)", brief)
+
+    def test_the_operator_is_shown_the_checkers_bounds_and_the_live_config(self):
+        from types import SimpleNamespace
+
+        from league.ci import CONFIG_DIALS
+        from league.merton import evidence_from
+
+        house = SimpleNamespace(
+            registry=SimpleNamespace(living=lambda: []),
+            ledger=SimpleNamespace(read=lambda **kw: []),
+            evaluator=SimpleNamespace(blocks=lambda _: [], rung=lambda _: 1),
+            economy=SimpleNamespace(balance=lambda _: 0),
+            books={}, budget=None, pacer=SimpleNamespace(report=lambda: {}, running=lambda: False),
+            settings=SimpleNamespace(real_money=False), registry_path=None)
+        shown = evidence_from(house)("operator")
+        self.assertEqual(set(shown["permitted_dials"]), set(CONFIG_DIALS))
+        for key, (low, high) in CONFIG_DIALS.items():
+            self.assertEqual(shown["permitted_dials"][key], {"min": low, "max": high})
+        self.assertIn("inference_daily_cap_usd", shown["config"])
+        self.assertNotIn("real_money", shown["permitted_dials"])
