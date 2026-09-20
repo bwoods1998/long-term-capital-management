@@ -435,7 +435,7 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
                         founding_seeds=[{k: s[k] for k in ("name", "family", "why")} for s in seeds.SEEDS],
                         registry=strategies.registry(), library=house.commons.library_search("edge evidence fees maker", 8)["results"])
         elif role == "toolsmith":
-            base = {"open_requests": house.commons.open_requests()[:10], "existing_tools": sorted(p.name for p in (Path(__file__).resolve().parent / "tools").glob("*.py"))}
+            base = {"open_requests": house.commons.open_requests(limit=10), "existing_tools": sorted(p.name for p in (Path(__file__).resolve().parent / "tools").glob("*.py"))}
         elif role == "operator":
             alerts = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.alert", limit=60, newest=True)]
             budget = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.budget", limit=20, newest=True)]

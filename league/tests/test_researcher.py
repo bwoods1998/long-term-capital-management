@@ -56,7 +56,7 @@ class ResearchCase(unittest.TestCase):
     def researcher(self, turns, **kw):
         self.script = Script(turns)
         return Researcher(
-            ledger=self.ledger, provider=self.script, commons=Commons(self.ledger), economy=self.economy, rules="THE GAME", contract="THE CONTRACT",
+            ledger=self.ledger, provider=self.script, commons=Commons(self.ledger, clock=self.clock), economy=self.economy, rules="THE GAME", contract="THE CONTRACT",
             run_replay=lambda agent, code: self.replays.append(code) or {"passed": False, "numbers": {"reasons": ["lost"], "trades": 43}, "digest": {"all": {"trades": 43, "wins": 38, "losses": 7}}},
             clock=self.clock, specialty=lambda agent: "YOUR SPECIALTY: sports results", lineage=self.registry.lineage,
             **{"settings": {"max_turns": 6, "profile": "pro_flex", "reasoning_effort": "medium"}, **kw})
@@ -96,7 +96,7 @@ class Journal(ResearchCase):
     def test_the_journal_is_on_the_ledger_so_it_survives_a_restart_and_its_authors_death(self):
         self.researcher([[("journal_write", {"text": "Totals over 5.5 lost 3 of 25 pre-game: the edge is thinner than the 93-cent price."})]]).research(self.parent, {}, session="s1")
         self.registry.died(self.parent.id, "credits")
-        fresh = Researcher(ledger=self.ledger, provider=None, commons=Commons(self.ledger), economy=self.economy, rules="", contract="",
+        fresh = Researcher(ledger=self.ledger, provider=None, commons=Commons(self.ledger, clock=self.clock), economy=self.economy, rules="", contract="",
                            run_replay=lambda a, c: {}, settings={}, lineage=Registry(self.ledger).lineage)
         self.assertEqual([row["text"][:20] for row in fresh.journal(self.child.id)], ["Totals over 5.5 lost"])
 

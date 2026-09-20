@@ -15,12 +15,13 @@
 from __future__ import annotations
 
 import json
+import time
 import re
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping
 
-from .ledger import HOUSE, Ledger
+from .ledger import HOUSE, Ledger, now_iso
 
 SEARCH_URL = "https://api.sailresearch.com/v1/search"
 MAX_NOTE_CHARS = 4000
@@ -55,8 +56,10 @@ def sail_search(key_source: Callable[[], str], *, opener: Any = None, timeout: f
 
 
 class Commons:
-    def __init__(self, ledger: Ledger, *, search: Callable[[str, int], list[dict[str, Any]]] | None = None, news: Any = None):
+    def __init__(self, ledger: Ledger, *, search: Callable[[str, int], list[dict[str, Any]]] | None = None, news: Any = None,
+                 clock: Callable[[], float] = time.time):
         self.ledger = ledger
+        self.clock = clock
         self._search = search
         self._news = news  # an ltcm.data.news.News: the keyless fallback
 
@@ -133,13 +136,35 @@ class Commons:
         entry = self.ledger.append("tool.request", {"name": name, "description": description}, agent=agent)
         return {"queued": entry.id, "note": "the architect reads this queue; a tool that is built is announced in the playbook"}
 
-    def open_requests(self) -> list[dict[str, Any]]:
+    def open_requests(self, *, limit: int | None = None, stale_days: float = 3.0) -> list[dict[str, Any]]:
+        """What the toolsmith is waiting on, most-asked-for first and newest before oldest.
+
+        It used to be plain ledger order -- oldest first -- and the toolsmith was shown the first
+        ten. With eighteen open on the floor's first night, the newest eight could never be seen,
+        and the oldest ten were ones he had already looked at and could not build, so the window
+        was clogged with the same rows for ever. A request nothing has closed after `stale_days`
+        is dropped from the queue rather than blocking it: an agent that still needs the thing
+        will ask again, and its asking again is the signal that it matters.
+
+        `want` counts how many different agents have asked for the same tool by name, which is the
+        best evidence the floor produces about what is actually missing -- six agents across four
+        desks asked for the price behind their strikes before anyone noticed."""
         done = {e.payload.get("request") for e in self.ledger.iter(kinds="tool.fulfilled")}
-        return [
+        oldest = now_iso(lambda: self.clock() - stale_days * 86400) if stale_days else ""
+        rows = [
             {"id": e.id, "by": e.agent, "at": e.at, **e.payload}
             for e in self.ledger.iter(kinds="tool.request")
-            if e.id not in done
+            if e.id not in done and e.at >= oldest
         ]
+        want: dict[str, int] = {}
+        for row in rows:
+            name = str(row.get("name") or "")
+            want[name] = want.get(name, 0) + 1
+        for row in rows:
+            row["asked_by_agents"] = want.get(str(row.get("name") or ""), 1)
+        rows.sort(key=lambda row: row["at"], reverse=True)          # newest first
+        rows.sort(key=lambda row: -row["asked_by_agents"])           # then what most agents want
+        return rows[:limit] if limit else rows
 
     def fulfil(self, request_id: str, outcome: str, *, change: str | None = None) -> None:
         self.ledger.append("tool.fulfilled", {"request": request_id, "outcome": str(outcome)[:1200], "change": change}, agent=HOUSE)

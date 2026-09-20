@@ -537,6 +537,9 @@ class IdleHands(HouseCase):
         row = self.house.ledger.last("agent.strategy", agent=self.agent.id).payload
         self.assertIs(row["passed_replay"], False)
         self.assertIn("at least trades", row["reason"])
+        # The count is read BEFORE the adoption clears it: the public record said "0 wakes" for
+        # every such rewrite on the floor this morning, which reads as the rule firing at random.
+        self.assertIn("had not fired in 10 wakes", row["reason"])
 
     def test_a_failed_file_that_does_not_trade_either_is_no_better_than_its_own(self):
         made = {"code": IDLER, "needs": {"venue": "alpaca", "horizon": "hour", "style": "test-idler", "symbols": ["BTC/USD"], "wake_minutes": 5},

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from league.tests.fakes import Clock
 from league.commons import Commons
 from league.ledger import Ledger
 
@@ -64,3 +65,49 @@ class CommonsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheToolsmithQueue(unittest.TestCase):
+    """It was plain ledger order -- oldest first -- and the toolsmith saw the first ten. With
+    eighteen open on the floor's first night the newest eight could never be seen, and the oldest
+    ten were ones he had already looked at and could not build, so the window was clogged with the
+    same rows for ever. Found by the stall audit, Sept 20, 2026."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+        self.commons = Commons(self.ledger, clock=self.clock)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def ask(self, agent, name, *, after=0.0):
+        self.clock.advance(after)
+        return self.ledger.append("tool.request", {"name": name, "description": f"{agent} wants {name}"}, agent=agent).id
+
+    def test_what_most_agents_ask_for_comes_first_then_the_newest(self):
+        self.ask("a1", "old_and_lonely")
+        for agent in ("b1", "b2", "b3"):
+            self.ask(agent, "the_underlier", after=60)
+        newest = self.ask("c1", "brand_new", after=60)
+        rows = self.commons.open_requests(limit=3)
+        self.assertEqual([r["name"] for r in rows[:3]], ["the_underlier", "the_underlier", "the_underlier"])
+        self.assertEqual(rows[0]["asked_by_agents"], 3)
+        self.assertIn(newest, [r["id"] for r in self.commons.open_requests()])   # and the newest is never crowded out
+        self.assertLess([r["id"] for r in self.commons.open_requests()].index(newest),
+                        [r["name"] for r in self.commons.open_requests()].index("old_and_lonely"))
+
+    def test_a_request_nothing_closes_falls_out_of_the_queue(self):
+        stale = self.ask("a1", "forgotten")
+        self.assertIn(stale, [r["id"] for r in self.commons.open_requests()])
+        self.clock.advance(4 * 86400)
+        self.assertNotIn(stale, [r["id"] for r in self.commons.open_requests()])
+        fresh = self.ask("a1", "forgotten")                 # asking again is the signal that it matters
+        self.assertIn(fresh, [r["id"] for r in self.commons.open_requests()])
+
+    def test_a_fulfilled_request_still_leaves_the_queue(self):
+        one = self.ask("a1", "buildable")
+        self.commons.fulfil(one, "built it")
+        self.assertEqual(self.commons.open_requests(), [])

@@ -142,7 +142,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
         game=game, settings=house_settings, kill_switch=gateway_kill_switch(gateway_url, token) if real_money else None,
     )
-    house.commons = Commons(house.ledger, search=sail_search(lambda: secret("SAIL_API_KEY")), news=News(cache_dir=root / "cache"))
+    # The same clock as the House: `open_requests` drops a request nothing has closed after three
+    # days, and a Commons reading a different clock would measure that window against the wrong now.
+    house.commons = Commons(house.ledger, search=sail_search(lambda: secret("SAIL_API_KEY")), news=News(cache_dir=root / "cache"),
+                            clock=house.clock)
     if house.researcher is not None:
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token)

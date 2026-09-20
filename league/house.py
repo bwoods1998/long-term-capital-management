@@ -1335,6 +1335,7 @@ class House:
             with self._state_lock:
                 self._state["last_research"][agent.id] = self.clock()  # however it ended: a failing provider is not retried every tick
         candidate = outcome.candidate
+        barren = self.idle_run(agent)["barren"]
         if candidate is not None and not candidate.get("passed", True):
             # A failed replay buys nothing -- unless the agent is in the one position where replay
             # cannot help it. Measured Sept 20, 2026: the six agents of the sports desk each saw up
@@ -1345,7 +1346,7 @@ class House:
             # to protect and no position in hand, a file that at least TRADES is worth more than
             # one that provably does nothing, and the paper screen is what stands above it.
             traded = float(candidate.get("numbers", {}).get("trades") or 0) > 0
-            if not (traded and rung >= 1 and self.record_is_empty(agent) and self.idle_run(agent)["barren"] >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
+            if not (traded and rung >= 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
                 candidate = None
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
             candidate = {**candidate, "purpose": "Merton wrote this file for it: " + candidate["purpose"]}
@@ -1364,7 +1365,7 @@ class House:
                     self.evaluator.promote(agent.id, 1, "its new code passed replay against every trial in its own line", candidate["numbers"])
                 else:
                     why = ("it rewrote itself: it had no record to protect" if candidate.get("passed", True) else
-                           f"it rewrote itself: its own rules had not fired in {self.idle_run(agent)['barren']} wakes with a live market in "
+                           f"it rewrote itself: its own rules had not fired in {barren} wakes with a live market in "
                            f"front of them, it had no record to protect, and this file at least trades")
                     self.ledger.append("agent.strategy", {"code_sha256": self.registry.get(agent.id).code_sha256, "was": was,
                                                           "reason": why, "passed_replay": bool(candidate.get("passed", True)), "_code": candidate["code"],
