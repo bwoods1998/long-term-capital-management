@@ -122,17 +122,19 @@ class EconomyTest(unittest.TestCase):
 
     def test_payout_is_due_once_an_epoch_and_is_recorded(self):
         standings = [Standing("a1", "n1", 1, 0.001, 30)]
+        epoch = float(self.economy.rules["epoch_seconds"])
+        pool = D(self.economy.rules["daily_pool_usd"])
         self.assertTrue(self.economy.payout_due())
         self.economy.payout(standings)
-        self.assertEqual(self.economy.balance("a1"), D("2.00"))
+        self.assertEqual(self.economy.balance("a1"), pool)
         self.assertFalse(self.economy.payout_due())
-        self.clock.advance(86400 / 2)
+        self.clock.advance(epoch / 2)
         self.assertFalse(self.economy.payout_due())
-        self.clock.advance(86400 / 2)
+        self.clock.advance(epoch / 2)
         self.assertTrue(self.economy.payout_due())
-        self.clock.advance(86400 * 9)  # ten epochs of downtime pay two, not ten
+        self.clock.advance(epoch * 9)  # ten epochs of downtime pay two, not ten
         self.economy.payout(standings)
-        self.assertEqual(self.economy.balance("a1"), D("6.00"))
+        self.assertEqual(self.economy.balance("a1"), pool * 3)
 
     def test_box_cost(self):
         self.assertEqual(self.economy.box_cost(90), D("0.001"))

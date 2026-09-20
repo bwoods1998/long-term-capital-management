@@ -1,8 +1,8 @@
 {
   "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
   "economy": {
-    "epoch_seconds": 86400,
-    "daily_pool_usd": "2.00",
+    "epoch_seconds": 21600,
+    "daily_pool_usd": "0.50",
     "niche_floor_share": "0.25",
     "rung_weights": {
       "0": "0",
@@ -15,7 +15,7 @@
     "fork_endowment_usd": "1.50",
     "max_population": 36,
     "min_population": 12,
-    "replay_deadline_epochs": 3,
+    "replay_deadline_epochs": 12,
     "box_usd_per_hour": "0.04",
     "box_creation_usd": "0.005",
     "unearned_share_to_floors": true,

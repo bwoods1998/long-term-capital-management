@@ -555,3 +555,12 @@ class TheOtherHalfOfTheBudget(HouseCase):
         self.assertEqual(self.house.frontier_pace(), 1.0)
         self.expedition(start="2026-01-01")  # over: no allowance to be behind on
         self.assertEqual(self.house.frontier_pace(), 1.0)
+
+    def test_the_pool_is_cut_to_the_epoch_that_pays_it_out(self):
+        """The league pays one epoch at a time and an epoch is six hours, not a day. Handing out a
+        day's pool four times a day would spend four budgets a day."""
+        self.expedition()
+        pacer = self.house.pacer
+        day = pacer.credit_pool()
+        self.assertEqual(pacer.credit_pool(per_seconds=21600), (day / 4).quantize(D("0.01")))
+        self.assertEqual(pacer.credit_pool(per_seconds=86400), day)

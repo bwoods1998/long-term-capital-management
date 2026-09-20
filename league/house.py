@@ -1530,7 +1530,8 @@ class House:
             capital.recommend(self, {name: (book.venue_cash or ZERO) for name, book in self.books.items() if book.real_money})
             # During the expedition the day's pool IS the day's Sail allowance: what the owner wants
             # spent is what the agents are given to spend.
-            self.economy.payout(self.standings(), pool=self.pacer.credit_pool() if self.pacer.running() else None)
+            self.economy.payout(self.standings(),
+                                pool=self.pacer.credit_pool(per_seconds=float(self.game["economy"]["epoch_seconds"])) if self.pacer.running() else None)
             self.ledger.append("ops.budget", {"what": "expedition", **self.pacer.report()})
             self._expedition_notices()
             if self.auditor is not None:

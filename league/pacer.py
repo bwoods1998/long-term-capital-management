@@ -129,7 +129,7 @@ class Pacer:
 
     # ---------------------------------------------------------------------- uses
     def credit_pool(self, *, share: Decimal = Decimal("0.85"), frontier_share: Decimal = Decimal("0.70"),
-                    floor: Decimal = Decimal("0.50")) -> Decimal:
+                    floor: Decimal = Decimal("0.50"), per_seconds: float = 86400.0) -> Decimal:
         """The day's pool of compute credits, out of both purses the owner funded.
 
         Most of the day's Sail allowance -- what an agent buys is mostly its sandbox seconds and
@@ -149,7 +149,10 @@ class Pacer:
         budget. Sleeping boxes cost nothing, so the count of retired ones does not enter this."""
         if not self.running():
             return ZERO
-        return max(self.allowance("sail") * share + self.allowance("openai") * frontier_share, floor).quantize(Decimal("0.01"))
+        day = max(self.allowance("sail") * share + self.allowance("openai") * frontier_share, floor)
+        # The pool is a DAY's worth; the league pays it out one epoch at a time, and an epoch is
+        # not always a day. Paying a day's pool every six hours would spend four budgets a day.
+        return (day * Decimal(str(per_seconds)) / Decimal("86400")).quantize(Decimal("0.01"))
 
     def report(self) -> dict[str, Any]:
         return {"day": self.day() + 1, "of": self.days, "running": self.running(),

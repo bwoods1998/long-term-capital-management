@@ -221,7 +221,7 @@ class HouseTest(HouseCase):
         # Nobody has a record yet. Before the expedition's first day the pool is the game file's $2; the
         # unearned performance share follows the floors (the owner wants the budget used), so all of it is paid.
         gained = self.house.economy.balance(agent.id) - before
-        self.assertGreater(gained, D("1.99"))
+        self.assertGreater(gained, D(self.house.game["economy"]["daily_pool_usd"]) - D("0.01"))
         self.assertLess(gained, D("2.01"))
 
     def test_during_the_expedition_the_days_pool_is_drawn_from_both_budgets(self):
@@ -234,7 +234,8 @@ class HouseTest(HouseCase):
         payout = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "payout"][-1]
         # 85% of Sail's $5 a day and 70% of the frontier's, because an agent buys research with
         # one and Merton's time with the other, all of it paid out
-        self.assertEqual((D(payout["pool_usd"]), D(payout["paid_usd"]).quantize(D("0.01"))), (D("7.75"), D("7.75")))
+        # a quarter of the day, because the league pays four times a day now
+        self.assertEqual((D(payout["pool_usd"]), D(payout["paid_usd"]).quantize(D("0.01"))), (D("1.94"), D("1.94")))
         report = self.house.ledger.last("ops.budget").payload
         self.assertEqual((report["what"], report["day"], report["of"], report["sail"]["budget_usd"]), ("expedition", 1, 10, "50"))
 
