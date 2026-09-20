@@ -81,24 +81,69 @@ class TuitionTest(unittest.TestCase):
         self.assertEqual((state["limit_usd"], state["max_agents"]), (D("50"), 4))
 
     def test_the_fifth_agent_waits_on_paper(self):
-        for i in range(4):
-            self.assertTrue(self.house.tuition()["room"], i)
+        with self.limit(150):
+            for i in range(4):
+                self.assertTrue(self.house.tuition()["room"], i)
+                self.on_micro(f"m{i}")
+            state = self.house.tuition()
+            self.assertEqual((state["seated"], state["room"]), (4, False))
+
+    def test_fifty_dollars_reserves_two_full_stakes_not_four_drawdown_stops(self):
+        for i in range(2):
+            self.assertTrue(self.house.tuition()["room"])
             self.on_micro(f"m{i}")
         state = self.house.tuition()
-        self.assertEqual((state["seated"], state["room"]), (4, False))
+        self.assertFalse(state["room"])
+        self.assertEqual(state["worst_case_loss_usd"], D(50))
+        self.assertEqual(state["headroom_usd"], D(0))
 
     def test_what_the_seated_could_still_lose_is_budgeted_before_it_is_lost(self):
-        # Four agents fit under $50 only while nothing has been lost: 4 x $7.50 = $30. After a $5
-        # loss a second agent still fits under $20.50 (5 + 2 x 7.50 = 20) but not under $19.
+        # The first seat's existing loss is part of its full $25 risk, not an additional $5.
+        # Two seats fit under $50 even after a mark falls, but not under $49.
         a = self.on_micro("aa")
         self.lose_about_five_dollars(a)
         spent = self.house.tuition()["spent_usd"]
         self.assertTrue(D("4.9") < spent < D("5.2"), spent)
-        with self.limit("20.50"):
+        with self.limit("50"):
             self.assertTrue(self.house.tuition()["room"])
-        with self.limit("19"):
+        with self.limit("49"):
             state = self.house.tuition()
             self.assertEqual((state["room"], state["closed"]), (False, False))
+
+    def test_gap_through_stop_cannot_oversubscribe_the_experimental_loss_budget(self):
+        from league.book import Intent
+
+        book = self.house.books["alpaca"]
+        instruments = [instrument_for("alpaca", {"symbol": symbol}) for symbol in ("BTC/USD", "ETH/USD")]
+        for inst in instruments:
+            self.real.set_quote(inst, "79998", "80002")
+        admitted = 0
+        for i in range(4):
+            if not self.house.tuition()["room"]:
+                break
+            agent = self.on_micro(f"gap{i}")
+            admitted += 1
+            for j, inst in enumerate(instruments):
+                outcome = book.submit([Intent.new(agent=agent.id, instrument=inst, side="buy", quantity="0.000124",
+                    reason="gap stress", created_at=now_iso(self.clock), nonce=f"{i}:{j}")])[0]
+                self.assertIn(outcome.status, ("filled", "sent"), outcome.detail)
+        for inst in instruments:
+            self.real.set_quote(inst, "0.99", "1.01")
+        book.mark()
+        self.assertEqual(admitted, 2)
+        self.assertLess(self.house.tuition()["spent_usd"], D(50))
+
+    def test_demoted_unsettled_holdings_still_reserve_headroom(self):
+        agent = self.on_micro("pending")
+        self.lose_about_five_dollars(agent)
+        self.house.evaluator.demote(agent.id, "awaiting exit")
+        with self.limit(30):
+            state = self.house.tuition()
+            self.assertEqual(state["seated"], 0)
+            self.assertEqual(state["pending_accounts"], 1)
+            self.assertGreater(state["worst_case_loss_usd"], state["spent_usd"])
+            self.assertFalse(state["room"])
+            self.assertFalse(state["closed"])  # settlement/exit can return the reserved cash
 
     def test_an_eligible_agent_is_not_even_audited_when_there_is_no_room(self):
         from league.evaluator import Verdict
@@ -163,6 +208,29 @@ class TuitionTest(unittest.TestCase):
         self.assertIn(paper_only.id, self.house.books["alpaca-paper"].accounts)
         self.assertEqual(self.house.tuition()["spent_usd"], D(0))
 
+    def test_profitable_swept_account_is_funded_once_on_reentry_and_can_wake(self):
+        from league.book import Intent
+
+        agent = self.on_micro("winner")
+        book = self.house.books["alpaca"]
+        book.submit([Intent.new(agent=agent.id, instrument=instrument_for("alpaca", BTC), side="buy", quantity="0.000124",
+            reason="profit then reentry", created_at=now_iso(self.clock), nonce="profit")])
+        self.quote(800000)
+        self.house._wind_down(agent, book)
+        account = book.account(agent.id)
+        self.assertLess(account.staked, D(-25))
+        self.assertTrue(account.swept)
+        self.assertEqual(account.cash, D(0))
+        for _ in range(5):
+            self.house.seat(agent)
+        self.assertEqual(account.cash, D(25))
+        self.assertLess(account.staked, D(0))
+        self.assertEqual(len([e for e in self.house.ledger.iter(kinds="book.stake", agent=agent.id)
+                              if e.payload["book"] == "alpaca" and D(e.payload["usd"]) > 0]), 2)
+        outcome = self.house.wake(agent)
+        self.assertNotEqual(outcome.get("skipped"), "no stake on its book yet")
+        self.assertEqual(account.cash, D(25))  # the wake did not lend a third stake
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -176,9 +244,10 @@ class TheGateMustNotSealItself(TuitionTest):
 
     def test_no_room_and_nobody_seated_is_closed_and_says_so(self):
         agent = self.on_micro("loser")
-        with self.limit(8):                       # reserve is $7.50, so the dead zone is $0.50 wide
+        with self.limit(29):                      # a full new $25 stake no longer fits after a $5 loss
             self.lose_about_five_dollars(agent)
             self.house.evaluator.demote(agent.id, "test: off the rung, its loss stays on the meter")
+            self.house._wind_down(agent, self.house.books["alpaca"])
             state = self.house.tuition()
             self.assertEqual(state["seated"], 0)
             self.assertFalse(state["room"])

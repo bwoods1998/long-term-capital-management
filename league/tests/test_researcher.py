@@ -5,6 +5,8 @@ wrote down, so what is tested is the House's side: the tools, the charges, the j
 """
 
 import json
+import asyncio
+import concurrent.futures
 import tempfile
 import unittest
 from decimal import Decimal
@@ -16,6 +18,7 @@ from league.commons import Commons
 from league.economy import Economy
 from league.ledger import Ledger
 from league.researcher import Researcher, TOOLS, _trim
+from league.sandbox import SandboxError
 from league.tests.fakes import Clock
 
 D = Decimal
@@ -146,6 +149,130 @@ class Looking(ResearchCase):
         self.researcher([]).research(self.parent, {}, session="s1")
         self.assertEqual((self.script.kwargs[0]["profile"], self.script.kwargs[0]["reasoning_effort"]), ("pro_flex", "medium"))
         self.assertEqual(before - self.economy.balance(self.parent.id), D("0.01"))
+
+
+class CandidateRetention(ResearchCase):
+    """Trying another idea must not discard code the House can already put to work."""
+
+    def run_candidates(self, outcomes):
+        codes = [CODE + f"\n# candidate {index}\n" for index in range(len(outcomes))]
+        researcher = self.researcher(
+            [[("replay", {"code": code, "purpose": f"idea {index}"})] for index, code in enumerate(codes)]
+            + [[("finish", {"summary": "Keep the improvement that can be used."})]]
+        )
+        results = iter(outcomes)
+        researcher.run_replay = lambda agent, code: next(results)
+        return researcher.research(self.parent, {}, session="candidates"), codes
+
+    def test_a_later_failed_replay_keeps_the_passing_candidate(self):
+        out, codes = self.run_candidates([
+            {"passed": True, "numbers": {"trades": 24}},
+            {"passed": False, "numbers": {"trades": 40, "reasons": ["lost"]}},
+        ])
+        self.assertEqual(out.candidate["code"], codes[0])
+        self.assertTrue(out.candidate["passed"])
+        self.assertEqual(out.trials, 2)
+        self.assertFalse(self.tool_output(2, 1)["passed"])  # the model still sees the failed result
+        retained = [row.payload for row in self.ledger.iter(kinds="agent.research") if row.payload.get("status") == "retained"]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0]["_candidate"], out.candidate)
+        self.assertEqual(retained[0]["session"], "candidates")
+
+    def test_a_selected_candidate_survives_process_exit_before_the_summary(self):
+        researcher = self.researcher([
+            [("replay", {"code": CODE, "purpose": "passing idea"})],
+            [("replay", {"code": CODE + "\n# next idea", "purpose": "another idea"})],
+        ])
+
+        def replay(agent, code):
+            if code != CODE:
+                raise SystemExit("a worker restarted")
+            return {"passed": True, "needs": agent.needs, "params": agent.params, "numbers": {"trades": 24}}
+
+        researcher.run_replay = replay
+        with self.assertRaises(SystemExit):
+            researcher.research(self.parent, {}, session="interrupted")
+        saved = [row.payload for row in self.ledger.iter(kinds="agent.research") if row.payload.get("status") == "retained"]
+        self.assertEqual(saved[0]["_candidate"]["code"], CODE)
+        self.assertTrue(saved[0]["_candidate"]["passed"])
+        self.assertFalse([row for row in self.ledger.iter(kinds="agent.research") if row.payload.get("tool") == "summary"])
+
+    def test_a_failed_candidate_that_trades_survives_a_later_idle_candidate(self):
+        out, codes = self.run_candidates([
+            {"passed": False, "numbers": {"trades": 3}},
+            {"passed": False, "numbers": {"trades": 0}},
+        ])
+        self.assertEqual(out.candidate["code"], codes[0])
+        self.assertFalse(out.candidate["passed"])
+        self.assertEqual(out.candidate["numbers"]["trades"], 3)
+
+    def test_a_later_passing_candidate_replaces_a_failure(self):
+        out, codes = self.run_candidates([
+            {"passed": False, "numbers": {"trades": 3}},
+            {"passed": True, "numbers": {"trades": 24}},
+        ])
+        self.assertEqual(out.candidate["code"], codes[1])
+        self.assertTrue(out.candidate["passed"])
+
+    def test_the_latest_refinement_wins_within_the_same_eligibility_class(self):
+        for passed, trades in ((True, 24), (False, 3), (False, 0)):
+            with self.subTest(passed=passed, trades=trades):
+                # Each research session's token charges have durable, distinct identities.
+                self.clock.advance(1)
+                outcomes = [{"passed": passed, "numbers": {"trades": trades}}] * 2
+                codes = [CODE + "\n# before\n", CODE + "\n# after\n"]
+                researcher = self.researcher([
+                    [("replay", {"code": code, "purpose": "refinement"})] for code in codes
+                ])
+                results = iter(outcomes)
+                researcher.run_replay = lambda agent, code: next(results)
+                out = researcher.research(self.parent, {}, session=f"refinement-{passed}-{trades}")
+                self.assertEqual(out.candidate["code"], codes[1])
+
+    def test_a_later_replay_error_does_not_erase_a_usable_candidate(self):
+        out, codes = self.run_candidates([
+            {"passed": True, "numbers": {"trades": 24}},
+            {"passed": False, "error": "replay unavailable", "numbers": {}},
+        ])
+        self.assertEqual(out.candidate["code"], codes[0])
+        self.assertEqual(out.reason, "finished")
+
+    def test_a_later_unavailable_box_keeps_the_candidate_and_the_paid_cost(self):
+        r = self.researcher([
+            [("replay", {"code": CODE, "purpose": "passing idea"})],
+            [("replay", {"code": CODE + "\n# next idea", "purpose": "another idea"})],
+            [("finish", {"summary": "Keep the earlier passing idea."})],
+        ])
+
+        def replay(agent, code):
+            if code != CODE:
+                raise SandboxError("probe box unavailable")
+            return {"passed": True, "needs": agent.needs, "params": agent.params, "numbers": {"trades": 24}}
+
+        r.run_replay = replay
+        before = self.economy.balance(self.parent.id)
+        out = r.research(self.parent, {}, session="box-failed")
+        self.assertEqual(out.candidate["code"], CODE)
+        self.assertEqual((out.reason, out.trials), ("finished", 1))
+        self.assertEqual(out.cost_usd, D("0.03"))
+        self.assertEqual(before - self.economy.balance(self.parent.id), out.cost_usd)
+        self.assertIn("probe box unavailable", self.tool_output(2, 1)["error"])
+        errors = [row.payload for row in self.ledger.iter(kinds="agent.research") if row.payload.get("tool") == "replay_error"]
+        self.assertEqual(len(errors), 1)
+        self.assertFalse(errors[0]["counted_as_trial"])
+        self.assertTrue(self.ledger.last("agent.research").payload["candidate"])
+
+    def test_replay_cancellation_and_process_exit_still_propagate(self):
+        for exception in (asyncio.CancelledError, concurrent.futures.CancelledError, SystemExit):
+            with self.subTest(exception=exception.__name__):
+                r = self.researcher([[("replay", {"code": CODE, "purpose": "an idea"})]])
+
+                def cancelled(agent, code):
+                    raise exception("stop")
+
+                r.run_replay = cancelled
+                with self.assertRaises(exception):
+                    r.research(self.parent, {}, session=f"cancel-{exception.__module__}-{exception.__name__}")
 
 
 if __name__ == "__main__":

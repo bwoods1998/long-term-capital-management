@@ -4,6 +4,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from league.merton import Merton, ForgeError, parse_proposal
 from league.frontier import Answer, FrontierError
@@ -107,6 +108,13 @@ class MertonTest(unittest.TestCase):
         row = self.merton(FakeFrontier(answer), FakeForge(fail=True)).run("teacher")
         self.assertIn("not configured", row["forge_error"])
 
+    def test_a_paid_unreadable_pass_retains_its_cost(self):
+        frontier = SimpleNamespace(ask=lambda **kw: Answer("not JSON", Decimal("0.85"), {}, "test-model"))
+        row = self.merton(frontier, FakeForge()).run("architect")
+        self.assertTrue(row["error"])
+        self.assertEqual(row["cost_usd"], "0.85")
+        self.assertEqual(self.ledger.last("merton.pass").payload["cost_usd"], "0.85")
+
     def test_the_toolsmith_does_not_spend_money_on_an_empty_queue(self):
         frontier = FakeFrontier({"files": []})
         row = self.merton(frontier, FakeForge(), evidence=lambda role: {"open_requests": []}).run("toolsmith")
@@ -120,6 +128,67 @@ class MertonTest(unittest.TestCase):
         merton.run("toolsmith")
         rows = [e.payload for e in self.ledger.iter(kinds="tool.fulfilled")]
         self.assertEqual([(r["request"], r["outcome"][:20]) for r in rows], [("req-1", "cannot be a pure too")])
+
+    def tool_proposal(self, forge):
+        self.ledger.append("tool.request", {"name": "midpoint", "description": "price an existing two-sided quote"}, agent="a1", id="req-1")
+        content = "def midpoint(bid, ask):\n    return (bid + ask) / 2\n"
+        answer = {"summary": "quote helper", "files": [{"path": "league/tools/midpoint.py", "content": content}],
+                  "answers": [{"request": "req-1", "outcome": "midpoint helper implemented"}]}
+        return self.merton(FakeFrontier(answer), forge, evidence=lambda role: {"open_requests": [{"id": "req-1"}]}), content
+
+    def test_a_tool_request_survives_a_failed_forge(self):
+        merton, _ = self.tool_proposal(FakeForge(fail=True))
+        self.assertIn("forge_error", merton.run("toolsmith"))
+        self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 0)
+
+    def test_a_tool_request_survives_failed_ci(self):
+        forge = FakeForge()
+        merton, _ = self.tool_proposal(forge)
+        merton.run("toolsmith")
+        self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 0)
+        forge.statuses[7] = {"state": "open", "checks": {"conclusion": "failure"}}
+        merton.follow()
+        self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 0)
+
+    def test_a_merged_tool_is_fulfilled_only_once_its_contents_are_running(self):
+        forge = FakeForge()
+        merton, content = self.tool_proposal(forge)
+        merton.run("toolsmith")
+        forge.statuses[7] = {"merged": True, "state": "closed", "checks": {"conclusion": "success"}}
+        root = Path(self.dir.name)
+        with patch("league.merton.__file__", str(root / "league/merton.py")):
+            self.assertEqual([r["status"] for r in merton.follow()], ["merged"])
+            self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 0)
+            # A later process sees the durable pending change, not an in-memory proposal.
+            restarted = self.merton(FakeFrontier(), forge)
+            tool = root / "league/tools/midpoint.py"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("def midpoint(bid, ask):\n    return bid\n")
+            self.assertEqual(restarted.follow(), [])
+            tool.write_text(content)
+            self.assertEqual([r["status"] for r in restarted.follow()], ["deployed"])
+            self.assertEqual(self.ledger.last("tool.fulfilled").payload["status"], "deployed")
+            self.assertEqual(restarted.follow(), [])
+            self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 1)
+
+    def test_a_rejected_tool_file_does_not_close_its_request(self):
+        self.ledger.append("tool.request", {"name": "x"}, id="req-1")
+        answer = {"files": [{"path": "league/constitution.py", "content": "changed"}],
+                  "answers": [{"request": "req-1", "outcome": "fixed"}]}
+        self.merton(FakeFrontier(answer), FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1"}]}).run("toolsmith")
+        self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 0)
+
+    def test_duplicate_and_invalid_tool_answers_do_not_lose_the_paid_pass(self):
+        frontier = FakeFrontier({"files": [], "answers": [
+            {"request": {}, "outcome": "bad id"},
+            {"request": "req-1", "outcome": "first answer"},
+            {"request": "req-1", "outcome": "final answer"},
+        ]})
+        merton = self.merton(frontier, FakeForge(), evidence=lambda role: {"open_requests": [{"id": "req-1"}]})
+        row = merton.run("toolsmith")
+        self.assertEqual(row["cost_usd"], "1.25")
+        self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 1)
+        self.assertEqual(self.ledger.last("tool.fulfilled").payload["outcome"], "final answer")
 
     def test_each_role_is_due_on_its_own_clock(self):
         merton = self.merton(FakeFrontier({"files": []}), FakeForge())
@@ -180,6 +249,9 @@ class Consulting(unittest.TestCase):
         asked = self.frontier.asked[0]
         self.assertEqual((asked["agent"], asked["effort"]), ("consult-meriwether-3", "high"))
         self.assertIn("THE STRATEGY CONTRACT", asked["system"])
+        prompt = json.loads(asked["user"])
+        self.assertEqual(prompt["question"], "Why do my fills lose?")
+        self.assertEqual(prompt["evidence"], {"strategy_file": "x"})
 
     def test_a_whole_file_comes_back_whole(self):
         code = "NEEDS = {}\nPARAMS = {}\n\ndef decide(ctx):\n    return {}\n"
@@ -194,6 +266,15 @@ class Consulting(unittest.TestCase):
         self.assertEqual((out["cost_usd"], out["code"], out["error"]), ("0", "", True))
         self.assertIn("could not be reached", out["answer"])
         self.assertTrue(self.ledger.last("merton.pass").payload["error"])
+
+    def test_an_unreadable_paid_consultation_is_still_billed(self):
+        merton = self.merton()
+        merton.frontier = SimpleNamespace(ask=lambda **kw: Answer("not JSON", Decimal("0.37"), {}, "test-model"))
+        out = merton.consult(self.agent, "Help with fees?", {}, contract="C")
+        self.assertTrue(out["error"])
+        self.assertEqual(out["cost_usd"], "0.37")
+        self.assertIn("unreadable", out["answer"])
+        self.assertEqual(self.ledger.last("merton.pass").payload["cost_usd"], "0.37")
 
     def test_he_is_told_what_he_may_not_do(self):
         from league.merton import CONSULT

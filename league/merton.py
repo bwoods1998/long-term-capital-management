@@ -296,14 +296,17 @@ class Merton:
     def consult(self, agent: Any, question: str, evidence: Mapping[str, Any], *, contract: str) -> dict[str, Any]:
         """One agent hires Merton with its own credits. Returns `{"answer", "code", "confidence",
         "cost_usd"}`; `code` is empty unless Merton wrote a whole strategy file. Never raises: a
-        frontier failure is an answer that says so and costs the agent nothing."""
+        refused call costs nothing; an unreadable paid answer retains its metered cost."""
         system = CONSULT + "\n\nTHE STRATEGY CONTRACT (the file format any code you write must follow)\n\n" + contract
+        reply = None
         try:
-            reply = self.frontier.ask(system=system, user=json.dumps(evidence, default=str),
+            reply = self.frontier.ask(system=system, user=json.dumps({"question": question, "evidence": evidence}, default=str),
                                       agent=f"consult-{agent.id}", max_output_tokens=12000, effort="high")
             answer = reply.json()
         except FrontierError as exc:
-            row = {"answer": f"Merton could not be reached ({exc}).", "code": "", "confidence": "low", "cost_usd": "0", "error": True}
+            detail = "could not be reached" if reply is None else "returned an unreadable answer"
+            row = {"answer": f"Merton {detail} ({exc}).", "code": "", "confidence": "low",
+                   "cost_usd": format(reply.cost_usd, "f") if reply is not None else "0", "error": True}
             self.ledger.append("merton.pass", {"role": "consultant", "agent": agent.id, "at_epoch": self.clock(), **row})
             return row
         code = str(answer.get("code") or "")
@@ -357,27 +360,40 @@ class Merton:
         system = BRIEFS[role] + "\n\n" + ANSWER
         if role in ("architect", "toolsmith"):
             system += "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT.read_text(encoding="utf-8")
+        answer = None
         try:
             answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"merton-{role}",
                                        max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000,
                                        effort=str(self.effort.get(role) or "medium"))
             proposal = parse_proposal(role, answer.json(), answer.cost_usd)
         except FrontierError as exc:
-            return self._record(role, {"summary": f"the pass could not run: {exc}", "cost_usd": "0", "files": 0, "error": True})
+            return self._record(role, {"summary": f"the pass failed: {exc}",
+                                      "cost_usd": format(answer.cost_usd, "f") if answer is not None else "0", "files": 0, "error": True})
         row = {"summary": proposal.summary, "cost_usd": format(proposal.cost_usd, "f"), "files": len(proposal.files), "dropped": proposal.dropped[:10]}
+        answers = []
         if role == "toolsmith":
-            # Every request gets an answer the agents can read, so the queue does not fill with
-            # things that will never be built.
-            waiting = {r["id"] for r in evidence.get("open_requests") or []}
-            for item in proposal.answers:
-                if item.get("request") in waiting and str(item.get("outcome") or "").strip():
-                    self.ledger.append("tool.fulfilled", {"request": item["request"], "outcome": str(item["outcome"])[:1200], "change": None})
+            waiting = {r.get("id") for r in evidence.get("open_requests") or []
+                       if isinstance(r, dict) and isinstance(r.get("id"), str)}
+            # Model output is untrusted; one request has one durable resolution, even when
+            # the model repeats itself. Bad IDs must not discard a paid pass's cost record.
+            unique = {item["request"]: {"request": item["request"], "outcome": str(item["outcome"])[:1200]}
+                      for item in proposal.answers
+                      if isinstance(item.get("request"), str) and item["request"] in waiting
+                      and str(item.get("outcome") or "").strip()}
+            answers = list(unique.values())
+            # Advice can close a request immediately. A proposed implementation cannot: a
+            # failed forge, failed CI or a refused deployment must leave the need discoverable.
+            if not proposal.files and not proposal.dropped:
+                for item in answers:
+                    self.ledger.append("tool.fulfilled", {**item, "change": None, "status": "answered"})
         if proposal.files:
             try:
                 made = self.forge.propose(role=role, slug=proposal.slug, title=proposal.title, body=proposal.body, files=proposal.files)
                 row.update(branch=made.get("branch"), number=made.get("number"), url=made.get("url"))
                 self.ledger.append("merton.change", {"role": role, "branch": made.get("branch"), "number": made.get("number"), "title": proposal.title,
-                                                    "status": "opened", "paths": [f["path"] for f in proposal.files]})
+                                                    "status": "opened", "paths": [f["path"] for f in proposal.files],
+                                                    "tool_answers": answers,
+                                                    "file_digests": {f["path"]: hashlib.sha256(f["content"].encode()).hexdigest() for f in proposal.files}})
             except ForgeError as exc:
                 row["forge_error"] = str(exc)[:300]
         return self._record(role, row)
@@ -396,6 +412,11 @@ class Merton:
                 latest[int(entry.payload["number"])] = dict(entry.payload)
         out = []
         for number, row in latest.items():
+            if row.get("status") == "merged":
+                deployed = self._fulfil_deployed(row)
+                if deployed is not None:
+                    out.append(deployed)
+                continue
             if row.get("status") not in ("opened", "pending"):
                 continue
             try:
@@ -408,7 +429,36 @@ class Merton:
                 row = {**row, "status": verdict}
                 self.ledger.append("merton.change", row)
                 out.append(row)
+                if verdict == "merged":
+                    deployed = self._fulfil_deployed(row)
+                    if deployed is not None:
+                        out.append(deployed)
         return out
+
+    def _fulfil_deployed(self, row: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Finish a tool request only when this process is running the accepted file contents.
+
+        A merge is not a deployment. Persisting answers and hashes on the change also means
+        a restart cannot lose the work waiting for the updater and its canary.
+        """
+        answers, digests = row.get("tool_answers"), row.get("file_digests")
+        if not answers or not digests:
+            return None
+        root = Path(__file__).resolve().parents[1]
+        for name, expected in digests.items():
+            if ci.guard([name], "toolsmith"):
+                return None
+            try:
+                if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected:
+                    return None
+            except OSError:
+                return None
+        for item in answers:
+            self.ledger.append("tool.fulfilled", {**item, "change": row.get("branch"), "status": "deployed"},
+                               id=f"tool-deployed:{row['number']}:{item['request']}")
+        deployed = {**row, "status": "deployed"}
+        self.ledger.append("merton.change", deployed)
+        return deployed
 
 
 def _epoch(iso: str) -> float:

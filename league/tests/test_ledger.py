@@ -3,6 +3,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from league.ledger import ChainBroken, HOUSE, Ledger, LedgerConflict, LedgerError, public_view
 
@@ -119,6 +120,53 @@ class LedgerTest(unittest.TestCase):
         b = self.ledger.append("agent.died", {"why": "credits"}, agent="a1")
         self.assertEqual(b.previous_hash, a.digest)
         self.assertEqual(self.ledger.verify(), 2)
+
+    def test_atomic_batch_is_invisible_to_other_connections_until_every_row_commits(self):
+        rows = [{"kind": "book.fill", "payload": {"q": str(n)}, "id": f"fill-{n}"} for n in range(3)]
+        original = self.ledger._append_one
+        reader = sqlite3.connect(str(self.path), isolation_level=None)
+        observed = []
+
+        def observe_during_transaction(**row):
+            entry = original(**row)
+            observed.append(reader.execute("SELECT COUNT(*) FROM ledger").fetchone()[0])
+            return entry
+
+        try:
+            with patch.object(self.ledger, "_append_one", side_effect=observe_during_transaction):
+                entries = self.ledger.append_many(rows)
+            self.assertEqual(observed, [0, 0, 0])
+            self.assertEqual(reader.execute("SELECT COUNT(*) FROM ledger").fetchone()[0], 3)
+            self.assertEqual([entry.seq for entry in entries], [1, 2, 3])
+            self.assertEqual(self.ledger.append_many(rows), entries)
+            self.assertEqual(self.ledger.verify(), 3)
+        finally:
+            reader.close()
+
+    def test_a_later_conflict_or_invalid_payload_rolls_back_the_whole_new_batch(self):
+        self.ledger.append("book.fill", {"q": "original"}, id="existing")
+        for bad, error in (({"kind": "book.fill", "payload": {"q": "changed"}, "id": "existing"}, LedgerConflict),
+                           ({"kind": "book.fill", "payload": {"oversized": "x" * 200_001}}, LedgerError),
+                           ({"kind": "unknown", "payload": {}}, LedgerError)):
+            with self.subTest(error=error.__name__, kind=bad["kind"]):
+                with self.assertRaises(error):
+                    self.ledger.append_many([{"kind": "book.fill", "payload": {"q": "new"}, "id": "new"}, bad])
+                self.assertIsNone(self.ledger.get("new"))
+                self.assertEqual(self.ledger.verify(), 1)
+
+    def test_an_interrupt_inside_a_batch_rolls_back_and_the_connection_remains_usable(self):
+        original = self.ledger._append_one
+
+        def interrupted(**row):
+            original(**row)
+            raise KeyboardInterrupt()
+
+        with patch.object(self.ledger, "_append_one", side_effect=interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                self.ledger.append_many([{"kind": "book.fill", "payload": {}, "id": "interrupted"}])
+        self.assertIsNone(self.ledger.get("interrupted"))
+        self.ledger.append("book.fill", {}, id="after")
+        self.assertEqual(self.ledger.verify(), 1)
 
 
 if __name__ == "__main__":

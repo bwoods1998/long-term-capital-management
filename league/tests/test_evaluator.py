@@ -1544,6 +1544,46 @@ class Family(EvalCase):
         verdict = self.ev.judge("a", "real", peers=["thin"], family="favorites")
         self.assertEqual(verdict.decision, "hold")
 
+    def test_short_lived_members_contribute_every_outcome_before_they_qualify(self):
+        # Regression: excluding members below the ten-block threshold erased the whole loss of
+        # an agent killed early. The threshold counts mature members; it does not censor returns.
+        for name in "abc":
+            self.member(name, self.series(name))
+        self.member("early-loss", [-1.0], pnls=(-15.0,))
+        self.member("new-winner", [0.006], pnls=(0.15,))
+        self.ledger.append("agent.died", {"cause": "evidence"}, agent="early-loss")
+        series, trades, _, counted = self.ev.family_record(["a", "b", "c", "early-loss", "new-winner"], "real")
+        self.assertEqual(counted, 3)
+        self.assertEqual(len(trades), 38)
+        self.assertAlmostEqual(series[0], (0.012 - 0.009 + 0.003 - 1.0 + 0.006) / 5, places=12)
+        self.assertAlmostEqual(series[1], (0.004 + 0.012 - 0.010) / 3, places=12)
+        self.assertLess(sum(series), 0)
+        self.assertNotEqual(self.ev.judge("a", "real", peers=["b", "c", "early-loss", "new-winner"], family="favorites").decision,
+                            "eligible")
+
+    def test_sweeping_a_dead_members_account_cannot_erase_its_trades(self):
+        # Regression: death does not write a rung change. Its last stay had no upper bound, so
+        # trade_returns used the post-sweep net stake and lost a profitable dead member's trades.
+        self.member("a", self.series("a"))
+        before = self.ev.family_record(["a"], "real")
+        self.stake("a", -25.6, at(), book="real")
+        self.ledger.append("agent.died", {"cause": "credits"}, agent="a")
+        after = self.ev.family_record(["a"], "real")
+        self.assertEqual(after, before)
+        self.assertEqual(len(after[1]), 12)
+
+    def test_sweeping_a_losing_members_account_cannot_amplify_its_trade_returns(self):
+        # A losing account retains a positive net stake after sweeping; using that residue used
+        # to turn a $2 loss on $25 into a 100% trade loss and a 250% entry risk.
+        self.member("a", self.series("a"), pnls=(-2.0,))
+        before = self.ev.family_record(["a"], "real")
+        self.stake("a", -23.0, at(), book="real")
+        self.ledger.append("agent.died", {"cause": "credits"}, agent="a")
+        after = self.ev.family_record(["a"], "real")
+        self.assertEqual(after, before)
+        self.assertEqual(after[1], [-2.0 / 25.0])
+        self.assertEqual(after[2], 5.0 / 25.0)
+
     def test_paper_blocks_are_not_pooled(self):
         self.member("a", self.series("a"))
         self.ev.seat("paper-only", 1, "test")

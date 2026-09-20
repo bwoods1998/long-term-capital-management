@@ -29,6 +29,7 @@ offer at 1 - q and would trade against a resting YES bid at or above it.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import threading
 import time
@@ -46,10 +47,9 @@ from ltcm.broker import (
     Position,
     Quote,
     RejectedOrder,
-    UnknownOutcome,
     money,
 )
-from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_key, event_cluster
+from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, gross_exposure
 
 from .fees import QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
@@ -221,6 +221,7 @@ class Account:
     fees: Decimal = ZERO
     swept: bool = False
     holdings: dict[str, Holding] = field(default_factory=dict)
+    funded: bool = False  # a positive stake was ever lent; net staked can be negative after profits return
 
 
 @dataclass
@@ -254,10 +255,15 @@ class Working:
     filled: Decimal = ZERO
     notional: Decimal = ZERO  # sum of price x quantity attributed so far
     fees_seen: Decimal = ZERO  # venue-reported fees attributed so far
+    reference_price: Decimal | None = None  # reserve an unfilled market buy at its ask, not its liquidation bid
+    allocation: dict[str, Any] | None = None  # durable targets for an incremental venue fill being attributed
 
     @property
     def open(self) -> bool:
-        return self.status in OPEN_STATUSES
+        # Older releases recorded a terminal submit response before attributing its fills.
+        # Recover an interrupted attribution by reading that same venue order again; the
+        # terminal label alone must never make an unbooked fill disappear from polling.
+        return self.status in OPEN_STATUSES or (self.status == "filled" and self.filled < self.quantity)
 
     @property
     def remaining(self) -> Decimal:
@@ -316,8 +322,9 @@ DEFAULT_RULES: dict[str, Any] = {
     "max_limit_deviation_pct": "0.10",
     "floor_max_daily_loss_pct": "0.08",
     "max_quote_age_seconds": 900,
-    # Alpaca's free option feed is fifteen minutes delayed (the live one needs the OPRA agreement
-    # signed). An option entry is a LIMIT order, so a stale quote can cost a fill, not a price.
+    # Alpaca's indicative options feed supplies modified quotes; its trades are delayed.
+    # These quotes are not executable NBBO (the live OPRA feed needs its agreement signed).
+    # This age limit is an existing guard, not a claim that indicative quotes are executable.
     "max_option_quote_age_seconds": 1500,
     "market_slippage_pct": "0.005",
 }
@@ -390,6 +397,9 @@ class Book:
         self.limits: dict[str, Limits] = {}
         self.accounts: dict[str, Account] = {}
         self.orders: dict[str, Working] = {}
+        self._cross_plans: dict[str, dict[str, Any]] = {}
+        self._cross_applied: set[str] = set()
+        self._cross_cursor = 0
         self.seen_intents: set[str] = set()
         self.marks: dict[str, Decimal] = {}  # instrument key -> last liquidation mark
         self.day_open: dict[str, tuple[str, Decimal]] = {}  # agent -> (day, equity at its start)
@@ -413,15 +423,17 @@ class Book:
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
+        self._finish_crosses()
 
     # ----------------------------------------------------------------- folding
     def _fold(self) -> None:
         """Rebuild state from the ledger. Every mutation below appends first and applies the
         appended row through `_apply`, so the live state and a rebuilt one are the same state."""
-        kinds = ("book.stake", "book.fill", "book.settle", "book.order", "book.baseline", "agent.intent")
+        kinds = ("book.stake", "book.fill", "book.settle", "book.order", "book.baseline", "book.cross_plan", "agent.intent")
         for entry in self.ledger.iter(kinds=kinds):
             if entry.payload.get("book") == self.name:
                 self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+            self._cross_cursor = entry.seq
 
     def _account(self, agent: str) -> Account:
         account = self.accounts.get(agent)
@@ -439,7 +451,13 @@ class Book:
             usd = money(p["usd"])
             account.staked += usd
             account.cash += usd
-            account.swept = usd < 0  # the House took the account's cash back: it is closed until staked again
+            if usd > 0:
+                account.funded = True
+                account.swept = False
+            elif usd < 0:
+                # Sizing can return only part of a loan, or leave holdings that will later
+                # settle. Only an empty account has closed and needs a fresh stake on reentry.
+                account.swept = account.cash == 0 and not account.holdings
             opened = self.day_open.get(agent)
             if opened is not None and opened[0] == at[:10]:
                 # Capital lent or taken back is not a day's profit or loss: without this, sweeping a
@@ -451,6 +469,8 @@ class Book:
                 self._apply_house(p)
             else:
                 self._apply_fill(agent, p, at)
+            if p.get("cross_plan_id"):
+                self._cross_applied.add(f"{p['source']}:{p['intent_id']}")
         elif kind == "book.baseline":
             if self.baseline_at is None:
                 self.baseline_at = at  # when this book first looked at its venue: fees from before it are not its own
@@ -467,16 +487,46 @@ class Book:
                 del account.holdings[instrument.key]
         elif kind == "book.order":
             self._apply_order(p)
+        elif kind == "book.cross_plan":
+            if p.get("complete"):
+                plan = self._cross_plans.get(p["plan_id"])
+                if plan and all(fill["id"] in self._cross_applied for fill in plan["fills"]):
+                    self._cross_plans.pop(p["plan_id"], None)
+            else:
+                self._cross_plans[p["plan_id"]] = dict(p)
 
     def _apply_fill(self, agent: str, p: Mapping[str, Any], at: str) -> None:
         account = self._account(agent)
+        self._apply_account_fill(account, p, at)
+        if money(p["position_delta"]) != 0:
+            instrument = Instrument.from_dict(p["instrument"])
+            self._traded[position_key(instrument)] = instrument
+        order_id = p.get("order_id")
+        working = self.orders.get(order_id) if order_id else None
+        if working is not None and p.get("source") == "venue":
+            self._fills_since_reconcile += 1
+            traded = money(p["quantity"])
+            if working.order_type == "limit" and self.fees.family == "alpaca":
+                self._fee_slack_usd += money(p.get("fee_usd") or 0)
+                if money(p.get("fee_quantity") or 0) > 0:
+                    key = position_key(working.instrument)
+                    self._fee_slack_units[key] = self._fee_slack_units.get(key, ZERO) + money(p["fee_quantity"])
+            working.filled += traded
+            working.notional += traded * money(p["price"])
+            working.fees_seen += money(p.get("venue_fee") or 0)
+            for share in working.shares:
+                if share.intent_id == p.get("intent_id"):
+                    share.filled += traded
+
+    @staticmethod
+    def _apply_account_fill(account: Account, p: Mapping[str, Any], at: str) -> None:
+        """Apply a fill to one account, also used to price a cross against a private copy."""
         cash_delta = money(p["cash_delta"])
         position_delta = money(p["position_delta"])
         account.cash += cash_delta
         account.fees += money(p.get("fee_usd") or 0)
         if position_delta != 0:
             instrument = Instrument.from_dict(p["instrument"])
-            self._traded[position_key(instrument)] = instrument
             holding = account.holdings.get(instrument.key)
             if holding is None:
                 holding = account.holdings[instrument.key] = Holding(instrument)
@@ -494,22 +544,6 @@ class Book:
                 holding.cost -= basis
             if holding.quantity <= 0:
                 del account.holdings[instrument.key]
-        order_id = p.get("order_id")
-        working = self.orders.get(order_id) if order_id else None
-        if working is not None and p.get("source") == "venue":
-            self._fills_since_reconcile += 1
-            traded = money(p["quantity"])
-            if working.order_type == "limit" and self.fees.family == "alpaca":
-                self._fee_slack_usd += money(p.get("fee_usd") or 0)
-                if money(p.get("fee_quantity") or 0) > 0:
-                    key = position_key(working.instrument)
-                    self._fee_slack_units[key] = self._fee_slack_units.get(key, ZERO) + money(p["fee_quantity"])
-            working.filled += traded
-            working.notional += traded * money(p["price"])
-            working.fees_seen += money(p.get("venue_fee") or 0)
-            for share in working.shares:
-                if share.intent_id == p.get("intent_id"):
-                    share.filled += traded
 
     def _apply_order(self, p: Mapping[str, Any]) -> None:
         order_id = str(p["order_id"])
@@ -531,9 +565,12 @@ class Book:
                 ],
                 submitted_at=p.get("submitted_at") or "",
                 liquidity=str(p.get("liquidity") or "taker"),
+                reference_price=None if p.get("reference_price") is None else money(p["reference_price"]),
             )
         working.status = p["status"]
         working.rested = bool(p.get("rested", working.rested))
+        if "allocation" in p:
+            working.allocation = dict(p["allocation"])
         if p.get("broker_order_id"):
             working.broker_order_id = p["broker_order_id"]
 
@@ -575,38 +612,40 @@ class Book:
                 if w.open and (agent is None or any(s.agent == agent for s in w.shares))
             ]
 
-    def _reserved_cash(self, agent: str) -> Decimal:
+    def _reservations(self, pending: Sequence[tuple[Intent, Quote]] = ()) -> list[tuple[str, Instrument, str, Decimal, Decimal, str]]:
+        """Unfilled commitments, including market intents accepted earlier in this batch.
+
+        Queued buys consume cash and exposure immediately; queued sells consume held units.
+        Neither a pending sale nor an unfilled buy supplies cash or units for another intent.
+        """
+        out = []
+        for working in self.orders.values():
+            if not working.open:
+                continue
+            price = working.limit_price or working.reference_price
+            if price is None:
+                quote = self._quote(working.instrument)  # an order recorded by an older release
+                price = (quote.reference(working.side) if quote is not None else None) or self.marks.get(working.instrument.key) or ZERO
+            for share in working.shares:
+                if share.quantity > share.filled:
+                    out.append((share.agent, working.instrument, working.side, share.quantity - share.filled, price, working.order_type))
+        for intent, quote in pending:
+            price = intent.limit_price or quote.reference(intent.side) or ZERO
+            out.append((intent.agent, intent.instrument, intent.side, intent.quantity, price, intent.order_type))
+        return out
+
+    def _reserved_cash(self, agent: str, pending: Sequence[tuple[Intent, Quote]] = ()) -> Decimal:
         total = ZERO
-        for working in self.orders.values():
-            if not working.open or working.side != "buy":
+        for owner, instrument, side, quantity, price, order_type in self._reservations(pending):
+            if owner != agent or side != "buy":
                 continue
-            price = working.limit_price or self.marks.get(working.instrument.key) or ZERO
-            for share in working.shares:
-                if share.agent == agent:
-                    total += (share.quantity - share.filled) * price * working.instrument.multiplier
+            if price <= 0:
+                return max(self._account(agent).cash, ZERO)  # unknown commitment: none of its cash is free to lend or spend
+            notional = quantity * price * instrument.multiplier
+            fee = self.fees.charge(instrument, "buy", quantity, price)
+            slack = notional * money(self.rules["market_slippage_pct"]) if order_type == "market" else ZERO
+            total += notional + fee.usd + slack
         return total
-
-    def _reserved_sells(self, agent: str) -> dict[str, Decimal]:
-        out: dict[str, Decimal] = {}
-        for working in self.orders.values():
-            if not working.open or working.side != "sell":
-                continue
-            for share in working.shares:
-                if share.agent == agent:
-                    key = working.instrument.key
-                    out[key] = out.get(key, ZERO) + (share.quantity - share.filled)
-        return out
-
-    def _working_event_buys(self, agent: str) -> dict[str, Decimal]:
-        out: dict[str, Decimal] = {}
-        for working in self.orders.values():
-            if not working.open or working.side != "buy" or working.instrument.asset_class != "event":
-                continue
-            market = (working.instrument.market_id or working.instrument.symbol).upper()
-            for share in working.shares:
-                if share.agent == agent and working.limit_price is not None:
-                    out[market] = out.get(market, ZERO) + (share.quantity - share.filled) * working.limit_price
-        return out
 
     def equity(self, agent: str) -> Decimal:
         """Cash plus holdings at their last liquidation mark (cost when never marked)."""
@@ -624,22 +663,6 @@ class Book:
     def total_equity(self) -> Decimal:
         with self._lock:
             return sum((self.equity(a) for a in self.accounts), ZERO)
-
-    def _event_exposure(self) -> dict[str, Decimal]:
-        """Every agent's event contracts at cost, by market and by cluster: the floor-wide view
-        the first run's cluster rule reads."""
-        book: dict[str, Decimal] = {}
-        for account in self.accounts.values():
-            for holding in account.holdings.values():
-                if holding.instrument.asset_class == "event" and holding.cost > 0:
-                    market = (holding.instrument.market_id or holding.instrument.symbol).upper()
-                    add_event_exposure(book, market, holding.cost)
-        for working in self.orders.values():
-            if working.open and working.side == "buy" and working.instrument.asset_class == "event":
-                market = (working.instrument.market_id or working.instrument.symbol).upper()
-                if working.limit_price is not None:
-                    add_event_exposure(book, market, working.remaining * working.limit_price)
-        return book
 
     # -------------------------------------------------------------------- risk
     def _manifest(self, agent: str, limits: Limits) -> Any:
@@ -695,7 +718,7 @@ class Book:
             return ZERO
         return equity - opened[1]
 
-    def check(self, intent: Intent, quote: Quote | None, now: str) -> list[str]:
+    def check(self, intent: Intent, quote: Quote | None, now: str, *, pending: Sequence[tuple[Intent, Quote]] = ()) -> list[str]:
         """Every reason this intent may not trade. Empty means it may."""
         reasons: list[str] = []
         limits = self.limits.get(intent.agent)
@@ -721,10 +744,35 @@ class Book:
         capabilities = set(self.broker.capabilities()) - {"short"}  # the live account cannot short
         equity = self.equity(intent.agent)
         floor_equity = self.total_equity()
+        reservations = self._reservations(pending)
+        if not reducing and any(side == "buy" and price <= 0 for _, _, side, _, price, _ in reservations):
+            reasons.append("an outstanding buy cannot be priced; new entries wait until its commitment is known")
+        working_sells: dict[str, Decimal] = {}
+        working_buys: dict[str, Decimal] = {}
+        working_event_buys: dict[str, Decimal] = {}
+        floor_event_exposure: dict[str, Decimal] = {}
+        for held_account in self.accounts.values():
+            for holding in held_account.holdings.values():
+                if holding.instrument.asset_class == "event" and holding.cost > 0:
+                    add_event_exposure(floor_event_exposure, (holding.instrument.market_id or holding.instrument.symbol).upper(), holding.cost)
+        for owner, instrument, side, quantity, price, _ in reservations:
+            key = instrument.key
+            value = quantity * price * instrument.multiplier
+            if side == "buy" and instrument.asset_class == "event":
+                market = (instrument.market_id or instrument.symbol).upper()
+                add_event_exposure(floor_event_exposure, market, value)
+                if owner == intent.agent:
+                    working_event_buys[market] = working_event_buys.get(market, ZERO) + value
+            if owner != intent.agent:
+                continue
+            if side == "sell":
+                working_sells[key] = working_sells.get(key, ZERO) + quantity
+            else:
+                working_buys[key] = working_buys.get(key, ZERO) + value
         ctx = RiskContext(
             manifest=self._manifest(intent.agent, limits),
             desk_equity=equity,
-            desk_cash=account.cash - self._reserved_cash(intent.agent),
+            desk_cash=account.cash - self._reserved_cash(intent.agent, pending),
             positions=positions,
             quote=quote,
             now=now,
@@ -736,15 +784,15 @@ class Book:
             kill_switch=bool(self.kill_switch and self.kill_switch()),
             market_open=self.market_open(intent.instrument, now) if self.market_open else None,
             adv_usd=None,
-            open_orders=len(self.open_orders(intent.agent)),
+            open_orders=len(self.open_orders(intent.agent)) + sum(1 for queued, _ in pending if queued.agent == intent.agent),
             venue_capabilities=capabilities,
-            working_sells=self._reserved_sells(intent.agent),
-            working_event_buys=self._working_event_buys(intent.agent),
+            working_sells=working_sells,
+            working_event_buys=working_event_buys,
             min_event_price=money(self.rules["min_event_price"]),
             max_event_market_pct=money(self.rules["max_event_market_pct"]),
             max_event_market_floor_pct=money(self.rules["max_event_market_floor_pct"]),
             max_event_cluster_floor_pct=money(self.rules["max_event_cluster_floor_pct"]),
-            floor_event_exposure=self._event_exposure(),
+            floor_event_exposure=floor_event_exposure,
         )
         decision = self.engine.check(order_intent, ctx)
         reasons.extend(decision.reasons)
@@ -772,10 +820,15 @@ class Book:
                 reasons.append(f"order of ${notional:.2f} is over this rung's ${limits.max_order_usd} an order")
             held = account.holdings.get(intent.instrument.key)
             held_value = (held.quantity * reference * intent.instrument.multiplier) if held and reference else ZERO
-            if held_value + notional > limits.max_position_usd:
+            position_value = held_value + working_buys.get(intent.instrument.key, ZERO) + notional
+            if position_value > limits.max_position_usd:
                 reasons.append(
-                    f"position of ${held_value + notional:.2f} would be over this rung's ${limits.max_position_usd}"
+                    f"position of ${position_value:.2f} including working buys would be over this rung's ${limits.max_position_usd}"
                 )
+            if working_buys and position_value > equity * money(self.rules["max_position_pct"]):
+                reasons.append("position including working buys exceeds the desk's position cap")
+            if working_buys and gross_exposure(positions) + sum(working_buys.values(), ZERO) + notional > equity * money(self.rules["max_gross_pct"]):
+                reasons.append("gross exposure including working buys exceeds the desk's gross cap")
         if intent.side == "buy" and intent.instrument.asset_class == "event":
             other = "no" if (intent.instrument.right or "yes") == "yes" else "yes"
             market = market_key(intent.instrument)
@@ -784,8 +837,8 @@ class Book:
                 for a in self.accounts.values() for h in a.holdings.values()
             )
             bidding = any(
-                w.open and w.side == "buy" and market_key(w.instrument) == market and (w.instrument.right or "yes") == other
-                for w in self.orders.values()
+                side == "buy" and market_key(instrument) == market and (instrument.right or "yes") == other
+                for _, instrument, side, _, _, _ in reservations
             )
             if held or bidding:
                 reasons.append(f"the House already holds or bids the {other} leg of this market; one account cannot hold both")
@@ -807,6 +860,14 @@ class Book:
         crossing = self._would_cross_own(intent, quote)
         if crossing:
             reasons.append(crossing)
+        if intent.order_type != "market":
+            # These market orders will be routed after the limits. A limit placed now must not
+            # be left for a queued opposite market order to hit at the venue.
+            side, _ = yes_space(intent.instrument, intent.side, intent.limit_price)
+            if any(market_key(queued.instrument) == market_key(intent.instrument)
+                   and yes_space(queued.instrument, queued.side, queued.limit_price)[0] != side
+                   for queued, _ in pending):
+                reasons.append("this order could trade against the House's queued market order")
         return reasons
 
     def _would_cross_own(self, intent: Intent, quote: Quote | None) -> str | None:
@@ -830,8 +891,10 @@ class Book:
         """Take one batch of intents: record, check, net the market orders, route, attribute."""
         outcomes: list[Outcome] = []
         with self._lock:
+            self._finish_crosses()
             now = now_iso(self.clock)
             market_groups: dict[str, list[tuple[Intent, Quote]]] = {}
+            pending: list[tuple[Intent, Quote]] = []
             for intent in intents:
                 if intent.id in self.seen_intents:
                     outcomes.append(Outcome(intent.id, intent.agent, "duplicate", "already recorded"))
@@ -841,7 +904,7 @@ class Book:
                 )
                 self._apply(entry.kind, intent.agent, entry.payload, entry.at)
                 quote = self._quote(intent.instrument)
-                reasons = self.check(intent, quote, now)
+                reasons = self.check(intent, quote, now, pending=pending)
                 if reasons:
                     outcomes.append(self._refuse(intent, reasons))
                     continue
@@ -850,6 +913,7 @@ class Book:
                         outcomes.append(self._refuse(intent, ["no two-sided quote to price a market order against"]))
                         continue
                     market_groups.setdefault(intent.instrument.key, []).append((intent, quote))
+                    pending.append((intent, quote))
                 else:
                     outcomes.append(self._route([intent], [intent.quantity], now))
             for group in market_groups.values():
@@ -886,11 +950,14 @@ class Book:
         buy_cross = allocate(crossed, [i.quantity for i in buys], step)
         sell_cross = allocate(crossed, [i.quantity for i in sells], step)
         residual: dict[str, Decimal] = {}
+        cross_parts: list[tuple[Intent, Decimal]] = []
         for intents, parts in ((buys, buy_cross), (sells, sell_cross)):
             for intent, part in zip(intents, parts):
                 if part > 0:
-                    self._cross(intent, part, quote, now)
+                    cross_parts.append((intent, part))
                 residual[intent.id] = intent.quantity - part
+        if cross_parts:
+            self._plan_cross(cross_parts, quote, now)
         cap = money(self.rules["max_order_usd"])
         touch = {"buy": quote.ask, "sell": quote.bid}
         for intents in (buys, sells):
@@ -902,7 +969,7 @@ class Book:
             for batch in batches:
                 if not batch:
                     continue
-                result = self._route(batch, [residual[i.id] for i in batch], now)
+                result = self._route(batch, [residual[i.id] for i in batch], now, reference_price=touch[batch[0].side])
                 for intent in batch:
                     outcomes.append(
                         Outcome(intent.id, intent.agent, result.status, result.detail, result.order_id, result.filled)
@@ -912,35 +979,36 @@ class Book:
                     outcomes.append(Outcome(intent.id, intent.agent, "crossed", "netted inside the House", None, intent.quantity))
         return outcomes
 
-    def _cross(self, intent: Intent, quantity: Decimal, quote: Quote, now: str) -> None:
-        """Fill part of a market order inside the House, priced as the venue would have."""
-        price = quote.ask if intent.side == "buy" else quote.bid
-        charge = self.fees.charge(intent.instrument, intent.side, quantity, price, liquidity="taker")
-        self._book_fill(
-            intent.agent,
-            intent,
-            quantity=quantity,
-            price=price,
-            charge=charge,
-            source="cross",
-            order_id=None,
-            fill_id=f"cross:{intent.id}",
-            at=now,
-        )
-        # What the account did not actually pay stays with the House: nothing went to the venue,
-        # so the agents' cash moves must sum to zero with this row.
-        multiplier = intent.instrument.multiplier
-        if intent.side == "buy":
-            house_cash = quantity * price * multiplier + charge.usd
-            house_units = -(quantity - charge.quantity)
-        else:
-            house_cash = -(quantity * price * multiplier - charge.usd)
-            house_units = quantity
-        entry = self.ledger.append(
-            "book.fill",
-            {
+    def _plan_cross(self, parts: Sequence[tuple[Intent, Decimal]], quote: Quote, now: str) -> None:
+        """Record all sides of an internal cross before moving any account's money.
+
+        Exact fill payloads are prepared against private account copies so multiple intents
+        by the same agent preserve sequential cost basis, realized profit and opening time.
+        A restart needs neither a quote nor a venue write to finish this commitment.
+        """
+        identity = "|".join(intent.id for intent, _ in parts)
+        plan_id = f"cross-plan:{self.name}:" + hashlib.sha256(identity.encode()).hexdigest()[:32]
+        accounts = {intent.agent: copy.deepcopy(self._account(intent.agent)) for intent, _ in parts}
+        fills = []
+        for intent, quantity in parts:
+            price = quote.ask if intent.side == "buy" else quote.bid
+            charge = self.fees.charge(intent.instrument, intent.side, quantity, price, liquidity="taker")
+            payload = self._fill_payload(intent.agent, intent, quantity=quantity, price=price, charge=charge,
+                                         source="cross", order_id=None, account=accounts[intent.agent])
+            payload["cross_plan_id"] = plan_id
+            fills.append({"id": f"cross:{intent.id}", "agent": intent.agent, "payload": payload})
+            self._apply_account_fill(accounts[intent.agent], payload, now)
+            multiplier = intent.instrument.multiplier
+            if intent.side == "buy":
+                house_cash = quantity * price * multiplier + charge.usd
+                house_units = -(quantity - charge.quantity)
+            else:
+                house_cash = -(quantity * price * multiplier - charge.usd)
+                house_units = quantity
+            house_payload = {
                 "book": self.name,
                 "source": "cross-house",
+                "cross_plan_id": plan_id,
                 "intent_id": intent.id,
                 "instrument": intent.instrument.to_dict(),
                 "side": "sell" if intent.side == "buy" else "buy",
@@ -950,11 +1018,39 @@ class Book:
                 "cash_delta": text(q_cash(house_cash)),
                 "position_delta": text(house_units),
                 "real_money": self.real_money,
-            },
-            agent=HOUSE,
-            id=f"cross-house:{intent.id}",
-        )
-        self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+            }
+            fills.append({"id": f"cross-house:{intent.id}", "agent": HOUSE, "payload": house_payload})
+        payload = {"book": self.name, "plan_id": plan_id, "at": now, "fills": fills}
+        self._commit_cross(payload)
+
+    def _commit_cross(self, plan: Mapping[str, Any]) -> None:
+        plan_id = plan["plan_id"]
+        rows = [{"kind": "book.cross_plan", "payload": dict(plan), "id": plan_id, "at": plan["at"]}]
+        rows.extend({"kind": "book.fill", "payload": fill["payload"], "agent": fill["agent"], "id": fill["id"], "at": plan["at"]}
+                    for fill in plan["fills"])
+        rows.append({"kind": "book.cross_plan", "payload": {"book": self.name, "plan_id": plan_id, "complete": True},
+                     "id": f"{plan_id}:complete", "at": plan["at"]})
+        # Older releases do not know the plan kind. They must still see either every ordinary
+        # fill or none: an automatic rollback can never inherit half of an internal trade.
+        entries = self.ledger.append_many(rows)
+        for entry in entries:
+            if entry.kind != "book.fill" or entry.id not in self._cross_applied:
+                self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+        self._cross_cursor = max(self._cross_cursor, max(entry.seq for entry in entries))
+        self._cross_applied.difference_update(fill["id"] for fill in plan["fills"])
+
+    def _finish_crosses(self) -> None:
+        """Finish durable internal commitments before accepting another order or polling."""
+        with self._lock:
+            # An append can be durable even when its caller did not reach the in-memory fold.
+            # Read plans since the last pass so this process can recover too, without a restart.
+            for entry in self.ledger.iter(kinds="book.cross_plan", after=self._cross_cursor):
+                if entry.payload.get("book") == self.name:
+                    self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+                self._cross_cursor = entry.seq
+            for plan_id, plan in list(self._cross_plans.items()):
+                self._commit_cross(plan)
+            self._cross_applied.intersection_update(fill["id"] for plan in self._cross_plans.values() for fill in plan["fills"])
 
     def _apply_house(self, p: Mapping[str, Any]) -> None:
         """The House row carries balancing cash and units; its units net to dust, never a position
@@ -972,7 +1068,7 @@ class Book:
             if holding.quantity == 0:
                 del account.holdings[instrument.key]
 
-    def _book_fill(
+    def _fill_payload(
         self,
         agent: str,
         intent: Intent | None,
@@ -982,15 +1078,14 @@ class Book:
         charge: Charge,
         source: str,
         order_id: str | None,
-        fill_id: str,
-        at: str,
         instrument: Instrument | None = None,
         side: str | None = None,
         reason: str = "",
         intent_id: str | None = None,
         liquidity: str = "taker",
         venue_fee: Decimal = ZERO,
-    ) -> None:
+        account: Account | None = None,
+    ) -> dict[str, Any]:
         instrument = instrument or intent.instrument
         side = side or intent.side
         multiplier = instrument.multiplier
@@ -1005,7 +1100,7 @@ class Book:
         held = None
         if side == "sell":
             # What this sale made against what the units cost, fees included: one closed trade.
-            held = self._account(agent).holdings.get(instrument.key)
+            held = (account if account is not None else self._account(agent)).holdings.get(instrument.key)
             if held is not None and held.quantity > 0:
                 realized = q_cash(cash_delta - held.cost * min(quantity, held.quantity) / held.quantity)
         payload = {
@@ -1030,10 +1125,9 @@ class Book:
             "reason": reason or (intent.reason if intent else ""),
             "real_money": self.real_money,
         }
-        entry = self.ledger.append("book.fill", payload, agent=agent, id=fill_id, at=at)
-        self._apply(entry.kind, agent, entry.payload, entry.at)
+        return payload
 
-    def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str) -> Outcome:
+    def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None) -> Outcome:
         """Send one venue order for these intents' quantities, then attribute what filled at once."""
         first = intents[0]
         total = sum(quantities, ZERO)
@@ -1054,19 +1148,25 @@ class Book:
             "submitted_at": now,
             "liquidity": self._liquidity(first),
             "real_money": self.real_money,
+            "reference_price": text(first.limit_price or reference_price),
         }
         # The order is on the ledger before it is on the wire: a crash between the two leaves an
         # `unknown` order the next poll resolves by its client id, never an order nobody recorded.
         self._order_row(base, "new", None, suffix="new")
         try:
             order = self.broker.submit(order_intent)
-        except UnknownOutcome as exc:
-            self._order_row(base, "unknown", None, suffix="unknown", reason=str(exc))
-            return Outcome(first.id, first.agent, "unknown", str(exc), order_id)
-        except (RejectedOrder, BrokerError, ValueError) as exc:
+        except RejectedOrder as exc:
             self._order_row(base, "rejected", None, suffix="rejected", reason=str(exc))
             return Outcome(first.id, first.agent, "rejected", str(exc), order_id)
-        self._order_row(base, order.status, order.broker_order_id, suffix=f"sent:{order.status}")
+        except (BrokerError, ValueError) as exc:
+            # A gateway 502, venue 5xx or unreadable success may follow an accepted write.
+            # Only an explicit rejection establishes that no order exists; preserve every
+            # other outcome for client-id polling, without submitting another order.
+            self._order_row(base, "unknown", None, suffix="unknown", reason=str(exc))
+            return Outcome(first.id, first.agent, "unknown", str(exc), order_id)
+        # Persist the acknowledgement as pollable until every fill has been attributed.
+        # Recording `filled` first used to strand the venue position after a crash here.
+        self._order_row(base, "accepted" if order.filled_quantity > 0 else order.status, order.broker_order_id, suffix="sent")
         working = self.orders[order_id]
         self._attribute(working, order, now)
         if working.open and not working.rested:
@@ -1091,12 +1191,25 @@ class Book:
             return "maker"
         return "taker"
 
-    def _order_row(self, base: Mapping[str, Any], status: str, broker_order_id: str | None, *, suffix: str, reason: str = "", rested: bool | None = None) -> None:
+    def _order_row(self, base: Mapping[str, Any], status: str, broker_order_id: str | None, *, suffix: str, reason: str = "", rested: bool | None = None,
+                   allocation: Mapping[str, Any] | None = None) -> None:
         payload = {**base, "status": status, "broker_order_id": broker_order_id, "reason": reason}
         if rested is not None:
             payload["rested"] = rested
-        entry = self.ledger.append("book.order", payload, id=f"order:{base['order_id']}:{suffix}")
-        self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+        if allocation is not None:
+            payload["allocation"] = dict(allocation)
+        entry_id = f"order:{base['order_id']}:{suffix}"
+        try:
+            entry = self.ledger.append("book.order", payload, id=entry_id)
+            self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+        except BaseException:
+            # The append may already be durable. Retain its exact allocation/acknowledgement
+            # in this process too; rebuilding it at a later time would conflict with its id.
+            # Order metadata folds are idempotent and do not move cash or positions.
+            recorded = self.ledger.get(entry_id)
+            if recorded is not None:
+                self._apply_order(recorded.payload)
+            raise
 
     def _base_of(self, working: Working) -> dict[str, Any]:
         return {
@@ -1111,13 +1224,17 @@ class Book:
             "shares": [{"intent_id": s.intent_id, "agent": s.agent, "quantity": text(s.quantity), "reason": s.reason} for s in working.shares],
             "submitted_at": working.submitted_at,
             "liquidity": working.liquidity,
+            "reference_price": text(working.reference_price),
             "real_money": self.real_money,
         }
 
     def _attribute(self, working: Working, order: Order, now: str) -> None:
         """Give each intent behind an order its part of what the venue has filled since last time."""
+        self._finish_allocation(working)
         filled = money(order.filled_quantity)
         delta = filled - working.filled
+        if delta < 0 or (delta > 0 and order.average_price is None):
+            return  # a stale or incomplete venue response cannot close an unaccounted order
         if delta > 0 and order.average_price is not None:
             total_notional = money(order.average_price) * filled
             price = (total_notional - working.notional) / delta
@@ -1129,6 +1246,7 @@ class Book:
             parts = allocate(delta, rooms, step)
             fee_parts = _split_cash(fee_delta, parts)
             before = working.filled
+            targets = []
             for share, part, venue_fee in zip(list(working.shares), parts, fee_parts):
                 if part <= 0:
                     continue
@@ -1140,32 +1258,54 @@ class Book:
                     charge = self.fees.charge(
                         working.instrument, working.side, part, price, liquidity=liquidity, filled_before=before
                     )
-                self._book_fill(
-                    share.agent,
-                    None,
-                    quantity=part,
-                    price=price,
-                    charge=charge,
-                    source="venue",
-                    order_id=working.order_id,
-                    fill_id=f"fill:{working.order_id}:{share.intent_id}:{text(share.filled + part)}",
-                    at=now,
-                    instrument=working.instrument,
-                    side=working.side,
-                    reason=share.reason,
-                    intent_id=share.intent_id,
-                    liquidity=liquidity,
-                    venue_fee=venue_fee,
-                )
+                target = share.filled + part
+                targets.append({"intent_id": share.intent_id, "target": text(target), "quantity": text(part),
+                                "fee_usd": text(charge.usd), "fee_quantity": text(charge.quantity), "venue_fee": text(venue_fee),
+                                "fill_id": f"fill:{working.order_id}:{share.intent_id}:{text(target)}"})
                 before += part
+            # The plan is durable before the first share is applied. Recomputing a partially
+            # applied pro-rata split after a restart gives the first share some of the next
+            # share's fill; the venue can still reconcile while the agents' records are wrong.
+            plan = {"filled": text(filled), "price": text(price), "at": now, "liquidity": liquidity, "targets": targets}
+            self._order_row(self._base_of(working), working.status, order.broker_order_id or working.broker_order_id,
+                            suffix=f"allocation:{text(filled)}", allocation=plan)
+            self._finish_allocation(working)
         if order.status != working.status:
             self._order_row(self._base_of(working), order.status, order.broker_order_id or working.broker_order_id, suffix=f"{order.status}:{text(filled)}")
+
+    def _finish_allocation(self, working: Working) -> None:
+        plan = working.allocation
+        if not plan:
+            return
+        shares = {share.intent_id: share for share in working.shares}
+        accounts: dict[str, Account] = {}
+        rows = []
+        for target in plan["targets"]:
+            share = shares[target["intent_id"]]
+            if share.filled >= money(target["target"]):
+                continue
+            if share.agent not in accounts:
+                accounts[share.agent] = copy.deepcopy(self._account(share.agent))
+            payload = self._fill_payload(
+                share.agent, None, quantity=money(target["quantity"]), price=money(plan["price"]),
+                charge=Charge(usd=money(target["fee_usd"]), quantity=money(target["fee_quantity"])),
+                source="venue", order_id=working.order_id,
+                instrument=working.instrument, side=working.side, reason=share.reason, intent_id=share.intent_id,
+                liquidity=plan["liquidity"], venue_fee=money(target["venue_fee"]), account=accounts[share.agent],
+            )
+            rows.append({"kind": "book.fill", "payload": payload, "agent": share.agent, "id": target["fill_id"], "at": plan["at"]})
+            self._apply_account_fill(accounts[share.agent], payload, plan["at"])
+        # A rollback into an older release must not see only the first agent's share either.
+        # Commit the entire incremental allocation before updating any in-memory account.
+        for entry in self.ledger.append_many(rows) if rows else []:
+            self._apply(entry.kind, entry.agent, entry.payload, entry.at)
 
     # -------------------------------------------------------------------- poll
     def poll(self) -> int:
         """Ask the venue about every open order and attribute new fills. Returns orders checked."""
         checked = 0
         with self._lock:
+            self._finish_crosses()
             now = now_iso(self.clock)
             for working in list(self.orders.values()):
                 if not working.open:

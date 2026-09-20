@@ -24,8 +24,15 @@ from .evaluator import Verdict
 from .frontier import Frontier, FrontierError
 from .ledger import Ledger
 
-SYSTEM = """You are the auditor of a small real-money trading league. An agent (a strategy program) has passed the
-statistical test on paper and is about to trade real money at $1 to $10 a position. You are the last check.
+SYSTEM = """You are the auditor of a small real-money trading league. An agent (a strategy program) has cleared
+the constitution's paper gate and is being considered for a bounded micro-real experiment. You are the last check.
+Read promotion_context and thresholds for the actual policy. The paper gate is a SCREEN, not proof of a positive
+confidence bound: it requires forward activity, closed trades, positive growth and bounded recent drawdown.
+A negative lower confidence bound can therefore be expected at this stage; by itself it is not a rule violation
+or an automatic veto. The stricter confidence-bound gate protects scaled capital after micro-real evidence.
+This experiment is constrained by micro_real_limits and the aggregate tuition limits in promotion_context.
+Do not claim it establishes a profitable strategy. Judge whether the supplied accounting, data and execution
+support the bounded experiment, and veto actual defects or unsupported safety assumptions.
 You do not pick trades and you do not judge whether the idea is clever. You hunt for reasons the evidence is
 not what it seems:
 - look-ahead or any use of information not available at decision time;
@@ -38,6 +45,11 @@ not what it seems:
 - a mismatch between what the code does and what the record shows (e.g. the code sends market orders but the
   fills are maker fills), or between the stated reasons and the trades;
 - exposure that duplicates agents already trading real money.
+Use the timestamps in refused_order_history and latest_reconciliations to distinguish historical failures from
+the latest account state. A historical freeze alone does not prove the book is still frozen. A newer successful
+reconciliation also does not by itself validate earlier incorrect marks: identify any remaining accounting defect.
+Missing or old reconciliation evidence is an uncertainty to assess, not evidence of a successful reconciliation.
+paper_fills includes both executions and settlements; use each row's kind, cost, payout, pnl and result when present.
 Answer with ONE JSON object and nothing else:
 {"approve": true|false, "confidence": 0.0-1.0, "summary": "two or three plain sentences",
  "findings": [{"severity": "blocker"|"concern"|"note", "issue": "...", "evidence": "what in the packet shows it"}]}
@@ -57,12 +69,25 @@ class Auditor:
     def packet(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
         book = str(verdict.numbers.get("book") or "")
         fills = [
-            {k: e.payload.get(k) for k in ("side", "quantity", "price", "fee_usd", "fee_quantity", "liquidity", "source", "realized", "reason")}
-            | {"at": e.at, "symbol": (e.payload.get("instrument") or {}).get("symbol"), "leg": (e.payload.get("instrument") or {}).get("right")}
+            {k: e.payload.get(k) for k in ("side", "quantity", "price", "fee_usd", "fee_quantity", "liquidity", "source", "realized", "reason",
+                                         "cost", "payout", "pnl", "result", "opened_at", "flat")}
+            | {"at": e.at, "kind": e.kind,
+               "instrument": {k: v for k, v in (e.payload.get("instrument") or {}).items()
+                              if k in ("asset_class", "symbol", "venue", "market_id", "right", "expiry", "strike", "multiplier", "currency")},
+               "symbol": (e.payload.get("instrument") or {}).get("symbol"), "leg": (e.payload.get("instrument") or {}).get("right")}
             for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent.id)
             if e.payload.get("book") == book and e.payload.get("source") != "dust"
         ]
-        refused = [e.payload.get("reasons") for e in self.ledger.iter(kinds="book.refused", agent=agent.id)][-20:]
+        refused = [{"at": e.at, "book": book, "reasons": e.payload.get("reasons")}
+                   for e in self.ledger.iter(kinds="book.refused", agent=agent.id) if e.payload.get("book") == book][-20:]
+        # One latest fact per relevant book; a newer row on another venue must not replace it.
+        reconciliations: dict[str, Any] = {name: None for name in (book, agent.venue) if name}
+        for entry in self.ledger.iter(kinds="book.reconciled"):
+            name = entry.payload.get("book")
+            if name in reconciliations:
+                reconciliations[name] = {"at": entry.at, "seq": entry.seq,
+                                        **{k: entry.payload.get(k) for k in ("book", "ok", "cash_venue", "cash_expected", "cash_diff",
+                                                                          "position_diffs", "dust_booked", "detail", "ledger_seq")}}
         blocks = self.evaluator.blocks(agent.id, book=book)
         trials = [e.payload for e in self.ledger.iter(kinds="eval.trial", agent=agent.id)]
         return {
@@ -71,12 +96,17 @@ class Auditor:
             "params": agent.params,
             "needs": agent.needs,
             "test_passed": verdict.numbers,
+            "promotion_context": {"from_rung": verdict.rung, "to_rung": verdict.rung + 1,
+                                  "paper_gate": CONSTITUTION["ladder"]["paper"],
+                                  "purpose": "bounded micro-real experiment", "tuition": CONSTITUTION["tuition"]},
             "thresholds": CONSTITUTION["ladder"],
             "trials_in_its_line": len(self.evaluator.family_trials(agent.family, self.lineage(agent.id) if self.lineage else None)),
             "replay_trials": [{k: t.get(k) for k in ("sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "max_drawdown", "passed", "reasons")} for t in trials][-10:],
             "paper_blocks": [{"key": b["key"], "log_growth": b["log_growth"], "active": b["active"]} for b in blocks][-200:],
             "paper_fills": fills[-120:],
-            "refused_orders": refused,
+            "refused_orders": [row["reasons"] for row in refused],
+            "refused_order_history": refused,
+            "latest_reconciliations": reconciliations,
             "already_on_real_money": self.live_agents(),
             "micro_real_limits": CONSTITUTION["rungs"]["2"],
         }

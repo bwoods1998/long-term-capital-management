@@ -37,10 +37,18 @@ code.
   any agent traded; a test pins its digest and the House writes the digest to the ledger at every
   start. `game.json` holds the economy's tunable dials, inside bounds the file itself lists.
   `config.json` holds where things are and four operating dials; it never holds a secret.
-- **Slow work runs beside the tick, never inside it.** Replays, research passes and Merton's passes
+- **Replays, research and Merton's role passes run beside the tick.** These tasks
   run on background threads in three lanes that cannot starve one another -- replays, research and
   housekeeping -- so a slow replay never delays a research pass or a deploy; the first real tick took
   six minutes before this rule.
+- **Lifecycle changes validate their inputs at commit time.** A wake, research pass, replay or
+  audit carries the strategy and rung version it started with. The House rechecks that version
+  before applying results and again before submitting a batch of wake intents. A slow model
+  response cannot rewrite a retired agent or authorize a replacement strategy's trades.
+- **Internal crosses and pooled fill allocations are atomic.** `Ledger.append_many` commits
+  each complete group or nothing. Private recovery plans retain exact prices, fees and attribution;
+  even a rollback to an older release sees complete normal fill rows. Risk checks reserve earlier
+  accepted intents in the same batch before considering later ones.
 
 ## Modules
 
@@ -59,7 +67,7 @@ code.
 | `sim.py` | `SimBroker`: a simulated Alpaca account that behaves as the paper venue was measured to. A canary House trades on it, never on the shared paper account. |
 | `economy.py` | `Economy`: balances folded from `credit.*` rows; `grant`, `charge` (never refused: the compute is already spent), `transfer`, `shares`/`payout` (a quarter as niche floors, three quarters won on growth SQUARED x root active blocks x the rung's weight; before anyone is profitable the won share goes to the least-bad TRADER, never split evenly), `can_fork`, `box_cost`. `load_game` and `check_bounds` read `game.json`. |
 | `game.json` | The economy's dials (pool, floor share, rung weights, endowments, fork threshold, population bounds, audit cooldown, research cadence) and the bounds the game designer must stay inside. |
-| `agents.py` | `Registry` and `Agent`: identity, strategy versions, lineage, niche (`venue/horizon/style`) and fate, folded from the ledger. `adopt` takes new code in place on rung 0, and above it only for an agent with no record to protect (no holding, no working order, no active block, no closed trade); otherwise new code is a child. |
+| `agents.py` | `Registry` and `Agent`: identity, strategy versions, lineage, niche (`venue/horizon/style`) and fate, folded from the ledger. The House adopts code in place on rung 0 or on paper with no record to protect (no holding, working order, active block or closed trade). New code for an agent on real money always starts as a child. |
 | `sandbox.py` | `SailSandbox` (one Sailbox per agent, forked from `agent_image_checkpoint`, sealed with an egress allowlist of `sealed.invalid` before it is recorded, destroyed if it cannot be sealed) and `LocalSandbox`. Both offer `decide`, `needs`, `replay`, `fork`, `retire`, `sleep_all`. |
 | `runner.py` | Runs one `decide` (or reads `NEEDS`) inside the box: 5 second limit, strategy prints discarded, one `DECIDE-RESULT <token>` line, then `os._exit`. |
 | `safety.py` | `check_code`: the import whitelist and the banned constructs (no underscore attributes, no attribute assignment, no `eval`/`exec`/`open`/`getattr`). Ported from the first run's Foundry, where it was hardened against real attempts. Imports nothing from the league. |
@@ -107,14 +115,20 @@ code.
    book: close finished blocks of log growth, take a look if one is due, and act on the verdict:
    `die` kills; `eligible` promotes (from paper only through Merton's audit, and only when real money
    is on); on rungs 2 and 3 a drift alarm demotes, and the House winds the account down and re-seats the agent on the book of its new rung.
-   Dead agents' free cash is swept back to the House row.
+   Retry unfinished exits for dead agents and abandoned books, preserve working sells, record
+   their final evidence (including later settlements), and sweep closed accounts' free cash.
 6. **Start due research passes** in the background, stuck agents first and then whoever has waited
    longest (at least three hours apart, halved while the day's Sail is underspent, and within the
    hour for an agent that cannot act at all; only for an agent with more than twice the minimum
    credits; and none at all from the moment a release is staged, because the restart would throw
-   the pass away half-read). A candidate that passes replay is adopted on rung 0 or becomes a fork
-   above it -- and one that FAILS is adopted anyway by an agent with no record whose own rules have
-   not fired for ten wakes, if the candidate at least trades.
+   the pass away half-read). Eligibility is checked again when a queued worker actually starts.
+   A passing candidate is adopted on rung 0 or on paper with no record; otherwise it becomes a
+   fork. A failed candidate that at least trades can replace an empty paper strategy after ten
+   barren wakes. A later failed replay does not discard an earlier passing candidate. Research
+   that finishes after retirement or a code change is recorded without changing that agent.
+   Selected candidates are saved privately as soon as replay selects them, including candidates
+   whose later fork is deferred or fails. That journal preserves work; it does not automatically
+   retry admission or resume an interrupted provider conversation.
 7. **Start Merton's due roles** in the background, and ask the gateway what CI made of each open
    pull request.
 8. **Once an epoch:** load new lessons from `playbook/`, resize rung-3 stakes, write the capital
@@ -126,6 +140,8 @@ code.
    under its floor; enroll Merton's registered strategies; and fill the last seat -- when the league
    is full, a newcomer displaces the worst agent that has had a fair chance, which is never one on
    real money, never a profitable one, and never one that has traded while an idle one remains.
+   Paper equity and option agents begin their grace period at their first offered trading
+   opportunity, so a weekend birth does not exhaust the grace before the market opens.
 10. **Save `house.json`, publish, write `health.json`.** A publishing failure is a warning: the site
     is downstream of the floor, never upstream.
 
@@ -149,7 +165,7 @@ Everything the House keeps is under one directory, `--root` (default `.data/leag
 | `kalshi-shadow.json` | The Kalshi shadow account: cash, positions, orders, fills, settlements applied. |
 | `provider.sqlite` | The metered record of cheap-model calls (the first run's `Provider`). Absent with `--no-research`. |
 | `publish.json` | The publisher's cursor into the ledger and its last mark time. |
-| `health.json` | Rewritten every tick: living, dead, frozen books, open orders, `ledger_seq`, `real_money`, the release. The watchdog reads it. |
+| `health.json` | Rewritten every tick: living, dead, frozen books, open orders, `ledger_seq`, `real_money`, release, tick duration, and queued/running background jobs with elapsed times. The watchdog reads it. |
 | `STOP` | If present, the `run` loop ends after the tick in hand. `python3 -m league stop` writes it, `start` removes it. |
 | `cache/` | Kalshi history and news, a byte-capped disk cache. |
 | `boxes/`, `alpaca-sim.json` | Only with `--local-sandbox` (one private directory per agent) and `--canary` (the simulated Alpaca account). |
@@ -157,7 +173,7 @@ Everything the House keeps is under one directory, `--root` (default `.data/leag
 ## Tests
 
 ```sh
-python3 -m unittest discover -s league/tests -t .        # 1,136 tests, about 160 s
+python3 -m unittest discover -s league/tests -t .        # the complete league suite
 python3 -m unittest league.tests.test_book               # one module
 python3 -m league.ci --no-tests                          # the content checks alone
 ```
