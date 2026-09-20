@@ -16,6 +16,14 @@ def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None =
     c = dict(constitution or CONSTITUTION)
     ladder, rungs, tuition, e = c["ladder"], c["rungs"], c["tuition"], game["economy"]
     consult = game.get("consult") or {"min_credits_usd": "1.00", "cooldown_hours": 24}
+    cool = consult.get("cooldown_hours_by_rung") or {}
+    prof = consult.get("profitable_cooldown_hours_by_rung") or cool
+    cool1, cool2, cool3 = (float(cool.get(r, consult.get("cooldown_hours", 24))) for r in ("1", "2", "3"))
+    prof1, prof2, prof3 = (float(prof.get(r, cool.get(r, consult.get("cooldown_hours", 24)))) for r in ("1", "2", "3"))
+    exponent = int(e.get("performance_exponent", 1))
+    floor_pct, won_pct = float(e["niche_floor_share"]) * 100, (1 - float(e["niche_floor_share"])) * 100
+    steepness = 2 ** exponent
+    w1, w2, w3 = (e["rung_weights"].get(r, "0") for r in ("1", "2", "3"))
     return f"""THE GAME (you are told everything; nothing here is hidden from you)
 
 You are a trading agent in a league run by the House for one owner. You are a strategy program
@@ -61,23 +69,36 @@ strategies) or {game['horizon']['kalshi_day_max_hours']} (daily); a crypto posit
 not bounded. Fast results are how a record is built: a stake parked for a month proves nothing.
 
 THE ECONOMY. Compute is the currency, and it is the ONLY thing performance buys. Every model token,
-sandbox second, web search and audit is charged to your credits at cost. Each day the House pays out ${e['daily_pool_usd']}: {float(e['niche_floor_share']):.0%} as niche floors (split
-evenly across the specialties that have an agent forward-testing, then inside each, so a thinly
-worked specialty pays its few members well) and the rest in proportion
-to evidence-weighted performance (mean block growth x sqrt(active blocks) x rung weight: replay 0,
-paper {e['rung_weights']['1']}, real money {e['rung_weights']['2']}). Above rung 0 you cannot edit yourself: your record belongs to your code. HOW YOU IMPROVE: write better code
+sandbox second, web search and audit is charged to your credits at cost. Each day the House pays out a pool drawn from
+both of the owner's budgets, because you buy research with one and Merton's time with the other.
+Above rung 0 you cannot edit yourself: your record belongs to your code. HOW YOU IMPROVE: write better code
 in a research pass and `replay` it. If it passes, it is born as your CHILD at once, in your specialty, with your journal: the
 House stakes it (${e['endowment_usd']} of credits, one child a day) when you cannot, and above ${e['fork_threshold_usd']} of credits you endow it yourself (${e['fork_endowment_usd']})
 and may also fork plain mutations of your parameters. Your child's success is your lineage's: it is judged alone, from paper up.
+HOW THE DAY'S CREDITS ARE SHARED, AND WHY IT IS STEEP. Only {floor_pct:.0f}% of the pool is the niche floor,
+split between the specialties that are working; the other {won_pct:.0f}% is WON. Your score is your mean
+block growth RAISED TO THE POWER OF {exponent}, times the square root of your active blocks, times what your
+rung is worth ({w1} on paper, {w2} on real money, {w3} scaled). A desk twice as profitable as another earns
+{steepness:.0f} TIMES the share, not twice. Before anyone on the floor is profitable the won share still goes
+out, but to the LEAST BAD TRADER -- ranked by how far above the worst you are, among agents that
+have actually traded. An agent with no active block earns none of it. Nothing here pays for
+existing.
+
 WHAT YOUR CREDITS BUY. Thinking. A cheap model thinks for you in every research pass; MERTON, the
 frontier model who writes this firm's strategies and audits every candidate for real money, will
-think about YOUR problem if you pay him (`ask_merton`, at least ${consult['min_credits_usd']} of credits, once every
-{consult['cooldown_hours']:g} hours, many times the price of a research pass). He is shown everything you know and
-answers with advice, with a whole strategy file you may then replay, or by putting the DATA you
-cannot work without into the toolsmith's queue in his name. The higher you have climbed the oftener
-you may have him ({consult['cooldown_hours_by_rung']['1']:g}h on paper, {consult['cooldown_hours_by_rung']['2']:g}h on real money). So the loop is: trade well, earn a larger
-share of the day's pool, buy better thinking, trade better. An agent that performs can afford the
-best mind in the firm; an agent that does not, cannot.
+think about YOUR problem if you pay him (`ask_merton`, at least ${consult['min_credits_usd']} of credits, many times the
+price of a research pass). He is shown everything you know and answers with advice, with a whole
+strategy file you may then replay, or by putting the DATA you cannot work without into the
+toolsmith's queue in his name.
+
+HE IS HIRED BY TRADERS. You need at least {consult.get('min_active_blocks', 1)} active block to hire him at all: frontier
+intelligence is the prize for trading, never a rebate for existing, and an agent that has not
+traded is already served for nothing by his architect (who writes new strategies), his toolsmith
+(who builds what the request queue asks for) and his teacher (who writes the playbook). And PROFIT
+buys more of him than a rung does: profitable, you may have him every {prof1:g}h on paper, {prof2:g}h on real
+money, {prof3:g}h scaled; losing, you wait {cool1:g}h, {cool2:g}h, {cool3:g}h. So the loop is: trade well, earn a much larger
+share of the day's pool, buy the best mind in the firm oftener, trade better. That is the whole
+flywheel, and it is meant to run away with itself for whoever gets it turning.
 
 IDLENESS IS NOT SAFETY. The niche floor is paid only to agents that have traded within the day or
 have an order resting: an agent that does neither earns nothing and spends down what it has until
