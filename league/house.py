@@ -28,7 +28,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -45,7 +45,8 @@ from .economy import Economy, Standing, load_game
 from .evaluator import Evaluator, Verdict
 from .fees import Fees
 from .ledger import HOUSE, Ledger, now_iso
-from .researcher import Researcher
+from .researcher import Researcher, pass_state, restore_pass
+from .research_jobs import ResearchJobs, ResearchPending
 from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxError
@@ -127,6 +128,8 @@ class House:
 
         self.experiments = Experiments(self.root / "experiments", self.ledger, clock=clock)
         self.recorder = Recorder(self.root / "recordings.sqlite", clock=clock)
+        self.research_jobs = ResearchJobs(self.root / "research.sqlite", clock=clock)
+        self._closing = threading.Event()
         self.registry = Registry(self.ledger)
         self.economy = Economy(self.ledger, self.game, clock=clock)
         self.evaluator = Evaluator(self.ledger, clock=clock, archive=self.experiments.archive)
@@ -190,7 +193,9 @@ class House:
                 look=lambda agent: self.snapshot(agent, self.book_of(agent)), lineage=self.registry.lineage,
                 standing=self.standing_of,
                 merton_settings=self.game.get("consult") or {}, house_budget=lambda: self.pacer.may_spend("openai"),
-                rung=self.evaluator.rung,
+                rung=self.evaluator.rung, jobs=self.research_jobs,
+                may_continue=self._research_permission, capabilities=self.research_capabilities,
+                coverage=self.research_coverage,
             )
         self._born_at = self.clock()
         self._inference_ceiling: Decimal | None = None  # the config's hard cap, read once (`_pace_inference`)
@@ -879,6 +884,8 @@ class House:
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
+        if self._closing.is_set():
+            return False
         running = self._jobs.get(key)
         if running is not None and running.is_alive():
             return False
@@ -889,6 +896,10 @@ class House:
 
         def job() -> None:
             with lane:
+                if self._closing.is_set():
+                    with self._state_lock:
+                        self._job_status.pop(key, None)
+                    return
                 queued_at = self._job_status[key]["queued_at"]
                 started_at = self.clock()
                 with self._state_lock:
@@ -923,8 +934,9 @@ class House:
 
     def wait(self, timeout: float | None = None) -> None:
         """Block until the slow work in hand is done (tests use it; the run loop does not)."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         for thread in list(self._jobs.values()):
-            thread.join(timeout)
+            thread.join(None if deadline is None else max(0, deadline - time.monotonic()))
 
     @staticmethod
     def _crashed(result: Mapping[str, Any]) -> str:
@@ -978,11 +990,11 @@ class House:
         self._charge_box(agent.id, described, note="reading a candidate's NEEDS")
         info = described.result
         if not info.get("ok"):
-            return {"passed": False, "error": info.get("error"), "numbers": {}}
+            return {"counted_as_trial": False, "passed": False, "error": info.get("error"), "numbers": {}}
         try:
             venue, horizon, _ = niche_of(info["needs"])
             if (venue, horizon) != (agent.venue, agent.horizon):
-                return {"passed": False, "error": "a candidate must stay on your venue and horizon", "numbers": {}}
+                return {"counted_as_trial": False, "passed": False, "error": "a candidate must stay on your venue and horizon", "numbers": {}}
             niche = self.niche_of(agent)
             if niche is not None:
                 info["needs"] = niches_module.constrain(info["needs"], niche)
@@ -1003,19 +1015,19 @@ class House:
                         "raise on an empty view. Nothing about its edge, and nothing about what it does when there is "
                         "something to trade, has been tested. Paper, when the market opens, is the first real test."
                         if blind else "this specialty has no replay: paper is the test")
-                return {"passed": ok, "error": None if ok else (run.result.get("error") if run else "no book"), "needs": info["needs"], "params": info.get("params") or {},
+                return {"counted_as_trial": False, "passed": ok, "error": None if ok else (run.result.get("error") if run else "no book"), "needs": info["needs"], "params": info.get("params") or {},
                         "numbers": {"passed": ok, "untested": blind, "reasons": [] if ok else ["it did not run on the live view"], "note": note}}
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
-            return {"passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
+            return {"counted_as_trial": False, "passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
         crash = self._crashed(result)
         if crash:
             self.alert("warning", f"{agent.id}: a candidate's replay was not run ({crash[:160]}); it is not counted as a trial")
-            return {"passed": False, "error": f"the replay could not be run and is NOT a trial against you: {crash[:160]}. "
+            return {"counted_as_trial": False, "passed": False, "error": f"the replay could not be run and is NOT a trial against you: {crash[:160]}. "
                                               "Ask for a smaller question of the tape, or tell the House with `request_tool`.",
                     "numbers": {}, "needs": info["needs"], "params": info.get("params") or {}}
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
-        return {"passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
+        return {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
                 "digest": result.get("digest")}
 
     # ----------------------------------------------------------------- judging
@@ -1432,16 +1444,19 @@ class House:
 
     # --------------------------------------------------------------- research
     def research_due(self, agent: Agent) -> bool:
-        if not agent.alive or self.researcher is None or not self.settings.research:
-            return False
-        rules = self.game.get("research") or {}
-        if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
+        if self._closing.is_set() or not agent.alive or self.researcher is None or not self.settings.research:
             return False
         if not self.pacer.may_spend("sail"):
             return False  # today's share of the expedition's Sail budget is spent (or the expedition is over)
         if self.deploying():
-            return False  # a restart is minutes away and would throw the pass away half-read
-        last = float(self._state["last_research"].get(agent.id) or 0)
+            return False  # existing sessions are checkpointed; do not add work during staging
+        pending = self.research_jobs.active(agent.id)
+        if pending:
+            return self.clock() >= pending["available"]
+        rules = self.game.get("research") or {}
+        if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
+            return False
+        last = max(float(self._state["last_research"].get(agent.id) or 0), self.research_jobs.last_finished(agent.id))
         return self.clock() - last >= self.research_interval_hours(agent) * 3600
 
     def idle_run(self, agent: Agent) -> dict[str, int]:
@@ -1515,8 +1530,11 @@ class House:
         funds, so the allowance -- not the cadence -- is what really decides who researches. Taken
         in the order they were born, the same agents would claim it every morning and the youngest
         desks would never research at all. Stuck first, then whoever has waited longest."""
-        return sorted(self.registry.living(),
-                      key=lambda a: (0 if self.idle_reason(a) else 1, float(self._state["last_research"].get(a.id) or 0)))
+        pending = {job["agent"]: job for job in self.research_jobs.pending()}
+        return sorted(self.registry.living(), key=lambda a: (
+            0 if a.id in pending else 1,
+            pending[a.id]["created"] if a.id in pending else (0 if self.idle_reason(a) else 1),
+            float(self._state["last_research"].get(a.id) or 0)))
 
     def behind_the_clock(self, kind: str) -> bool:
         """Is today's share of this budget running behind the day? The owner funded a fortnight to
@@ -1560,46 +1578,137 @@ class House:
             return None
         return self.research(current)
 
+    def queue_research(self, agent: Agent) -> bool:
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None or self._closing.is_set():
+                return False
+            self.research_jobs.enqueue(agent.id, generation)
+        return self._background(f'research:{agent.id}', self._research_if_due, agent)
+
+    def _research_permission(self, agent: Agent) -> str:
+        if self._closing.is_set() or self.deploying():
+            return 'deployment or shutdown'
+        with self._lifecycle_lock:
+            job = self.research_jobs.active(agent.id)
+            current = self._generation(agent.id)
+            if current is None or (job and list(current[:-1]) != job['generation'][:-1]):
+                return 'retired or changed'
+        if self.stopped() or (self.budget is not None and self.budget.mode == 'stopped'):
+            return 'research stopped'
+        if not self.pacer.may_spend('sail'):
+            return 'campaign allowance unavailable'
+        return ''
+
+    def research_capabilities(self, agent: Agent) -> dict[str, Any]:
+        from .capabilities import describe
+        return describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
+                        alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
+
+    def research_coverage(self, agent: Agent) -> dict[str, Any]:
+        from .capabilities import tape_coverage
+        niche = self.niche_of(agent)
+        if niche is not None and not niche.replay:
+            return {'mode': 'smoke_only', 'counted_as_trial': False,
+                    'note': 'No historical option-chain replay. A smoke check cannot measure edge or fills.'}
+        try:
+            query, tape = self.tape_for(agent.needs)
+            return {'query': query, **tape_coverage(tape)}
+        except Exception as exc:
+            return {'mode': 'unavailable', 'counted_as_trial': False,
+                    'error': f'{type(exc).__name__}: {str(exc)[:200]}'}
+
+    def _research_standing(self, agent: Agent):
+        rung = self.evaluator.rung(agent.id)
+        return {
+            'rung': rung, 'credits_usd': format(self.economy.balance(agent.id), 'f'),
+            'blocks': len(self.evaluator.blocks(agent.id)),
+            'last_trial': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.trial', agent=agent.id)))), None),
+            'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') == 'look'), None),
+            'can_fork': self.economy.can_fork(agent.id), 'recent_trades': self._recent_trades(agent.id),
+            'idle': {**self.idle_run(agent), 'why_now': self.idle_reason(agent)},
+            'rewrites_in_place': rung == 0 or (rung == 1 and self.record_is_empty(agent)),
+            'runtime_capabilities': self.research_capabilities(agent),
+        }
+
     def research(self, agent: Agent) -> Any:
         with self._lifecycle_lock:
             generation = self._generation(agent.id)
             if generation is None:
                 return None
-            agent = deepcopy(self.registry.get(agent.id))
-            rung = self.evaluator.rung(agent.id)
-            standing = {
-                "rung": rung, "credits_usd": format(self.economy.balance(agent.id), "f"),
-                "blocks": len(self.evaluator.blocks(agent.id)),
-                "last_trial": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.trial", agent=agent.id)))), None),
-                "last_look": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.verdict", agent=agent.id))) if e.payload.get("decision") == "look"), None),
-                "can_fork": self.economy.can_fork(agent.id),
-                "recent_trades": self._recent_trades(agent.id),
-                "idle": {**self.idle_run(agent), "why_now": self.idle_reason(agent)},
-                "rewrites_in_place": rung == 0 or (rung == 1 and self.record_is_empty(agent)),
-            }
-        try:
-            outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")
-        finally:
+            job = self.research_jobs.enqueue(agent.id, generation)
+        session = job['session']
+        with self.research_jobs.claim(session) as claimed:
+            if not claimed:
+                return None
+            job = self.research_jobs.get(session)
+            if job['status'] not in ('queued', 'working', 'ready', 'applying'):
+                return None
+            if job['status'] == 'applying':
+                # A crash may have occurred after adoption/forking. Keep the outcome on the
+                # queue and ledger, but do not repeat a capital/credit/lifecycle side effect.
+                self.ledger.append('agent.research', {'tool': 'candidate', 'status': 'commit_unconfirmed',
+                    'session': session, 'reason': 'restart during candidate commit; not repeated',
+                    '_candidate': (job['outcome'] or {}).get('candidate')}, agent=agent.id,
+                    id=f'research-commit-unconfirmed:{session}')
+                self.research_jobs.finish(session, 'candidate commit unconfirmed; evidence retained')
+                return None
+            with self._lifecycle_lock:
+                current = self._generation(agent.id)
+                if current is None or list(current[:-1]) != job['generation'][:-1]:
+                    self.research_jobs.finish(session, 'retired or changed before resume', cancelled=True)
+                    return None
+                generation = tuple(job['generation'])
+                if job['snapshot'] is None:
+                    snapshot = {'agent': asdict(self.registry.get(agent.id)),
+                                'standing': self._research_standing(agent)}
+                else:
+                    snapshot = job['snapshot']
+            agent = Agent(**snapshot['agent'])
+            if job['status'] in ('queued', 'working'):
+                job = self.research_jobs.start(session, snapshot)
+                try:
+                    outcome = self.researcher.research(agent, snapshot['standing'], session=session)
+                except ResearchPending as exc:
+                    self.research_jobs.defer(session, str(exc))
+                    return None
+                except BaseException:
+                    # Preserve the checkpoint. A tool intent without a receipt is resolved
+                    # conservatively by Researcher on resume, not retried every tick.
+                    self.research_jobs.defer(session, 'interrupted before research completion')
+                    raise
+                self.research_jobs.ready(session, pass_state(outcome))
+            else:
+                outcome = restore_pass(job['outcome'])
+            if outcome.candidate:
+                self.research_jobs.applying(session)
+                with self._lifecycle_lock:
+                    candidate = self._commit_research(agent.id, generation, outcome)
+                if candidate:
+                    try:
+                        child = self.fork(agent, code=candidate['code'], params=candidate['params'], reason=candidate['purpose'], passed_replay=True,
+                                          staked_by_house=not self.economy.can_fork(agent.id))
+                    except Exception as exc:
+                        self.ledger.append('agent.research', {'tool': 'candidate', 'status': 'fork_error',
+                            'session': session, 'reason': f'{type(exc).__name__}: {str(exc)[:200]}', '_candidate': candidate}, agent=agent.id)
+                        raise
+                    self.ledger.append('agent.research', {'tool': 'candidate', 'status': 'forked' if child else 'deferred',
+                        'session': session, 'child': child.id if child else None,
+                        'reason': 'a child was admitted' if child else 'a child was not admitted', '_candidate': candidate}, agent=agent.id)
+            self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
-                        self._state["last_research"][agent.id] = self.clock()  # a failing provider is not retried every tick
-        with self._lifecycle_lock:
-            candidate = self._commit_research(agent.id, generation, outcome)
-        if candidate:
-            # Forking probes and copies a sandbox. Its parent strategy was validated above;
-            # these slow operations do not block decisions or settlements on the other desks.
-            try:
-                child = self.fork(agent, code=candidate["code"], params=candidate["params"], reason=candidate["purpose"], passed_replay=True,
-                                  staked_by_house=not self.economy.can_fork(agent.id))
-            except Exception as exc:
-                self.ledger.append("agent.research", {"tool": "candidate", "status": "fork_error",
-                    "reason": f"{type(exc).__name__}: {str(exc)[:200]}", "_candidate": candidate}, agent=agent.id)
-                raise
-            self.ledger.append("agent.research", {"tool": "candidate", "status": "forked" if child else "deferred",
-                "child": child.id if child else None, "reason": "a child was admitted" if child else "a child was not admitted",
-                "_candidate": candidate}, agent=agent.id)
-        return outcome
+                        self._state['last_research'][agent.id] = self.clock()
+            return outcome
+
+    def _cancel_retired_research(self):
+        for job in self.research_jobs.pending():
+            if self._generation(job['agent']) is not None:
+                continue
+            with self.research_jobs.claim(job['session']) as claimed:
+                if claimed:
+                    self.research_jobs.finish(job['session'], 'retired before resume', cancelled=True)
 
     def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
         """Apply a candidate under the lifecycle lock, or return it for a separate child."""
@@ -1872,12 +1981,11 @@ class House:
                     self._retry_wind_down(agent, book)
                     self._observe_wind_down(agent, book)
                     self._sweep(agent.id, book)
+        self._cancel_retired_research()
         for agent in self.research_order() if open_for_business else []:
             if self.research_due(agent):
-                # Stamped when the pass ENDS (in `research`), not when it is queued: on the first
-                # production day every agent was stamped at 18:02, queued, and lost to a restart,
-                # so nobody researched for an hour and a half. A pass in hand is not queued twice.
-                self._background(f"research:{agent.id}", self._research_if_due, agent)
+                # Persist before dispatch, so queued work also survives process exit.
+                self.queue_research(agent)
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if self.backup is not None and self.backup.due():
@@ -1945,6 +2053,8 @@ class House:
             "release": Path(__file__).resolve().parents[1].name,
             "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
             "background_jobs": jobs,
+            "durable_research": [{k: j[k] for k in ("session", "agent", "status", "created", "updated", "available", "reason", "resumes")}
+                                 for j in self.research_jobs.pending()],
             "recordings": self.recorder.stats(),
             "campaign": self.campaigns.report() if self.campaigns else None,
         }
@@ -1953,9 +2063,11 @@ class House:
         os.replace(tmp, self.root / "health.json")
 
     def close(self, *, wait: float | None = 5.0) -> None:
+        self._closing.set()
         self.wait(wait)
         self._save_state()
         self.recorder.close()
+        self.research_jobs.close()
         self.ledger.close()
         if self.campaigns:
             self.campaigns.close()

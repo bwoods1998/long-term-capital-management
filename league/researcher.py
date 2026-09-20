@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from typing import Any, Callable, Mapping
 
@@ -23,10 +23,15 @@ from .commons import SEARCH_CHARGE_USD, Commons
 from .ledger import Ledger, now_iso
 from .safety import CodeRefused, check_code
 from .sandbox import SandboxError
+from .research_jobs import ResearchPending
 
 ZERO = Decimal(0)
 
 TOOLS: list[dict[str, Any]] = [
+    {"name": "runtime_status", "description": "Read the House's current replay, data and research capabilities, limits and implementation revision. Free. Verify old journal or library blockers here before asking for a tool that may already be implemented. This reports support/configuration, not measured tape coverage.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "replay_coverage", "description": "Inspect actual dates, counts, warmup and observed-bar coverage of the historical tape for your CURRENT strategy NEEDS. Fetches/caches the same input as replay, but runs no strategy, buys no sandbox replay and adds no selection trial. Verify a stale-data blocker here before repeating it. Counts do not demonstrate an edge or realistic fills.",
+     "parameters": {"type": "object", "properties": {}}},
     {"name": "web_search", "description": "Search the web. Costs credits. Use it to check a fact or find evidence for an idea, not to browse.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "library_search", "description": "Search the research library every agent shares. Free. Notes written by your own specialty come first. Look here before paying for a web search.",
@@ -65,6 +70,17 @@ class Pass:
     consulted: str = ""  # the strategy file Merton wrote for it this pass, if any
 
 
+def pass_state(out) -> dict[str, Any]:
+    values = asdict(Pass(out.agent if hasattr(out, 'agent') else ''))
+    values.update({key: getattr(out, key, value) for key, value in values.items()})
+    values['cost_usd'] = str(values['cost_usd'])
+    return values
+
+
+def restore_pass(values) -> Pass:
+    return Pass(**{**values, 'cost_usd': Decimal(str(values['cost_usd']))})
+
+
 class Researcher:
     def __init__(
         self,
@@ -86,6 +102,10 @@ class Researcher:
         lineage: Callable[[str], list[str]] | None = None,  # (agent id) -> itself, its parent, its parent's parent...
         standing: Callable[[str], Mapping[str, Any]] | None = None,  # (agent id) -> {"active_blocks", "mean_growth"}
         house_budget: Callable[[], bool] | None = None,  # () -> whether the firm may spend on the frontier model today
+        jobs: Any = None,  # durable queue owned by the House; None for an in-memory pass
+        may_continue: Callable[[Agent], str] | None = None,
+        capabilities: Callable[[Agent], Mapping[str, Any]] | None = None,
+        coverage: Callable[[Agent], Mapping[str, Any]] | None = None,
     ):
         self.ledger = ledger
         self.provider = provider
@@ -104,6 +124,8 @@ class Researcher:
         self.lineage = lineage
         self.standing = standing
         self.house_budget = house_budget
+        self.jobs, self.may_continue, self.capabilities = jobs, may_continue, capabilities
+        self.coverage = coverage
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -120,7 +142,9 @@ class Researcher:
             "Write a library note when you learn something another agent could use, "
             "and a journal note (`journal_write`) for your future self: you keep nothing else of this pass. "
             "A replay submits a candidate; it does not install code during this conversation. The House checks adoption or "
-            "fork eligibility after the pass. Describe a submitted candidate as proposed, and do not claim it is installed. End with `finish`."
+            "fork eligibility after the pass. Describe a submitted candidate as proposed, and do not claim it is installed. "
+            "Your standing's runtime_capabilities and runtime_status describe the deployed House: check them before treating an "
+            "old journal or library note about missing infrastructure as current. All model turns cost credits, including abstention. End with `finish`."
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
@@ -153,6 +177,7 @@ class Researcher:
         record = dict(self.standing(agent.id) if self.standing else {})
         return {
             "record": record,
+            "runtime_capabilities": dict(self.capabilities(agent)) if self.capabilities else None,
             "agent": {"id": agent.id, "family": agent.family, "niche": agent.niche, "generation": agent.generation},
             "specialty": self.specialty(agent) if self.specialty else "",
             "strategy_file": agent.code,
@@ -180,112 +205,198 @@ class Researcher:
 
     # -------------------------------------------------------------------- pass
     def research(self, agent: Agent, standing: Mapping[str, Any], *, session: str) -> Pass:
-        out = Pass(agent.id)
-        conversation: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system()},
-            {"role": "user", "content": self._state(agent, standing)},
-        ]
-        nudged, truncated = False, 0
-        effort = str(self.settings.get("reasoning_effort", "low"))
-        profile = str(self.settings.get("profile", "flash_flex"))
-        fast = str(self.settings.get("fast_profile") or "")
-        for turn in range(int(self.settings.get("max_turns", 6))):
-            balance = self.economy.balance(agent.id)
-            if balance <= Decimal(str(self.settings.get("min_credits_usd", "0.10"))):
-                out.reason = "credits"
+        """Resume at a saved model or tool boundary, with the original request and transcript.
+
+        Completed tool results and candidate source are saved before buying another turn. An
+        interrupted tool intent is ambiguous: keep its evidence and end the pass instead of
+        risking another paid replay, consultation, library write or charge. The provider's own
+        durable response store makes a resumed model request safe under the same request key.
+        """
+        job = self.jobs.get(session) if self.jobs else None
+        state = job['checkpoint'] if job else None
+        if state is None:
+            state = {
+                'version': 1, 'stage': 'model', 'turn': 0, 'started': self.clock(),
+                'conversation': [{'role': 'system', 'content': self._system()},
+                                 {'role': 'user', 'content': self._state(agent, standing)}],
+                'nudged': False, 'truncated': 0,
+                'effort': str(self.settings.get('reasoning_effort', 'low')),
+                'profile': str(self.settings.get('profile', 'flash_flex')),
+                'settings': dict(self.settings), 'tools': TOOLS,
+                'out': pass_state(Pass(agent.id)),
+            }
+        if state.get('version') != 1:
+            raise RuntimeError('unsupported research checkpoint version')
+        out = restore_pass(state['out'])
+        conversation, settings = state['conversation'], state['settings']
+
+        def save():
+            state['out'] = pass_state(out)
+            if self.jobs:
+                self.jobs.save(session, state)
+
+        def advance():
+            state['turn'] += 1
+            state['stage'] = 'model'
+            state.pop('response', None)
+            save()
+
+        save()  # freeze the prompt, settings and exact tool schema before any paid request
+        while state['stage'] != 'done':
+            turn = state['turn']
+            if state['stage'] == 'tool_pending':
+                # A receipt was not saved. Even a successful write followed by process exit
+                # looks like this, so no side effect is safe to repeat. A replay may already
+                # have retained a candidate on the append-only ledger: recover that code.
+                call = state['response']['calls'][state['call_index']]
+                for entry in self.ledger.iter(kinds='agent.research', agent=agent.id):
+                    p = entry.payload
+                    if p.get('session') == session and p.get('status') == 'retained' and p.get('_candidate'):
+                        if _candidate_rank(p['_candidate']) >= _candidate_rank(out.candidate):
+                            out.candidate = p['_candidate']
+                out.reason = f"tool outcome unconfirmed: {call['name']}"
+                out.summary = 'A restart interrupted a tool before its receipt was saved. Its outcome is unconfirmed; the tool was not repeated. Retained candidate evidence is preserved.'
+                state['stage'] = 'done'
+                save()
                 break
-            try:
-                response = self.provider.respond(
-                    profile,
-                    conversation,
-                    tools=TOOLS,
-                    desk_id=agent.id,
-                    session_id=session,
-                    request_key=f"{session}:{turn}",
-                    reasoning_effort=effort,
-                    max_output_tokens=int(self.settings.get("max_output_tokens", 4096)),
-                    tool_choice=str(self.settings.get("tool_choice", "auto")),
-                    # What it may spend today: what it has already spent today PLUS what it still
-                    # holds. The provider compares this against the desk's CUMULATIVE spend for the
-                    # day, so passing the balance alone was a ratchet -- every charge lowered the
-                    # cap and raised the total, and the moment the total passed the balance the
-                    # agent was locked out until midnight UTC however many credits it was granted.
-                    # Measured Sept 20, 2026: research on the floor fell to nothing on
-                    # `provider_desk_cap_exceeded` with agents holding credits they could not use.
-                    # It still cannot spend credits it does not have: the balance is the headroom.
-                    desk_cap_usd_per_day=balance + self._charged_today(agent.id),
-                    cache_key=f"league:{agent.family}",
-                )
-            except Exception as exc:  # noqa: BLE001 - a provider failure ends the pass, not the House
-                code = str(getattr(exc, "code", None) or type(exc).__name__)
-                if code == "provider_poll_timeout" and fast and profile != fast:
-                    # The flex queue would not serve this turn inside its deadline -- twice in the
-                    # floor's first evening, and each time the whole pass was thrown away with
-                    # everything it had read still in hand. The priority tier is the same model at
-                    # twice the price: cheaper than losing the pass, and only for the turn that
-                    # waited.
-                    self.ledger.append("agent.research", {"tool": "queued", "session": session, "turn": turn,
-                                                          "was": profile, "now": fast}, agent=agent.id)
-                    profile = fast
-                    continue
-                out.reason = f"provider: {code}"
+            permission = self.may_continue(agent) if self.may_continue else ''
+            if permission == 'retired or changed':
+                out.reason, state['stage'] = permission, 'done'
+                save()
                 break
-            out.turns = turn + 1
-            cost = Decimal(str(response.cost_usd or 0))
-            if cost > 0:
-                out.cost_usd += cost
-                self.economy.charge(agent.id, cost, "research tokens", detail={"session": session, "turn": turn}, id=f"tokens:{session}:{turn}")
-            conversation.extend(response.output_items)
-            text = (response.output_text or "").strip()
-            if text:
-                self.ledger.append("agent.thought", {"text": text[:4000], "session": session, "phase": "research"}, agent=agent.id)
-            calls = response.function_calls
-            if response.status in ("failed", "cancelled") or response.incomplete:
-                # An answer cut short (usually the output budget, reasoning tokens included) still
-                # holds the tool calls it managed to make: they are run, and the next turn has a
-                # whole budget again. Measured Sept 19, 2026: five of eight passes ended here after
-                # two turns, and everything the model had done was thrown away.
-                reason = str(getattr(response, "incomplete_reason", None) or response.status)
-                self.ledger.append("agent.research", {"tool": "truncated", "session": session, "turn": turn, "reason": reason,
-                                                      "calls": [c.name for c in calls], "effort": effort}, agent=agent.id)
-                truncated += 1
-                if truncated > 2:
-                    out.reason = f"provider: {reason}"
+            if permission:
+                raise ResearchPending(permission)
+            if self.jobs and self.clock() - state['started'] > 6 * 3600:
+                out.reason, state['stage'] = 'session expired after six hours', 'done'
+                save()
+                break
+            if state['stage'] == 'model':
+                if turn >= int(settings.get('max_turns', 6)):
+                    state['stage'] = 'done'
+                    save()
                     break
+                balance = self.economy.balance(agent.id)
+                request_key = f'{session}:{turn}'
+                record = self.provider.record(request_key) if self.jobs and hasattr(self.provider, 'record') else None
+                if record is None and balance <= Decimal(str(settings.get('min_credits_usd', '0.10'))):
+                    out.reason, state['stage'] = 'credits', 'done'
+                    save()
+                    break
+                try:
+                    response = self.provider.respond(
+                        state['profile'], conversation, tools=state['tools'], desk_id=agent.id,
+                        session_id=session, request_key=request_key, reasoning_effort=state['effort'],
+                        max_output_tokens=int(settings.get('max_output_tokens', 4096)),
+                        tool_choice=str(settings.get('tool_choice', 'auto')),
+                        # The provider counts today's cumulative spend, so balance is headroom,
+                        # not the cumulative desk cap. Charge ids below remain stable on resume.
+                        desk_cap_usd_per_day=balance + self._charged_today(agent.id),
+                        cache_key=f'league:{agent.family}',
+                    )
+                except Exception as exc:  # a refused call ends the pass, not the House
+                    code = str(getattr(exc, 'code', None) or type(exc).__name__)
+                    record = self.provider.record(request_key) if self.jobs and hasattr(self.provider, 'record') else None
+                    if record and record.get('response_id') and code in (
+                        'provider_poll_timeout', 'provider_transport_unconfirmed', 'provider_transport_timeout', 'provider_http_429',
+                        'provider_http_500', 'provider_http_502', 'provider_http_503', 'provider_http_504',
+                        'provider_http_529',
+                    ):
+                        # Timeout is not cancellation. Release the worker and poll THIS response
+                        # again later; buying the fast tier here duplicates the accepted work.
+                        raise ResearchPending(code) from exc
+                    fast = str(settings.get('fast_profile') or '')
+                    if not self.jobs and code == 'provider_poll_timeout' and fast and state['profile'] != fast:
+                        self.ledger.append('agent.research', {'tool': 'queued', 'session': session,
+                            'turn': turn, 'was': state['profile'], 'now': fast}, agent=agent.id)
+                        state['profile'] = fast
+                        advance()
+                        continue
+                    out.reason, state['stage'] = f'provider: {code}', 'done'
+                    save()
+                    break
+                state['response'] = {
+                    'cost_usd': str(response.cost_usd or 0), 'items': response.output_items,
+                    'text': (response.output_text or '').strip(), 'status': response.status,
+                    'incomplete': response.incomplete,
+                    'incomplete_reason': getattr(response, 'incomplete_reason', None),
+                    'calls': [{'name': c.name, 'arguments': c.arguments, 'call_id': c.call_id,
+                               'error': c.error} for c in response.function_calls],
+                }
+                state['stage'] = 'response'
+                save()  # the response is durable before charging the agent or running its tools
+            if state['stage'] == 'response':
+                response = state['response']
+                out.turns = turn + 1
+                cost = Decimal(response['cost_usd'])
+                if cost > 0:
+                    self.economy.charge(agent.id, cost, 'research tokens', detail={'session': session, 'turn': turn}, id=f'tokens:{session}:{turn}')
+                    out.cost_usd += cost
+                conversation.extend(response['items'])
+                if response['text']:
+                    self.ledger.append('agent.thought', {'text': response['text'][:4000], 'session': session,
+                        'phase': 'research'}, agent=agent.id, id=f'research-thought:{session}:{turn}' if self.jobs else None)
+                calls = response['calls']
+                if response['status'] in ('failed', 'cancelled') or response['incomplete']:
+                    reason = str(response['incomplete_reason'] or response['status'])
+                    self.ledger.append('agent.research', {'tool': 'truncated', 'session': session, 'turn': turn,
+                        'reason': reason, 'calls': [c['name'] for c in calls], 'effort': state['effort']},
+                        agent=agent.id, id=f'research-truncated:{session}:{turn}' if self.jobs else None)
+                    state['truncated'] += 1
+                    if state['truncated'] > 2:
+                        out.reason, state['stage'] = f'provider: {reason}', 'done'
+                        save()
+                        break
+                    if not calls:
+                        state['effort'] = 'low'
+                        conversation.append({'role': 'user', 'content':
+                            'Your last reply ran out of room before you called a tool, so it bought you nothing. '
+                            'Stop weighing options. Call one tool now, with the shortest arguments that do the job.'})
+                        advance()
+                        continue
                 if not calls:
-                    # It spent its whole output budget thinking and never reached a tool call.
-                    # Measured over the floor's first evening: twelve of twenty-eight passes ended
-                    # exactly here, on turn two or three, having bought nothing at all. The cure is
-                    # not a bigger budget -- reasoning will fill any budget -- but less of it spent
-                    # on reasoning, so the next turn is asked for the call and nothing else.
-                    effort = "low"
-                    conversation.append({"role": "user", "content":
-                                         "Your last reply ran out of room before you called a tool, so it bought you nothing. "
-                                         "Stop weighing options. Call one tool now, with the shortest arguments that do the job."})
+                    if state['nudged']:
+                        out.reason, state['stage'] = 'no tool call', 'done'
+                        save()
+                        break
+                    state['nudged'] = True
+                    conversation.append({'role': 'user', 'content': 'Call a tool. If you are done, call `finish`.'})
+                    advance()
                     continue
-            if not calls:
-                if nudged:
-                    out.reason = "no tool call"
+                state.update(stage='tools', call_index=0, finished=False)
+                save()
+            if state['stage'] == 'tools':
+                calls = state['response']['calls']
+                while state['call_index'] < len(calls):
+                    permission = self.may_continue(agent) if self.may_continue else ''
+                    if permission == 'retired or changed':
+                        out.reason, state['stage'] = permission, 'done'
+                        save()
+                        break
+                    if permission:
+                        raise ResearchPending(permission)
+                    call = calls[state['call_index']]
+                    state['stage'] = 'tool_pending'
+                    save()  # write the intent before any side effect
+                    result = {'error': call['error']} if call['error'] else self._execute(agent, call['name'], call['arguments'], out, session)
+                    out.calls.append(call['name'])
+                    conversation.append({'type': 'function_call_output', 'call_id': call['call_id'],
+                                         'output': json.dumps(result, default=str)[:12000]})
+                    state['finished'] = state['finished'] or call['name'] == 'finish'
+                    state['call_index'] += 1
+                    state['stage'] = 'tools'
+                    save()  # receipt, transcript and Pass effects are one atomic checkpoint
+                if state['stage'] == 'done':
                     break
-                nudged = True
-                conversation.append({"role": "user", "content": "Call a tool. If you are done, call `finish`."})
-                continue
-            finished = False
-            for call in calls:
-                result = {"error": call.error} if call.error else self._execute(agent, call.name, call.arguments, out, session)
-                out.calls.append(call.name)
-                conversation.append({"type": "function_call_output", "call_id": call.call_id, "output": json.dumps(result, default=str)[:12000]})
-                if call.name == "finish":
-                    finished = True
-            if finished:
-                out.reason = "finished"
-                break
-        self.ledger.append(
-            "agent.research",
-            {"tool": "summary", "session": session, "turns": out.turns, "cost_usd": format(out.cost_usd, "f"), "trials": out.trials,
-             "summary": out.summary[:1200], "reason": out.reason, "candidate": bool(out.candidate)},
-            agent=agent.id,
-        )
+                if state['finished']:
+                    out.reason, state['stage'] = 'finished', 'done'
+                    save()
+                    break
+                advance()
+        self.ledger.append('agent.research', {
+            'tool': 'summary', 'session': session, 'turns': out.turns,
+            'cost_usd': format(out.cost_usd, 'f'), 'trials': out.trials,
+            'summary': out.summary[:1200], 'reason': out.reason, 'candidate': bool(out.candidate),
+        }, agent=agent.id, id=f'research-summary:{session}' if self.jobs else None)
         return out
 
     # ------------------------------------------------------------------- tools
@@ -372,6 +483,10 @@ class Researcher:
     def _execute(self, agent: Agent, name: str, args: Mapping[str, Any], out: Pass, session: str) -> dict[str, Any]:
         public = {k: (str(v)[:200] if k != "code" else f"{len(str(v))} characters") for k, v in dict(args or {}).items() if k != "text"}
         self.ledger.append("agent.research", {"tool": name, "arguments": public, "session": session}, agent=agent.id)
+        if name == "runtime_status":
+            return dict(self.capabilities(agent)) if self.capabilities else {"error": "runtime capabilities unavailable"}
+        if name == "replay_coverage":
+            return dict(self.coverage(agent)) if self.coverage else {"error": "replay coverage unavailable", "counted_as_trial": False}
         if name == "markets_now":
             if self.look is None:
                 return {"error": "the House cannot show the live view here"}
@@ -419,7 +534,8 @@ class Researcher:
                 self.ledger.append("agent.research", {"tool": "replay_error", "session": session,
                                                        "error": error, "counted_as_trial": False}, agent=agent.id)
                 return {"passed": False, "error": error}
-            out.trials += 1
+            counted = bool(outcome.get("counted_as_trial", not outcome.get("error")))
+            out.trials += int(counted)
             numbers = dict(outcome.get("numbers") or {})
             if outcome.get("passed") or not outcome.get("error"):
                 # A candidate that ran is carried whatever the verdict; the House decides what a
@@ -439,7 +555,7 @@ class Researcher:
                     self.ledger.append("agent.research", {"tool": "candidate", "status": "retained",
                         "session": session, "parent_code_sha256": agent.code_sha256,
                         "_candidate": candidate}, agent=agent.id)
-            return {"passed": bool(outcome.get("passed")), "reasons": numbers.get("reasons"), "trials_in_family": numbers.get("trials"),
+            return {"counted_as_trial": counted, "passed": bool(outcome.get("passed")), "reasons": numbers.get("reasons"), "trials_in_family": numbers.get("trials"),
                     "deflated_sharpe": numbers.get("deflated_sharpe"), "sharpe": numbers.get("sharpe"), "trades": numbers.get("trades"),
                     "return_pct": numbers.get("return_pct"), "max_drawdown": numbers.get("max_drawdown"), "fees_usd": numbers.get("fees_usd"),
                     "oos_mean_log_growth": numbers.get("oos_mean_log_growth"), "error": outcome.get("error"),

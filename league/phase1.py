@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 import math
 from pathlib import Path
@@ -39,8 +41,14 @@ def report(root: str | Path, *, now=None):
     jobs = [p for k,p in rows if k == 'ops.job' and p.get('state') in ('finished', 'failed')]
     begun_jobs = {p['job'] for k,p in rows if k == 'ops.job' and p.get('state') == 'started'}
     latency = {}
-    for lane in ('research', 'replay', 'merton', 'survey'):
-        lane_jobs = [p for p in jobs if p['key'].split(':')[0] == lane]
+    def lane_of(key):
+        if key == 'merton:follow':
+            return 'housekeeping'
+        if key == 'niche-survey':
+            return 'survey'
+        return key.split(':')[0]
+    for lane in ('research', 'replay', 'merton', 'survey', 'housekeeping'):
+        lane_jobs = [p for p in jobs if lane_of(p['key']) == lane]
         stats = {'finished': len(lane_jobs), 'failed': sum(p['state'] == 'failed' for p in lane_jobs)}
         for field in ('queued_seconds', 'running_seconds', 'elapsed_seconds'):
             values = sorted(float(p.get(field, 0)) for p in lane_jobs)
@@ -48,6 +56,20 @@ def report(root: str | Path, *, now=None):
                             for name,q in [('p50', .5), ('p95', .95), ('max', 1)]}
         latency[lane] = stats
     trials = [p for k,p in rows if k == 'eval.trial']
+    conclusions = [p for k,p in rows if k == 'agent.research' and p.get('tool') == 'summary']
+    research = {'completed_sessions': len(conclusions),
+                'reasons': dict(Counter(p.get('reason', 'unknown') for p in conclusions)),
+                'with_candidate': sum(bool(p.get('candidate')) for p in conclusions),
+                'reported_cost_usd': str(sum((Decimal(str(p.get('cost_usd') or 0)) for p in conclusions), Decimal(0))),
+                'note': 'Session costs exclude unfinished work. Research latency counts worker attempts, including deferrals. Replay tools can include smoke checks; eval.trial is the counted-trial source.'}
+    if (root / 'research.sqlite').exists():
+        db = connect(root / 'research.sqlite')
+        try:
+            research['durable_jobs'] = [dict(r) for r in db.execute(
+                'SELECT status,COUNT(*) count,SUM(resumes) resumes FROM research_jobs GROUP BY status')]
+            research['pending'] = [dict(r) for r in db.execute("SELECT session,agent,status,created,updated,available,reason,resumes FROM research_jobs WHERE status IN ('queued','working','ready','applying') ORDER BY created,session")]
+        finally:
+            db.close()
     db = connect(root / 'recordings.sqlite')
     try:
         count, size, first, last = db.execute('SELECT COUNT(*),COALESCE(SUM(length(payload)),0),MIN(received),MAX(received) FROM snapshots').fetchone()
@@ -62,7 +84,7 @@ def report(root: str | Path, *, now=None):
                             'latest': list(finished.values())[-5:]},
             'trials': {'total': len(trials), 'with_manifest': sum(bool(p.get('experiment')) for p in trials),
                        'passed': sum(bool(p.get('passed')) for p in trials)},
-            'jobs_without_finish': sorted(begun_jobs - {p['job'] for p in jobs}), 'latency': latency,
+            'jobs_without_finish': sorted(begun_jobs - {p['job'] for p in jobs}), 'latency': latency, 'research': research,
             'recordings': {'kind': 'sampled_rest_snapshots', 'count': count, 'compressed_bytes': size,
                            'first_received': first, 'last_received': last, 'evicted': evicted},
             'interpretation': 'Unfinished work may still be running or may have been interrupted. Historical passes do not establish live profitability. External reserves are allowances, not invoices.'}

@@ -231,6 +231,7 @@ class InTheHouse(HouseCase):
         self.house.seat(agent)
         good = self.house._candidate_replay(agent, seeds.load("options-pullback"))
         self.assertTrue(good["passed"], good)
+        self.assertFalse(good["counted_as_trial"])
         self.assertIn("no replay", good["numbers"]["note"])
         broken = seeds.load("options-pullback").replace("def decide(ctx):", "def decide(ctx):\n    return 1 / 0\n\ndef _unused(ctx):")
         self.assertFalse(self.house._candidate_replay(agent, broken)["passed"])

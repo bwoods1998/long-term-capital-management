@@ -1,0 +1,84 @@
+"""The House's current research contract, separate from fallible historical journals."""
+from __future__ import annotations
+
+from functools import lru_cache
+import hashlib
+from pathlib import Path
+import time
+
+from .ledger import now_iso
+
+
+@lru_cache(maxsize=1)
+def revision():
+    root = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for name in ('capabilities.py', 'house.py', 'tapes.py', 'replay.py'):
+        digest.update(name.encode() + b'\0' + (root / name).read_bytes())
+    return digest.hexdigest()
+
+
+def describe(agent, settings, niche, *, clock=time.time, alpaca=False, kalshi=False):
+    replay = niche is None or niche.replay
+    bars = agent.needs.get('bars') or {}
+    days = (settings.kalshi_replay_days * (7 if agent.horizon == 'day' else 1)
+            if agent.venue == 'kalshi' else settings.replay_days * (6 if agent.horizon == 'day' else 1))
+    return {
+        'as_of': now_iso(clock), 'revision': revision(),
+        'scope': {'agent': agent.id, 'venue': agent.venue, 'horizon': agent.horizon},
+        'authority': 'Current House implementation and configuration. Older journals/library notes may describe earlier releases. Support does not establish data coverage or profitability.',
+        'replay': {
+            'mode': 'historical_development' if replay else 'smoke_only_no_historical_option_chains',
+            'requested_window_days': days if replay else None,
+            'window_ends': 'time the tape is first built; cached up to 24h; not a fixed August tape' if replay else None,
+            'coverage': 'Actual dates, markets and samples depend on returned data. A requested window is not proof of coverage.',
+            'signal_timeframe': str(bars.get('timeframe') or ('1Hour' if agent.venue == 'kalshi' else '5Min')),
+            'alpaca_warmup': 'Implemented: pre-window bars from NEEDS.bars.limit, capped at 500; never future bars.',
+            'daily_execution_clock': 'Implemented: Alpaca daily signals execute on 5Min bars. Equity daily bars become available at the next New York midnight; crypto daily bars at the next UTC midnight.',
+            'settlement_clock': 'Implemented: Kalshi cash waits for reported settlement_ts. Unknown settlements remain unresolved and cannot qualify.',
+            'selection': 'Reused history is development evidence. A smoke pass tests code execution only. Paper/forward risk and live-capital gates still apply.',
+            'limitations': ['bar-based fills; no historical queue position or adverse-selection calibration',
+                            'Kalshi historical selection is limited to returned settled markets',
+                            'no historical option-chain replay'],
+        },
+        'observations': {
+            'alpaca_source_configured': alpaca, 'kalshi_source_configured': kalshi,
+            'cross_venue': 'Implemented: NEEDS.observe.symbols supplies Alpaca bars/quotes; NEEDS.observe.series supplies Kalshi markets in live views. No Kalshi event-series observation in Alpaca replay.',
+            'kalshi_observed_bars': 'Implemented: replay uses NEEDS.bars timeframe and limit, with warmup. Missing bars or more than 4,000 bars per symbol is unsupported, never silently resampled.',
+            'not_supplied': ['perpetual funding/open-interest feed', 'point-in-time earnings-surprise panel', 'live sports score feed'],
+            'recording': 'Shared sampled REST snapshots with receive times; not tick/depth history. Experiment inputs/results are archived separately.',
+        },
+        'research': 'Model turns spend credits even when no replay or search is purchased. A retained candidate is proposed until the House records adoption/forking. Use runtime_status to check changed capabilities and replay_coverage to inspect your actual tape without buying a sandbox replay or adding a selection trial.',
+    }
+
+
+def tape_coverage(tape):
+    """Summarize returned inputs, keeping execution events distinct from market observations."""
+    steps = tape.get('steps') or []
+    quoted = [s for s in steps if s.get('markets') or s.get('bars') or s.get('execution_bars')]
+    markets = {str(m.get('market')) for s in steps for m in (s.get('markets') or []) if m.get('market')}
+    signals = {}
+    for step in steps:
+        for symbol, rows in (step.get('history_bars') or {}).items():
+            for row in rows:
+                signals.setdefault(symbol, []).append(row.get('t'))
+        for symbol in step.get('bars') or {}:
+            signals.setdefault(symbol, []).append(step.get('t'))
+
+    def span(rows):
+        times = sorted(str(r['t']) for r in rows if r.get('t'))
+        return {'rows': len(rows), 'first_at': times[0] if times else None, 'last_at': times[-1] if times else None}
+
+    return {
+        'mode': 'historical_development', 'counted_as_trial': False,
+        'venue': tape.get('venue'), 'horizon': tape.get('horizon'),
+        'signal_timeframe': tape.get('timeframe'), 'execution_timeframe': tape.get('execution_timeframe'),
+        'execution_events': span(steps), 'market_observation_steps': span(quoted), 'distinct_markets': len(markets),
+        'signal_history': {s: {'rows': len(times), 'first_at': min(t for t in times if t),
+                               'last_at': max(t for t in times if t)}
+                           for s, times in signals.items() if any(times)},
+        'warmup': {s: span(rows) for s, rows in (tape.get('warmup_bars') or {}).items()},
+        'observed_bars': {s: span(rows) for s, rows in (tape.get('observed_bars') or {}).items()},
+        'reported_settlements': len(tape.get('settlements') or {}),
+        'note': 'These are actual returned tape counts/dates, not requested-window coverage or independent forward evidence. Settlement/cutoff events can extend beyond the last market observation. Historical fills remain modeled.',
+    }
