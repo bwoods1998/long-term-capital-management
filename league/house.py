@@ -1223,6 +1223,27 @@ class House:
             return f"{idle['shut']} wakes in a row with nothing open to trade: this is bench time, and the bench is where a better strategy is written"
         return ""
 
+    def _weakest(self, rules: Mapping[str, Any]) -> Agent | None:
+        """The agent a newcomer displaces, or None when nobody has earned displacing.
+
+        Never one on real money -- what that may cost is already bounded by the tuition, and the
+        auditor put it there. Never a profitable one, however small its record. Never one too young
+        to have had a fair chance. Of the rest, the one with the least to show: growth first, then
+        how much it has traded, then how little is left in its purse."""
+        epoch = float(rules["epoch_seconds"])
+        grace = float(rules.get("displace_after_epochs", 2)) * epoch
+        now = self.clock()
+        rank = []
+        for standing in self.standings():
+            agent = self.registry.get(standing.agent)
+            if standing.rung >= 2 or standing.mean_growth > 0:
+                continue
+            if now - _epoch(agent.born_at) < grace:
+                continue
+            rank.append((standing.mean_growth, standing.active_blocks, float(self.economy.balance(agent.id)), agent))
+        rank.sort(key=lambda row: row[:3])
+        return rank[0][3] if rank else None
+
     def research_order(self) -> list[Agent]:
         """Who gets asked first when the day's frontier allowance is nearly all the floor has.
 
@@ -1428,8 +1449,20 @@ class House:
         ceiling, one at a time, and puts the newcomer on the desk that is furthest from full, so
         exploration spreads across the firm instead of converging on whoever is winning."""
         living = self.registry.living()
-        if not living or len(living) >= int(rules["max_population"]):
+        if not living:
             return None
+        if len(living) >= int(rules["max_population"]):
+            # A ceiling with nothing dying under it is a floor that has stopped searching. Measured
+            # Sept 20, 2026: thirty-three agents born in twelve hours and NOT ONE dead, four births
+            # from a league that could never try anything again. So the last seat is a tournament:
+            # a newcomer takes it from the worst agent that has had its chance, which is the
+            # selection pressure the ceiling was meant to create and never did.
+            loser = self._weakest(rules)
+            if loser is None:
+                return None
+            self.kill(loser, "displaced", self.postmortem(loser, "displaced",
+                                                          "the league was full and it was the weakest agent with a fair chance behind it"))
+            living = self.registry.living()
         urgent = len(living) < int(rules["min_population"])
         every = float(rules["newcomer_seconds"]) / (4 if urgent else 1)
         if self.clock() - self._born_at < 300:

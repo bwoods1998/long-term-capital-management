@@ -341,6 +341,40 @@ class Refill(HouseCase):
         finally:
             restarted.close(wait=None)
 
+    def test_a_full_league_gives_the_last_seat_to_a_newcomer_over_its_worst_agent(self):
+        """Thirty-three born in twelve hours and not one dead: a ceiling with nothing dying under
+        it is a floor that has stopped searching."""
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=2, min_population=0, displace_after_epochs=2)
+        good = self.seated("winner")
+        weak = self.seated("loser")
+        self.house.evaluator.seat(weak.id, 1, "test")
+        self.clock.advance(2 * float(rules["epoch_seconds"]) + 601)
+        self.house._state["last_newcomer"]["at"] = self.clock() - 601
+        for agent, growth in ((good, 0.01), (weak, -0.01)):
+            for n in range(3):
+                self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": growth, "active": True,
+                                                        "book": "alpaca-paper", "block": f"b{n}"}, agent=agent.id)
+        joined = self.house._refill(rules)
+        self.assertIsNotNone(joined)
+        living = [a.id for a in self.house.registry.living()]
+        self.assertNotIn(weak.id, living)   # the worst with a fair chance behind it
+        self.assertIn(good.id, living)      # the profitable one is never displaced
+        died = self.house.ledger.last("agent.died", agent=weak.id).payload
+        self.assertEqual(died["cause"], "displaced")
+
+    def test_nobody_young_or_profitable_or_on_real_money_is_displaced(self):
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=1, min_population=0, displace_after_epochs=2)
+        fresh = self.seated("newish")
+        self.house.evaluator.seat(fresh.id, 1, "test")
+        self.clock.advance(601)
+        self.assertIsNone(self.house._weakest(rules))  # too young to have had a chance
+        self.assertIsNone(self.house._refill(rules))   # so the league stays full and adds nobody
+        self.clock.advance(2 * float(rules["epoch_seconds"]))
+        self.house.evaluator.promote(fresh.id, 2, "test: real money")
+        self.assertIsNone(self.house._weakest(rules))  # real money is the auditor's and the tuition's
+
     def test_a_newcomer_joins_the_desk_with_the_most_room(self):
         crypto = self.seated()  # alpaca-crypto-majors
         rules = self.house.game["economy"]

@@ -143,8 +143,11 @@ class Researcher:
         )
 
     def consult_evidence(self, agent: Agent) -> dict[str, Any]:
-        """Everything the agent knows, for the theorist it is paying."""
+        """Everything the agent knows, for the theorist it is paying -- including whether it is
+        trading at all, which decides whether advice could possibly help it."""
+        record = dict(self.standing(agent.id) if self.standing else {})
         return {
+            "record": record,
             "agent": {"id": agent.id, "family": agent.family, "niche": agent.niche, "generation": agent.generation},
             "specialty": self.specialty(agent) if self.specialty else "",
             "strategy_file": agent.code,

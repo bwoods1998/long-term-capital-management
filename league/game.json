@@ -21,7 +21,8 @@
     "unearned_share_to_floors": true,
     "idle_broke_wakes": 30,
     "newcomer_seconds": 3600,
-    "performance_exponent": 2
+    "performance_exponent": 2,
+    "displace_after_epochs": 2
   },
   "bounds": {
     "daily_pool_usd": [

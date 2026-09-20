@@ -201,6 +201,16 @@ class Consulting(unittest.TestCase):
         self.assertIn("NOT given the power to trade, to promote it, or to change the rules", CONSULT)
         self.assertIn("keep the agent inside its specialty", CONSULT)
 
+    def test_he_is_told_to_write_a_file_not_a_critique(self):
+        """Ten agents hired him on the floor's first night and ten got advice alone, mostly "audit
+        this before you spend another trial" -- counsel any of them could have written itself, at
+        the price of the best mind in the firm."""
+        from league.merton import CONSULT
+
+        self.assertIn("WRITE IT A STRATEGY FILE", CONSULT)
+        self.assertIn("Advice is the\nEXCEPTION here, not the default", CONSULT)
+        self.assertLess(CONSULT.index("A WHOLE STRATEGY FILE"), CONSULT.index("ADVICE ALONE"))
+
 
 class PacedByTheBudget(unittest.TestCase):
     """The frontier budget is the half that writes strategies, builds tools and reads the floor.
