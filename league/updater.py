@@ -77,11 +77,16 @@ def unpack(tarball: bytes, target: Path) -> int:
 
 class Updater:
     def __init__(self, base: str | Path = "/workspace", *, repo: str = REPO, fetch: Callable[[], bytes] | None = None,
-                 launch: Callable[[Path, str], None] | None = None, clock: Callable[[], float] = time.time, every_seconds: int = 1800):
+                 launch: Callable[[Path, str], None] | None = None, clock: Callable[[], float] = time.time, every_seconds: int = 1800,
+                 judge: Callable[[Path], list[str]] | None = None):
         self.base = Path(base)
         self.releases = Releases(self.base)
         self.fetch = fetch or (lambda: fetch_main(repo))
         self.launch = launch or self._launch
+        #: (incoming tree) -> what refuses it. The incoming tree's OWN content checks, run as its
+        #: own process, so a tree is judged by its own rules rather than by a judge one commit out
+        #: of date. Tests hand in a stub; nothing else should.
+        self.judge = judge or self._judged_by_itself
         self.clock = clock
         self.every = every_seconds
         self._last = 0.0
@@ -138,21 +143,48 @@ class Updater:
         return {"action": "deploying", "release": release_id, "files": files}
 
     def vet(self, incoming: Path, running: Path) -> list[str]:
-        """The running release's own content checks, applied to the new tree."""
-        from . import ci
+        """The content checks, applied to the new tree -- by the NEW tree's own judge.
 
-        problems = ci.check_strategies(incoming) + ci.check_tools(incoming) + ci.check_game(incoming)
+        This used to import the RUNNING release's `ci`, which judged the incoming tree by rules one
+        commit out of date. GitHub judges a branch with the branch's own `ci.py`, so the two
+        disagreed by exactly one commit, and a change that widens a bound and uses the wider value
+        in the same commit passed there and was refused here -- for ever, because git main is
+        cumulative, so the offending file stays in every later tree and the refusal repeats. It
+        happened to this repository on Sept 20, 2026 (`inference_daily_cap_usd`), and it would have
+        stopped the box taking any update at all, with no alert anywhere.
+
+        What the new tree may not decide for itself stays here, in code the incoming tree cannot
+        touch: the real-money switch is the owner's own deploy and no automatic update may flip it.
+        The branch's judge is the second wall, not the only one -- GitHub has already run the same
+        checks on the same tree before it reached main."""
+        problems = []
         try:
             new = json.loads((incoming / "league" / "config.json").read_text(encoding="utf-8"))
             old = json.loads((running / "league" / "config.json").read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            return problems + [f"league/config.json cannot be read: {exc}"]
+            return [f"league/config.json cannot be read: {exc}"]
         if bool(new.get("real_money")) != bool(old.get("real_money")):
             problems.append("league/config.json changes real_money: that switch is the owner's own deploy, never an automatic update")
-        for key, (low, high) in ci.CONFIG_DIALS.items():
-            if key in new and not low <= float(new[key]) <= high:
-                problems.append(f"league/config.json: {key} = {new[key]} is outside [{low}, {high}]")
-        return problems
+        return problems + list(self.judge(incoming))
+
+    @staticmethod
+    def _judged_by_itself(incoming: Path) -> list[str]:
+        """The incoming tree's own content checks, run inside that tree as its own process.
+
+        A subprocess, not an import: `league/ci.py` reaches the rest of its package by relative
+        import, so it can only judge the tree it lives in. This is what GitHub already does to the
+        same commit, which is the point -- the two judges must not disagree."""
+        if not (incoming / "league" / "ci.py").exists():
+            return ["the incoming tree has no league/ci.py to judge itself with"]
+        try:
+            done = subprocess.run([sys.executable, "-m", "league.ci", "--content-only"], cwd=str(incoming),
+                                  capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return [f"the incoming tree's own checks could not be run: {type(exc).__name__}: {str(exc)[:200]}"]
+        if done.returncode == 0:
+            return []
+        refused = [line[len("REFUSED: "):] for line in done.stdout.splitlines() if line.startswith("REFUSED: ")]
+        return refused or [f"the incoming tree's own checks refused it (exit {done.returncode}): {(done.stderr or done.stdout)[-300:]}"]
 
 
 def _remove(path: Path) -> None:

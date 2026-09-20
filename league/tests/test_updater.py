@@ -31,6 +31,7 @@ def tree(real_money=False, extra=None, tick_seconds=60):
     files = {
         "league/config.json": json.dumps({"real_money": real_money, "tick_seconds": tick_seconds}),
         "league/game.json": (Path(__file__).resolve().parents[1] / "game.json").read_text(),
+        "league/ci.py": "# a real tree carries its own judge; these tests hand `Updater` a stub one\n",
         "league/strategies/registry.json": "[]",
         "league/house.py": "# the house\n",
         "league/__main__.py": "# a release is recognised by this file\n",
@@ -60,14 +61,17 @@ class UpdaterCase(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
-    def updater(self):
-        return Updater(self.base, fetch=lambda: self.main, launch=lambda source, rid: self.launched.append((source, rid)), clock=self.clock)
+    def updater(self, judge=None):
+        """`judge` stands in for the incoming tree's own `league.ci --content-only`, which a real
+        tree runs as its own process; these synthetic trees have no package to run it from."""
+        return Updater(self.base, fetch=lambda: self.main, launch=lambda source, rid: self.launched.append((source, rid)),
+                       clock=self.clock, judge=judge or (lambda incoming: []))
 
     def test_only_release_trees_travel_and_nothing_strange(self):
         target = self.base / "unpacked"
         unpack(tarball(tree(), links={"league/evil": "/etc/passwd"}), target)
         names = sorted(p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file())
-        self.assertEqual(names, ["league/__main__.py", "league/config.json", "league/game.json", "league/house.py", "league/strategies/registry.json",
+        self.assertEqual(names, ["league/__main__.py", "league/ci.py", "league/config.json", "league/game.json", "league/house.py", "league/strategies/registry.json",
                                  "ltcm/broker.py", "scripts/run.sh"])
         self.assertEqual((target / "scripts/run.sh").stat().st_mode & 0o777, 0o755)
         self.assertEqual((target / "league/house.py").stat().st_mode & 0o777, 0o644)
@@ -92,18 +96,47 @@ class UpdaterCase(unittest.TestCase):
         self.assertEqual(updater.check()["action"], "none")
         self.assertEqual(len(self.launched), 1)
 
-    def test_main_cannot_turn_real_money_on_or_carry_an_unsafe_strategy(self):
+    @staticmethod
+    def content_judge(incoming):
+        """What `league.ci --content-only` reports when the incoming tree runs it on itself. In
+        production that is a subprocess inside the tree; here the checks are called directly."""
+        import os
+
+        from league import ci
+
+        here = os.getcwd()
+        os.chdir(incoming)
+        try:
+            return ci.check_strategies(incoming) + ci.check_tools(incoming) + ci.check_game(incoming) + ci.check_config(None, incoming)
+        finally:
+            os.chdir(here)
+
+    def test_main_cannot_turn_real_money_on_whatever_its_own_judge_says(self):
+        """The real-money switch is not the incoming tree's to decide, so this one check stays in
+        `vet` itself, in code the incoming tree cannot touch."""
         self.main = tarball(tree(real_money=True))
         out = self.updater().check()
         self.assertEqual(out["action"], "refused")
         self.assertIn("real_money", " ".join(out["reasons"]))
+
+    def test_the_incoming_trees_own_checks_refuse_an_unsafe_strategy_and_a_bad_dial(self):
         self.main = tarball(tree(extra={"league/strategies/bad.py": "import os\ndef decide(ctx):\n    return {}\n",
                                         "league/strategies/registry.json": json.dumps([{"name": "bad", "family": "t", "file": "bad.py", "why": "x"}])}))
-        out = self.updater().check()
+        out = self.updater(judge=self.content_judge).check()
         self.assertEqual(out["action"], "refused")
         self.assertEqual(self.launched, [])
         self.main = tarball(tree(tick_seconds=5))
-        self.assertIn("tick_seconds", " ".join(self.updater().check()["reasons"]))
+        self.assertIn("tick_seconds", " ".join(self.updater(judge=self.content_judge).check()["reasons"]))
+
+    def test_a_tree_judged_by_its_own_rules_may_widen_a_bound_and_use_it(self):
+        """The judge used to be the RUNNING release's, so a commit that widens a bound and uses the
+        wider value passed GitHub and was refused here -- for ever, because main is cumulative and
+        the offending file stays in every later tree. It happened to this repository on Sept 20."""
+        wider = (Path(__file__).resolve().parents[1] / "ci.py").read_text().replace(
+            '"tick_seconds": (30, 600)', '"tick_seconds": (5, 600)')
+        self.main = tarball(tree(tick_seconds=5, extra={"league/ci.py": wider}))
+        self.assertEqual(self.updater(judge=lambda incoming: [] if "(5, 600)" in
+                                      (incoming / "league" / "ci.py").read_text() else ["tick_seconds"]).check()["action"], "deploying")
 
     def test_a_sound_new_strategy_is_let_through(self):
         self.main = tarball(tree(extra={"league/strategies/ok.py": GOOD, "league/strategies/registry.json": json.dumps([{"name": "ok", "family": "t", "file": "ok.py", "why": "x"}])}))

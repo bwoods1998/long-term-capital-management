@@ -254,8 +254,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD", help="the commit being judged")
     parser.add_argument("--no-tests", action="store_true")
     parser.add_argument("--guard-only", action="store_true", help="only the path guard (run from main's copy of this file)")
+    parser.add_argument("--content-only", action="store_true",
+                        help="only the content checks, with no git and no test run: what the box's updater asks an incoming tree")
     args = parser.parse_args(argv)
-    if args.guard_only:
+    if args.content_only:
+        # Run by `Updater.vet` in the INCOMING tree, so a tree is judged by its own rules rather
+        # than by a judge one commit out of date -- the two disagreed, and a commit that widened a
+        # bound and used the wider value could never reach the box.
+        problems = check_strategies() + check_tools() + check_game() + check_config(None)
+    elif args.guard_only:
         problems = guard_branch(args.base or "origin/main", args.head, args.branch)
     else:
         problems = check(args.base, args.branch, tests=not args.no_tests, head=args.head)
