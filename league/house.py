@@ -21,8 +21,8 @@ other boxes and returns plain data.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
-import random
 import re
 import threading
 import time
@@ -38,6 +38,8 @@ from ltcm.broker import Instrument, money
 from . import seeds as seeds_module
 from .agents import Agent, Registry, niche_of
 from . import capital, niches as niches_module
+from . import parameters
+from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
 from .constitution import CONSTITUTION, digest as constitution_digest
@@ -858,6 +860,7 @@ class House:
         return {s: list(bars)[-MAX_OBSERVED_BARS:] for s, bars in (rows or {}).items() if bars}
 
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+        parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
         tape_id, tape = self.tape_for(needs)
@@ -962,6 +965,9 @@ class House:
             agent = deepcopy(self.registry.get(agent.id))
             if self._state["tried"].get(agent.id) == agent.code_sha256:
                 return {"agent": agent.id, "skipped": "its code has had its replay; research may change it"}
+        errors = parameters.inspect(agent.params, agent.needs)['errors']
+        if errors:
+            return {"agent": agent.id, "skipped": "invalid parameters", "errors": errors}
         try:
             result, tape_id = self._run_replay(agent, agent.code, agent.needs, agent.params)
         except Exception as exc:  # noqa: BLE001 - no tape or no box: try again next wake
@@ -998,11 +1004,15 @@ class House:
             niche = self.niche_of(agent)
             if niche is not None:
                 info["needs"] = niches_module.constrain(info["needs"], niche)
+            parameters.require_valid(info.get("params") or {}, info["needs"])
             if niche is not None and not niche.replay:
                 # No history to walk: the candidate must at least decide on what its parent sees now.
                 # It is not a counted trial and proves no edge; its child answers on paper.
                 book = self.book_of(agent)
-                ctx = self.snapshot(agent, book) if book is not None else None
+                candidate_agent = deepcopy(agent)
+                candidate_agent.code, candidate_agent.needs = code, info["needs"]
+                candidate_agent.params = dict(info.get("params") or {})
+                ctx = self.snapshot(candidate_agent, book) if book is not None else None
                 run = self.sandbox.decide(agent.id, code, ctx) if ctx is not None else None
                 if run is not None:
                     self._charge_box(agent.id, run, note="a candidate's smoke run")
@@ -1422,7 +1432,9 @@ class House:
         if niche is not None and self.members(niche.id) >= niche.max_members:
             return None  # its specialty is full: no niche may crowd out the rest
         child_code = code or parent.code
-        child_params = dict(params) if params is not None else (parent.params if code else mutate(parent.params, seed=f"{parent.id}:{len(self.registry.agents)}"))
+        child_params = dict(params) if params is not None else (parent.params if code else self._mutated_params(parent, seed=f"{parent.id}:{len(self.registry.agents)}"))
+        if child_params is None:
+            return None
         child = self.spawn(parent.line or parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
                            endowment=rules["endowment_usd"] if staked_by_house else None)
         if staked_by_house:
@@ -1441,6 +1453,18 @@ class House:
             self._state["tried"][child.id] = child.code_sha256
             self.seat(child)
         return child
+
+    def _mutated_params(self, parent: Agent, *, seed: str) -> dict[str, Any] | None:
+        """Reject structural failures and duplicate living programs before buying a probe."""
+        excluded = [a.params for a in self.registry.living()
+                    if a.code_sha256 == parent.code_sha256 and a.niche == parent.niche]
+        try:
+            return mutate(parent.params, seed=seed, needs=parent.needs, excluded=excluded)
+        except ValueError as exc:
+            identity = hashlib.sha256(json.dumps([parent.code_sha256, parent.params, parent.needs, seed], sort_keys=True).encode()).hexdigest()
+            self.ledger.append('agent.mutation', {'status': 'rejected', 'reason': str(exc), 'seed': seed,
+                'counted_as_trial': False}, agent=parent.id, id=f'mutation:{parent.id}:{identity}')
+            return None
 
     # --------------------------------------------------------------- research
     def research_due(self, agent: Agent) -> bool:
@@ -1724,6 +1748,12 @@ class House:
         agent = self.registry.get(agent_id)
         rung = self.evaluator.rung(agent.id)
         candidate = outcome.candidate
+        if candidate:
+            errors = parameters.inspect(candidate['params'], candidate['needs'])['errors']
+            if errors:
+                self.ledger.append('agent.research', {'tool': 'candidate', 'status': 'not_adopted',
+                    'reason': 'invalid parameters: ' + '; '.join(errors), '_candidate': candidate}, agent=agent.id)
+                return None
         barren = self.idle_run(agent)["barren"]
         if candidate is not None and not candidate.get("passed", True):
             # A failed replay buys nothing -- unless the agent is in the one position where replay
@@ -1874,6 +1904,7 @@ class House:
         living = self.registry.living()
         if not living:
             return None
+        loser = None
         if len(living) >= int(rules["max_population"]):
             # A ceiling with nothing dying under it is a floor that has stopped searching. Measured
             # Sept 20, 2026: thirty-three agents born in twelve hours and NOT ONE dead, four births
@@ -1883,9 +1914,8 @@ class House:
             loser = self._weakest(rules)
             if loser is None:
                 return None
-            self.kill(loser, "displaced", self.postmortem(loser, "displaced",
-                                                          "the league was full and it was the weakest agent with a fair chance behind it"))
-            living = self.registry.living()
+            # Do not retire a resident until the cadence is due and a valid replacement exists.
+            living = [a for a in living if a.id != loser.id]
         urgent = len(living) < int(rules["min_population"])
         every = float(rules["newcomer_seconds"]) / (4 if urgent else 1)
         if self.clock() - self._born_at < 300:
@@ -1900,18 +1930,25 @@ class House:
         last = float(state.get("at") or state.get("since") or self._born_at)
         if self.clock() - last < every:
             return None
-        room = [n for n in self.niches.values() if not n.dormant and self.members(n.id) < n.max_members]
-        seats = {n.id: n.max_members - self.members(n.id) for n in room}
-        here = [a for a in living if a.specialty in seats] or living
-        if seats:
-            widest = max(seats.values())
-            here = [a for a in here if seats.get(a.specialty) == widest] or here
-        best = max(here, key=lambda a: (self.evaluator.rung(a.id), self.economy.balance(a.id)))
+        seats = {n.id: n.max_members - sum(a.specialty == n.id for a in living)
+                 for n in self.niches.values() if not n.dormant}
+        seats = {key: value for key, value in seats.items() if value > 0}
+        here = [a for a in living if a.specialty in seats or (a.specialty is None and not self.settings.specialists)]
         with self._state_lock:
             self._state["last_newcomer"]["at"] = self.clock()
+        child_params = None
+        for best in sorted(here, key=lambda a: (seats.get(a.specialty, 0), self.evaluator.rung(a.id), self.economy.balance(a.id)), reverse=True):
+            child_params = self._mutated_params(best, seed=f"newcomer:{len(self.registry.agents)}")
+            if child_params is not None:
+                break
+        if child_params is None:
+            return None
+        if loser is not None:
+            self.kill(loser, "displaced", self.postmortem(loser, "displaced",
+                "the league was full and a valid newcomer replaces its weakest eligible agent"))
         child = self.spawn(best.line or best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
-                           params=mutate(best.params, seed=f"newcomer:{len(self.registry.agents)}"),
-                           reason=f"a House-staked mutation of {best.id}: its desk had the most room, and the league was {len(living)} of {rules['max_population']}")
+                           params=child_params,
+                           reason=f"a House-staked valid mutation of {best.id}: open desks with more room were tried first; the league was {len(living)} of {rules['max_population']}")
         self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False,
                                             "reason": "population", "new_code": False}, agent=best.id)
         return child
@@ -2053,6 +2090,8 @@ class House:
             "release": Path(__file__).resolve().parents[1].name,
             "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
             "background_jobs": jobs,
+            "invalid_parameters": {a.id: report['errors'] for a in self.registry.living()
+                                   if not (report := parameters.inspect(a.params, a.needs))['valid']},
             "durable_research": [{k: j[k] for k in ("session", "agent", "status", "created", "updated", "available", "reason", "resumes")}
                                  for j in self.research_jobs.pending()],
             "recordings": self.recorder.stats(),
@@ -2078,21 +2117,6 @@ def _epoch(iso: str) -> float:
 
     parsed = instant(iso)
     return parsed.timestamp() if parsed else 0.0
-
-
-def mutate(params: Mapping[str, Any], *, seed: str, scale: float = 0.2) -> dict[str, Any]:
-    """A child's parameters: each number moved by up to `scale`, deterministically from the seed.
-    Integers stay integers, booleans and everything else are inherited unchanged."""
-    rng = random.Random(seed)
-    out: dict[str, Any] = {}
-    for key, value in params.items():
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            out[key] = value
-        elif isinstance(value, int):
-            out[key] = max(1, int(round(value * (1 + rng.uniform(-scale, scale))))) if value > 0 else value
-        else:
-            out[key] = round(value * (1 + rng.uniform(-scale, scale)), 6)
-    return out
 
 
 def names_match(founder: Mapping[str, Any], names: Sequence[str]) -> bool:

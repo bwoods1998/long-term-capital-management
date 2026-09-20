@@ -65,6 +65,7 @@ KINDS: dict[str, bool] = {
     "agent.research": True,
     "agent.intent": True,
     "agent.forked": True,
+    "agent.mutation": False,  # structural proposals refused before endowment or a paid trial
     "agent.died": True,
     "agent.postmortem": True,
     # The netting book.

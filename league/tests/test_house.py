@@ -263,7 +263,8 @@ class HouseTest(HouseCase):
         self.assertIsInstance(child["lookback"], int)
         self.assertIs(child["maker"], True)
         self.assertEqual(child["symbols"], ["BTC/USD"])
-        self.assertNotEqual(child["z"], 2.0)
+        self.assertNotEqual(child, params)
+        self.assertEqual(child["z"], 2.0)  # unknown units stay frozen until explicitly bounded
 
 
 IDLE = '''

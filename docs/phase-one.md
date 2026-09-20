@@ -82,6 +82,14 @@ pre-phase expenditure remains historical expenditure and is not erased or called
   normal tape cache. Coverage inspection runs no strategy or sandbox and adds no selection
   trial. Research summaries now distinguish counted trials from smoke checks and unavailable inputs. Requested window length is kept distinct from returned coverage, and settlement-only
   events are kept distinct from market observations. Historical journals are preserved.
+- **Valid parameter experiments.** Births, adoptions and replays reject nonfinite values,
+  impossible probability bands, crossed ranges and declared parameter-rule violations.
+  Automatic mutations change one numeric knob within its standard or declared bounds and
+  reject duplicate living configurations before buying a probe or granting an endowment.
+  Unspecified numeric units stay fixed. A population replacement is selected before retiring
+  its resident, and the newcomer cadence also governs displacement. Existing legacy records
+  remain intact; health and current-capability reports identify their invalid parameters for
+  research. Options smoke checks use the candidate's parameters and declared inputs.
 
 These recordings are sampled REST views, not a tick/order-book archive. Alpaca replay execution
 still uses bar prices and a modeled spread, not historical queue position or observed fills.
