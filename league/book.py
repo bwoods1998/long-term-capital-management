@@ -1445,17 +1445,27 @@ class Book:
             if result.ok:
                 self._unreconciled = 0
                 return result
-            if self._traded_yet():
-                self._unreconciled += 1
-                return result if self.real_money or self._unreconciled < ADOPT_AFTER else self._adopt_the_venue(result)
-            # A book that has never traded cannot have drifted: its first reading of the venue was
-            # taken across a moment that moved. (Sept 19, 2026: a leftover bid filled between the
-            # cash read and the position read of a new league's first baseline, and froze the book
-            # $40 short with no agent having traded at all.) It has nothing of its own to lose by
-            # reading again, and every later difference is still a freeze.
-            self._baseline_row(self.baseline_cash + result.cash_diff, self.baseline_positions,
-                               f"re-read: the book has never traded and the venue was {result.cash_diff:+.4f} against its first reading")
-            return self._reconcile()
+            # Counted before the never-traded re-read, not inside the other branch: a position the
+            # venue holds that the ledger never learned about leaves every account empty, so
+            # `_traded_yet` is false, so the counter never moved -- and the re-read below corrects
+            # CASH only and leaves the position diff standing. The book froze for ever in exactly
+            # the state the adoption exists to clear.
+            self._unreconciled += 1
+            if not self._traded_yet():
+                # A book that has never traded cannot have drifted: its first reading of the venue
+                # was taken across a moment that moved. (Sept 19, 2026: a leftover bid filled
+                # between the cash read and the position read of a new league's first baseline, and
+                # froze the book $40 short with no agent having traded at all.) It has nothing of
+                # its own to lose by reading again.
+                self._baseline_row(self.baseline_cash + result.cash_diff, self.baseline_positions,
+                                   f"re-read: the book has never traded and the venue was {result.cash_diff:+.4f} against its first reading")
+                result = self._reconcile()
+                if result.ok:
+                    self._unreconciled = 0
+                    return result
+            if self.real_money or self._unreconciled < ADOPT_AFTER:
+                return result
+            return self._adopt_the_venue(result)
 
     def _adopt_the_venue(self, result: Reconciliation) -> Reconciliation:
         """Practice money: take the venue's word for what is held and carry on.

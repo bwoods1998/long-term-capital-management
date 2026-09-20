@@ -78,7 +78,11 @@ class Settings:
     research: bool = True
     max_wakes_per_tick: int = 16
     cold_wakes_per_tick: int = 5  # in a House's first five minutes (see `due`)
-    deploy_grace_seconds: int = 900  # no new research from the moment a release is staged (`deploying`)
+    # No new research from the moment a release is staged. It wants to be a little longer than a
+    # research pass (one to three minutes, measured) so the ones in flight finish before the
+    # restart, and a good deal SHORTER than a deploy: at fifteen minutes against a half-hourly
+    # deploy, a floor that is improving itself quickly would have spent half its life waiting.
+    deploy_grace_seconds: int = 420
     wake_workers: int = 6
     slow_workers: int = 3  # replays at once, beside the tick and never inside it
     research_workers: int = 5  # research passes at once: each is minutes of WAITING on Sail's flex window, not work
@@ -673,6 +677,16 @@ class House:
             self._inference_ceiling = Decimal(str(provider.floor_cap))
         allowance = self.pacer.allowance("sail") if self.pacer.running() else ZERO
         provider.floor_cap = min(self._inference_ceiling, allowance) if allowance > 0 else self._inference_ceiling
+        # A request is charged against the day before it is sent, and only settling, abandoning or
+        # reconciling gives it back. A pass killed by a restart -- which a floor that deploys itself
+        # does often -- leaves its reservation standing until midnight UTC, against the same cap
+        # this method just set. `reconcile_stale` is the documented cure and nothing on the floor
+        # was calling it: its one caller is `spent_today`, which nothing in league/ uses.
+        if hasattr(provider, "reconcile_stale"):
+            try:
+                provider.reconcile_stale()
+            except Exception as exc:  # noqa: BLE001 - a stale sweep that fails is a warning, not a tick
+                self.alert("warning", f"stale inference reservations could not be reconciled ({type(exc).__name__}: {str(exc)[:160]})")
 
     def _update(self) -> None:
         outcome = self.updater.check()
@@ -1013,7 +1027,7 @@ class House:
                     exits.append(Intent.new(
                         agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
                         reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
-                        created_at=now, nonce=f"horizon:{holding.opened_at}",
+                        created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}",
                     ))
             # A long option is sold before it can expire: in the money at the bell it would be
             # exercised into a hundred shares this account cannot carry. From 14:30 New York on

@@ -345,3 +345,18 @@ class FirstBaseline(BookCase):
         for _ in range(ADOPT_AFTER + 2):
             self.assertFalse(self.book.reconcile().ok)
         self.assertEqual([e for e in self.ledger.iter(kinds="book.baseline") if "adopted" in e.payload["note"]], [])
+
+    def test_a_position_the_ledger_never_learned_of_still_reaches_the_adoption(self):
+        """`_traded_yet` is false when no account holds anything, so the counter never moved and
+        the never-traded re-read corrects CASH only -- leaving the position diff to freeze the book
+        for ever, in exactly the state the adoption exists to clear. Found by the stall audit."""
+        from league.book import ADOPT_AFTER
+
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.held[self.btc.key] = (self.btc, D("0.5"))   # the venue holds what no agent ever bought
+        for _ in range(ADOPT_AFTER - 1):
+            self.assertFalse(self.book.reconcile().ok)
+        healed = self.book.reconcile()
+        self.assertTrue(healed.ok, healed.detail)
+        note = [e.payload for e in self.ledger.iter(kinds="book.baseline")][-1]
+        self.assertIn("adopted the venue", note["note"])
