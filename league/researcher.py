@@ -39,7 +39,7 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}},
     {"name": "request_tool", "description": "Ask the architect to build something the House does not offer (a data feed, an indicator, a venue feature). Say what and why.",
      "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}}, "required": ["name", "description"]}},
-    {"name": "markets_now", "description": "See what your strategy sees right now: the live markets, quotes, bars or option chain of your specialty, your positions and working orders. Free. Look before you design: a rule about spreads or prices should start from the spreads and prices that are really there.",
+    {"name": "markets_now", "description": "Inspect a compact research preview of your strategy's current markets, quotes, bars, option chain, positions and working orders. Read coverage for the actual snapshot counts and history dates: this preview shows only the latest 30 bars per symbol, 40 busiest markets and first 40 option contracts. Preview truncation does not shorten the strategy's input. Free. Look before you design: a rule about spreads or prices should start from the spreads and prices that are really there.",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "journal_write", "description": "Write a note to your FUTURE SELF. Your journal is handed back to you at the start of every research pass, and your children inherit it: what you tried, what the result was, what you will check next, what not to repeat. Keep each entry short and dated by the House.",
      "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
@@ -453,15 +453,35 @@ def _candidate_rank(candidate: Mapping[str, Any] | None) -> int:
 
 
 def _trim(ctx: Mapping[str, Any]) -> dict[str, Any]:
-    """The live view, cut to what a model can read: the busiest 40 markets, the 40 nearest option
-    contracts, the last 30 bars of each symbol."""
-    out = {k: v for k, v in dict(ctx).items() if k not in ("markets", "chain", "bars", "memory", "params")}
+    """The live view, cut to what a model can read: the busiest 40 markets, the first 40 option
+    contracts, the last 30 bars of each symbol. Coverage describes the untrimmed strategy input."""
+    def coverage(rows: Any, limit: int) -> dict[str, Any]:
+        return {"available_to_strategy": len(rows), "shown": min(len(rows), limit), "truncated": len(rows) > limit}
+
+    # Explain the preview before the potentially large arrays: the tool response also has a
+    # character limit, and agents must not mistake displayed rows for the full runtime feed.
+    out = {"view_note": "Rows shown here are a research preview. Coverage counts and dates describe the strategy snapshot "
+                        "before preview trimming; this preview does not shorten the strategy's input. "
+                        "Shown counts are before the response-size limit, which may cut long previews further.", "coverage": {}}
+    out.update({k: v for k, v in dict(ctx).items() if k not in ("markets", "chain", "bars", "memory", "params", "view_note", "coverage")})
     if "markets" in ctx:
         rows = sorted(ctx["markets"] or [], key=lambda m: -(m.get("volume_24h") or 0))
         out["markets"] = rows[:40]
         out["markets_shown"] = f"{min(len(rows), 40)} busiest of {len(rows)}"
+        out["coverage"]["markets"] = coverage(rows, 40)
     if "chain" in ctx:
-        out["chain"] = (ctx["chain"] or [])[:40]
+        rows = ctx["chain"] or []
+        out["chain"] = rows[:40]
+        out["coverage"]["chain"] = coverage(rows, 40)
     if "bars" in ctx:
-        out["bars"] = {symbol: (bars or [])[-30:] for symbol, bars in (ctx["bars"] or {}).items()}
+        out["bars"], out["coverage"]["bars"] = {}, {}
+        for symbol, bars in (ctx["bars"] or {}).items():
+            rows = bars or []
+            out["bars"][symbol] = rows[-30:]
+            details = coverage(rows, 30)
+            if rows:
+                for name, row in (("available_first_at", rows[0]), ("available_last_at", rows[-1]), ("shown_first_at", rows[-30:][0])):
+                    if isinstance(row, Mapping) and isinstance(row.get("t"), str):
+                        details[name] = row["t"]
+            out["coverage"]["bars"][symbol] = details
     return out
