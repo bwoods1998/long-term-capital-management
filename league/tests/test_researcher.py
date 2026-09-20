@@ -132,6 +132,46 @@ class Looking(ResearchCase):
         self.assertEqual((len(out["chain"]), len(out["bars"]["F"]), out["bars"]["F"][-1]), (40, 30, {"c": 199}))
         self.assertNotIn("memory", out)
 
+    def test_live_view_distinguishes_preview_history_from_the_strategy_history(self):
+        view = {"bars": {"SPY": [{"c": i} for i in range(70)], "QQQ": [{"c": i} for i in range(120)]}}
+        r = self.researcher([[("markets_now", {})]], look=lambda agent: view)
+        r.research(self.parent, {}, session="coverage")
+        shown = self.tool_output(1)
+        self.assertEqual(shown["coverage"]["bars"], {
+            "SPY": {"available_to_strategy": 70, "shown": 30, "truncated": True},
+            "QQQ": {"available_to_strategy": 120, "shown": 30, "truncated": True},
+        })
+        self.assertIn("research preview", shown["view_note"])
+        self.assertEqual(shown["bars"]["SPY"], view["bars"]["SPY"][-30:])
+        self.assertEqual(shown["bars"]["QQQ"], view["bars"]["QQQ"][-30:])
+        self.assertEqual({symbol: len(rows) for symbol, rows in view["bars"].items()}, {"SPY": 70, "QQQ": 120})
+
+    def test_coverage_reports_actual_empty_short_and_bounded_inputs(self):
+        out = _trim({"markets": [{"market": str(i), "volume_24h": i} for i in range(60)],
+                     "chain": [{"occ": str(i)} for i in range(90)],
+                     "bars": {"empty": [], "missing": None, "short": [{"c": 1}], "exact": [{"c": i} for i in range(30)]}})
+        self.assertEqual(out["coverage"]["markets"], {"available_to_strategy": 60, "shown": 40, "truncated": True})
+        self.assertEqual(out["coverage"]["chain"], {"available_to_strategy": 90, "shown": 40, "truncated": True})
+        for symbol, count in (("empty", 0), ("missing", 0), ("short", 1), ("exact", 30)):
+            self.assertEqual(out["coverage"]["bars"][symbol], {"available_to_strategy": count, "shown": count, "truncated": False})
+        empty = _trim({"markets": [], "chain": None, "bars": {}})
+        self.assertEqual(empty["coverage"]["markets"], {"available_to_strategy": 0, "shown": 0, "truncated": False})
+        self.assertEqual(empty["coverage"]["chain"], empty["coverage"]["markets"])
+        self.assertEqual(empty["coverage"]["bars"], {})
+
+    def test_bar_coverage_keeps_the_full_history_dates_before_the_preview(self):
+        from datetime import date, timedelta
+
+        bars = [{"t": (date(2025, 11, 18) + timedelta(days=i)).isoformat(), "c": i} for i in range(210)]
+        out = _trim({"bars": {"NVDA": bars}})
+        self.assertEqual(out["coverage"]["bars"]["NVDA"], {
+            "available_to_strategy": 210, "shown": 30, "truncated": True,
+            "available_first_at": bars[0]["t"], "available_last_at": bars[-1]["t"], "shown_first_at": bars[-30]["t"],
+        })
+        self.assertEqual(out["bars"]["NVDA"], bars[-30:])
+        encoded = json.dumps(out)
+        self.assertLess(encoded.index('"coverage"'), encoded.index('"c"'))
+
     def test_a_replay_answers_with_where_it_won_and_lost(self):
         r = self.researcher([[("replay", {"code": CODE, "purpose": "pre-game only"})]])
         out = r.research(self.parent, {}, session="s1")
