@@ -87,6 +87,7 @@ class LadderTest(unittest.TestCase):
         self.data = FakeAlpacaData()
         game = load_game()
         game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9  # the ladder is what is under test, not the refill
         game["audit"]["cooldown_hours"] = 72  # the mechanism is what is tested here, not the expedition's dial (24)
         self.auditor = FakeAuditor()
         self.house = House(

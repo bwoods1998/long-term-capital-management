@@ -32,6 +32,7 @@ class TuitionTest(unittest.TestCase):
         self.paper, self.real = FakeBroker("alpaca-paper"), FakeBroker("alpaca", cash="800")
         game = load_game()
         game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9  # the ladder is what is under test, not the refill
         self.auditor = FakeAuditor()
         self.house = House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.paper, "alpaca": self.real}, sandbox=InProcessSandbox(),
