@@ -547,6 +547,10 @@ class House:
     def due(self) -> list[Agent]:
         now = self.clock()
         out = [a for a in self.registry.living() if float(self._state["next_wake"].get(a.id) or 0) <= now]
+        # Serve the oldest deadline first. Birth order alone can starve the tail forever when
+        # an earlier cohort becomes due again before the bounded wake batch reaches it.
+        # Python's stable sort retains the registry's birth/id order for equal deadlines.
+        out.sort(key=lambda a: float(self._state["next_wake"].get(a.id) or 0))
         # A House that has just started has every cache cold: each wake re-reads its venue listings.
         # Measured Sept 19, 2026: sixteen cold wakes in one tick took over four minutes, and the
         # watchdog rightly rolled the release back as a House whose ticks do not finish. For its
