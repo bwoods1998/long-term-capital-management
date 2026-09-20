@@ -21,7 +21,10 @@ concurrency:
 jobs:
   guard:
     # The path guard, from main's copy of league/ci.py, against the branch's commits.
-    if: startsWith(github.head_ref, 'merton/') && github.event.pull_request.head.repo.full_name == github.repository
+    # `astra/` as well as `merton/`: the DEPLOYED gateway still names branches with the old prefix,
+    # so every proposal Merton opened landed on a branch this workflow ignored and sat open for
+    # ever. The role is the second segment either way, so the path guard below is exactly as tight.
+    if: (startsWith(github.head_ref, 'merton/') || startsWith(github.head_ref, 'astra/')) && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

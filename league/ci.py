@@ -53,9 +53,18 @@ CONFIG_DIALS: dict[str, tuple[float, float]] = {
 }
 
 
+#: The branch prefixes a proposal of Merton's may arrive under. `merton/` is what the gateway's
+#: source emits; `astra/` is what the DEPLOYED gateway still emitted on Sept 20, 2026, months after
+#: the rename -- so every pull request he opened landed on a branch the merge workflow ignored, sat
+#: open for ever, and nothing anywhere said so. The floor could propose changes to itself and never
+#: land one. Both are accepted until the gateway is redeployed; the role is the second segment
+#: either way, so the path guard is exactly as tight.
+PREFIXES = ("merton", "astra")
+
+
 def role_of(branch: str) -> str | None:
     parts = str(branch or "").split("/")
-    return parts[1] if len(parts) >= 3 and parts[0] == "merton" and parts[1] in ROLE_PATHS else None
+    return parts[1] if len(parts) >= 3 and parts[0] in PREFIXES and parts[1] in ROLE_PATHS else None
 
 
 def guard(paths: Iterable[str], role: str | None) -> list[str]:
@@ -234,14 +243,14 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
     problems: list[str] = []
     role = role_of(branch or "")
     paths = changed_paths(base, head, cwd=root) if base else []
-    if (branch or "").startswith("merton/"):
+    if (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)):
         if role is None:
             problems.append(f"{branch}: not a branch name of the form merton/<role>/<slug>")
         problems.extend(guard(paths, role))
     problems.extend(check_strategies(root))
     problems.extend(check_tools(root))
     problems.extend(check_game(root))
-    problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith("merton/") else None, root))
+    problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)) else None, root))
     if tests and not problems:
         problems.extend(run_tests(root))
     return problems

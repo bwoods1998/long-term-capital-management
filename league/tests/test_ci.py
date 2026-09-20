@@ -85,3 +85,30 @@ class RepositoryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheDeployedGatewaysPrefix(unittest.TestCase):
+    """The gateway's source names branches `merton/`; the DEPLOYED gateway still emitted `astra/`
+    on Sept 20, 2026, so every proposal Merton opened landed on a branch the merge workflow ignored
+    and sat open for ever, with nothing anywhere saying so. The floor could propose changes to
+    itself and never land one."""
+
+    def test_both_prefixes_carry_a_role_and_nothing_else_does(self):
+        self.assertEqual(ci.role_of("merton/architect/a-thing"), "architect")
+        self.assertEqual(ci.role_of("astra/operator/a-thing"), "operator")
+        for branch in ("evil/architect/x", "astra/ledger/x", "merton/ledger/x", "astra/architect", "architect/x", ""):
+            self.assertIsNone(ci.role_of(branch), branch)
+
+    def test_the_guard_is_as_tight_under_either_prefix(self):
+        for prefix in ci.PREFIXES:
+            self.assertEqual(ci.guard(["league/constitution.py"], ci.role_of(f"{prefix}/architect/x")),
+                             ["league/constitution.py: no role may change this file"])
+            self.assertTrue(ci.guard(["league/game.json"], ci.role_of(f"{prefix}/architect/x")))   # not the architect's
+            self.assertEqual(ci.guard(["league/strategies/new.py"], ci.role_of(f"{prefix}/architect/x")), [])
+
+    def test_the_merge_workflow_accepts_both(self):
+        from pathlib import Path
+
+        text = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "merton.yml").read_text()
+        self.assertIn("startsWith(github.head_ref, 'merton/')", text)
+        self.assertIn("startsWith(github.head_ref, 'astra/')", text)
