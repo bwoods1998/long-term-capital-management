@@ -430,3 +430,12 @@ class IdleHands(HouseCase):
         self.house._note_wake(self.agent, acted=True, offered=0)
         self.house._note_wake(self.agent, acted=False, offered=0)
         self.assertTrue(self.house._working(self.agent, epoch))  # its market is simply shut
+
+    def test_the_stuck_and_the_long_waiting_are_asked_before_the_comfortable(self):
+        """The day's allowance, not the cadence, decides who researches; birth order must not."""
+        others = [self.seated(name, IDLER) for name in ("aye", "bee", "cee")]
+        self.house._state["last_research"] = {self.agent.id: 900.0, others[0].id: 100.0, others[1].id: 500.0, others[2].id: 300.0}
+        self.assertEqual([a.id for a in self.house.research_order()],
+                         [others[0].id, others[2].id, others[1].id, self.agent.id])
+        self.wakes(10)  # now the one that researched most recently is the one that cannot act
+        self.assertEqual(self.house.research_order()[0].id, self.agent.id)

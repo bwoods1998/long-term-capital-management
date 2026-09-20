@@ -1151,6 +1151,16 @@ class House:
             return f"{idle['shut']} wakes in a row with nothing open to trade: this is bench time, and the bench is where a better strategy is written"
         return ""
 
+    def research_order(self) -> list[Agent]:
+        """Who gets asked first when the day's frontier allowance is nearly all the floor has.
+
+        Twenty-eight agents on a three-hour cadence want more passes in a day than the expedition
+        funds, so the allowance -- not the cadence -- is what really decides who researches. Taken
+        in the order they were born, the same agents would claim it every morning and the youngest
+        desks would never research at all. Stuck first, then whoever has waited longest."""
+        return sorted(self.registry.living(),
+                      key=lambda a: (0 if self.idle_reason(a) else 1, float(self._state["last_research"].get(a.id) or 0)))
+
     def research_interval_hours(self, agent: Agent | None = None) -> float:
         """How long an agent waits between research passes. The game file's number, halved (never
         under an hour) while today's frontier spending is running behind the clock: the owner wants
@@ -1378,7 +1388,7 @@ class House:
             for agent in self.registry.dead():
                 if agent.id in book.accounts:
                     self._sweep(agent.id, book)
-        for agent in self.registry.living() if open_for_business else []:
+        for agent in self.research_order() if open_for_business else []:
             if self.research_due(agent):
                 # Stamped when the pass ENDS (in `research`), not when it is queued: on the first
                 # production day every agent was stamped at 18:02, queued, and lost to a restart,
