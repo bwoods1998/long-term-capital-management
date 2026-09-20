@@ -78,7 +78,7 @@ _FINE_STEP = Decimal("0.000000001")
 _WHOLE_STEP = Decimal(1)
 _FEE_GRID = Decimal("0.0001")
 _SCALARS = (str, int, float, bool, type(None))
-_MARKET_FIELDS = ("market", "series", "title", "yes_bid", "yes_ask", "close_time", "volume_24h", "open_interest", "strike")
+_MARKET_FIELDS = ("market", "series", "title", "yes_bid", "yes_ask", "close_time", "hours_to_resolve", "volume_24h", "open_interest", "strike")
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -264,7 +264,7 @@ class _View:
 
 def _alpaca_view(step: dict, half_spread: float) -> _View:
     view = _View()
-    bars = step.get("bars")
+    bars = step.get("execution_bars", step.get("bars"))
     if not isinstance(bars, dict):
         return view
     for symbol, bar in bars.items():
@@ -285,6 +285,8 @@ def _alpaca_view(step: dict, half_spread: float) -> _View:
         view.quotes[symbol] = (bid, ask)
         view.ranges[symbol] = (low, high)  # trades: a buy needs a print under it, a sell one over it
         view.marks[symbol] = bid
+    if "execution_bars" in step:
+        view.bars = {}  # signal history is appended separately, with its actual availability time
     return view
 
 
@@ -309,8 +311,10 @@ def _kalshi_view(step: dict) -> _View:
         view.quotes[f"{ticker}|no"] = (flip(yes_ask), flip(yes_bid))  # NO bid = 1 - YES ask
         view.ranges[f"{ticker}|yes"] = (ask_low, bid_high)
         view.ranges[f"{ticker}|no"] = (flip(bid_high), flip(ask_low))
-        view.marks[f"{ticker}|yes"] = yes_bid or 0.0
-        view.marks[f"{ticker}|no"] = flip(yes_ask) or 0.0
+        if yes_bid is not None:
+            view.marks[f"{ticker}|yes"] = yes_bid
+        if yes_ask is not None:
+            view.marks[f"{ticker}|no"] = flip(yes_ask)
     return view
 
 
@@ -319,13 +323,14 @@ class _Account:
     """One agent's simulated account on one venue: cash, holdings, resting orders and the tally."""
 
     def __init__(self, venue: str, stake: float, limits: dict[str, float], results: dict[str, str], record_fills: bool,
-                 maker_fee_series: Any = ()):
+                 maker_fee_series: Any = (), settlements: dict | None = None):
         self.venue = venue
         self.maker_fee_series = {str(x).upper() for x in (maker_fee_series or ())}
         self.stake = stake
         self.cash = stake
         self.limits = limits
         self.results = results
+        self.settlements = settlements
         self.positions: dict[str, dict[str, Any]] = {}
         self.orders: dict[str, dict[str, Any]] = {}
         self.order_seq = 0
@@ -437,6 +442,10 @@ class _Account:
             position = self.positions[key]
             if position["close_ts"] is None or now_ts < position["close_ts"]:
                 continue
+            if self.settlements is not None:
+                settled = _parse_ts(self.settlements.get(position["market"]))
+                if settled is None or now_ts < settled:
+                    continue  # trading stopped, but the cash is still locked
             result = str(self.results.get(position["market"]) or "").strip().lower()
             if result in ("yes", "no"):
                 payout = position["quantity"] if position["leg"] == result else 0.0
@@ -444,7 +453,9 @@ class _Account:
                 position["pnl"] += payout - position["cost"]
                 self.trade_returns.append(position["pnl"] / self.stake)
                 self._closed(position, "won" if payout > 0 else "lost", now)
-            else:  # no recorded result: hand back the price paid and count it; not a trade
+            elif self.settlements is not None:
+                continue  # unknown outcome is neither a cash refund nor a win
+            else:  # legacy tapes: archived evaluators retain their old contract
                 self.cash += position["cost"]
                 self.unresolved += 1
             del self.positions[key]
@@ -596,6 +607,21 @@ def _tape_problem(tape: Any) -> str | None:
     if not isinstance(steps, list) or not steps:
         return "the tape has no steps"
     last = None
+
+    def history_problem(series, cutoff, *, warmup=False):
+        if not isinstance(series, dict):
+            return 'history must map symbols to bar lists'
+        for rows in series.values():
+            if not isinstance(rows, list):
+                return 'history bars must be a list'
+            previous = None
+            for bar in rows:
+                stamp = _parse_ts(bar.get('t')) if isinstance(bar, dict) else None
+                if stamp is None or stamp > cutoff or (warmup and stamp == cutoff) or (previous is not None and stamp <= previous):
+                    return 'history contains future or unordered bars'
+                previous = stamp
+        return None
+
     for index, step in enumerate(steps):
         ts = _parse_ts(step.get("t")) if isinstance(step, dict) else None
         if ts is None:
@@ -603,6 +629,13 @@ def _tape_problem(tape: Any) -> str | None:
         if last is not None and ts <= last:
             return f"step {index} is not later than the step before it"
         last = ts
+        problem = history_problem(step.get('history_bars', {}), ts)
+        if problem:
+            return problem
+    first = _parse_ts(steps[0]['t'])
+    problem = history_problem(tape.get('warmup_bars', {}), first, warmup=True)
+    if problem:
+        return problem
     return None
 
 
@@ -717,6 +750,8 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     results = tape.get("results") if isinstance(tape.get("results"), dict) else {}
 
     bars_need = needs.get("bars") if isinstance(needs.get("bars"), dict) else {}
+    if venue == 'alpaca' and tape.get('timeframe') and bars_need.get('timeframe') and tape['timeframe'] != bars_need['timeframe']:
+        return failed('unsupported input: tape timeframe does not match declared bars')
     bar_limit = _num(bars_need.get("limit"))
     bar_limit = DEFAULT_BARS if bar_limit is None else max(1, min(MAX_BARS, int(bar_limit)))
     wanted_symbols = [s for s in needs.get("symbols") or [] if isinstance(s, str)] if isinstance(needs.get("symbols"), list) else []
@@ -729,11 +764,19 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     # each step: a Kalshi tape carries no bars of its own, and an hourly BTC strike is a bet about
     # a price the strategy could not see until now.
     observed_bars = tape.get("observed_bars") if isinstance(tape.get("observed_bars"), dict) else {}
+    observed_need = bars_need  # the same NEEDS.bars declaration used by the live House
+    observed_limit = _num(observed_need.get('limit'))
+    observed_limit = 60 if observed_limit is None else max(1, min(200, int(observed_limit)))
+    if venue == 'kalshi' and watched_symbols and tape.get('observed_timeframe') and tape['observed_timeframe'] != (observed_need.get('timeframe') or '1Hour'):
+        return failed('unsupported input: observed timeframe does not match declaration')
+    if venue == 'kalshi' and watched_symbols and any(not observed_bars.get(s) for s in watched_symbols):
+        return failed('unsupported input: required observed bars are missing')
     max_hours = _num(needs.get("max_hours_to_close"))
 
-    account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else ())
+    account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else (),
+                       tape.get('settlements') if isinstance(tape.get('settlements'), dict) else None)
     account.tradeable = (set(wanted_symbols) if wanted_symbols else None, wanted_series or None)
-    history: dict[str, list[dict[str, Any]]] = {}
+    history: dict[str, list[dict[str, Any]]] = {s: [dict(b) for b in rows[-MAX_BARS:]] for s, rows in (tape.get('warmup_bars') or {}).items()}
     memory: dict[str, Any] = {}
     errors, last_error = 0, ""
     blocks: list[dict[str, Any]] = []
@@ -774,6 +817,10 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         for symbol, bar in view.bars.items():
             series = history.setdefault(symbol, [])
             series.append(bar)
+            del series[:-MAX_BARS]
+        for symbol, bars in (step.get('history_bars') or {}).items():
+            series = history.setdefault(symbol, [])
+            series.extend(dict(bar) for bar in bars)
             del series[:-MAX_BARS]
 
         if equity > RUIN_EQUITY and step.get("execution_only") is not True:
@@ -830,7 +877,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                         ctx["observed"]["markets"] = watched_markets
                     if watched_symbols and observed_bars:
                         ctx["observed"]["bars"] = {
-                            s: [dict(b) for b in _bars_until(observed_bars.get(s) or (), now_ts)[-bar_limit:]]
+                            s: [dict(b) for b in _bars_until(observed_bars.get(s) or (), now_ts)[-observed_limit:]]
                             for s in watched_symbols
                         }
 
@@ -890,7 +937,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         "refusal_reasons": dict(sorted(account.refusal_reasons.items())),
         "errors": errors,
         "last_error": last_error,
-        "unresolved": account.unresolved,
+        "unresolved": account.unresolved + (sum(1 for p in account.positions.values() if p['close_ts'] is not None and p['close_ts'] <= now_ts) if account.settlements is not None else 0),
         "expired_orders": account.expired_orders,
         "open_positions": len(account.positions),
         "open_orders": len(account.orders),

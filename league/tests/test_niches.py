@@ -418,14 +418,14 @@ def decide(ctx):
         self.assertEqual(steps[1]["watched"], ["KXETHD"])   # and watches one it may not
         self.assertEqual(steps[-1]["mine"], [])             # both markets have closed by the last step
 
-    def test_a_tape_without_the_underlier_still_runs(self):
+    def test_a_tape_without_the_declared_underlier_is_unsupported(self):
         from league.replay import run_replay
         from league.tests.test_replay import kalshi_tape, market
 
         tape = kalshi_tape([[market(0.91, 0.93)] for _ in range(3)], {})
         result = run_replay(self.CODE, {}, tape, stake=200.0, limits={"max_position_usd": 100.0, "max_order_usd": 75.0}, audit=True)
-        self.assertTrue(result["ok"], result.get("error"))
-        self.assertEqual(result["final_memory"]["log"][-1]["closes"], [])
+        self.assertFalse(result["ok"])
+        self.assertIn("required observed bars are missing", result["error"])
 
     def test_the_house_records_the_underlier_over_the_tapes_own_window(self):
         from league.tests.test_house import HouseCase
@@ -450,7 +450,8 @@ def decide(ctx):
             _, tape = case.house.tape_for(needs)
             self.assertEqual(asked["series"], ["KXBTCD", "KXETHD"])       # what it watches is on the tape
             self.assertEqual(asked["symbols"], ["BTC/USD", "ETH/USD"])    # and so is the underlier
-            self.assertEqual(asked["timeframe"], "5Min")                  # a week of hourly markets fits at five minutes
+            self.assertEqual(asked["timeframe"], "1Hour")                 # match the live default, not an inferred timeframe
+            self.assertEqual(tape["observed_timeframe"], "1Hour")
             self.assertEqual(sorted(tape["observed_bars"]), ["BTC/USD", "ETH/USD"])
         finally:
             case.tearDown()

@@ -85,6 +85,9 @@ KINDS: dict[str, bool] = {
     "eval.block": True,  # one forward observation of after-cost log growth
     "eval.verdict": True,  # promotion, demotion or death, with the statistics that decided it
     "eval.drift": True,
+    "experiment.started": False,
+    "experiment.finished": False,
+    "ops.job": False,
     # The economy.
     "credit.grant": True,
     "credit.charge": True,

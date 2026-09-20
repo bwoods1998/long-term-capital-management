@@ -770,12 +770,14 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertEqual(listed_close(dict(row, can_close_early=False), 5.0), 5.0)
         history = FakeHistory([row], {ticker: [candle("2026-09-10T12:31:00Z", 0.60, 0.62)]})
         tape = KalshiData(None, history, clock=clock).tape(["KXMLBGAME"], start=START, end=END)
-        self.assertEqual([step["t"] for step in tape["steps"]], ["2026-09-10T12:35:00Z", "2026-09-10T12:40:00Z", "2026-09-10T12:45:00Z", "2026-09-10T12:47:13Z"])
-        shown = tape["steps"][-2]["markets"][0]
+        self.assertEqual([step["t"] for step in tape["steps"]], ["2026-09-10T12:35:00Z", "2026-09-10T12:40:00Z", "2026-09-10T12:45:00Z", "2026-09-10T12:47:13Z", END])
+        self.assertTrue(tape["steps"][-1]["execution_only"])
+        self.assertEqual(tape["steps"][-1]["markets"], [])
+        shown = tape["steps"][-3]["markets"][0]
         self.assertEqual(shown["close_time"], "2026-09-12T00:00:00Z")   # never the moment the game ended
         self.assertEqual(shown["hours_to_close"], 35.25)
         self.assertIsNone(shown["strike"])
-        terminal = tape["steps"][-1]["markets"][0]
+        terminal = tape["steps"][-2]["markets"][0]
         self.assertEqual(terminal["close_time"], "2026-09-10T12:47:13Z")
         self.assertIsNone(terminal["yes_bid"])
         self.assertIsNone(terminal["yes_ask"])

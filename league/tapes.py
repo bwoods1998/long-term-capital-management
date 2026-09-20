@@ -49,7 +49,8 @@ import re
 import threading
 import time
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Callable, Iterable
 
 DATA_URL = "https://data.alpaca.markets"
@@ -257,7 +258,7 @@ class AlpacaData:
                 if name not in found or not isinstance(rows, list):
                     continue
                 for row in rows:
-                    bar = self._bar(row, seconds)
+                    bar = self._bar(row, seconds, daily_equity=not crypto and timeframe == "1Day")
                     if bar is not None and start_ts <= bar[0] <= last:
                         found[name][int(bar[0])] = bar[1]
             token = payload.get("next_page_token")
@@ -268,12 +269,15 @@ class AlpacaData:
         return {symbol: [rows[key] for key in sorted(rows)] for symbol, rows in found.items()}
 
     @staticmethod
-    def _bar(row: Any, seconds: int) -> "tuple[float, dict[str, Any]] | None":
+    def _bar(row: Any, seconds: int, *, daily_equity: bool = False) -> "tuple[float, dict[str, Any]] | None":
         """One venue bar as (close time, bar stamped with its close); None when unusable."""
         if not isinstance(row, dict):
             return None
         try:
             closed = parse_time(row.get("t")) + seconds
+            if daily_equity:
+                opened = datetime.fromtimestamp(parse_time(row.get("t")), ZoneInfo("America/New_York"))
+                closed = (opened.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
         except TapeError:
             return None
         o, h, l, c = (_float(row.get(key)) for key in ("o", "h", "l", "c"))
@@ -377,6 +381,7 @@ class AlpacaData:
         end: str,
         horizon: str = "hour",
         half_spread_bps: "float | None" = None,
+        warmup_bars: int = 0,
     ) -> "dict[str, Any]":
         """A replay tape: one step per distinct bar close in [start, end] across the symbols. A
         step carries the bars that closed at its `t`; a symbol with no bar then is absent from
@@ -397,22 +402,49 @@ class AlpacaData:
             if spread is None or spread < 0:
                 raise TapeError(f"half_spread_bps must be zero or more, got {half_spread_bps!r}")
         now = float(self.clock())
+        warmup_bars = max(0, min(500, int(warmup_bars)))
+        warmup: dict[str, list[dict[str, Any]]] = {}
+        signals: dict[str, list[dict[str, Any]]] = {}
+        execution = "5Min" if timeframe == "1Day" else timeframe
         by_time: dict[str, dict[str, dict[str, float]]] = {}
         for crypto in (True, False):
             group = [name for name in names if is_crypto(name) == crypto]
             if not group:
                 continue
-            for name, rows in self._closed_bars(group, timeframe, start_ts, end_ts, now).items():
+            first = start_ts - self.default_lookback(timeframe, warmup_bars, crypto=crypto) if warmup_bars else start_ts
+            signal_rows = self._closed_bars(group, timeframe, first, end_ts, now)
+            for name, rows in signal_rows.items():
+                warmup[name] = [bar for bar in rows if parse_time(bar['t']) < start_ts][-warmup_bars:] if warmup_bars else []
+                signals[name] = [bar for bar in rows if parse_time(bar['t']) >= start_ts]
+            execution_rows = self._closed_bars(group, execution, start_ts, end_ts, now) if execution != timeframe else signals
+            for name, rows in execution_rows.items():
                 for bar in rows:
                     by_time.setdefault(bar["t"], {})[name] = {key: bar[key] for key in ("o", "h", "l", "c", "v")}
         steps = [
             {"t": t, "bars": {name: by_time[t][name] for name in names if name in by_time[t]}}
             for t in sorted(by_time)  # one fixed-width UTC format: text order is time order
         ]
+        if execution != timeframe:
+            # Daily history becomes available after its NY day ends. Execution uses actual
+            # intraday bars, so regular-session strategies can act without seeing today's close.
+            cursors = {name: 0 for name in names}
+            for entry in steps:
+                entry['execution_bars'], entry['bars'] = entry['bars'], {}
+                for name in names:
+                    rows = signals.get(name, [])
+                    index = cursors[name]
+                    while index < len(rows) and rows[index]['t'] <= entry['t']:
+                        # Include gaps (weekends/data outages) without silently losing history.
+                        entry.setdefault('history_bars', {}).setdefault(name, []).append(rows[index])
+                        index += 1
+                    cursors[name] = index
         return {
             "venue": "alpaca",
             "horizon": horizon,
-            "step_seconds": seconds,
+            "step_seconds": TIMEFRAME_SECONDS[execution],
+            "execution_timeframe": execution,
+            "warmup_bars": warmup,
+            "warmup_requested": warmup_bars,
             "half_spread_bps": float(spread),
             "symbols": names,
             "timeframe": timeframe,
@@ -694,6 +726,7 @@ class KalshiData:
         events, listed = self._settled_events(names, start_ts, end_ts)
         by_time: dict[int, list[dict[str, Any]]] = {}
         results: dict[str, str] = {}
+        settlements: dict[str, str] = {}
         scanned = 0
         for event in sorted(events, key=lambda name: self._hash("event|" + name)):
             if len(results) >= cap:
@@ -715,8 +748,15 @@ class KalshiData:
                 if not rows:
                     continue
                 results[market["ticker"]] = market["result"]
+                settled = market.get("settlement_ts")
+                if settled is not None:
+                    settlements[market["ticker"]] = iso(settled)
+                    if start_ts <= settled <= end_ts:
+                        by_time.setdefault(settled, [])
                 for t, row in rows:
                     by_time.setdefault(t, []).append(row)
+        if by_time:
+            by_time.setdefault(int(end_ts), [])  # mark capital still locked at the scoring cutoff
         steps = []
         for t in sorted(by_time):
             rows = sorted(by_time[t], key=lambda row: (row["close_time"], row["market"]))
@@ -734,6 +774,8 @@ class KalshiData:
             "maker_fee_series": _maker_fee_series(names),
             "steps": steps,
             "results": results,
+            "settlements": settlements,
+            "settlement_clock": "reported_settlement_ts",
             "meta": {"listed": listed, "scanned": scanned, "kept": len(results)},
         }
 
@@ -773,11 +815,20 @@ class KalshiData:
                     # Whole hours, so two tapes over nearby windows ask History the same URLs.
                     candles_from = int(max(open_ts, start_ts - CANDLE_WARMUP_SECONDS)) // 3600 * 3600
                     event = str(row.get("event_ticker") or "-".join(ticker.split("-")[:2]))
+                    try:
+                        settled = parse_time(row.get("settlement_ts"))
+                        if settled < close_ts:
+                            settled = None
+                        else:
+                            settled = math.ceil(settled)
+                    except TapeError:
+                        settled = None
                     events.setdefault(event, []).append({
                         "ticker": ticker,
                         "series": name,
                         "title": str(row.get("title") or ""),
                         "result": result,
+                        "settlement_ts": settled,
                         "close_ts": close_ts,
                         "close_time": iso(_listed_stop(row, close_ts)),
                         "listed_close_ts": _listed_stop(row, close_ts),

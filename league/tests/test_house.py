@@ -42,7 +42,7 @@ class FakeAlpacaData:
     def quotes(self, symbols):
         return {s: {"bid": self.price - 5, "ask": self.price + 5} for s in symbols}
 
-    def tape(self, symbols, timeframe, *, start, end, horizon="hour", half_spread_bps=None):
+    def tape(self, symbols, timeframe, *, start, end, horizon="hour", half_spread_bps=None, warmup_bars=0):
         steps = []
         for hour in range(60):
             for minute in range(0, 60, 5):
