@@ -1289,11 +1289,20 @@ class House:
     def keep_population(self) -> None:
         rules = self.game["economy"]
         deadline = float(rules.get("replay_deadline_epochs", 3)) * float(rules["epoch_seconds"])
+        broke = Decimal(str((self.game.get("research") or {}).get("min_credits_usd", "0.10"))) * 2
+        stuck = int(rules.get("idle_broke_wakes", 30))
         for agent in self.registry.living():
             if not self.economy.alive(agent.id):
                 self.kill(agent, "credits", "its compute credits reached zero")
             elif self.evaluator.rung(agent.id) == 0 and self.clock() - _epoch(agent.born_at) > deadline:
                 self.kill(agent, "never qualified", f"it did not pass replay within {rules.get('replay_deadline_epochs', 3)} epochs of its birth")
+            elif self.idle_run(agent)["barren"] >= stuck and self.economy.balance(agent.id) <= broke:
+                # Neither able to trade nor able to buy a new idea: it cannot change and it cannot
+                # act, and it will sit at this balance for as long as the floor runs, holding a
+                # seat on its desk that a newcomer could use. A shut market does not count here --
+                # that is the calendar, not the agent.
+                self.kill(agent, "stuck", f"{self.idle_run(agent)['barren']} wakes in a row with a live market in front of it and nothing done, "
+                                          f"and too few credits left to research its way out")
         for agent in self.registry.living():
             if self.economy.can_fork(agent.id) and self.evaluator.rung(agent.id) >= 1:
                 last = float(self._state.setdefault("last_fork", {}).get(agent.id) or 0)

@@ -19,6 +19,7 @@
     "box_usd_per_hour": "0.04",
     "box_creation_usd": "0.005",
     "unearned_share_to_floors": true,
+    "idle_broke_wakes": 30,
     "newcomer_seconds": 3600
   },
   "bounds": {

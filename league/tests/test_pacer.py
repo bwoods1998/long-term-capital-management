@@ -441,3 +441,27 @@ class IdleHands(HouseCase):
                          [others[0].id, others[2].id, others[1].id, self.agent.id])
         self.wakes(10)  # now the one that researched most recently is the one that cannot act
         self.assertEqual(self.house.research_order()[0].id, self.agent.id)
+
+
+    def test_an_agent_that_can_neither_trade_nor_afford_a_new_idea_dies(self):
+        """Research stops at twice the minimum credits, so a barren agent would otherwise sit at
+        that balance for as long as the floor runs: unable to act, unable to change, holding a seat
+        on its desk. A shut market is the calendar, not the agent, and never counts here."""
+        self.house.economy.charge(self.agent.id, self.house.economy.balance(self.agent.id) - D("0.15"), "test")
+        self.wakes(29)
+        self.house.keep_population()
+        self.assertIn(self.agent.id, [a.id for a in self.house.registry.living()])
+        self.wakes(1)
+        self.house.keep_population()
+        self.assertNotIn(self.agent.id, [a.id for a in self.house.registry.living()])
+        self.assertIn("nothing done", self.house.ledger.last("agent.died", agent=self.agent.id).payload["detail"])
+
+    def test_a_desk_whose_market_is_shut_is_not_killed_for_being_poor(self):
+        rich = self.seated("bench", IDLER)
+        self.house.economy.grant(rich.id, D("0.15"), "a thin purse")
+        self.data.quotes = lambda symbols: {}
+        for _ in range(40):
+            self.house._state["next_wake"][rich.id] = 0
+            self.house.wake(self.house.registry.get(rich.id))
+        self.house.keep_population()
+        self.assertIn(rich.id, [a.id for a in self.house.registry.living()])
