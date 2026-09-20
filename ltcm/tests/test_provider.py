@@ -1,6 +1,7 @@
 import email.message
 import json
 import tempfile
+import threading
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -394,6 +395,176 @@ class StaleReservationTests(ProviderCase):
         provider.spent_today()  # reconciles: the hold is released
         self.assertEqual(provider.spent_today("earnings-01"), Decimal("0"))
         self.assertEqual(provider._last_reconcile, self.time[0])
+
+
+class SettlementAccountingTests(ProviderCase):
+    """A released hold and a replayed terminal response must never reduce actual spend."""
+
+    def prepared(self, provider, key="s1:0"):
+        with self.assertRaises(TransportError):
+            self.respond(provider, profile="pro_asap", key=key)
+        return dict(provider._db.execute("SELECT * FROM requests WHERE request_key=?", (key,)).fetchone())
+
+    def test_stale_reconciliation_preserves_a_foreground_call_still_running_here(self):
+        provider = None
+
+        def delayed(*args, **kwargs):
+            self.time[0] += 901  # longer than the poll deadline, shorter than foreground timeout
+            self.assertEqual(provider.reconcile_stale(), {"settled": 0, "released": 0})
+            self.assertEqual(provider._db.execute("SELECT status FROM requests").fetchone()["status"], "prepared")
+            return response()
+
+        provider = self.provider(delayed, poll_timeout=900)
+        out = self.respond(provider, profile="pro_asap")
+        self.assertEqual(provider.spent_today(), out.cost_usd)
+        self.assertEqual(provider._active, {})
+
+    def test_late_acceptance_restores_a_released_hold_before_settlement(self):
+        provider = self.provider(FakeTransport(RuntimeError("an interrupted POST")))
+        row = self.prepared(provider)
+        provider._abandon(row)
+        self.assertEqual(provider.spent_today(), Decimal(0))
+        provider._accept_response(row["id"], "resp_one")
+        self.assertEqual(provider.spent_today(), Decimal(row["reserved_usd"]))
+        # A duplicated acceptance cannot restore the same hold twice either.
+        provider._accept_response(row["id"], "resp_one")
+        self.assertEqual(provider.spent_today(), Decimal(row["reserved_usd"]))
+        out = provider._settle(row, response(), "completed")
+        self.assertEqual(provider.spent_today(), out.cost_usd)
+
+    def test_late_completion_books_its_full_cost_when_the_hold_was_already_released(self):
+        provider = self.provider(FakeTransport(RuntimeError("an interrupted POST")))
+        row = self.prepared(provider)
+        provider._abandon(row)
+        out = provider._settle(row, response(), "completed")
+        self.assertGreater(out.cost_usd, 0)
+        self.assertEqual(provider.spent_today(), out.cost_usd)
+        # Stale errors or acceptance responses cannot reopen or alter the paid terminal row.
+        finished = dict(provider._db.execute("SELECT * FROM requests").fetchone())
+        provider._accept_response(row["id"], "resp_one")
+        provider._mark_error(row["id"], "a stale caller timed out")
+        self.assertEqual(dict(provider._db.execute("SELECT * FROM requests").fetchone()), finished)
+
+    def test_two_connections_settle_the_same_request_only_once(self):
+        provider = self.provider(FakeTransport(RuntimeError("an interrupted POST"), RuntimeError("another POST")))
+        row = self.prepared(provider)
+        other = self.prepared(provider, "s1:1")
+        second = self.provider(FakeTransport())
+        barrier, outcomes, failures = threading.Barrier(2), [], []
+
+        def settle(instance):
+            try:
+                barrier.wait(5)
+                outcomes.append(instance._settle(row, response(), "completed"))
+            except BaseException as exc:
+                failures.append(exc)
+
+        threads = [threading.Thread(target=settle, args=(instance,)) for instance in (provider, second)]
+        for worker in threads:
+            worker.start()
+        for worker in threads:
+            worker.join(5)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual(outcomes[0].cost_usd, outcomes[1].cost_usd)
+        expected = outcomes[0].cost_usd + Decimal(other["reserved_usd"])
+        self.assertEqual(provider.spent_today(), expected)
+        provider._settle(row, response(), "completed")
+        self.assertEqual(provider.spent_today(), expected)
+
+    def test_a_late_foreground_response_after_another_process_abandoned_it_is_charged(self):
+        provider = None
+
+        def delayed(*args, **kwargs):
+            row = dict(provider._db.execute("SELECT * FROM requests").fetchone())
+            provider._abandon(row)  # another process may have swept the stale row
+            return response()
+
+        provider = self.provider(delayed)
+        out = self.respond(provider, profile="pro_asap")
+        self.assertEqual(provider.spent_today(), out.cost_usd)
+
+    def test_a_reaper_snapshot_cannot_release_a_newly_accepted_or_retried_request(self):
+        provider = self.provider(FakeTransport(RuntimeError("an interrupted POST")))
+        row = self.prepared(provider)
+        self.time[0] += 901
+        cutoff = provider._now()
+        provider._accept_response(row["id"], "resp_one")
+        self.assertFalse(provider._abandon(row, stale_before=cutoff))
+        self.assertFalse(provider._abandon(row))  # even a stale caller's later definite error
+        self.assertEqual(provider.spent_today(), Decimal(row["reserved_usd"]))
+
+    def test_an_abandoned_retry_reserves_again_before_post_and_obeys_the_cap(self):
+        transport = FakeTransport(RuntimeError("first POST"), RuntimeError("another held POST"), response())
+        provider = self.provider(transport)
+        row = self.prepared(provider)
+        provider._abandon(row)
+        other = self.prepared(provider, "s1:1")
+        held = Decimal(other["reserved_usd"])
+        provider.floor_cap = held
+        before = len(transport.posts)
+        with self.assertRaisesRegex(BudgetExceeded, "provider_floor_cap_exceeded"):
+            self.respond(provider, profile="pro_asap")
+        self.assertEqual(len(transport.posts), before)
+        self.assertEqual(provider.spent_today(), held)
+        provider.floor_cap = Decimal(25)
+        with self.assertRaisesRegex(BudgetExceeded, "provider_desk_cap_exceeded"):
+            self.respond(provider, profile="pro_asap", cap=str(held))
+        self.assertEqual(len(transport.posts), before)
+        out = self.respond(provider, profile="pro_asap")
+        self.assertEqual(provider.spent_today(), held + out.cost_usd)
+        self.assertEqual(transport.posts[-1]["key"], row["id"])
+
+    def test_reaper_rechecks_an_active_request_even_if_its_snapshot_was_taken_earlier(self):
+        provider = None
+        observed = []
+
+        def first(*args, **kwargs):
+            raise RuntimeError("process stopped")
+
+        provider = self.provider(first)
+        row = self.prepared(provider)
+        self.time[0] += 901
+
+        def resumed(*args, **kwargs):
+            # The row's timestamp is still old; active ownership, not just age, protects it.
+            observed.append(provider._abandon(row, stale_before=provider._now()))
+            return response()
+
+        provider.transport = resumed
+        out = self.respond(provider, profile="pro_asap")
+        self.assertEqual(observed, [False])
+        self.assertEqual(provider.spent_today(), out.cost_usd)
+
+    def test_budget_rebuild_is_a_dry_run_then_an_idempotent_atomic_repair(self):
+        provider = self.provider(FakeTransport(RuntimeError("first POST"), RuntimeError("second POST"), RuntimeError("third POST")))
+        first = self.prepared(provider)
+        held = self.prepared(provider, "s1:1")
+        abandoned = self.prepared(provider, "s1:2")
+        provider._abandon(abandoned)
+        completed = provider._settle(first, response(), "completed")
+        expected = completed.cost_usd + Decimal(held["reserved_usd"])
+        requests = [dict(row) for row in provider._db.execute("SELECT * FROM requests ORDER BY id")]
+        provider._db.execute("UPDATE budget_days SET spent_usd='0.001'")
+        plan = provider.reconcile_budget_days()
+        self.assertFalse(plan["applied"])
+        self.assertEqual(plan["before_usd"], "0.001")
+        self.assertEqual(Decimal(plan["after_usd"]), expected)
+        self.assertEqual(provider.spent_today(), Decimal("0.001"))
+        applied = provider.reconcile_budget_days(apply=True)
+        self.assertEqual(applied["changes"], plan["changes"])
+        self.assertEqual(provider.spent_today(), expected)
+        self.assertEqual(provider.reconcile_budget_days(apply=True)["changes"], [])
+        self.assertEqual([dict(row) for row in provider._db.execute("SELECT * FROM requests ORDER BY id")], requests)
+
+    def test_budget_rebuild_keeps_unsettled_usage_at_its_conservative_cost(self):
+        provider = self.provider(FakeTransport(response(usage=None)))
+        out = self.respond(provider, profile="pro_asap")
+        provider._db.execute("UPDATE budget_days SET spent_usd='0'")
+        provider.reconcile_budget_days(apply=True)
+        self.assertEqual(provider.spent_today(), out.cost_usd)
+        self.assertEqual(provider._db.execute("SELECT error FROM requests").fetchone()["error"], "usage_unsettled")
 
 
 class DispatchTests(ProviderCase):

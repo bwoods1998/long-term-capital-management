@@ -670,6 +670,7 @@ class Provider:
         self.poll_interval = float(poll_interval)
         self.poll_timeout = float(poll_timeout)
         self._lock = threading.RLock()
+        self._active: dict[str, int] = {}  # callers still awaiting a response in this process
         self._balance: tuple[float, Decimal | None] | None = None
         self._db = sqlite3.connect(
             str(self.path), isolation_level=None, check_same_thread=False, timeout=30
@@ -785,6 +786,7 @@ class Provider:
                     "SELECT * FROM requests WHERE status IN ('prepared', 'dispatched') AND updated_at < ?",
                     (cutoff,),
                 ).fetchall()
+                if not self._active.get(r["id"])
             ]
         for row in rows:
             if row.get("response_id"):
@@ -800,8 +802,8 @@ class Provider:
                     except Exception:
                         continue
                 continue
-            self._abandon(row)
-            released += 1
+            if self._abandon(row, stale_before=cutoff):
+                released += 1
         self._last_reconcile = now_seconds
         return {"settled": settled, "released": released}
 
@@ -873,6 +875,52 @@ class Provider:
             " ON CONFLICT(day, desk_id) DO UPDATE SET spent_usd = excluded.spent_usd",
             (day, desk_id, format(total, "f")),
         )
+
+    def reconcile_budget_days(self, *, apply: bool = False) -> dict[str, Any]:
+        """Rebuild committed counters from durable requests, atomically; dry-run by default.
+
+        Every settled cost counts once, including conservative `usage_unsettled` costs.
+        Prepared/dispatched requests retain their full hold; abandoned requests without a
+        cost contribute zero. No request, response, status, cap, or price is changed. Callers
+        repairing historical counters should keep a database backup and the returned diff.
+        """
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                expected: dict[tuple[str, str], Decimal] = {}
+                for row in self._db.execute("SELECT desk_id,created_at,status,cost_usd,reserved_usd FROM requests"):
+                    if row["cost_usd"] is not None:
+                        amount = Decimal(row["cost_usd"])
+                    elif row["status"] in ("prepared", "dispatched"):
+                        amount = Decimal(row["reserved_usd"])
+                    elif row["status"] == "abandoned":
+                        amount = ZERO
+                    else:
+                        raise ProviderError("provider_budget_state_unknown")
+                    if not amount.is_finite() or amount < ZERO:
+                        raise ProviderError("provider_budget_amount_invalid")
+                    key = row["created_at"][:10], row["desk_id"]
+                    expected[key] = expected.get(key, ZERO) + amount
+                stored = {(row["day"], row["desk_id"]): Decimal(row["spent_usd"])
+                          for row in self._db.execute("SELECT day,desk_id,spent_usd FROM budget_days")}
+                changes = []
+                for day, desk_id in sorted(expected.keys() | stored.keys()):
+                    before, after = stored.get((day, desk_id), ZERO), expected.get((day, desk_id), ZERO)
+                    if before != after:
+                        changes.append({"day": day, "desk_id": desk_id, "before_usd": format(before, "f"),
+                                        "after_usd": format(after, "f"), "delta_usd": format(after - before, "f")})
+                        if apply:
+                            self._db.execute("INSERT INTO budget_days(day,desk_id,spent_usd) VALUES(?,?,?)"
+                                             " ON CONFLICT(day,desk_id) DO UPDATE SET spent_usd=excluded.spent_usd",
+                                             (day, desk_id, format(after, "f")))
+                result = {"applied": apply, "changes": changes,
+                          "before_usd": format(sum(stored.values(), ZERO), "f"),
+                          "after_usd": format(sum(expected.values(), ZERO), "f")}
+                self._db.execute("COMMIT" if apply else "ROLLBACK")
+                return result
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
 
     def check_balance(self) -> Decimal | None:
         """Reported Sail credit in USD, cached for 60 seconds. None when it cannot be confirmed.
@@ -1094,10 +1142,21 @@ class Provider:
                     max_output_tokens=max_output_tokens,
                 )
             row = dict(row)
-        if row["status"] in TERMINAL:
-            # A crash-retry re-reads the stored response instead of paying for it again.
-            return self._response_from_row(row)
-        return self._dispatch(row)
+            if row["status"] == "abandoned":
+                row = self._readmit(row["id"], Decimal(str(desk_cap_usd_per_day)))
+            if row["status"] in TERMINAL:
+                # A crash-retry re-reads the stored response instead of paying for it again.
+                return self._response_from_row(row)
+            self._active[row["id"]] = self._active.get(row["id"], 0) + 1
+        try:
+            return self._dispatch(row)
+        finally:
+            with self._lock:
+                remaining = self._active[row["id"]] - 1
+                if remaining:
+                    self._active[row["id"]] = remaining
+                else:
+                    self._active.pop(row["id"], None)
 
     def _admit(
         self,
@@ -1168,6 +1227,34 @@ class Provider:
             "SELECT * FROM requests WHERE request_key = ?", (request_key,)
         ).fetchone()
 
+    def _readmit(self, request_id: str, desk_cap: Decimal) -> dict[str, Any]:
+        """A caller retrying an abandoned request must reserve again before any POST/GET."""
+        self._db.execute("BEGIN IMMEDIATE")
+        try:
+            row = dict(self._db.execute("SELECT * FROM requests WHERE id=?", (request_id,)).fetchone())
+            if row["status"] == "abandoned" and row["cost_usd"] is None:
+                # Keep the original request identity and accounting day. A retry is not a way
+                # to move an old obligation onto a fresh budget or evade its original cap.
+                day, reserved = row["created_at"][:10], Decimal(row["reserved_usd"])
+                desk = self._db.execute("SELECT spent_usd FROM budget_days WHERE day=? AND desk_id=?",
+                                        (day, row["desk_id"])).fetchone()
+                desk_spent = Decimal(desk["spent_usd"]) if desk else ZERO
+                floor_spent = sum((Decimal(r["spent_usd"]) for r in self._db.execute(
+                    "SELECT spent_usd FROM budget_days WHERE day=?", (day,))), ZERO)
+                limit = self.desk_fuse if self.desk_fuse is not None else desk_cap
+                if desk_spent + reserved > limit:
+                    raise BudgetExceeded("provider_desk_cap_exceeded")
+                if floor_spent + reserved > self.floor_cap:
+                    raise BudgetExceeded("provider_floor_cap_exceeded")
+                self._add_spend(day, row["desk_id"], reserved)
+                self._db.execute("UPDATE requests SET status='prepared',updated_at=? WHERE id=?", (self._now(), request_id))
+                row = dict(self._db.execute("SELECT * FROM requests WHERE id=?", (request_id,)).fetchone())
+            self._db.execute("COMMIT")
+            return row
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            raise
+
     def _dispatch(self, row: dict[str, Any]) -> ProviderResponse:
         body = json.loads(row["body"])
         profile = row["profile"]
@@ -1211,12 +1298,7 @@ class Provider:
                 raise ProviderError("provider_response_identity_changed")
             # Persist the accepted id before any validation can reject the response we now owe for.
             if not response_id:
-                with self._lock:
-                    self._db.execute(
-                        "UPDATE requests SET response_id = ?, status = ?, updated_at = ?"
-                        " WHERE id = ? AND response_id IS NULL",
-                        (seen_id, "dispatched", self._now(), row["id"]),
-                    )
+                self._accept_response(row["id"], seen_id)
                 response_id = seen_id
             if status not in TERMINAL | PENDING:
                 self._mark_error(row["id"], "provider_unknown_status")
@@ -1231,19 +1313,43 @@ class Provider:
                 raise ProviderError("provider_poll_timeout")
             self.sleep(self.poll_interval)
 
-    def _abandon(self, row: Mapping[str, Any]) -> None:
+    def _accept_response(self, request_id: str, response_id: str) -> None:
+        """An accepted late response restores any hold an earlier timeout released."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                current = dict(self._db.execute("SELECT * FROM requests WHERE id=?", (request_id,)).fetchone())
+                if current["response_id"] and current["response_id"] != response_id:
+                    raise ProviderError("provider_response_identity_changed")
+                if current["cost_usd"] is None:
+                    if current["status"] == "abandoned":
+                        self._add_spend(current["created_at"][:10], current["desk_id"], Decimal(current["reserved_usd"]))
+                    self._db.execute("UPDATE requests SET response_id=?,status='dispatched',updated_at=? WHERE id=?",
+                                     (response_id, self._now(), request_id))
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+
+    def _abandon(self, row: Mapping[str, Any], *, stale_before: str | None = None) -> bool:
         """Release a request's reservation and mark it abandoned; idempotent per row."""
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
+                current = dict(self._db.execute("SELECT * FROM requests WHERE id=?", (row["id"],)).fetchone())
+                if stale_before is not None and (self._active.get(row["id"]) or current["response_id"] or
+                                                 current["updated_at"] >= stale_before):
+                    self._db.execute("COMMIT")
+                    return False  # a retry or acceptance happened after the reaper's snapshot
                 changed = self._db.execute(
                     "UPDATE requests SET status = ?, updated_at = ?"
-                    " WHERE id = ? AND status IN ('prepared', 'dispatched')",
+                    " WHERE id = ? AND status IN ('prepared', 'dispatched') AND cost_usd IS NULL AND response_id IS NULL",
                     ("abandoned", self._now(), row["id"]),
                 ).rowcount
                 if changed:
-                    self._add_spend(row["created_at"][:10], row["desk_id"], -Decimal(row["reserved_usd"]))
+                    self._add_spend(current["created_at"][:10], current["desk_id"], -Decimal(current["reserved_usd"]))
                 self._db.execute("COMMIT")
+                return bool(changed)
             except Exception:
                 try:
                     self._db.execute("ROLLBACK")
@@ -1254,7 +1360,7 @@ class Provider:
     def _mark_error(self, request_id: str, code: str) -> None:
         with self._lock:
             self._db.execute(
-                "UPDATE requests SET error = ?, updated_at = ? WHERE id = ?",
+                "UPDATE requests SET error = ?, updated_at = ? WHERE id = ? AND cost_usd IS NULL",
                 (code, self._now(), request_id),
             )
 
@@ -1277,6 +1383,13 @@ class Provider:
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
+                current = dict(self._db.execute("SELECT * FROM requests WHERE id=?", (row["id"],)).fetchone())
+                if current["cost_usd"] is not None:
+                    # Polling, foreground completion, and another process may all see the same
+                    # terminal response. The first booking wins; no hold is released twice.
+                    self._db.execute("COMMIT")
+                    return self._response_from_row(current)
+                held = ZERO if current["status"] == "abandoned" else Decimal(current["reserved_usd"])
                 self._db.execute(
                     "UPDATE requests SET status = ?, response_id = ?, response = ?, usage = ?,"
                     " cost_usd = ?, updated_at = ?, error = ? WHERE id = ?",
@@ -1291,7 +1404,7 @@ class Provider:
                         row["id"],
                     ),
                 )
-                self._add_spend(row["created_at"][:10], row["desk_id"], cost - reserved)
+                self._add_spend(current["created_at"][:10], current["desk_id"], cost - held)
                 self._db.execute("COMMIT")
             except Exception:
                 try:
