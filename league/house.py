@@ -1217,6 +1217,26 @@ class House:
         return sorted(self.registry.living(),
                       key=lambda a: (0 if self.idle_reason(a) else 1, float(self._state["last_research"].get(a.id) or 0)))
 
+    def behind_the_clock(self, kind: str) -> bool:
+        """Is today's share of this budget running behind the day? The owner funded a fortnight to
+        be spent, and an allowance still unspent at noon is work that was not done."""
+        allowance = self.pacer.allowance(kind)
+        if allowance <= 0:
+            return False
+        day_gone = (self.clock() % 86400) / 86400.0
+        return day_gone > 0.25 and float(1 - self.pacer.room(kind) / allowance) < 0.6 * day_gone
+
+    def frontier_pace(self) -> float:
+        """The share of its usual wait one of Merton's roles serves, halved while the day's
+        frontier allowance runs behind the clock.
+
+        Measured Sept 20, 2026, eleven hours in: the gateway had billed $1.72 of frontier calls
+        against $7.14 a day, while the agents spent two and a half times their Sail allowance on
+        research. The cheap model was the bottleneck and the dear one sat half idle -- and the dear
+        one is the half that writes strategies, builds the tools eighteen requests are waiting on,
+        and reads the floor. A budget the owner funded to be spent is not thrift unspent."""
+        return 0.5 if self.behind_the_clock("openai") else 1.0
+
     def research_interval_hours(self, agent: Agent | None = None) -> float:
         """How long an agent waits between research passes. The game file's number, halved (never
         under an hour) while today's Sail spending is running behind the clock: the owner wants
@@ -1226,12 +1246,7 @@ class House:
         base = float((self.game.get("research") or {}).get("min_hours_between", 6))
         if agent is not None and self.idle_reason(agent):
             base = min(base, float((self.game.get("research") or {}).get("idle", {}).get("min_hours_between", 1)))
-        allowance = self.pacer.allowance("sail")
-        if allowance <= 0:
-            return base
-        day_gone = (self.clock() % 86400) / 86400.0
-        behind = float(1 - self.pacer.room("sail") / allowance) < 0.6 * day_gone
-        return max(1.0, base / 2) if behind and day_gone > 0.25 else base
+        return max(1.0, base / 2) if self.behind_the_clock("sail") else base
 
     def research(self, agent: Agent) -> Any:
         rung = self.evaluator.rung(agent.id)

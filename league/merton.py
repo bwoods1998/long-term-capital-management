@@ -253,7 +253,7 @@ Answer with ONE JSON object and nothing else:
 
 class Merton:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
-                 schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None,
+                 schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None, pace: Any = None,
                  effort: Mapping[str, str] | None = None):
         self.frontier = frontier
         self.forge = forge
@@ -262,6 +262,10 @@ class Merton:
         self.clock = clock
         #: How often each role sits down. One architect pass is about $1.25 of the $100 month.
         self.schedule_hours = dict(schedule_hours or {"operator": 24, "teacher": 72, "toolsmith": 24, "designer": 168, "architect": 168})
+        #: () -> the share of its usual wait a role serves, so the House can bring the roles round
+        #: sooner while the day's frontier allowance is unspent (`House.frontier_pace`). Never
+        #: longer than the game file's number, and never under a quarter of it.
+        self.pace = pace or (lambda: 1.0)
         #: A role's FIRST pass waits until the league has something to show it: an architect shown
         #: an empty table on the first morning would be a dollar spent on nothing.
         self.first_after_hours = dict(first_after_hours or {"operator": 6, "toolsmith": 12, "teacher": 24, "architect": 48, "designer": 72})
@@ -301,6 +305,13 @@ class Merton:
         rows = [e for e in self.ledger.read(kinds="merton.pass", limit=500, newest=True) if e.payload.get("role") == role]
         return float(rows[-1].payload["at_epoch"]) if rows else None
 
+    def _pace(self) -> float:
+        try:
+            share = self.pace()
+            return 1.0 if share is None else max(0.25, min(float(share), 1.0))
+        except Exception:  # noqa: BLE001 - a pacer that cannot answer leaves the schedule alone
+            return 1.0
+
     def due(self) -> list[str]:
         now = self.clock()
         started = self.ledger.read(kinds="ops.started", limit=1)
@@ -311,7 +322,7 @@ class Merton:
             if last is None:
                 if running_hours >= self.first_after_hours.get(role, 0):
                     out.append(role)
-            elif now - last >= self.schedule_hours[role] * 3600:
+            elif now - last >= self.schedule_hours[role] * self._pace() * 3600:
                 out.append(role)
         return out
 

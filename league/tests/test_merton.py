@@ -200,3 +200,51 @@ class Consulting(unittest.TestCase):
 
         self.assertIn("NOT given the power to trade, to promote it, or to change the rules", CONSULT)
         self.assertIn("keep the agent inside its specialty", CONSULT)
+
+
+class PacedByTheBudget(unittest.TestCase):
+    """The frontier budget is the half that writes strategies, builds tools and reads the floor.
+    Eleven hours into the expedition the gateway had billed $1.72 of it against $7.14 a day."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+        self.share = [1.0]
+        self.merton = Merton(FakeFrontier({"files": []}), FakeForge(), self.ledger, evidence=lambda role: {},
+                             clock=self.clock, schedule_hours={"operator": 8, "teacher": 12, "toolsmith": 8, "designer": 36, "architect": 8},
+                             first_after_hours={"operator": 0, "teacher": 0, "toolsmith": 0, "designer": 0, "architect": 0},
+                             pace=lambda: self.share[0])
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def test_an_underspent_day_brings_a_role_round_sooner(self):
+        self.ledger.append("ops.started", {"release": "test"})
+        self.merton.run("operator")
+        self.clock.advance(5 * 3600)
+        self.assertNotIn("operator", self.merton.due())  # eight hours, on the game file's clock
+        self.share[0] = 0.5
+        self.assertIn("operator", self.merton.due())  # four, while the day's frontier is unspent
+
+    def test_the_schedule_is_never_stretched_and_never_gutted(self):
+        self.ledger.append("ops.started", {"release": "test"})
+        self.merton.run("architect")
+        last = self.merton.last_pass("architect")
+        for share, hours, expected in ((4.0, 7.9, False), (4.0, 8.1, True), (0.0, 1.9, False), (0.0, 2.1, True), (None, 8.1, True)):
+            self.share[0] = share                 # stretched back to one, gutted up to a quarter
+            self.clock.now = last + hours * 3600
+            self.assertEqual("architect" in self.merton.due(), expected, (share, hours))
+
+    def test_a_pacer_that_raises_leaves_the_schedule_alone(self):
+        def broken():
+            raise RuntimeError("no pacer")
+
+        self.merton.pace = broken
+        self.ledger.append("ops.started", {"release": "test"})
+        self.merton.run("teacher")
+        self.clock.advance(11 * 3600)
+        self.assertNotIn("teacher", self.merton.due())
+        self.clock.advance(2 * 3600)
+        self.assertIn("teacher", self.merton.due())

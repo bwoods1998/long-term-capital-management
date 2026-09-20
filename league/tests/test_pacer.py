@@ -506,3 +506,31 @@ class IdleHands(HouseCase):
         self.wakes(12)
         self.house.research(self.house.registry.get(self.agent.id))
         self.assertEqual(self.house.registry.get(self.agent.id).code_sha256, was)
+
+
+class TheOtherHalfOfTheBudget(HouseCase):
+    """Eleven hours in, the gateway had billed $1.72 of frontier calls against an allowance of
+    $7.14 a day, while the agents spent two and a half times their Sail allowance on research. The
+    cheap model was the bottleneck and the dear one -- the half that writes strategies and builds
+    the tools eighteen requests are waiting on -- sat half idle."""
+
+    def expedition(self, **kw):
+        today = __import__("league.ledger", fromlist=["now_iso"]).now_iso(self.clock)[:10]
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50", **kw})
+
+    def test_an_unspent_frontier_day_brings_mertons_roles_round_twice_as_often(self):
+        self.expedition()
+        self.clock.now = self.clock.now - self.clock.now % 86400 + 15 * 3600  # 15:00 and nothing spent
+        self.house.pacer._cache.clear()
+        self.assertEqual(self.house.frontier_pace(), 0.5)
+        self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "3.00"})  # 60% of the day's $5: on pace
+        self.house.pacer._cache.clear()
+        self.assertEqual(self.house.frontier_pace(), 1.0)
+
+    def test_the_morning_is_not_behind_and_neither_is_a_floor_outside_the_expedition(self):
+        self.expedition()
+        self.clock.now = self.clock.now - self.clock.now % 86400 + 3 * 3600  # 03:00: too early to call the day behind
+        self.house.pacer._cache.clear()
+        self.assertEqual(self.house.frontier_pace(), 1.0)
+        self.expedition(start="2026-01-01")  # over: no allowance to be behind on
+        self.assertEqual(self.house.frontier_pace(), 1.0)
