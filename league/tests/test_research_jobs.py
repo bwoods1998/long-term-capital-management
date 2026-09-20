@@ -414,6 +414,17 @@ class HouseRecovery(HouseCase):
         self.assertEqual(report['market_observation_steps']['rows'], 2)
         self.assertEqual(report['signal_history']['SPY'], {'rows': 1, 'first_at': '2026-09-19T04:00:00Z', 'last_at': '2026-09-19T04:00:00Z'})
 
+    def test_coverage_exposes_market_sampling_and_each_series_actual_dates(self):
+        from league.capabilities import tape_coverage
+        report = tape_coverage({'series': ['NFL', 'CFB'], 'meta': {'listed': 3006, 'scanned': 500, 'kept': 500}, 'steps': [
+            {'t': '2026-08-02T10:00:00Z', 'markets': [{'market': 'OLD', 'series': 'NFL'}]},
+            {'t': '2026-09-20T10:00:00Z', 'markets': [{'market': 'NEW', 'series': 'CFB'}]},
+        ]})
+        self.assertEqual(report['markets_by_series']['NFL']['last_at'], '2026-08-02T10:00:00Z')
+        self.assertEqual(report['markets_by_series']['CFB']['first_at'], '2026-09-20T10:00:00Z')
+        self.assertEqual(report['listing_sample'], {'listed': 3006, 'scanned': 500, 'kept': 500})
+        self.assertEqual(report['requested_series'], ['NFL', 'CFB'])
+
     def test_architect_and_toolsmith_see_the_deployed_capabilities(self):
         from league.merton import evidence_from
         self.seated()

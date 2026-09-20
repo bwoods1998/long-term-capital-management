@@ -56,7 +56,16 @@ def tape_coverage(tape):
     """Summarize returned inputs, keeping execution events distinct from market observations."""
     steps = tape.get('steps') or []
     quoted = [s for s in steps if s.get('markets') or s.get('bars') or s.get('execution_bars')]
-    markets = {str(m.get('market')) for s in steps for m in (s.get('markets') or []) if m.get('market')}
+    markets, series = set(), {}
+    for step in steps:
+        for market in step.get('markets') or []:
+            if not market.get('market'):
+                continue
+            markets.add(str(market['market']))
+            row = series.setdefault(str(market.get('series') or '(unknown)'), {'markets': set(), 'times': []})
+            row['markets'].add(str(market['market']))
+            if step.get('t'):
+                row['times'].append(str(step['t']))
     signals = {}
     for step in steps:
         for symbol, rows in (step.get('history_bars') or {}).items():
@@ -72,8 +81,14 @@ def tape_coverage(tape):
     return {
         'mode': 'historical_development', 'counted_as_trial': False,
         'venue': tape.get('venue'), 'horizon': tape.get('horizon'),
+        'requested_series': tape.get('series') or [], 'requested_symbols': tape.get('symbols') or [],
+        'listing_sample': {k: v for k, v in (tape.get('meta') or {}).items() if k in ('listed', 'scanned', 'kept')},
         'signal_timeframe': tape.get('timeframe'), 'execution_timeframe': tape.get('execution_timeframe'),
         'execution_events': span(steps), 'market_observation_steps': span(quoted), 'distinct_markets': len(markets),
+        'markets_by_series': {s: {'markets': len(row['markets']),
+                                 'first_at': min(row['times']) if row['times'] else None,
+                                 'last_at': max(row['times']) if row['times'] else None}
+                              for s, row in series.items()},
         'signal_history': {s: {'rows': len(times), 'first_at': min(t for t in times if t),
                                'last_at': max(t for t in times if t)}
                            for s, times in signals.items() if any(times)},
