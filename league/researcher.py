@@ -129,7 +129,12 @@ class Researcher:
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
             + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"
                "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
-               "end this pass with the same rules you started it with.\n\n" if (standing.get("idle") or {}).get("why_now") else "")
+               "end this pass with the same rules you started it with.\n"
+               + ("You have no record to protect: a file you `replay` this pass becomes your rules directly, with no fork to pay for\n"
+                  "and no history to inherit it unfairly. Nothing is at risk but a pass you were going to spend anyway, so make the\n"
+                  "change big enough to find out something. A pass that only reads and reasons has bought you nothing.\n"
+                  if standing.get("rewrites_in_place") else "") + "\n"
+               if (standing.get("idle") or {}).get("why_now") else "")
             + f"Your current strategy file:\n```python\n{agent.code}\n```\n"
             f"Your parameters: {json.dumps(agent.params)}\n"
             "Decide what, if anything, is worth your credits right now."

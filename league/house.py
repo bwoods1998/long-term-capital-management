@@ -1192,6 +1192,7 @@ class House:
             "can_fork": self.economy.can_fork(agent.id),
             "recent_trades": self._recent_trades(agent.id),
             "idle": {**self.idle_run(agent), "why_now": self.idle_reason(agent)},
+            "rewrites_in_place": rung == 0 or self.record_is_empty(agent),
         }
         try:
             outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")

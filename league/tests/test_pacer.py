@@ -416,6 +416,11 @@ class IdleHands(HouseCase):
                                   SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}),
                                   {"idle": {"barren": 12, "why_now": "twelve wakes in a row and nothing done"}})
         self.assertIn("WHY YOU ARE AWAKE NOW: twelve wakes in a row and nothing done", state)
+        self.assertNotIn("no record to protect", state)  # this one has a record; a change costs it a fork
+        free = Researcher._state(SimpleNamespace(journal=lambda _: [], specialty=None),
+                                 SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}),
+                                 {"idle": {"why_now": "nine wakes and nothing done"}, "rewrites_in_place": True})
+        self.assertIn("A pass that only reads and reasons has bought you nothing", free)
         self.assertNotIn("WHY YOU ARE AWAKE", Researcher._state(SimpleNamespace(journal=lambda _: [], specialty=None),
                                                                 SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}), {}))
 
