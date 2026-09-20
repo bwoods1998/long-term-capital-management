@@ -133,8 +133,37 @@ class Commons:
         description = str(description or "").strip()[:1200]
         if not name or len(description) < 20:
             return {"error": "name the tool and say what it should do and why you need it"}
+        for row in self.open_requests() + self.blocked_requests():
+            if row['by'] == agent and row['name'] == name:
+                return {'queued': row['id'], 'status': row['status'], 'existing': True,
+                        'note': 'This request remains unresolved; repeating it does not create another task.'}
         entry = self.ledger.append("tool.request", {"name": name, "description": description}, agent=agent)
         return {"queued": entry.id, "note": "the architect reads this queue; a tool that is built is announced in the playbook"}
+
+    def _requests(self) -> list[dict[str, Any]]:
+        """Fold the latest resolution, preserving old advice incorrectly labeled fulfilled."""
+        rows = {}
+        for entry in self.ledger.iter(kinds=('tool.request', 'tool.fulfilled', 'tool.blocked')):
+            p = entry.payload
+            if entry.kind == 'tool.request':
+                rows[entry.id] = {'id': entry.id, 'by': entry.agent, 'at': entry.at, **p, 'status': 'open'}
+                continue
+            row = rows.get(p.get('request'))
+            if row is None:
+                continue
+            legacy_blocked = (entry.kind == 'tool.fulfilled' and p.get('status') == 'answered'
+                              and str(p.get('outcome') or '').lower().startswith('cannot be a pure tool'))
+            blocked = entry.kind == 'tool.blocked' or legacy_blocked
+            row.update(status='blocked' if blocked else 'fulfilled', outcome=p.get('outcome'),
+                       owner=p.get('owner', 'house-engineering') if blocked else None,
+                       reviewed_at=entry.at, legacy_advice=legacy_blocked)
+        return list(rows.values())
+
+    def blocked_requests(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Unimplemented requests have no age expiry; advice is not a shipped capability."""
+        rows = [r for r in self._requests() if r['status'] == 'blocked']
+        rows.sort(key=lambda r: r['at'])
+        return rows[:limit] if limit else rows
 
     def open_requests(self, *, limit: int | None = None, stale_days: float = 3.0) -> list[dict[str, Any]]:
         """What the toolsmith is waiting on, most-asked-for first and newest before oldest.
@@ -149,19 +178,14 @@ class Commons:
         `want` counts how many different agents have asked for the same tool by name, which is the
         best evidence the floor produces about what is actually missing -- six agents across four
         desks asked for the price behind their strikes before anyone noticed."""
-        done = {e.payload.get("request") for e in self.ledger.iter(kinds="tool.fulfilled")}
         oldest = now_iso(lambda: self.clock() - stale_days * 86400) if stale_days else ""
-        rows = [
-            {"id": e.id, "by": e.agent, "at": e.at, **e.payload}
-            for e in self.ledger.iter(kinds="tool.request")
-            if e.id not in done and e.at >= oldest
-        ]
-        want: dict[str, int] = {}
+        rows = [r for r in self._requests() if r['status'] == 'open' and r['at'] >= oldest]
+        want: dict[str, set[str]] = {}
         for row in rows:
             name = str(row.get("name") or "")
-            want[name] = want.get(name, 0) + 1
+            want.setdefault(name, set()).add(row['by'])
         for row in rows:
-            row["asked_by_agents"] = want.get(str(row.get("name") or ""), 1)
+            row["asked_by_agents"] = len(want[str(row.get("name") or "")])
         rows.sort(key=lambda row: row["at"], reverse=True)          # newest first
         rows.sort(key=lambda row: -row["asked_by_agents"])           # then what most agents want
         return rows[:limit] if limit else rows

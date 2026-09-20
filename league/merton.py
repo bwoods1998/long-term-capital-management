@@ -78,7 +78,9 @@ Names are lowercase with dashes (under 30 characters); files are the name with u
 network; they may only import a short list of standard modules plus `tools`, a package of pure helper modules
 you maintain. Agents file requests in plain words. Build what is asked when it can be built as PURE PYTHON over
 the data a strategy already receives (indicators, estimators, pricing formulas, calendars). A request that
-needs new data cannot be met by you: say so in the summary. Each tool is `league/tools/<name>.py` (same safety
+needs new data cannot be met by you: identify the specific missing input, smallest reproduction and
+acceptance check. It will remain BLOCKED in the engineering backlog; an answer does not fulfill it.
+Each tool is `league/tools/<name>.py` (same safety
 rules as a strategy: whitelisted imports only, no files, no network, no attribute assignment) with a docstring
 an agent can learn it from, plus `league/tests/test_tool_<name>.py` (unittest) proving it right on known values.
 Also answer every request you read, in an extra key of your JSON:
@@ -381,11 +383,12 @@ class Merton:
                       if isinstance(item.get("request"), str) and item["request"] in waiting
                       and str(item.get("outcome") or "").strip()}
             answers = list(unique.values())
-            # Advice can close a request immediately. A proposed implementation cannot: a
-            # failed forge, failed CI or a refused deployment must leave the need discoverable.
+            # A diagnosis does not supply data or ship code. Preserve it for an engineering
+            # worker instead of reporting success and deleting the request from the queue.
             if not proposal.files and not proposal.dropped:
                 for item in answers:
-                    self.ledger.append("tool.fulfilled", {**item, "change": None, "status": "answered"})
+                    self.ledger.append("tool.blocked", {**item, "change": None, "status": "blocked",
+                                                        "owner": "house-engineering"})
         if proposal.files:
             try:
                 made = self.forge.propose(role=role, slug=proposal.slug, title=proposal.title, body=proposal.body, files=proposal.files)
@@ -539,6 +542,8 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
             base.update(replay_trials=trials, lessons_so_far=[e.payload.get("title") for e in ledger.read(kinds="playbook.entry", limit=40, newest=True)],
                         today=time.strftime("%Y-%m-%d", time.gmtime(house.clock())))
         living = house.registry.living()
+        base['engineering_backlog'] = house.commons.blocked_requests(limit=10)
+        base['engineering_note'] = 'These requests remain unimplemented. Advice is not fulfillment. No current Merton role may edit House network adapters or core engine; do not claim those capabilities have been built.'
         if living and callable(getattr(house, 'research_capabilities', None)):
             current = house.research_capabilities(living[0])
             base['runtime_capabilities'] = {

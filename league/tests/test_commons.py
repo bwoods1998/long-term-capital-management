@@ -111,3 +111,32 @@ class TheToolsmithQueue(unittest.TestCase):
         one = self.ask("a1", "buildable")
         self.commons.fulfil(one, "built it")
         self.assertEqual(self.commons.open_requests(), [])
+
+    def test_blocked_requests_survive_age_and_restart_without_being_rebought(self):
+        one = self.ask('a1', 'positioning_feed')
+        self.ledger.append('tool.blocked', {'request': one, 'outcome': 'requires a source adapter',
+                                          'owner': 'house-engineering'})
+        self.clock.advance(10 * 86400)
+        restarted = Commons(self.ledger, clock=self.clock)
+        self.assertEqual(restarted.open_requests(), [])
+        self.assertEqual(restarted.blocked_requests()[0]['id'], one)
+        reply = restarted.request_tool('a1', 'positioning_feed', 'Still need the point-in-time observations for the hypothesis.')
+        self.assertEqual(reply['queued'], one)
+        self.assertTrue(reply['existing'])
+        self.assertEqual(self.ledger.count(kinds='tool.request'), 1)
+
+    def test_legacy_cannot_build_answer_is_recovered_until_a_real_resolution(self):
+        one = self.ask('a1', 'observed_bars')
+        self.ledger.append('tool.fulfilled', {'request': one, 'status': 'answered',
+            'outcome': 'cannot be a pure tool: needs an engine change'})
+        row = self.commons.blocked_requests()[0]
+        self.assertTrue(row['legacy_advice'])
+        self.assertEqual(self.commons.open_requests(), [])
+        self.commons.fulfil(one, 'deployed and verified', change='verified-change')
+        self.assertEqual(self.commons.blocked_requests(), [])
+
+    def test_repeating_the_same_name_does_not_count_as_more_agents(self):
+        for _ in range(3):
+            self.ask('a1', 'same_feed')
+        self.ask('a2', 'same_feed')
+        self.assertTrue(all(r['asked_by_agents'] == 2 for r in self.commons.open_requests()))
