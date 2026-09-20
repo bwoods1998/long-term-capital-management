@@ -50,10 +50,11 @@ from .rules import rules_text
 from .sandbox import SandboxError
 from .venues import family_of, instrument_for, market_hours
 
-#: How many bars of a watched underlier a replay tape carries per symbol. A three-week window of
-#: one-minute bars is millions of rows and a box killed for memory (Sept 19, 2026); this is a few
-#: weeks of fifteen-minute bars, which is what a strike inside twelve hours is answered by.
+#: How many bars of a watched underlier a replay tape carries per symbol, and the sizes it may
+#: choose between. A three-week window of one-minute bars is millions of rows and a box killed for
+#: memory (Sept 19, 2026); four thousand of them is about two megabytes for six symbols.
 MAX_OBSERVED_BARS = 4000
+OBSERVED_BAR_SIZES = (("5Min", 300), ("15Min", 900), ("1Hour", 3600), ("1Day", 86400))
 from ltcm.data import market_open_at
 
 ZERO = Decimal(0)
@@ -708,7 +709,7 @@ class House:
 
             def build(series=series, under=under, step=step, markets=markets, start_iso=start_iso, end_iso=end_iso, horizon=horizon):
                 tape = self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=markets, step_seconds=step)
-                bars = self._underlier_bars(under, step, start_iso, end_iso)
+                bars = self._underlier_bars(under, start_iso, end_iso)
                 if bars:
                     tape["observed_bars"] = bars
                 return tape
@@ -718,16 +719,20 @@ class House:
                 self._tapes[key] = (end, build())
             return key, self._tapes[key][1]
 
-    def _underlier_bars(self, symbols: Sequence[str], step: int, start_iso: str, end_iso: str) -> dict[str, list[dict[str, Any]]]:
+    def _underlier_bars(self, symbols: Sequence[str], start_iso: str, end_iso: str) -> dict[str, list[dict[str, Any]]]:
         """Bars of what a Kalshi strategy watches on Alpaca, over the same window as its tape.
 
-        A bar no coarser than the tape's own step, and no more of them than a replay can carry: a
-        three-week window of one-minute bars is millions of rows and a killed box, and an hourly
-        strike is answered by fifteen-minute bars just as well. A failure here is no bars, never a
-        failed replay: what it watches is not what it trades."""
+        The finest bar whose count over the tape's own window fits what a replay can carry: an
+        hourly tape's week is 5-minute bars, a daily tape's seven weeks is hourly ones, and neither
+        is the millions of rows and killed box that a fine bar over a long window would be. Chosen
+        from the window rather than fixed, because a cap applied afterwards would silently leave
+        the OLD end of a long tape with no bars at all and a strategy refusing to trade its first
+        week for a reason it could not see. A failure here is no bars, never a failed replay: what
+        it watches is not what it trades."""
         if not symbols or self.alpaca_data is None:
             return {}
-        timeframe = "5Min" if step <= 900 else ("15Min" if step <= 3600 else "1Hour")
+        span = max(_epoch(end_iso) - _epoch(start_iso), 1.0)
+        timeframe = next((name for name, secs in OBSERVED_BAR_SIZES if span / secs <= MAX_OBSERVED_BARS), OBSERVED_BAR_SIZES[-1][0])
         try:
             rows = self.alpaca_data.bars(list(symbols), timeframe, start=start_iso, end=end_iso, limit=MAX_OBSERVED_BARS)
         except Exception as exc:  # noqa: BLE001

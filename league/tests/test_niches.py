@@ -450,8 +450,32 @@ def decide(ctx):
             _, tape = case.house.tape_for(needs)
             self.assertEqual(asked["series"], ["KXBTCD", "KXETHD"])       # what it watches is on the tape
             self.assertEqual(asked["symbols"], ["BTC/USD", "ETH/USD"])    # and so is the underlier
-            self.assertEqual(asked["timeframe"], "5Min")                  # no coarser than the tape's own step
+            self.assertEqual(asked["timeframe"], "5Min")                  # a week of hourly markets fits at five minutes
             self.assertEqual(sorted(tape["observed_bars"]), ["BTC/USD", "ETH/USD"])
+        finally:
+            case.tearDown()
+
+    def test_a_long_window_takes_a_coarser_bar_rather_than_losing_its_old_end(self):
+        """A daily tape is seven weeks. Capping a five-minute series afterwards would leave its
+        first month with no bars at all, and a strategy refusing to trade for a reason it cannot
+        see. The size is chosen from the window instead, so every step of the tape has bars."""
+        from league.house import MAX_OBSERVED_BARS, OBSERVED_BAR_SIZES
+        from league.tests.test_house import HouseCase
+
+        case = HouseCase("run"); case.setUp()
+        try:
+            asked = {}
+
+            class Alpaca:
+                def bars(self, symbols, timeframe, *, start=None, end=None, limit=120):
+                    asked["timeframe"] = timeframe
+                    return {s: [] for s in symbols}
+
+            case.house.alpaca_data = Alpaca()
+            case.house._underlier_bars(["BTC/USD"], "2026-08-01T00:00:00Z", "2026-09-19T00:00:00Z")
+            self.assertEqual(asked["timeframe"], "1Hour")
+            span = 49 * 86400
+            self.assertLessEqual(span / dict(OBSERVED_BAR_SIZES)[asked["timeframe"]], MAX_OBSERVED_BARS)
         finally:
             case.tearDown()
 
