@@ -101,7 +101,13 @@ class Updater:
         )
 
     def tried(self) -> set[str]:
-        return {str(row.get("release")) for row in self.releases.history() if row.get("release")}
+        """The releases the watchdog has really judged. A row marked `busy` is not one of them: it
+        means another deploy held the lock, so the code was never unpacked, let alone run. And the
+        promotion's own restart makes that race the NORMAL case -- the House comes up, its updater
+        checks on the first tick, and the previous deploy is still inside its ten-minute watch. A
+        commit retired on one of those was retired for good, with no retry and no expiry, silently:
+        a floor that rewrites itself would have dropped its own improvements one at a time."""
+        return {str(row["release"]) for row in self.releases.history() if row.get("release") and not row.get("busy")}
 
     def check(self) -> dict[str, Any]:
         """One look at main. Returns what was found and what was done."""

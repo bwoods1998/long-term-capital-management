@@ -611,8 +611,12 @@ class Watchdog:
                 return self._deploy(Path(source), release_id, max(1, int(canary_ticks)), max(0, int(watch_seconds)), max(1, int(watch_every)))
         except DeployBusy as exc:
             started = self.clock()
-            row = self.releases.record({"deploy": f"{release_id}@{int(started)}", "release": release_id, "stage": "verdict", "verdict": "refused", "reasons": [str(exc)]})
-            return {"deploy": row["deploy"], "release": release_id, "verdict": "refused", "reasons": [str(exc)], "current": self.releases.current(),
+            # `busy` marks a refusal that says nothing about the release: the lock was held, the
+            # code was never unpacked, let alone judged. `Updater.tried` must not retire a commit
+            # on one of these (see there: the promotion's own restart makes the race the norm).
+            row = self.releases.record({"deploy": f"{release_id}@{int(started)}", "release": release_id, "stage": "verdict",
+                                        "verdict": "refused", "busy": True, "reasons": [str(exc)]})
+            return {"deploy": row["deploy"], "release": release_id, "verdict": "refused", "busy": True, "reasons": [str(exc)], "current": self.releases.current(),
                     "previous": self.releases.previous(), "started_at": iso(started), "finished_at": iso(started), "readings": 0, "stages": [row]}
 
     def _deploy(self, source: Path, release_id: str, canary_ticks: int, watch_seconds: int, watch_every: int) -> dict[str, Any]:

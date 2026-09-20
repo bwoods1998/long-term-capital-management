@@ -120,3 +120,33 @@ class UpdaterCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ABusyLockDoesNotRetireACommit(UpdaterCase):
+    """`Watchdog.deploy` holds its lock through the canary, the promotion, the restart and the
+    whole ten-minute watch. The restart brings a House up whose updater checks on its FIRST tick,
+    while that lock is still held -- so the race is not rare, it is what happens after every
+    promotion. Retiring the commit on it meant a floor that rewrites itself dropped its own
+    improvements one at a time, silently, with no retry and no expiry."""
+
+    def test_a_release_refused_for_a_busy_lock_is_tried_again(self):
+        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        updater = self.updater()
+        self.assertEqual(updater.check()["action"], "deploying")
+        _, release_id = self.launched[0]
+        self.releases.record({"release": release_id, "stage": "verdict", "verdict": "refused", "busy": True,
+                              "reasons": ["another deploy or rollback is running (pid 123)"]})
+        self.assertNotIn(release_id, updater.tried())
+        self.assertEqual(updater.check()["action"], "deploying")   # the same content, offered again
+        self.assertEqual(len(self.launched), 2)
+
+    def test_a_release_the_watchdog_really_judged_is_not_offered_again(self):
+        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        updater = self.updater()
+        self.assertEqual(updater.check()["action"], "deploying")
+        _, release_id = self.launched[0]
+        self.releases.record({"release": release_id, "stage": "verdict", "verdict": "rolled_back",
+                              "reasons": ["the alpaca-paper book is frozen"]})
+        self.assertIn(release_id, updater.tried())
+        self.assertEqual(updater.check()["action"], "none")
+        self.assertEqual(len(self.launched), 1)
