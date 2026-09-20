@@ -86,7 +86,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
 
     from .auditor import Auditor
     from .budget import Budget
-    from .commons import Commons, sail_search
+    from .campaigns import CampaignBudget
+    from .commons import Commons
+    from .funded import FundedTransport
     from .frontier import Frontier
     from .paper import KalshiShadowBroker
     from .publish import Publisher
@@ -132,7 +134,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     else:
         sandbox = SailSandbox(SailboxClient(), root / "sandbox.json", image_checkpoint=config["agent_image_checkpoint"], name_prefix=name_prefix)
 
+    campaigns = CampaignBudget(root / "campaigns.sqlite") if not canary else None
     provider = Provider(root / "provider.sqlite", floor_cap_usd_per_day=config.get("inference_daily_cap_usd", "3.00")) if research else None
+    if provider is not None and campaigns is not None:
+        provider.transport = FundedTransport(provider.transport, campaigns)
     house_settings = Settings(
         tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
         real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
@@ -141,14 +146,15 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
         game=game, settings=house_settings, kill_switch=gateway_kill_switch(gateway_url, token) if real_money else None,
+        campaigns=campaigns,
     )
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
-    house.commons = Commons(house.ledger, search=sail_search(lambda: secret("SAIL_API_KEY")), news=News(cache_dir=root / "cache"),
+    house.commons = Commons(house.ledger, news=News(cache_dir=root / "cache"),
                             clock=house.clock)
     if house.researcher is not None:
         house.researcher.commons = house.commons
-    frontier = Frontier(gateway_url, token)
+    frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,

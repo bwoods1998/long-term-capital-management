@@ -7,6 +7,10 @@ works are in [the repository README](../README.md); why each thing is the way it
 [the build log](../docs/runs/2026-09-20-overnight-build.md). This page is for someone changing the
 code.
 
+The active spending policy and experiment workflow are documented in
+[Phase one](../docs/phase-one.md). Production uses persistent campaign allowances; the legacy
+fourteen-day pacer remains only for compatibility and isolated fixtures.
+
 ## Design rules
 
 - **Standard library only.** `sqlite3`, `urllib`, `decimal`, `hashlib`, `json`, `threading`,

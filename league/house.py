@@ -110,6 +110,7 @@ class House:
         auditor: Any = None,
         publisher: Any = None,
         budget: Any = None,
+        campaigns: Any = None,
         game: Mapping[str, Any] | None = None,
         settings: Settings | None = None,
         clock: Callable[[], float] = time.time,
@@ -121,10 +122,18 @@ class House:
         self.settings = settings or Settings()
         self.game = dict(game or load_game())
         self.ledger = Ledger(self.root / "ledger.sqlite", clock=clock)
+        from .experiments import Experiments
+        from .recordings import Recorder
+
+        self.experiments = Experiments(self.root / "experiments", self.ledger, clock=clock)
+        self.recorder = Recorder(self.root / "recordings.sqlite", clock=clock)
         self.registry = Registry(self.ledger)
         self.economy = Economy(self.ledger, self.game, clock=clock)
-        self.evaluator = Evaluator(self.ledger, clock=clock)
-        self.pacer = Pacer(self.ledger, clock=clock)
+        self.evaluator = Evaluator(self.ledger, clock=clock, archive=self.experiments.archive)
+        from .campaigns import CampaignPacer
+
+        self.campaigns = campaigns
+        self.pacer = CampaignPacer(self.ledger, campaigns, clock=clock) if campaigns else Pacer(self.ledger, clock=clock)
         self.commons = commons or Commons(self.ledger)
         self.sandbox = sandbox
         self.alpaca_data = alpaca_data
@@ -463,7 +472,12 @@ class House:
         hit = self._data_cache.get(key)
         if hit and self.clock() - hit[0] < ttl:
             return hit[1]
+        started = self.clock()
         value = build()
+        try:
+            self.recorder.record(key, value, started=started)
+        except Exception as exc:  # recording failure must not prevent position management
+            self.alert("warning", f"market recording failed ({type(exc).__name__})")
         self._data_cache[key] = (self.clock(), value)
         return value
 
@@ -675,6 +689,8 @@ class House:
             try:
                 instrument = instrument_for(book.broker.venue, dict(row))
                 side = str(row.get("side") or "").lower()
+                if book.real_money and side == "buy" and self.campaigns and not self.campaigns.policy["allow_new_live_capital"]:
+                    raise ValueError("this phase permits exits but no new real-money entries")
                 niche = self.niche_of(agent)
                 if niche is not None and side == "buy" and not niche.holds(instrument):
                     raise ValueError(f"{instrument.market_id or instrument.symbol} is outside the {niche.id} specialty")
@@ -776,8 +792,9 @@ class House:
             # What the strategy watches rides on the same tape, so a replay sees what a wake sees.
             symbols = sorted(set(symbols) | {str(s) for s in (watched.get("symbols") or [])[:6]})
             timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
-            key = f"alpaca:{','.join(symbols)}:{timeframe}:{horizon}:{start_iso[:10]}"
-            build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon)  # noqa: E731
+            warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
+            key = f"alpaca:{','.join(symbols)}:{timeframe}:{warmup}:{horizon}:{start_iso[:10]}"
+            build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon, warmup_bars=warmup)  # noqa: E731
         else:
             series = sorted(str(s) for s in (needs.get("series") or []))[:12]
             # What it watches rides on the tape too, so a replay sees what a wake sees: the series
@@ -786,6 +803,8 @@ class House:
             # strikes are written on. Recorded once for the whole window and sliced per step.
             series = sorted(set(series) | {str(s) for s in (watched.get("series") or [])[:niches_module.MAX_OBSERVED]})
             under = sorted({str(s) for s in (watched.get("symbols") or [])})[:niches_module.MAX_OBSERVED]
+            observed_timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Hour")
+            observed_limit = max(1, min(200, int((needs.get("bars") or {}).get("limit") or 60)))
             # A tape is JSON handed to a sealed box, and a seven-week sports tape at five-minute
             # steps is hundreds of megabytes: three agents of the sports desk had their replays
             # KILLED (exit 137) on Sept 19, 2026, and were charged a trial each for it. A strategy
@@ -793,13 +812,14 @@ class House:
             # the half hour and carries fewer markets.
             step = self.settings.kalshi_day_step_seconds if horizon == "day" else 300
             markets = self.settings.kalshi_replay_markets if horizon == "hour" else min(self.settings.kalshi_replay_markets, self.settings.kalshi_day_markets)
-            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}:{','.join(under)}"
+            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}:{','.join(under)}:{observed_timeframe}:{observed_limit}"
 
             def build(series=series, under=under, step=step, markets=markets, start_iso=start_iso, end_iso=end_iso, horizon=horizon):
                 tape = self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=markets, step_seconds=step)
-                bars = self._underlier_bars(under, start_iso, end_iso)
+                bars = self._underlier_bars(under, start_iso, end_iso, timeframe=observed_timeframe, warmup=observed_limit)
                 if bars:
                     tape["observed_bars"] = bars
+                    tape["observed_timeframe"] = observed_timeframe
                 return tape
         with self._tape_lock:  # one build at a time: two agents of one family want the same tape
             hit = self._tapes.get(key)
@@ -807,20 +827,24 @@ class House:
                 self._tapes[key] = (end, build())
             return key, self._tapes[key][1]
 
-    def _underlier_bars(self, symbols: Sequence[str], start_iso: str, end_iso: str) -> dict[str, list[dict[str, Any]]]:
+    def _underlier_bars(self, symbols: Sequence[str], start_iso: str, end_iso: str, *, timeframe: str | None = None, warmup: int = 0) -> dict[str, list[dict[str, Any]]]:
         """Bars of what a Kalshi strategy watches on Alpaca, over the same window as its tape.
 
-        The finest bar whose count over the tape's own window fits what a replay can carry: an
-        hourly tape's week is 5-minute bars, a daily tape's seven weeks is hourly ones, and neither
-        is the millions of rows and killed box that a fine bar over a long window would be. Chosen
-        from the window rather than fixed, because a cap applied afterwards would silently leave
-        the OLD end of a long tape with no bars at all and a strategy refusing to trade its first
-        week for a reason it could not see. A failure here is no bars, never a failed replay: what
-        it watches is not what it trades."""
+        Production passes the same timeframe/limit as the live NEEDS declaration and includes
+        warmup. An oversized declared window is unsupported rather than silently resampled.
+        Legacy direct callers without a timeframe retain the old capacity-based choice.
+        Missing bars become an explicit unsupported-input result before paid replay."""
         if not symbols or self.alpaca_data is None:
             return {}
         span = max(_epoch(end_iso) - _epoch(start_iso), 1.0)
-        timeframe = next((name for name, secs in OBSERVED_BAR_SIZES if span / secs <= MAX_OBSERVED_BARS), OBSERVED_BAR_SIZES[-1][0])
+        from .tapes import AlpacaData, TIMEFRAME_SECONDS, TapeError, iso, is_crypto
+
+        timeframe = timeframe or next((name for name, secs in OBSERVED_BAR_SIZES if span / secs <= MAX_OBSERVED_BARS), OBSERVED_BAR_SIZES[-1][0])
+        if timeframe not in TIMEFRAME_SECONDS or span / TIMEFRAME_SECONDS[timeframe] + warmup > MAX_OBSERVED_BARS:
+            raise TapeError("unsupported input: declared observed timeframe exceeds the replay capacity")
+        if warmup:
+            reach = max(AlpacaData.default_lookback(timeframe, warmup, crypto=is_crypto(s)) for s in symbols)
+            start_iso = iso(_epoch(start_iso) - reach)
         try:
             rows = self.alpaca_data.bars(list(symbols), timeframe, start=start_iso, end=end_iso, limit=MAX_OBSERVED_BARS)
         except Exception as exc:  # noqa: BLE001
@@ -829,15 +853,29 @@ class House:
         return {s: list(bars)[-MAX_OBSERVED_BARS:] for s, bars in (rows or {}).items() if bars}
 
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+        if self.campaigns and not self.pacer.may_spend("sail"):
+            raise ValueError("campaign allowance is closed")
         tape_id, tape = self.tape_for(needs)
+        observed = needs.get("observe") or {}
+        if needs.get("venue") == "kalshi" and any(not (tape.get("observed_bars") or {}).get(s) for s in observed.get("symbols") or []):
+            raise ValueError("unsupported input: required observed bars are missing")
+        if needs.get("venue") == "alpaca" and observed.get("series"):
+            raise ValueError("unsupported input: cross-venue event observations are not recorded on equity tapes")
         row = CONSTITUTION["rungs"]["1"]
-        run = self.sandbox.replay(
-            agent.id, code, params, tape, stake=float(row["stake_usd"]),
-            limits={"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])},
-            timeout=self.settings.replay_timeout,
-        )
+        stake = float(row["stake_usd"])
+        limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}
+        attempt = self.experiments.begin(agent=agent.id, family=agent.family,
+            lineage=self.registry.lineage(agent.id), code=code, params=params, needs=needs,
+            tape=tape, query=tape_id, stake=stake, limits=limits)
+        try:
+            run = self.sandbox.replay(agent.id, code, params, tape, stake=stake, limits=limits,
+                                      timeout=self.settings.replay_timeout)
+        except Exception as exc:
+            self.experiments.finish(attempt, {"ok": False, "error": f"sandbox: {type(exc).__name__}"})
+            raise
         self._charge_box(agent.id, run, note="a replay")
-        return run.result, tape_id
+        artifact = self.experiments.finish(attempt, run.result, seconds=run.seconds)
+        return {**run.result, "experiment": artifact}, attempt["tape"]
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
@@ -851,16 +889,30 @@ class House:
 
         def job() -> None:
             with lane:
+                queued_at = self._job_status[key]["queued_at"]
+                started_at = self.clock()
                 with self._state_lock:
-                    self._job_status[key]["started_at"] = self.clock()
+                    self._job_status[key]["started_at"] = started_at
+                job_id = f"{key}:{queued_at:.6f}"
+                state = "finished"
                 try:
+                    self.ledger.append("ops.job", {"job": job_id, "key": key, "state": "started",
+                        "queued_seconds": max(0, started_at - queued_at)})
                     work(*args)
                 except Exception as exc:  # noqa: BLE001
+                    state = "failed"
                     try:
                         self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})")
                     except Exception:  # noqa: BLE001 - the ledger may already be closed on the way out
                         pass
                 finally:
+                    try:
+                        self.ledger.append("ops.job", {"job": job_id, "key": key, "state": state,
+                            "queued_seconds": max(0, started_at - queued_at),
+                            "running_seconds": max(0, self.clock() - started_at),
+                            "elapsed_seconds": max(0, self.clock() - queued_at)})
+                    except Exception:
+                        pass  # a missing finish remains visible as interrupted work after restart
                     with self._state_lock:
                         self._job_status.pop(key, None)
 
@@ -999,6 +1051,8 @@ class House:
             rung = self.evaluator.rung(agent.id)
             if rung != verdict.rung:
                 return
+            if rung >= 1 and self.campaigns and not self.campaigns.policy["allow_new_live_capital"]:
+                return
             if rung == 1:
                 if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
                     return  # it stays eligible on paper until the owner turns real money on
@@ -1040,6 +1094,10 @@ class House:
                 told[kind] = True
                 spent, budget = self.pacer.spent(kind), self.pacer.budget[kind]
                 why = "its budget is spent" if spent >= budget else f"day {self.pacer.days} is over with ${budget - spent:.2f} unspent"
+                if self.campaigns:
+                    self.alert("info", f"{self.campaigns.policy['phase']}: {name} allowance closed ({why}). "
+                               "New paid work stops; position reconciliation and exits continue. The next phase is not automatically funded.")
+                    continue
                 self.alert("error", f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
                                     + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Merton's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
 
@@ -1463,6 +1521,8 @@ class House:
     def behind_the_clock(self, kind: str) -> bool:
         """Is today's share of this budget running behind the day? The owner funded a fortnight to
         be spent, and an allowance still unspent at noon is work that was not done."""
+        if getattr(self.pacer, "no_catch_up", False):
+            return False
         allowance = self.pacer.allowance(kind)
         if allowance <= 0:
             return False
@@ -1769,6 +1829,10 @@ class House:
                 self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
         # Past the monthly compute line only agents holding real money are woken, so they can exit.
         open_for_business = self.budget is None or self.budget.check() == "open"
+        if self.campaigns:
+            meter = getattr(self.provider, "transport", None)
+            metered = bool(meter and hasattr(meter, "refresh") and meter.refresh())
+            open_for_business = open_for_business and metered and self.pacer.may_spend("sail")
         summary["budget"] = "open" if open_for_business else "stopped"
         batches: dict[str, list[Mapping[str, Any]]] = {}
         waking = [a for a in self.due() if self.economy.alive(a.id) and (open_for_business or self._holds_real_money(a))]
@@ -1881,6 +1945,8 @@ class House:
             "release": Path(__file__).resolve().parents[1].name,
             "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
             "background_jobs": jobs,
+            "recordings": self.recorder.stats(),
+            "campaign": self.campaigns.report() if self.campaigns else None,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
@@ -1889,7 +1955,10 @@ class House:
     def close(self, *, wait: float | None = 5.0) -> None:
         self.wait(wait)
         self._save_state()
+        self.recorder.close()
         self.ledger.close()
+        if self.campaigns:
+            self.campaigns.close()
 
 
 def _epoch(iso: str) -> float:

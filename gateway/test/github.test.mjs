@@ -66,7 +66,10 @@ test('the judges are refused for every role, even under rules loosened to allow 
     ...github.FORBIDDEN_FILES, 'gateway/worker.mjs', 'gateway/lib/github.mjs', 'gateway/wrangler.jsonc',
     '.github/workflows/ci.yml', '.github/CODEOWNERS', 'League/CI.py', 'league/Constitution.py', 'GATEWAY/worker.mjs', '.GitHub/workflows/merge.yml',
   ];
-  assert.deepEqual(github.FORBIDDEN_FILES, ['constitution', 'ci', 'ledger', 'book', 'evaluator', 'stats', 'auditor', 'watchdog', 'safety', 'replay', 'updater'].map(name => `league/${name}.py`));
+  assert.deepEqual(github.FORBIDDEN_FILES, [
+    ...['constitution', 'ci', 'ledger', 'book', 'evaluator', 'stats', 'auditor', 'watchdog', 'safety', 'replay', 'updater'].map(name => `league/${name}.py`),
+    'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py',
+  ]);
   for (const role of Object.keys(github.ROLES)) {
     const loosened = { [role]: { under: [''] } };
     assert.equal(github.pathRefusal(role, 'anything/at/all.py', loosened), null, 'the loosened rules do allow everything else');

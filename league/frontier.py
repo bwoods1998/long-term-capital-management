@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -77,12 +78,13 @@ def output_text(payload: dict[str, Any]) -> str:
 
 
 class Frontier:
-    def __init__(self, gateway_url: str, token_source: Callable[[], str], *, model: str = MODEL, opener: Any = None, timeout: float = 600.0):
+    def __init__(self, gateway_url: str, token_source: Callable[[], str], *, model: str = MODEL, opener: Any = None, timeout: float = 600.0, spend_guard: Any = None):
         self.url = gateway_url.rstrip("/") + "/v1/frontier/responses"
         self.token_source = token_source
         self.model = model
         self.opener = opener or urllib.request.urlopen
         self.timeout = timeout
+        self.spend_guard = spend_guard
 
     def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium") -> Answer:
         body = {
@@ -96,6 +98,19 @@ class Frontier:
             headers={"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json",
                      AGENT_HEADER: attribution(agent), "User-Agent": "ltcm-floor/1.0"},
         )
+        commitment = "frontier:" + secrets.token_hex(16)
+        if self.spend_guard is not None:
+            from .campaigns import CampaignClosed
+
+            if self.model != MODEL:
+                raise FrontierError("the campaign has no verified price for this model")
+            # One UTF-8 byte per possible input token plus framing, including the long-context
+            # and cache-write premiums. Standard service only; no built-in paid tools.
+            hold = (Decimal(len(request.data) + 4096) * 25 + Decimal(body["max_output_tokens"]) * 75) / 1000000
+            try:
+                self.spend_guard.reserve(commitment, "foundation-review", hold)
+            except CampaignClosed as exc:
+                raise FrontierError(str(exc)) from None
         try:
             with self.opener(request, timeout=self.timeout) as response:
                 payload = json.load(response)
@@ -113,4 +128,17 @@ class Frontier:
             cost_usd = Decimal(0)
         if not cost_usd.is_finite() or cost_usd < 0:
             cost_usd = Decimal(0)  # the gateway's own meter is the record; a garbled header charges nothing here
+        if self.spend_guard is not None and cost is not None:
+            try:
+                confirmed = Decimal(str(cost))
+                usage = payload.get('usage') if isinstance(payload.get('usage'), dict) else {}
+                tokens_in, tokens_out = usage.get('input_tokens'), usage.get('output_tokens')
+                if (confirmed.is_finite() and confirmed >= 0 and type(tokens_in) is int and type(tokens_out) is int
+                        and min(tokens_in, tokens_out) >= 0 and payload.get('model') == self.model):
+                    # The gateway's header is an estimate, not an invoice. Keep the phase bound
+                    # conservative even if its pricing omits long-context/cache-write premiums.
+                    bounded = (Decimal(tokens_in) * 25 + Decimal(tokens_out) * 75) / 1000000
+                    self.spend_guard.settle(commitment, max(confirmed, bounded))
+            except InvalidOperation:
+                pass  # unknown costs retain the full hold, including across restarts
         return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model))

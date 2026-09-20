@@ -27,6 +27,8 @@ House acts on the verdicts it returns.
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -61,11 +63,13 @@ def block_key(at: str, horizon: str) -> str:
 
 
 class Evaluator:
-    def __init__(self, ledger: Ledger, *, constitution: Mapping[str, Any] | None = None, clock=time.time):
+    def __init__(self, ledger: Ledger, *, constitution: Mapping[str, Any] | None = None, clock=time.time, archive=None):
         self.ledger = ledger
         self.c = dict(constitution or CONSTITUTION)
         self.ladder = self.c["ladder"]
         self.clock = clock
+        self.archive = archive
+        self._evaluation_policy = None
 
     # ------------------------------------------------------------------ state
     def rung(self, agent: str) -> int:
@@ -132,6 +136,8 @@ class Evaluator:
         reasons = []
         if not result.get("ok"):
             reasons.append(f"the replay failed: {result.get('error')}")
+        if int(result.get("unresolved") or 0):
+            reasons.append("positions lack a completed settlement within the recorded scoring window")
         if int(result.get("trades") or 0) < rules["min_trades"]:
             reasons.append(f"{int(result.get('trades') or 0)} closed trades, {rules['min_trades']} needed")
         if len(growth) < rules["min_blocks"]:
@@ -160,6 +166,19 @@ class Evaluator:
             "passed": passed,
             "reasons": reasons,
         }
+        if result.get("experiment"):
+            numbers["experiment"] = result["experiment"]
+        if self.archive is not None:
+            if self._evaluation_policy is None:
+                from . import ledger as ledger_module
+
+                self._evaluation_policy = self.archive.put({"constitution": self.c, "python": list(sys.version_info[:3]),
+                    "sources": {"evaluator.py": Path(__file__).read_text(encoding="utf-8"),
+                                "stats.py": Path(stats.__file__).read_text(encoding="utf-8"),
+                                "ledger.py": Path(ledger_module.__file__).read_text(encoding="utf-8")}})
+            numbers["evaluation_artifact"] = self.archive.put({"schema": 1, "policy": self._evaluation_policy,
+                "prior_trial_sharpes": trials[:-1], "lineage": list(lineage) if lineage is not None else None,
+                "result": self.archive.put(result), "verdict": numbers})
         self.ledger.append("eval.trial", numbers, agent=agent)
         if passed and promote and self.rung(agent) == 0:
             return self.promote(agent, 1, "passed replay against every trial in its own line", numbers)

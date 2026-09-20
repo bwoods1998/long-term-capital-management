@@ -90,7 +90,7 @@ class TerminalRangeTest(unittest.TestCase):
                 with self.subTest(leg=leg, step=step):
                     before = (.89, .91) if leg == "yes" else (.09, .11)
                     after = (.01, .02) if leg == "yes" else (.98, .99)
-                    history = FakeHistory([settled(TICKER, "no" if leg == "yes" else "yes", stamp(-60), stamp(240))],
+                    history = FakeHistory([settled(TICKER, "no" if leg == "yes" else "yes", stamp(-60), stamp(240), settlement_ts=stamp(240))],
                         {TICKER:[candle(stamp(0), *before), candle(stamp(180), *after)]})
                     tape = KalshiData(None, history, clock=lambda: BASE + 600).tape(
                         ["KXBTCD"], start=stamp(0), end=stamp(600), step_seconds=step)
@@ -104,8 +104,8 @@ class TerminalRangeTest(unittest.TestCase):
 
     def test_terminal_and_another_markets_observation_share_one_ordered_step(self):
         other = "KXBTCD-OTHER-T81000"
-        history = FakeHistory([settled(TICKER, "no", stamp(-60), stamp(300)),
-                               settled(other, "yes", stamp(-60), stamp(600))],
+        history = FakeHistory([settled(TICKER, "no", stamp(-60), stamp(300), settlement_ts=stamp(300)),
+                               settled(other, "yes", stamp(-60), stamp(600), settlement_ts=stamp(600))],
             {TICKER:[candle(stamp(0), .89, .91), candle(stamp(300), .01, .02)],
              other:[candle(stamp(0), .4, .5), candle(stamp(300), .5, .6)]})
         tape = KalshiData(None, history, clock=lambda: BASE + 900).tape(["KXBTCD"], start=stamp(0), end=stamp(600))
@@ -131,8 +131,8 @@ def decide(ctx):
 
     def test_off_grid_close_does_not_create_a_wake_that_cancels_another_markets_order(self):
         other = "KXBTCD-OTHER-T81000"
-        history = FakeHistory([settled(TICKER, "yes", stamp(-60), stamp(240)),
-                               settled(other, "no", stamp(-60), stamp(600))],
+        history = FakeHistory([settled(TICKER, "yes", stamp(-60), stamp(240), settlement_ts=stamp(240)),
+                               settled(other, "no", stamp(-60), stamp(600), settlement_ts=stamp(600))],
             {TICKER:[candle(stamp(0), .89, .91)],
              other:[candle(stamp(0), .89, .91), candle(stamp(300), .01, .02)]})
         tape = KalshiData(None, history, clock=lambda: BASE + 900).tape(["KXBTCD"], start=stamp(0), end=stamp(600))

@@ -444,6 +444,7 @@ class History:
                 parsed["volume"] = Decimal(str(volume))
                 parsed["result"] = str(row.get("result") or "").lower() or None
                 parsed["open_time"] = row.get("open_time")
+                parsed["settlement_ts"] = row.get("settlement_ts")
                 parsed["latest_expiration_time"] = row.get("latest_expiration_time")
                 value = row.get("settlement_value_dollars")
                 if value is None and row.get("settlement_value") is not None:
