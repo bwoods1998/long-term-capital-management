@@ -5,6 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 from league.constitution import CONSTITUTION
 from league.ledger import Ledger
@@ -470,3 +471,38 @@ class IdleHands(HouseCase):
             self.house.wake(self.house.registry.get(rich.id))
         self.house.keep_population()
         self.assertIn(rich.id, [a.id for a in self.house.registry.living()])
+
+    def test_a_frozen_agent_takes_a_file_that_trades_even_when_the_replay_fails(self):
+        """The sports desk, Sept 20, 2026: six agents, up to two hundred live markets each, none
+        inside the band they were born with, thirteen research passes and eight trials between
+        them, and not one rewrite -- a looser rule that fires twice on a thin tape can never clear
+        twenty closed trades, so their live rules stayed exactly as born."""
+        from league.tests.test_house import BUYER
+
+        needs = {"venue": "alpaca", "horizon": "hour", "style": "test-buyer", "symbols": ["BTC/USD"], "bars": {"timeframe": "5Min", "limit": 10}, "wake_minutes": 5}
+        made = {"code": BUYER, "needs": needs, "params": {"notional": 20.0}, "purpose": "something that fires",
+                "numbers": {"trades": 14}, "passed": False}
+        self.house.researcher = SimpleNamespace(research=lambda agent, standing, session: SimpleNamespace(
+            candidate=dict(made), consulted="", trials=1, cost_usd=D("0.03"), summary="x", reason="finished"))
+        was = self.house.registry.get(self.agent.id).code_sha256
+
+        self.wakes(5)  # not stuck yet: a failed replay buys nothing
+        self.house.research(self.house.registry.get(self.agent.id))
+        self.assertEqual(self.house.registry.get(self.agent.id).code_sha256, was)
+
+        self.wakes(5)  # ten barren wakes: its own rules demonstrably do not fire
+        self.house.research(self.house.registry.get(self.agent.id))
+        self.assertNotEqual(self.house.registry.get(self.agent.id).code_sha256, was)
+        row = self.house.ledger.last("agent.strategy", agent=self.agent.id).payload
+        self.assertIs(row["passed_replay"], False)
+        self.assertIn("at least trades", row["reason"])
+
+    def test_a_failed_file_that_does_not_trade_either_is_no_better_than_its_own(self):
+        made = {"code": IDLER, "needs": {"venue": "alpaca", "horizon": "hour", "style": "test-idler", "symbols": ["BTC/USD"], "wake_minutes": 5},
+                "params": {}, "purpose": "no", "numbers": {"trades": 0}, "passed": False}
+        self.house.researcher = SimpleNamespace(research=lambda agent, standing, session: SimpleNamespace(
+            candidate=dict(made), consulted="", trials=1, cost_usd=D("0.03"), summary="x", reason="finished"))
+        was = self.house.registry.get(self.agent.id).code_sha256
+        self.wakes(12)
+        self.house.research(self.house.registry.get(self.agent.id))
+        self.assertEqual(self.house.registry.get(self.agent.id).code_sha256, was)

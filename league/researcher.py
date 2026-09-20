@@ -44,7 +44,7 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
     {"name": "ask_merton", "description": "Hire Merton, the firm's theorist, to think about YOUR problem. He is the frontier model that writes the firm's strategies and audits every candidate for real money, and he is EXPENSIVE: this costs many times a research pass, out of your own credits, and you may hire him once a day. He is shown everything you know (your file, your journal, your trades, your replays, your specialty) and answers with advice or with a whole strategy file you can then `replay`. Ask when you are stuck or when your idea may be structurally dead, not for a parameter.",
      "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}},
-    {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your whole family, and costs sandbox seconds. Code that PASSES is born as your child at once (the House stakes it if you cannot). Give the complete strategy file and what you changed and why.",
+    {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your whole family, and costs sandbox seconds. Code that PASSES is born as your child at once (the House stakes it if you cannot). If your OWN rules have not fired for hours and you have no record to protect, code that merely TRADES on the tape replaces yours in place, failed verdict and all: a strategy that never acts cannot be measured, and paper is then the test. Give the complete strategy file and what you changed and why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "purpose": {"type": "string"}}, "required": ["code", "purpose"]}},
     {"name": "finish", "description": "End this research pass with one or two sentences on what you concluded.",
      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
@@ -367,9 +367,13 @@ class Researcher:
             outcome = self.run_replay(agent, code)
             out.trials += 1
             numbers = dict(outcome.get("numbers") or {})
-            if outcome.get("passed"):
+            if outcome.get("passed") or not outcome.get("error"):
+                # A candidate that ran is carried whatever the verdict; the House decides what a
+                # failure may buy (`House.research`: an agent whose own rules have not fired for
+                # hours and has no record to protect takes a file that at least trades).
                 out.candidate = {"code": code, "needs": outcome.get("needs") or {}, "params": outcome.get("params") or {},
-                                 "numbers": numbers, "purpose": str(args.get("purpose") or "")[:600]}
+                                 "numbers": numbers, "passed": bool(outcome.get("passed")),
+                                 "purpose": str(args.get("purpose") or "")[:600]}
             return {"passed": bool(outcome.get("passed")), "reasons": numbers.get("reasons"), "trials_in_family": numbers.get("trials"),
                     "deflated_sharpe": numbers.get("deflated_sharpe"), "sharpe": numbers.get("sharpe"), "trades": numbers.get("trades"),
                     "return_pct": numbers.get("return_pct"), "max_drawdown": numbers.get("max_drawdown"), "fees_usd": numbers.get("fees_usd"),
