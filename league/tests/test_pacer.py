@@ -88,8 +88,15 @@ class PacerCase(unittest.TestCase):
         self.ledger.append("ops.budget", {"what": "sail", "spent_usd": "9"}, at="2026-09-18T23:00:00.000Z")
         self.assertEqual(self.pacer.spent("sail"), D(0))
 
-    def test_the_credit_pool_is_most_of_the_days_sail_allowance(self):
-        self.assertEqual(self.pacer.credit_pool(), D("6.07"))  # 85% of 7.142857
+    def test_the_credit_pool_is_drawn_from_both_purses_the_owner_funded(self):
+        """An agent pays for its research tokens out of this pool, and research is a frontier cost.
+        Sized from Sail alone the pool capped research at a fraction of what the second hundred
+        dollars would fund; what the House keeps back is Merton's passes and the audits."""
+        # 85% of Sail's 7.142857 plus 70% of the frontier's 5.00 (RULES funds $70 over 14 days)
+        self.assertEqual(self.pacer.credit_pool(), D("9.57"))
+        self.merton("70")
+        self.at("2026-09-20T12:00:00")  # the frontier budget is gone: tomorrow the pool is Sail's share alone
+        self.assertEqual(self.pacer.credit_pool(), D("6.54"))
         self.at("2026-10-05T00:00:00")
         self.assertEqual(self.pacer.credit_pool(), D(0))
 

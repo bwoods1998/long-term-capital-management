@@ -117,12 +117,20 @@ class Pacer:
         return self.day() >= self.days or self.remaining(kind) <= 0
 
     # ---------------------------------------------------------------------- uses
-    def credit_pool(self, *, share: Decimal = Decimal("0.85"), floor: Decimal = Decimal("0.50")) -> Decimal:
-        """The day's pool of compute credits: most of the day's Sail allowance (the rest is the
-        House's own box and the boxes' idle minutes, which no agent is charged for)."""
+    def credit_pool(self, *, share: Decimal = Decimal("0.85"), frontier_share: Decimal = Decimal("0.70"),
+                    floor: Decimal = Decimal("0.50")) -> Decimal:
+        """The day's pool of compute credits, out of BOTH purses the owner funded.
+
+        Most of the day's Sail allowance -- the rest is the House's own box and the boxes' idle
+        minutes, which no agent is charged for -- and most of the day's frontier allowance, because
+        an agent pays for its research tokens from this same pool. Sized from Sail alone, as it was
+        at first, the pool capped what the agents could research at a fraction of what the frontier
+        budget would fund, and the owner's second hundred dollars would have gone unspent. The
+        share the House keeps back is Merton's own passes and the audits, which agents do not pay
+        for; `may_spend` still stands behind both budgets, so neither can be overrun."""
         if not self.running():
             return ZERO
-        return max(self.allowance("sail") * share, floor).quantize(Decimal("0.01"))
+        return max(self.allowance("sail") * share + self.allowance("openai") * frontier_share, floor).quantize(Decimal("0.01"))
 
     def report(self) -> dict[str, Any]:
         return {"day": self.day() + 1, "of": self.days, "running": self.running(),

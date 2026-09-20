@@ -224,7 +224,7 @@ class HouseTest(HouseCase):
         self.assertGreater(gained, D("1.99"))
         self.assertLess(gained, D("2.01"))
 
-    def test_during_the_expedition_the_days_pool_is_the_days_sail_allowance(self):
+    def test_during_the_expedition_the_days_pool_is_drawn_from_both_budgets(self):
         from league.pacer import Pacer
 
         agent = self.seated()
@@ -232,7 +232,8 @@ class HouseTest(HouseCase):
         self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50"})
         self.house.tick()
         payout = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "payout"][-1]
-        self.assertEqual((D(payout["pool_usd"]), D(payout["paid_usd"]).quantize(D("0.01"))), (D("4.25"), D("4.25")))  # 85% of $50 over ten days, all of it paid
+        # 85% of Sail's $5 a day plus 70% of the frontier's $5 a day, all of it paid out
+        self.assertEqual((D(payout["pool_usd"]), D(payout["paid_usd"]).quantize(D("0.01"))), (D("7.75"), D("7.75")))
         report = self.house.ledger.last("ops.budget").payload
         self.assertEqual((report["what"], report["day"], report["of"], report["sail"]["budget_usd"]), ("expedition", 1, 10, "50"))
 
