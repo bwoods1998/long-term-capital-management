@@ -538,6 +538,15 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
         elif role == "teacher":
             base.update(replay_trials=trials, lessons_so_far=[e.payload.get("title") for e in ledger.read(kinds="playbook.entry", limit=40, newest=True)],
                         today=time.strftime("%Y-%m-%d", time.gmtime(house.clock())))
+        living = house.registry.living()
+        if living and callable(getattr(house, 'research_capabilities', None)):
+            current = house.research_capabilities(living[0])
+            base['runtime_capabilities'] = {
+                'as_of': current['as_of'], 'revision': current['revision'], 'authority': current['authority'],
+                'implemented_replay_support': {key: current['replay'][key] for key in (
+                    'alpaca_warmup', 'daily_execution_clock', 'settlement_clock', 'selection', 'limitations')},
+                'observations': current['observations'], 'research': current['research'],
+            }
         return base
 
     return gather

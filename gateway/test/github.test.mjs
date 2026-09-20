@@ -68,7 +68,7 @@ test('the judges are refused for every role, even under rules loosened to allow 
   ];
   assert.deepEqual(github.FORBIDDEN_FILES, [
     ...['constitution', 'ci', 'ledger', 'book', 'evaluator', 'stats', 'auditor', 'watchdog', 'safety', 'replay', 'updater'].map(name => `league/${name}.py`),
-    'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py',
+    'league/campaigns.json', 'league/campaigns.py', 'league/funded.py', 'league/experiments.py', 'league/recordings.py', 'league/research_jobs.py', 'league/capabilities.py',
   ]);
   for (const role of Object.keys(github.ROLES)) {
     const loosened = { [role]: { under: [''] } };
