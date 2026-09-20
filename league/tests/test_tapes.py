@@ -664,14 +664,14 @@ class KalshiTapeTest(unittest.TestCase):
         present = [t for t in sorted(self.by_time) if A in self.by_time[t]]
         self.assertEqual(present, [
             "2026-09-10T12:05:00Z", "2026-09-10T12:10:00Z", "2026-09-10T12:15:00Z", "2026-09-10T12:20:00Z",
-            # 12:25 and 12:30: one-sided. 13:00: closed.
+            # 12:25 and 12:30: one-sided. 13:00 carries only the closing execution range.
             "2026-09-10T12:35:00Z", "2026-09-10T12:40:00Z", "2026-09-10T12:45:00Z", "2026-09-10T12:50:00Z",
-            "2026-09-10T12:55:00Z",
+            "2026-09-10T12:55:00Z", "2026-09-10T13:00:00Z",
         ])
         present = [t for t in sorted(self.by_time) if E in self.by_time[t]]
         self.assertEqual(present[0], "2026-09-10T12:35:00Z")
-        self.assertEqual(present[-1], "2026-09-10T13:25:00Z")
-        self.assertEqual(len(present), 11)
+        self.assertEqual(present[-1], "2026-09-10T13:30:00Z")
+        self.assertEqual(len(present), 12)
 
     def test_row_carries_the_last_candle_and_the_extremes_of_its_step(self):
         self.assertEqual(self.by_time["2026-09-10T12:05:00Z"][A], {
@@ -707,7 +707,7 @@ class KalshiTapeTest(unittest.TestCase):
         tape = KalshiData(None, scripted_history(), clock=clock).tape(["KXBTCD"], start=START, end=END, step_seconds=900, horizon="day")
         self.assertEqual((tape["step_seconds"], tape["horizon"]), (900, "day"))
         rows = {step["t"]: {row["market"]: row for row in step["markets"]} for step in tape["steps"]}
-        self.assertEqual(sorted(t for t in rows if A in rows[t]), ["2026-09-10T12:15:00Z", "2026-09-10T12:45:00Z"])
+        self.assertEqual(sorted(t for t in rows if A in rows[t]), ["2026-09-10T12:15:00Z", "2026-09-10T12:45:00Z", "2026-09-10T13:00:00Z"])
         first = rows["2026-09-10T12:15:00Z"][A]   # all three early candles fall inside (12:00, 12:15]
         self.assertEqual((first["yes_ask"], first["yes_ask_low"], first["yes_bid_high"]), (0.52, 0.43, 0.51))
 
@@ -770,11 +770,15 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertEqual(listed_close(dict(row, can_close_early=False), 5.0), 5.0)
         history = FakeHistory([row], {ticker: [candle("2026-09-10T12:31:00Z", 0.60, 0.62)]})
         tape = KalshiData(None, history, clock=clock).tape(["KXMLBGAME"], start=START, end=END)
-        self.assertEqual([step["t"] for step in tape["steps"]], ["2026-09-10T12:35:00Z", "2026-09-10T12:40:00Z", "2026-09-10T12:45:00Z"])
-        shown = tape["steps"][-1]["markets"][0]
+        self.assertEqual([step["t"] for step in tape["steps"]], ["2026-09-10T12:35:00Z", "2026-09-10T12:40:00Z", "2026-09-10T12:45:00Z", "2026-09-10T12:47:13Z"])
+        shown = tape["steps"][-2]["markets"][0]
         self.assertEqual(shown["close_time"], "2026-09-12T00:00:00Z")   # never the moment the game ended
         self.assertEqual(shown["hours_to_close"], 35.25)
         self.assertIsNone(shown["strike"])
+        terminal = tape["steps"][-1]["markets"][0]
+        self.assertEqual(terminal["close_time"], "2026-09-10T12:47:13Z")
+        self.assertIsNone(terminal["yes_bid"])
+        self.assertIsNone(terminal["yes_ask"])
 
     def test_errors(self):
         with self.assertRaisesRegex(TapeError, "needs a History"):

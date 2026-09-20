@@ -717,10 +717,13 @@ class KalshiData:
                 results[market["ticker"]] = market["result"]
                 for t, row in rows:
                     by_time.setdefault(t, []).append(row)
-        steps = [
-            {"t": iso(t), "markets": sorted(by_time[t], key=lambda row: (row["close_time"], row["market"]))}
-            for t in sorted(by_time)
-        ]
+        steps = []
+        for t in sorted(by_time):
+            rows = sorted(by_time[t], key=lambda row: (row["close_time"], row["market"]))
+            entry = {"t": iso(t), "markets": rows}
+            if all(row.get("execution_only") is True for row in rows):
+                entry["execution_only"] = True
+            steps.append(entry)
         return {
             "venue": "kalshi",
             "horizon": horizon,
@@ -788,7 +791,7 @@ class KalshiData:
     def _market_steps(
         market: "dict[str, Any]", candles: "list[dict[str, Any]]", start_ts: float, end_ts: float, step: int
     ) -> "list[tuple[int, dict[str, Any]]]":
-        """One market's rows on the step grid: (step time, row), oldest first."""
+        """Grid observations, then a quote-free closing row for outstanding orders' final range."""
         usable = sorted(
             (c for c in candles if isinstance(c, dict) and isinstance(c.get("ts"), (int, float)) and not isinstance(c.get("ts"), bool)),
             key=lambda c: c["ts"],
@@ -804,7 +807,7 @@ class KalshiData:
         out: list[tuple[int, dict[str, Any]]] = []
         for t in range(first, int(math.floor(end_ts)) + 1, step):
             if t >= close_ts:
-                break  # trading has stopped: nothing to show, and the result is about to be known
+                break  # the final range is emitted below, without a new tradable quote
             if t >= market["listed_close_ts"]:
                 break  # a game running past its scheduled end: the live view has dropped it, so the replay does too
             index = bisect.bisect_right(ends, t) - 1
@@ -831,6 +834,32 @@ class KalshiData:
                 "open_interest": _float(candle.get("open_interest")) or 0.0,
                 "strike": market["strike"],
             }))
+        stop = min(close_ts, market["listed_close_ts"])
+        if out and start_ts <= stop <= end_ts:
+            # The last grid point can precede the trading stop by almost a whole step. Dropping
+            # those minute candles hides the adverse fills of bids left resting into the close.
+            # Consume only candles AFTER the last emitted observation, never its earlier range,
+            # and never a candle after the stop. A one-sided final candle can still have a range.
+            index = bisect.bisect_right(ends, stop)
+            inside = usable[bisect.bisect_right(ends, out[-1][0]):index]
+            lows = [v for c in inside for v in (_float(c.get("yes_ask_low")), _float(c.get("yes_ask_close")))
+                    if v is not None and 0.0 < v < 1.0]
+            highs = [v for c in inside for v in (_float(c.get("yes_bid_high")), _float(c.get("yes_bid_close")))
+                     if v is not None and 0.0 < v < 1.0]
+            terminal = dict(out[-1][1])
+            terminal.update(
+                execution_only=True,
+                yes_bid=None, yes_ask=None,  # execution history only, not an invented closing touch
+                yes_ask_low=min(lows) if lows else None,
+                yes_bid_high=max(highs) if highs else None,
+                close_time=iso(stop), hours_to_close=0.0,
+                hours_to_resolve=round((market.get("resolve_ts", market["listed_close_ts"]) - stop) / 3600.0, 4),
+                volume_24h=round(max(0.0, volume[index] - volume[bisect.bisect_right(ends, stop - DAY)]), 2),
+                open_interest=_float(usable[index - 1].get("open_interest")) or 0.0,
+            )
+            # Replay works earlier resting orders before retiring a closed market. Its close_time
+            # also prevents this terminal row from admitting a fresh order or reaching decide().
+            out.append((int(stop), terminal))
         return out
 
 

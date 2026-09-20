@@ -751,6 +751,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         blocks.append({"key": block_key, "log_growth": round(log_growth, 12), "active": block_active})
         previous_equity = block_equity
 
+    decisions_walked = 0
     for step in tape["steps"]:
         now = step["t"]
         now_ts = _parse_ts(now)
@@ -761,7 +762,6 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                 close_block()
             block_key, block_active = key, False
         steps_walked += 1
-        random.seed(seed + steps_walked)  # the same draws on every replay, and no state carried in `random`
         view = _alpaca_view(step, half_spread) if venue == "alpaca" else _kalshi_view(step)
         held_before, fills_before = bool(account.positions), account.fills
 
@@ -776,7 +776,11 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
             series.append(bar)
             del series[:-MAX_BARS]
 
-        if equity > RUIN_EQUITY:
+        if equity > RUIN_EQUITY and step.get("execution_only") is not True:
+            # Closing execution events are not new snapshots or wakes. Besides avoiding an empty
+            # universe decision, keep their insertion from changing later regular random draws.
+            decisions_walked += 1
+            random.seed(seed + decisions_walked)
             # (c) what the strategy may know: this step and the past, never the tape itself.
             ctx: dict[str, Any] = {
                 "now": now, "venue": venue, "rung": 0,
