@@ -790,12 +790,21 @@ class House:
                 # No history to walk: the candidate must at least decide on what its parent sees now.
                 # It is not a counted trial and proves no edge; its child answers on paper.
                 book = self.book_of(agent)
-                run = self.sandbox.decide(agent.id, code, self.snapshot(agent, book)) if book is not None else None
+                ctx = self.snapshot(agent, book) if book is not None else None
+                run = self.sandbox.decide(agent.id, code, ctx) if ctx is not None else None
                 if run is not None:
                     self._charge_box(agent.id, run, note="a candidate's smoke run")
                 ok = bool(run is not None and run.result.get("ok"))
+                # On a weekend an options desk is handed an empty view, and code that only ever
+                # answered "the session is closed" has proved nothing at all -- not even that it
+                # runs on the path that matters. Say so, rather than let a pass be read as one.
+                blind = ok and ctx is not None and self._offered(agent, ctx) == 0
+                note = ("this specialty has no replay, and its market is shut: this run proved only that your code does not "
+                        "raise on an empty view. Nothing about its edge, and nothing about what it does when there is "
+                        "something to trade, has been tested. Paper, when the market opens, is the first real test."
+                        if blind else "this specialty has no replay: paper is the test")
                 return {"passed": ok, "error": None if ok else (run.result.get("error") if run else "no book"), "needs": info["needs"], "params": info.get("params") or {},
-                        "numbers": {"passed": ok, "reasons": [] if ok else ["it did not run on the live view"], "note": "this specialty has no replay: paper is the test"}}
+                        "numbers": {"passed": ok, "untested": blind, "reasons": [] if ok else ["it did not run on the live view"], "note": note}}
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
             return {"passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}

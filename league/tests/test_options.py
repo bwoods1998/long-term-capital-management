@@ -236,6 +236,21 @@ class InTheHouse(HouseCase):
         self.assertFalse(self.house._candidate_replay(agent, broken)["passed"])
         self.assertEqual(list(self.house.ledger.iter(kinds="eval.trial")), [])
 
+    def test_a_smoke_run_on_a_shut_market_says_it_proved_nothing(self):
+        """A weekend hands an options desk an empty view. Code that only ever answered "the session
+        is closed" has not been tested -- not even on the path that matters -- and a pass there must
+        not read like one."""
+        agent = self.options_agent()
+        self.house.seat(agent)
+        self.house._offered = lambda a, ctx: 0
+        shut = self.house._candidate_replay(agent, seeds.load("options-pullback"))
+        self.assertTrue(shut["passed"])
+        self.assertIs(shut["numbers"]["untested"], True)
+        self.assertIn("its market is shut", shut["numbers"]["note"])
+        self.house._offered = lambda a, ctx: 4
+        open_now = self.house._candidate_replay(agent, seeds.load("options-pullback"))
+        self.assertIs(open_now["numbers"]["untested"], False)
+
 
 if __name__ == "__main__":
     unittest.main()
