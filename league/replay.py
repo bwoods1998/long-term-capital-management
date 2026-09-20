@@ -320,6 +320,9 @@ class _Account:
         self.expired_orders = 0
         self.trade_returns: list[float] = []
         self.trade_log: list[dict[str, Any]] = []  # one row a closed trade, for `digest`
+        #: (symbols, series) the strategy may trade; None means "anything on the tape". What it
+        #: only WATCHES is refused, as the House's book refuses anything outside its specialty.
+        self.tradeable: tuple[set[str] | None, set[str] | None] = (None, None)
         self.fill_log: list[dict[str, Any]] | None = [] if record_fills else None
 
     # -- money -------------------------------------------------------------------------------
@@ -463,6 +466,9 @@ class _Account:
             ticker, leg = intent.get("market"), intent.get("leg", "yes")
             if not isinstance(ticker, str) or leg not in ("yes", "no"):
                 return self.refuse("malformed: a kalshi intent names a market and a yes or no leg")
+            allowed = self.tradeable[1]
+            if allowed is not None and str(ticker).split("-", 1)[0] not in allowed and market_series(view, ticker) not in allowed:
+                return self.refuse("this market is one you watch, not one you trade")
             market = view.markets.get(ticker)
             if market is None:
                 return self.refuse("no quote for this market at this step")
@@ -474,6 +480,8 @@ class _Account:
             symbol = intent.get("symbol")
             if not isinstance(symbol, str) or not symbol:
                 return self.refuse("malformed: an alpaca intent names a symbol")
+            if self.tradeable[0] is not None and symbol not in self.tradeable[0]:
+                return self.refuse("this symbol is one you watch, not one you trade")
             ident, key = {"symbol": symbol}, symbol
         has_quantity, has_notional = intent.get("quantity") is not None, intent.get("notional_usd") is not None
         if has_quantity == has_notional:
@@ -695,9 +703,14 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     bar_limit = DEFAULT_BARS if bar_limit is None else max(1, min(MAX_BARS, int(bar_limit)))
     wanted_symbols = [s for s in needs.get("symbols") or [] if isinstance(s, str)] if isinstance(needs.get("symbols"), list) else []
     wanted_series = {s for s in needs.get("series") or [] if isinstance(s, str)} if isinstance(needs.get("series"), list) else set()
+    # What the strategy WATCHES rides on the same tape but may not be traded, here as in the House.
+    observe = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
+    watched_symbols = [s for s in (observe.get("symbols") or []) if isinstance(s, str)][:6]
+    watched_series = {s for s in (observe.get("series") or []) if isinstance(s, str)}
     max_hours = _num(needs.get("max_hours_to_close"))
 
     account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else ())
+    account.tradeable = (set(wanted_symbols) if wanted_symbols else None, wanted_series or None)
     history: dict[str, list[dict[str, Any]]] = {}
     memory: dict[str, Any] = {}
     errors, last_error = 0, ""
@@ -754,6 +767,11 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                 shown = wanted_symbols or sorted(history)
                 ctx["bars"] = {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in shown}
                 ctx["quotes"] = {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in shown if s in view.quotes}
+                if watched_symbols:
+                    ctx["observed"] = {
+                        "bars": {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in watched_symbols},
+                        "quotes": {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in watched_symbols if s in view.quotes},
+                    }
             else:
                 shown_markets = []
                 for market in view.markets.values():
@@ -769,6 +787,8 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                     row["hours_to_close"] = hours
                     shown_markets.append(row)
                 ctx["markets"] = shown_markets
+                if watched_series:
+                    ctx["observed"] = {"markets": [row for row in shown_markets if row.get("series") in watched_series]}
 
             # (d) decide.
             answer, error = deadline.call(decide, ctx)
@@ -853,6 +873,11 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         result["fill_log"] = account.fill_log
         result["final_memory"] = memory
     return result
+
+
+def market_series(view: Any, ticker: str) -> str:
+    market = view.markets.get(ticker)
+    return str((market or {}).get("series") or "")
 
 
 def digest(trades: list) -> dict:

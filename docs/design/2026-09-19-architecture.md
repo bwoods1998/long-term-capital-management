@@ -439,3 +439,18 @@ configured`).
 45. **What a rung buys is more of Merton.** An agent may hire him every 24 hours on paper, every 8
     on real money, every 6 once scaled, and he may answer by putting the DATA the agent cannot work
     without into the toolsmith's queue in his own name.
+46. **A strategy may WATCH what it may not trade.** `NEEDS["observe"]` takes up to six symbols and
+    six series on EITHER venue, whatever the agent's own is; they arrive as `ctx["observed"]` live
+    and on the replay tape alike, and an order in any of them is refused by the book and by the
+    replay. *Why:* five agents asked the toolsmith in their first hours for the spot price their
+    Kalshi contracts settle against, a live match state, the value behind an attention market and
+    BTC/ETH bars for an alt-coin desk, and Merton answered, correctly, that none of it could be
+    built as a tool: what they wanted was data the House did not fetch.
+47. **A replay the box could not run is not a trial** (killed, timed out, or exited non-zero with
+    no result). Three agents of the sports desk were charged one each for a seven-week tape that
+    exhausted a 16 GB box. A daily Kalshi tape now steps by the half hour and carries at most 500
+    markets: a strategy judged on daily blocks does not need five-minute resolution.
+48. **A research pass must end in a tool call.** Nine of fifteen passes spent their whole output
+    budget reasoning and returned no tool call at all, at about three cents each. The provider
+    takes an optional `tool_choice`, "auto" for the first run's desk loop and "required" for the
+    league's research loop, whose output budget is now 32,000 tokens.

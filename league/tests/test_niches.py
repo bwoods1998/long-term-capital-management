@@ -319,3 +319,62 @@ class InTheHouse(HouseCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Watching(HouseCase):
+    """What a strategy may watch and may not trade, on either venue, live and in replay."""
+
+    def test_what_is_watched_is_kept_whole_and_capped_while_the_universe_is_cut(self):
+        sports = niches.load()["kalshi-sports"]
+        out = niches.constrain({"venue": "kalshi", "horizon": "day", "series": ["KXNFLGAME", "KXBTCD"],
+                                "observe": {"symbols": [f"S{i}" for i in range(9)], "series": ["kxbtcd"]}}, sports)
+        self.assertEqual(out["series"], ["KXNFLGAME"])  # the traded universe is its specialty's
+        self.assertEqual((len(out["observe"]["symbols"]), out["observe"]["series"]), (6, ["KXBTCD"]))
+        self.assertNotIn("observe", niches.constrain({"venue": "kalshi", "horizon": "day", "series": ["KXNFLGAME"]}, sports))
+
+    def test_the_house_fetches_it_from_either_venue(self):
+        asked = {}
+
+        class Alpaca:
+            def bars(self, symbols, timeframe, **kw):
+                asked["bars"] = (list(symbols), timeframe); return {s: [] for s in symbols}
+
+            def quotes(self, symbols):
+                asked["quotes"] = list(symbols); return {s: {"bid": 1.0, "ask": 1.1} for s in symbols}
+
+        class Kalshi:
+            def markets(self, series, *, max_hours_to_close, max_age=None):
+                asked["markets"] = list(series); return [{"market": "KXBTCD-1", "series": "KXBTCD"}]
+
+        self.house.alpaca_data, self.house.kalshi_data = Alpaca(), Kalshi()
+        seen = self.house._observed({"symbols": ["BTC/USD"], "series": ["KXBTCD"]}, {"bars": {"timeframe": "1Hour", "limit": 40}})
+        self.assertEqual((asked["bars"], asked["quotes"], asked["markets"]), ((["BTC/USD"], "1Hour"), ["BTC/USD"], ["KXBTCD"]))
+        self.assertEqual(sorted(seen), ["bars", "markets", "quotes"])
+
+    def test_a_feed_that_is_down_does_not_spoil_the_wake(self):
+        class Broken:
+            def bars(self, *a, **kw):
+                raise RuntimeError("the feed is down")
+
+        self.house.alpaca_data = Broken()
+        self.assertIn("RuntimeError", self.house._observed({"symbols": ["BTC/USD"]}, {})["error"])
+
+    def test_the_replay_shows_it_and_refuses_to_trade_it(self):
+        from league.replay import run_replay
+        from league.tests.test_house import FakeAlpacaData
+
+        code = '''
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "watcher", "symbols": ["BTC/USD"],
+         "observe": {"symbols": ["ETH/USD"]}, "bars": {"timeframe": "5Min", "limit": 5}, "wake_minutes": 5}
+PARAMS = {"notional_usd": 20.0}
+
+def decide(ctx):
+    seen = sorted((ctx.get("observed") or {}).get("bars") or {})
+    return {"intents": [{"symbol": "ETH/USD", "side": "buy", "notional_usd": 20.0, "type": "market", "reason": "the one I only watch"}],
+            "thought": "observed " + ",".join(seen)}
+'''
+        tape = FakeAlpacaData().tape(["BTC/USD", "ETH/USD"], "5Min", start="x", end="y")
+        result = run_replay(code, {}, tape, stake=200.0, limits={"max_position_usd": 100.0, "max_order_usd": 75.0})
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["trades"], 0)
+        self.assertGreater(result["refused"], 0)

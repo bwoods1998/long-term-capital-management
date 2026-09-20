@@ -58,6 +58,14 @@ ctx = {
 }
 ```
 
+## What you may watch but not trade
+
+`NEEDS["observe"] = {"symbols": ["BTC/USD"], "series": ["KXBTCD"]}` (up to six of each) asks the
+House for instruments on EITHER venue, whatever your own is. They arrive as `ctx["observed"]`
+(`bars` and `quotes` for symbols, `markets` for series), live and on the replay tape alike, and an
+order in any of them is refused here and by the House. That is how a Kalshi strategy reads the
+spot price its contracts settle against, or an Alpaca one reads a coin it does not trade.
+
 `hours_to_close` is when trading is expected to stop and `hours_to_resolve` when the contract is
 expected to pay. For a game the two are the same (it closes when a winner is declared, near its
 scheduled end, whatever later close it lists); a weather market stops trading the evening before

@@ -201,6 +201,31 @@ class House:
             rows += [{**c, "occ": c["symbol"], "underlying_price": spot} for c in near[:40]]
         return rows
 
+    def _observed(self, watched: Mapping[str, Any], needs: Mapping[str, Any]) -> dict[str, Any]:
+        """What a strategy may watch and may not trade: bars and the touch of any Alpaca symbol,
+        and the open markets of any Kalshi series, on either venue whatever its own is. Measured
+        Sept 19, 2026: five agents asked the toolsmith for exactly this and it could not be built
+        as a tool, because what they wanted was data the House does not fetch."""
+        out: dict[str, Any] = {}
+        symbols = [str(x) for x in (watched.get("symbols") or [])][:6]
+        series = [str(x) for x in (watched.get("series") or [])][:6]
+        if symbols and self.alpaca_data is not None:
+            bars = dict(needs.get("bars") or {})
+            timeframe = str(bars.get("timeframe") or "1Hour")
+            limit = max(1, min(int(bars.get("limit") or 60), 200))
+            key = f"observe:{','.join(symbols)}:{timeframe}:{limit}"
+            try:
+                out["bars"] = self._cached(key, 60, lambda: self.alpaca_data.bars(symbols, timeframe, limit=limit))
+                out["quotes"] = self._cached(f"observe-q:{','.join(symbols)}", 30, lambda: self.alpaca_data.quotes(symbols))
+            except Exception as exc:  # noqa: BLE001 - a feed that is down is not the agent's wake
+                out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+        if series and self.kalshi_data is not None:
+            try:
+                out["markets"] = self._cached(f"observe-m:{','.join(series)}", 60, lambda: self._markets(series, 24.0, 120.0))
+            except Exception as exc:  # noqa: BLE001
+                out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+        return out
+
     def _markets(self, series: list[str], hours: float, max_age: float) -> list[dict[str, Any]]:
         try:
             return self.kalshi_data.markets(series, max_hours_to_close=hours, max_age=max_age)
@@ -466,6 +491,9 @@ class House:
             else:
                 row["symbol"] = inst.market_id or inst.symbol
             ctx["open_orders"].append(row)
+        watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
+        if watched:
+            ctx["observed"] = self._observed(watched, needs)
         if agent.venue == "alpaca":
             symbols = [str(s) for s in (needs.get("symbols") or [])][:12]
             bars = dict(needs.get("bars") or {})
@@ -609,8 +637,11 @@ class House:
         else:
             days = self.settings.replay_days * (6 if horizon == "day" else 1)
         start_iso, end_iso = now_iso(lambda: end - days * 86400), now_iso(lambda: end)
+        watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
         if venue == "alpaca":
             symbols = sorted(str(s) for s in (needs.get("symbols") or []))[:12]
+            # What the strategy watches rides on the same tape, so a replay sees what a wake sees.
+            symbols = sorted(set(symbols) | {str(s) for s in (watched.get("symbols") or [])[:6]})
             timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
             key = f"alpaca:{','.join(symbols)}:{timeframe}:{horizon}:{start_iso[:10]}"
             build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon)  # noqa: E731

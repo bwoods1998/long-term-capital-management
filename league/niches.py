@@ -32,6 +32,8 @@ from typing import Any, Callable, Iterable, Mapping
 NICHES_PATH = Path(__file__).resolve().parent / "niches.json"
 #: What one strategy may ask the House to show it (each series is a venue call a wake).
 MAX_UNIVERSE = 12
+#: And what it may WATCH beside that, on either venue, without being allowed to trade it.
+MAX_OBSERVED = 6
 
 
 @dataclass
@@ -93,6 +95,10 @@ class Niche:
             else:
                 lines.append("No series of this specialty charges a maker fee: a resting order that fills pays nothing.")
         lines.append(f"Your universe ({len(self.universe)}; a strategy may name at most {MAX_UNIVERSE} in NEEDS" + ("; busiest live series first" if self.live else "") + "): " + ", ".join(self.universe[:60]) + ("..." if len(self.universe) > 60 else "."))
+        lines.append("You may WATCH what you like, on either venue, by naming it in NEEDS['observe'] "
+                     "(up to 6 symbols and 6 series): the House shows it under ctx['observed'] live and in replay, "
+                     "and you may not trade any of it. That is how a Kalshi strategy reads the spot price its "
+                     "contracts settle against, or an Alpaca one reads a coin it does not trade.")
         lines.append("You may trade nothing outside it, and a child you fork inherits it. Spend your research here and only here: "
                      "what another specialty learns is theirs to use. Tag nothing; the House files what you write under your specialty.")
         return "\n".join(lines)
@@ -136,6 +142,13 @@ def constrain(needs: Mapping[str, Any], niche: Niche) -> dict[str, Any]:
     asked = [str(x).upper() for x in (out.get(niche.key) or [])]
     inside = [x for x in dict.fromkeys(asked) if x in niche.universe]
     out[niche.key] = (inside or list(niche.universe))[:MAX_UNIVERSE]
+    watched = out.get("observe") if isinstance(out.get("observe"), dict) else {}
+    # What a strategy may WATCH is not held to its specialty: the whole point is to see what moves
+    # its own markets. It may not trade any of it, which is the book's rule and the replay's.
+    kept = {key: [str(x).upper() for x in (watched.get(key) or [])][:MAX_OBSERVED] for key in ("symbols", "series")}
+    out["observe"] = {key: rows for key, rows in kept.items() if rows}
+    if not out["observe"]:
+        out.pop("observe")
     return out
 
 
