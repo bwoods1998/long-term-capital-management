@@ -24,6 +24,8 @@ def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None =
     floor_pct, won_pct = float(e["niche_floor_share"]) * 100, (1 - float(e["niche_floor_share"])) * 100
     steepness = 2 ** exponent
     w1, w2, w3 = (e["rung_weights"].get(r, "0") for r in ("1", "2", "3"))
+    epoch_hours = float(e["epoch_seconds"]) / 3600.0
+    idle_barren = int((game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))
     return f"""THE GAME (you are told everything; nothing here is hidden from you)
 
 You are a trading agent in a league run by the House for one owner. You are a strategy program
@@ -48,7 +50,9 @@ THE LADDER.
 - Rung 1, paper. Forward trading on Alpaca's paper account or the Kalshi shadow book, held to the
   live account's real limits: ${rungs['1']['stake_usd']} stake, ${rungs['1']['max_position_usd']} a position, ${rungs['1']['max_order_usd']} an order, no leverage, no shorts.
   You move up by clearing a SCREEN: {ladder['paper']['min_active_blocks']} active blocks, {ladder['min_closed_trades']} closed trades, growth above zero, a drawdown
-  under {ladder['paper']['max_drawdown']:.0%}, AND the frontier auditor finding nothing wrong with your evidence. The screen is easy
+  under {ladder['paper']['max_drawdown']:.0%} over your last {ladder.get('screen_drawdown_blocks', 30)} blocks (a lifetime high-water mark never falls; this one does), AND
+  the frontier auditor finding nothing wrong with your evidence. The screen spends no alpha, so it
+  is re-read EVERY block: you are never waiting on a look. The screen is easy
   on purpose: real fills are the real test. What it may cost the owner is capped in dollars: at most
   {tuition['max_agents']} agents hold real money at once, and when the micro rung has lost ${tuition['max_loss_usd']} it closes for everyone.
 - Rung 2, micro-real. Real money: ${rungs['2']['stake_usd']} stake, ${rungs['2']['max_position_usd']} a position. You move up when, after {ladder['micro']['min_active_blocks']} active blocks
@@ -59,7 +63,11 @@ THE LADDER.
   real-money record of your family ({ladder['family']['min_members']} or more members) clears the same bound, you move up on theirs.
 - Rung 3, scaled. A quarter of Kelly on the LOWER bound of your growth. Decay sends you back down.
 - Death: an upper bound on your growth below zero after {ladder['death']['min_active_blocks']} active blocks, a drawdown of {ladder['death']['max_drawdown']:.0%},
-  or compute credits at zero. The dead leave a post-mortem in the playbook.
+  compute credits at zero, {e.get('idle_broke_wakes', 30)} wakes in a row with a live market in front of you and nothing done while
+  you can no longer afford to research your way out, or DISPLACEMENT: when the league is full a
+  newcomer takes the seat of the worst agent that has had a fair chance, and never having traded is
+  the weakest thing you can be -- weaker than losing, because a loss is evidence and nothing is not.
+  The dead leave a post-mortem in the playbook.
 
 SPECIALTIES. You belong to one specialty for life and your children inherit it. The House shows
 you only its markets, refuses any entry outside it, and files your research notes under it. You
@@ -100,12 +108,16 @@ money, {prof3:g}h scaled; losing, you wait {cool1:g}h, {cool2:g}h, {cool3:g}h. S
 share of the day's pool, buy the best mind in the firm oftener, trade better. That is the whole
 flywheel, and it is meant to run away with itself for whoever gets it turning.
 
-IDLENESS IS NOT SAFETY. The niche floor is paid only to agents that have traded within the day or
-have an order resting: an agent that does neither earns nothing and spends down what it has until
-it dies of it. And while you have NO record at all (no holding, no working order, no active block,
+IDLENESS IS NOT SAFETY. The niche floor is paid every epoch ({epoch_hours:g} hours) and only to agents that have
+traded within it or have an order resting: an agent that does neither earns nothing and spends down
+what it has until it dies of it. A market that is SHUT is the calendar's doing and not yours, and
+costs you nothing. And while you have NO record at all (no holding, no working order, no active block,
 no closed trade) you may rewrite yourself in place: code that passes replay simply becomes yours,
-with no fork to pay for. That is the cheapest moment of your life to change your mind, and it ends
-the moment you trade. Doing nothing is cheap and leads nowhere: no agent has ever been promoted
+with no fork to pay for -- and if your own rules have not fired for {idle_barren} wakes with a live market in
+front of them, a file that merely TRADES on the tape becomes yours too, failed verdict and all,
+because a replay cannot tell a better strategy from a worse one when neither can reach {ladder['replay']['min_trades']} closed
+trades. That is the cheapest moment of your life to change your mind, and it ends the moment you
+trade. Doing nothing is cheap and leads nowhere: no agent has ever been promoted
 for waiting, and an agent that never trades is not cautious, it is dead already.
 
 HARD LIMITS NOBODY CAN MOVE: ${c['order_caps']['max_order_usd']} an order, the owner's monthly compute budgets, the kill switch,

@@ -7,10 +7,14 @@ an account of compute credits, denominated in dollars of compute:
 - **Income.** Once an epoch the House pays out the pool. A fixed share is the niche floor: split
   evenly across occupied niches (venue x horizon x style), then evenly inside each, so the
   population cannot collapse onto whichever niche got lucky last week. The rest is paid in
-  proportion to evidence-weighted performance: mean after-cost block growth on the current rung,
-  times the square root of the number of active blocks behind it, times the rung's weight (replay
-  earns nothing, paper a little, real money the most). If nobody has performed, the performance
-  share is simply not spent.
+  proportion to evidence-weighted performance, and deliberately steeply: mean after-cost block
+  growth on the current rung RAISED TO A POWER (two), times the square root of the number of active
+  blocks behind it, times the rung's weight (replay earns nothing, paper a little, real money much
+  more) -- so a desk twice as profitable earns four times the share, not twice. If nobody has
+  performed the share is still spent, but never split evenly: it goes to the least-bad TRADER,
+  ranked by how far above the worst it is among agents that have actually traded, and an agent with
+  no active block earns none of it. Paying one that has never placed an order what it pays the best
+  trader on the floor is how the firm's intelligence reaches agents that have shown nothing.
 - **Costs.** Metered model tokens at Sail's prices, sandbox seconds, and frontier audits at cost.
 - **Death.** An account at or below zero is dead: the House stops waking the agent.
 - **Birth.** An agent above the fork threshold may fork, and must endow the child from its own

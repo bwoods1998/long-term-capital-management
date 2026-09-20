@@ -38,7 +38,9 @@ code.
   start. `game.json` holds the economy's tunable dials, inside bounds the file itself lists.
   `config.json` holds where things are and four operating dials; it never holds a secret.
 - **Slow work runs beside the tick, never inside it.** Replays, research passes and Merton's passes
-  run on background threads (two at a time); the first real tick took six minutes before this rule.
+  run on background threads in three lanes that cannot starve one another -- replays, research and
+  housekeeping -- so a slow replay never delays a research pass or a deploy; the first real tick took
+  six minutes before this rule.
 
 ## Modules
 
@@ -57,14 +59,14 @@ code.
 | `sim.py` | `SimBroker`: a simulated Alpaca account that behaves as the paper venue was measured to. A canary House trades on it, never on the shared paper account. |
 | `economy.py` | `Economy`: balances folded from `credit.*` rows; `grant`, `charge` (never refused: the compute is already spent), `transfer`, `shares`/`payout` (a quarter as niche floors, three quarters won on growth SQUARED x root active blocks x the rung's weight; before anyone is profitable the won share goes to the least-bad TRADER, never split evenly), `can_fork`, `box_cost`. `load_game` and `check_bounds` read `game.json`. |
 | `game.json` | The economy's dials (pool, floor share, rung weights, endowments, fork threshold, population bounds, audit cooldown, research cadence) and the bounds the game designer must stay inside. |
-| `agents.py` | `Registry` and `Agent`: identity, strategy versions, lineage, niche (`venue/horizon/style`) and fate, folded from the ledger. `adopt` is for rung 0 only; above it new code is a child. |
+| `agents.py` | `Registry` and `Agent`: identity, strategy versions, lineage, niche (`venue/horizon/style`) and fate, folded from the ledger. `adopt` takes new code in place on rung 0, and above it only for an agent with no record to protect (no holding, no working order, no active block, no closed trade); otherwise new code is a child. |
 | `sandbox.py` | `SailSandbox` (one Sailbox per agent, forked from `agent_image_checkpoint`, sealed with an egress allowlist of `sealed.invalid` before it is recorded, destroyed if it cannot be sealed) and `LocalSandbox`. Both offer `decide`, `needs`, `replay`, `fork`, `retire`, `sleep_all`. |
 | `runner.py` | Runs one `decide` (or reads `NEEDS`) inside the box: 5 second limit, strategy prints discarded, one `DECIDE-RESULT <token>` line, then `os._exit`. |
 | `safety.py` | `check_code`: the import whitelist and the banned constructs (no underscore attributes, no attribute assignment, no `eval`/`exec`/`open`/`getattr`). Ported from the first run's Foundry, where it was hardened against real attempts. Imports nothing from the league. |
 | `commons.py` | `Commons`: web search (Sail's search API, Google News RSS as fallback, $0.01 charged per query), the research library, the tool-request queue (ordered by how many agents asked for the same tool, then newest; a request nothing closes in three days leaves it), the playbook. All of it is ledger rows. |
 | `researcher.py` | `Researcher`: a cheap Sail model's tool loop for one agent, every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. |
 | `rules.py` | `rules_text(game)`: what every agent is told, generated from the constitution and `game.json` so it cannot drift from what is enforced. |
-| `seeds/` | The twelve founding strategy files and `all_seeds()`. They are data, not modules: nothing imports them. |
+| `seeds/` | The fourteen founding strategy files (Kalshi, crypto, equity and options) and `all_seeds()`. They are data, not modules: nothing imports them. |
 | `strategies/` | Strategies Merton adds as architect; `registry.json` lists them and the House enrolls each once, on rung 0. Empty at the start. |
 | `tools/` | Pure helper modules Merton adds as toolsmith; uploaded beside the strategy so it may `from tools.<name> import ...`. Empty at the start. |
 | `playbook/` | Lessons Merton adds as teacher, one markdown file each; the House loads them into the ledger's playbook. |
@@ -104,19 +106,26 @@ code.
    (a mismatch is an error alert and freezes new entries). Then judge each living agent on that
    book: close finished blocks of log growth, take a look if one is due, and act on the verdict:
    `die` kills; `eligible` promotes (from paper only through Merton's audit, and only when real money
-   is on); on rungs 2 and 3 a drift alarm demotes and moves the agent back to the practice book.
+   is on); on rungs 2 and 3 a drift alarm demotes, and the House winds the account down and re-seats the agent on the book of its new rung.
    Dead agents' free cash is swept back to the House row.
-6. **Start due research passes** in the background (at least six hours apart, and only for an agent
-   with more than twice the minimum credits). A candidate that passes replay is adopted on rung 0 or
-   becomes a fork above it.
+6. **Start due research passes** in the background, stuck agents first and then whoever has waited
+   longest (at least three hours apart, halved while the day's Sail is underspent, and within the
+   hour for an agent that cannot act at all; only for an agent with more than twice the minimum
+   credits; and none at all from the moment a release is staged, because the restart would throw
+   the pass away half-read). A candidate that passes replay is adopted on rung 0 or becomes a fork
+   above it -- and one that FAILS is adopted anyway by an agent with no record whose own rules have
+   not fired for ten wakes, if the candidate at least trades.
 7. **Start Merton's due roles** in the background, and ask the gateway what CI made of each open
    pull request.
 8. **Once an epoch:** load new lessons from `playbook/`, resize rung-3 stakes, write the capital
    recommendation, pay the pool, score the auditor's vetoes.
-9. **Keep the population:** kill agents at zero credits and rung-0 agents past the replay deadline;
-   fork agents above the fork threshold (rung 1 and up, once an epoch); re-found any seed never born
-   if the population is under its floor; enroll Merton's registered strategies; if every seed has had
-   its life and the floor is still not met, stake a mutation of whoever stands highest.
+9. **Keep the population:** kill agents at zero credits, rung-0 agents past the replay deadline, and
+   agents stuck barren with too little left to research their way out (the culling runs even when
+   the Sail meter has stopped the floor; only the refill waits for business); fork agents above the
+   fork threshold (rung 1 and up, once an epoch); re-found any seed never born if the population is
+   under its floor; enroll Merton's registered strategies; and fill the last seat -- when the league
+   is full, a newcomer displaces the worst agent that has had a fair chance, which is never one on
+   real money, never a profitable one, and never one that has traded while an idle one remains.
 10. **Save `house.json`, publish, write `health.json`.** A publishing failure is a warning: the site
     is downstream of the floor, never upstream.
 
@@ -148,7 +157,7 @@ Everything the House keeps is under one directory, `--root` (default `.data/leag
 ## Tests
 
 ```sh
-python3 -m unittest discover -s league/tests -t .        # 847 tests, about 75 s
+python3 -m unittest discover -s league/tests -t .        # 1,136 tests, about 160 s
 python3 -m unittest league.tests.test_book               # one module
 python3 -m league.ci --no-tests                          # the content checks alone
 ```

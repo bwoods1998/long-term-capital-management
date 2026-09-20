@@ -16,7 +16,8 @@ slippage are all inside the number.
   rate: a t-interval flatters that shape until the first loss arrives.
 - **Death** is the mirror: an upper bound below zero, or a drawdown past the limit. (The economy
   adds the third way to die: compute credits at zero.)
-- **Replay** counts every run as a trial. A family that tried two hundred variants must beat the
+- **Replay** counts every run as a trial, against the candidate's own LINE -- itself, its parent,
+  its parent's parent, never its cousins. A line that ground two hundred variants must beat the
   Sharpe ratio two hundred unskilled tries would reach by luck (the deflated Sharpe ratio).
 
 The evaluator only reads the ledger and writes `eval.*` rows. It never trades and never kills: the

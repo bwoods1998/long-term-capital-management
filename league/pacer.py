@@ -6,7 +6,7 @@ unspent is research that was not done. A hard cap alone cannot do that, and a sc
 advance cannot either, because nobody knows what a research pass or an architect's pass will cost
 next week. So the House paces from what was really spent:
 
-    today's allowance = (the budget - everything spent so far) / (the days that are left)
+    today's allowance = front_load x (the budget - what was spent before today) / (days left)
 
 recomputed every day, so a quiet day's unspent share rolls forward and a dear day is paid back.
 Three things follow the allowance: the day's pool of compute credits (what agents can spend on

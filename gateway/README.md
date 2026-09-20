@@ -102,7 +102,7 @@ rounds **against** the order.
 An order sent with `X-LTCM-Purpose: exit` skips the two dollar caps (not the order count, and not
 the kill switch), so a position can always be closed however the day's budget was spent. The
 header is the caller's own claim; the order count still bounds a VM that lies. The league's book
-does not set it today, so every league order is metered as an entry.
+sets it on a sell, so an exit passes the dollar caps while an entry is still metered by them.
 
 A reservation is returned only when the forward never reached the venue. A venue that answered at
 all keeps its reservation, however it answered, and so does a timeout after dispatch: an
@@ -163,7 +163,10 @@ Every rule is enforced here first and by the repository's own CI (`league/ci.py`
   `^[a-z0-9][a-z0-9-]{1,48}$`; the title is one line of 120 characters, the body 8000. The pull
   request's body ends `Opened by Merton (<role>) through the LTCM gateway.`
 - The branch is `merton/<role>/<slug>-<first 8 hex of sha256 over the files>`, so a retry of the
-  same proposal is the same branch. A retry that finds its branch (the same tree, or the same
+  same proposal is the same branch. **The DEPLOYED worker still emits the old `astra/` prefix**, and
+  the merge workflow accepts both until the gateway is redeployed from this source: before it did,
+  every proposal landed on a branch the guard, the judge and the merge job all ignored, and sat open
+  for ever. A retry that finds its branch (the same tree, or the same
   files when `main` has moved since) and its open pull request makes nothing and returns them. A
   branch of that name holding anything else is a `409`, never overwritten; so is a proposal that
   changes nothing on `main`.
@@ -287,9 +290,10 @@ from `ALERT_FROM` to `ALERT_TO`. Without the binding the watchdog still runs and
 mail.
 
 Check what is placed with `npx wrangler secret list`: it prints names, never values, and should
-show exactly the eleven names above. On Sept 20, 2026 it showed ten: **`GITHUB_TOKEN` was not yet
-placed**, so Merton's five pull-request roles record `GitHub is not configured` until the owner
-places it.
+show exactly the eleven names above. On Sept 20, 2026 all eleven are placed. `GITHUB_TOKEN` went in that morning, and two of Merton's
+pull requests were opened through this route, judged by CI and merged with no human in the loop
+(#7, a teacher's lesson, and #8, an operator's change to a dial, which took effect on the running
+floor within the hour).
 
 The first run's Coinbase secrets (`COINBASE_KEY_NAME`, `COINBASE_API_SECRET`) are obsolete:
 nothing reads them, and they were already gone from the deployed Worker on Sept 20. If the list

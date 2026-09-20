@@ -112,11 +112,15 @@ The simulator (`league/replay.py`) walks a recorded tape step by step. At each s
 - a limit order that crosses the touch fills at the touch as a taker, or is refused if `post_only`;
 - a resting limit order fills at its own price, as a maker, only when a later step's range trades
   strictly through it (`low < price` for a buy, `high > price` for a sell);
-- fees are the venue's: Alpaca crypto 0.25% taker and 0.15% maker, Kalshi
-  `0.07 x contracts x price x (1 - price)` for a taker and nothing for a maker;
+- fees are close to the venue's: Alpaca crypto 0.25% taker and 0.15% maker, Kalshi
+  `0.07 x contracts x price x (1 - price)` rounded UP to the cent for a taker, and for a maker
+  nothing on most series and that same formula on the few that charge them (your specialty's brief
+  names which). The replay charges what the book charges, so a fee you did not model is not a
+  surprise waiting on paper;
 - Kalshi contracts settle at 1 or 0 on the tape's recorded result;
 - the same rung limits and no-shorts, no-leverage rules apply.
 
-The result is the per-block series of after-cost log growth of the account. Every replay ever
-run is recorded as a trial and counted against the family when the deflated Sharpe ratio is
-computed: trying many variants raises the bar for all of them.
+The result is the per-block series of after-cost log growth of the account. Every replay ever run
+is recorded as a trial and counted against your own LINE -- yourself, your parent, your parent's
+parent, never your cousins -- when the deflated Sharpe ratio is computed: grinding many variants
+down one line raises the bar for every later one on it.

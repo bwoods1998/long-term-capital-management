@@ -9,9 +9,11 @@ One pass of one role:
 2. Merton answers, through the gateway's metered route, with a small set of whole files;
 3. the House checks the proposal against the same path guard CI uses (`league/ci.py`) and drops
    anything outside the role's paths;
-4. the forge turns it into a branch `merton/<role>/<slug>` and a pull request. In production the
+4. the forge turns it into a branch `merton/<role>/<slug>` and a pull request (the DEPLOYED gateway
+   still emits `astra/...`; both are judged, and the role is the second segment either way). In production the
    forge is the gateway (`POST /v1/github/pr`: the GitHub credential lives there, not on Sail);
-5. CI judges the pull request; a repository workflow merges a green one; the House notices `main`
+5. CI judges the pull request; a repository workflow merges a green one (it accepts a branch under
+   `merton/` or `astra/`, because the deployed gateway still names the old prefix); the House notices `main`
    move, and the watchdog stages the new code on a canary before the House runs it.
 
 Every pass and every change is a row on the ledger and a line on the public tape, with its cost.

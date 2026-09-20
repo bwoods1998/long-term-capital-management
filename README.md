@@ -90,7 +90,9 @@ account), which is why every option order is a limit order. There is no replay (
 chains): paper is this specialty's replay. Not yet measured, because the market was closed: a
 filled option order, Alpaca's end-of-day regulatory fees (the book now books any FEE activity
 that explains a cash shortfall), and whether Alpaca holds cash behind a resting option bid (the
-book accepts either). An unexplained difference freezes entries, never exits.
+book accepts either). An unexplained difference freezes entries, never exits -- on a real-money book until the owner
+clears it, and on a practice book only until the third reading that does not reconcile, when the
+House takes the venue's word and carries the difference on its own row, crediting no agent.
 
 **The expedition.** The owner's decision of Sept 19: both compute budgets, $100 of Sail and $100 of
 the frontier model, are to be USED in full over fourteen days from that date, so the design can be
@@ -180,8 +182,8 @@ thing an agent can be, ahead of any amount of losing: an agent that trades and l
 by the evaluator and will be killed on its own evidence, while an agent that trades nothing is
 judged by nobody and costs a box and a seat for as long as it is left alone.
 
-**Forks.** An agent with $3.00 of credits or more may fork, and must endow the child with $1.00 of
-its own. An agent above rung 0 never edits itself, because its record belongs to its code: an
+**Forks.** An agent with $4.00 of credits or more may fork, and must endow the child with $1.50 of
+its own ($1.00 is what the House stakes when it cannot). An agent above rung 0 never edits itself, because its record belongs to its code: an
 improvement is a child, a mutation of its parameters or new code its researcher wrote, and the child
 answers for itself from replay up — unless it has NO record at all (no holding, no working order, no active
 block, no closed trade), in which case code that passes replay simply becomes its own, with no fork to pay for:
@@ -267,10 +269,10 @@ What no model and no code path on Sail may change, and where each item is enforc
 | Order caps | $75 an order, $4,000 and 2,000 orders a day | in the gateway, before anything is signed (`gateway/wrangler.jsonc`); `league/book.py` refuses first so it can say why |
 | Kill switch | engaged or released | in the gateway; the House's token can engage it, only the owner's separate token releases it. The paper venue passes it, because no money is behind it |
 | OpenAI budget | $100 a month | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
-| Sail budget | $100 a month, $10 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
+| Sail budget | $100 a month, $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest, and the House writes the digest to the ledger every time it starts |
 | The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, `gateway/`, `.github/` | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
-| Real money | `"real_money": false` in `league/config.json` | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
+| Real money | `"real_money": true` in `league/config.json` -- the owner threw that switch on Sept 20 | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 
 ## Merton's six jobs
 
@@ -371,7 +373,7 @@ The `league/` modules:
 Tests. Python 3.11 or later, standard library only; the gateway needs Node.
 
 ```sh
-python3 -m unittest discover -s league/tests -t .   # 847 tests, about two minutes (the whole-ladder test is most of it)
+python3 -m unittest discover -s league/tests -t .   # 1,136 tests, about two and a half minutes (the whole-ladder test is most of it)
 python3 -m unittest discover -s ltcm/tests -t .     # 1,753 tests: the first run's suite, still green
 (cd gateway && npm test)                            # 104 tests
 python3 -m league.ci --no-tests                     # content checks: strategies, tools, game and config bounds
