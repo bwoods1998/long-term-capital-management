@@ -397,18 +397,23 @@ class Publisher:
         at = now_iso(self.clock)
         ledger = house.ledger
         desks, curve_rows = [], {}
-        charges_today = ZERO
-        spend = {"tokens": ZERO, "boxes": ZERO, "other": ZERO}
+        spend = {"tokens": ZERO, "boxes": ZERO, "search": ZERO, "other": ZERO}
+        spend_today = dict(spend)
         for entry in ledger.iter(kinds="credit.charge"):
             amount = Decimal(entry.payload["usd"])
-            bucket = "tokens" if "token" in entry.payload.get("what", "") else ("boxes" if "sandbox" in entry.payload.get("what", "") else "other")
+            what = entry.payload.get("what", "")
+            bucket = "tokens" if "token" in what else ("boxes" if "sandbox" in what else ("search" if what == "web search" else "other"))
             spend[bucket] += amount
             if entry.at[:10] == at[:10]:
-                charges_today += amount
-        agents = list(house.registry.living()) + list(house.registry.dead())[-8:]
-        for agent in agents:
+                spend_today[bucket] += amount
+        living, dead = list(house.registry.living()), list(house.registry.dead())
+        displayed = {a.id for a in living + dead[-8:]}
+        # The roster is bounded for the site, but the experiment includes every agent ever born.
+        # Removing an old loser from the display must never remove its loss or research cost.
+        for agent in living + dead:
             row, generation = self._desk(house, agent, at)
-            desks.append(row)
+            if agent.id in displayed:
+                desks.append(row)
             g = curve_rows.setdefault(agent.generation, {"desks": 0, "decisions": 0, "cost": ZERO, "pnl": ZERO, "capital": ZERO})
             g["desks"] += 1
             g["decisions"] += generation["decisions"]
@@ -448,7 +453,17 @@ class Publisher:
                 if performance.get("net_flows") is not None:
                     pnl_total = Decimal(account["account_equity"]) - Decimal(str(performance["start_equity"])) - Decimal(str(performance["net_flows"]))
                     floor["since_inception_pct"] = money(pnl_total / Decimal(str(performance["start_equity"])) * 100, 4, signed=True)
-        sail_total = spend["tokens"] + spend["boxes"] + spend["other"]
+        # Frontier consultations and audits are charged to agent credits too, but are not Sail
+        # expenses. Prefer the actual Sail balance-debit meter, which also sees the House box and
+        # unassigned infrastructure. Without it, publish only the attributed Sail estimate.
+        sail_total = spend["tokens"] + spend["boxes"] + spend["search"]
+        sail_today = spend_today["tokens"] + spend_today["boxes"] + spend_today["search"]
+        metered = [e for e in ledger.iter(kinds="ops.budget") if e.payload.get("what") == "sail" and e.payload.get("spent_usd") is not None]
+        if metered:
+            sail_total = sum((Decimal(e.payload["spent_usd"]) for e in metered), ZERO)
+            sail_today = sum((Decimal(e.payload["spent_usd"]) for e in metered if e.at[:10] == at[:10]), ZERO)
+        pacer = getattr(house, "pacer", None)
+        daily_cap = pacer.allowance("sail") if pacer is not None else Decimal(house.game["economy"]["daily_pool_usd"])
         wakes = ledger.count(kinds="agent.woke")
         body = {
             "schema_version": 1,
@@ -456,22 +471,41 @@ class Publisher:
             "floor": floor,
             "desks": desks,
             "committee": {"last_memo_at": None, "allocations": {d["id"]: d["capital_usd"] for d in desks if d["status"] == "active"}},
-            "budget": {"spent_today_usd": money(charges_today, 4), "cap_usd": money(house.game["economy"]["daily_pool_usd"], 2),
+            "budget": {"spent_today_usd": money(sail_today, 4), "cap_usd": money(daily_cap, 2),
                        "mode": "stopped" if (house.budget is not None and house.budget.mode == "stopped") else "open"},
             "infra": {"host": "sailbox" if os.environ.get("SAILBOX_ID") or Path("/workspace").exists() else "local"},
             "run": {
                 "started_at": started_at, "uptime_seconds": int(max(self.clock() - _epoch(started_at), 0)), "availability_7d_pct": None,
                 "sessions_total": wakes, "sessions_today": min(wakes, sum(1 for e in ledger.read(kinds="agent.woke", limit=10000, newest=True) if e.at[:10] == at[:10])),
                 "decisions_total": ledger.count(kinds="agent.intent"),
-                "sail_model_spend_today_usd": money(charges_today, 4), "sail_model_spend_total_usd": money(spend["tokens"], 4),
+                "sail_model_spend_today_usd": money(spend_today["tokens"], 4), "sail_model_spend_total_usd": money(spend["tokens"], 4),
                 "sail_infra_spend_total_usd": money(spend["boxes"], 4), "sail_spend_total_usd": money(sail_total, 4),
                 "pnl_total_usd": money(pnl_total, 4, signed=True),
                 "pnl_per_sail_dollar": money(pnl_total / sail_total, 4, signed=True) if sail_total > 0 else None,
-                "models_used": ["DeepSeek V4 Flash", "GPT-6 Merton"],
+                "models_used": self._models_used(house, spend["tokens"]),
             },
             "lab": {"experiments": [], "curve": curve, "calibration": {"n": 0, "brier": None}},
         }
         return body
+
+    @staticmethod
+    def _models_used(house: Any, token_spend: Decimal) -> list[str]:
+        from ltcm.provider import DISPLAY_NAMES, PROFILES
+        from .frontier import MODEL
+
+        profiles = {str(e.payload["profile"]) for e in house.ledger.iter(kinds="provider.request") if e.payload.get("profile")}
+        if not profiles and token_spend > 0:
+            # Older research charges did not carry a profile. The configured profile is the best
+            # available attribution for those rows, rather than a hardcoded model from launch day.
+            profiles.add(str((house.game.get("research") or {}).get("profile", "flash_flex")))
+        models = set()
+        for profile in profiles:
+            model = PROFILES[profile][0] if profile in PROFILES else profile
+            models.add(DISPLAY_NAMES.get(model, model))
+        if any(Decimal(str(e.payload.get("cost_usd") or 0)) > 0 for e in house.ledger.iter(kinds=("merton.pass", "audit.verdict"))):
+            frontier = getattr(getattr(house, "merton", None), "frontier", None)
+            models.add(str(getattr(frontier, "model", MODEL)))
+        return [clean_text(model, 40) for model in sorted(models)[:8]]
 
     def _desk(self, house: Any, agent: Any, at: str) -> tuple[dict[str, Any], dict[str, Any]]:
         rung = house.evaluator.rung(agent.id)

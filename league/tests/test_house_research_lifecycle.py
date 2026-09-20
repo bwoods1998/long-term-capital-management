@@ -1,0 +1,146 @@
+"""Research waiting for a worker must not spend a retired agent's remaining purse."""
+import threading
+import json
+from types import SimpleNamespace
+
+from league.ledger import now_iso
+from league.pacer import Pacer
+from league.tests.test_house import BUYER, HouseCase
+
+
+class ResearchLifecycle(HouseCase):
+    def test_health_distinguishes_queued_work_from_running_work(self):
+        lane = threading.Semaphore(0)
+        self.house._lanes["research"] = lane
+        entered, finish = threading.Event(), threading.Event()
+
+        def work():
+            entered.set()
+            finish.wait(5)
+
+        self.house._background("research:example", work)
+        try:
+            self.clock.advance(7)
+            self.house._health({"at": now_iso(self.clock)})
+            health = json.loads((self.house.root / "health.json").read_text())
+            self.assertEqual(health["background_jobs"], [{"key": "research:example", "state": "queued", "queued_seconds": 7, "running_seconds": 0}])
+            lane.release()
+            self.assertTrue(entered.wait(5))
+            self.clock.advance(3)
+            self.house._health({"at": now_iso(self.clock)})
+            health = json.loads((self.house.root / "health.json").read_text())
+            self.assertEqual(health["background_jobs"][0]["state"], "running")
+            self.assertEqual(health["background_jobs"][0]["running_seconds"], 3)
+        finally:
+            finish.set()
+            lane.release()
+            self.house.wait(5)
+        self.assertEqual(self.house._job_status, {})
+
+    def ready(self):
+        self.house.settings.research = True
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={
+            "start": now_iso(self.clock)[:10], "days": 10, "sail_usd": "50", "openai_usd": "50"})
+        calls = []
+        self.house.researcher = SimpleNamespace(research=lambda *a, **k: calls.append(a) or SimpleNamespace(candidate=None))
+        return self.seated(), calls
+
+    def test_retirement_while_queued_prevents_a_provider_call(self):
+        agent, calls = self.ready()
+        self.house._lanes["research"] = threading.Semaphore(0)
+        self.house._background("research:" + agent.id, self.house._research_if_due, agent)
+        self.house.registry.died(agent.id, "displaced")
+        self.house._lanes["research"].release()
+        self.house._jobs["research:" + agent.id].join(5)
+        self.assertEqual(calls, [])
+        self.assertNotIn(agent.id, self.house._state["last_research"])
+
+    def test_exhausted_budget_is_rechecked_after_queueing(self):
+        agent, calls = self.ready()
+        self.assertTrue(self.house.research_due(agent))
+        self.house.pacer.may_spend = lambda kind: False
+        self.house._research_if_due(agent)
+        self.assertEqual(calls, [])
+
+    def test_retirement_during_a_pass_does_not_adopt_its_result(self):
+        agent, _ = self.ready()
+        original = agent.code_sha256
+        better = BUYER + "\n# improvement\n"
+
+        def finish(agent, standing, session):
+            self.house.registry.died(agent.id, "displaced")
+            return SimpleNamespace(candidate={"code": better, "needs": agent.needs, "params": agent.params,
+                                              "purpose": "an improvement", "numbers": {}, "passed": True}, consulted="")
+
+        self.house.researcher = SimpleNamespace(research=finish)
+        self.house.research(agent)
+        self.assertEqual(agent.code_sha256, original)
+        self.assertFalse(agent.alive)
+        self.assertNotIn(agent.id, self.house._state["last_research"])
+        saved = self.house.ledger.last("agent.research").payload
+        self.assertEqual(saved["status"], "not_adopted")
+        self.assertEqual(saved["_candidate"]["code"], better)
+
+    def test_a_promotion_during_research_uses_the_current_rung(self):
+        agent = self.house.spawn("buyer", "test-family", BUYER)
+        better = BUYER + "\n# improvement\n"
+        original = agent.code_sha256
+        forks = []
+
+        def finish(agent, standing, session):
+            self.assertEqual(standing["rung"], 0)
+            self.house.evaluator.seat(agent.id, 1, "qualified during the pass")
+            self.house.record_is_empty = lambda agent: False
+            return SimpleNamespace(candidate={"code": better, "needs": agent.needs, "params": agent.params,
+                                              "purpose": "an improvement", "numbers": {}, "passed": True}, consulted="")
+
+        self.house.researcher = SimpleNamespace(research=finish)
+        self.house.fork = lambda *args, **kwargs: forks.append(kwargs)
+        self.house.research(agent)
+        self.assertEqual(agent.code_sha256, original)
+        self.assertEqual(len(forks), 1)
+
+    def test_a_promotion_to_real_money_during_research_never_replaces_the_audited_code(self):
+        agent, _ = self.ready()
+        original = agent.code_sha256
+        better = BUYER + "\n# unapproved improvement\n"
+        forks = []
+        self.house.record_is_empty = lambda agent: True
+
+        def finish(agent, standing, session):
+            self.assertEqual(standing["rung"], 1)
+            self.house.evaluator.seat(agent.id, 2, "the original code passed its audit")
+            return SimpleNamespace(candidate={"code": better, "needs": agent.needs, "params": agent.params,
+                                              "purpose": "an improvement", "numbers": {}, "passed": True}, consulted="")
+
+        self.house.researcher = SimpleNamespace(research=finish)
+        self.house.fork = lambda *args, **kwargs: forks.append(kwargs)
+        self.house.research(agent)
+        self.assertEqual(agent.code_sha256, original)
+        self.assertEqual(len(forks), 1)
+        self.assertEqual(forks[0]["code"], better)
+
+    def test_a_real_money_agent_is_never_promised_an_in_place_rewrite(self):
+        agent, _ = self.ready()
+        self.house.evaluator.seat(agent.id, 2, "audited original code")
+        self.house.record_is_empty = lambda agent: True
+        prompts = []
+        self.house.researcher = SimpleNamespace(research=lambda agent, standing, session:
+                                               prompts.append(standing) or SimpleNamespace(candidate=None))
+        self.house.research(agent)
+        self.assertFalse(prompts[0]["rewrites_in_place"])
+
+    def test_a_barren_real_money_agent_cannot_adopt_a_failed_replay(self):
+        agent, _ = self.ready()
+        self.house.evaluator.seat(agent.id, 2, "audited original code")
+        self.house.record_is_empty = lambda agent: True
+        self.house._state["idle"][agent.id] = {"barren": 20, "offered": 10}
+        original = agent.code_sha256
+        forks = []
+        self.house.researcher = SimpleNamespace(research=lambda agent, standing, session: SimpleNamespace(
+            candidate={"code": BUYER + "\n# failed experiment\n", "needs": agent.needs, "params": agent.params,
+                       "purpose": "it trades", "numbers": {"trades": 3}, "passed": False}, consulted=""))
+        self.house.fork = lambda *args, **kwargs: forks.append(kwargs)
+        self.house.research(agent)
+        self.assertEqual(agent.code_sha256, original)
+        self.assertEqual(forks, [])

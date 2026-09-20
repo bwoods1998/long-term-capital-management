@@ -75,6 +75,7 @@ KINDS: dict[str, bool] = {
     "book.cancel": True,
     "book.fill": True,  # a venue fill attributed to one agent
     "book.cross": True,  # two agents' opposite intents netted inside the House
+    "book.cross_plan": False,  # recoverable internal cross: exact agent and House fills, then completion
     "book.settle": True,  # a Kalshi market resolved
     "book.mark": True,  # one agent's equity on one book
     "book.reconciled": True,
@@ -226,6 +227,32 @@ class Ledger:
         at: str | None = None,
     ) -> Entry:
         """Append one row. Idempotent on `id`. Returns the stored row."""
+        return self.append_many([{"kind": kind, "payload": payload, "agent": agent, "id": id, "public": public, "at": at}])[0]
+
+    def append_many(self, rows: Iterable[dict[str, Any]]) -> list[Entry]:
+        """Append one indivisible, ordered group using the same validation and idempotent ids.
+
+        Readers, including an older release, see either the whole group or none of it. A bad
+        later row or a conflicting id rolls back every new row in this call.
+        """
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                entries = [self._append_one(**row) for row in rows]
+                self._db.execute("COMMIT")
+            except BaseException:
+                try:
+                    self._db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+        return entries
+
+    def _append_one(
+        self, kind: str, payload: dict[str, Any], *, agent: str = HOUSE, id: str | None = None,
+        public: bool | None = None, at: str | None = None,
+    ) -> Entry:
+        """One row inside the transaction and lock held by `append_many`."""
         if kind not in KINDS:
             raise LedgerError(f"unknown ledger kind {kind!r}")
         if not isinstance(payload, dict):
@@ -244,37 +271,26 @@ class Ledger:
         if not isinstance(entry_id, str) or not 1 <= len(entry_id) <= 200:
             raise LedgerError("invalid entry id")
         stamp = at or now_iso(self.clock)
-        with self._lock:
-            self._db.execute("BEGIN IMMEDIATE")
-            try:
-                existing = self._db.execute("SELECT * FROM ledger WHERE id = ?", (entry_id,)).fetchone()
-                if existing is not None:
-                    same = (
-                        existing["kind"] == kind
-                        and existing["agent"] == agent
-                        and existing["payload"] == text
-                        and bool(existing["public"]) == bool(public)
-                    )
-                    self._db.execute("COMMIT")
-                    if same:
-                        return _entry(existing)
-                    raise LedgerConflict(f"ledger entry {entry_id} exists with different content")
-                previous = self._db.execute("SELECT digest FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
-                previous_hash = previous["digest"] if previous else GENESIS
-                digest = digest_for(entry_id, kind, agent, stamp, public, text, previous_hash)
-                self._db.execute(
-                    "INSERT INTO ledger (id, kind, agent, at, public, payload, previous_hash, digest)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (entry_id, kind, agent, stamp, int(bool(public)), text, previous_hash, digest),
-                )
-                row = self._db.execute("SELECT * FROM ledger WHERE id = ?", (entry_id,)).fetchone()
-                self._db.execute("COMMIT")
-            except Exception:
-                try:
-                    self._db.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass
-                raise
+        existing = self._db.execute("SELECT * FROM ledger WHERE id = ?", (entry_id,)).fetchone()
+        if existing is not None:
+            same = (
+                existing["kind"] == kind
+                and existing["agent"] == agent
+                and existing["payload"] == text
+                and bool(existing["public"]) == bool(public)
+            )
+            if same:
+                return _entry(existing)
+            raise LedgerConflict(f"ledger entry {entry_id} exists with different content")
+        previous = self._db.execute("SELECT digest FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
+        previous_hash = previous["digest"] if previous else GENESIS
+        digest = digest_for(entry_id, kind, agent, stamp, public, text, previous_hash)
+        self._db.execute(
+            "INSERT INTO ledger (id, kind, agent, at, public, payload, previous_hash, digest)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (entry_id, kind, agent, stamp, int(bool(public)), text, previous_hash, digest),
+        )
+        row = self._db.execute("SELECT * FROM ledger WHERE id = ?", (entry_id,)).fetchone()
         return _entry(row)
 
     # ------------------------------------------------------------------- reads

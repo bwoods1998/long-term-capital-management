@@ -48,6 +48,7 @@ from ..broker import (
 from ..data import TransportError, iso
 from . import (
     AlpacaCredentials,
+    PURPOSE_HEADER,
     VenueClient,
     confirm_or_unknown,
     dec,
@@ -153,8 +154,9 @@ class AlpacaBroker:
         self.credentials = credentials
         self.venue = venue
         self.feed = feed
-        #: `indicative` is free and fifteen minutes delayed; `opra` is live and needs the OPRA
-        #: agreement signed on the account (measured Sept 19, 2026: HTTP 403 without it).
+        #: `indicative` has modified quotes and delayed trades, not executable OPRA NBBO.
+        #: `opra` is live and needs the OPRA agreement signed on the account.
+        #: https://docs.alpaca.markets/us/reference/optionlatestquotes
         self.option_feed = option_feed
         self.base = (base_url or (PAPER_BASE if credentials.paper else LIVE_BASE)).rstrip("/")
         self.data = data_url.rstrip("/")
@@ -168,6 +170,7 @@ class AlpacaBroker:
         *,
         params: "dict[str, Any] | None" = None,
         body: Any = None,
+        headers: "dict[str, str] | None" = None,
         base: "str | None" = None,
         what: str,
         ok: tuple[int, ...] = (200, 201, 204),
@@ -178,7 +181,7 @@ class AlpacaBroker:
             if pairs:
                 url += "?" + urllib.parse.urlencode(pairs)
         status, payload = self.client.request(
-            method, url, headers=self.credentials.headers(), body=body, what=what
+            method, url, headers={**self.credentials.headers(), **(headers or {})}, body=body, what=what
         )
         return require_ok(status, payload, what=what, ok=ok)
 
@@ -311,7 +314,7 @@ class AlpacaBroker:
             body["position_intent"] = "buy_to_open" if intent.side == "buy" else "sell_to_close"
             body["time_in_force"] = "day"  # the only one Alpaca takes for options
         try:
-            payload = self._call("POST", "/v2/orders", body=body, what="alpaca submit")
+            payload = self._call("POST", "/v2/orders", body=body, headers={PURPOSE_HEADER: intent.purpose}, what="alpaca submit")
         except TransportError as exc:
             return confirm_or_unknown(
                 lambda: self.order_by_client_id(intent.id),

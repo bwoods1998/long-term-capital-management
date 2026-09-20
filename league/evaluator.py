@@ -407,26 +407,31 @@ class Evaluator:
         """The pooled real-money record of a family on one book: block by block, the mean growth
         of the members that were on a real-money rung in that block (one series, so members that
         trade the same hour are one observation, not several); their closed trades; the average
-        fraction they put at risk; and how many members had enough blocks to count."""
+        fraction they put at risk; and how many members had enough blocks to qualify the family.
+
+        Every member's outcomes count, including agents that died before qualifying. Requiring
+        mature members must never erase early losses. Every stay is read through a fixed ledger
+        position so that sweeping an account cannot erase or rescale its closed trades."""
         rules = self.ladder["family"]
+        through, _ = self.ledger.head()
         by_block: dict[str, list[float]] = {}
         trades: list[float] = []
         risks: list[float] = []
         counted = 0
         for member in dict.fromkeys(members):
-            changes = [e for e in self.ledger.iter(kinds="eval.verdict", agent=member) if e.payload.get("decision") in ("promote", "demote", "seat")]
+            changes = [e for e in self.ledger.iter(kinds="eval.verdict", agent=member)
+                       if e.seq <= through and e.payload.get("decision") in ("promote", "demote", "seat")]
             rows: list[dict[str, Any]] = []
             for index, change in enumerate(changes):
                 if int(change.payload["to_rung"]) < 2:
                     continue
-                until = changes[index + 1].seq if index + 1 < len(changes) else None
+                until = changes[index + 1].seq if index + 1 < len(changes) else through
                 rows += self.blocks(member, since_seq=change.seq, until_seq=until, book=book)
                 returns, risk = self.trade_returns(member, book, since_seq=change.seq, until_seq=until)
                 trades += returns
                 risks += [risk] * len(returns)
-            if sum(1 for r in rows if r.get("active")) < int(rules["min_member_active_blocks"]):
-                continue
-            counted += 1
+            if sum(1 for r in rows if r.get("active")) >= int(rules["min_member_active_blocks"]):
+                counted += 1
             for row in rows:
                 by_block.setdefault(str(row["key"]), []).append(float(row["log_growth"]))
         series = [sum(values) / len(values) for _, values in sorted(by_block.items())]

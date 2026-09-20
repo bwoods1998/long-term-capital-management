@@ -241,7 +241,8 @@ class Packet(AuditorCase):
         self.ledger.append("book.fill", {"book": book, "source": "venue", "side": "buy", "quantity": "5", "price": "0.95", "fee_usd": "0.00", "fee_quantity": None,
                                          "liquidity": "maker", "realized": None, "reason": "a favourite", "instrument": inst, "order_id": "o-1",
                                          "intent_id": "i-1", "cash_delta": "-4.75", "_private": "never"}, agent=agent)
-        self.ledger.append("book.settle", {"book": book, "instrument": inst, "result": "no", "quantity": "5", "pnl": "0.25", "reason": "a favourite"}, agent=agent)
+        self.ledger.append("book.settle", {"book": book, "instrument": inst, "result": "no", "quantity": "5", "cost": "4.75", "payout": "5.00",
+                                           "pnl": "0.25", "reason": "a favourite"}, agent=agent)
         self.ledger.append("book.fill", {"book": book, "source": "dust", "side": "sell", "quantity": "0.0001", "price": "0", "instrument": inst}, agent=agent)
         self.ledger.append("book.fill", {"book": "kalshi", "source": "venue", "side": "buy", "quantity": "1", "price": "0.5", "instrument": inst}, agent=agent)
         self.ledger.append("book.fill", {"book": book, "source": "venue", "side": "buy", "quantity": "9", "price": "0.9", "instrument": inst}, agent="someone-else")
@@ -279,8 +280,39 @@ class Packet(AuditorCase):
         self.assertEqual((buy["symbol"], buy["leg"]), ("KXBTC-26SEP2013-T64000", "no"))
         self.assertTrue(buy["at"])
         self.assertEqual(settled["symbol"], "KXBTC-26SEP2013-T64000")
+        self.assertEqual((settled["kind"], settled["result"], settled["cost"], settled["payout"], settled["pnl"]),
+                         ("book.settle", "no", "4.75", "5.00", "0.25"))
+        self.assertEqual(settled["instrument"], buy["instrument"])
         self.assertEqual(packet["refused_orders"], [["over the order cap"]])
         self.assertEqual(packet["already_on_real_money"], live)
+
+    def test_repaired_freeze_has_dated_current_evidence_from_the_correct_books(self):
+        agent = self.agent.id
+        self.ledger.append("book.refused", {"book": "kalshi-shadow", "reasons": ["the book is frozen"]},
+                           agent=agent, at="2026-09-20T01:00:00.000Z")
+        self.ledger.append("book.refused", {"book": "alpaca-paper", "reasons": ["another book"]}, agent=agent)
+        self.ledger.append("book.reconciled", {"book": "kalshi-shadow", "ok": False, "cash_diff": "-40", "detail": "cash differs"},
+                           at="2026-09-20T01:00:00.000Z")
+        repaired = self.ledger.append("book.reconciled", {"book": "kalshi-shadow", "ok": True, "cash_diff": "0",
+                                                          "position_diffs": {}, "detail": "", "ledger_seq": 42},
+                                      at="2026-09-20T02:00:00.000Z")
+        self.ledger.append("book.reconciled", {"book": "kalshi", "ok": False, "cash_diff": "-3", "detail": "live mismatch"},
+                           at="2026-09-20T02:01:00.000Z")
+        self.ledger.append("book.reconciled", {"book": "alpaca", "ok": True, "cash_diff": "0"},
+                           at="2026-09-20T02:02:00.000Z")
+        packet = self.auditor().packet(self.agent, self.verdict)
+        paper, live = packet["latest_reconciliations"]["kalshi-shadow"], packet["latest_reconciliations"]["kalshi"]
+        self.assertEqual((paper["ok"], paper["cash_diff"], paper["at"], paper["seq"]), (True, "0", repaired.at, repaired.seq))
+        self.assertEqual((live["ok"], live["cash_diff"]), (False, "-3"))
+        self.assertEqual(packet["refused_order_history"], [{"at": "2026-09-20T01:00:00.000Z", "book": "kalshi-shadow",
+                                                          "reasons": ["the book is frozen"]}])
+        self.assertEqual(set(packet["latest_reconciliations"]), {"kalshi", "kalshi-shadow"})
+
+    def test_missing_reconciliations_are_explicit_and_the_screen_is_named(self):
+        packet = self.auditor().packet(self.agent, self.verdict)
+        self.assertEqual(packet["latest_reconciliations"], {"kalshi-shadow": None, "kalshi": None})
+        self.assertEqual(packet["promotion_context"]["paper_gate"]["gate"], "screen")
+        self.assertEqual(packet["promotion_context"]["tuition"], CONSTITUTION["tuition"])
 
     def test_the_packet_is_bounded(self):
         book, agent = "kalshi-shadow", self.agent.id

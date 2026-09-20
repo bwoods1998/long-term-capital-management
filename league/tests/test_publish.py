@@ -7,6 +7,8 @@ from pathlib import Path
 from ltcm.broker import Balance
 
 from league.publish import Publisher, clean, clean_text, event_id, money, to_events
+from league.ledger import now_iso
+from league.pacer import Pacer
 from league.tests.fakes import Clock
 from league.tests.test_house import BUYER, HouseCase
 
@@ -187,6 +189,67 @@ class PublisherTest(HouseCase):
         publisher.post("/events", {"schema_version": 1, "events": []})
         self.assertEqual(site.posts[0][0], "https://blakewoods.us/api/capital/events")
         self.assertEqual(site.posts[0][1]["Authorization"], "Bearer " + "t" * 40)
+
+    def test_the_generation_curve_keeps_losses_and_costs_after_the_ninth_death(self):
+        oldest = self.seated("oldest")
+        self.house.tick()
+        self.clock.advance(301)
+        self.house.tick()
+        self.house.kill(oldest, "test")
+        loss = self.house.books["alpaca-paper"].account(oldest.id).realized
+        self.assertLess(loss, 0)
+        for index in range(8):
+            agent = self.house.registry.born(name=f"retired-{index}", family="test-family", code=BUYER,
+                                              needs={"venue": "alpaca", "horizon": "hour", "style": "test"})
+            self.house.economy.charge(agent.id, "1", "research tokens")
+            self.house.registry.died(agent.id, "test")
+        total_cost = sum((D(e.payload["usd"]) for e in self.house.ledger.iter(kinds="credit.charge")), D(0))
+        body = self.publisher(FakeSite()).checkpoint(self.house)
+        self.assertEqual(len(body["desks"]), 8)
+        self.assertNotIn(oldest.id, {d["id"] for d in body["desks"]})
+        row = body["lab"]["curve"][0]
+        self.assertEqual(row["desks"], 9)
+        self.assertEqual(row["pnl_usd"], money(loss, 4, signed=True))
+        self.assertEqual(row["cost_usd"], money(total_cost, 4))
+        self.assertGreater(row["decisions"], 0)
+
+    def test_model_costs_exclude_other_compute_and_the_budget_uses_the_sail_meter(self):
+        agent = self.seated()
+        self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={
+            "start": now_iso(self.clock)[:10], "days": 10, "sail_usd": "100", "openai_usd": "100", "front_load": "2",
+        })
+        self.house.economy.charge(agent.id, "1", "research tokens")
+        self.house.ledger.append("ops.budget", {"what": "sail", "spent_usd": "5"})
+        self.clock.advance(86400)
+        for amount, what in (("2", "research tokens"), ("0.6", "sandbox seconds"), ("0.01", "web search"),
+                             ("4", "frontier audit"), ("5", "merton's time")):
+            self.house.economy.charge(agent.id, amount, what)
+        self.house.ledger.append("ops.budget", {"what": "sail", "spent_usd": "3"})
+        body = self.publisher(FakeSite()).checkpoint(self.house)
+        run = body["run"]
+        self.assertEqual(run["sail_model_spend_today_usd"], "2.0000")
+        self.assertEqual(run["sail_model_spend_total_usd"], "3.0000")
+        self.assertEqual(run["sail_spend_total_usd"], "8.0000")
+        self.assertLess(D(run["sail_infra_spend_total_usd"]), D("0.7"))
+        self.assertEqual(body["budget"]["spent_today_usd"], "3.0000")
+        self.assertEqual(body["budget"]["cap_usd"], "21.11")
+
+    def test_sail_cost_estimates_do_not_include_frontier_calls_without_a_balance_meter(self):
+        for amount, what in (("2", "research tokens"), ("0.6", "sandbox seconds"),
+                             ("0.01", "web search"), ("4", "frontier audit"), ("5", "merton's time")):
+            self.house.economy.charge("test", amount, what)
+        body = self.publisher(FakeSite()).checkpoint(self.house)
+        self.assertEqual(body["run"]["sail_spend_total_usd"], "2.6100")
+        self.assertEqual(body["budget"]["spent_today_usd"], "2.6100")
+
+    def test_the_model_list_follows_recorded_or_configured_profiles(self):
+        publisher = self.publisher(FakeSite())
+        self.assertEqual(publisher.checkpoint(self.house)["run"]["models_used"], [])
+        self.house.economy.charge("test", "0.1", "research tokens")
+        self.assertEqual(publisher.checkpoint(self.house)["run"]["models_used"], ["DeepSeek V4 Pro"])
+        self.house.ledger.append("provider.request", {"profile": "flash_flex", "cost_usd": "0.02"})
+        self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "0.5"})
+        self.assertEqual(publisher.checkpoint(self.house)["run"]["models_used"], ["DeepSeek V4 Flash", "gpt-6-astra"])
 
 
 if __name__ == "__main__":

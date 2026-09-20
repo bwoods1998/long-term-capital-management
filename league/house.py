@@ -27,6 +27,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
@@ -158,6 +159,9 @@ class House:
         self._tapes: dict[str, tuple[float, dict[str, Any]]] = {}
         self._tape_lock = threading.Lock()
         self._state_lock = threading.RLock()
+        # Serialize lifecycle commits, not slow model/box/audit calls. A completed result must
+        # still belong to the same strategy and rung when its effects reach the floor.
+        self._lifecycle_lock = threading.RLock()
         # Slow work runs on daemon threads: a flex-window model call can take a quarter of an hour,
         # and a House that is told to stop must stop. (The provider settles an orphaned call later.)
         # Three lanes (measured on the first production start, Sept 19, 2026: with one two-slot queue,
@@ -166,6 +170,7 @@ class House:
                        "research": threading.Semaphore(max(1, self.settings.research_workers)),
                        "ops": threading.Semaphore(max(1, self.settings.ops_workers))}
         self._jobs: dict[str, threading.Thread] = {}
+        self._job_status: dict[str, dict[str, Any]] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -446,7 +451,7 @@ class House:
         book.limits[agent.id] = self._limits(rung if book.real_money else 1, agent, account.staked)
         # A new seat, or a return to a book the House had closed the agent's account on (a
         # demotion after a loss leaves `staked` above zero and cash at zero: it is staked afresh).
-        if account.staked <= 0 or (account.swept and not account.holdings):
+        if not account.funded or (account.swept and not account.holdings):
             stake = CONSTITUTION["rungs"]["2" if book.real_money else "1"]["stake_usd"]
             try:
                 book.stake(agent.id, stake, note=f"rung {rung} stake")
@@ -549,20 +554,34 @@ class House:
         cold = now - self._born_at < 300
         return out[: min(self.settings.max_wakes_per_tick, self.settings.cold_wakes_per_tick) if cold else self.settings.max_wakes_per_tick]
 
+    def _generation(self, agent_id: str) -> tuple[str, str, int, int] | None:
+        """Identity of the strategy and rung stay, read while holding the lifecycle lock."""
+        agent = self.registry.get(agent_id)
+        if agent is None or not agent.alive:
+            return None
+        strategy = json.dumps([agent.params, agent.needs], sort_keys=True, separators=(",", ":"))
+        last_strategy = self.ledger.last("agent.strategy", agent=agent_id)
+        return agent.code_sha256, strategy, last_strategy.seq if last_strategy else 0, self.evaluator._rung_entered(agent_id)
+
     def wake(self, agent: Agent) -> dict[str, Any]:
         """One wake of one agent. Returns what happened, for the caller and the tests."""
-        self._state["next_wake"][agent.id] = self.clock() + agent.wake_minutes * 60
-        rung = self.evaluator.rung(agent.id)
-        if self._state["tried"].get(agent.id) != agent.code_sha256:
-            self._background(f"replay:{agent.id}", self._replay_own, agent)  # its code has not had its replay yet
-        if rung == 0:
-            return {"agent": agent.id, "skipped": "in replay"}
-        book = self.book_of(agent)
-        if book is None:
-            return {"agent": agent.id, "skipped": "no book for its venue"}
-        self.seat(agent)
-        if book.account(agent.id).staked <= 0 and not book.account(agent.id).holdings:
-            return {"agent": agent.id, "skipped": "no stake on its book yet"}
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None:
+                return {"agent": agent.id, "skipped": "retired"}
+            agent = deepcopy(self.registry.get(agent.id))
+            self._state["next_wake"][agent.id] = self.clock() + agent.wake_minutes * 60
+            rung = self.evaluator.rung(agent.id)
+            if self._state["tried"].get(agent.id) != agent.code_sha256:
+                self._background(f"replay:{agent.id}", self._replay_own, agent)
+            if rung == 0:
+                return {"agent": agent.id, "skipped": "in replay"}
+            book = self.book_of(agent)
+            if book is None:
+                return {"agent": agent.id, "skipped": "no book for its venue"}
+            self.seat(agent)
+            if book.account(agent.id).cash <= 0 and not book.account(agent.id).holdings:
+                return {"agent": agent.id, "skipped": "no stake on its book yet"}
         try:
             ctx = self.snapshot(agent, book)
         except Exception as exc:  # noqa: BLE001 - a data outage skips a wake, it does not stop the floor
@@ -575,24 +594,43 @@ class House:
             return {"agent": agent.id, "skipped": "sandbox"}
         self._charge_box(agent.id, run, note="a decision")
         result = run.result
-        if not result.get("ok"):
-            self.ledger.append("agent.woke", {"ok": False, "error": str(result.get("error"))[:400], "book": book.name}, agent=agent.id)
-            return {"agent": agent.id, "error": result.get("error")}
-        self._state["memory"][agent.id] = result.get("memory") or {}
-        thought = str(result.get("thought") or "").strip()
-        if thought:
-            self.ledger.append("agent.thought", {"text": thought, "phase": "decide", "book": book.name}, agent=agent.id)
-        cancelled = [book.cancel(agent.id, order_id).status for order_id in result.get("cancels") or []]
-        intents, dropped = self._intents(agent, book, result.get("intents") or [])
+        # Sizing may need a venue quote, so do it before the short result commit.
+        intents, dropped = self._intents(agent, book, result.get("intents") or []) if result.get("ok") else ([], [])
         offered = self._offered(agent, ctx)
-        idle = self._note_wake(agent, acted=bool(intents or cancelled or ctx["positions"] or ctx["open_orders"]), offered=offered)
-        self.ledger.append(
-            "agent.woke",
-            {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds"),
-             "offered": offered, **({"barren": idle["barren"]} if idle["barren"] else {}), **({"shut": idle["shut"]} if idle["shut"] else {})},
-            agent=agent.id,
-        )
-        return {"agent": agent.id, "book": book.name, "intents": intents, "dropped": dropped, "offered": offered}
+        with self._lifecycle_lock:
+            if self._generation(agent.id) != generation:
+                return {"agent": agent.id, "skipped": "strategy or rung changed during decision"}
+            if not result.get("ok"):
+                self.ledger.append("agent.woke", {"ok": False, "error": str(result.get("error"))[:400], "book": book.name}, agent=agent.id)
+                return {"agent": agent.id, "error": result.get("error")}
+            self._state["memory"][agent.id] = result.get("memory") or {}
+            thought = str(result.get("thought") or "").strip()
+            if thought:
+                self.ledger.append("agent.thought", {"text": thought, "phase": "decide", "book": book.name}, agent=agent.id)
+            cancelled = [book.cancel(agent.id, order_id).status for order_id in result.get("cancels") or []]
+            idle = self._note_wake(agent, acted=bool(intents or cancelled or ctx["positions"] or ctx["open_orders"]), offered=offered)
+            self.ledger.append(
+                "agent.woke",
+                {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds"),
+                 "offered": offered, **({"barren": idle["barren"]} if idle["barren"] else {}), **({"shut": idle["shut"]} if idle["shut"] else {})},
+                agent=agent.id,
+            )
+        return {"agent": agent.id, "book": book.name, "intents": intents, "dropped": dropped, "offered": offered,
+                "_generation": generation}
+
+    def _submit_wakes(self, book_name: str, outcomes: Sequence[Mapping[str, Any]]) -> list[Any]:
+        """Validate again at the batched order boundary: a wake may have waited for other boxes."""
+        with self._lifecycle_lock:
+            intents = []
+            for outcome in outcomes:
+                generation = outcome.get("_generation")
+                agent = self.registry.get(outcome["agent"])
+                if generation is None or self._generation(outcome["agent"]) != generation:
+                    continue
+                if self.book_of(agent) is not self.books[book_name]:
+                    continue
+                intents.extend(outcome.get("intents") or [])
+            return self.books[book_name].submit(intents) if intents else []
 
     def _offered(self, agent: Agent, ctx: Mapping[str, Any]) -> int:
         """How many live, tradeable things this wake actually put in front of the strategy.
@@ -804,9 +842,13 @@ class House:
             return False
 
         lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay") else "ops"]
+        with self._state_lock:
+            self._job_status[key] = {"queued_at": self.clock(), "started_at": None}
 
         def job() -> None:
             with lane:
+                with self._state_lock:
+                    self._job_status[key]["started_at"] = self.clock()
                 try:
                     work(*args)
                 except Exception as exc:  # noqa: BLE001
@@ -814,6 +856,9 @@ class House:
                         self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})")
                     except Exception:  # noqa: BLE001 - the ledger may already be closed on the way out
                         pass
+                finally:
+                    with self._state_lock:
+                        self._job_status.pop(key, None)
 
         thread = threading.Thread(target=job, name=f"league-slow:{key}"[:60], daemon=True)
         self._jobs[key] = thread
@@ -842,8 +887,13 @@ class House:
     def _replay_own(self, agent: Agent) -> dict[str, Any]:
         """An agent's own code gets one replay, counted as a trial. For an agent on rung 0 it is
         the way up; after it, only research can change its fate."""
-        if self._state["tried"].get(agent.id) == agent.code_sha256:
-            return {"agent": agent.id, "skipped": "its code has had its replay; research may change it"}
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None:
+                return {"agent": agent.id, "skipped": "retired"}
+            agent = deepcopy(self.registry.get(agent.id))
+            if self._state["tried"].get(agent.id) == agent.code_sha256:
+                return {"agent": agent.id, "skipped": "its code has had its replay; research may change it"}
         try:
             result, tape_id = self._run_replay(agent, agent.code, agent.needs, agent.params)
         except Exception as exc:  # noqa: BLE001 - no tape or no box: try again next wake
@@ -853,11 +903,17 @@ class House:
         if crash:
             self.alert("warning", f"{agent.id}: its replay was not run ({crash[:160]}); it is not counted as a trial and will be tried again")
             return {"agent": agent.id, "skipped": f"the replay could not be run: {crash[:120]}"}
-        with self._state_lock:
-            self._state["tried"][agent.id] = agent.code_sha256
-        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, lineage=self.registry.lineage(agent.id))
-        if verdict.decision == "promote":
-            self.seat(agent)
+        with self._lifecycle_lock:
+            current = self._generation(agent.id) == generation
+            if current:
+                with self._state_lock:
+                    self._state["tried"][agent.id] = agent.code_sha256
+            # A stale replay still consumed a trial, but cannot qualify or mark a replacement
+            # strategy as tested. Its captured code and parameters remain on the trial row.
+            verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id,
+                                                  promote=current, lineage=self.registry.lineage(agent.id))
+            if verdict.decision == "promote":
+                self.seat(self.registry.get(agent.id))
         return {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
 
     def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
@@ -908,49 +964,63 @@ class House:
 
     # ----------------------------------------------------------------- judging
     def judge(self, agent: Agent) -> Verdict | None:
-        book = self.book_of(agent)
-        rung = self.evaluator.rung(agent.id)
-        if book is None or rung < 1:
-            return None
-        self.evaluator.observe(agent.id, book.name, agent.horizon)
-        peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
-        verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None:
+                return None
+            book = self.book_of(agent)
+            rung = self.evaluator.rung(agent.id)
+            if book is None or rung < 1:
+                return None
+            self.evaluator.observe(agent.id, book.name, agent.horizon)
+            peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
+            verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
+            if verdict.decision not in ("die", "eligible") and rung >= 2:
+                drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
+                if drift.decision == "demote":
+                    self._move_books(agent, book)
+                    return drift
         if verdict.decision == "die":
-            self.kill(agent, "evidence", verdict.reason)
+            self.kill(agent, "evidence", verdict.reason, expected_generation=generation)
         elif verdict.decision == "eligible":
-            self._promote(agent, verdict)
-        elif rung >= 2:
-            drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
-            if drift.decision == "demote":
-                self._move_books(agent, book)
-                return drift
+            self._promote(agent, verdict, expected_generation=generation)
         return verdict
 
-    def _promote(self, agent: Agent, verdict: Verdict) -> None:
-        rung = self.evaluator.rung(agent.id)
+    def _promote(self, agent: Agent, verdict: Verdict, *, expected_generation: tuple | None = None) -> None:
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None or (expected_generation is not None and generation != expected_generation):
+                return
+            agent = deepcopy(self.registry.get(agent.id))
+            rung = self.evaluator.rung(agent.id)
+            if rung != verdict.rung:
+                return
+            if rung == 1:
+                if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
+                    return  # it stays eligible on paper until the owner turns real money on
+                state = self.tuition()
+                if not state["room"]:
+                    if not self._state.get("tuition_told"):
+                        self._state["tuition_told"] = True
+                        self.alert("warning", f"{agent.id} cleared the paper screen and was not promoted: the micro rung has "
+                                              f"{state['seated']} of {state['max_agents']} agents seated and ${state['headroom_usd']:.2f} of "
+                                              f"headroom under its ${state['limit_usd']} tuition. It waits on paper.")
+                    return
+                self._state["tuition_told"] = False
+                if self.auditor is None or not self._audit_due(agent):
+                    return
         if rung == 1:
-            if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
-                return  # it stays eligible on paper until the owner turns real money on
-            state = self.tuition()
-            if not state["room"]:
-                # Not in silence: an agent that cleared the screen and was turned away here is the
-                # single most important thing the floor can tell its owner.
-                if not self._state.get("tuition_told"):
-                    self._state["tuition_told"] = True
-                    self.alert("warning", f"{agent.id} cleared the paper screen and was not promoted: the micro rung has "
-                                          f"{state['seated']} of {state['max_agents']} agents seated and ${state['headroom_usd']:.2f} of "
-                                          f"headroom under its ${state['limit_usd']} tuition. It waits on paper.")
-                return
-            self._state["tuition_told"] = False
-            if self.auditor is None or not self._audit_due(agent):
-                return
-            audit = self.auditor.audit(agent, verdict)
+            audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
             if not audit.get("approve"):
                 return  # it stays on paper, where its record is the auditor's counterfactual
-        old = self.book_of(agent)
-        self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
-        if rung == 1 and old is not None:
-            self._move_books(agent, old)
+        with self._lifecycle_lock:
+            if self._generation(agent.id) != generation or (rung == 1 and not self.tuition()["room"]):
+                return
+            agent = self.registry.get(agent.id)
+            old = self.book_of(agent)
+            self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
+            if rung == 1 and old is not None:
+                self._move_books(agent, old)
 
     def _run_backup(self) -> None:
         row = self.backup.run()
@@ -1072,36 +1142,54 @@ class House:
         test. What that may cost is a number in the constitution, not a statistic. The cost is
         the net loss of every real-money account that has never earned rung 3 (a swept account
         counts what it lost: its equity is zero and what was not returned is still staked). A
-        new agent is seated only while the loss so far, plus what the agents already seated
-        and this one could lose before the drawdown rule stops them, fits under the line."""
+        new agent is seated only while every active micro stake, the remaining risk of abandoned
+        accounts, and its own stake fit under the loss line. A drawdown stop is not a guaranteed
+        exit price: an option or a contract held to settlement can lose its entire purchase."""
         rules = CONSTITUTION["tuition"]
-        pnl, seated = ZERO, 0
+        active = {agent.id for agent in self.registry.living() if self.evaluator.rung(agent.id) == 2}
+        stake = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"])
+        pnl, worst_loss, pending_accounts = ZERO, ZERO, 0
+        accounted = set()
         for book in self.books.values():
             if not book.real_money:
                 continue
             for agent_id in book.agents():
                 if self.evaluator.max_rung(agent_id) < 3:
-                    pnl += book.equity(agent_id) - book.account(agent_id).staked
-        for agent in self.registry.living():
-            if self.evaluator.rung(agent.id) == 2:
-                seated += 1
+                    account = book.account(agent_id)
+                    pnl += book.equity(agent_id) - account.staked
+                    working = book.open_orders(agent_id)
+                    if agent_id in active:
+                        # All its cash can still be spent. Reserve a future stake as well when
+                        # seat() has yet to fund a newly promoted or previously swept account.
+                        funding = stake if not account.funded or (account.swept and not account.holdings) else ZERO
+                        worst_loss += account.staked + funding - min(account.cash, ZERO)
+                        accounted.add(agent_id)
+                    else:
+                        pending_accounts += bool(account.holdings or working)
+                        # Retired/demoted cash is safe unless an unresolved entry can spend it.
+                        safe_cash = min(account.cash, ZERO) if any(w.side == "buy" for w in working) else account.cash
+                        worst_loss += account.staked - safe_cash
+        worst_loss += sum((stake for agent_id in active - accounted if self.evaluator.max_rung(agent_id) < 3), ZERO)
+        worst_loss = max(worst_loss, ZERO)
+        seated = len(active)
         spent = max(-pnl, ZERO)
         limit = Decimal(rules["max_loss_usd"])
-        at_risk = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]) * Decimal(str(CONSTITUTION["ladder"]["death"]["max_drawdown"]))
-        room = seated < int(rules["max_agents"]) and spent + at_risk * (seated + 1) <= limit
-        # Closed means NO FURTHER AGENT CAN EVER BE SEATED, which is not the same as the line being
-        # reached. Between $42.50 and $50 with nobody seated the two came apart and the state
-        # sealed itself: `room` was false so nothing could be promoted, `closed` was false so the
-        # owner was never told, and `spent` could only rise to the line by seating an agent, which
-        # `room` had just forbidden. The gate's failure destroyed the precondition of its own
-        # alarm, and the floor would have stopped promoting to real money in silence, for ever.
-        closed = spent >= limit or (not room and seated == 0)
+        room = seated < int(rules["max_agents"]) and worst_loss + stake <= limit
+        # Reserved headroom can return when abandoned positions settle. Do not describe that
+        # wait as a permanently exhausted budget. A flat floor unable to fund even one full
+        # stake is closed and must still report that condition rather than waiting silently.
+        closed = spent >= limit or (not room and seated == 0 and pending_accounts == 0)
         return {"pnl_usd": pnl, "spent_usd": spent, "limit_usd": limit, "seated": seated,
                 "max_agents": int(rules["max_agents"]), "room": room, "closed": closed,
-                "headroom_usd": limit - spent - at_risk}
+                "headroom_usd": limit - worst_loss, "worst_case_loss_usd": worst_loss,
+                "reserved_loss_usd": max(worst_loss - spent, ZERO), "pending_accounts": pending_accounts}
 
     def _enforce_tuition(self) -> None:
         """At the line the micro rung closes: everyone on it goes back to paper, once."""
+        with self._lifecycle_lock:
+            self._enforce_tuition_locked()
+
+    def _enforce_tuition_locked(self) -> None:
         state = self.tuition()
         if not state["closed"]:
             self._state["tuition_closed"] = False
@@ -1117,10 +1205,10 @@ class House:
             reached = state["spent_usd"] >= state["limit_usd"]
             why = (f"has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition"
                    if reached else
-                   f"has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition, and what one more agent could lose "
-                   f"before the drawdown rule stops it no longer fits under the line")
-            self.alert("error", f"The micro rung {why} and is closed. No agent is promoted to real money "
-                                "until the owner raises `tuition.max_loss_usd` in the constitution.")
+                   f"has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition, and one more agent's full stake "
+                   f"no longer fits under the line")
+            self.alert("error", f"The micro rung {why} and is closed. Further promotion waits for settled headroom "
+                                "or a change to `tuition.max_loss_usd` in the constitution.")
 
     def _audit_due(self, agent: Agent) -> bool:
         """An audit is about a quarter of a dollar, charged to the agent. A vetoed agent is not
@@ -1145,13 +1233,25 @@ class House:
         self.seat(agent)
 
     def _wind_down(self, agent: Agent, book: Book) -> None:
-        book.cancel_all(agent.id)
+        # An unfinished sell already closes this account. Keep it in flight and reserve its
+        # remaining units so retrying after a venue outage cannot duplicate or cancel that exit.
+        for working in book.open_orders(agent.id):
+            if working.side == "buy":
+                book.cancel(agent.id, working.order_id)
+        reserved: dict[str, Decimal] = {}
+        for working in book.open_orders(agent.id):
+            if working.side == "sell":
+                reserved[working.instrument.key] = reserved.get(working.instrument.key, ZERO) + sum(
+                    (share.quantity - share.filled for share in working.shares if share.agent == agent.id), ZERO)
         now = now_iso(self.clock)
         exits = []
         for holding in list(book.account(agent.id).holdings.values()):
             if holding.instrument.asset_class == "event":
                 continue  # a Kalshi contract is held to settlement: selling a favourite at the bid gives the edge back
-            exits.append(Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=holding.quantity,
+            quantity = max(holding.quantity - reserved.get(holding.instrument.key, ZERO), ZERO)
+            if quantity <= 0:
+                continue
+            exits.append(Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=quantity,
                                     reason="the House is closing this account", created_at=now, nonce=f"wind-down:{now}"))
         if exits:
             book.submit(exits)
@@ -1164,23 +1264,48 @@ class House:
         if not account.holdings and not book.open_orders(agent_id) and account.cash > 0 and not account.swept:
             book.stake(agent_id, -account.cash, note="account closed")  # all of it: what is left of the stake, and any profit
 
+    def _observe_wind_down(self, agent: Agent, book: Book) -> None:
+        """Keep the evidence until an abandoned account's final trades and sweep are observed.
+
+        A dead or demoted agent can still hold contracts awaiting settlement. Those outcomes
+        belong on the record even though this book no longer decides the agent's current rung.
+        The zero-equity block after the sweep needs a later mark to finish; once it exists there
+        is no unfinished capital left to observe, and flat marks need not be scanned again.
+        """
+        account = book.account(agent.id)
+        if account.swept and account.cash == 0 and not account.holdings and not book.open_orders(agent.id):
+            rows = self.evaluator.blocks(agent.id, book=book.name)
+            if rows and float(rows[-1]["end_equity"]) == 0:
+                return
+        self.evaluator.observe(agent.id, book.name, agent.horizon)
+
+    def _retry_wind_down(self, agent: Agent, book: Book) -> None:
+        """Retry an abandoned account's exits without letting one venue failure stop the floor."""
+        try:
+            self._wind_down(agent, book)
+        except Exception as exc:  # noqa: BLE001 - the next mark pass retries the unfinished account
+            self.alert("warning", f"{agent.id}: {book.name} could not finish winding down ({type(exc).__name__}: {str(exc)[:160]})")
+
     # ------------------------------------------------------------------ death
-    def kill(self, agent: Agent, cause: str, detail: str = "") -> None:
-        if not agent.alive:
-            return
-        for book in self.books.values():
-            if agent.id in book.accounts:
-                self._wind_down(agent, book)
-        text = self.postmortem(agent, cause, detail)
-        self.ledger.append("agent.postmortem", {"text": text, "cause": cause}, agent=agent.id)
-        self.commons.playbook_add(f"Post-mortem: {agent.id}", text, source="graveyard", agent=agent.id)
-        self.registry.died(agent.id, cause, detail)
+    def kill(self, agent: Agent, cause: str, detail: str = "", *, expected_generation: tuple | None = None) -> None:
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None or (expected_generation is not None and generation != expected_generation):
+                return
+            agent = self.registry.get(agent.id)
+            for book in self.books.values():
+                if agent.id in book.accounts:
+                    self._wind_down(agent, book)
+            text = self.postmortem(agent, cause, detail)
+            self.ledger.append("agent.postmortem", {"text": text, "cause": cause}, agent=agent.id)
+            self.commons.playbook_add(f"Post-mortem: {agent.id}", text, source="graveyard", agent=agent.id)
+            self.registry.died(agent.id, cause, detail)
+            for key in ("next_wake", "memory", "last_research", "tried", "idle"):
+                self._state[key].pop(agent.id, None)
         try:
             self.sandbox.retire(agent.id)
         except Exception as exc:  # noqa: BLE001
             self.alert("warning", f"{agent.id}: its box could not be retired ({type(exc).__name__})")
-        for key in ("next_wake", "memory", "last_research", "tried", "idle"):
-            self._state[key].pop(agent.id, None)
 
     def postmortem(self, agent: Agent, cause: str, detail: str) -> str:
         rung = self.evaluator.rung(agent.id)
@@ -1245,7 +1370,7 @@ class House:
 
     # --------------------------------------------------------------- research
     def research_due(self, agent: Agent) -> bool:
-        if self.researcher is None or not self.settings.research:
+        if not agent.alive or self.researcher is None or not self.settings.research:
             return False
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
@@ -1302,7 +1427,19 @@ class House:
             agent = self.registry.get(standing.agent)
             if standing.rung >= 2 or standing.mean_growth > 0:
                 continue
-            if now - _epoch(agent.born_at) < grace:
+            opportunity = _epoch(agent.born_at)
+            niche = self.niche_of(agent)
+            if standing.rung == 1 and niche is not None and niche.asset_class in ("equity", "option"):
+                # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
+                # its equity agents were displaced before their first market session. Start
+                # their paper-seat grace at an actual offered opportunity (or a legacy fill),
+                # not at a weekend birth. Replay-only agents still have their normal deadline.
+                first = next((e for e in self.ledger.iter(kinds=("agent.woke", "book.fill"), agent=agent.id)
+                              if e.kind == "book.fill" or (e.payload.get("ok") and int(e.payload.get("offered") or 0) > 0)), None)
+                if first is None:
+                    continue
+                opportunity = max(opportunity, _epoch(first.at))
+            if now - opportunity < grace:
                 continue
             rank.append((standing.active_blocks > 0, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
@@ -1350,23 +1487,69 @@ class House:
             base = min(base, float((self.game.get("research") or {}).get("idle", {}).get("min_hours_between", 1)))
         return max(1.0, base / 2) if self.behind_the_clock("sail") else base
 
+    def _research_if_due(self, agent: Agent) -> Any:
+        """Recheck after waiting for a research worker: a queued job owns no budget or seat."""
+        current = self.registry.get(agent.id)
+        if current is None or not self.research_due(current):
+            return None
+        if self.budget is not None and self.budget.mode == "stopped":
+            return None
+        return self.research(current)
+
     def research(self, agent: Agent) -> Any:
-        rung = self.evaluator.rung(agent.id)
-        standing = {
-            "rung": rung, "credits_usd": format(self.economy.balance(agent.id), "f"),
-            "blocks": len(self.evaluator.blocks(agent.id)),
-            "last_trial": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.trial", agent=agent.id)))), None),
-            "last_look": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.verdict", agent=agent.id))) if e.payload.get("decision") == "look"), None),
-            "can_fork": self.economy.can_fork(agent.id),
-            "recent_trades": self._recent_trades(agent.id),
-            "idle": {**self.idle_run(agent), "why_now": self.idle_reason(agent)},
-            "rewrites_in_place": rung == 0 or self.record_is_empty(agent),
-        }
+        with self._lifecycle_lock:
+            generation = self._generation(agent.id)
+            if generation is None:
+                return None
+            agent = deepcopy(self.registry.get(agent.id))
+            rung = self.evaluator.rung(agent.id)
+            standing = {
+                "rung": rung, "credits_usd": format(self.economy.balance(agent.id), "f"),
+                "blocks": len(self.evaluator.blocks(agent.id)),
+                "last_trial": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.trial", agent=agent.id)))), None),
+                "last_look": next((e.payload for e in reversed(list(self.ledger.iter(kinds="eval.verdict", agent=agent.id))) if e.payload.get("decision") == "look"), None),
+                "can_fork": self.economy.can_fork(agent.id),
+                "recent_trades": self._recent_trades(agent.id),
+                "idle": {**self.idle_run(agent), "why_now": self.idle_reason(agent)},
+                "rewrites_in_place": rung == 0 or (rung == 1 and self.record_is_empty(agent)),
+            }
         try:
             outcome = self.researcher.research(agent, standing, session=f"research:{agent.id}:{int(self.clock())}")
         finally:
-            with self._state_lock:
-                self._state["last_research"][agent.id] = self.clock()  # however it ended: a failing provider is not retried every tick
+            with self._lifecycle_lock:
+                with self._state_lock:
+                    if self._generation(agent.id) is not None:
+                        self._state["last_research"][agent.id] = self.clock()  # a failing provider is not retried every tick
+        with self._lifecycle_lock:
+            candidate = self._commit_research(agent.id, generation, outcome)
+        if candidate:
+            # Forking probes and copies a sandbox. Its parent strategy was validated above;
+            # these slow operations do not block decisions or settlements on the other desks.
+            try:
+                child = self.fork(agent, code=candidate["code"], params=candidate["params"], reason=candidate["purpose"], passed_replay=True,
+                                  staked_by_house=not self.economy.can_fork(agent.id))
+            except Exception as exc:
+                self.ledger.append("agent.research", {"tool": "candidate", "status": "fork_error",
+                    "reason": f"{type(exc).__name__}: {str(exc)[:200]}", "_candidate": candidate}, agent=agent.id)
+                raise
+            self.ledger.append("agent.research", {"tool": "candidate", "status": "forked" if child else "deferred",
+                "child": child.id if child else None, "reason": "a child was admitted" if child else "a child was not admitted",
+                "_candidate": candidate}, agent=agent.id)
+        return outcome
+
+    def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
+        """Apply a candidate under the lifecycle lock, or return it for a separate child."""
+        # A pass can outlive a promotion, a displacement or another code adoption. Its old
+        # rung must never authorize replacing code that has since acquired a trading record.
+        current_generation = self._generation(agent_id)
+        if current_generation is None or current_generation[:-1] != generation[:-1]:
+            if outcome.candidate:
+                self.ledger.append("agent.research", {"tool": "candidate", "status": "not_adopted",
+                    "reason": "the agent retired or its code changed during research",
+                    "_candidate": outcome.candidate}, agent=agent_id)
+            return None
+        agent = self.registry.get(agent_id)
+        rung = self.evaluator.rung(agent.id)
         candidate = outcome.candidate
         barren = self.idle_run(agent)["barren"]
         if candidate is not None and not candidate.get("passed", True):
@@ -1379,17 +1562,15 @@ class House:
             # to protect and no position in hand, a file that at least TRADES is worth more than
             # one that provably does nothing, and the paper screen is what stands above it.
             traded = float(candidate.get("numbers", {}).get("trades") or 0) > 0
-            if not (traded and rung >= 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
+            if not (traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
                 candidate = None
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
             candidate = {**candidate, "purpose": "Merton wrote this file for it: " + candidate["purpose"]}
         if candidate:
-            if rung == 0 or self.record_is_empty(agent):
-                # An agent above rung 0 does not edit itself, because its record belongs to its
-                # code. With NO record there is nothing to protect, and the rule only slows the
-                # loop down: measured on the first evening, the six agents of the sports desk each
-                # saw 126 to 200 live markets and found none inside the band they were born with,
-                # so not one of them could trade at all, and none could afford a fork for days.
+            if rung == 0 or (rung == 1 and self.record_is_empty(agent)):
+                # Empty paper records can restart in place. A real-money identity always forks
+                # new code: its existing code earned the paper screen and audit, even before
+                # its first real trade has created a record in the current book.
                 was = self.registry.get(agent.id).code_sha256
                 self.registry.adopt(agent.id, code=candidate["code"], needs=candidate["needs"], params=candidate["params"], reason=candidate["purpose"])
                 self._state["tried"][agent.id] = self.registry.get(agent.id).code_sha256
@@ -1405,15 +1586,14 @@ class House:
                                                           "params": candidate["params"], "needs": candidate["needs"]}, agent=agent.id)
                 self.seat(self.registry.get(agent.id))
             else:
-                self.fork(agent, code=candidate["code"], params=candidate["params"], reason=candidate["purpose"], passed_replay=True,
-                          staked_by_house=not self.economy.can_fork(agent.id))
-        return outcome
+                return candidate
+        return None
 
     def record_is_empty(self, agent: Agent) -> bool:
         """True when nothing this agent has done could be evidence and nothing is in its hands: no
         holding, no working order, no active block and no closed trade on the book of its rung.
-        Such an agent may rewrite itself in place, like one that has not passed replay yet: there
-        is no record for new code to inherit unfairly, and no position for it to be left holding."""
+        On paper this permits an in-place rewrite: no record or position is inherited. A real
+        agent still has its earlier paper qualification to protect and must fork new code."""
         book = self.book_of(agent)
         if book is None:
             return True
@@ -1443,7 +1623,8 @@ class House:
         """One agent's record at its current rung: what it has earned the right to ask for."""
         agent = self.registry.get(agent_id)
         rung = self.evaluator.rung(agent_id)
-        rows = self.evaluator.blocks(agent_id, since_seq=self.evaluator._rung_entered(agent_id)) if rung >= 1 else []
+        book = self.book_of(agent)
+        rows = self.evaluator.blocks(agent_id, since_seq=self.evaluator._rung_entered(agent_id), book=book.name) if rung >= 1 and book else []
         growth = [float(r["log_growth"]) for r in rows]
         return {"rung": rung, "active_blocks": sum(1 for r in rows if r.get("active")),
                 "mean_growth": (sum(growth) / len(growth)) if growth else 0.0, "niche": agent.niche}
@@ -1454,7 +1635,8 @@ class House:
         for agent in self.registry.living():
             rung = self.evaluator.rung(agent.id)
             entered = self.evaluator._rung_entered(agent.id)
-            rows = self.evaluator.blocks(agent.id, since_seq=entered) if rung >= 1 else []
+            book = self.book_of(agent)
+            rows = self.evaluator.blocks(agent.id, since_seq=entered, book=book.name) if rung >= 1 and book else []
             growth = [float(r["log_growth"]) for r in rows]
             active = sum(1 for r in rows if r.get("active"))
             out.append(Standing(agent.id, agent.niche, rung, (sum(growth) / len(growth)) if growth else 0.0, active,
@@ -1584,7 +1766,7 @@ class House:
         # Past the monthly compute line only agents holding real money are woken, so they can exit.
         open_for_business = self.budget is None or self.budget.check() == "open"
         summary["budget"] = "open" if open_for_business else "stopped"
-        batches: dict[str, list[Intent]] = {}
+        batches: dict[str, list[Mapping[str, Any]]] = {}
         waking = [a for a in self.due() if self.economy.alive(a.id) and (open_for_business or self._holds_real_money(a))]
         # Each wake is mostly waiting on the agent's box, so they run side by side; every agent
         # has its own box and its own lock, and the ledger and the books are thread-safe.
@@ -1593,10 +1775,10 @@ class House:
         for agent, outcome in zip(waking, outcomes):
             summary["woke"].append(agent.id)
             if outcome.get("intents"):
-                batches.setdefault(outcome["book"], []).extend(outcome["intents"])
-        for name, intents in batches.items():
-            outcomes = self.books[name].submit(intents)
-            summary["orders"] += sum(1 for o in outcomes if o.status not in ("refused", "duplicate"))
+                batches.setdefault(outcome["book"], []).append(outcome)
+        for name, wakes in batches.items():
+            submitted = self._submit_wakes(name, wakes)
+            summary["orders"] += sum(1 for o in submitted if o.status not in ("refused", "duplicate"))
         now = self.clock()
         for name, book in self.books.items():
             if now - float(self._state["last_mark"].get(name) or 0) < self.settings.mark_every_seconds:
@@ -1614,15 +1796,20 @@ class House:
             for agent in self.registry.living():
                 if self.book_of(agent) is book:
                     self.judge(agent)
+                elif agent.id in book.accounts:
+                    self._retry_wind_down(agent, book)
+                    self._observe_wind_down(agent, book)
             for agent in self.registry.dead():
                 if agent.id in book.accounts:
+                    self._retry_wind_down(agent, book)
+                    self._observe_wind_down(agent, book)
                     self._sweep(agent.id, book)
         for agent in self.research_order() if open_for_business else []:
             if self.research_due(agent):
                 # Stamped when the pass ENDS (in `research`), not when it is queued: on the first
                 # production day every agent was stamped at 18:02, queued, and lost to a restart,
                 # so nobody researched for an hour and a half. A pass in hand is not queued twice.
-                self._background(f"research:{agent.id}", self.research, agent)
+                self._background(f"research:{agent.id}", self._research_if_due, agent)
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if self.backup is not None and self.backup.due():
@@ -1677,11 +1864,19 @@ class House:
         return summary
 
     def _health(self, summary: Mapping[str, Any]) -> None:
+        now = self.clock()
+        with self._state_lock:
+            jobs = [{"key": key, "state": "queued" if job["started_at"] is None else "running",
+                     "queued_seconds": round(max((job["started_at"] if job["started_at"] is not None else now) - job["queued_at"], 0), 3),
+                     "running_seconds": round(max(now - job["started_at"], 0), 3) if job["started_at"] is not None else 0}
+                    for key, job in sorted(self._job_status.items())]
         health = {
             "at": summary["at"], "living": len(self.registry.living()), "dead": len(self.registry.dead()),
             "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders())} for name, book in self.books.items()},
             "ledger_seq": self.ledger.head()[0], "real_money": self.settings.real_money,
             "release": Path(__file__).resolve().parents[1].name,
+            "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
+            "background_jobs": jobs,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from ltcm.broker import Instrument, OrderIntent, RejectedOrder, UnknownOutcome, VenueUnavailable
 from ltcm.data import TransportError
-from ltcm.adapters import AlpacaCredentials
+from ltcm.adapters import AlpacaCredentials, GatewaySigner, PURPOSE_HEADER, VenueClient
 from ltcm.adapters.alpaca import (
     DATA_BASE,
     LIVE_BASE,
@@ -280,6 +280,18 @@ class OptionTests(unittest.TestCase):
 
 
 class SubmitTests(unittest.TestCase):
+    def test_the_gateway_receives_the_exit_purpose_that_releases_dollar_caps(self):
+        gateway = "https://gateway.test"
+        transport = FakeTransport({("POST", gateway + "/v1/alpaca/v2/orders"): ORDER})
+        client = VenueClient(transport, gateway_url=gateway, gateway=GatewaySigner("x" * 40), venue="alpaca")
+        adapter = AlpacaBroker(AlpacaCredentials("placeholder", "placeholder", paper=False), client=client)
+        adapter.submit(intent(side="sell", purpose="exit", exit_of="original-entry"))
+        self.assertEqual(transport.last["headers"][PURPOSE_HEADER], "exit")
+        self.assertEqual(transport.last["body"]["side"], "sell")
+        self.assertNotIn("APCA-API-SECRET-KEY", transport.last["headers"])
+        adapter.submit(intent())
+        self.assertEqual(transport.last["headers"][PURPOSE_HEADER], "entry")
+
     def test_the_request_body_is_exactly_what_alpaca_expects(self):
         client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): ORDER})
         proposal = intent(order_type="limit", limit_price="230.50", time_in_force="day")

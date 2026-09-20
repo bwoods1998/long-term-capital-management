@@ -16,9 +16,9 @@
 # premiums in reach are under 75 cents: at-the-money weeklies on stocks under about $20.
 #
 # WHEN IT TRADES. 09:45 to 15:30 New York. One contract an underlying, at most max_open at once.
-# A LIMIT order between the mid and the ask (the quotes it sees are fifteen minutes old, so a
-# market order is not allowed and a stale price costs a fill, never more). Unfilled bids are
-# cancelled after requote_minutes.
+# A LIMIT order between the mid and the ask. The free indicative feed modifies quotes and
+# delays trades; a limit bounds the execution price but does not validate the quote or remove
+# adverse selection. Market orders are forbidden. Cancel unfilled bids after requote_minutes.
 #
 # HOW IT EXITS. A limit sell at the bid at +take_profit_pct or -stop_pct on the premium paid, or
 # with exit_days left. The House itself sells anything still held on its last afternoon.

@@ -1,7 +1,10 @@
 import unittest
 from decimal import Decimal
 
+from league.book import Book
 from league.capital import kelly_stake, recommend, resize
+from league.fees import Fees
+from league.tests.fakes import FakeBroker
 from league.tests.test_house import BUYER, HouseCase
 
 D = Decimal
@@ -43,6 +46,29 @@ class RecommendationTest(HouseCase):
     def test_resize_only_touches_rung_three_on_a_real_book(self):
         agent = self.seated()
         self.assertIsNone(resize(self.house, agent))
+
+    def test_shrinking_a_flat_real_account_does_not_immediately_fund_it_again(self):
+        agent = self.seated()
+        broker = FakeBroker("alpaca", cash="500")
+        book = Book("alpaca", broker, self.house.ledger, fees=Fees("alpaca"), real_money=True, clock=self.clock)
+        self.house.books["alpaca"] = book
+        book.reconcile()
+        self.house.evaluator.promote(agent.id, 2, "test micro admission")
+        self.house.evaluator.promote(agent.id, 3, "test sizing an established real account")
+        book.stake(agent.id, "100")
+        self.house.seat(agent)
+        row = resize(self.house, agent)  # no bounded return record: target the $25 micro stake
+        self.assertEqual(D(row["moved_usd"]), D(-75))
+        self.assertEqual(D(row["stake_usd"]), D(25))
+        for _ in range(3):
+            self.house.seat(agent)
+        self.assertEqual(book.account(agent.id).cash, D(25))
+        self.assertEqual(book.account(agent.id).staked, D(25))
+        self.assertFalse(book.account(agent.id).swept)
+        self.assertIsNone(resize(self.house, agent))
+        self.assertEqual(len(list(self.house.ledger.iter(kinds="book.stake", agent=agent.id))), 2)
+        self.assertEqual(broker.submitted, [])
+        self.assertTrue(book.reconcile().ok)
 
 
 if __name__ == "__main__":

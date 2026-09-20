@@ -22,6 +22,7 @@ from .agents import Agent
 from .commons import SEARCH_CHARGE_USD, Commons
 from .ledger import Ledger, now_iso
 from .safety import CodeRefused, check_code
+from .sandbox import SandboxError
 
 ZERO = Decimal(0)
 
@@ -42,9 +43,9 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {}}},
     {"name": "journal_write", "description": "Write a note to your FUTURE SELF. Your journal is handed back to you at the start of every research pass, and your children inherit it: what you tried, what the result was, what you will check next, what not to repeat. Keep each entry short and dated by the House.",
      "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
-    {"name": "ask_merton", "description": "Hire Merton, the firm's theorist, to think about YOUR problem. He is the frontier model that writes the firm's strategies and audits every candidate for real money, and he is EXPENSIVE: this costs many times a research pass, out of your own credits, and you may hire him once a day. He is shown everything you know (your file, your journal, your trades, your replays, your specialty) and answers with advice or with a whole strategy file you can then `replay`. Ask when you are stuck or when your idea may be structurally dead, not for a parameter.",
+    {"name": "ask_merton", "description": "Hire Merton, the firm's theorist, to think about YOUR problem. He is the frontier model that writes the firm's strategies and audits every candidate for real money, and he is EXPENSIVE: this costs many times a research pass, out of your own credits, and hiring follows your rung's activity, credit and cooldown rules. He is shown everything you know (your file, your journal, your trades, your replays, your specialty) and answers with advice or with a whole strategy file you can then `replay`. Ask when you are stuck or when your idea may be structurally dead, not for a parameter.",
      "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}},
-    {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your whole family, and costs sandbox seconds. Code that PASSES is born as your child at once (the House stakes it if you cannot). If your OWN rules have not fired for hours and you have no record to protect, code that merely TRADES on the tape replaces yours in place, failed verdict and all: a strategy that never acts cannot be measured, and paper is then the test. Give the complete strategy file and what you changed and why.",
+    {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your lineage, and costs sandbox seconds. Code that PASSES is kept for the House to adopt or fork when this pass ends (the House stakes a child if you cannot). A later failed trial cannot discard a passing file. If you are on PAPER, your OWN rules have not fired for hours and you have no record to protect, code that merely TRADES on the tape can replace yours in place, failed verdict and all: a strategy that never acts cannot be measured, and paper is then the test. Give the complete strategy file and what you changed and why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "purpose": {"type": "string"}}, "required": ["code", "purpose"]}},
     {"name": "finish", "description": "End this research pass with one or two sentences on what you concluded.",
      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
@@ -404,16 +405,36 @@ class Researcher:
                 check_code(code)
             except CodeRefused as exc:
                 return {"error": f"code refused (not counted as a trial): {exc}"}
-            outcome = self.run_replay(agent, code)
+            try:
+                outcome = self.run_replay(agent, code)
+            except (SandboxError, OSError) as exc:
+                # A probe box can fail before the replay callback has a result to return.
+                # Keep earlier work and paid token charges; unavailable infrastructure is not
+                # evidence against this strategy. Cancellation and process exit still propagate.
+                error = f"replay unavailable (not counted as a trial): {type(exc).__name__}: {str(exc)[:200]}"
+                self.ledger.append("agent.research", {"tool": "replay_error", "session": session,
+                                                       "error": error, "counted_as_trial": False}, agent=agent.id)
+                return {"passed": False, "error": error}
             out.trials += 1
             numbers = dict(outcome.get("numbers") or {})
             if outcome.get("passed") or not outcome.get("error"):
                 # A candidate that ran is carried whatever the verdict; the House decides what a
                 # failure may buy (`House.research`: an agent whose own rules have not fired for
                 # hours and has no record to protect takes a file that at least trades).
-                out.candidate = {"code": code, "needs": outcome.get("needs") or {}, "params": outcome.get("params") or {},
-                                 "numbers": numbers, "passed": bool(outcome.get("passed")),
-                                 "purpose": str(args.get("purpose") or "")[:600]}
+                candidate = {"code": code, "needs": outcome.get("needs") or {}, "params": outcome.get("params") or {},
+                             "numbers": numbers, "passed": bool(outcome.get("passed")),
+                             "purpose": str(args.get("purpose") or "")[:600]}
+                # The House applies one candidate after the pass. Exploring another idea must not
+                # erase a passing file, or the trading file an idle agent could adopt on paper.
+                # Among equally usable candidates, keep the model's latest refinement.
+                if _candidate_rank(candidate) >= _candidate_rank(out.candidate):
+                    out.candidate = candidate
+                    # Save before another model call or sandbox run can be interrupted. The
+                    # summary's boolean cannot recover paid-for code after a restart or a full
+                    # specialty. Private payload keys are stripped from the public ledger.
+                    self.ledger.append("agent.research", {"tool": "candidate", "status": "retained",
+                        "session": session, "parent_code_sha256": agent.code_sha256,
+                        "_candidate": candidate}, agent=agent.id)
             return {"passed": bool(outcome.get("passed")), "reasons": numbers.get("reasons"), "trials_in_family": numbers.get("trials"),
                     "deflated_sharpe": numbers.get("deflated_sharpe"), "sharpe": numbers.get("sharpe"), "trades": numbers.get("trades"),
                     "return_pct": numbers.get("return_pct"), "max_drawdown": numbers.get("max_drawdown"), "fees_usd": numbers.get("fees_usd"),
@@ -421,6 +442,14 @@ class Researcher:
                     # Where it won and lost: by series or symbol, by how long before the end it got in, and its worst trades.
                     "digest": outcome.get("digest"), "note": numbers.get("note")}
         return {"error": f"no such tool {name!r}"}
+
+
+def _candidate_rank(candidate: Mapping[str, Any] | None) -> int:
+    if candidate is None:
+        return 0
+    if candidate.get("passed"):
+        return 3
+    return 2 if float((candidate.get("numbers") or {}).get("trades") or 0) > 0 else 1
 
 
 def _trim(ctx: Mapping[str, Any]) -> dict[str, Any]:
