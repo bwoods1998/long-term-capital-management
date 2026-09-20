@@ -167,6 +167,9 @@ class House:
                 rung=self.evaluator.rung,
             )
         self._born_at = self.clock()
+        # Written once, on the first ever start, and persisted: `_refill` paces newcomers from it
+        # when none has been born yet (see there for why this must outlive a restart).
+        self._state.setdefault("last_newcomer", {}).setdefault("since", self._born_at)
         self._record_start()
         # Every book's baseline is taken now, before anything can trade: what the venue holds at
         # this moment is what is not the book's. (Taken later, a resting order's reserved cash or a
@@ -1335,9 +1338,16 @@ class House:
             return None
         urgent = len(living) < int(rules["min_population"])
         every = float(rules["newcomer_seconds"]) / (4 if urgent else 1)
-        # A House that has just started waits a full interval before it adds anyone: the first
-        # minutes are for founding and for taking baselines, not for breeding.
-        last = float(self._state.setdefault("last_newcomer", {}).get("at") or self._born_at)
+        if self.clock() - self._born_at < 300:
+            return None  # this process has just started: settle first, as `due()` does with wakes
+        # The wait is since the last newcomer, or since the floor first ran -- NOT since this
+        # process started. Measured Sept 20, 2026: the interval was anchored on `_born_at`, which
+        # moves on every restart, and a floor that deploys itself restarts every half hour. In six
+        # hours the hour never once elapsed, `last_newcomer` was never written, and the league sat
+        # at its founding size with seven seats empty. A floor that rewrites itself deploys often
+        # by design, so anything paced longer than a deploy must survive one.
+        state = self._state.setdefault("last_newcomer", {})
+        last = float(state.get("at") or state.get("since") or self._born_at)
         if self.clock() - last < every:
             return None
         room = [n for n in self.niches.values() if not n.dormant and self.members(n.id) < n.max_members]

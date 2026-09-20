@@ -322,6 +322,22 @@ class Refill(HouseCase):
         self.clock.advance(601)
         self.assertIsNone(self.house._refill(rules), "the ceiling holds")
 
+    def test_the_wait_for_a_newcomer_outlives_a_restart(self):
+        """Sept 20, 2026: the interval was anchored on this process's start, which moves on every
+        deploy, and a floor that rewrites itself deploys every half hour. In six hours the hour
+        never elapsed once and the league sat at its founding size with seven seats empty."""
+        self.seated()
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=3, min_population=0)
+        self.clock.advance(400)
+        self.house._save_state()  # as a tick does, within a minute of the first start
+        restarted = self.new_house(game=self.house.game)  # the same state directory, a new process
+        try:
+            self.clock.advance(400)  # 800s since the floor first ran, 400s since this process did
+            self.assertIsNotNone(restarted._refill(rules))
+        finally:
+            restarted.close(wait=None)
+
     def test_a_newcomer_joins_the_desk_with_the_most_room(self):
         crypto = self.seated()  # alpaca-crypto-majors
         rules = self.house.game["economy"]
