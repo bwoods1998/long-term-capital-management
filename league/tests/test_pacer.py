@@ -88,15 +88,10 @@ class PacerCase(unittest.TestCase):
         self.ledger.append("ops.budget", {"what": "sail", "spent_usd": "9"}, at="2026-09-18T23:00:00.000Z")
         self.assertEqual(self.pacer.spent("sail"), D(0))
 
-    def test_the_credit_pool_is_drawn_from_both_purses_the_owner_funded(self):
-        """An agent pays for its research tokens out of this pool, and research is a frontier cost.
-        Sized from Sail alone the pool capped research at a fraction of what the second hundred
-        dollars would fund; what the House keeps back is Merton's passes and the audits."""
-        # 85% of Sail's 7.142857 plus 70% of the frontier's 5.00 (RULES funds $70 over 14 days)
-        self.assertEqual(self.pacer.credit_pool(), D("9.57"))
-        self.merton("70")
-        self.at("2026-09-20T12:00:00")  # the frontier budget is gone: tomorrow the pool is Sail's share alone
-        self.assertEqual(self.pacer.credit_pool(), D("6.54"))
+    def test_the_credit_pool_is_most_of_the_days_sail_allowance(self):
+        """Sail alone: what an agent buys with these credits -- sandbox seconds, research tokens --
+        is a Sail cost. A consultation with Merton is the frontier's, and paced against it."""
+        self.assertEqual(self.pacer.credit_pool(), D("6.07"))  # 85% of 7.142857
         self.at("2026-10-05T00:00:00")
         self.assertEqual(self.pacer.credit_pool(), D(0))
 
@@ -142,26 +137,26 @@ class Catching(HouseCase):
         self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50", **kw})
 
     def test_research_comes_round_twice_as_often_while_the_day_is_underspent(self):
-        """Research is a frontier cost, so it is the frontier allowance that decides its pace."""
+        """Research is a Sail cost, so it is the Sail allowance that decides its pace."""
         self.expedition()
         self.clock.now = self.clock.now - self.clock.now % 86400 + 3 * 3600  # 03:00: too early to call the day behind
         self.assertEqual(self.house.research_interval_hours(), 3.0)
         self.clock.now += 12 * 3600  # 15:00 and nothing spent
         self.house.pacer._cache.clear()
         self.assertEqual(self.house.research_interval_hours(), 1.5)
-        self.house.ledger.append("agent.research", {"tool": "summary", "cost_usd": "3.00"}, agent="a1")  # 60% of the day's $5 by 15:00: on pace
+        self.house.ledger.append("ops.budget", {"what": "sail", "spent_usd": "3.00"})  # 60% of the day's $5 by 15:00: on pace
         self.house.pacer._cache.clear()
         self.assertEqual(self.house.research_interval_hours(), 3.0)
 
-    def test_an_agents_research_is_counted_against_the_frontier_budget(self):
-        """It is the floor's largest frontier cost. Left uncounted, as it was on the first evening,
-        the meter read a third of the truth and the owner's budget would have been overrun blind."""
+    def test_research_is_a_sail_cost_and_is_not_billed_to_the_frontier_budget(self):
+        """A research pass runs on Sail's own inference, not on the frontier model, and the Sail
+        meter reads it from the credit balance. Counting it twice would stop Merton and the audits
+        -- the calls that really are the frontier's -- on a bill they did not run up."""
         self.expedition()
         self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "1.05"})
         self.house.ledger.append("agent.research", {"tool": "summary", "cost_usd": "2.16"}, agent="a1")
-        self.house.ledger.append("agent.research", {"tool": "replay", "session": "s"}, agent="a1")  # a turn, not a bill
         self.house.pacer._cache.clear()
-        self.assertEqual(self.house.pacer.spent("openai"), D("3.21"))
+        self.assertEqual(self.house.pacer.spent("openai"), D("1.05"))
 
     def test_outside_the_expedition_the_game_files_number_stands(self):
         self.assertEqual(self.house.research_interval_hours(), 3.0)

@@ -15,9 +15,10 @@ When a budget is gone, or the last day is over, that kind of spending stops for 
 owner is told once. The monthly caps (the gateway's for the frontier model, the House's meter for
 Sail) stand behind this as before.
 
-Sail is metered from the falls in its credit balance (`league/budget.py`); the frontier model from
-the cost the gateway reports on each call, which the ledger records on `merton.pass`,
-`audit.verdict` and `agent.research` rows -- every kind of frontier call the floor makes.
+Sail is metered from the falls in its credit balance (`league/budget.py`), which is where an
+agent's research lands: a research pass runs on Sail's own inference (`ltcm/provider.py`), not on
+the frontier model. The frontier budget is the gateway's: the cost it reports on each call, which
+the ledger records on `merton.pass` and `audit.verdict` rows.
 """
 
 from __future__ import annotations
@@ -71,12 +72,11 @@ class Pacer:
         if kind == "sail":
             rows = ((e.at, e.payload.get("spent_usd")) for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "sail")
         else:
-            # Every frontier dollar: Merton's own passes and the consultations agents buy from him
-            # (`merton.pass`), the auditor's verdicts, and — by far the largest of the three — the
-            # agents' own research passes. Measured on the first evening, research had spent $2.16
-            # against Merton's $1.05, and none of it was counted here: the budget the owner funded
-            # would have been overrun in silence while this meter read a third of the truth.
-            rows = ((e.at, e.payload.get("cost_usd")) for e in self.ledger.iter(kinds=("merton.pass", "audit.verdict", "agent.research")))
+            # Merton's own passes and the consultations agents buy from him (`merton.pass`), and the
+            # auditor's verdicts. NOT `agent.research`: a research pass runs on Sail's own inference
+            # (`ltcm/provider.py`), and the gateway's meter agrees -- on the first evening it had
+            # billed $1.72 of frontier calls, every one a consult, a Merton pass or an audit.
+            rows = ((e.at, e.payload.get("cost_usd")) for e in self.ledger.iter(kinds=("merton.pass", "audit.verdict")))
         for at, usd in rows:
             try:
                 amount = Decimal(str(usd or 0))
@@ -117,20 +117,15 @@ class Pacer:
         return self.day() >= self.days or self.remaining(kind) <= 0
 
     # ---------------------------------------------------------------------- uses
-    def credit_pool(self, *, share: Decimal = Decimal("0.85"), frontier_share: Decimal = Decimal("0.70"),
-                    floor: Decimal = Decimal("0.50")) -> Decimal:
-        """The day's pool of compute credits, out of BOTH purses the owner funded.
-
-        Most of the day's Sail allowance -- the rest is the House's own box and the boxes' idle
-        minutes, which no agent is charged for -- and most of the day's frontier allowance, because
-        an agent pays for its research tokens from this same pool. Sized from Sail alone, as it was
-        at first, the pool capped what the agents could research at a fraction of what the frontier
-        budget would fund, and the owner's second hundred dollars would have gone unspent. The
-        share the House keeps back is Merton's own passes and the audits, which agents do not pay
-        for; `may_spend` still stands behind both budgets, so neither can be overrun."""
+    def credit_pool(self, *, share: Decimal = Decimal("0.85"), floor: Decimal = Decimal("0.50")) -> Decimal:
+        """The day's pool of compute credits: most of the day's Sail allowance (the rest is the
+        House's own box and the boxes' idle minutes, which no agent is charged for). Sail alone,
+        because everything an agent pays for out of this pool -- its sandbox seconds and its
+        research tokens -- is a Sail cost. What agents buy from the frontier model, a consultation
+        with Merton, is paced against the frontier budget where it is spent."""
         if not self.running():
             return ZERO
-        return max(self.allowance("sail") * share + self.allowance("openai") * frontier_share, floor).quantize(Decimal("0.01"))
+        return max(self.allowance("sail") * share, floor).quantize(Decimal("0.01"))
 
     def report(self) -> dict[str, Any]:
         return {"day": self.day() + 1, "of": self.days, "running": self.running(),

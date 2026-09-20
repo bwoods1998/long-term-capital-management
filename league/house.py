@@ -1130,8 +1130,8 @@ class House:
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
-        if not (self.pacer.may_spend("sail") and self.pacer.may_spend("openai")):
-            return False  # today's share of an expedition budget is spent (or the expedition is over)
+        if not self.pacer.may_spend("sail"):
+            return False  # today's share of the expedition's Sail budget is spent (or the expedition is over)
         last = float(self._state["last_research"].get(agent.id) or 0)
         return self.clock() - last >= self.research_interval_hours(agent) * 3600
 
@@ -1168,18 +1168,18 @@ class House:
 
     def research_interval_hours(self, agent: Agent | None = None) -> float:
         """How long an agent waits between research passes. The game file's number, halved (never
-        under an hour) while today's frontier spending is running behind the clock: the owner wants
+        under an hour) while today's Sail spending is running behind the clock: the owner wants
         the expedition's budget used, and an allowance still unspent at noon is research not done.
         An agent that cannot act at all waits the idle interval instead -- it has nothing else to
         spend its time on, and every wake it sits out is a wake it did not learn from."""
         base = float((self.game.get("research") or {}).get("min_hours_between", 6))
         if agent is not None and self.idle_reason(agent):
             base = min(base, float((self.game.get("research") or {}).get("idle", {}).get("min_hours_between", 1)))
-        allowance = self.pacer.allowance("openai")
+        allowance = self.pacer.allowance("sail")
         if allowance <= 0:
             return base
         day_gone = (self.clock() % 86400) / 86400.0
-        behind = float(1 - self.pacer.room("openai") / allowance) < 0.6 * day_gone
+        behind = float(1 - self.pacer.room("sail") / allowance) < 0.6 * day_gone
         return max(1.0, base / 2) if behind and day_gone > 0.25 else base
 
     def research(self, agent: Agent) -> Any:
