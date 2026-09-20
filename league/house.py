@@ -1260,8 +1260,17 @@ class House:
 
         Never one on real money -- what that may cost is already bounded by the tuition, and the
         auditor put it there. Never a profitable one, however small its record. Never one too young
-        to have had a fair chance. Of the rest, the one with the least to show: growth first, then
-        how much it has traded, then how little is left in its purse."""
+        to have had a fair chance. Of the rest, the one with the LEAST EVIDENCE of an edge.
+
+        Least evidence means, first and above everything, that it has never traded. Ranking by
+        growth alone did the opposite of what it was for: an agent that has never placed an order
+        has a mean growth of exactly 0.0, which sorts above every negative number, so the agents
+        that never traded were the SAFEST on the floor and the ones doing the work were displaced.
+        It killed hilibrand at 09:46 on Sept 20, 2026 -- the agent furthest up the ladder, twelve
+        active blocks of the fifteen the screen wants -- while twenty-six agents that had never
+        traded at all sat untouched. An agent that is trading and losing is being judged by the
+        evaluator, which will kill it on its own evidence at twenty blocks; an agent that trades
+        nothing is judged by nobody and costs a box and a seat for as long as it is left there."""
         epoch = float(rules["epoch_seconds"])
         grace = float(rules.get("displace_after_epochs", 2)) * epoch
         now = self.clock()
@@ -1272,9 +1281,10 @@ class House:
                 continue
             if now - _epoch(agent.born_at) < grace:
                 continue
-            rank.append((standing.mean_growth, standing.active_blocks, float(self.economy.balance(agent.id)), agent))
-        rank.sort(key=lambda row: row[:3])
-        return rank[0][3] if rank else None
+            rank.append((standing.active_blocks > 0, standing.mean_growth, standing.active_blocks,
+                         float(self.economy.balance(agent.id)), agent))
+        rank.sort(key=lambda row: row[:4])  # has it traded at all, then growth, then how much, then its purse
+        return rank[0][4] if rank else None
 
     def research_order(self) -> list[Agent]:
         """Who gets asked first when the day's frontier allowance is nearly all the floor has.

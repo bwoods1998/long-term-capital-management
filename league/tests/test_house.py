@@ -363,6 +363,24 @@ class Refill(HouseCase):
         died = self.house.ledger.last("agent.died", agent=weak.id).payload
         self.assertEqual(died["cause"], "displaced")
 
+    def test_an_agent_that_has_never_traded_goes_before_one_that_is_trading_badly(self):
+        """Ranking by growth alone did the opposite of what it was for: an agent that has never
+        placed an order has a mean growth of exactly 0.0, which sorts above every negative number,
+        so the agents that never traded were the SAFEST on the floor. It killed hilibrand at 09:46
+        on Sept 20, 2026 -- twelve of the fifteen active blocks the screen wants -- while
+        twenty-six agents that had never traded sat untouched."""
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=2, min_population=0, displace_after_epochs=2)
+        working = self.seated("worker")     # trading, and losing
+        idle = self.seated("idler")         # has never placed an order
+        for a in (working, idle):
+            self.house.evaluator.seat(a.id, 1, "test")
+        for n in range(12):
+            self.house.ledger.append("eval.block", {"agent": working.id, "log_growth": -0.01, "active": True,
+                                                    "book": "alpaca-paper", "block": f"b{n}"}, agent=working.id)
+        self.clock.advance(2 * float(rules["epoch_seconds"]) + 601)
+        self.assertEqual(self.house._weakest(rules).id, idle.id)
+
     def test_nobody_young_or_profitable_or_on_real_money_is_displaced(self):
         rules = self.house.game["economy"]
         rules.update(newcomer_seconds=600, max_population=1, min_population=0, displace_after_epochs=2)
