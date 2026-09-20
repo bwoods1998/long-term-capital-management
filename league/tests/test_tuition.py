@@ -166,3 +166,32 @@ class TuitionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheGateMustNotSealItself(TuitionTest):
+    """Between the reserve and the line, with nobody seated, `room` was false so nothing could be
+    promoted and `closed` was false so the owner was never told -- and `spent` could only reach the
+    line by seating an agent, which `room` had just forbidden. The gate's failure destroyed the
+    precondition of its own alarm. Found by the stall audit, Sept 20, 2026."""
+
+    def test_no_room_and_nobody_seated_is_closed_and_says_so(self):
+        agent = self.on_micro("loser")
+        with self.limit(8):                       # reserve is $7.50, so the dead zone is $0.50 wide
+            self.lose_about_five_dollars(agent)
+            self.house.evaluator.demote(agent.id, "test: off the rung, its loss stays on the meter")
+            state = self.house.tuition()
+            self.assertEqual(state["seated"], 0)
+            self.assertFalse(state["room"])
+            self.assertTrue(state["closed"], state)
+            self.house._enforce_tuition()
+        said = self.house.ledger.last("ops.alert").payload
+        self.assertEqual(said["level"], "error")
+        self.assertIn("no longer fits under the line", said["text"])
+
+    def test_with_headroom_the_gate_is_open_and_quiet(self):
+        with self.limit(50):
+            state = self.house.tuition()
+            self.assertTrue(state["room"])
+            self.assertFalse(state["closed"])
+            self.house._enforce_tuition()
+        self.assertEqual([e for e in self.house.ledger.iter(kinds="ops.alert")], [])

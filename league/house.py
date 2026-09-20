@@ -931,8 +931,17 @@ class House:
         if rung == 1:
             if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
                 return  # it stays eligible on paper until the owner turns real money on
-            if not self.tuition()["room"]:
-                return  # the micro rung is full, or its tuition is spent: it waits on paper
+            state = self.tuition()
+            if not state["room"]:
+                # Not in silence: an agent that cleared the screen and was turned away here is the
+                # single most important thing the floor can tell its owner.
+                if not self._state.get("tuition_told"):
+                    self._state["tuition_told"] = True
+                    self.alert("warning", f"{agent.id} cleared the paper screen and was not promoted: the micro rung has "
+                                          f"{state['seated']} of {state['max_agents']} agents seated and ${state['headroom_usd']:.2f} of "
+                                          f"headroom under its ${state['limit_usd']} tuition. It waits on paper.")
+                return
+            self._state["tuition_told"] = False
             if self.auditor is None or not self._audit_due(agent):
                 return
             audit = self.auditor.audit(agent, verdict)
@@ -1080,7 +1089,16 @@ class House:
         limit = Decimal(rules["max_loss_usd"])
         at_risk = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]) * Decimal(str(CONSTITUTION["ladder"]["death"]["max_drawdown"]))
         room = seated < int(rules["max_agents"]) and spent + at_risk * (seated + 1) <= limit
-        return {"pnl_usd": pnl, "spent_usd": spent, "limit_usd": limit, "seated": seated, "max_agents": int(rules["max_agents"]), "room": room, "closed": spent >= limit}
+        # Closed means NO FURTHER AGENT CAN EVER BE SEATED, which is not the same as the line being
+        # reached. Between $42.50 and $50 with nobody seated the two came apart and the state
+        # sealed itself: `room` was false so nothing could be promoted, `closed` was false so the
+        # owner was never told, and `spent` could only rise to the line by seating an agent, which
+        # `room` had just forbidden. The gate's failure destroyed the precondition of its own
+        # alarm, and the floor would have stopped promoting to real money in silence, for ever.
+        closed = spent >= limit or (not room and seated == 0)
+        return {"pnl_usd": pnl, "spent_usd": spent, "limit_usd": limit, "seated": seated,
+                "max_agents": int(rules["max_agents"]), "room": room, "closed": closed,
+                "headroom_usd": limit - spent - at_risk}
 
     def _enforce_tuition(self) -> None:
         """At the line the micro rung closes: everyone on it goes back to paper, once."""
@@ -1096,8 +1114,13 @@ class House:
                     self._move_books(agent, old)
         if not self._state.get("tuition_closed"):
             self._state["tuition_closed"] = True
-            self.alert("error", f"The micro rung has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition and is closed. "
-                                "No agent is promoted to real money until the owner raises `tuition.max_loss_usd` in the constitution.")
+            reached = state["spent_usd"] >= state["limit_usd"]
+            why = (f"has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition"
+                   if reached else
+                   f"has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition, and what one more agent could lose "
+                   f"before the drawdown rule stops it no longer fits under the line")
+            self.alert("error", f"The micro rung {why} and is closed. No agent is promoted to real money "
+                                "until the owner raises `tuition.max_loss_usd` in the constitution.")
 
     def _audit_due(self, agent: Agent) -> bool:
         """An audit is about a quarter of a dollar, charged to the agent. A vetoed agent is not
