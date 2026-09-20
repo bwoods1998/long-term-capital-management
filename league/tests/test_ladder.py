@@ -137,6 +137,21 @@ class LadderTest(unittest.TestCase):
         house.economy.charge(agent.id, house.economy.balance(agent.id) - D("0.10"), "test")
         self.assertFalse(house._audit_due(agent))
 
+    def test_an_audit_that_never_ran_does_not_cost_the_agent_a_day(self):
+        """A gate that fails shut is right. A gate that fails shut AND fines the agent a day at the
+        top of the ladder for its own malfunction is not: the frontier was down, not the strategy."""
+        house = self.house
+        agent = house.spawn("climber", "ladder-test", LADDER, reason="test", endowment="2.5")
+        house.evaluator.seat(agent.id, 1, "test")
+        house.ledger.append("audit.verdict", {"approve": False, "error": "frontier call refused: HTTP 502",
+                                              "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
+        self.assertFalse(house._audit_due(agent))
+        self.clock.advance(31 * 60)
+        self.assertTrue(house._audit_due(agent))
+        house.ledger.append("audit.verdict", {"approve": False, "summary": "look-ahead in the entry"}, agent=agent.id)
+        self.clock.advance(31 * 60)
+        self.assertFalse(house._audit_due(agent))  # a real veto is still a day's wait
+
     def test_up_the_ladder_sized_and_back_down(self):
         house = self.house
         agent = house.spawn("climber", "ladder-test", LADDER, reason="test", endowment="2.5")

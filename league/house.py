@@ -1005,14 +1005,19 @@ class House:
     def _audit_due(self, agent: Agent) -> bool:
         """An audit is about a quarter of a dollar, charged to the agent. A vetoed agent is not
         audited again at every look: it waits out a cooldown on paper (where its record is the
-        auditor's counterfactual), and no agent is audited that cannot pay for it and live."""
+        auditor's counterfactual), and no agent is audited that cannot pay for it and live.
+
+        An audit that did not happen -- the call refused, the answer unreadable -- is not a verdict
+        and must not cost the agent a day at the top of the ladder for the gate's own malfunction.
+        It waits the short cooldown instead, long enough not to hammer a frontier that is down."""
         rules = self.game.get("audit") or {}
         if self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
             return False
         last = self.ledger.last("audit.verdict", agent=agent.id)
         if last is None:
             return True
-        return self.clock() - _epoch(last.at) >= float(rules.get("cooldown_hours", 72)) * 3600
+        hours = float(rules.get("error_cooldown_hours", 0.5) if last.payload.get("error") else rules.get("cooldown_hours", 72))
+        return self.clock() - _epoch(last.at) >= hours * 3600
 
     def _move_books(self, agent: Agent, old: Book) -> None:
         """Leave one book for another: cancel, sell what can be sold, and take the stake back."""

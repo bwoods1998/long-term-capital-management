@@ -308,7 +308,7 @@ class Packet(AuditorCase):
         self.assertEqual(headers["authorization"], "Bearer " + SECRET)  # the only place the token may appear
         body = json.loads(request.data.decode("utf-8"))
         self.assertEqual(body["model"], "gpt-6-astra")
-        self.assertEqual(body["max_output_tokens"], 6000)
+        self.assertEqual(body["max_output_tokens"], 12000)
         system, user = body["input"]
         self.assertEqual((system["role"], system["content"]), ("system", SYSTEM))
         self.assertEqual(user["role"], "user")
@@ -416,3 +416,16 @@ class Score(AuditorCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AGateThatDidNotRun(AuditorCase):
+    """A gate must fail shut. It must not also fine the agent a day at the top of the ladder for
+    failing: the House reads `error` on the row and lets the audit come round again soon."""
+
+    def test_an_unreadable_answer_is_marked_an_error_not_a_verdict(self):
+        row = self.auditor(says(None, raw_text="I am afraid I cannot")).audit(self.agent, self.verdict)
+        self.assertEqual((row["approve"], row["error"]), (False, "the auditor's answer could not be read"))
+
+    def test_a_real_veto_carries_no_error(self):
+        row = self.auditor(says({"approve": False, "summary": "look-ahead", "findings": [finding("blocker")]})).audit(self.agent, self.verdict)
+        self.assertNotIn("error", row)

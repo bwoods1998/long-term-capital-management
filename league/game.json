@@ -57,6 +57,7 @@
   },
   "audit": {
     "cooldown_hours": 24,
+    "error_cooldown_hours": 0.5,
     "min_credits_usd": "0.60"
   },
   "research": {

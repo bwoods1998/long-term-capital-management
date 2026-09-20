@@ -85,7 +85,10 @@ class Auditor:
     def audit(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
         packet = self.packet(agent, verdict)
         try:
-            answer = self.frontier.ask(system=SYSTEM, user=json.dumps(packet, default=str), agent=f"audit-{agent.id}", max_output_tokens=6000)
+            # 12,000, as Merton's own passes get: reasoning tokens are spent out of this budget
+            # before a single character of the JSON is written, and an audit that runs out of room
+            # is read as a veto by an agent that may have earned its seat.
+            answer = self.frontier.ask(system=SYSTEM, user=json.dumps(packet, default=str), agent=f"audit-{agent.id}", max_output_tokens=12000)
         except FrontierError as exc:
             # No audit, no promotion: a gate that fails open is not a gate.
             self.ledger.append("audit.verdict", {"approve": False, "error": str(exc)[:300], "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
@@ -95,7 +98,9 @@ class Auditor:
         try:
             result = answer.json()
         except FrontierError:
-            result = {"approve": False, "summary": "the auditor's answer could not be read", "findings": []}
+            # Not a verdict: the gate stays shut, but an agent is not made to wait out a day's
+            # cooldown for the auditor's own malfunction (`House._audit_due` reads `error`).
+            result = {"approve": False, "summary": "the auditor's answer could not be read", "findings": [], "unreadable": True}
         listed = result.get("findings") if isinstance(result.get("findings"), list) else []
         everything = [f for f in listed if isinstance(f, dict)]
         blockers = [f for f in everything if str(f.get("severity")).strip().lower() == "blocker"]
@@ -104,6 +109,7 @@ class Auditor:
         approve = result.get("approve") is True and not blockers
         row = {
             "approve": approve,
+            **({"error": "the auditor's answer could not be read"} if result.get("unreadable") else {}),
             "confidence": result.get("confidence"),
             "summary": str(result.get("summary") or "")[:1200],
             "findings": [{"severity": str(f.get("severity"))[:12], "issue": str(f.get("issue"))[:400], "evidence": str(f.get("evidence"))[:400]} for f in findings],
