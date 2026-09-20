@@ -258,3 +258,34 @@ class PacedByTheBudget(unittest.TestCase):
         self.assertNotIn("teacher", self.merton.due())
         self.clock.advance(2 * 3600)
         self.assertIn("teacher", self.merton.due())
+
+
+class WhereANewStrategyIsWorthWriting(unittest.TestCase):
+    """Twice on Sept 20, 2026 the architect declined with "every specialty is occupied" while
+    twenty-six agents across the floor had never placed a single order. An occupied desk full of
+    agents that cannot trade is the emptiest thing on the floor, and the brief never said so."""
+
+    def test_the_brief_sends_him_at_the_worst_evidence_not_the_empty_corner(self):
+        from league.merton import BRIEFS
+
+        brief = BRIEFS["architect"]
+        self.assertIn("barren_agents", brief)
+        self.assertIn("losing_agents", brief)
+        self.assertIn("having members is not a reason to leave it alone", brief)
+
+    def test_a_desk_reports_how_its_members_are_really_faring(self):
+        from types import SimpleNamespace
+
+        from league.merton import _how_the_desk_is_doing
+
+        record = {"idle": {"active_blocks": 0, "mean_growth": 0.0},
+                  "loser": {"active_blocks": 9, "mean_growth": -0.004},
+                  "winner": {"active_blocks": 6, "mean_growth": 0.003},
+                  "elsewhere": {"active_blocks": 40, "mean_growth": 0.09}}
+        house = SimpleNamespace(
+            registry=SimpleNamespace(living=lambda: [SimpleNamespace(id=a, niche="d1" if a != "elsewhere" else "d2") for a in record]),
+            standing_of=lambda agent_id: record[agent_id])
+        self.assertEqual(_how_the_desk_is_doing(house, "d1"),
+                         {"barren_agents": 1, "trading_agents": 2, "losing_agents": 1, "best_mean_growth": 0.003})
+        self.assertEqual(_how_the_desk_is_doing(house, "nobody"),
+                         {"barren_agents": 0, "trading_agents": 0, "losing_agents": 0, "best_mean_growth": None})

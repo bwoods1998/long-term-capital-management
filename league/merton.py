@@ -59,8 +59,13 @@ Every agent is a SPECIALIST: it belongs for life to one specialty of `specialtie
 series or symbols, a brief of what is known there), and a strategy is placed by what its NEEDS ask to see, so name
 series or symbols from ONE specialty's universe (a strategy that sits in none is refused). Entries on Kalshi must
 resolve within 12 hours (hourly strategies) or 48 (daily); a crypto position is closed after 48 hours.
-Write at most two strategies a pass. Aim at specialties that are empty, thinly worked, or where everything has
-died for a reason you can name and avoid. Prefer structural edges that survive fees (maker fills, favourites,
+Write at most two strategies a pass. Aim at the specialties where the EVIDENCE IS WORST, which is almost never
+an empty one: `specialties` carries `barren_agents` (members that have looked at a live market and placed nothing)
+and `losing_agents` (members that trade and lose). A specialty having members is not a reason to leave it alone --
+they may all be failing, and a strategy that works where others fail is worth far more than one in an empty corner.
+Twice on Sept 20, 2026 you declined a pass with "every specialty is occupied" while twenty-six agents across the
+floor had never placed a single order. An occupied desk full of agents that cannot trade is the emptiest thing
+here. Take an empty specialty only when one exists. Prefer structural edges that survive fees (maker fills, favourites,
 settlement mechanics, calendar effects) to pattern-fitting. Each strategy is one file
 `league/strategies/<name>.py` that follows the strategy contract EXACTLY, plus the WHOLE updated
 `league/strategies/registry.json` (a JSON list of {"name", "family", "file", "why"}; keep every existing row).
@@ -407,6 +412,27 @@ def _epoch(iso: str) -> float:
     return parsed.timestamp() if parsed else 0.0
 
 
+def _how_the_desk_is_doing(house: Any, niche_id: str) -> dict[str, Any]:
+    """How a specialty's members are really faring: how many cannot trade at all, how many trade
+    and lose, and the best growth anyone there has managed. An architect told only that a desk has
+    members will leave it alone; told that all six of them have placed nothing, it has work to do."""
+    barren = losing = traded = 0
+    best = None
+    for agent in house.registry.living():
+        if agent.niche != niche_id:
+            continue
+        standing = house.standing_of(agent.id)
+        if standing["active_blocks"] <= 0:
+            barren += 1
+            continue
+        traded += 1
+        if standing["mean_growth"] <= 0:
+            losing += 1
+        best = standing["mean_growth"] if best is None else max(best, standing["mean_growth"])
+    return {"barren_agents": barren, "trading_agents": traded, "losing_agents": losing,
+            "best_mean_growth": None if best is None else round(best, 6)}
+
+
 def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
     """What each role is shown, gathered from the House. Plain data, public rows only, no code secrets."""
 
@@ -430,7 +456,10 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
 
             base.update(replay_trials=trials, occupied_niches=sorted({a.niche for a in house.registry.living()}),
                         specialties=[{"id": n.id, "title": n.title, "venue": n.venue, "horizons": list(n.horizons), "open": not n.dormant,
-                                      "members": house.members(n.id), "universe": list(n.universe[:24]), "brief": n.brief[:700]}
+                                      "members": house.members(n.id), "universe": list(n.universe[:24]), "brief": n.brief[:700],
+                                      # What actually decides where a new strategy is worth writing: not whether
+                                      # anyone sits there, but whether anyone sitting there can trade or profit.
+                                      **_how_the_desk_is_doing(house, n.id)}
                                      for n in house.niches.values()],
                         founding_seeds=[{k: s[k] for k in ("name", "family", "why")} for s in seeds.SEEDS],
                         registry=strategies.registry(), library=house.commons.library_search("edge evidence fees maker", 8)["results"])
