@@ -113,7 +113,7 @@ unconfirmed write is an order until reconciliation says otherwise.
 `POST /v1/frontier/responses` forwards one call to `https://api.openai.com/v1/responses` with
 `OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$100** a UTC calendar month, starting at zero).
 A call is priced twice. Before it leaves, at its worst case: every byte of the request as input at
-three bytes a token, every allowed output token used; that much is reserved, and a call whose
+one byte per token plus framing, at the long-context ceiling, every allowed output token used; that much is reserved, and a call whose
 worst case does not fit in what is left of the month is a `402` with `cap: frontier_month`. After
 it returns, at the usage the provider reports, and the difference is given back. The reply carries
 `X-LTCM-Cost-USD`, and `X-LTCM-Agent` on the request attributes the cost in `/v1/health`.
@@ -126,9 +126,13 @@ call is an uncapped one.
 | `gpt-6-astra` | 12.50 | 1.00 | 50 |
 | `gpt-5.6-sol` | 5.00 | 0.40 | 20 |
 | `gpt-5.6-terra` | 2.50 | 0.20 | 12 |
+| `gpt-5.6-luna` | 0.25 | 0.02 | 1.20 |
 
 Input is priced at the cache-write rate, the dearest an input token can be, so the meter errs
-high. Also refused: a streaming or background call (`400`: the usage that settles the bill arrives
+high. Requests above 272,000 input tokens use the configured long-context rates (2x input
+and cached input, 1.5x output). Only inline text and standard service are admitted; stored
+conversations, attachments, built-in tools and other service tiers have no price here.
+These are conservative estimates, not provider invoices. Also refused: a streaming or background call (`400`: the usage that settles the bill arrives
 only with a complete response), `max_output_tokens` missing or outside 1 to 16,000 (`400`), a body
 over 512 KiB (`413`), no `OPENAI_SECRET_KEY` (`503`). A provider `4xx` is settled at zero; a
 provider error, a timeout (280 seconds) or a reply with no readable usage keeps its whole

@@ -154,6 +154,25 @@ class CampaignTests(PhaseCase):
             model.ask(system='s', user='u', agent='test')
         self.assertEqual(len(opener.calls), 1)
 
+    def test_supported_openai_models_reserve_and_settle_their_own_ceiling(self):
+        guard = self.budget()
+        for model, rate_in, rate_out in [('gpt-5.6-luna', '.50', '1.80'),
+                                         ('gpt-5.6-terra', '5', '18'), ('gpt-5.6-sol', '10', '30')]:
+            with self.subTest(model=model):
+                before = guard.remaining('openai')
+                usage = {'input_tokens': 1000, 'output_tokens': 2000}
+                opener = FakeOpener(ok(cost='0.001', model=model, usage=usage))
+                Frontier('https://example.test', lambda: 'token', model=model, opener=opener,
+                         spend_guard=guard).ask(system='s', user='u', agent='test')
+                bound = (1000 * Decimal(rate_in) + 2000 * Decimal(rate_out)) / 1000000
+                self.assertEqual(before - guard.remaining('openai'), bound)
+        self.assertEqual(guard.report()['pending_calls'], 0)
+        opener = FakeOpener()
+        with self.assertRaisesRegex(FrontierError, 'no verified price'):
+            Frontier('https://example.test', lambda: 'token', model='unpriced', opener=opener,
+                     spend_guard=guard).ask(system='s', user='u', agent='test')
+        self.assertEqual(opener.calls, [])
+
     def test_sail_detached_settlement_survives_restart(self):
         guard = self.budget()
         calls = []
