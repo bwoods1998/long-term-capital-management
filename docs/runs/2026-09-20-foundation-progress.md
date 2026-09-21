@@ -1,5 +1,8 @@
 # Foundation progress — September 20, 2026
 
+The later [two-hour evening watch](2026-09-20-evening-watch.md) tracks current observations,
+including a premature displacement and the paper-screen cadence bug found after this snapshot.
+
 Latest verified runtime snapshot: **6:32 PM Pacific / September 21, 01:32 UTC**.
 The foundation is producing reproducible experiments. The API chief architect cannot yet
 repair the whole harness autonomously, and no profitable forward edge has been established.

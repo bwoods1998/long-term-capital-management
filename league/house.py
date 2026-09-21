@@ -1531,13 +1531,31 @@ class House:
             if standing.rung >= 2 or standing.mean_growth > 0:
                 continue
             opportunity = _epoch(agent.born_at)
+            opportunity_seq = 0
+            if standing.rung == 1:
+                # A late replay pass or a new empty-record strategy has not had the old
+                # program's trading opportunity. Meriwether-8 passed replay at 00:21 and
+                # was displaced at 01:01 with zero forward blocks because its birth was
+                # already fourteen hours old. Recover the current program's start from
+                # the ledger, including across restarts; duplicate strategy rows do not
+                # buy another grace period.
+                signature = None
+                for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
+                    p = entry.payload
+                    if entry.kind in ("agent.born", "agent.strategy"):
+                        current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
+                        if current != signature:
+                            opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                            signature = current
+                    elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
+                        opportunity, opportunity_seq = _epoch(entry.at), entry.seq
             niche = self.niche_of(agent)
             if standing.rung == 1 and niche is not None and niche.asset_class in ("equity", "option"):
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
                 # its equity agents were displaced before their first market session. Start
                 # their paper-seat grace at an actual offered opportunity (or a legacy fill),
                 # not at a weekend birth. Replay-only agents still have their normal deadline.
-                first = next((e for e in self.ledger.iter(kinds=("agent.woke", "book.fill"), agent=agent.id)
+                first = next((e for e in self.ledger.iter(kinds=("agent.woke", "book.fill"), agent=agent.id, after=opportunity_seq)
                               if e.kind == "book.fill" or (e.payload.get("ok") and int(e.payload.get("offered") or 0) > 0)), None)
                 if first is None:
                     continue
