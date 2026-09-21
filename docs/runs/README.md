@@ -2,6 +2,7 @@
 
 ## Current league
 
+- [Persistent earned live trading, September 21 UTC](2026-09-21-persistent-live-trading.md): replaces the timed pilot with owner-activated ladder access and existing venue cash; budgets and losses are retained.
 - [Game gate audit, September 21 UTC](2026-09-21-game-gate-audit.md): reachable evidence gates, aggressive resource rewards, replacement and bounded live learning.
 - [Evening watch, September 20 Pacific](2026-09-20-evening-watch.md): two-hour observations and the eight-hour accelerated run.
 

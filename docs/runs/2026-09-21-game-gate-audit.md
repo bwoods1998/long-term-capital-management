@@ -6,6 +6,10 @@ aggressively and replace unsuccessful agents after actual opportunity. It supers
 30-block micro rule and the one-hour replay replacement minimum in the earlier
 [evening-watch report](2026-09-20-evening-watch.md). Historical results are unchanged.
 
+The owner subsequently replaced the timed pilot with [persistent earned live trading](2026-09-21-persistent-live-trading.md).
+The account-action section below records the former, expired window. Use the newer activation
+command; the evidence gates and incentive changes in this audit remain in force.
+
 ## Findings and changes
 
 The game had genuine mechanical obstacles. A fresh 04:20 UTC snapshot had 25 paper agents,

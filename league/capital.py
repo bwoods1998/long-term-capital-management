@@ -87,24 +87,32 @@ def resize(house: Any, agent: Any) -> dict[str, Any] | None:
     growth, alpha = _sizing_record(house, agent, book)
     account = book.account(agent.id)
     present = max(account.staked, Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]))
-    target, numbers = kelly_stake(growth, present, book.venue_cash or ZERO,
+    guard = getattr(house, 'campaigns', None)
+    pilot = guard.live_authorization() if guard else None
+    venue_cash = book.venue_cash or ZERO
+    venue_caps = pilot['policy'].get('venue_capital_usd') if pilot else None
+    if venue_caps:
+        venue_cash = min(venue_cash, Decimal(venue_caps[agent.venue]) + max(house.tuition(agent.venue)['pnl_usd'], ZERO))
+    target, numbers = kelly_stake(growth, present, venue_cash,
                                  alpha=alpha, family_lcb=_family_lcb(house, agent, book))
     equity = book.equity(agent.id)
     delta = target - equity
-    guard = getattr(house, 'campaigns', None)
-    pilot = guard.live_pilot() if guard else None
     if pilot:
         if not guard.allows_live(3):
             return None
         # Every promoted account stays inside the same experiment's risk envelope. A rung-3
         # label must not turn $25 of tuition into unrestricted venue capital.
-        room = min(Decimal(pilot['policy']['max_stake_usd']) - account.staked,
-                   house.tuition()['headroom_usd'])
+        room = house.tuition()['headroom_usd']
+        if venue_caps:
+            room = min(room, house.tuition(agent.venue)['headroom_usd'])
+        else:
+            room = min(room, Decimal(pilot['policy']['max_stake_usd']) - account.staked)
         if delta > 0:
             delta = min(delta, max(room, ZERO))
             target = equity + delta
-        numbers['live_pilot'] = pilot['id']
-        numbers['pilot_max_stake_usd'] = pilot['policy']['max_stake_usd']
+        numbers['live_authorization'] = pilot['id']
+        if not venue_caps:
+            numbers['pilot_max_stake_usd'] = pilot['policy']['max_stake_usd']
     # Small moves are noise: act on a tenth of the stake or more. Shrinking never forces a sale:
     # only free cash comes back, and the position caps shrink with the stake at once.
     if abs(delta) < max(equity, Decimal(1)) / 10:
@@ -139,7 +147,7 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
     demand: dict[str, Decimal] = {"kalshi": ZERO, "alpaca": ZERO}
     ranked = []
     guard = getattr(house, 'campaigns', None)
-    pilot = guard.live_pilot() if guard else None
+    pilot = guard.live_authorization() if guard else None
     for agent in house.registry.living():
         rung = house.evaluator.rung(agent.id)
         if rung < 2:
@@ -152,7 +160,9 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
         present = max(account.staked, Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]))
         target, numbers = kelly_stake(growth, present, Decimal("1e12"), alpha=alpha)  # before venue cash binds
         if pilot:
-            target = min(target, Decimal(pilot['policy']['max_stake_usd']))
+            ceiling = (pilot['policy']['venue_capital_usd'][agent.venue] if pilot['policy'].get('venue_capital_usd')
+                       else pilot['policy']['max_stake_usd'])
+            target = min(target, Decimal(ceiling))
         if numbers.get("lcb") is not None and numbers["lcb"] > 0:
             demand[agent.venue] += target
             ranked.append({"agent": agent.id, "venue": agent.venue, "rung": rung, "lcb": numbers["lcb"], "blocks": numbers["blocks"], "justified_usd": str(target)})
@@ -162,7 +172,10 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
     shortfall = {venue: max(demand[venue] - cash[venue] * share * max(len([r for r in ranked if r["venue"] == venue]), 1), ZERO) for venue in demand}
     if pilot:
         shortfall = {venue: ZERO for venue in demand}
-        summary = (f"Add nothing for this live-learning window. Its ${pilot['policy']['max_loss_usd']} aggregate risk envelope "
+        summary = (f"The owner allocated ${pilot['policy']['max_loss_usd']} across the live venues. "
+                   "Performance earns sizing within that allocation; losses remain recorded and deposits do not enlarge it."
+                   if pilot['policy'].get('venue_capital_usd') else
+                   f"Add nothing for this live-learning window. Its ${pilot['policy']['max_loss_usd']} aggregate risk envelope "
                    f"and ${pilot['policy']['max_stake_usd']} per-agent capital limit remain binding after promotion. "
                    "Research evidence cannot authorize an expanded financial experiment.")
     elif not ranked:

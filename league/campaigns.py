@@ -75,6 +75,8 @@ class CampaignBudget:
                 policy TEXT NOT NULL, first_row INTEGER NOT NULL, meters TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS live_pilot(id TEXT PRIMARY KEY, started REAL NOT NULL,
                 ends REAL NOT NULL, policy TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS live_trading(id TEXT PRIMARY KEY, started REAL NOT NULL,
+                policy TEXT NOT NULL, revoked REAL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -85,8 +87,58 @@ class CampaignBudget:
         self.ends = self.started + float(self.policy["duration_hours"]) * 3600
 
     def running(self) -> bool:
+        live = self.live_trading()
+        if live and live['active']:
+            return True  # Explicit owner grant: existing dollars remain bounded, without a timer.
         burst = self.burst()
         return self.started <= self.clock() < self.ends and (not burst or burst['started'] <= self.clock() < burst['ends'])
+
+    def live_trading(self) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute('SELECT * FROM live_trading').fetchone()
+            if row is None:
+                return None
+            value = {**dict(row), 'policy': json.loads(row['policy']), 'mode': 'persistent', 'ends': None}
+            from .live_trading import policy
+            value['active'] = (value['revoked'] is None and value['started'] <= self.clock()
+                               and value['policy'] == policy(value['policy']['venue_capital_usd']))
+            return value
+
+    def live_authorization(self) -> dict[str, Any] | None:
+        # Even a revoked grant retains its capital accounting; disabling cannot erase losses.
+        return self.live_trading() or self.live_pilot()
+
+    def activate_live_trading(self, ident: str, venue_capital: Mapping[str, Any]) -> dict[str, Any]:
+        """Account-owner action. Persistent ladder access; no provider or capital replenishment."""
+        from .live_trading import policy
+        if not isinstance(ident, str) or not ident.strip() or len(ident) > 100:
+            raise ValueError('live trading requires a bounded identity')
+        encoded = canonical(policy(venue_capital))
+        with self.lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                old = self.live_trading()
+                if old:
+                    if old['id'] != ident or canonical(old['policy']) != encoded:
+                        raise CampaignClosed('live trading already has a capital allocation; it cannot reset')
+                else:
+                    if self.live_pilot():
+                        raise CampaignClosed('an existing pilot requires an explicit capital migration')
+                    burst = self.burst()
+                    if not burst or not all(self.ready(k) for k in ('sail', 'openai')):
+                        raise CampaignClosed('an existing funded burst and healthy provider meters are required')
+                    if any(self._burst_used(k, burst) >= micro(burst['policy']['caps_usd'][k]) for k in ('sail', 'openai')):
+                        raise CampaignClosed('unused Sail and OpenAI allowance is required for execution and audits')
+                    self.db.execute('INSERT INTO live_trading VALUES(?,?,?,NULL)', (ident, self.clock(), encoded))
+                self.db.execute('COMMIT')
+            except BaseException:
+                self.db.execute('ROLLBACK')
+                raise
+        return self.live_trading()
+
+    def revoke_live_trading(self) -> None:
+        with self.lock:
+            self.db.execute('UPDATE live_trading SET revoked=COALESCE(revoked,?)', (self.clock(),))
 
     def burst(self) -> dict[str, Any] | None:
         with self.lock:
@@ -166,6 +218,8 @@ class CampaignBudget:
         with self.lock:
             self.db.execute('BEGIN IMMEDIATE')
             try:
+                if self.live_trading():
+                    raise CampaignClosed('persistent live trading cannot be replaced by a timed pilot')
                 old = self.live_pilot()
                 if old:
                     if old['id'] != ident or canonical(old['policy']) != encoded:
@@ -187,6 +241,9 @@ class CampaignBudget:
     def allows_live(self, target_rung: int) -> bool:
         if target_rung not in (2, 3):
             return False
+        live = self.live_trading()
+        if live:
+            return live['active'] and target_rung <= live['policy']['max_rung']
         if self.policy['allow_new_live_capital']:
             return True
         pilot = self.live_pilot()
@@ -318,6 +375,9 @@ class CampaignBudget:
                 "foundation_cap_usd": self.policy['total_cap_usd'],
                 "allow_new_live_capital": self.policy["allow_new_live_capital"],
                 "live_pilot": self.live_pilot(),
+                "live_trading": self.live_trading(),
+                "effective_research_deadline": (None if self.live_trading() and self.live_trading()['active']
+                                                else min(self.ends, burst['ends']) if burst else self.ends),
                 "accounts": {kind: {"cap_usd": usd(cap + micro(extra.get(kind, '0'))), "committed_usd": usd(self._used(kind)),
                     "external_reserve_usd": usd(self.external.get(kind, 0)), "remaining_usd": str(self.remaining(kind))}
                     for kind, cap in self.caps.items()},
@@ -325,7 +385,7 @@ class CampaignBudget:
                 "pending_calls": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost IS NULL").fetchone()[0],
                 "reservation_breaches": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost>reserved").fetchone()[0],
                 "burst": ({'id': burst['id'], 'started': burst['started'], 'ends': burst['ends'],
-                    'running': self.running(), 'caps_usd': burst['policy']['caps_usd'],
+                    'running': burst['started'] <= self.clock() < min(self.ends, burst['ends']), 'caps_usd': burst['policy']['caps_usd'],
                     'committed_usd': {k: usd(self._burst_used(k, burst)) for k in burst['policy']['caps_usd']},
                     'remaining_usd': {k: str(self.remaining(k)) for k in burst['policy']['caps_usd']},
                     'note': 'Additional owner research allowance. Original phase and commitments are retained; expiry closes new paid work.'} if burst else None),
@@ -392,6 +452,8 @@ class CampaignPacer(Pacer):
             return Decimal(0)
         # This is an eight-hour envelope, not a daily allowance. Reserve half of OpenAI
         # for shared architect work and a quarter of Sail for hosting/validation.
-        total = self.allowance('sail') * Decimal('.75') + self.allowance('openai') * Decimal('.5')
+        live = self.guard.live_trading()
+        allowance = self.remaining if live and live['active'] else self.allowance
+        total = allowance('sail') * Decimal('.75') + allowance('openai') * Decimal('.5')
         duration = Decimal(str(burst['ends'] - burst['started']))
         return (total * Decimal(str(per_seconds)) / duration).quantize(Decimal('.01'))

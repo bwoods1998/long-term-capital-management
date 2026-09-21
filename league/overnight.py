@@ -43,6 +43,9 @@ def validate(p):
 
 def active(guard, clock):
     burst = guard.burst() if guard is not None else None
+    live = guard.live_trading() if guard is not None else None
+    if burst and live and live['active']:
+        return {**burst, 'ends': None, 'live_authorization': live['id']}
     return burst if burst and burst['started'] <= clock() < burst['ends'] and guard.running() else None
 
 

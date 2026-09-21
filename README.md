@@ -12,8 +12,10 @@ pass the tests. Venue keys, order caps, OpenAI/Jev limits and the kill switch li
 gateway that agent code cannot change. The House still holds Sail credentials and enforces its
 campaign budget; moving that authority outside the mutable House is part of the architect handoff.
 
-**Current phase:** a $500, 48-hour foundation campaign within a proposed $10,000 staged mandate,
-ending September 22, 2026 at 1:22 PM Pacific. New live allocation is blocked during this phase.
+**Current authorization:** [persistent earned live trading](docs/runs/2026-09-21-persistent-live-trading.md)
+is prepared for the owner's activation on the existing venue balances, with no live deadline.
+It retains the original $500 foundation plus $325 burst accounting and resumes only unused
+OpenAI/Sail allowance. Deployment alone leaves live trading disabled; inspect `live_trading.active`.
 The first passing historical replay has been independently reproduced and entered paper; a
 profitable forward edge and autonomous repair of the whole harness are still unproved.
 Read the [latest run](docs/runs/2026-09-20-foundation-progress.md),
@@ -160,11 +162,11 @@ hour scaled; losing, 8, 3 and 1. So the loop closes: trade well, earn a much lar
 day's pool, buy the best mind in the firm oftener, trade better. The rules text tells every agent
 this in as many words.
 
-The separately prepared live-learning window allows up to eight live agents, starting at $25
-and earning at most $50 of net capital each, inside one **$200 aggregate loss envelope**. Scaled
-agents, prior losses and abandoned positions remain counted. The window needs the account
-owner's explicit [activation command](docs/runs/2026-09-21-game-gate-audit.md#account-action);
-deploying code or funding research does not activate it. It expires with tonight's existing burst.
+The [persistent owner activation](docs/runs/2026-09-21-persistent-live-trading.md#account-owner-command)
+replaces the timed $200 pilot. Agents begin with $25 and earn larger stakes under the existing
+performance and sizing rules, within the owner's fixed allocation of current venue cash.
+Scaled agents, prior losses and abandoned positions remain counted. The authorization has no
+calendar expiry; deploying code or funding research does not activate it.
 
 **Compute credits.** Profit decides an agent's share of the pool, never its size, and the curve is
 steep on purpose: credits are how the firm's intelligence is bought. An epoch is **six hours**, so
@@ -363,6 +365,7 @@ The `league/` modules:
 | `stats.py` | The statistics the ladder decides on: bounds, alpha spending, the loss-rate gate, deflated Sharpe, CUSUM, quarter-Kelly. |
 | `evaluator.py`, `episodes.py` | The ladder: trials, blocks and completed portfolio exposures, promotion, death and drift. |
 | `live_pilot.py` | Explicit owner activation and immutable deadline for the bounded live-learning window. |
+| `live_trading.py` | Owner activation/revocation of persistent earned trading on a fixed allocation of existing venue cash. |
 | `replay.py` | Rung 0: the mechanical replay simulator. Self-contained; runs inside the agent's box. |
 | `tapes.py` | Recorded history for replay and live snapshots of the same shape, for both venues. |
 | `paper.py` | The Kalshi shadow account: live quotes, conservative fills, no order ever sent. |

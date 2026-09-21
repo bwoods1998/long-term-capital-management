@@ -27,11 +27,19 @@ def report(root: str | Path, *, now=None):
         costs = [dict(r) for r in db.execute('SELECT kind,COUNT(*) calls,SUM(COALESCE(cost,0)) settled_micro_usd,SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END) held_micro_usd,SUM(cost IS NULL) unresolved FROM commitments GROUP BY kind')]
         meters = [dict(r) for r in db.execute('SELECT meter.*,checked,failed FROM meter LEFT JOIN meter_health USING(id)')]
         burst = None
+        live_trading = None
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='burst'").fetchone():
             row = db.execute('SELECT * FROM burst').fetchone()
             if row:
                 burst = {**dict(row), 'policy': json.loads(row['policy']), 'meters': json.loads(row['meters'])}
                 burst['running'] = burst['started'] <= now < burst['ends']
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='live_trading'").fetchone():
+            row = db.execute('SELECT * FROM live_trading').fetchone()
+            if row:
+                from .live_trading import policy as live_policy
+                live_trading = {**dict(row), 'policy': json.loads(row['policy'])}
+                live_trading['active'] = (row['revoked'] is None and row['started'] <= now
+                    and live_trading['policy'] == live_policy(live_trading['policy']['venue_capital_usd']))
     finally:
         db.close()
     since = datetime.fromtimestamp(phase['started'], timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
@@ -110,8 +118,9 @@ def report(root: str | Path, *, now=None):
     finally:
         db.close()
     ends = phase['started'] + float(policy['duration_hours']) * 3600
-    return {'phase': phase['id'], 'started': phase['started'], 'ends': ends, 'running': phase['started'] <= now < ends,
-            'policy': policy, 'burst': burst, 'costs': costs, 'vendor_meters': meters,
+    running = bool(live_trading and live_trading['active']) or (phase['started'] <= now < ends and (not burst or burst['running']))
+    return {'phase': phase['id'], 'started': phase['started'], 'ends': ends, 'running': running,
+            'policy': policy, 'burst': burst, 'live_trading': live_trading, 'costs': costs, 'vendor_meters': meters,
             'experiments': {'started': len(started), 'finished': len(finished),
                             'unfinished_attempts': sorted(set(started)-set(finished)),
                             'latest': list(finished.values())[-5:]},
