@@ -241,6 +241,29 @@ class SavedResearch(ResearchCase):
         self.assertEqual(resumed.provider.seen, [])
         self.assertEqual(self.economy.balance(self.parent.id), Decimal('4.99'))
 
+    def test_interrupted_free_read_is_refreshed_without_rebuying_the_model(self):
+        r = self.fresh([[('runtime_status', {}), ('finish', {'summary': 'read recovered'})]],
+                       capabilities=lambda agent: {'revision': 'old'})
+        save = self.jobs.save
+        def die_before_receipt(session, state):
+            if state['stage'] == 'tools' and state['call_index'] == 1:
+                raise SystemExit('read happened, receipt not saved')
+            save(session, state)
+        self.jobs.save = die_before_receipt
+        with self.assertRaises(SystemExit):
+            self.run_pass(r)
+        self.reopen()
+        resumed = self.fresh(capabilities=lambda agent: {'revision': 'new'})
+        out = self.run_pass(resumed)
+        self.assertEqual(out.reason, 'finished')
+        self.assertEqual(resumed.provider.seen, [])
+        self.assertEqual(self.economy.balance(self.parent.id), Decimal('4.99'))
+        saved = self.jobs.get(self.session)['checkpoint']
+        receipts = [i for i in saved['conversation'] if i.get('type') == 'function_call_output']
+        self.assertIn('new', receipts[0]['output'])
+        recoveries = [e for e in self.ledger.iter(kinds='agent.research') if e.payload.get('tool') == 'refreshed_read']
+        self.assertEqual(len(recoveries), 1)
+
     def test_shutdown_after_a_response_saves_it_before_running_any_tool(self):
         stopped = [False]
         r = self.fresh([[('journal_write', {'text': 'An expensive finding that must be preserved.'}), ('finish', {'summary': 'done'})]],

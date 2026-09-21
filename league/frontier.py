@@ -46,6 +46,7 @@ class Answer:
     usage: dict[str, Any]
     model: str
     status: str = 'completed'
+    cost_verified: bool = True
 
     def json(self) -> dict[str, Any]:
         """The first JSON object in the answer. Raises FrontierError when there is none."""
@@ -141,18 +142,21 @@ class Frontier:
             cost_usd = Decimal(0)
         if not cost_usd.is_finite() or cost_usd < 0:
             cost_usd = Decimal(0)  # the gateway's own meter is the record; a garbled header charges nothing here
-        if self.spend_guard is not None and cost is not None:
+        verified = False
+        if cost is not None:
             try:
                 confirmed = Decimal(str(cost))
                 usage = payload.get('usage') if isinstance(payload.get('usage'), dict) else {}
                 tokens_in, tokens_out = usage.get('input_tokens'), usage.get('output_tokens')
                 if (confirmed.is_finite() and confirmed >= 0 and type(tokens_in) is int and type(tokens_out) is int
                         and min(tokens_in, tokens_out) >= 0 and payload.get('model') == self.model):
+                    verified = True
                     # The gateway's header is an estimate, not an invoice. Keep the phase bound
                     # conservative even if its pricing omits long-context/cache-write premiums.
-                    bounded = (Decimal(tokens_in) * input_rate + Decimal(tokens_out) * output_rate) / 1000000
-                    self.spend_guard.settle(commitment, max(confirmed, bounded))
+                    if self.spend_guard is not None:
+                        bounded = (Decimal(tokens_in) * input_rate + Decimal(tokens_out) * output_rate) / 1000000
+                        self.spend_guard.settle(commitment, max(confirmed, bounded))
             except InvalidOperation:
                 pass  # unknown costs retain the full hold, including across restarts
         return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model),
-                      str(payload.get('status') or 'completed'))
+                      str(payload.get('status') or 'completed'), verified)

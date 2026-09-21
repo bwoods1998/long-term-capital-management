@@ -156,6 +156,13 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
+    if house.researcher is not None and campaigns is not None:
+        from .fast_research import FastResearch, ResearchRouter, MODEL as RESEARCH_MODEL, load_routes
+
+        fast = FastResearch(root / 'fast-research.sqlite',
+            Frontier(gateway_url, token, model=RESEARCH_MODEL, spend_guard=campaigns),
+            house.ledger, balance=house.economy.balance, clock=house.clock)
+        house.researcher.provider = ResearchRouter(provider, fast, load_routes())
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],

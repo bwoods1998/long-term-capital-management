@@ -59,6 +59,11 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
 ]
 
+# These tools buy no inference and write no strategy, credits, orders or shared notes.
+# After a crash, their new receipt describes a refreshed observation, not the lost one.
+REFRESHABLE_TOOLS = frozenset(('runtime_status', 'replay_coverage', 'markets_now',
+                             'library_search', 'library_read', 'playbook_read'))
+
 
 @dataclass
 class Pass:
@@ -227,14 +232,15 @@ class Researcher:
         job = self.jobs.get(session) if self.jobs else None
         state = job['checkpoint'] if job else None
         if state is None:
+            settings = self.provider.settings_for(agent, self.settings) if hasattr(self.provider, 'settings_for') else dict(self.settings)
             state = {
                 'version': 1, 'stage': 'model', 'turn': 0, 'started': self.clock(),
                 'conversation': [{'role': 'system', 'content': self._system()},
                                  {'role': 'user', 'content': self._state(agent, standing)}],
                 'nudged': False, 'truncated': 0,
-                'effort': str(self.settings.get('reasoning_effort', 'low')),
-                'profile': str(self.settings.get('profile', 'flash_flex')),
-                'settings': dict(self.settings), 'tools': TOOLS,
+                'effort': str(settings.get('reasoning_effort', 'low')),
+                'profile': str(settings.get('profile', 'flash_flex')),
+                'settings': settings, 'tools': TOOLS,
                 'out': pass_state(Pass(agent.id)),
             }
         if state.get('version') != 1:
@@ -261,6 +267,13 @@ class Researcher:
                 # looks like this, so no side effect is safe to repeat. A replay may already
                 # have retained a candidate on the append-only ledger: recover that code.
                 call = state['response']['calls'][state['call_index']]
+                if call['name'] in REFRESHABLE_TOOLS:
+                    self.ledger.append('agent.research', {'tool': 'refreshed_read', 'session': session,
+                        'turn': turn, 'name': call['name'], 'reason': 'interrupted read refreshed after restart'},
+                        agent=agent.id, id=f'research-read-recovery:{session}:{turn}:{state["call_index"]}')
+                    state['stage'] = 'tools'
+                    save()
+                    continue
                 for entry in self.ledger.iter(kinds='agent.research', agent=agent.id):
                     p = entry.payload
                     if p.get('session') == session and p.get('status') == 'retained' and p.get('_candidate'):
@@ -410,11 +423,19 @@ class Researcher:
                     save()
                     break
                 advance()
+        summary_id = f'research-summary:{session}' if self.jobs else None
+        if summary_id and self.ledger.get(summary_id):
+            return out
+        if 'finished_at' not in state:
+            state['finished_at'] = self.clock()
+            save()
         self.ledger.append('agent.research', {
             'tool': 'summary', 'session': session, 'turns': out.turns,
+            'profile': state['profile'], 'started': state['started'], 'finished': state['finished_at'],
+            'elapsed_seconds': round(max(0, state['finished_at'] - state['started']), 3),
             'cost_usd': format(out.cost_usd, 'f'), 'trials': out.trials,
             'summary': out.summary[:1200], 'reason': out.reason, 'candidate': bool(out.candidate),
-        }, agent=agent.id, id=f'research-summary:{session}' if self.jobs else None)
+        }, agent=agent.id, id=summary_id)
         return out
 
     # ------------------------------------------------------------------- tools

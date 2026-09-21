@@ -69,3 +69,31 @@ allocation; changing that requires an explicit, recorded policy transition and v
 Private snapshots and the SQLite baseline are retained outside the repository; they include
 account information and agent source. This report publishes the conclusions, not credentials
 or raw account records.
+
+## Faster research treatment (acceptance in progress)
+
+A persisted cohort router can assign new research sessions to OpenAI Luna. Both routes receive
+the same research evidence and available tools. Sail uses native function calls; Luna uses a
+strict inline JSON envelope through the existing metered gateway. This is a comparison of
+**route and protocol**, not a clean estimate of model intelligence alone. Existing sessions keep
+their original provider and exact request identity. The new cohort is disabled until paid-loop
+acceptance completes.
+
+The Luna adapter records its paid response before tool execution, reuses it after restart,
+locks each request across processes, rejects changed identities, and never automatically buys
+an ambiguous request again. Invalid tool envelopes, incomplete responses and unverified billing
+receipts execute no tools. Agent credits and the campaign reserve must cover the call first.
+Research admission follows the selected provider's budget; exhausted Sail inference allowance
+does not incorrectly block a funded Luna session. Sandbox/hosting stops still apply.
+
+Interrupted free observation tools can now be refreshed after restart, with an explicit recovery
+receipt. Replays, paid calls and writes retain the conservative no-repeat rule. Summaries record
+their frozen profile and elapsed time to support cost/throughput comparisons without changing
+their idempotent identity. At 7:34 PM, the floor had 82 completed summaries, 26 archived trials and
+three historical passes. This is five additional summaries and five additional trials since the
+baseline, not evidence of live profitability.
+
+The funding-audit packet now describes the actual position-reducing exit exemption, the entry
+caps and the gateway's reliance on the House's exit tag. A regression test exercises a profitable
+exit above the rung's entry cap and rejects an oversell. The earlier advisory objection remains
+in this report; it is not silently rewritten as a production approval.
