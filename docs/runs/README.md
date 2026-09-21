@@ -2,6 +2,9 @@
 
 ## Current league
 
+- [Game gate audit, September 21 UTC](2026-09-21-game-gate-audit.md): reachable evidence gates, aggressive resource rewards, replacement and bounded live learning.
+- [Evening watch, September 20 Pacific](2026-09-20-evening-watch.md): two-hour observations and the eight-hour accelerated run.
+
 - [Foundation progress, September 20](2026-09-20-foundation-progress.md): deployed campaign,
   research recovery, model grants, replay proof and Jev integration.
 - [Model comparison, September 20](2026-09-20-model-routing.md): what the paid coding pilots measured.

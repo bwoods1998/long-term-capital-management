@@ -492,13 +492,14 @@ def _how_the_desk_is_doing(house: Any, niche_id: str) -> dict[str, Any]:
         if agent.niche != niche_id:
             continue
         standing = house.standing_of(agent.id)
-        if standing["active_blocks"] <= 0:
+        if standing.get('earned_observations', standing['active_blocks']) <= 0:
             barren += 1
             continue
         traded += 1
-        if standing["mean_growth"] <= 0:
+        growth = standing.get('earned_growth', standing['mean_growth'])
+        if growth <= 0:
             losing += 1
-        best = standing["mean_growth"] if best is None else max(best, standing["mean_growth"])
+        best = growth if best is None else max(best, growth)
     return {"barren_agents": barren, "trading_agents": traded, "losing_agents": losing,
             "best_mean_growth": None if best is None else round(best, 6)}
 
@@ -558,6 +559,20 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
             base.update(replay_trials=trials, lessons_so_far=[e.payload.get("title") for e in ledger.read(kinds="playbook.entry", limit=40, newest=True)],
                         today=time.strftime("%Y-%m-%d", time.gmtime(house.clock())))
         living = house.registry.living()
+        from .constitution import CONSTITUTION
+        guard = getattr(house, 'campaigns', None)
+        burst = guard.burst() if guard else getattr(house, '_burst', None)
+        base['qualification_policy'] = CONSTITUTION['ladder']
+        base['learning_window'] = ({'id': burst['id'], 'ends': burst['ends'],
+            'remaining_seconds': max(0, burst['ends'] - house.clock()),
+            'guidance': 'Prioritize falsifiable improvements that can produce new forward observations in the remaining window. '
+                        'Use shorter settlement/holding opportunities when an after-fee edge supports them. '
+                        'Do not force turnover, assume profitability, or mistake repeated historical tests for new evidence.'}
+            if burst and 'ends' in burst else None)
+        base['live_pilot'] = guard.live_pilot() if guard else None
+        states = getattr(house, '_state', {}).get('promotion_status', {})
+        base['promotion_holds'] = [states[a.id] for a in living if a.id in states
+                                   and states[a.id].get('stage') not in ('evidence', 'promoted')][-12:]
         base['engineering_backlog'] = house.commons.blocked_requests(limit=10)
         if getattr(house, 'semantic_lab', None) is not None:
             base['semantic_research'] = house.semantic_lab.evidence(limit=8)

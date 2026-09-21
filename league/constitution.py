@@ -1,9 +1,9 @@
 """The constitution: what no model and no code path on Sail may change.
 
-These numbers were written down before any agent traded, which is what makes the tests
-pre-registered. They are constants in a file that Merton's pull requests are refused for touching
-(`league/ci.py` guards the path), and the House records this file's digest on the ledger every
-time it starts, so a change is visible in the public record.
+These are versioned evaluation rules. The initial thresholds preceded the league; owner-requested
+revisions and their rationale are recorded in the run reports. Merton's pull requests cannot
+touch this file (`league/ci.py` guards the path). The House records its digest whenever it starts,
+so changed rules are visible and cannot be described as an unchanged preregistered experiment.
 
 The order caps, the OpenAI budget and the kill switch are ENFORCED in the Cloudflare gateway,
 outside Sail, where nothing here can reach them; they are repeated here so the House refuses
@@ -53,14 +53,17 @@ CONSTITUTION: dict[str, Any] = {
         # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
         # micro rung is capped in dollars instead: see `tuition`.
         # `min_active_blocks` is in BLOCKS, and a block is an hour or a calendar day by the
-        # strategy's own declared horizon: 15 days is the whole expedition, so a daily strategy
-        # could never reach real money inside one. What the screen really asks for is a week of
-        # honest forward trading, which is 15 hourly blocks or 5 daily ones.
+        # strategy's own declared horizon. This remains an alternative for long or overlapping
+        # exposures; completed_exposures below removes a mandatory elapsed-time requirement.
         "paper": {"gate": "screen", "min_active_blocks": 15, "min_active_blocks_day": 5, "max_drawdown": 0.15},
         # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
         # this is the gate that protects real size. Promotion spends its own alpha: the looks
         # that can only kill (before `min_active_blocks`) spend none of it.
-        "micro": {"gate": "bound", "min_active_blocks": 30},
+        # Owner-requested accelerated experiment, Sept 20: remove the 30-hour minimum.
+        # Five active blocks retain the conventional route. The completed-exposure route below
+        # has no elapsed-time minimum; both routes share the original promotion error budget.
+        "micro": {"gate": "bound", "min_active_blocks": 5},
+        "completed_exposures": {"min_episodes": 10, "look_every_episodes": 5, "promotion_alpha_share": 0.5},
         # A small edge proves itself across a family sooner than in one agent (the first run's
         # favourites edge was only ever measurable pooled). An agent on rung 2 whose own record is
         # positive but not yet decisive may be scaled on its family's pooled real-money record:
@@ -102,4 +105,4 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = "ce94a5abab8c2f161628bd7695d75823382b2df27827940d05f169834584dbfd"
+PINNED_DIGEST = 'bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1'

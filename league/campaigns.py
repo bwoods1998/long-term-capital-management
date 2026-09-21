@@ -73,6 +73,8 @@ class CampaignBudget:
             CREATE TABLE IF NOT EXISTS meter_health(id TEXT PRIMARY KEY, checked REAL NOT NULL, failed INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS burst(id TEXT PRIMARY KEY, started REAL NOT NULL, ends REAL NOT NULL,
                 policy TEXT NOT NULL, first_row INTEGER NOT NULL, meters TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS live_pilot(id TEXT PRIMARY KEY, started REAL NOT NULL,
+                ends REAL NOT NULL, policy TEXT NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -135,6 +137,60 @@ class CampaignBudget:
         latest = self.db.execute('SELECT latest FROM meter WHERE id=?', (kind,)).fetchone()
         measured = max(0, latest[0] - burst['meters'].get(kind, latest[0])) if latest else 0
         return max(settled, measured) + pending
+
+    def live_pilot(self) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute('SELECT * FROM live_pilot').fetchone()
+            if row is None:
+                return None
+            value = {**dict(row), 'policy': json.loads(row['policy'])}
+            from .live_pilot import policy
+            value['active'] = (value['policy'] == policy() and self.running()
+                               and value['started'] <= self.clock() < value['ends'])
+            return value
+
+    def activate_live_pilot(self, ident: str) -> dict[str, Any]:
+        """One explicit account-owner activation; never implied by a research budget.
+
+        The original phase, provider holds and deadline remain untouched. This grants only the
+        existing audited micro entry and evidence-based scaling inside one bounded experiment.
+        It cannot renew itself after expiry.
+        """
+        from .live_pilot import policy
+        from .constitution import CONSTITUTION
+        if not isinstance(ident, str) or not ident.strip() or len(ident) > 100:
+            raise ValueError('live pilot requires a bounded identity')
+        if Decimal(CONSTITUTION['rungs']['2']['stake_usd']) != Decimal(policy()['stake_usd']):
+            raise ValueError('the live pilot requires the existing $25 micro stake')
+        encoded = canonical(policy())
+        with self.lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                old = self.live_pilot()
+                if old:
+                    if old['id'] != ident or canonical(old['policy']) != encoded:
+                        raise CampaignClosed('a live pilot already exists; its risk or deadline cannot reset')
+                else:
+                    burst = self.burst()
+                    if not burst or not self.running() or not all(self.ready(k) for k in ('sail', 'openai')):
+                        raise CampaignClosed('a healthy funded research burst is required')
+                    if self.remaining('openai') <= 0:
+                        raise CampaignClosed('fresh promotion audits need funded OpenAI allowance')
+                    self.db.execute('INSERT INTO live_pilot VALUES(?,?,?,?)',
+                                    (ident, self.clock(), min(self.ends, burst['ends']), encoded))
+                self.db.execute('COMMIT')
+            except BaseException:
+                self.db.execute('ROLLBACK')
+                raise
+        return self.live_pilot()
+
+    def allows_live(self, target_rung: int) -> bool:
+        if target_rung not in (2, 3):
+            return False
+        if self.policy['allow_new_live_capital']:
+            return True
+        pilot = self.live_pilot()
+        return bool(pilot and pilot['active'] and target_rung <= pilot['policy']['max_rung'])
 
     def allowance(self, kind: str) -> Decimal:
         burst = self.burst()
@@ -261,6 +317,7 @@ class CampaignBudget:
                 "running": self.running(), "cap_usd": usd(micro(self.policy['total_cap_usd']) + sum(micro(v) for v in extra.values())),
                 "foundation_cap_usd": self.policy['total_cap_usd'],
                 "allow_new_live_capital": self.policy["allow_new_live_capital"],
+                "live_pilot": self.live_pilot(),
                 "accounts": {kind: {"cap_usd": usd(cap + micro(extra.get(kind, '0'))), "committed_usd": usd(self._used(kind)),
                     "external_reserve_usd": usd(self.external.get(kind, 0)), "remaining_usd": str(self.remaining(kind))}
                     for kind, cap in self.caps.items()},

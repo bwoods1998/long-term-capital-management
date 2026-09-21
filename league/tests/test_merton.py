@@ -439,6 +439,13 @@ class DesignerSourceAndRuntime(unittest.TestCase):
         self.assertEqual(shown['game'],load_game())
         self.assertEqual(shown['active_game']['economy']['epoch_seconds'],3600)
         self.assertNotEqual(shown['game']['economy']['epoch_seconds'],3600)
+        house._burst = {'id': 'night', 'ends': 2000}
+        house.clock = lambda: 1500
+        shown = evidence_from(house)('designer')
+        self.assertEqual(shown['learning_window']['remaining_seconds'], 500)
+        self.assertEqual(shown['qualification_policy']['micro']['min_active_blocks'], 5)
+        self.assertEqual(shown['qualification_policy']['completed_exposures']['min_episodes'], 10)
+        self.assertIsNone(shown['live_pilot'])
 
 
 class NoBriefMayCarryANumberTheCheckerOwns(unittest.TestCase):

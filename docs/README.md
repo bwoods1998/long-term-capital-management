@@ -7,6 +7,9 @@ now; everything under "History" describes something that no longer runs.
 
 ## The system as it is now
 
+- [Game gate audit and live-learning window](runs/2026-09-21-game-gate-audit.md): completed-exposure qualification, reward continuity, evidence-based replacement, bounded scaling and account activation.
+- [Two-hour watch and accelerated overnight run](runs/2026-09-20-evening-watch.md): runtime findings, fixes, spend and acceptance.
+
 - [Active foundation phase](phase-one.md): the funded campaign, current limits and reproducibility contract.
 - [Latest foundation progress](runs/2026-09-20-foundation-progress.md): deployed changes, verified
   runtime state, first reproduced replay, Jev probe and unresolved issues.

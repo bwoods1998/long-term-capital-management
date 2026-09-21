@@ -158,7 +158,10 @@ class LadderTest(unittest.TestCase):
         house.evaluator.seat(agent.id, 1, "test: straight to paper")
         house._state["tried"][agent.id] = agent.code_sha256
 
-        self.run_hours(42, edge=0.78)  # 2.2% moves, right 78% of the time, against a 0.5% round-trip fee
+        for _ in range(42 * 12):
+            self.run_hours(1 / 12, edge=0.78)
+            if house.evaluator.rung(agent.id) >= 2:
+                break
         self.assertEqual(self.auditor.seen[:1], [agent.id])  # eligible on paper, so it was audited
         self.assertEqual(house.evaluator.rung(agent.id), 2)
         real, paper = house.books["alpaca"], house.books["alpaca-paper"]
@@ -168,7 +171,10 @@ class LadderTest(unittest.TestCase):
         self.assertEqual(real.limits[agent.id].max_position_usd, D("10"))
         self.assertTrue(real.reconcile().ok)
 
-        self.run_hours(46, edge=0.78)
+        for _ in range(46 * 12):
+            self.run_hours(1 / 12, edge=0.78)
+            if house.evaluator.rung(agent.id) >= 3:
+                break
         self.assertEqual(house.evaluator.rung(agent.id), 3)
         fills = [e for e in house.ledger.iter(kinds="book.fill", agent=agent.id) if e.payload["book"] == "alpaca" and e.payload["source"] == "venue"]
         self.assertTrue(all(D(e.payload["quantity"]) * D(e.payload["price"]) <= D("10.01") for e in fills[:50]))  # micro-real means micro
@@ -178,7 +184,7 @@ class LadderTest(unittest.TestCase):
         sized = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=agent.id) if e.payload.get("decision") == "size"]
         self.assertTrue(sized)
         self.assertGreater(D(sized[-1]["stake_usd"]), D("25"))
-        self.assertLessEqual(D(sized[-1]["stake_usd"]), real.venue_cash * D("0.25") + 1)  # never more than a quarter of the venue's cash
+        self.assertLessEqual(D(sized[-1]["stake_usd"]), D(sized[-1]["ceiling_usd"]))  # venue cash at the sizing decision
         # Regression: every wake re-seats the agent, and a seat once reset a scaled agent's limits to
         # the micro rung's, so its larger stake traded at $10 a position until the next day's sizing.
         self.run_hours(1, edge=0.78)

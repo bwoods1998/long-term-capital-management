@@ -472,17 +472,17 @@ class Researcher:
         # An agent that has not traded cannot hire him at all: Merton's own roles -- the architect,
         # the toolsmith who answers its requests, the teacher -- serve it for nothing instead.
         standing = self.standing(agent.id) if self.standing else {}
-        blocks = int(standing.get("active_blocks") or 0)
+        blocks = int(standing.get("earned_observations", standing.get("active_blocks")) or 0)
         needed = int(rules.get("min_active_blocks", 1))
         if blocks < needed:
-            return {"error": f"Merton is hired by traders: you have {blocks} active block(s) and need {needed}. "
+            return {"error": f"Merton is hired by traders: you have {blocks} earned observation(s) and need {needed}. "
                              "Trade first -- his architect, toolsmith and teacher already work for the whole floor, free."}
         last = self._last_consult(agent)
         # What a rung buys, and what PROFIT buys on top of it: the higher an agent has climbed and
         # the better it is doing, the more of him it may have. A losing desk waits; a winning one
         # can have him every hour and run away with the firm's best thinking. That is the flywheel.
         rung = self.rung(agent.id) if self.rung else 1
-        winning = float(standing.get("mean_growth") or 0.0) > 0
+        winning = float(standing.get("earned_growth", standing.get("mean_growth")) or 0.0) > 0
         table = rules.get("profitable_cooldown_hours_by_rung" if winning else "cooldown_hours_by_rung") or {}
         hours = float(table.get(str(rung), rules.get("cooldown_hours", 24)))
         if last is not None and self.clock() - last < hours * 3600:

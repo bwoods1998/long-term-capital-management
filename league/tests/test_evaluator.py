@@ -28,6 +28,8 @@ ALPHA = float(CONSTITUTION["ladder"]["alpha"])
 #: agents on paper (as they did when paper used it too), under a constitution whose paper gate is
 #: the bound as well: the rule under test is the same code at either rung.
 BOUND = copy.deepcopy(CONSTITUTION)
+BOUND["ladder"].pop("completed_exposures")  # isolate the original single-route statistical tests
+BOUND["ladder"]["micro"]["min_active_blocks"] = 30
 BOUND["ladder"]["paper"] = {"gate": "bound", "min_active_blocks": 30}
 
 WINNER = [1.2, 1.0, -0.4]  # dollars a block on a $200 stake: mean +0.3%, two wins in three
@@ -1424,7 +1426,7 @@ class Screen(EvalCase):
     def test_paper_still_kills(self):
         verdict = self.run_blocks([-0.004 if i % 3 else 0.001 for i in range(20)])
         self.assertEqual((verdict.decision, verdict.reason), ("die", "the upper bound on its growth is below zero"))
-        self.assertEqual(self.looks("a")[-1]["alpha_death"], stats.spend(ALPHA, 1))  # the look at 15 could not kill, so spent none
+        self.assertEqual(self.looks("a")[-1]["alpha_death"], stats.spend(ALPHA / 2, 1))  # block and episode routes share death alpha; the look at 15 could not kill, so spent none
 
     def test_a_thirty_percent_drawdown_kills_on_paper(self):
         verdict = self.run_blocks([-0.2, -0.2])
@@ -1450,8 +1452,8 @@ class Screen(EvalCase):
         self.assertEqual(verdict.decision, "hold")
         self.assertIn("next look is at 15", verdict.reason)
 
-    def test_the_micro_rung_asks_thirty_of_either_kind(self):
-        self.assertEqual((self.ev._gate_blocks(2, "day"), self.ev._gate_blocks(2, "hour")), (30, 30))
+    def test_the_conventional_micro_route_requires_five_blocks_of_either_kind(self):
+        self.assertEqual((self.ev._gate_blocks(2, "day"), self.ev._gate_blocks(2, "hour")), (5, 5))
 
     def test_the_micro_rung_is_still_the_bound(self):
         self.ev.seat("a", 2, "test")
@@ -1463,7 +1465,7 @@ class Screen(EvalCase):
             if i in (20, 25, 30):
                 verdict = self.ev.judge("a", "real")
         self.assertEqual((verdict.decision, verdict.reason), ("hold", "the evidence does not decide yet"))
-        self.assertEqual((verdict.numbers["tested_promotion"], verdict.numbers["alpha_spent"]), (True, stats.spend(ALPHA, 1)))
+        self.assertEqual((verdict.numbers["tested_promotion"], verdict.numbers["alpha_spent"]), (True, stats.spend(ALPHA / 2, 3)))
 
     def test_a_look_row_from_before_the_tests_were_told_apart_counts_against_both(self):
         self.ev.seat("a", 2, "test")
@@ -1473,7 +1475,7 @@ class Screen(EvalCase):
         for i in range(30):
             self.block("a", 0.004 if i % 2 == 0 else -0.003, book="real", start=25.0)
         numbers = self.ev.judge("a", "real").numbers
-        self.assertEqual((numbers["alpha_spent"], numbers["alpha_death"]), (stats.spend(ALPHA, 2), stats.spend(ALPHA, 2)))
+        self.assertEqual((numbers["alpha_spent"], numbers["alpha_death"]), (stats.spend(ALPHA / 2, 2), stats.spend(ALPHA / 2, 2)))
 
 
 class Family(EvalCase):

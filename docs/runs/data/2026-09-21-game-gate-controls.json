@@ -1,0 +1,65 @@
+{
+  "kind": "synthetic evaluator controls, not market forecasts",
+  "seed": 20260921,
+  "constitution_digest": "bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1",
+  "cohorts": {
+    "strong_mixed_edge": {
+      "agents": 24,
+      "max_completed_exposures": 48,
+      "decisions": {
+        "eligible": 24
+      },
+      "exposures_at_eligibility": [
+        10,
+        10,
+        15,
+        10,
+        15,
+        20,
+        10,
+        10,
+        10,
+        10,
+        25,
+        10,
+        10,
+        10,
+        40,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        15,
+        10
+      ]
+    },
+    "zero_gross_edge_after_fees": {
+      "agents": 24,
+      "max_completed_exposures": 48,
+      "decisions": {
+        "hold": 22,
+        "die": 2
+      },
+      "exposures_at_eligibility": []
+    },
+    "negative_edge": {
+      "agents": 24,
+      "max_completed_exposures": 48,
+      "decisions": {
+        "die": 24
+      },
+      "exposures_at_eligibility": []
+    },
+    "tiny_all_wins": {
+      "agents": 24,
+      "max_completed_exposures": 48,
+      "decisions": {
+        "hold": 24
+      },
+      "exposures_at_eligibility": []
+    }
+  }
+}

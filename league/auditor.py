@@ -14,6 +14,7 @@ the micro-real stake, next to what the approved agents really made.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from decimal import Decimal
 from typing import Any, Mapping
@@ -22,7 +23,7 @@ from .agents import Agent
 from .constitution import CONSTITUTION
 from .evaluator import Verdict
 from .frontier import Frontier, FrontierError
-from .ledger import Ledger
+from .ledger import Ledger, canonical
 
 SYSTEM = """You are the auditor of a small real-money trading league. An agent (a strategy program) has cleared
 the constitution's paper gate and is being considered for a bounded micro-real experiment. You are the last check.
@@ -55,6 +56,13 @@ Answer with ONE JSON object and nothing else:
  "findings": [{"severity": "blocker"|"concern"|"note", "issue": "...", "evidence": "what in the packet shows it"}]}
 Approve only if you found no blocker. When in doubt, veto: a vetoed agent keeps trading on paper and can return."""
 
+EXECUTION_POLICY = {
+    "entry_caps": "The House applies rung order and position caps to entries, including working buys and fees.",
+    "reducing_exits": "Book.check exempts position-reducing sells from entry dollar caps. The risk engine checks held quantity including reserved sells, so an exit cannot reverse into a short position.",
+    "gateway_exit_path": "Book._order_intent labels sells as exits; the gateway exempts that tag from entry dollar caps. Per-agent reducing-quantity validation is in the trusted House, not the gateway.",
+    "source": "league/book.py:Book.check, Book._order_intent; ltcm/risk.py; gateway/lib/router.mjs",
+    "interpretation": "A profitable holding may be sold above the $10 entry cap. These controls do not guarantee a fill, a price, a profitable edge or continuous venue availability."}
+
 
 class Auditor:
     def __init__(self, frontier: Frontier, ledger: Ledger, economy: Any, evaluator: Any, *, live_agents=lambda: [], lineage=None):
@@ -64,6 +72,14 @@ class Auditor:
         self.evaluator = evaluator
         self.live_agents = live_agents  # () -> [{"agent", "family", "niche"}] already on real money
         self.lineage = lineage  # (agent id) -> itself, its parent, its parent's parent...
+
+    @property
+    def policy_digest(self):
+        # Quotes, elapsed time and another profitable mark cannot buy a fresh audit. A changed
+        # trusted policy/packet definition can: the earlier veto may have relied on a fixed defect.
+        return hashlib.sha256(canonical({'system': SYSTEM, 'execution_policy': EXECUTION_POLICY,
+            'ladder': CONSTITUTION['ladder'], 'rungs': CONSTITUTION['rungs'],
+            'tuition': CONSTITUTION['tuition']}).encode()).hexdigest()
 
     # ----------------------------------------------------------------- packet
     def packet(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
@@ -98,7 +114,10 @@ class Auditor:
             "test_passed": verdict.numbers,
             "promotion_context": {"from_rung": verdict.rung, "to_rung": verdict.rung + 1,
                                   "paper_gate": CONSTITUTION["ladder"]["paper"],
-                                  "purpose": "bounded micro-real experiment", "tuition": CONSTITUTION["tuition"]},
+                                  "completed_exposure_gate": CONSTITUTION['ladder'].get('completed_exposures'),
+                                  "purpose": "bounded micro-real experiment",
+                                  "tuition": (verdict.numbers.get('allocation_context') or {}).get('tuition', CONSTITUTION["tuition"]),
+                                  "allocation_context": verdict.numbers.get('allocation_context')},
             "thresholds": CONSTITUTION["ladder"],
             "trials_in_its_line": len(self.evaluator.family_trials(agent.family, self.lineage(agent.id) if self.lineage else None)),
             "replay_trials": [{k: t.get(k) for k in ("sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "max_drawdown", "passed", "reasons")} for t in trials][-10:],
@@ -109,12 +128,8 @@ class Auditor:
             "latest_reconciliations": reconciliations,
             "already_on_real_money": self.live_agents(),
             "micro_real_limits": CONSTITUTION["rungs"]["2"],
-            "execution_policy": {
-                "entry_caps": "The House applies rung order and position caps to entries, including working buys and fees.",
-                "reducing_exits": "Book.check exempts position-reducing sells from entry dollar caps. The risk engine checks held quantity including reserved sells, so an exit cannot reverse into a short position.",
-                "gateway_exit_path": "Book._order_intent labels sells as exits; the gateway exempts that tag from entry dollar caps. Per-agent reducing-quantity validation is in the trusted House, not the gateway.",
-                "source": "league/book.py:Book.check, Book._order_intent; ltcm/risk.py; gateway/lib/router.mjs",
-                "interpretation": "A profitable holding may be sold above the $10 entry cap. These controls do not guarantee a fill, a price, a profitable edge or continuous venue availability."},
+            "execution_policy": dict(EXECUTION_POLICY),
+            "audit_policy_digest": self.policy_digest,
         }
 
     # ------------------------------------------------------------------ audit
@@ -127,7 +142,9 @@ class Auditor:
             answer = self.frontier.ask(system=SYSTEM, user=json.dumps(packet, default=str), agent=f"audit-{agent.id}", max_output_tokens=12000)
         except FrontierError as exc:
             # No audit, no promotion: a gate that fails open is not a gate.
-            self.ledger.append("audit.verdict", {"approve": False, "error": str(exc)[:300], "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
+            self.ledger.append("audit.verdict", {"approve": False, "error": str(exc)[:300],
+                "policy_digest": packet['audit_policy_digest'],
+                "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
             return {"approve": False, "error": str(exc)}
         if answer.cost_usd > 0:
             self.economy.charge(agent.id, answer.cost_usd, "frontier audit", detail={"model": answer.model})
@@ -145,6 +162,7 @@ class Auditor:
         approve = result.get("approve") is True and not blockers
         row = {
             "approve": approve,
+            "policy_digest": packet['audit_policy_digest'],
             **({"error": "the auditor's answer could not be read"} if result.get("unreadable") else {}),
             "confidence": result.get("confidence"),
             "summary": str(result.get("summary") or "")[:1200],

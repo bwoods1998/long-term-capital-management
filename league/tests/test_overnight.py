@@ -114,7 +114,7 @@ class BurstGame(HouseCase):
         agent=self.seated();self.house.evaluator.seat(agent.id,0,'test replay')
         self.house._burst={'id':'night','started':self.clock(),'policy':load_policy()}
         rules=game_for(load_game(),self.house._burst)['economy']
-        self.clock.advance(3601)
+        self.clock.advance(600)  # completed opportunity, not a mandatory hour of existence
         self.assertIsNone(self.house._weakest(rules))
         for n in range(2):
             self.house.ledger.append('agent.research',{'tool':'summary','reason':'finished'},agent=agent.id)
