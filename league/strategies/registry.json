@@ -18,9 +18,9 @@
     "why": "Three props agents are barren. Library reports motivate separating numeric-prop underdog YES touch execution from adverse-selected makers and single-event TD/HR bets, but the cited +38.08% replay failed OOS growth and had only 21 blocks. Test a fixed 20-40 cent band with two-sided books, a two-cent default spread cap, rounded fee reserves, $2 total spending and one exposure resolving within 48 hours. Preserve props lineage trials; this is an unqualified falsification test, not an established edge."
   },
   {
-    "name": "index-overnight-fractional",
+    "name": "etf-overnight-fractional",
     "family": "equity-overnight",
-    "file": "index_overnight_fractional.py",
-    "why": "Five index-ETF agents are barren and the supplied momentum replays repeatedly fail. Test the distinct published overnight-drift hypothesis through a fixed late-session SPY entry and next-session morning exit, using fractional market orders capped at $2, fresh inputs, and a bounded spread filter. This is an untested execution variant of the existing equity-overnight hypothesis, not a new alpha claim or a reset of applicable lineage trials; normal replay, independent paper, audit, and capital gates remain mandatory."
+    "file": "etf_overnight_fractional.py",
+    "why": "Five index-ETF agents are barren and recent trend replays fail qualification. Implement the founding overnight-calendar hypothesis with fractional market orders so micro stakes need not buy whole ETF shares: one exposure capped at $2, fixed normal-session entry and next-session exit, fresh narrow quotes, outstanding-order discipline and one entry attempt per date. SPY and DIA jointly belong to the index-ETF specialty. The published anomaly is motivation, not local evidence; retain equity-overnight lineage accounting and require after-spread replay qualification followed by independent forward evidence."
   }
 ]
