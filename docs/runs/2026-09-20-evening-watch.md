@@ -1,7 +1,8 @@
 # Two-hour evening observation — September 20, 2026
 
 Observation window: **6:53–8:53 PM Pacific** (September 21, 01:53–03:53 UTC).
-This is an in-progress record. The overnight experiment will be specified after the full window.
+The full observation window is complete. A final queue-scheduling repair and its deployment
+acceptance continued afterward; the overnight experiment and funding are recorded below.
 
 ## Baseline and measured blockers
 
@@ -182,11 +183,12 @@ It classifies public market packets and research failures once for the fleet, re
 typed answer and bill. Its first 16 requests produced 128 labels for $0.001616. The follow-up
 adds bounded architect-proposed questions, a two-hour feature freeze, and a three-way comparison
 on later unseen events. See the [design and accounting](../design/2026-09-20-typesafe-pilot.md).
-Runtime acceptance of this follow-up remains pending. Label probabilities are research inputs;
+The main follow-up passed runtime acceptance at 8:52 PM. Label probabilities are research inputs;
 neither confidence nor a favorable historical replay authorizes a trade or promotion.
 
 The follow-up is [PR #32](https://github.com/bwoods1998/long-term-capital-management/pull/32),
-merged as `7be707e`. Full Python 3.11/3.14 CI and all 123 gateway tests pass. Researchers receive
+merged as `7be707e`. All 1,380 league and 1,773 retained-runtime tests pass on Python 3.11 and
+3.14, alongside all 123 gateway tests. Researchers receive
 their own failure classifications plus relevant market-series labels, with the exact question
 definitions identified by a digest. The designer sees the repository game separately from the
 temporary runtime overlay; an earlier proposal had confused those two sources. The autonomous
@@ -204,6 +206,27 @@ The gateway proposal ceiling was raised from 12 to 96 per UTC day to accommodate
 roles. No role gains additional write paths or bypasses CI. Worker version
 `b25e7ab3-1b77-4eac-8cef-a25835572043` carries this setting, the $20 Jev cap and $300 OpenAI
 monthly ceiling. The stricter immutable research windows still govern paid calls.
+
+At **8:53:01 PM**, the two-hour snapshot recorded **46 living and 22 retired agents**, **183
+completed research summaries**, **43 archived trials with manifests**, and **nine historical
+passes**. Against the 6:55 PM baseline, that is 106 additional summaries, 22 additional trials
+and seven additional passes. These passes share lineages and historical data; they are not
+nine independent demonstrations of an edge. The Jev lab had completed **4,147 market packets
+for $0.418425**, with calls still in flight. Its forward evaluation correctly reported
+insufficient independent data; the frozen test window had not started.
+
+Release `20260921T033839Z-8fb170591a92` passed its three-tick canary, ledger verification and
+all twenty production-watch readings, receiving a final `promoted` verdict at **8:52:30 PM**.
+All four books remained unfrozen, the campaign recorded zero reservation breaches, and the
+slow-tick diagnostic had no trace. Original phase timestamps and live-allocation restrictions
+remained intact.
+
+One last scheduling issue appeared under real load: 163 research packets were queued behind
+newer market observations. The repair reserves up to 64 slots in each 1,024-request batch for
+research diagnostics. A separate recent-record cursor makes current failures available while
+the historical cursor catches up; request hashes deduplicate both paths. The batch and dollar
+limits are unchanged. Regression tests cover both starvation and history catch-up. Acceptance
+of that narrow repair is recorded separately below.
 
 ## Overnight funding and decision criteria
 
