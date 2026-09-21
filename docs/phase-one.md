@@ -1,6 +1,9 @@
 # Phase one: funded, reproducible experiments
 
 This is the first 48-hour foundation phase of the accelerated plan accepted September 20, 2026.
+The owner subsequently requested [persistent earned live trading](runs/2026-09-21-persistent-live-trading.md).
+Its separate activation removes effective research/live calendar expiry while preserving every
+original dollar cap, cost and pending hold. It supersedes the timed $200 pilot described below.
 It starts on the first production activation of `league/campaigns.json`. The start and end are
 persisted in `state/campaigns.sqlite`; restarting, redeploying, topping up an account or changing
 the calendar cannot renew the allowance. Canaries have separate state and do not activate it.
@@ -14,7 +17,8 @@ Tonight's [eight-hour research burst](runs/2026-09-20-evening-watch.md) adds $25
 $75 Sail to this foundation without resetting it; Jev has $20 of separately backed allowance.
 The [game gate audit](runs/2026-09-21-game-gate-audit.md) adds faster evidence routes and prepares
 an explicitly activated $200 live-learning window. Base phase policy remains recorded as
-`allow_new_live_capital=false`; consult `live_pilot.active` and `allows_live` for effective policy.
+`allow_new_live_capital=false`; consult `live_trading.active`, the legacy `live_pilot.active`,
+and `allows_live` for effective policy. The persistent command does not replenish funding.
 
 ## Released capital and account setup
 
@@ -60,7 +64,7 @@ pre-phase expenditure remains historical expenditure and is not erased or called
   keep their holds. Over-reservation costs or a decreasing vendor expenditure counter close new
   admission. The Sail period expenditure counter includes non-model costs and cannot be hidden
   by a top-up. Missing/stale meter readings stop new paid research and paper wakes.
-- **Live capital is separately activated.** The base phase blocks promotions into live rungs and new live buy intents. The owner-only bounded pilot can release them until the existing burst deadline; see the gate audit above.
+- **Live capital is separately activated.** The base phase blocks promotions into live rungs and new live buy intents. The persistent owner grant releases earned access without a timer, using current venue cash. The older pilot expires with the burst; see the persistent activation above.
   Existing position polling, reconciliation and exits continue. At expiry, new paid campaigns and
   paper wakes stop; essential hosting and existing risk management continue. This is application
   admission control, not a provider-enforced cap on every hosting/storage invoice. The operating

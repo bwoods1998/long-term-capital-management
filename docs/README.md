@@ -7,7 +7,8 @@ now; everything under "History" describes something that no longer runs.
 
 ## The system as it is now
 
-- [Game gate audit and live-learning window](runs/2026-09-21-game-gate-audit.md): completed-exposure qualification, reward continuity, evidence-based replacement, bounded scaling and account activation.
+- [Persistent earned live trading](runs/2026-09-21-persistent-live-trading.md): owner activation without a calendar expiry, full ladder, current venue cash and preserved research budgets.
+- [Game gate audit and former live-learning window](runs/2026-09-21-game-gate-audit.md): completed-exposure qualification, reward continuity and evidence-based replacement.
 - [Two-hour watch and accelerated overnight run](runs/2026-09-20-evening-watch.md): runtime findings, fixes, spend and acceptance.
 
 - [Active foundation phase](phase-one.md): the funded campaign, current limits and reproducibility contract.

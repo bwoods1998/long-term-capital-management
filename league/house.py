@@ -1116,13 +1116,14 @@ class House:
                     self._promotion_status(agent, verdict, 'live_book', 'the live venue is not enabled')
                     return  # it stays eligible on paper until the owner turns real money on
                 state = self.tuition()
-                pilot = self.campaigns.live_pilot() if self.campaigns else None
+                pilot = self.campaigns.live_authorization() if self.campaigns else None
                 verdict = Verdict(verdict.agent, verdict.rung, verdict.decision, verdict.reason,
                     {**verdict.numbers, 'allocation_context': {
                         'tuition': {'max_loss_usd': str(state['limit_usd']), 'max_agents': state['max_agents']},
                         'headroom_usd': str(state['headroom_usd']), 'seated': state['seated'],
                         'live_pilot': pilot}})
-                if not state["room"]:
+                if not state["room"] or (pilot and pilot['policy'].get('venue_capital_usd')
+                                         and not self.tuition(agent.venue)['room']):
                     self._promotion_status(agent, verdict, 'tuition', 'the aggregate micro risk budget has no free stake',
                                            headroom_usd=str(state['headroom_usd']))
                     if not self._state.get("tuition_told"):
@@ -1151,7 +1152,10 @@ class House:
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
-            if rung == 1 and not self.tuition()["room"]:
+            authorization = self.campaigns.live_authorization() if self.campaigns else None
+            if rung == 1 and (not self.tuition()["room"] or
+                    (authorization and authorization['policy'].get('venue_capital_usd')
+                     and not self.tuition(agent.venue)['room'])):
                 self._promotion_status(agent, verdict, 'tuition', 'another admission used the available micro stake')
                 return
             agent = self.registry.get(agent.id)
@@ -1278,7 +1282,7 @@ class House:
         return closed
 
     # ---------------------------------------------------------------- tuition
-    def tuition(self) -> dict[str, Any]:
+    def tuition(self, venue: str | None = None) -> dict[str, Any]:
         """What the micro rung has cost so far, and whether it may take another agent.
 
         The paper screen lets through agents with no proven edge, on purpose: real fills are the
@@ -1289,19 +1293,22 @@ class House:
         accounts, and its own stake fit under the loss line. A drawdown stop is not a guaranteed
         exit price: an option or a contract held to settlement can lose its entire purchase."""
         rules = dict(CONSTITUTION["tuition"])
-        pilot = self.campaigns.live_pilot() if self.campaigns else None
+        pilot = self.campaigns.live_authorization() if self.campaigns else None
         if pilot:
             # The owner explicitly funds this envelope. Reaching rung 3 or expiry must never
             # erase its losses, reserved stakes or abandoned positions from the experiment.
             rules['max_loss_usd'] = pilot['policy']['max_loss_usd']
             rules['max_agents'] = pilot['policy']['max_agents']
+            if venue is not None and 'venue_capital_usd' in pilot['policy']:
+                rules['max_loss_usd'] = pilot['policy']['venue_capital_usd'][venue]
         active = {agent.id for agent in self.registry.living()
-                  if self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3}
+                  if (venue is None or agent.venue == venue)
+                  and (self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3)}
         stake = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"])
         pnl, worst_loss, pending_accounts = ZERO, ZERO, 0
         accounted = set()
         for book in self.books.values():
-            if not book.real_money:
+            if not book.real_money or venue is not None and book.name != REAL_BOOK[venue]:
                 continue
             for agent_id in book.agents():
                 if pilot or self.evaluator.max_rung(agent_id) < 3:
@@ -1340,11 +1347,25 @@ class House:
             self._enforce_tuition_locked()
 
     def _enforce_tuition_locked(self) -> None:
+        authorization = self.campaigns.live_authorization() if self.campaigns else None
+        # Venue allocations are separate purses: profit at Alpaca cannot refill Kalshi's risk.
+        if authorization and authorization['policy'].get('venue_capital_usd'):
+            for venue in authorization['policy']['venue_capital_usd']:
+                state = self.tuition(venue)
+                if state['closed']:
+                    for agent in self.registry.living():
+                        if agent.venue == venue and self.evaluator.rung(agent.id) >= 2:
+                            old = self.book_of(agent)
+                            while self.evaluator.rung(agent.id) >= 2:
+                                self.evaluator.demote(agent.id, f"the {venue} capital allocation is exhausted",
+                                                      {'spent_usd': str(state['spent_usd'])})
+                            if old is not None:
+                                self._move_books(agent, old)
         state = self.tuition()
         if not state["closed"]:
             self._state["tuition_closed"] = False
             return
-        pilot = self.campaigns.live_pilot() if self.campaigns else None
+        pilot = self.campaigns.live_authorization() if self.campaigns else None
         for agent in self.registry.living():
             if self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3:
                 old = self.book_of(agent)
@@ -1824,6 +1845,7 @@ class House:
                 'micro': dict(ladder['micro']),
                 'completed_exposures': dict(ladder.get('completed_exposures') or {}),
                 'live_pilot': self.campaigns.live_pilot() if self.campaigns else None,
+                'live_trading': self.campaigns.live_trading() if self.campaigns else None,
                 'live_tuition': {k: str(v) if isinstance(v, Decimal) else v for k, v in self.tuition().items()},
                 'promotion_status': self._state.get('promotion_status', {}).get(agent.id),
                 'new_live_capital_allowed_by_campaign': self.campaigns.allows_live(2) if self.campaigns else self.settings.real_money,

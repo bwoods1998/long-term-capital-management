@@ -561,15 +561,17 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
         living = house.registry.living()
         from .constitution import CONSTITUTION
         guard = getattr(house, 'campaigns', None)
-        burst = guard.burst() if guard else getattr(house, '_burst', None)
+        from .overnight import active
+        burst = (active(guard, house.clock) or guard.burst()) if guard else getattr(house, '_burst', None)
         base['qualification_policy'] = CONSTITUTION['ladder']
         base['learning_window'] = ({'id': burst['id'], 'ends': burst['ends'],
-            'remaining_seconds': max(0, burst['ends'] - house.clock()),
+            'remaining_seconds': max(0, burst['ends'] - house.clock()) if burst['ends'] is not None else None,
             'guidance': 'Prioritize falsifiable improvements that can produce new forward observations in the remaining window. '
                         'Use shorter settlement/holding opportunities when an after-fee edge supports them. '
                         'Do not force turnover, assume profitability, or mistake repeated historical tests for new evidence.'}
             if burst and 'ends' in burst else None)
         base['live_pilot'] = guard.live_pilot() if guard else None
+        base['live_trading'] = guard.live_trading() if guard else None
         states = getattr(house, '_state', {}).get('promotion_status', {})
         base['promotion_holds'] = [states[a.id] for a in living if a.id in states
                                    and states[a.id].get('stage') not in ('evidence', 'promoted')][-12:]
