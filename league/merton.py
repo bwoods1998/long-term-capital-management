@@ -554,6 +554,8 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
                         today=time.strftime("%Y-%m-%d", time.gmtime(house.clock())))
         living = house.registry.living()
         base['engineering_backlog'] = house.commons.blocked_requests(limit=10)
+        if getattr(house, 'semantic_lab', None) is not None:
+            base['semantic_research'] = house.semantic_lab.evidence(limit=8)
         base['engineering_note'] = 'These requests remain unimplemented. Advice is not fulfillment. No current Merton role may edit House network adapters or core engine; do not claim those capabilities have been built.'
         if living and callable(getattr(house, 'research_capabilities', None)):
             current = house.research_capabilities(living[0])

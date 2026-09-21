@@ -54,11 +54,11 @@
     "MAX_DAY_USD": "4000",
     "MAX_DAY_ORDERS": "2000",
     // The frontier model's month, in dollars. The owner raises it when the return earns it.
-    "FRONTIER_MONTH_USD": "100",
-    // One-off shadow pilot, backed by a retained $10 foundation-review reservation. No reset
+    "FRONTIER_MONTH_USD": "300",
+    // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
-    "TYPESAFE_PILOT_USD": "10",
-    "TYPESAFE_PILOT_END": "2026-09-22T20:22:14.430Z",
+    "TYPESAFE_PILOT_USD": "20",
+    "TYPESAFE_PILOT_END": "2026-09-21T11:01:16.977Z",
     // Dollars per million tokens: input, cached input, output. A model absent here is refused.
     // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
     // cache-write rate, the dearest an input token can be, so the meter errs high.

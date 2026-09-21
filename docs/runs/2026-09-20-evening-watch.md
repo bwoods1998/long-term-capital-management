@@ -106,15 +106,30 @@ The challenger and read-recovery changes are [PR #27](https://github.com/bwoods1
 full Python 3.11/3.14 and gateway CI pass. The admission/context release was observed live at
 7:48 PM as `main-c3bd58a58d1a`, with candidate admissions present in health and four books unfrozen.
 
-## Owner-authorized eight-hour learning burst (activation pending)
+## Owner-authorized eight-hour learning burst
 
-The proposed additional window funds OpenAI up to **$250** and Sail up to **$75**. The owner
+The activated additional window funds OpenAI up to **$250** and Sail up to **$75**. The owner
 separately increased Jev to **$20**, bringing tonight's provider envelope to **$345**. Existing
 balances count. These are incremental experiment limits, not estimated invoices or proof that
 every dollar can produce useful new data. The original foundation start, expiry, external reserves,
 Jev backing and unresolved requests remain recorded. The burst has one immutable identity and
 deadline; restart, midnight and settling an older hold cannot replenish it. After expiry, new
 paid research closes while trading exits, reconciliation and observation continue.
+
+The immutable window was activated at **8:01:16 PM Pacific**, ending **4:01:16 AM Pacific**.
+Before activation, another $10 was reserved under `external-pilot:typesafe-expansion-to20-20260921`,
+bringing Jev's retained backing to $20 without using the new $250 OpenAI allowance. The original
+foundation remains $500; the additional $325 window makes the total recorded authorization $825.
+The provider envelope for tonight is $345 because Jev's $20 is already backed inside the foundation.
+Activation preserved the original phase timestamps and all commitments; a private pre-activation
+SQLite backup is retained. [PR #28](https://github.com/bwoods1998/long-term-capital-management/pull/28)
+passed full CI and merged. Exact merged commit `b94e6d4` was sent to the watchdog from a clean
+worktree at 8:01 PM; runtime acceptance is being observed.
+
+The gateway's OpenAI monthly ceiling is now $300, accommodating existing spending plus the new
+window. Its Jev ceiling is $20 with the same 4:01 AM expiry and 500,000 lifetime requests. The
+deployed Worker version is `0bdc5e01-effa-4b5a-9299-9a3490722a12`; all 123 gateway tests pass.
+No vendor balances were inferred from these internal caps.
 
 | Dial | Foundation | Burst |
 |---|---:|---:|

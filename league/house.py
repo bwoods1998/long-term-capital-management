@@ -155,6 +155,7 @@ class House:
         self.publisher = publisher
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
+        self.semantic_lab: Any = None
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
@@ -1680,8 +1681,11 @@ class House:
 
     def research_capabilities(self, agent: Agent) -> dict[str, Any]:
         from .capabilities import describe
-        return describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
-                        alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
+        result = describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
+                          alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
+        if self.semantic_lab is not None:
+            result['semantic_research'] = self.semantic_lab.evidence(agent.id)
+        return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
         from .capabilities import coverage_needs, tape_coverage
@@ -2196,6 +2200,8 @@ class House:
                 self.queue_research(agent)
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
+        if open_for_business and self.semantic_lab is not None and self.semantic_lab.due():
+            self._background('semantic-lab', self.semantic_lab.run)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
         if self.updater is not None and self.updater.due():
@@ -2269,6 +2275,7 @@ class House:
                                      for row in Admissions(self.ledger).rows()[-30:]],
             "recordings": self.recorder.stats(),
             "campaign": self.campaigns.report() if self.campaigns else None,
+            "semantic_lab": self.semantic_lab.stats() if self.semantic_lab else None,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
