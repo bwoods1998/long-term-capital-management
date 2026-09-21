@@ -22,6 +22,15 @@ MODEL = "gpt-6-astra"
 COST_HEADER = "X-LTCM-Cost-USD"
 AGENT_HEADER = "X-LTCM-Agent"
 MAX_OUTPUT_TOKENS = 16000
+# Verified standard-service ceilings, including long-context cache writes. Kept outside
+# game.json: agents may choose a model, but cannot supply the price used to admit its bill.
+# https://developers.openai.com/api/docs/pricing (2026-09-20), dollars / million tokens.
+MODEL_CEILINGS = {
+    "gpt-6-astra": (Decimal("25"), Decimal("75")),
+    "gpt-5.6-sol": (Decimal("10"), Decimal("30")),
+    "gpt-5.6-terra": (Decimal("5"), Decimal("18")),
+    "gpt-5.6-luna": (Decimal("0.50"), Decimal("1.80")),
+}
 
 
 class FrontierError(RuntimeError):
@@ -102,11 +111,12 @@ class Frontier:
         if self.spend_guard is not None:
             from .campaigns import CampaignClosed
 
-            if self.model != MODEL:
+            if self.model not in MODEL_CEILINGS:
                 raise FrontierError("the campaign has no verified price for this model")
             # One UTF-8 byte per possible input token plus framing, including the long-context
             # and cache-write premiums. Standard service only; no built-in paid tools.
-            hold = (Decimal(len(request.data) + 4096) * 25 + Decimal(body["max_output_tokens"]) * 75) / 1000000
+            input_rate, output_rate = MODEL_CEILINGS[self.model]
+            hold = (Decimal(len(request.data) + 4096) * input_rate + Decimal(body["max_output_tokens"]) * output_rate) / 1000000
             try:
                 self.spend_guard.reserve(commitment, "foundation-review", hold)
             except CampaignClosed as exc:
@@ -137,7 +147,7 @@ class Frontier:
                         and min(tokens_in, tokens_out) >= 0 and payload.get('model') == self.model):
                     # The gateway's header is an estimate, not an invoice. Keep the phase bound
                     # conservative even if its pricing omits long-context/cache-write premiums.
-                    bounded = (Decimal(tokens_in) * 25 + Decimal(tokens_out) * 75) / 1000000
+                    bounded = (Decimal(tokens_in) * input_rate + Decimal(tokens_out) * output_rate) / 1000000
                     self.spend_guard.settle(commitment, max(confirmed, bounded))
             except InvalidOperation:
                 pass  # unknown costs retain the full hold, including across restarts
