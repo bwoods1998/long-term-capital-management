@@ -13,8 +13,8 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(CONSTITUTION["budgets"]["sail_month_usd"], "100")
         self.assertEqual(CONSTITUTION["budgets"]["openai_month_usd"], "100")
         self.assertEqual(CONSTITUTION["order_caps"]["max_order_usd"], "75")
-        self.assertEqual(CONSTITUTION["rungs"]["2"]["max_position_usd"], "10")
-        self.assertEqual(CONSTITUTION["rungs"]["3"]["kelly_fraction"], 0.25)
+        self.assertEqual(CONSTITUTION["rungs"]["2"]["max_position_usd"], "30")  # the learning surge, Sept 21, 2026
+        self.assertEqual(CONSTITUTION["rungs"]["3"]["kelly_fraction"], 0.5)  # the learning surge
         self.assertEqual(CONSTITUTION["ladder"]["alpha"], 0.05)
 
     def test_a_changed_threshold_changes_the_digest(self):

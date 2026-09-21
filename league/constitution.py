@@ -115,8 +115,16 @@ CONSTITUTION: dict[str, Any] = {
         # position is ONE contract of at most `option_max_position_usd` in premium. Options are
         # long premium only (the gateway refuses anything else): what is paid is all that can be lost,
         # and the tuition cap above counts it like any other loss.
-        "2": {"stake_usd": "25", "max_position_usd": "10", "max_order_usd": "10", "option_max_position_usd": "20"},
-        "3": {"max_order_usd": "75", "kelly_fraction": 0.25, "max_share_of_venue": 0.25},
+        # Owner revision, Sept 21, 2026 ~23:50 UTC (the learning surge): "allow for more risk taking ...
+        # larger trades based on their conviction". A strategy learns its sizing on paper ($200 stake,
+        # $100 a position, $75 an order) and was squeezed to $25 / $10 / $10 on promotion, so its
+        # proven intents were refused or clipped (huang-6: $8 against a $7.89 cap). Now $60 / $30 /
+        # $30, one option contract up to $40. `micro_demotion` still returns a live loser to paper.
+        "2": {"stake_usd": "60", "max_position_usd": "30", "max_order_usd": "30", "option_max_position_usd": "40"},
+        # Learning surge (owner, Sept 21, 2026 ~00:00 UTC: "it's obviously going to require some additional
+        # risk taking and volatility which I'm willing to accept"): a PROVEN edge (positive lower bound)
+        # compounds at half of Kelly on that bound, up to 40% of the venue's cash (a quarter and 25%).
+        "3": {"max_order_usd": "75", "kelly_fraction": 0.5, "max_share_of_venue": 0.4},
     },
 }
 
@@ -159,4 +167,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'f7de9c7d5212757ebabe4789fe86ab0fe2ee11c830412d0d6f2490e4d9ec5e87'
+PINNED_DIGEST = '9beefd2cb84cde228fa3b92b0ae4017aaf6a4826d8afc2803181e58f290db4b4'

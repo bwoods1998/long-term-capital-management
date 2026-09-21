@@ -190,11 +190,11 @@ class InTheHouse(HouseCase):
         paper = self.house._limits(1, agent)
         self.assertEqual((paper.asset_classes, paper.max_position_usd, paper.max_order_usd), (("option",), D("100"), D("75")))
         micro = self.house._limits(2, agent)
-        self.assertEqual((micro.max_position_usd, micro.max_order_usd), (D("20"), D("20")))
-        self.assertEqual(CONSTITUTION["rungs"]["2"]["option_max_position_usd"], "20")
+        self.assertEqual((micro.max_position_usd, micro.max_order_usd), (D("40"), D("40")))
+        self.assertEqual(CONSTITUTION["rungs"]["2"]["option_max_position_usd"], "40")
         stock_agent = self.seated()
         self.assertNotIn("option", self.house._limits(1, stock_agent).asset_classes)
-        self.assertEqual(self.house._limits(2, stock_agent).max_position_usd, D("10"))
+        self.assertEqual(self.house._limits(2, stock_agent).max_position_usd, D("30"))
 
     def test_the_chain_is_near_the_money_two_sided_affordable_and_after_today(self):
         asked = {}
