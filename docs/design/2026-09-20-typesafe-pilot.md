@@ -1,10 +1,10 @@
 # Jev: shared semantic features and measured workflow decisions
 
 September 20, 2026. The owner installed `TYPE_SAFE_TOKEN` as a Worker secret. The deployed
-gateway admits a **$10 lifetime allowance and up to 100,000 calls**, backed by the current
-phase budget and ending with that phase. The initial $1/200-request restriction was expanded
-after considering fleet-wide semantic workloads. Capacity is available; this is not a target
-to consume it. The first live comparison is complete. No production trading or promotion
+gateway now admits a **$20 lifetime allowance and up to 500,000 calls**, backed by retained
+phase commitments and ending September 21 at **11:01:16 UTC / 4:01 AM Pacific**. The initial $1/200-request restriction was expanded
+after considering fleet-wide semantic workloads. The owner requested using the full $20 for useful
+classification work; the queue targets unique evidence and measured feature experiments. The first live comparison is complete. No production trading or promotion
 decision consumes these answers yet.
 
 Jev provides typed choices, rubric scores and yes/no probabilities over supplied text/state.
@@ -14,6 +14,28 @@ these questions and uses generative models for code and difficult reasoning.
 [TypeSafe introduction](https://docs.typesafe.ai/introduction).
 
 ## Larger role in the harness
+
+The implemented shared lab consumes recorded public Kalshi market states and bounded research
+results. Eight atomic market questions classify contract semantics, related exposure, missing
+context and execution concerns; six research questions classify failures and unsupported claims.
+One request shares its state across these questions. Content/model/rubric hashes deduplicate
+work across agents. Each request has a durable intent and receipt; interrupted calls retain
+their identity and are not automatically repurchased. A bounded worker queue, request pacing,
+disk reserve and error cooldown support an unattended run.
+
+Recent classifications become fallible evidence in researchers' `runtime_status` and the
+architect's context. Labels cannot change budgets, submit orders, approve capital or merge code.
+The lab separately matches labels to later recorded quotes, requires each label to precede its
+outcome, and compares a fixed numerical baseline with added Jev features on later unseen events.
+The target is a five-minute sampled midpoint direction, **not net profit or fill quality**.
+Training and evaluation must have sufficient forward rows and distinct events before scoring.
+
+The first real batch produced 128 typed market labels across 16 requests for **$0.001616**, with
+no unconfirmed calls. It also retained 1,184 additional market packets and 25 research packets.
+This verifies the queue/provider path; it does not validate label correctness or economic value.
+At the published token price, $20 is approximately 476 million input tokens. Available distinct
+inputs and productive rubric experiments determine actual spend. Repeating unchanged evidence
+only to empty the account would not create independent observations.
 
 | Candidate role | A question on our existing evidence | What a useful result would change |
 |---|---|---|

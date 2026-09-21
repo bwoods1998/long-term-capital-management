@@ -8,7 +8,7 @@ export const MAX_BODY_BYTES = 64 * 1024;
 // Published 64k total input limit at $0.042/M, free output: < $0.003 per request.
 // Reserve a full cent, including ambiguous failures; never infer a free call from HTTP status.
 export const RESERVATION_MICRO = 10000n;
-export const MAX_CALLS = 100000;
+export const MAX_CALLS = 500000;
 export const capMicro = env => parseUsdMicro(env.TYPESAFE_PILOT_USD, 0n);
 export const money = formatUsdMicro;
 
