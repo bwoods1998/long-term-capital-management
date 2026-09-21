@@ -1,7 +1,7 @@
 {
-  "_about": "Owner's direction, Sept 21, 2026: make the learn-research-trade-fail-or-succeed loop as rapid as possible and use every input. Applied on top of the funded burst policy (whose record and spend caps are unchanged). Measured before: Luna sessions median 12 s, Sail pro_flex 241 s (p90 1,178 s); Sail was the underused budget.",
+  "_about": "Owner's direction, Sept 21, 2026: make the learn-research-trade-fail-or-succeed loop as rapid as possible and use every input. Applied on top of the funded burst policy (whose record and spend caps are unchanged). Measured before: Luna sessions median 12 s, Sail pro_flex 241 s (p90 1,178 s); Sail was the underused budget. 20:26 UTC: all 16 research workers were busy with Sail sessions (multi-turn, replays inside), so 24.",
   "research_minutes": 10,
-  "research_workers": 16,
+  "research_workers": 24,
   "replay_workers": 6,
   "newcomer_seconds": 300,
   "max_population": 56,
