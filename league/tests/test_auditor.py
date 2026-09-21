@@ -67,6 +67,22 @@ def finding(severity, issue="an issue", evidence="the packet") -> dict:
 
 
 class AuditorCase(unittest.TestCase):
+    def test_packet_includes_allocated_house_order_rejections_and_attribution_evidence(self):
+        book = 'kalshi-shadow'
+        base = {'book': book, 'order_id': 'owned', 'side': 'sell', 'quantity': '4',
+                'shares': [{'agent': 'fav-1'}], 'instrument': {'symbol': 'TEST'}}
+        self.ledger.append('book.order', {**base, 'status': 'unknown', 'reason': 'HTTP 403 insufficient position'})
+        self.ledger.append('book.order', {**base, 'status': 'rejected', 'reason': 'the venue has no such order'})
+        self.ledger.append('book.order', {**base, 'order_id': 'other', 'shares': [{'agent': 'other'}]})
+        auditor = self.auditor()
+        auditor.book_evidence = lambda agent, name: {'ok': False, 'book': name, 'agent': agent}
+        packet = auditor.packet(self.agent, self.verdict)
+        self.assertFalse(packet['book_accounting']['ok'])
+        self.assertEqual(len(packet['recent_order_outcomes']), 1)
+        row = packet['recent_order_outcomes'][0]
+        self.assertEqual(row['status'], 'rejected')
+        self.assertIn('403', row['submission_error'])
+
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.ledger = Ledger(Path(self.dir.name) / "ledger.db")

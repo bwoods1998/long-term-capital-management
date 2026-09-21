@@ -27,6 +27,15 @@ def call(venue="alpaca-paper", occ="F261009C00013000"):
 
 
 class Parsing(unittest.TestCase):
+    def test_gateway_brokers_can_use_owner_configured_opra_without_silent_fallback(self):
+        from league.venues import gateway_broker
+        for venue in ('alpaca', 'alpaca-paper'):
+            broker = gateway_broker(venue, gateway_url='https://gateway.test', token='test-token-' * 4, option_feed='opra')
+            self.assertEqual(broker.option_feed, 'opra')
+            self.assertEqual(broker.feed, 'iex')
+        with self.assertRaises(ValueError):
+            gateway_broker('alpaca', gateway_url='https://gateway.test', token='test-token-' * 4, option_feed='invented')
+
     def test_an_occ_symbol_is_an_option_of_a_hundred_shares(self):
         inst = call()
         self.assertEqual((inst.asset_class, inst.symbol, inst.expiry, inst.strike, inst.right, inst.multiplier), ("option", "F", "2026-10-09", D("13"), "call", D(100)))

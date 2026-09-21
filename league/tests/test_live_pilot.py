@@ -87,6 +87,41 @@ class LiveAuthorization(PhaseCase):
 
 
 class LivePath(unittest.TestCase):
+    def test_unresolved_source_attribution_cannot_buy_audit_capital_or_rewards(self):
+        from league.evaluator import Verdict
+        f = self.fixture(ladder_cases.LadderTest)
+        h = f.house
+        self.funding(f)
+        agent = h.spawn('tainted', 'ladder-test', LADDER, reason='test', endowment='2.5')
+        h.evaluator.seat(agent.id, 1, 'test paper seed')
+        h.seat(agent)
+        book = h.book_of(agent)
+        book._evidence_issues[agent.id] = {'test': {'reason': 'missing owned units'}}
+        h._promote(agent, Verdict(agent.id, 1, 'eligible', 'synthetic passing screen', {'book': book.name}))
+        self.assertEqual(h.evaluator.rung(agent.id), 1)
+        self.assertEqual(f.auditor.seen, [])
+        self.assertEqual(h._state['promotion_status'][agent.id]['stage'], 'accounting_integrity')
+        self.assertEqual(h._standing(agent, 3600).score_observations, 0)
+        self.assertFalse(h._standing(agent, 3600).working)
+        self.assertFalse(f.real.submitted)
+
+    def test_attribution_is_checked_again_after_the_paid_audit(self):
+        from league.evaluator import Verdict
+        f = self.fixture(ladder_cases.LadderTest)
+        h = f.house
+        self.funding(f)
+        agent = h.spawn('race', 'ladder-test', LADDER, reason='test', endowment='2.5')
+        h.evaluator.seat(agent.id, 1, 'test paper seed'); h.seat(agent)
+        book = h.book_of(agent)
+        def audit(*args):
+            book._evidence_issues[agent.id] = {'test': {'reason': 'new attribution defect'}}
+            return {'approve': True}
+        f.auditor.audit = audit
+        h._promote(agent, Verdict(agent.id, 1, 'eligible', 'synthetic passing screen', {'book': book.name}))
+        self.assertEqual(h.evaluator.rung(agent.id), 1)
+        self.assertEqual(h._state['promotion_status'][agent.id]['stage'], 'accounting_integrity')
+        self.assertFalse(f.real.submitted)
+
     def fixture(self, kind=tuition_cases.TuitionTest):
         f = kind(); f.setUp()
         self.addCleanup(f.tearDown)

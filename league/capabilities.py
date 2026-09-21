@@ -119,6 +119,7 @@ def tape_coverage(tape):
         'requested_series': tape.get('series') or [], 'requested_symbols': tape.get('symbols') or [],
         'listing_sample': {k: v for k, v in (tape.get('meta') or {}).items() if k in ('listed', 'scanned', 'kept')},
         'signal_timeframe': tape.get('timeframe'), 'execution_timeframe': tape.get('execution_timeframe'),
+        'stock_feed': tape.get('stock_feed'),
         'execution_events': span(steps), 'market_observation_steps': span(quoted), 'distinct_markets': len(markets),
         'markets_by_series': {s: {'markets': len(row['markets']),
                                  'first_at': min(row['times']) if row['times'] else None,
