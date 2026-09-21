@@ -200,12 +200,24 @@ class Economy:
                 out[s.agent] += floor_pool / len(niches) / len(members)
         weights = self.rules["rung_weights"]
         steep = int(self.rules.get("performance_exponent", 1))
-        evidenced = [s for s in standings if s.score_observations >= int(self.rules.get('performance_min_blocks', 0))]
+        minimum = int(self.rules.get('performance_min_blocks', 0))
+        evidenced = [s for s in standings if s.score_observations >= minimum]
         scores = {
             s.agent: Decimal(str(max(s.score_growth, 0.0))) ** steep * Decimal(str(max(s.score_observations, 0))).sqrt() * usd(weights.get(str(s.score_rung), "0"))
             for s in evidenced
         }
         total = sum(scores.values(), ZERO)
+        if total <= 0:
+            # Nobody evidenced is profitable. A profitable record shorter than the minimum comes
+            # before the least-bad LOSER, shrunk by how much of the minimum it has; it never
+            # competes with an evidenced winner, where one lucky block would dominate a cubic curve.
+            # Measured Sept 21, 2026: a daily-horizon desk earns one block a day, so mullins-2 was
+            # up 1.6% a day on two blocks and earned nothing, while the 17:00 payout went to
+            # hilibrand-2 and three huang agents, all under water, as the least bad.
+            scores = {s.agent: (Decimal(str(s.score_growth)) ** steep * Decimal(s.score_observations).sqrt()
+                                * usd(weights.get(str(s.score_rung), "0")) * Decimal(s.score_observations) / Decimal(minimum))
+                      for s in standings if 0 < s.score_observations < minimum and s.score_growth > 0}
+            total = sum(scores.values(), ZERO)
         if total <= 0:
             scores = self._least_bad(evidenced, weights)
             total = sum(scores.values(), ZERO)

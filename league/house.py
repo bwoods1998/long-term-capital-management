@@ -47,6 +47,7 @@ from .constitution import CONSTITUTION, digest as constitution_digest
 from .economy import Economy, Standing, load_game
 from .evaluator import Evaluator, Verdict
 from .fees import Fees
+from .frontier import TIER_ROLES
 from .ledger import HOUSE, Ledger, now_iso
 from .researcher import Researcher, pass_state, restore_pass
 from .research_jobs import ResearchJobs, ResearchPending
@@ -208,6 +209,11 @@ class House:
                 may_continue=self._research_permission, capabilities=self.research_capabilities,
                 coverage=self.research_coverage,
             )
+        #: The gateway's monthly frontier line (`FrontierMonth`), set by `service.build`. None in
+        #: tests and on a canary: every tier is then "all" and the gateway's 402 is the only line.
+        self.frontier_month = None
+        if self.researcher is not None:
+            self.researcher.frontier_tier = self.frontier_tier
         self._born_at = self.clock()
         self._inference_ceiling: Decimal | None = None  # the config's hard cap, read once (`_pace_inference`)
         # Written once, on the first ever start, and persisted: `_refill` paces newcomers from it
@@ -1752,6 +1758,25 @@ class House:
         rank.sort(key=lambda row: row[:4])  # has it traded at all, then growth, then how much, then its purse
         return rank[0][4] if rank else None
 
+    def frontier_tier(self) -> str:
+        """What frontier work the gateway's month still pays for (`frontier.frontier_tier`).
+        A change of tier is written to the ledger once, so the owner reads why Merton went quiet."""
+        from .frontier import frontier_tier
+
+        month = self.frontier_month
+        remaining = month.remaining() if month is not None else None
+        tier = frontier_tier(remaining, self.game.get("frontier_reserve"))
+        with self._state_lock:
+            changed = tier != self._state.get("frontier_tier", "all")
+            self._state["frontier_tier"] = tier
+        if changed:
+            shown = f"${remaining:.2f}" if remaining is not None else "unknown"
+            self.alert("warning" if tier != "all" else "info", {
+                "all": f"frontier month {shown} left: every role runs again",
+                "earned": f"frontier month {shown} left: cheap research moves to Sail and the unearned roles pause",
+                "audits": f"frontier month {shown} left: only audits and winners' consultations remain"}[tier])
+        return tier
+
     def research_order(self) -> list[Agent]:
         """Who gets asked first when the day's frontier allowance is nearly all the floor has.
 
@@ -2444,7 +2469,10 @@ class House:
             self.budget.pacer = self.pacer
         self._pace_inference()
         if open_for_business and self.merton is not None:
+            allowed = TIER_ROLES[self.frontier_tier()]
             for role in self.merton.due():
+                if allowed is not None and role not in allowed:
+                    continue  # the month's last dollars are kept for code, audits and winners
                 # One role at a time against today's allowance: a pass is a dime to a few dollars,
                 # and its cost is only known when it ends.
                 if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):

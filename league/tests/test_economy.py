@@ -120,6 +120,29 @@ class EconomyTest(unittest.TestCase):
         shares = self.economy.shares(standings, "2.00")
         self.assertEqual((shares["a1"], shares["b1"]), (D("0.25") + D("1.50"), D("0.25")))
 
+    def test_a_short_profitable_record_outranks_the_least_bad_loser(self):
+        """A daily desk earns one block a day. Under the minimum, its profit still competes,
+        shrunk by the share of the minimum it has; losers never outrank it as the least bad."""
+        game = load_game()
+        game["economy"]["performance_min_blocks"] = 5
+        game["economy"]["performance_exponent"] = 3
+        economy = Economy(self.ledger, game, clock=self.clock)
+        standings = [Standing("loser", "n1", 1, -0.0007, 41), Standing("less", "n1", 1, -0.0001, 20),
+                     Standing("daily", "n2", 1, 0.0003, 2)]
+        shares = economy.shares(standings, "2.00")
+        floor = D("0.50") / 2
+        self.assertEqual(shares["daily"], floor + D("1.50"))
+        self.assertEqual(shares["less"], floor / 2)
+        self.assertEqual(shares["loser"], floor / 2)
+
+    def test_a_short_record_never_competes_with_an_evidenced_winner(self):
+        game = load_game()
+        game["economy"]["performance_min_blocks"] = 4
+        economy = Economy(self.ledger, game, clock=self.clock)
+        standings = [Standing("full", "n1", 1, 0.001, 4), Standing("short", "n2", 1, 0.5, 1)]
+        shares = economy.shares(standings, "2.00")
+        self.assertEqual((shares["full"], shares["short"]), (D("0.25") + D("1.50"), D("0.25")))
+
     def test_payout_is_due_once_an_epoch_and_is_recorded(self):
         standings = [Standing("a1", "n1", 1, 0.001, 30)]
         epoch = float(self.economy.rules["epoch_seconds"])

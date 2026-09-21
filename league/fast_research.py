@@ -171,8 +171,11 @@ class FastResearch:
 
 
 class ResearchRouter:
-    def __init__(self, sail, fast, routes):
+    def __init__(self, sail, fast, routes, *, tier=None):
         self.sail, self.fast, self.routes = sail, fast, dict(routes)
+        #: () -> the House's frontier tier. Below "all", the gateway's month is kept for audits,
+        #: code and winners, so a Luna-cohort agent's NEW session runs on Sail instead of stopping.
+        self.tier = tier
         if type(self.routes.get('enabled')) is not bool:
             raise ValueError('research route enabled must be boolean')
         if self.routes['enabled']:
@@ -187,6 +190,8 @@ class ResearchRouter:
             return dict(settings)
         bucket = int(hashlib.sha256((route['cohort']+':'+agent.id).encode()).hexdigest()[:8], 16) / 2**32
         if bucket >= float(route['fraction']):
+            return dict(settings)
+        if self.tier is not None and self.tier() != 'all':
             return dict(settings)
         return {**settings, 'profile': PROFILE, 'fast_profile': '',
                 'max_output_tokens': 6000, 'reasoning_effort': 'medium'}

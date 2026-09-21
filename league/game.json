@@ -122,6 +122,11 @@
       "teacher": "medium"
     }
   },
+  "frontier_reserve": {
+    "_about": "Dollars left in the gateway's monthly frontier budget (GET /v1/health) below which frontier work narrows. Under earned_usd, cheap-model research moves to Sail and the unearned roles (operator, teacher, designer) pause; under code_roles_usd the architect and toolsmith pause too, and only audits and consultations by profitable agents remain. Promotion to real money needs an audit, so the month's last dollars are kept for it.",
+    "earned_usd": "20",
+    "code_roles_usd": "8"
+  },
   "consult": {
     "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits, and what it must have DONE to be allowed to. Frontier intelligence is the scarcest thing on the floor: it is the prize for trading well, never a rebate for existing. An agent that has not traded is served by Merton's own roles -- the architect who writes strategies, the toolsmith who builds what the queue asks for, the teacher who writes the lessons -- which cost it nothing and reach the whole firm.",
     "min_credits_usd": "0.35",

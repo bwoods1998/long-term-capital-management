@@ -353,7 +353,10 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${env.OPENAI_SECRET_KEY}`, 'User-Agent': 'ltcm-gateway/1.0' },
       body: body.text,
       redirect: 'manual',
-      signal: AbortSignal.timeout(280000),
+      // Just under the House's own 600-second read. At 280 seconds a high-effort consultation
+      // was cut off before it answered and still kept its whole worst case on the month: on
+      // Sept 21, 2026 most agent consultations ended this way, about $3 each for nothing.
+      signal: AbortSignal.timeout(570000),
     });
   } catch {
     // Nothing came back. The provider may still bill a call it received, so the hold stays.
