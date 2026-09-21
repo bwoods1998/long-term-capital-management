@@ -81,6 +81,21 @@ class BurstBudget(PhaseCase):
         self.assertEqual(pacer.credit_pool(per_seconds=3600), Decimal('.38'))
         self.assertEqual(pacer.room('openai'), 3)
 
+    def test_an_owner_top_up_raises_the_ceiling_and_resets_nothing(self):
+        guard = self.budget(); guard.activate_burst('night', self.small_policy())
+        guard.reserve('spent', 'foundation-review', '2')
+        self.assertEqual(guard.remaining('openai'), 1)
+        guard.top_up('topup-1:openai', 'openai', '5', 'owner added credit')
+        guard.top_up('topup-1:openai', 'openai', '5', 'owner added credit')  # idempotent
+        self.assertEqual(guard.remaining('openai'), 6)
+        self.assertEqual(guard.burst()['policy']['caps_usd']['openai'], '8')
+        with self.assertRaises(CampaignClosed):
+            guard.top_up('topup-1:openai', 'openai', '9', 'a different amount')
+        with self.assertRaises(ValueError):
+            guard.top_up('big', 'openai', '1001', 'too much at once')
+        self.assertEqual(guard.activate_burst('night', self.small_policy())['id'], 'night')  # still idempotent
+        self.assertTrue(guard.reserve('more', 'foundation-review', '5'))
+
     def test_invalid_policy_cannot_authorize_a_burst(self):
         for key,value in [('duration_hours', 100), ('luna_fraction', float('nan')),
                           ('research_workers',True), ('performance_min_blocks',0)]:

@@ -287,7 +287,7 @@ Answer with ONE JSON object and nothing else:
 class Merton:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
                  schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None, pace: Any = None,
-                 effort: Mapping[str, str] | None = None):
+                 effort: Mapping[str, str] | None = None, backoff_max: Mapping[str, int] | None = None):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
@@ -304,6 +304,8 @@ class Merton:
         self.first_after_hours = dict(first_after_hours or {"operator": 6, "toolsmith": 12, "teacher": 24, "architect": 48, "designer": 72})
         #: How hard each role thinks (the frontier model's reasoning effort). The roles that write code think hardest.
         self.effort = dict(effort or {})
+        #: The most times its usual wait a role's empty passes may stretch it (default eight).
+        self.backoff_max = dict(backoff_max or {})
 
     # ---------------------------------------------------------------- consult
     def consult(self, agent: Any, question: str, evidence: Mapping[str, Any], *, contract: str) -> dict[str, Any]:
@@ -380,7 +382,7 @@ class Merton:
             if int(row.get("files") or 0) > 0:
                 break
             empty += 1
-        return 2 ** min(max(empty - 1, 0), 3)
+        return min(2 ** min(max(empty - 1, 0), 3), int(self.backoff_max.get(role, 8)))
 
     # -------------------------------------------------------------------- pass
     def run(self, role: str) -> dict[str, Any]:
