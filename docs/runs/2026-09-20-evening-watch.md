@@ -225,8 +225,9 @@ One last scheduling issue appeared under real load: 163 research packets were qu
 newer market observations. The repair reserves up to 64 slots in each 1,024-request batch for
 research diagnostics. A separate recent-record cursor makes current failures available while
 the historical cursor catches up; request hashes deduplicate both paths. The batch and dollar
-limits are unchanged. Regression tests cover both starvation and history catch-up. Acceptance
-of that narrow repair is recorded separately below.
+limits are unchanged. Regression tests cover both starvation and history catch-up. The
+[follow-up PR](https://github.com/bwoods1998/long-term-capital-management/pull/33) records CI
+and deployment acceptance for that narrow repair.
 
 ## Overnight funding and decision criteria
 
