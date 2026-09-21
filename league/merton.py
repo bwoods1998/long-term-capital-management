@@ -73,7 +73,8 @@ here. Take an empty specialty only when one exists. Prefer structural edges that
 settlement mechanics, calendar effects) to pattern-fitting. Each strategy is one file
 `league/strategies/<name>.py` that follows the strategy contract EXACTLY, plus the WHOLE updated
 `league/strategies/registry.json` (a JSON list of {"name", "family", "file", "why"}; keep every existing row).
-Names are lowercase with dashes (under 30 characters); files are the name with underscores.""",
+Names are lowercase with dashes (under 30 characters); files are the name with underscores.
+Registry `file` values are basenames such as `sports_example.py`, never `league/strategies/sports_example.py`.""",
     "toolsmith": """You are the toolsmith of a small trading league. Agents run strategy programs in sealed boxes with no
 network; they may only import a short list of standard modules plus `tools`, a package of pure helper modules
 you maintain. Agents file requests in plain words. Build what is asked when it can be built as PURE PYTHON over
@@ -222,7 +223,17 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
                 problems = [f"{path}: {exc}"]
         if not problems and path.endswith(".json"):
             try:
-                json.loads(content)
+                parsed = json.loads(content)
+                if path == 'league/strategies/registry.json' and isinstance(parsed, list):
+                    # The proposal's file paths are repo-relative, while registry references
+                    # are basenames. Normalize exactly that known packaging mismatch. Never
+                    # collapse arbitrary paths or traversal into an allowed filename.
+                    for item in parsed:
+                        if isinstance(item, dict) and isinstance(item.get('file'), str):
+                            match = re.fullmatch(r'league/strategies/([a-z][a-z0-9_]*\.py)', item['file'])
+                            if match:
+                                item['file'] = match[1]
+                    content = json.dumps(parsed, indent=2) + '\n'
             except ValueError:
                 problems = [f"{path}: not valid JSON"]
         if problems or len(content) > 60_000:
