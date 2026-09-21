@@ -61,6 +61,21 @@ class Episodes(unittest.TestCase):
         self.assertAlmostEqual(rows[1]['return'], -.05 / 25.1)
         self.assertAlmostEqual(rows[0]['risk_fraction'], 5.01 / 25)
 
+    def test_repair_restarts_evidence_cadence_without_refunding_statistical_allowances(self):
+        self.add('eval.verdict', {'decision': 'episode-look', 'rung': 2, 'episodes': 100,
+                                 'tested_promotion': True, 'tested_death': True})
+        correction = self.add('book.fill_correction', {'cash_delta': '0'})
+        self.record(['.15', '.10', '-.01'] * 4)
+        self.ev.judge('a', 'real')
+        looks = [e for e in self.ledger.iter(kinds='eval.verdict', agent='a')
+                 if e.payload.get('decision') == 'episode-look']
+        self.assertEqual(len(looks), 2)
+        self.assertGreater(looks[-1].seq, correction.seq)
+        self.assertEqual(looks[-1].payload['look'], 2)
+        self.assertEqual(looks[-1].payload['episodes'], 12)
+        budget = self.ev._episode_allowance('a', self.ev._rung_entered('a'), 'promotion')
+        self.assertAlmostEqual(looks[-1].payload['alpha_spent'], stats.spend(budget, 2))
+
     def test_overlapping_positions_and_partial_exits_are_one_exposure(self):
         self.fill('buy', -5, 2)
         self.fill('buy', -5, 2, symbol='ETH/USD')

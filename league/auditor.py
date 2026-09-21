@@ -119,7 +119,9 @@ class Auditor:
 
     # ----------------------------------------------------------------- packet
     def packet(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
+        from .accounting import evidence_cutoffs
         book = str(verdict.numbers.get("book") or "")
+        cutoff = evidence_cutoffs(self.ledger, agent.id).get(book, 0)
         fills = [
             {k: e.payload.get(k) for k in ("side", "quantity", "price", "fee_usd", "fee_quantity", "liquidity", "source", "realized", "reason",
                                          "cost", "payout", "pnl", "result", "opened_at", "flat")}
@@ -128,7 +130,7 @@ class Auditor:
                               if k in ("asset_class", "symbol", "venue", "market_id", "right", "expiry", "strike", "multiplier", "currency")},
                "symbol": (e.payload.get("instrument") or {}).get("symbol"), "leg": (e.payload.get("instrument") or {}).get("right")}
             for e in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent.id)
-            if e.payload.get("book") == book and e.payload.get("source") != "dust"
+            if e.payload.get("book") == book and e.payload.get("source") != "dust" and e.seq > cutoff
         ]
         refused = [{"at": e.at, "book": book, "reasons": e.payload.get("reasons")}
                    for e in self.ledger.iter(kinds="book.refused", agent=agent.id) if e.payload.get("book") == book][-20:]
@@ -237,10 +239,12 @@ class Auditor:
             vetoes += 1
             windows.setdefault(entry.agent, {"since": entry.seq, "until": None, "book": p.get("book")})
         for agent, window in windows.items():
+            from .accounting import evidence_cutoffs
+            cutoff = evidence_cutoffs(self.ledger, agent).get(window['book'], 0)
             pnl = Decimal(0)
             for block in self.ledger.iter(kinds="eval.block", agent=agent):
                 first = int(block.payload.get("first_mark_seq") or block.seq)
-                if first > window["since"] and (window["until"] is None or first <= window["until"]) and block.payload.get("book") == window["book"]:
+                if first > max(window["since"], cutoff) and (window["until"] is None or first <= window["until"]) and block.payload.get("book") == window["book"]:
                     pnl += Decimal(str(block.payload["end_equity"])) - Decimal(str(block.payload["start_equity"])) - Decimal(str(block.payload.get("flow") or 0))
             scaled = pnl * scale
             if scaled < 0:
