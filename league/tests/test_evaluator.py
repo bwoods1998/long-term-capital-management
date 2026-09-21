@@ -867,7 +867,7 @@ class Judge(EvalCase):
         self.stake("a", 200, at(0, 0))
         self.ev.seat("a", 1, "test")
         self.live("a", WINNER * 9)  # 27 marks: looks at 20 and 25 are on the ledger
-        again = Evaluator(self.ledger)
+        again = Evaluator(self.ledger, constitution=self.ev.c)
         self.assertEqual(again.rung("a"), 1)
         self.assertEqual(again.blocks("a"), self.ev.blocks("a"))
         first, second = self.ev.judge("a", "paper"), again.judge("a", "paper")
@@ -1701,3 +1701,34 @@ class AFreeCheckIsNotRationed(unittest.TestCase):
         self.assertGreater(len(looks), 1, "a free check must not wait five blocks between looks")
         self.assertTrue(all(row["tested_promotion"] is False for row in looks))  # and none of them spent alpha
         self.assertTrue(all(row["tested_death"] is False for row in looks))
+
+    def test_screen_can_qualify_between_death_looks_without_spending_alpha(self):
+        self.evaluator.seat("a1", 1, "test")
+        self.ledger.append("book.stake", {"book": "kalshi-shadow", "usd": "200"}, agent="a1")
+        for n in range(12):
+            self.ledger.append("book.settle", {"book": "kalshi-shadow", "pnl": "0.10",
+                "instrument": {"market_id": f"M{n}"}}, agent="a1")
+        for n in range(20):
+            self.block("a1", 0.001 if n % 2 else -0.0012, n)
+        self.assertEqual(self.evaluator.judge("a1", "kalshi-shadow").decision, "hold")
+        first = self.ledger.last("eval.verdict", agent="a1").payload
+        self.assertTrue(first["tested_death"])
+        self.block("a1", 0.003, 20)
+        verdict = self.evaluator.judge("a1", "kalshi-shadow")
+        self.assertEqual(verdict.decision, "eligible")
+        self.assertFalse(verdict.numbers["tested_death"])
+        self.assertFalse(verdict.numbers["tested_promotion"])
+        self.assertIsNone(verdict.numbers["alpha_death"])
+        for n in range(21, 25):
+            self.block("a1", 0.0001, n)
+            verdict = self.evaluator.judge("a1", "kalshi-shadow")
+        self.assertTrue(verdict.numbers["tested_death"])
+        self.assertAlmostEqual(verdict.numbers["alpha_death"], first["alpha_death"] / 4)
+
+    def test_statistical_death_still_runs_when_due_on_a_screen_rung(self):
+        self.evaluator.seat("a1", 1, "test")
+        for n in range(20):
+            self.block("a1", -0.001 if n % 2 else -0.0012, n)
+        verdict = self.evaluator.judge("a1", "kalshi-shadow")
+        self.assertEqual(verdict.decision, "die")
+        self.assertTrue(verdict.numbers["tested_death"])

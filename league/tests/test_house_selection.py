@@ -20,3 +20,42 @@ class SelectionOpportunity(HouseCase):
         rules = self.house.game["economy"]
         self.clock.advance(float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"]) + 1)
         self.assertEqual(self.house._weakest(rules).id, agent.id)
+
+    def test_late_replay_pass_gets_a_forward_opportunity(self):
+        agent = self.house.spawn("late", "test-family", BUYER)
+        rules = self.house.game["economy"]
+        grace = float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"])
+        self.clock.advance(grace + 1)
+        self.assertEqual(self.house._weakest(rules).id, agent.id)
+        self.house.evaluator.promote(agent.id, 1, "passed replay", {})
+        self.assertIsNone(self.house._weakest(rules))
+        self.clock.advance(grace + 1)
+        self.assertEqual(self.house._weakest(rules).id, agent.id)
+
+    def test_replacement_strategy_gets_grace_but_duplicate_rows_do_not_extend_it(self):
+        agent = self.seated()
+        rules = self.house.game["economy"]
+        grace = float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"])
+        self.clock.advance(grace + 1)
+        self.house.registry.adopt(agent.id, code=BUYER + "\n# new program\n", needs=agent.needs,
+                                  params=agent.params, reason="empty-record replacement")
+        self.assertIsNone(self.house._weakest(rules))
+        self.clock.advance(grace + 1)
+        self.house.registry.adopt(agent.id, code=agent.code, needs=agent.needs,
+                                  params=agent.params, reason="duplicate receipt")
+        self.assertEqual(self.house._weakest(rules).id, agent.id)
+
+    def test_old_equity_opportunity_does_not_age_a_replacement_strategy(self):
+        agent = self.seated("stocks", BUYER.replace('"BTC/USD"', '"SPY"'))
+        rules = self.house.game["economy"]
+        grace = float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"])
+        self.house.ledger.append("agent.woke", {"ok": True, "offered": 1}, agent=agent.id)
+        self.clock.advance(grace + 1)
+        self.house.registry.adopt(agent.id, code=agent.code + "\n# new program\n", needs=agent.needs,
+                                  params=agent.params, reason="empty-record replacement")
+        self.clock.advance(grace + 1)
+        self.assertIsNone(self.house._weakest(rules))
+        self.house.ledger.append("agent.woke", {"ok": True, "offered": 1}, agent=agent.id)
+        self.assertIsNone(self.house._weakest(rules))
+        self.clock.advance(grace + 1)
+        self.assertEqual(self.house._weakest(rules).id, agent.id)

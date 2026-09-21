@@ -358,13 +358,16 @@ class Evaluator:
         # it only makes an agent wait. hilibrand-2 cleared everything but cumulative growth at its
         # first look on Sept 20, 2026, was 0.35% of one block away, and would not have been looked
         # at again for five hours. A free check is not rationed.
-        costs_alpha = active >= int(death["min_active_blocks"]) or (bool(gate) and gate.get("gate", "bound") == "bound")
-        if active < needed or (spent_looks and costs_alpha and active - last_look_active < every):
-            when = max(needed, last_look_active + every) if costs_alpha else needed
+        statistical_due = not spent_looks or active - last_look_active >= every
+        screen_due = bool(gate) and gate.get("gate", "bound") == "screen" and active >= blocks_needed
+        if active < needed or (not statistical_due and not screen_due):
+            when = max(needed, last_look_active + every)
             return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {when}", numbers)
         alpha = float(self.ladder["alpha"])
-        tests_death = active >= death["min_active_blocks"]
-        tests_bound = bool(gate) and gate.get("gate", "bound") == "bound" and active >= blocks_needed
+        # Once death tests begin, their cadence must still not delay the free paper screen.
+        # A check between paid looks reads the screen without spending either test's alpha.
+        tests_death = statistical_due and active >= death["min_active_blocks"]
+        tests_bound = statistical_due and bool(gate) and gate.get("gate", "bound") == "bound" and active >= blocks_needed
         # A row written before the tests were told apart tested both whenever it looked.
         k_death = 1 + sum(1 for row in looks if row.get("tested_death", True))
         k_promote = 1 + sum(1 for row in looks if row.get("tested_promotion", True))
