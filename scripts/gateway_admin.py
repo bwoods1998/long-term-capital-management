@@ -55,7 +55,7 @@ def main():
         with urllib.request.urlopen(request, timeout=30) as response:
             data = json.load(response)
         sail = data.get('sail') or {}
-        print(json.dumps({'kill_switch': data.get('kill_switch'), 'today': data.get('today'), 'frontier': data.get('frontier'), 'github': data.get('github'),
+        print(json.dumps({'kill_switch': data.get('kill_switch'), 'today': data.get('today'), 'frontier': data.get('frontier'), 'typesafe': data.get('typesafe'), 'github': data.get('github'),
                           'sail_balance_usd': sail.get('balance_usd'), 'box_status': sail.get('box_status')}, indent=1))
         return
     token = KEY.read_text().strip()

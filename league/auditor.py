@@ -50,6 +50,9 @@ Use the timestamps in refused_order_history and latest_reconciliations to distin
 the latest account state. A historical freeze alone does not prove the book is still frozen. A newer successful
 reconciliation also does not by itself validate earlier incorrect marks: identify any remaining accounting defect.
 Missing or old reconciliation evidence is an uncertainty to assess, not evidence of a successful reconciliation.
+Inspect book_accounting and recent_order_outcomes: a reconciled aggregate can conceal a negative baseline
+offsetting an agent's phantom holding. Submitted exit intentions do not establish executed exits, and venue
+rejections can explain an apparent strategy failure. Unresolved attribution invalidates affected performance.
 paper_fills includes both executions and settlements; use each row's kind, cost, payout, pnl and result when present.
 Answer with ONE JSON object and nothing else:
 {"approve": true|false, "confidence": 0.0-1.0, "summary": "two or three plain sentences",
@@ -64,14 +67,34 @@ EXECUTION_POLICY = {
     "interpretation": "A profitable holding may be sold above the $10 entry cap. These controls do not guarantee a fill, a price, a profitable edge or continuous venue availability."}
 
 
+def order_outcomes(ledger: Ledger, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    """Orders belong to House ledger rows; identify owners through their allocation shares."""
+    orders = {}
+    for entry in ledger.iter(kinds='book.order'):
+        p = entry.payload
+        if p.get('book') != book or not any(s.get('agent') == agent for s in p.get('shares') or []):
+            continue
+        key = p.get('order_id')
+        previous = orders.pop(key, {})
+        row = {'at': entry.at, **{k: p.get(k) for k in ('order_id', 'instrument', 'side', 'quantity', 'status', 'reason')}}
+        if p.get('status') == 'unknown' and p.get('reason'):
+            row['submission_error'] = p['reason']
+        elif previous.get('submission_error'):
+            row['submission_error'] = previous['submission_error']
+        orders[key] = row
+    return list(orders.values())[-limit:]
+
+
 class Auditor:
-    def __init__(self, frontier: Frontier, ledger: Ledger, economy: Any, evaluator: Any, *, live_agents=lambda: [], lineage=None):
+    def __init__(self, frontier: Frontier, ledger: Ledger, economy: Any, evaluator: Any, *, live_agents=lambda: [], lineage=None,
+                 book_evidence=None):
         self.frontier = frontier
         self.ledger = ledger
         self.economy = economy
         self.evaluator = evaluator
         self.live_agents = live_agents  # () -> [{"agent", "family", "niche"}] already on real money
         self.lineage = lineage  # (agent id) -> itself, its parent, its parent's parent...
+        self.book_evidence = book_evidence
 
     @property
     def policy_digest(self):
@@ -103,7 +126,7 @@ class Auditor:
             if name in reconciliations:
                 reconciliations[name] = {"at": entry.at, "seq": entry.seq,
                                         **{k: entry.payload.get(k) for k in ("book", "ok", "cash_venue", "cash_expected", "cash_diff",
-                                                                          "position_diffs", "dust_booked", "detail", "ledger_seq")}}
+                                                                          "position_diffs", "dust_booked", "detail", "ledger_seq", "attribution_issues")}}
         blocks = self.evaluator.blocks(agent.id, book=book)
         trials = [e.payload for e in self.ledger.iter(kinds="eval.trial", agent=agent.id)]
         return {
@@ -126,6 +149,8 @@ class Auditor:
             "refused_orders": [row["reasons"] for row in refused],
             "refused_order_history": refused,
             "latest_reconciliations": reconciliations,
+            "book_accounting": self.book_evidence(agent.id, book) if self.book_evidence else None,
+            "recent_order_outcomes": order_outcomes(self.ledger, agent.id, book),
             "already_on_real_money": self.live_agents(),
             "micro_real_limits": CONSTITUTION["rungs"]["2"],
             "execution_policy": dict(EXECUTION_POLICY),

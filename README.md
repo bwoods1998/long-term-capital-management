@@ -13,9 +13,11 @@ gateway that agent code cannot change. The House still holds Sail credentials an
 campaign budget; moving that authority outside the mutable House is part of the architect handoff.
 
 **Current authorization:** [persistent earned live trading](docs/runs/2026-09-21-persistent-live-trading.md)
-is prepared for the owner's activation on the existing venue balances, with no live deadline.
+was activated by the owner on September 21 at 14:10 UTC, using existing venue balances with no live deadline.
 It retains the original $500 foundation plus $325 burst accounting and resumes only unused
-OpenAI/Sail allowance. Deployment alone leaves live trading disabled; inspect `live_trading.active`.
+OpenAI/Sail allowance. Deployment alone cannot activate it; inspect `live_trading.active`.
+The [September 21 live watch](docs/runs/2026-09-21-live-hour.md) records current provider funding,
+stock/options readiness and an investigation of legacy paper-account attribution.
 The first passing historical replay has been independently reproduced and entered paper; a
 profitable forward edge and autonomous repair of the whole harness are still unproved.
 Read the [latest run](docs/runs/2026-09-20-foundation-progress.md),

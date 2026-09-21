@@ -22,7 +22,8 @@ PAPER_VENUES = ("alpaca-paper",)
 GATEWAY_VENUES = REAL_VENUES + PAPER_VENUES
 
 
-def gateway_broker(venue: str, *, gateway_url: str, token: str, transport: Any = None, clock: Any = None, feed: str = DEFAULT_FEED):
+def gateway_broker(venue: str, *, gateway_url: str, token: str, transport: Any = None, clock: Any = None,
+                   feed: str = DEFAULT_FEED, option_feed: str = "indicative"):
     """The adapter for `venue`, speaking only to the gateway."""
     if venue not in GATEWAY_VENUES:
         raise ValueError(f"the gateway does not serve {venue!r}")
@@ -30,8 +31,11 @@ def gateway_broker(venue: str, *, gateway_url: str, token: str, transport: Any =
     client = VenueClient(transport, gateway_url=gateway_url, gateway=signer, venue=venue)
     if venue == "kalshi":
         return KalshiBroker(KalshiCredentials("gateway", signer), client=client, clock=clock)
+    if option_feed not in ('indicative', 'opra'):
+        raise ValueError('option_feed must be indicative or opra')
     # The credential is a placeholder: the gateway drops the APCA headers and signs with its own.
-    return AlpacaBroker(AlpacaCredentials("gateway", "gateway", paper=False), client=client, venue=venue, feed=feed)
+    return AlpacaBroker(AlpacaCredentials("gateway", "gateway", paper=False), client=client, venue=venue,
+                        feed=feed, option_feed=option_feed)
 
 
 def family_of(venue: str) -> str:

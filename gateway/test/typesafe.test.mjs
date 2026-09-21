@@ -113,6 +113,34 @@ test('the lifetime call count remains bounded even when provider usage is zero',
   assert.equal(gate.typesafeReserve({ id: 'over', digest: 'b'.repeat(64) }).status, 402);
 });
 
+test('explicit persistent mode resumes unused allowance without resetting costs, identities or holds', async () => {
+  const x = setup(settings, new Error('uncertain upstream response'));
+  await x.call(request('old-unknown'));
+  const env = { ...settings, TYPESAFE_PERSISTENT: 'true', TYPESAFE_PILOT_END: '2020-01-01' };
+  const resumed = setup(env, undefined, x.store);
+  assert.equal(resumed.gate.typesafeStatus().spent_usd, '0.010000');
+  assert.equal(resumed.gate.typesafeStatus().ends, null);
+  assert.equal(resumed.gate.typesafeStatus().persistent, true);
+  assert.equal((await resumed.call(request('old-unknown'))).status, 409);
+  assert.equal((await resumed.call(request('new-funded-request'))).status, 200);
+  assert.equal(resumed.gate.typesafeStatus().spent_usd, '0.010042');
+  const exhausted = setup({ ...env, TYPESAFE_PILOT_USD: '0.01' }, undefined, x.store);
+  assert.equal((await exhausted.call(request('cannot-refill'))).status, 402);
+  const revoked = setup({ ...env, TYPESAFE_PERSISTENT: 'false' }, undefined, x.store);
+  assert.equal((await revoked.call(request('expired-again'))).status, 402);
+  assert.equal(revoked.tape.calls.length, 0);
+});
+
+test('persistent mode requires literal configuration and still respects pricing breaches', () => {
+  for (const setting of [undefined, true, 'yes', '1', 'TRUE']) {
+    const gate = setup({ ...settings, TYPESAFE_PILOT_END: '2020-01-01', TYPESAFE_PERSISTENT: setting }).gate;
+    assert.equal(gate.typesafeReserve({ id: 'closed', digest: 'a'.repeat(64) }).status, 402);
+  }
+  const store = memoryStore({ [TYPESAFE_KEY]: JSON.stringify({ spent: '100', calls: 1, pending: 0, breaches: 1 }) });
+  const gate = setup({ ...settings, TYPESAFE_PERSISTENT: 'true' }, undefined, store).gate;
+  assert.equal(gate.typesafeReserve({ id: 'breached', digest: 'a'.repeat(64) }).status, 402);
+});
+
 test('question schema cannot smuggle unpriced model settings or arbitrary result types', () => {
   assert.equal(admit(body), null);
   for (const bad of [{ ...body, endpoint: 'https://elsewhere.test' }, { ...body, stream: true },

@@ -440,6 +440,7 @@ class AlpacaData:
                     cursors[name] = index
         return {
             "venue": "alpaca",
+            "stock_feed": self.feed if any(not is_crypto(name) for name in names) else None,
             "horizon": horizon,
             "step_seconds": TIMEFRAME_SECONDS[execution],
             "execution_timeframe": execution,
