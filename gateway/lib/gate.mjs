@@ -179,7 +179,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
     typesafeStatus() {
       const row = read(store, TYPESAFE_KEY, { spent: '0', calls: 0, pending: 0, breaches: 0 });
       return { ...row, spent_usd: typesafe.money(row.spent), cap_usd: typesafe.money(typesafe.capMicro(env)),
-        max_calls: typesafe.MAX_CALLS, ends: env.TYPESAFE_PILOT_END || null, model: typesafe.MODEL };
+        max_calls: typesafe.MAX_CALLS, persistent: env.TYPESAFE_PERSISTENT === 'true',
+        ends: env.TYPESAFE_PERSISTENT === 'true' ? null : env.TYPESAFE_PILOT_END || null, model: typesafe.MODEL };
     },
 
     typesafeReserve({ id, digest, at = now() }) {
@@ -192,7 +193,8 @@ export function createGate({ store, env = {}, now = Date.now }) {
         ? 'This request was already accepted; it will not be billed again.' : 'This request identity has different content.' };
       const end = Date.parse(env.TYPESAFE_PILOT_END || '');
       const cap = typesafe.capMicro(env), row = this.typesafeStatus();
-      if (!Number.isFinite(end) || at >= end || cap <= 0n || row.breaches
+      const windowOpen = env.TYPESAFE_PERSISTENT === 'true' || (Number.isFinite(end) && at < end);
+      if (!windowOpen || cap <= 0n || row.breaches
           || row.calls >= typesafe.MAX_CALLS || BigInt(row.spent) + typesafe.RESERVATION_MICRO > cap) {
         return { ok: false, status: 402, cap: 'typesafe_pilot', error: 'The funded TypeSafe pilot allowance is unavailable.' };
       }
