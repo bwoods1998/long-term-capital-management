@@ -1,62 +1,39 @@
 {
   "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
   "economy": {
-    "epoch_seconds": 21600,
+    "epoch_seconds": 3600,
     "daily_pool_usd": "0.50",
-    "niche_floor_share": "0.25",
+    "niche_floor_share": "0.15",
     "rung_weights": {
       "0": "0",
       "1": "0.2",
       "2": "1.5",
       "3": "3.0"
     },
-    "endowment_usd": "1.00",
+    "endowment_usd": "2.00",
     "fork_threshold_usd": "4.00",
     "fork_endowment_usd": "1.50",
-    "max_population": 36,
+    "max_population": 48,
     "min_population": 12,
-    "replay_deadline_epochs": 12,
+    "replay_deadline_epochs": 72.0,
     "box_usd_per_hour": "0.04",
     "box_creation_usd": "0.005",
     "unearned_share_to_floors": true,
     "idle_broke_wakes": 30,
-    "newcomer_seconds": 3600,
-    "performance_exponent": 2,
-    "displace_after_epochs": 2
+    "newcomer_seconds": 600,
+    "performance_exponent": 3,
+    "displace_after_epochs": 12.0,
+    "performance_min_blocks": 5
   },
   "bounds": {
-    "daily_pool_usd": [
-      "0.50",
-      "8.00"
-    ],
-    "niche_floor_share": [
-      "0.10",
-      "0.70"
-    ],
-    "endowment_usd": [
-      "0.25",
-      "2.00"
-    ],
-    "fork_threshold_usd": [
-      "1.50",
-      "10.00"
-    ],
-    "fork_endowment_usd": [
-      "0.50",
-      "3.00"
-    ],
-    "max_population": [
-      8,
-      48
-    ],
-    "min_population": [
-      4,
-      24
-    ],
-    "newcomer_seconds": [
-      600,
-      86400
-    ]
+    "daily_pool_usd": ["0.50", "8.00"],
+    "niche_floor_share": ["0.10", "0.70"],
+    "endowment_usd": ["0.25", "2.00"],
+    "fork_threshold_usd": ["1.50", "10.00"],
+    "fork_endowment_usd": ["0.50", "3.00"],
+    "max_population": [8, 48],
+    "min_population": [4, 24],
+    "newcomer_seconds": [600, 86400]
   },
   "audit": {
     "cooldown_hours": 24,
@@ -66,13 +43,13 @@
   "research": {
     "profile": "pro_flex",
     "fast_profile": "pro_asap",
-    "max_turns": 10,
+    "max_turns": 12,
     "max_output_tokens": 32000,
-    "min_hours_between": 3,
+    "min_hours_between": 0.25,
     "idle": {
       "barren_wakes": 10,
       "shut_wakes": 6,
-      "min_hours_between": 1
+      "min_hours_between": 0.25
     },
     "min_credits_usd": "0.10",
     "reasoning_effort": "medium",
@@ -85,27 +62,18 @@
     "crypto_max_hold_hours": 48
   },
   "horizon_bounds": {
-    "kalshi_hour_max_hours": [
-      1,
-      24
-    ],
-    "kalshi_day_max_hours": [
-      12,
-      96
-    ],
-    "crypto_max_hold_hours": [
-      6,
-      168
-    ]
+    "kalshi_hour_max_hours": [1, 24],
+    "kalshi_day_max_hours": [12, 96],
+    "crypto_max_hold_hours": [6, 168]
   },
   "merton": {
     "_about": "How often each of Merton's roles sits down, in hours, during the expedition. The pacer still gates every pass on the day's allowance, so this is how often a role MAY run, not how often it must.",
     "schedule_hours": {
-      "operator": 4,
-      "toolsmith": 3,
-      "teacher": 6,
-      "designer": 12,
-      "architect": 3
+      "operator": 0.25,
+      "toolsmith": 0.5,
+      "teacher": 1,
+      "designer": 1,
+      "architect": 0.5
     },
     "first_after_hours": {
       "operator": 1,
@@ -128,14 +96,14 @@
     "min_active_blocks": 1,
     "cooldown_hours": 8,
     "cooldown_hours_by_rung": {
-      "1": 8,
-      "2": 3,
-      "3": 1
+      "1": 1,
+      "2": 0.5,
+      "3": 0.25
     },
     "profitable_cooldown_hours_by_rung": {
-      "1": 3,
-      "2": 1,
-      "3": 0.5
+      "1": 0.5,
+      "2": 0.25,
+      "3": 0.25
     }
   }
 }
