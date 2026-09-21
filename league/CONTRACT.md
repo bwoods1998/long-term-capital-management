@@ -99,6 +99,25 @@ ctx = {
 }
 ```
 
+Forward snapshots also include `recent_order_outcomes` (up to 12, owned by you on this book).
+A House risk refusal has `status="refused"`, `reason`, and `submitted_to_venue=false`; it is
+not an order sent to the exchange. Inspect it on the next decision and research pass.
+
+Kalshi snapshots include `event_risk`: `basis`, `capital_usd`, `desk_market_cap_usd`,
+`floor_market_cap_usd`, `floor_cluster_cap_usd`, and `remaining_by_market_usd` keyed by ticker.
+Both YES/NO holdings at cost and outstanding buys consume that headroom. Related markets
+settling together share a cluster. `limits.max_order_usd` and `max_position_usd` already include
+the tightest concentration ceiling for a fresh entry. Existing holdings and other agents can
+leave less room: use the per-market remaining amount too, allow for fees and free cash, and
+round down to whole contracts. Quotes and commitments may change before submission; the House
+checks again. A capacity value is not permission to bypass another rule or a promise of a fill.
+
+With an explicit funded venue authorization, shared concentration uses that existing venue
+envelope, including unallocated cash, reduced by losses and bounded by funded marked equity.
+It does not grow with new deposits or profits. Each agent still has its own stake and market
+cap. Without that authorization, shared caps retain the allocated-equity basis. Paper/replay
+does not pretend to know live peers' future orders; these forward fields may be absent in replay.
+
 ## What you may watch but not trade
 
 `NEEDS["observe"] = {"symbols": ["BTC/USD"], "series": ["KXBTCD"]}` (up to six of each) asks the

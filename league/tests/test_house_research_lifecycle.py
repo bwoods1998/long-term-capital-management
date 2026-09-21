@@ -62,6 +62,40 @@ class ResearchLifecycle(HouseCase):
         self.house._research_if_due(agent)
         self.assertEqual(calls, [])
 
+    def test_new_owned_execution_refusal_accelerates_research_without_bypassing_budget(self):
+        agent, _ = self.ready()
+        self.house._state['last_research'][agent.id] = self.clock()
+        self.assertFalse(self.house.research_due(agent))
+        self.clock.advance(1)
+        self.house.ledger.append('book.refused', {'book': 'alpaca', 'reasons': ['another book']}, agent=agent.id)
+        self.clock.advance(59)
+        self.assertFalse(self.house.research_due(agent))
+        self.house.ledger.append('book.refused', {'book': 'alpaca-paper', 'reasons': ['oversized']}, agent=agent.id)
+        self.assertTrue(self.house.research_due(agent))
+        self.house.pacer.may_spend = lambda kind: False
+        self.assertFalse(self.house.research_due(agent))
+        self.house.pacer.may_spend = lambda kind: True
+        self.house._state['last_research'][agent.id] = self.clock()
+        self.assertFalse(self.house.research_due(agent), 'a refusal already covered by a pass must not retrigger it')
+
+    def test_burst_reaudit_follows_new_completed_evidence_instead_of_waiting_a_day(self):
+        agent = self.seated()
+        self.house.seat(agent)
+        self.house._burst = {'id': 'test-accelerated-game'}
+        self.house.game['audit']['min_credits_usd'] = '0.20'
+        self.house.ledger.append('audit.verdict', {'approve': False, 'summary': 'needs fresh evidence'}, agent=agent.id)
+        self.assertFalse(self.house._audit_due(agent))
+        # Five full non-overlapping exposures on the current book, all after the audit.
+        for number in range(5):
+            for side, cash, quantity in [('buy', '-5', '1'), ('sell', '5.1', '-1')]:
+                self.clock.advance(1)
+                self.house.ledger.append('book.fill', {'book': 'alpaca-paper', 'instrument': {'symbol': 'BTC/USD'},
+                    'side': side, 'source': 'venue', 'cash_delta': cash, 'position_delta': quantity}, agent=agent.id)
+            self.assertEqual(self.house._audit_due(agent), number == 4)
+        self.assertEqual(self.house.evaluator.rung(agent.id), 1, 'reaudit permission is not a promotion')
+        self.house.ledger.append('audit.verdict', {'approve': False, 'summary': 'still no edge'}, agent=agent.id)
+        self.assertFalse(self.house._audit_due(agent), 'the same observations cannot purchase repeated reaudits')
+
     def test_retirement_during_a_pass_does_not_adopt_its_result(self):
         agent, _ = self.ready()
         original = agent.code_sha256

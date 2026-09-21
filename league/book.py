@@ -49,7 +49,7 @@ from ltcm.broker import (
     RejectedOrder,
     money,
 )
-from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, gross_exposure
+from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_at_risk, event_cluster, gross_exposure
 
 from .fees import QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
@@ -381,6 +381,7 @@ class Book:
         resolves_at: Any = None,
         sleep: Any = time.sleep,
         kill_switch: Any = None,
+        event_capital_budget: Any = None,
     ):
         self.name = name
         self.broker = broker
@@ -393,6 +394,7 @@ class Book:
         self.resolves_at = resolves_at  # callable(instrument) -> epoch seconds | None: when an event market is expected to pay
         self.sleep = sleep
         self.kill_switch = kill_switch  # callable() -> bool
+        self.event_capital_budget = event_capital_budget  # callable() -> explicit venue dollars, or None
         self.engine = RiskEngine()
         self.limits: dict[str, Limits] = {}
         self.accounts: dict[str, Account] = {}
@@ -687,6 +689,70 @@ class Book:
         with self._lock:
             return sum((self.equity(a) for a in self.accounts), ZERO)
 
+    def event_floor_capital(self) -> Decimal | None:
+        """Funded authorization, including unused reserve; never a new trading allocation.
+
+        Only an explicit venue envelope replaces the legacy allocated-equity denominator.
+        Stakes are internal loans, not deposits. Include all booked P&L (also swept/dead
+        accounts and House fees), so a restart or another agent cannot erase losses. Gains
+        and later deposits cannot enlarge the original authorization. Unattributed owner
+        positions supply no capital here. Daily-loss denominators are unchanged.
+        """
+        if not self.real_money or self.event_capital_budget is None:
+            return None
+        budget = self.event_capital_budget()
+        if budget is None:
+            return None
+        with self._lock:
+            if self.baseline_cash is None:
+                return ZERO
+            pnl = sum((self.equity(a) - row.staked for a, row in self.accounts.items()), ZERO)
+            return max(ZERO, min(money(budget) + min(pnl, ZERO), self.baseline_cash + pnl))
+
+    def _event_exposure(self, reservations, *, agent: str | None = None) -> dict[str, Decimal]:
+        exposure: dict[str, Decimal] = {}
+        for owner, account in self.accounts.items():
+            if agent is not None and owner != agent:
+                continue
+            for holding in account.holdings.values():
+                if holding.instrument.asset_class == 'event' and holding.cost > 0:
+                    add_event_exposure(exposure, (holding.instrument.market_id or holding.instrument.symbol).upper(), holding.cost)
+        for owner, instrument, side, quantity, price, _ in reservations:
+            if (agent is None or owner == agent) and side == 'buy' and instrument.asset_class == 'event':
+                add_event_exposure(exposure, (instrument.market_id or instrument.symbol).upper(), quantity * price * instrument.multiplier)
+        return exposure
+
+    def event_risk(self, agent: str, markets: Iterable[str] = ()) -> dict[str, Any]:
+        """The same concentration caps/exposures as check(), visible before a strategy sizes.
+
+        Headroom is principal, not a promise of execution: cash, fees, price changes, other
+        rules and concurrently accepted orders are checked again at submission.
+        """
+        with self._lock:
+            authorized = self.event_floor_capital()
+            capital = self.total_equity() if authorized is None else authorized
+            def cap(rule, basis, enabled=True):
+                pct = money(self.rules[rule])
+                return max(ZERO, basis * pct) if enabled and pct > 0 else None
+            desk = cap('max_event_market_pct', self.equity(agent))
+            market_cap = cap('max_event_market_floor_pct', capital, self.real_money)
+            cluster_cap = cap('max_event_cluster_floor_pct', capital, self.real_money)
+            reservations = self._reservations()
+            own, floor = self._event_exposure(reservations, agent=agent), self._event_exposure(reservations)
+            unknown = any(side == 'buy' and price <= 0 for _, _, side, _, price, _ in reservations)
+            remaining = {}
+            for symbol in markets:
+                market = str(symbol).upper()
+                bounds = [limit - used for limit, used in (
+                    (desk, own.get(market, ZERO)), (market_cap, floor.get(market, ZERO)),
+                    (cluster_cap, cluster_at_risk(floor, event_cluster(market)))) if limit is not None]
+                remaining[str(symbol)] = float(max(ZERO, min(bounds))) if bounds and not unknown else (0.0 if unknown else None)
+            return {'basis': 'authorized_venue' if authorized is not None else 'allocated_equity',
+                    'capital_usd': float(capital), 'desk_market_cap_usd': None if desk is None else float(desk),
+                    'floor_market_cap_usd': None if market_cap is None else float(market_cap),
+                    'floor_cluster_cap_usd': None if cluster_cap is None else float(cluster_cap),
+                    'remaining_by_market_usd': remaining}
+
     # -------------------------------------------------------------------- risk
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules
@@ -773,17 +839,12 @@ class Book:
         working_sells: dict[str, Decimal] = {}
         working_buys: dict[str, Decimal] = {}
         working_event_buys: dict[str, Decimal] = {}
-        floor_event_exposure: dict[str, Decimal] = {}
-        for held_account in self.accounts.values():
-            for holding in held_account.holdings.values():
-                if holding.instrument.asset_class == "event" and holding.cost > 0:
-                    add_event_exposure(floor_event_exposure, (holding.instrument.market_id or holding.instrument.symbol).upper(), holding.cost)
+        floor_event_exposure = self._event_exposure(reservations)
         for owner, instrument, side, quantity, price, _ in reservations:
             key = instrument.key
             value = quantity * price * instrument.multiplier
             if side == "buy" and instrument.asset_class == "event":
                 market = (instrument.market_id or instrument.symbol).upper()
-                add_event_exposure(floor_event_exposure, market, value)
                 if owner == intent.agent:
                     working_event_buys[market] = working_event_buys.get(market, ZERO) + value
             if owner != intent.agent:
@@ -816,6 +877,7 @@ class Book:
             max_event_market_floor_pct=money(self.rules["max_event_market_floor_pct"]),
             max_event_cluster_floor_pct=money(self.rules["max_event_cluster_floor_pct"]),
             floor_event_exposure=floor_event_exposure,
+            event_floor_capital=self.event_floor_capital(),
         )
         decision = self.engine.check(order_intent, ctx)
         reasons.extend(decision.reasons)

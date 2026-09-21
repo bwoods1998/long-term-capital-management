@@ -144,7 +144,10 @@ class Researcher:
             + "\n\nTHE STRATEGY CONTRACT (the file format your code must follow)\n\n"
             + self.contract
             + "\n\nHOW TO WORK. Call one tool per turn. Start from your journal and your own recent trades: they are what you know that "
-            "nobody else does. Look at the live view (`markets_now`) before you design a rule about prices or spreads. Read the library "
+            "nobody else does. Look at the live view (`markets_now`) before you design a rule about prices or spreads. Read "
+            "recent_order_outcomes: a status of refused with submitted_to_venue=false is a House constraint, not a venue failure. "
+            "For event sizing use the current limits and event_risk.remaining_by_market_usd, then reserve fees and round contracts down. "
+            "Diagnose a new refusal before repeating a blocked entry; one oversized intent does not establish that trading is impossible. Read the library "
             "and the playbook before paying for a search. State a falsifiable question, the existing baseline, the artifact you will "
             "produce, and the acceptance check. Spend a replay only when its answer can change a specific decision. A reused historical "
             "tail is development evidence, not independent forward validation. A documented missing input or an explicit abstention "

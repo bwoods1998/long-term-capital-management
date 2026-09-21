@@ -83,6 +83,7 @@ def describe(agent, settings, niche, *, clock=time.time, alpaca=False, kalshi=Fa
             'not_supplied': ['perpetual funding/open-interest feed', 'point-in-time earnings-surprise panel', 'live sports score feed'],
             'recording': 'Shared sampled REST snapshots with receive times; not tick/depth history. Experiment inputs/results are archived separately.',
         },
+        'execution_feedback': 'Forward strategy snapshots and research standing include owned recent_order_outcomes, including House refusals before venue submission. Kalshi markets_now includes effective limits and event_risk remaining principal per market after shared holdings and working buys. A fresh current-book refusal pulls the next research pass forward, subject to earned credits and provider budget.',
         'research': 'Model turns spend credits even when no replay or search is purchased. A retained candidate is proposed until the House records adoption/forking. Use runtime_status to check changed capabilities. replay_coverage accepts complete proposed NEEDS and reports each missing observed symbol before any sandbox replay or selection trial. One missing symbol does not mean the whole feed is absent. Toolsmith advice is not implementation; blocked requests remain in the engineering backlog.',
     }
 
