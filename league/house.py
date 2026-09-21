@@ -37,6 +37,7 @@ from ltcm.broker import Instrument, money
 
 from . import seeds as seeds_module
 from .agents import Agent, Registry, niche_of
+from .admissions import Admissions
 from . import capital, niches as niches_module
 from . import parameters
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
@@ -1506,7 +1507,7 @@ class House:
             return f"{idle['shut']} wakes in a row with nothing open to trade: this is bench time, and the bench is where a better strategy is written"
         return ""
 
-    def _weakest(self, rules: Mapping[str, Any]) -> Agent | None:
+    def _weakest(self, rules: Mapping[str, Any], *, specialty: str | None = None, exclude: Sequence[str] = ()) -> Agent | None:
         """The agent a newcomer displaces, or None when nobody has earned displacing.
 
         Never one on real money -- what that may cost is already bounded by the tuition, and the
@@ -1528,6 +1529,8 @@ class House:
         rank = []
         for standing in self.standings():
             agent = self.registry.get(standing.agent)
+            if agent.id in exclude or (specialty is not None and agent.specialty != specialty):
+                continue
             if standing.rung >= 2 or standing.mean_growth > 0:
                 continue
             opportunity = _epoch(agent.born_at)
@@ -1674,6 +1677,13 @@ class House:
 
     def _research_standing(self, agent: Agent):
         rung = self.evaluator.rung(agent.id)
+        ladder = self.evaluator.ladder
+        peers = []
+        for entry in self.ledger.iter(kinds='eval.trial'):
+            other = self.registry.get(entry.agent)
+            if other is not None and other.id != agent.id and other.niche == agent.niche and entry.payload.get('passed'):
+                peers.append({'agent': entry.agent, 'at': entry.at, 'seq': entry.seq,
+                    **{k: entry.payload.get(k) for k in ('passed', 'trades', 'blocks', 'trials', 'deflated_sharpe', 'experiment')}})
         return {
             'rung': rung, 'credits_usd': format(self.economy.balance(agent.id), 'f'),
             'blocks': len(self.evaluator.blocks(agent.id)),
@@ -1683,6 +1693,16 @@ class House:
             'idle': {**self.idle_run(agent), 'why_now': self.idle_reason(agent)},
             'rewrites_in_place': rung == 0 or (rung == 1 and self.record_is_empty(agent)),
             'runtime_capabilities': self.research_capabilities(agent),
+            'qualification_policy': {
+                'replay': dict(ladder['replay']),
+                'lineage_trials': len(self.evaluator.family_trials(agent.family, self.registry.lineage(agent.id))),
+                'hard_trial_limit': None,
+                'paper': {**ladder['paper'], 'required_active_blocks_for_this_horizon': self.evaluator._gate_blocks(1, agent.horizon),
+                          'min_closed_trades': ladder['min_closed_trades']},
+                'new_live_capital_allowed_by_campaign': bool(self.campaigns.policy['allow_new_live_capital']) if self.campaigns else self.settings.real_money,
+                'note': 'Replay selection penalties depend on the observed record and trial history; there is no fixed five-to-nine-trial cutoff. The paper gate is a screen, not a positive confidence bound.'},
+            'peer_replay_passes': peers[-3:],
+            'peer_evidence_note': 'Recorded historical passes, including retired peers. Counterexamples to impossibility claims, not proof of edge or independent validation. Source programs and all trials remain in their own lineages.',
         }
 
     def research(self, agent: Agent) -> Any:
@@ -1739,16 +1759,9 @@ class House:
                 with self._lifecycle_lock:
                     candidate = self._commit_research(agent.id, generation, outcome)
                 if candidate:
-                    try:
-                        child = self.fork(agent, code=candidate['code'], params=candidate['params'], reason=candidate['purpose'], passed_replay=True,
-                                          staked_by_house=not self.economy.can_fork(agent.id))
-                    except Exception as exc:
-                        self.ledger.append('agent.research', {'tool': 'candidate', 'status': 'fork_error',
-                            'session': session, 'reason': f'{type(exc).__name__}: {str(exc)[:200]}', '_candidate': candidate}, agent=agent.id)
-                        raise
-                    self.ledger.append('agent.research', {'tool': 'candidate', 'status': 'forked' if child else 'deferred',
-                        'session': session, 'child': child.id if child else None,
-                        'reason': 'a child was admitted' if child else 'a child was not admitted', '_candidate': candidate}, agent=agent.id)
+                    with self._lifecycle_lock:
+                        row = Admissions(self.ledger).enqueue(agent.id, generation, candidate, session)
+                        self._admit_candidate(row)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
             with self._lifecycle_lock:
                 with self._state_lock:
@@ -1763,6 +1776,74 @@ class House:
             with self.research_jobs.claim(job['session']) as claimed:
                 if claimed:
                     self.research_jobs.finish(job['session'], 'retired before resume', cancelled=True)
+
+    def _admit_candidate(self, row, *, displace=False):
+        """Retry a known deferred fork under the lifecycle lock; never retry an unknown write."""
+        queue = Admissions(self.ledger)
+        if row['status'] == 'admitting':
+            queue.record(row, 'unconfirmed', 'restart during admission; inspect the retained evidence before retrying')
+            return None
+        if row['status'] not in ('queued', 'deferred'):
+            return None
+        parent = self.registry.get(row['agent'])
+        generation = self._generation(row['agent'])
+        expected = row.get('_generation')
+        if expected is None:  # a deferred receipt written before the queue existed
+            job = self.research_jobs.get(row['session'])
+            expected = job['generation'] if job else None
+        if generation is None or expected is None or list(generation[:-1]) != list(expected[:-1]):
+            queue.record(row, 'cancelled', 'parent retired or changed; candidate evidence retained')
+            return None
+        candidate = row['_candidate']
+        if candidate.get('passed') is not True or parameters.inspect(candidate['params'], candidate['needs'])['errors']:
+            queue.record(row, 'cancelled', 'candidate did not pass replay or has invalid parameters')
+            return None
+        rules = self.game['economy']
+        staked = not self.economy.can_fork(parent.id)
+        if staked and self.clock() - float(self._state.setdefault('last_staked', {}).get(parent.id) or 0) < float(rules['epoch_seconds']):
+            queue.record(row, 'deferred', 'waiting for the parent House-endowment cadence')
+            return None
+        niche = self.niche_of(parent)
+        niche_full = niche is not None and self.members(niche.id) >= niche.max_members
+        full = len(self.registry.living()) >= int(rules['max_population'])
+        loser = None
+        if niche_full or full:
+            if displace:
+                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,))
+            if loser is None:
+                queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')
+                return None
+            # Verify the replacement before retiring anyone. Its module executes only in the
+            # sealed probe box, exactly as at spawn. A bad file must not displace a resident.
+            try:
+                described = self.sandbox.needs(PROBE_BOX, candidate['code'])
+                self._charge_box(parent.id, described, note='validating a deferred candidate admission')
+                info = described.result
+                if not info.get('ok') or niche_of(info['needs'])[:2] != (parent.venue, parent.horizon):
+                    raise ValueError('candidate no longer describes the same venue and horizon')
+                needs = niches_module.constrain(info['needs'], niche) if niche else info['needs']
+                if needs != candidate['needs']:
+                    raise ValueError('candidate description differs from its replayed inputs')
+                parameters.require_valid({**info.get('params', {}), **candidate['params']}, needs)
+            except Exception as exc:
+                queue.record(row, 'deferred', f'candidate validation unavailable: {type(exc).__name__}: {str(exc)[:160]}')
+                return None
+        queue.record(row, 'admitting', 'paper admission write started', displaced=loser.id if loser else None)
+        try:
+            if loser is not None:
+                self.kill(loser, 'displaced', self.postmortem(loser, 'displaced',
+                    'a replay-passing deferred candidate has priority over an untested mutation'))
+            child = self.fork(parent, code=candidate['code'], params=candidate['params'],
+                              reason=candidate['purpose'], passed_replay=True, staked_by_house=staked)
+        except Exception as exc:
+            queue.record(row, 'unconfirmed', f'admission interrupted: {type(exc).__name__}: {str(exc)[:160]}')
+            self.alert('warning', f"{parent.id}: candidate admission is unconfirmed; retained for inspection")
+            return None
+        if child is None:
+            queue.record(row, 'deferred', 'fork returned without admission; capacity or endowment unavailable')
+            return None
+        queue.record(row, 'admitted', 'a replay-passing child was seated on paper', child=child.id)
+        return child
 
     def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
         """Apply a candidate under the lifecycle lock, or return it for a separate child."""
@@ -1940,6 +2021,17 @@ class House:
         failure shrank the league from 28 towards 12 instead of cycling it. Now it fills up to the
         ceiling, one at a time, and puts the newcomer on the desk that is furthest from full, so
         exploration spreads across the firm instead of converging on whoever is winning."""
+        # Replay-passing candidates precede random mutations at the same newcomer cadence.
+        # The ledger queue survives a research pass finishing and the House restarting.
+        state = self._state.setdefault('last_newcomer', {})
+        last = float(state.get('at') or state.get('since') or self._born_at)
+        if self.clock() - self._born_at >= 300 and self.clock() - last >= float(rules['newcomer_seconds']):
+            with self._lifecycle_lock:
+                for row in Admissions(self.ledger).pending():
+                    child = self._admit_candidate(row, displace=True)
+                    if child is not None:
+                        state['at'] = self.clock()
+                        return child
         living = self.registry.living()
         if not living:
             return None
@@ -2133,6 +2225,8 @@ class House:
                                    if not (report := parameters.inspect(a.params, a.needs))['valid']},
             "durable_research": [{k: j[k] for k in ("session", "agent", "status", "created", "updated", "available", "reason", "resumes")}
                                  for j in self.research_jobs.pending()],
+            "candidate_admissions": [{k: row.get(k) for k in ('session', 'agent', 'status', 'reason', 'child')}
+                                     for row in Admissions(self.ledger).rows()[-30:]],
             "recordings": self.recorder.stats(),
             "campaign": self.campaigns.report() if self.campaigns else None,
         }

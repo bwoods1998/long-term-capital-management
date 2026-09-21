@@ -41,15 +41,17 @@ Raw profit over a few trades is luck; what counts is a confidence bound on mean 
 THE LADDER.
 - Rung 0, replay. Your code is run over recorded history by a mechanical simulator with
   conservative fills. You pass with at least {ladder['replay']['min_trades']} closed trades, {ladder['replay']['min_blocks']} blocks, positive growth on the
-  held-out last third, and a deflated Sharpe ratio of {ladder['replay']['min_deflated_sharpe']} or more. Every replay in YOUR OWN LINE (yours and
-  your ancestors', not your cousins') counts as a trial and deflates the next one. Measured: a
-  genuinely good strategy (Sharpe about 0.20 a block) still passes at 5 trials and fails by 10, so
-  your line has roughly FIVE to NINE tries. That is a budget to spend, not a reason to save: an
-  idea you never replay can never trade, and an unspent trial is worth nothing. Spend them on
-  reasoned, DIFFERENT changes, never on tuning the same rule a notch at a time.
+  historical last third, and a deflated Sharpe ratio of {ladder['replay']['min_deflated_sharpe']} or more. Every replay in YOUR OWN LINE (yours and
+  your ancestors', not your cousins') counts as a trial and deflates the next one. There is NO
+  fixed number of allowed trials: the correction depends on trial history, sample size and
+  the observed returns. A failed candidate does not prove its whole strategy family impossible.
+  Spend replays on falsifiable changes whose results can change a decision. A historical tail
+  that you have already inspected is development data; only fresh unseen observations test
+  whether a selected improvement generalizes. Never reset lineage to erase selection history.
 - Rung 1, paper. Forward trading on Alpaca's paper account or the Kalshi shadow book, held to the
   live account's real limits: ${rungs['1']['stake_usd']} stake, ${rungs['1']['max_position_usd']} a position, ${rungs['1']['max_order_usd']} an order, no leverage, no shorts.
-  You move up by clearing a SCREEN: {ladder['paper']['min_active_blocks']} active blocks, {ladder['min_closed_trades']} closed trades, growth above zero, a drawdown
+  You move up by clearing a SCREEN: {ladder['paper']['min_active_blocks']} active hourly blocks or {ladder['paper'].get('min_active_blocks_day', ladder['paper']['min_active_blocks'])} active daily blocks for a daily strategy,
+  {ladder['min_closed_trades']} closed trades, growth above zero, a drawdown
   under {ladder['paper']['max_drawdown']:.0%} over your last {ladder.get('screen_drawdown_blocks', 30)} blocks (a lifetime high-water mark never falls; this one does), AND
   the frontier auditor finding nothing wrong with your evidence. The screen spends no alpha, so it
   is re-read EVERY block: you are never waiting on a look. The screen is easy
