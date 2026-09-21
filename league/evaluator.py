@@ -354,17 +354,21 @@ class Evaluator:
             numbers['completed_exposure_evidence'] = fast.numbers
             if fast.decision in ('eligible', 'die'):
                 return fast
-        looks = [
-            e.payload for e in self.ledger.iter(kinds="eval.verdict", agent=agent)
+        from .accounting import evidence_cutoffs
+        cutoff = evidence_cutoffs(self.ledger, agent).get(book, 0)
+        look_entries = [
+            e for e in self.ledger.iter(kinds="eval.verdict", agent=agent)
             if e.seq > entered and e.payload.get("decision") == "look"
         ]
+        looks = [e.payload for e in look_entries]
         gate = self._gate(rung)
         blocks_needed = self._gate_blocks(rung, horizon)
         every = int(self.ladder["look_every_active_blocks"])
         needed = min([death["min_active_blocks"]] + ([blocks_needed] if gate else []))
         # Rationed by the looks that SPENT something, not by every look taken: a screen-only look
         # costs no alpha, so letting it start the clock would push the death test out of reach.
-        spent_looks = [row for row in looks if row.get("tested_death", True) or row.get("tested_promotion", True)]
+        spent_looks = [e.payload for e in look_entries if e.seq > cutoff
+                       and (e.payload.get("tested_death", True) or e.payload.get("tested_promotion", True))]
         last_look_active = int(spent_looks[-1].get("active_blocks") or 0) if spent_looks else 0
         # Looking often is rationed because each look that runs a STATISTICAL test spends alpha,
         # and an agent looked at often enough would pass one by luck. A screen runs no such test --
@@ -451,9 +455,14 @@ class Evaluator:
             return self._decide(agent, rung, 'die', 'completed exposures breached the drawdown limit', numbers)
         if len(rows) < int(rules['min_episodes']) or numbers['trades'] < int(self.ladder['min_closed_trades']):
             return Verdict(agent, rung, 'hold', 'more completed exposures and closed trades are needed', numbers)
-        looks = [e.payload for e in self.ledger.iter(kinds='eval.verdict', agent=agent, after=entered)
-                 if e.payload.get('decision') == 'episode-look']
-        due = not looks or len(rows) - int(looks[-1]['episodes']) >= int(rules['look_every_episodes'])
+        from .accounting import evidence_cutoffs
+        cutoff = evidence_cutoffs(self.ledger, agent).get(book, 0)
+        look_entries = [e for e in self.ledger.iter(kinds='eval.verdict', agent=agent, after=entered)
+                        if e.payload.get('decision') == 'episode-look']
+        looks = [e.payload for e in look_entries]
+        fresh_looks = [e.payload for e in look_entries if e.seq > cutoff]
+        # Evidence counters restart after a repair; statistical error allowances do not.
+        due = not fresh_looks or len(rows) - int(fresh_looks[-1]['episodes']) >= int(rules['look_every_episodes'])
         promotion_budget = self._episode_allowance(agent, entered, 'promotion')
         death_budget = self._episode_allowance(agent, entered, 'death')
         alpha = stats.spend(promotion_budget, len(looks) + 1) if promotion_budget > 0 else None
@@ -465,8 +474,7 @@ class Evaluator:
                            ucb=death_bounds['ucb'] if death_bounds else None)
         # Promote only from a fully marked, flat portfolio on this fast route. Otherwise a
         # sequence of realized winners could conceal an open loser between hourly blocks.
-        from .accounting import evidence_cutoffs
-        clean_since = max(entered, evidence_cutoffs(self.ledger, agent).get(book, 0))
+        clean_since = max(entered, cutoff)
         marks = [e for e in self.ledger.iter(kinds='book.mark', agent=agent, after=clean_since)
                  if e.payload.get('book') == book]
         events = [e for e in self.ledger.iter(kinds=('book.fill', 'book.settle', 'book.stake'), agent=agent, after=entered)

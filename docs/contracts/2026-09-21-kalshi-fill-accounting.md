@@ -53,7 +53,9 @@ audit trail but are excluded from promotion, drift, rewards, audit packets and
 recent-trade summaries. Completed exposure calculations retain the cash
 correction and discard an exposure spanning it; subsequent episodes use the
 corrected capital. New observation blocks start from corrected marked equity.
-Actual losses remain in cash, cost basis, realized P&L and the positive-equity
+Fresh evidence counters do not have to catch up to invalid old observation
+counts before another evaluation. Already-spent statistical error allowances
+remain spent. Actual losses remain in cash, cost basis, realized P&L and the positive-equity
 promotion check. The correction does not forgive a loss or create a promotion.
 
 Agents receive the receipt and money correction through `book_accounting`.

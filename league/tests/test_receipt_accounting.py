@@ -162,6 +162,22 @@ class ReceiptAccountingTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertAlmostEqual(rows[0]['return'], 1 / 19.3267)
 
+    def test_old_block_look_does_not_force_new_evidence_to_catch_up_to_dirty_counts(self):
+        ev = Evaluator(self.ledger)
+        ev.seat('a', 2, 'test live')
+        self.ledger.append('eval.verdict', {'decision': 'look', 'rung': 2, 'active_blocks': 100,
+            'tested_death': True, 'tested_promotion': True}, agent='a')
+        self.assertTrue(self.book.reconcile().ok)
+        correction = self.ledger.last('book.fill_correction', agent='a')
+        for i in range(35):
+            mark = self.ledger.append('book.mark', {'book': 'kalshi', 'equity': '25'}, agent='a')
+            self.ledger.append('eval.block', {'book': 'kalshi', 'key': str(i), 'first_mark_seq': mark.seq,
+                'last_mark_seq': mark.seq, 'active': True, 'exposure': .3, 'log_growth': 0.0001}, agent='a')
+        ev.judge('a', 'kalshi')
+        looks = [e for e in self.ledger.iter(kinds='eval.verdict', agent='a') if e.payload.get('decision') == 'look']
+        self.assertEqual(len(looks), 2)
+        self.assertGreater(looks[-1].seq, correction.seq)
+
 
 class FreshAttributionTests(unittest.TestCase):
     def test_complete_and_incomplete_acknowledgements_converge_to_one_exact_receipt(self):
