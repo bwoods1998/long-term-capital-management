@@ -303,7 +303,7 @@ class Incentives(HouseCase):
         self.assertFalse(self.house.record_is_empty(agent))
         better = BUYER.replace('"notional": 20.0', '"notional": 30.0')
         self.house.researcher = type("R", (), {"research": staticmethod(lambda agent, standing, session: type("P", (), {
-            "candidate": {"code": better, "needs": agent.needs, "params": {"notional": 30.0}, "purpose": "a change", "numbers": {}},
+            "candidate": {"code": better, "needs": agent.needs, "params": {"notional": 30.0}, "purpose": "a change", "numbers": {}, "passed": True},
             "consulted": "", "cost_usd": D(0)})())})()
         self.house.research(agent)
         self.assertEqual(self.house.registry.get(agent.id).params["notional"], 20.0, "its own file is untouched")

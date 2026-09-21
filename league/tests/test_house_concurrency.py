@@ -232,13 +232,15 @@ class CommitConcurrency(Threads, HouseCase):
         self.assertNotIn(agent.id, self.house._state["tried"])
 
     def test_refused_or_failed_forks_retain_the_full_candidate(self):
+        from league.admissions import Admissions
+
         agent = self.seated()
         self.research_ready(agent)
         self.house.record_is_empty = lambda agent: False
         original_hash = agent.code_sha256
         self.house.fork = lambda *args, **kwargs: None
         self.house.research(agent)
-        deferred = self.house.ledger.last("agent.research", agent=agent.id).payload
+        deferred = Admissions(self.house.ledger).rows()[-1]
         self.assertEqual(deferred["status"], "deferred")
         self.assertEqual(deferred["_candidate"]["code"], self.candidate(agent).candidate["code"])
 
@@ -246,10 +248,10 @@ class CommitConcurrency(Threads, HouseCase):
             raise RuntimeError("a probe box is unavailable")
 
         self.house.fork = broken
-        with self.assertRaisesRegex(RuntimeError, "probe box"):
-            self.house.research(agent)
-        failed = self.house.ledger.last("agent.research", agent=agent.id).payload
-        self.assertEqual(failed["status"], "fork_error")
+        self.house.research(agent)
+        failed = Admissions(self.house.ledger).rows()[-1]
+        self.assertEqual(failed["status"], "unconfirmed")
+        self.assertIn("probe box", failed["reason"])
         self.assertEqual(failed["_candidate"], deferred["_candidate"])
         self.assertEqual(agent.code_sha256, original_hash)
 
