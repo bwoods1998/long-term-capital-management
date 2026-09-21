@@ -25,6 +25,22 @@ def burst_policy():
     return p
 
 
+
+# These tests exercise mechanisms (tuition, the timed pilot, audit scoring, concurrency) with the
+# micro rung as it stood before the owner's learning-surge revision of Sept 21, 2026 ($25 / $10 /
+# $10, $20 options). The mechanisms are unchanged; only today's numbers moved.
+from unittest.mock import patch as _patch  # noqa: E402
+from league.constitution import CONSTITUTION as _CONSTITUTION  # noqa: E402
+_LEGACY_MICRO = _patch.dict(_CONSTITUTION["rungs"]["2"], {"stake_usd": "25", "max_position_usd": "10", "max_order_usd": "10", "option_max_position_usd": "20"})
+
+
+def setUpModule():
+    _LEGACY_MICRO.start()
+
+
+def tearDownModule():
+    _LEGACY_MICRO.stop()
+
 class LiveAuthorization(PhaseCase):
     def test_a_research_burst_does_not_implicitly_enable_trading(self):
         guard = self.budget()

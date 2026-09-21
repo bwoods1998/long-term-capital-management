@@ -36,6 +36,22 @@ def decide(ctx):
 '''
 
 
+
+# The ladder's integration runs through the legacy $50 tuition, which cannot seat a $60 stake; it
+# exercises the mechanism with the micro rung as it stood before the Sept 21, 2026 learning surge.
+# Production's persistent owner grant supersedes the tuition.
+from unittest.mock import patch as _patch  # noqa: E402
+from league.constitution import CONSTITUTION as _CONSTITUTION  # noqa: E402
+_LEGACY_MICRO = _patch.dict(_CONSTITUTION["rungs"]["2"], {"stake_usd": "25", "max_position_usd": "10", "max_order_usd": "10", "option_max_position_usd": "20"})
+
+
+def setUpModule():
+    _LEGACY_MICRO.start()
+
+
+def tearDownModule():
+    _LEGACY_MICRO.stop()
+
 class InProcessSandbox:
     """Test-only: runs `decide` in this process (a thousand wakes as subprocesses takes minutes).
     It claims to be sealed so the House will open real-money books against the fake venues."""

@@ -12,11 +12,12 @@ D = Decimal
 
 class KellyStakeTest(unittest.TestCase):
     def test_no_record_or_no_edge_is_the_micro_stake(self):
-        self.assertEqual(kelly_stake([], D(25), D(800))[0], D(25))
-        self.assertEqual(kelly_stake([0.001] * 40, D(25), D(800))[0], D(25))  # no variance: nothing to bound
+        # The floor is the constitution's micro stake: $60 since the learning surge of Sept 21, 2026.
+        self.assertEqual(kelly_stake([], D(25), D(800))[0], D(60))
+        self.assertEqual(kelly_stake([0.001] * 40, D(25), D(800))[0], D(60))  # no variance: nothing to bound
         losing = [(-0.004 if i % 2 else 0.002) for i in range(60)]
         stake, numbers = kelly_stake(losing, D(25), D(800))
-        self.assertEqual(stake, D(25))
+        self.assertEqual(stake, D(60))
         self.assertIn("not above zero", numbers["reason"])
 
     def test_a_bounded_edge_is_sized_on_the_lower_bound_not_the_mean(self):
@@ -24,15 +25,15 @@ class KellyStakeTest(unittest.TestCase):
         stake, numbers = kelly_stake(growth, D(25), D(100000))
         self.assertGreater(numbers["lcb"], 0)
         self.assertLess(numbers["lcb"], numbers["mean"])
-        on_the_mean = D(25) * D(str(0.25 * numbers["mean"] / numbers["variance"]))
+        on_the_mean = D(25) * D(str(0.5 * numbers["mean"] / numbers["variance"]))  # half Kelly since the learning surge
         self.assertLess(stake, on_the_mean)
         self.assertGreater(stake, D(25))
 
     def test_the_venue_share_is_a_ceiling(self):
         growth = [(0.006 if i % 3 else -0.002) for i in range(90)]
         stake, numbers = kelly_stake(growth, D(25), D(400))
-        self.assertEqual(stake, D("100.00"))  # a quarter of the venue's cash, whatever Kelly says
-        self.assertEqual(numbers["ceiling_usd"], "100.00")
+        self.assertEqual(stake, D("160.00"))  # 40% of the venue's cash (learning surge), whatever Kelly says
+        self.assertEqual(numbers["ceiling_usd"], "160.00")
 
 
 class RecommendationTest(HouseCase):
@@ -57,13 +58,13 @@ class RecommendationTest(HouseCase):
         self.house.evaluator.promote(agent.id, 3, "test sizing an established real account")
         book.stake(agent.id, "100")
         self.house.seat(agent)
-        row = resize(self.house, agent)  # no bounded return record: target the $25 micro stake
-        self.assertEqual(D(row["moved_usd"]), D(-75))
-        self.assertEqual(D(row["stake_usd"]), D(25))
+        row = resize(self.house, agent)  # no bounded return record: target the $60 micro stake
+        self.assertEqual(D(row["moved_usd"]), D(-40))
+        self.assertEqual(D(row["stake_usd"]), D(60))
         for _ in range(3):
             self.house.seat(agent)
-        self.assertEqual(book.account(agent.id).cash, D(25))
-        self.assertEqual(book.account(agent.id).staked, D(25))
+        self.assertEqual(book.account(agent.id).cash, D(60))
+        self.assertEqual(book.account(agent.id).staked, D(60))
         self.assertFalse(book.account(agent.id).swept)
         self.assertIsNone(resize(self.house, agent))
         self.assertEqual(len(list(self.house.ledger.iter(kinds="book.stake", agent=agent.id))), 2)

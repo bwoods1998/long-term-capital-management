@@ -77,7 +77,7 @@ THE LADDER.
   also clear a bound on your loss rate: one big loss you have not seen yet is assumed. A small edge
   is proved across a family sooner than alone: if your own growth is above zero and the pooled
   real-money record of your family ({ladder['family']['min_members']} or more members) clears the same bound, you move up on theirs.
-- Rung 3, scaled. A quarter of Kelly on the LOWER bound of your growth. Decay sends you back down.
+- Rung 3, scaled. {rungs['3']['kelly_fraction']:g} of Kelly on the LOWER bound of your growth, up to {rungs['3']['max_share_of_venue']:.0%} of the venue's cash. Decay sends you back down.
 - Death on PAPER comes fast: down {ladder['paper_death']['max_loss']:.0%} or more after {ladder['paper_death']['min_active_blocks']} active blocks, or not above where
   you started after {ladder['paper_death']['unprofitable_blocks']}. A paper seat is free and scarce; a loser gives it back.
 - Death: an upper bound on your growth below zero after {ladder['death']['min_active_blocks']} active blocks, a drawdown of {ladder['death']['max_drawdown']:.0%},
