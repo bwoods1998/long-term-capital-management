@@ -55,7 +55,8 @@
     "MAX_DAY_ORDERS": "2000",
     // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
     // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
-    "FRONTIER_MONTH_USD": "174",
+    // Sept 21 22:15 UTC: the owner added $200 of OpenAI credit -> $374.
+    "FRONTIER_MONTH_USD": "374",
     // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
     "TYPESAFE_PILOT_USD": "20",

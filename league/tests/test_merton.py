@@ -233,6 +233,15 @@ class MertonTest(unittest.TestCase):
         self.ledger.append("merton.pass", {"role": "operator", "at_epoch": self.clock(), "files": 0, "skipped": True})
         self.assertEqual(merton.backoff("operator"), 1)  # a skipped pass neither counts nor resets
 
+    def test_the_architect_backs_off_at_most_twice(self):
+        merton = self.merton(FakeFrontier({"files": []}), FakeForge())
+        merton.backoff_max = {"architect": 2}
+        self.ledger.append("ops.started", {"release": "test"})
+        for _ in range(5):
+            merton.run("architect")
+            merton.run("operator")
+        self.assertEqual((merton.backoff("architect"), merton.backoff("operator")), (2, 8))
+
     def test_following_records_what_ci_decided(self):
         answer = {"summary": "s", "slug": "idea", "title": "t", "body": "b", "files": [{"path": "league/strategies/idea.py", "content": GOOD}]}
         forge = FakeForge()

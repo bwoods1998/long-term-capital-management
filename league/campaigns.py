@@ -77,6 +77,8 @@ class CampaignBudget:
                 ends REAL NOT NULL, policy TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS live_trading(id TEXT PRIMARY KEY, started REAL NOT NULL,
                 policy TEXT NOT NULL, revoked REAL);
+            CREATE TABLE IF NOT EXISTS topups(id TEXT PRIMARY KEY, at REAL NOT NULL, kind TEXT NOT NULL,
+                amount INTEGER NOT NULL, note TEXT NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -143,11 +145,42 @@ class CampaignBudget:
             self.db.execute('UPDATE live_trading SET revoked=COALESCE(revoked,?)', (self.clock(),))
 
     def burst(self) -> dict[str, Any] | None:
+        """The funded burst, its caps raised by every owner top-up (`top_up`). The stored policy
+        row never changes; spend already committed is never reset."""
         with self.lock:
             row = self.db.execute('SELECT * FROM burst').fetchone()
             if row is None:
                 return None
-            return {**dict(row), 'policy': json.loads(row['policy']), 'meters': json.loads(row['meters'])}
+            policy = json.loads(row['policy'])
+            added = dict(self.db.execute('SELECT kind, SUM(amount) FROM topups GROUP BY kind').fetchall())
+            if added:
+                policy['caps_usd'] = {k: usd(micro(v) + int(added.get(k) or 0)) for k, v in policy['caps_usd'].items()}
+            return {**dict(row), 'policy': policy, 'meters': json.loads(row['meters']),
+                    'topups_usd': {k: usd(v) for k, v in added.items()}}
+
+    def top_up(self, ident: str, kind: str, amount: Any, note: str) -> dict[str, Any]:
+        """Account-owner action: the owner added money at the provider, and the burst may spend it.
+        Append-only and idempotent by identity; it raises a ceiling and resets nothing."""
+        value = micro(amount)
+        if kind not in ('sail', 'openai') or not 0 < value <= micro('1000'):
+            raise ValueError('a top-up is Sail or OpenAI, more than $0 and at most $1,000')
+        if not ident or len(ident) > 100 or not str(note).strip():
+            raise ValueError('a top-up needs an identity and a note')
+        with self.lock:
+            if self.burst() is None:
+                raise CampaignClosed('there is no funded burst to top up')
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                old = self.db.execute('SELECT kind, amount FROM topups WHERE id=?', (ident,)).fetchone()
+                if old and (old[0], old[1]) != (kind, value):
+                    raise CampaignClosed('that top-up identity already names a different amount')
+                if not old:
+                    self.db.execute('INSERT INTO topups VALUES(?,?,?,?,?)', (ident, self.clock(), kind, value, str(note)[:300]))
+                self.db.execute('COMMIT')
+            except BaseException:
+                self.db.execute('ROLLBACK')
+                raise
+        return self.burst()
 
     def activate_burst(self, ident: str, policy: Mapping[str, Any]) -> dict[str, Any]:
         """Explicit owner action; one immutable, incremental research allowance per phase.
@@ -167,7 +200,7 @@ class CampaignBudget:
             try:
                 old = self.burst()
                 if old:
-                    if old['id'] != ident or canonical(old['policy']) != encoded:
+                    if old['id'] != ident or self.db.execute('SELECT policy FROM burst').fetchone()[0] != encoded:
                         raise CampaignClosed('a burst already exists; cannot reset its clock or allowance')
                 else:
                     if not self.running() or not all(self.ready(k) for k in policy['caps_usd']):

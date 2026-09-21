@@ -120,6 +120,9 @@
       "architect": 2,
       "designer": 8
     },
+    "backoff_max": {
+      "architect": 2
+    },
     "effort": {
       "architect": "high",
       "toolsmith": "high",
