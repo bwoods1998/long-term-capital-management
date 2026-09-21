@@ -816,7 +816,7 @@ class House:
             symbols = sorted(set(symbols) | {str(s) for s in (watched.get("symbols") or [])[:6]})
             timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
             warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
-            key = f"alpaca:{','.join(symbols)}:{timeframe}:{warmup}:{horizon}:{start_iso[:10]}"
+            key = f"alpaca:{','.join(symbols)}:{timeframe}:{warmup}:{horizon}:{start_iso[:10]}:{getattr(self.alpaca_data, 'feed', 'unknown')}"
             build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon, warmup_bars=warmup)  # noqa: E731
         else:
             series = sorted(str(s) for s in (needs.get("series") or []))[:12]
@@ -835,7 +835,7 @@ class House:
             # the half hour and carries fewer markets.
             step = self.settings.kalshi_day_step_seconds if horizon == "day" else 300
             markets = self.settings.kalshi_replay_markets if horizon == "hour" else min(self.settings.kalshi_replay_markets, self.settings.kalshi_day_markets)
-            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}:{','.join(under)}:{observed_timeframe}:{observed_limit}"
+            key = f"kalshi:{','.join(series)}:{horizon}:{step}:{markets}:{start_iso[:10]}:{','.join(under)}:{observed_timeframe}:{observed_limit}:{getattr(self.alpaca_data, 'feed', 'unknown')}"
 
             def build(series=series, under=under, step=step, markets=markets, start_iso=start_iso, end_iso=end_iso, horizon=horizon):
                 tape = self.kalshi_data.tape(series, start=start_iso, end=end_iso, horizon=horizon, max_markets=markets, step_seconds=step)
@@ -1107,6 +1107,12 @@ class House:
             rung = self.evaluator.rung(agent.id)
             if rung != verdict.rung:
                 return
+            source_book = self.book_of(agent)
+            if rung >= 1 and source_book is not None and not source_book.evidence_integrity(agent.id)['ok']:
+                self._promotion_status(agent, verdict, 'accounting_integrity',
+                    'the source record contains an unresolved position attribution defect',
+                    accounting=source_book.evidence_integrity(agent.id))
+                return
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign',
                     'the campaign has not released this live rung; a screen pass alone cannot allocate money')
@@ -1148,6 +1154,12 @@ class House:
                 return  # it stays on paper, where its record is the auditor's counterfactual
         with self._lifecycle_lock:
             if self._generation(agent.id) != generation:
+                return
+            source_book = self.book_of(agent)
+            if rung >= 1 and source_book is not None and not source_book.evidence_integrity(agent.id)['ok']:
+                self._promotion_status(agent, verdict, 'accounting_integrity',
+                    'position attribution changed during the audit; the source record requires repair',
+                    accounting=source_book.evidence_integrity(agent.id))
                 return
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
@@ -1782,6 +1794,9 @@ class House:
         from .capabilities import describe
         result = describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
                           alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
+        result['observations']['stock_feed'] = getattr(self.alpaca_data, 'feed', None)
+        paper = self.books.get('alpaca-paper')
+        result['observations']['option_feed'] = getattr(paper.broker, 'option_feed', None) if paper else None
         if self.semantic_lab is not None:
             observed = agent.needs.get('observe') or {}
             result['semantic_research'] = self.semantic_lab.evidence(agent.id,
@@ -1812,7 +1827,9 @@ class House:
                     'error': f'{type(exc).__name__}: {str(exc)[:200]}'}
 
     def _research_standing(self, agent: Agent):
+        from .auditor import order_outcomes
         rung = self.evaluator.rung(agent.id)
+        book = self.book_of(agent)
         ladder = self.evaluator.ladder
         peers = []
         for entry in self.ledger.iter(kinds='eval.trial'):
@@ -1826,6 +1843,8 @@ class House:
             'last_trial': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.trial', agent=agent.id)))), None),
             'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') in ('look', 'episode-look')), None),
             'can_fork': self.economy.can_fork(agent.id), 'recent_trades': self._recent_trades(agent.id),
+            'book_accounting': book.evidence_integrity(agent.id) if book else None,
+            'recent_order_outcomes': order_outcomes(self.ledger, agent.id, book.name) if book else [],
             'candidate_submission': {'allowed': True, 'parent_can_fund_child': self.economy.can_fork(agent.id),
                 'house_can_stake_replay_pass': True, 'full_seats_queue_candidate': True,
                 'style_may_change_within_venue_horizon_specialty': True,
@@ -2108,6 +2127,9 @@ class House:
         rung = self.evaluator.rung(agent.id)
         entered = self.evaluator._rung_entered(agent.id)
         book = self.book_of(agent)
+        if book is not None and not book.evidence_integrity(agent.id)['ok']:
+            return Standing(agent.id, agent.niche, rung, 0.0, 0, working=False,
+                            reward_growth=0.0, reward_observations=0, reward_rung=rung)
         rows = self.evaluator.blocks(agent.id, since_seq=entered, book=book.name) if rung >= 1 and book else []
         growth = [float(r["log_growth"]) for r in rows]
         active = sum(1 for r in rows if r.get("active"))
@@ -2140,6 +2162,8 @@ class House:
                             reward_observations=reward[1], reward_rung=reward_rung)
 
     def _reward_evidence(self, agent, book, rows, since, *, until=None):
+        if not book.evidence_integrity(agent.id)['ok']:
+            return 0.0, 0
         growth = [float(r['log_growth']) for r in rows]
         active = sum(1 for r in rows if r.get('active'))
         # A day's return is not compared with an hour's return as though their clocks matched.
@@ -2424,8 +2448,14 @@ class House:
                     for key, job in sorted(self._job_status.items())]
         health = {
             "at": summary["at"], "living": len(self.registry.living()), "dead": len(self.registry.dead()),
-            "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders())} for name, book in self.books.items()},
+            "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders()),
+                             "attribution_issues": {a: report['issues'] for a in book.agents()
+                                                    if not (report := book.evidence_integrity(a))['ok']}}
+                      for name, book in self.books.items()},
             "ledger_seq": self.ledger.head()[0], "real_money": self.settings.real_money,
+            "data_feeds": {name: {'stocks': getattr(book.broker, 'feed', None),
+                                  'options': getattr(book.broker, 'option_feed', None)}
+                           for name, book in self.books.items() if name.startswith('alpaca')},
             "release": Path(__file__).resolve().parents[1].name,
             "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
             "background_jobs": jobs,

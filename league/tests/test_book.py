@@ -80,6 +80,35 @@ class YesSpaceTest(unittest.TestCase):
 
 
 class PaperBookTest(BookCase):
+    def test_paper_adoption_cannot_mask_missing_owned_units_with_a_negative_baseline(self):
+        self.seat('owner')
+        self.broker.set_quote(BTC, '80000', '80010')
+        self.book.reconcile()
+        self.book.submit([self.intent('owner', BTC, 'buy', '0.0005')])
+        self.book.reconcile()
+        self.broker.held.pop(BTC.key)  # venue execution whose attribution is absent
+        for _ in range(6):
+            self.assertFalse(self.book.reconcile().ok)
+        self.assertNotIn(BTC.key, self.book.baseline_positions)
+        self.assertFalse(any('adopted' in e.payload['note'] for e in self.ledger.iter(kinds='book.baseline')))
+
+    def test_legacy_negative_baseline_taints_only_its_holders_and_cannot_be_laundered(self):
+        self.seat('owner'); self.seat('clean')
+        self.broker.set_quote(BTC, '80000', '80010')
+        self.book.reconcile()
+        self.book.submit([self.intent('owner', BTC, 'buy', '0.0005')])
+        held = self.book.account('owner').holdings[BTC.key].quantity
+        self.broker.held.pop(BTC.key)
+        key = next(iter(self.book._ledger_totals()[1]))
+        self.book._baseline_row(self.book.baseline_cash, {key: -held}, 'legacy masking adjustment')
+        self.assertTrue(self.book.reconcile().ok)  # aggregate alone is not attribution proof
+        self.assertFalse(self.book.evidence_integrity('owner')['ok'])
+        self.assertTrue(self.book.evidence_integrity('clean')['ok'])
+        self.book._baseline_row(self.book.baseline_cash, {}, 'a later rewrite cannot repair past marks')
+        restored = self.new_book()
+        self.assertFalse(restored.evidence_integrity('owner')['ok'])
+        self.assertTrue(restored.evidence_integrity('clean')['ok'])
+
     def test_funding_history_survives_a_profitable_sweep_and_restart(self):
         self.seat("winner", usd="25")
         self.broker.set_quote(BTC, "80000", "80010")

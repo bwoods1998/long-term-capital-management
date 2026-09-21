@@ -706,10 +706,13 @@ class SailFork(SailCase):
 
     def test_a_child_that_cannot_be_sealed_is_an_error(self):
         self.sandbox.decide("parent", TINY, {})
+        mark = len(self.sail.calls)  # tool additions change the parent's upload count
         self.sail.failing["set_egress"] = Boom("egress API is down")
         with self.assertRaises(SandboxError):
             self.sandbox.fork("parent", "child")
-        self.assertNotIn("exec", self.sail.names(8))
+        self.assertNotIn("exec", self.sail.names(mark))
+        self.assertIsNone(self.sandbox.box_of('child'))
+        self.assertIn('terminate', self.sail.names(mark))
 
 
 class SailRetire(SailCase):

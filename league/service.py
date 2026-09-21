@@ -123,10 +123,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
 
         paper: Any = SimBroker(root / "alpaca-sim.json", touch_from(alpaca_data))
     else:
-        paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"))
+        paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
+                               option_feed=config.get('alpaca_option_feed', 'indicative'))
     brokers: dict[str, Any] = {"alpaca-paper": paper, "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data)}
     if real_money:
-        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"))
+        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
+                                          option_feed=config.get('alpaca_option_feed', 'indicative'))
         brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
 
     if local_sandbox:
@@ -180,6 +182,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
         lineage=house.registry.lineage,
+        book_evidence=lambda agent, book: house.books[book].evidence_integrity(agent) if book in house.books else None,
     )
     if merton:
         from .merton import Merton, GatewayForge, evidence_from

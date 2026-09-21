@@ -411,6 +411,7 @@ class Book:
         self.baseline_positions: dict[str, Decimal] = {}
         self.venue_cash: Decimal | None = None
         self.baseline_at: str | None = None
+        self._evidence_issues: dict[str, dict[str, Any]] = {}
         self._fills_since_reconcile = 0
         self._unreconciled = 0  # consecutive readings that did not reconcile (see `_adopt_the_venue`)
         #: How far the venue may fairly differ from the book since the last reconciliation because
@@ -476,6 +477,21 @@ class Book:
                 self.baseline_at = at  # when this book first looked at its venue: fees from before it are not its own
             self.baseline_cash = money(p["cash"])
             self.baseline_positions = {k: money(v) for k, v in dict(p.get("positions") or {}).items()}
+            # A negative baseline can hide an agent holding more units than the venue owns.
+            # Aggregate cash/units may still reconcile; the affected agent's history does not.
+            # Keep this provenance even if a later baseline is rewritten: that cannot repair
+            # the already recorded forward marks or prove ownership of a missing execution.
+            for key, quantity in self.baseline_positions.items():
+                if quantity >= 0:
+                    continue
+                for name, account in self.accounts.items():
+                    if name == HOUSE:
+                        continue
+                    if any(position_key(h.instrument) == key and h.quantity > 0 for h in account.holdings.values()):
+                        self._evidence_issues.setdefault(name, {})[key] = {
+                            'instrument': key, 'baseline_quantity': text(quantity), 'detected_at': at,
+                            'reason': 'a negative baseline offsets this agent\'s holding; ownership and forward marks require repair',
+                        }
         elif kind == "book.settle":
             account = self._account(agent)
             instrument = Instrument.from_dict(p["instrument"])
@@ -599,6 +615,13 @@ class Book:
     def account(self, agent: str) -> Account:
         with self._lock:
             return self._account(agent)
+
+    def evidence_integrity(self, agent: str) -> dict[str, Any]:
+        """Attribution is distinct from an aggregate reconciliation, and survives restarts."""
+        with self._lock:
+            issues = [dict(row) for row in self._evidence_issues.get(agent, {}).values()]
+            return {'ok': not issues, 'book': self.name, 'issues': issues,
+                    'note': 'An accounting repair must also exclude contaminated evidence; changing a baseline alone is not a repair.'}
 
     def agents(self) -> list[str]:
         with self._lock:
@@ -1628,6 +1651,10 @@ class Book:
             held = venue_positions.get(key, ZERO) - positions.get(key, ZERO)
             if held != 0:
                 baseline[key] = held
+        if any(value < 0 for value in baseline.values()):
+            # Absorbing missing owned units into a negative baseline leaves phantom holdings
+            # and fictitious mark-to-market performance while falsely reporting reconciliation.
+            return result
         self._baseline_row(venue_cash - cash, baseline,
                            f"adopted the venue after {self._unreconciled} readings that did not reconcile ({result.detail}): "
                            "practice money, and a frozen book stops every agent on the venue")
@@ -1751,6 +1778,8 @@ class Book:
                     "ledger_seq": head_seq,
                     "ledger_digest": head_digest,
                     "real_money": self.real_money,
+                    "attribution_issues": {name: self.evidence_integrity(name)['issues']
+                                           for name in self._evidence_issues},
                 },
             )
             return Reconciliation(ok, venue_cash, q_cash(expected), q_cash(cash_diff), diffs, dust, detail)
