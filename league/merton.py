@@ -358,9 +358,29 @@ class Merton:
             if last is None:
                 if running_hours >= self.first_after_hours.get(role, 0):
                     out.append(role)
-            elif now - last >= self.schedule_hours[role] * self._pace() * 3600:
+            elif now - last >= self.schedule_hours[role] * self._pace() * self.backoff(role) * 3600:
                 out.append(role)
         return out
+
+    def backoff(self, role: str) -> int:
+        """How many times its usual wait a role serves after passes that changed nothing: one empty
+        pass is normal, each further one in a row doubles the wait, up to eight times, and it is
+        back to one the moment a pass proposes a change.
+
+        Measured Sept 21, 2026: in four hours the operator sat down fifteen times at a quarter-hour
+        cadence and answered "leave the dials unchanged" every time, and the designer, teacher,
+        toolsmith and architect mostly the same -- about $4 an hour of the frontier month for no
+        change, while agents that had earned him waited on the same month. A pass that was skipped
+        (nothing to do, nothing spent) neither counts nor resets."""
+        rows = [e.payload for e in self.ledger.read(kinds="merton.pass", limit=500, newest=True) if e.payload.get("role") == role]
+        empty = 0
+        for row in reversed(rows):
+            if row.get("skipped"):
+                continue
+            if int(row.get("files") or 0) > 0:
+                break
+            empty += 1
+        return 2 ** min(max(empty - 1, 0), 3)
 
     # -------------------------------------------------------------------- pass
     def run(self, role: str) -> dict[str, Any]:
