@@ -1819,10 +1819,34 @@ class House:
         the expedition's budget used, and an allowance still unspent at noon is research not done.
         An agent that cannot act at all waits the idle interval instead -- it has nothing else to
         spend its time on, and every wake it sits out is a wake it did not learn from."""
-        base = float((self.game.get("research") or {}).get("min_hours_between", 6))
+        rules = self.game.get("research") or {}
+        base = float(rules.get("min_hours_between", 6))
         if agent is not None and self.idle_reason(agent):
-            base = min(base, float((self.game.get("research") or {}).get("idle", {}).get("min_hours_between", 1)))
-        return min(base, max(1.0, base / 2)) if self.behind_the_clock("sail") else base
+            base = min(base, float(rules.get("idle", {}).get("min_hours_between", 1)))
+        base = min(base, max(1.0, base / 2)) if self.behind_the_clock("sail") else base
+        return base * self.research_pace(agent) if agent is not None else base
+
+    def research_pace(self, agent: Agent) -> float:
+        """The share of the usual research interval this agent waits, from its own record.
+
+        Winners run: an agent whose earned record is profitable researches at `winner_share` of the
+        interval, and every candidate its research passes through replay is born its child -- so a
+        winning line breeds faster. An agent on paper or above with `loser_min_observations` of
+        evidence and a losing record waits `loser_multiple` times as long. Everyone else, and every
+        agent still in replay, keeps the interval (owner's direction, Sept 21, 2026)."""
+        pace = (self.game.get("research") or {}).get("pace") or {}
+        if not pace:
+            return 1.0
+        try:
+            row = self.standing_of(agent.id)
+        except Exception:  # noqa: BLE001 - a record that cannot be read changes nothing
+            return 1.0
+        growth, seen = float(row.get("earned_growth") or 0.0), int(row.get("earned_observations") or 0)
+        if seen > 0 and growth > 0:
+            return float(pace.get("winner_share", 1.0))
+        if row.get("rung", 0) >= 1 and seen >= int(pace.get("loser_min_observations", 5)) and growth < 0:
+            return float(pace.get("loser_multiple", 1.0))
+        return 1.0
 
     def _research_if_due(self, agent: Agent) -> Any:
         """Recheck after waiting for a research worker: a queued job owns no budget or seat."""

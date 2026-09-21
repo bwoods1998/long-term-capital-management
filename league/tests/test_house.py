@@ -332,6 +332,21 @@ def decide(ctx):
 
 
 
+class ResearchPace(HouseCase):
+    """Winners run, losers wait: the owner's direction of Sept 21, 2026."""
+
+    def test_a_winner_researches_more_often_and_a_loser_less(self):
+        self.house.game["research"]["min_hours_between"] = 0.25
+        winner, loser, fresh = self.seated("winner"), self.seated("loser"), self.seated("fresh")
+        for agent, growth in ((winner, 0.003), (loser, -0.002)):
+            for n in range(6):
+                self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": growth, "active": True,
+                                                        "book": "alpaca-paper", "block": f"b{n}"}, agent=agent.id)
+        self.assertAlmostEqual(self.house.research_interval_hours(winner), 0.25 * 0.33)
+        self.assertAlmostEqual(self.house.research_interval_hours(loser), 0.25 * 4)
+        self.assertAlmostEqual(self.house.research_interval_hours(fresh), 0.25)
+
+
 class Refill(HouseCase):
     """A death is only useful if something new sits in the empty seat."""
 
