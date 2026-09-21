@@ -19,6 +19,12 @@ This is an execution-path finding and a losing trade, not evidence of profitabil
   cumulative `taker_fill_cost_dollars` plus `maker_fill_cost_dollars`. Their sum
   divided by filled quantity is the actual leg execution average. The order's
   limit is not its execution price. Dollar fee totals include maker and taker.
+- GET's [directional outcome](https://docs.kalshi.com/getting_started/order_direction)
+  can name the opposite of the agent's original leg: selling YES appears as
+  buying NO. Historical account receipts confirm that cumulative cost follows
+  that returned outcome (e.g. 10 YES sold at $0.25 report $7.50 of NO cost).
+  The Book complements that average back to the original leg before attributing
+  the sale; this also covers selling NO and partial-fill polling.
 - Legacy integer-cent fields remain supported explicitly. Zero-valued modern
   fields take precedence over legacy values. Missing execution price or fees
   in a V2 acknowledgement defer attribution until a complete order receipt;
@@ -68,7 +74,7 @@ corrected ledger state.
 
 Regression tests cover V2 YES/NO price units, per-contract fees, incomplete
 acknowledgements, explicit zero, legacy cents, maker/taker cost aggregation,
-IOC partial/zero fills, open and settled recovery, partial exits, unavailable
+IOC partial/zero fills, polled YES/NO exits, open and settled recovery, partial exits, unavailable
 or mismatched receipts, ambiguous partial allocations, restart after a committed
 correction, unchanged quantities/baselines, excluded contaminated evidence and
 fresh episodes/blocks with corrected capital. Adapter-to-book tests verify that

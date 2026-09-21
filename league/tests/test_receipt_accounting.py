@@ -180,6 +180,37 @@ class ReceiptAccountingTests(unittest.TestCase):
 
 
 class FreshAttributionTests(unittest.TestCase):
+    def test_polled_sell_receipts_use_the_agents_leg_not_the_opposite_directional_cost(self):
+        from ltcm.tests.test_adapters_kalshi import make, intent, TICKER, YES, NO
+        for instrument, outcome, book_side, receipt_cost, expected in (
+                (YES, 'no', 'ask', '7.5', '2.5'), (NO, 'yes', 'bid', '2.5', '7.5')):
+            with self.subTest(leg=instrument.right), tempfile.TemporaryDirectory() as directory:
+                ledger = Ledger(Path(directory) / 'ledger.sqlite'); self.addCleanup(ledger.close)
+                broker = FakeBroker('kalshi', cash='500', family='kalshi')
+                book = Book('kalshi', broker, ledger, fees=Fees('kalshi'), real_money=True)
+                book.venue_cash = D(500); book.stake('a', '25')
+                buy = {'book': 'kalshi', 'instrument': instrument.to_dict(), 'source': 'cross',
+                       'side': 'buy', 'quantity': '10', 'price': '.4', 'cash_delta': '-4',
+                       'position_delta': '10', 'fee_usd': '0'}
+                e = ledger.append('book.fill', buy, agent='a'); book._apply(e.kind, e.agent, e.payload, e.at)
+                request = intent(instrument=instrument, side='sell', quantity='10')
+                adapter, _, _ = make(order_api='v2')
+                receipt = adapter.parse_order({'order_id': 's1', 'client_order_id': request.id,
+                    'ticker': TICKER, 'outcome_side': outcome, 'book_side': book_side, 'status': 'executed',
+                    'initial_count_fp': '10.00', 'fill_count_fp': '10.00', 'remaining_count_fp': '0.00',
+                    'taker_fill_cost_dollars': receipt_cost, 'maker_fill_cost_dollars': '0',
+                    'taker_fees_dollars': '.13', 'maker_fees_dollars': '0'})
+                base = {'book': 'kalshi', 'order_id': receipt.id, 'broker_order_id': 's1',
+                        'instrument': instrument.to_dict(), 'side': 'sell', 'quantity': '10',
+                        'order_type': 'market', 'status': 'accepted',
+                        'shares': [{'agent': 'a', 'intent_id': request.id, 'quantity': '10'}]}
+                e = ledger.append('book.order', base); book._apply(e.kind, e.agent, e.payload, e.at)
+                book._attribute(book.orders[receipt.id], receipt, '2026-09-21T16:06:50Z')
+                self.assertEqual(book.account('a').cash, D(21) + D(expected) - D('.13'))
+                self.assertEqual(book.account('a').realized, D(expected) - D('.13') - D(4))
+                self.assertEqual(book.account('a').holdings, {})
+                self.assertEqual(broker.submitted, [])
+
     def test_complete_and_incomplete_acknowledgements_converge_to_one_exact_receipt(self):
         from ltcm.tests.test_adapters_kalshi import make, intent, TICKER
         for missing in (None, 'average_fill_price', 'average_fee_paid'):

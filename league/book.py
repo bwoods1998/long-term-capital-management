@@ -1337,7 +1337,14 @@ class Book:
         if delta < 0 or (delta > 0 and order.average_price is None):
             return  # a stale or incomplete venue response cannot close an unaccounted order
         if delta > 0 and order.average_price is not None:
-            total_notional = money(order.average_price) * filled
+            average = money(order.average_price)
+            if (self.fees.family == 'kalshi' and market_key(order.instrument) == market_key(working.instrument)
+                    and (order.instrument.right or 'yes') != (working.instrument.right or 'yes')):
+                # GET reports directional exposure: selling YES is buying NO. Its cumulative
+                # cost is on that returned leg. Attribute the receipt on the agent's original
+                # leg, just as the V2 acknowledgement already does when an intent is present.
+                average = ONE - average
+            total_notional = average * filled
             price = (total_notional - working.notional) / delta
             venue_fees = money(order.fees or 0)
             fee_delta = max(venue_fees - working.fees_seen, ZERO)
