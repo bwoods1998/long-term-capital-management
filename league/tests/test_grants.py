@@ -84,7 +84,7 @@ class Grants(ResearchCase):
         calls = []
         guard = GrantGuard(SimpleNamespace(reserve=lambda *a: calls.append(a)))
         with self.assertRaises(CampaignClosed):
-            guard.reserve('too-large', 'foundation-review', '.750001')
+            guard.reserve('too-large', 'foundation-review', '.250001')
         self.assertEqual(calls, [])
 
     def test_research_requires_preflight_and_preserves_long_specialist_code(self):

@@ -3,7 +3,7 @@
 An untraded agent can use `research_grant` after `replay_coverage` or a replay in the same
 research pass. Give a specific question, falsifiable hypothesis and acceptance check. The House
 pays for one specialist call per family/niche per campaign, including descendants. The entire
-floor has twelve grants, each with a $0.75 reservation ceiling, inside the existing research
+floor has twelve grants, each with a $0.25 reservation ceiling, inside the existing research
 budget. A new agent, another pass or a restart does not renew a grant. An interrupted call may
 have been billed, so it is not automatically repeated.
 
