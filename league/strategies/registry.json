@@ -10,5 +10,11 @@
     "family": "prices-favorites",
     "file": "wti_isolated_maker.py",
     "why": "Three prices agents are barren and the sole trader loses. The desk reports positive WTI-plus-diesel maker results but losses in Brent, motivating a WTI-only YES control rather than another broad commodities variant. Freeze the 90-93 cent band, cap spending at $2 including a conservative fee reserve, allow one outstanding exposure, and require explicit resolution within 48 hours. Reused evidence does not establish this candidate's edge; normal lineage-adjusted replay and independent forward gates remain mandatory."
+  },
+  {
+    "name": "props-numeric-touch",
+    "family": "sports-props-favorites",
+    "file": "props_numeric_touch.py",
+    "why": "Three props agents are barren. Library reports motivate separating numeric-prop underdog YES touch execution from adverse-selected makers and single-event TD/HR bets, but the cited +38.08% replay failed OOS growth and had only 21 blocks. Test a fixed 20-40 cent band with two-sided books, a two-cent default spread cap, rounded fee reserves, $2 total spending and one exposure resolving within 48 hours. Preserve props lineage trials; this is an unqualified falsification test, not an established edge."
   }
 ]
