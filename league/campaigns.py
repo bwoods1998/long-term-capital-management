@@ -94,6 +94,8 @@ class CampaignBudget:
         return self.started <= self.clock() < self.ends and (not burst or burst['started'] <= self.clock() < burst['ends'])
 
     def live_trading(self) -> dict[str, Any] | None:
+        # A grant pins the rules that govern real money (`constitution.money_digest`); a legacy
+        # grant pinned the whole constitution and holds only while its money rules are unchanged.
         with self.lock:
             row = self.db.execute('SELECT * FROM live_trading').fetchone()
             if row is None:
@@ -101,7 +103,7 @@ class CampaignBudget:
             value = {**dict(row), 'policy': json.loads(row['policy']), 'mode': 'persistent', 'ends': None}
             from .live_trading import policy
             value['active'] = (value['revoked'] is None and value['started'] <= self.clock()
-                               and value['policy'] == policy(value['policy']['venue_capital_usd']))
+                               and _grant_matches(value['policy'], policy(value['policy']['venue_capital_usd'])))
             return value
 
     def live_authorization(self) -> dict[str, Any] | None:
@@ -457,3 +459,12 @@ class CampaignPacer(Pacer):
         total = allowance('sail') * Decimal('.75') + allowance('openai') * Decimal('.5')
         duration = Decimal(str(burst['ends'] - burst['started']))
         return (total * Decimal(str(per_seconds)) / duration).quantize(Decimal('.01'))
+
+
+def _grant_matches(stored: Mapping[str, Any], expected: Mapping[str, Any]) -> bool:
+    if stored == expected:
+        return True
+    from .constitution import LEGACY_GRANT_DIGESTS
+    legacy = LEGACY_GRANT_DIGESTS.get(stored.get('constitution_digest'))
+    return (legacy is not None and legacy == expected.get('constitution_digest')
+            and {**stored, 'constitution_digest': legacy} == dict(expected))

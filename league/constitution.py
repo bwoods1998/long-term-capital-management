@@ -47,7 +47,12 @@ CONSTITUTION: dict[str, Any] = {
         # best of the trials in its line; 0.75 is a three-to-one bet on free information, and the
         # bar for money is the screen, the audit and the tuition cap that come after. The volume
         # thresholds are NOT relaxed: what the league is short of is strategies that trade at all.
-        "replay": {"min_trades": 20, "min_blocks": 30, "min_deflated_sharpe": 0.75, "min_oos_blocks": 8},
+        # Owner revision, Sept 21, 2026 ("push hard ... not mechanically too difficult at the risk-free
+        # rungs"): 0.75 -> 0.5 and 30 -> 20 blocks. Of the 268 replays from Sept 20 21:00 to Sept 21
+        # 18:15, 18 passed at 0.75 and 40 would have at 0.5; the deflated Sharpe was the reason in 93
+        # of every 99 failures. 0.5 still asks that the idea more likely than not beats the best of
+        # the trials in its own line, and paper -- forward evidence -- is where it is really tested.
+        "replay": {"min_trades": 20, "min_blocks": 20, "min_deflated_sharpe": 0.5, "min_oos_blocks": 8},
         # Rung 1 -> 2: a SCREEN, then the frontier audit. Not a confidence bound: a bound strict
         # enough to mean something needs hundreds of trades (the first run's one measured edge
         # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
@@ -72,6 +77,13 @@ CONSTITUTION: dict[str, Any] = {
         "family": {"alpha": 0.05, "min_members": 2, "min_member_active_blocks": 10},
         # Death at any rung above 0: evidence that growth is negative, or the stake is going.
         "death": {"min_active_blocks": 20, "max_drawdown": 0.30},
+        # Owner revision, Sept 21, 2026: losers on PAPER die fast, because a paper seat is the
+        # scarcest free thing the league has. After `min_active_blocks`, a paper record down
+        # `max_loss` or more from where it started dies; after `unprofitable_blocks`, any record
+        # that is not above where it started dies. Measured that day: the five 15-minute crypto
+        # agents were down 10-17% on paper and held their seats for a day, and a founding seed
+        # sat unprofitable through 41 active blocks. Real money keeps `death` above.
+        "paper_death": {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30},
         # Drift at rungs 2 and 3: a CUSUM on block growth against the record that earned the rung.
         # h = 6 is about one false alarm in 1,300 blocks (h = 4 would be one a week on hourly blocks).
         "drift": {"k": 0.5, "h": 6.0, "window_blocks": 60, "min_reference_blocks": 10},
@@ -103,6 +115,36 @@ def digest(constitution: dict[str, Any] | None = None) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+#: What does NOT govern real money: the version, the research budgets, and the two risk-free
+#: rules (the replay gate to a paper seat, and death on paper). Everything else -- order caps,
+#: tuition, the real-money rungs, the screen that promotes to money, drift, death on money -- is.
+RISK_FREE = (("version",), ("budgets",), ("ladder", "replay"), ("ladder", "paper_death"))
+
+
+def money_digest(constitution: dict[str, Any] | None = None) -> str:
+    """The SHA-256 of the rules that govern real money. The owner's live-trading grant pins this,
+    not `digest()`: tuning the risk-free rungs must not silently revoke real-money authorization,
+    and changing any money rule still must."""
+    import copy
+
+    rules = copy.deepcopy(constitution or CONSTITUTION)
+    for path in RISK_FREE:
+        node = rules
+        for key in path[:-1]:
+            node = node.get(key, {})
+        node.pop(path[-1], None)
+    return digest(rules)
+
+
+#: Grants recorded before the money digest existed pinned the whole constitution. Such a grant
+#: stays valid only while the money rules are EXACTLY those in force when it was granted:
+#: {full digest at grant: money digest of that same constitution}.
+LEGACY_GRANT_DIGESTS = {
+    'bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1':
+        'c72854cc5ede3b7f5cab0cdcfb6345714c105e111619e6b68d1fb0ccad6cc985',
+}
+
+
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1'
+PINNED_DIGEST = 'fb590f2f7888780f5c29604b79d597a483d55d096178d5bbc5124302de6f486a'

@@ -106,6 +106,35 @@ class PersistentAuthorization(PhaseCase):
             with self.assertRaises(CampaignClosed):
                 guard.activate_live_trading('earned', CAPITAL)
 
+    def test_risk_free_rules_can_change_without_revoking_the_money_grant(self):
+        """The grant pins the rules that govern real money; the replay gate and paper death do not."""
+        guard, _ = self.expired()
+        guard.activate_live_trading('earned', CAPITAL)
+        with patch.dict(CONSTITUTION['ladder']['replay'], min_deflated_sharpe=.3), \
+                patch.dict(CONSTITUTION['ladder']['paper_death'], max_loss=.05):
+            self.assertTrue(guard.allows_live(3))
+        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=3):
+            self.assertFalse(guard.allows_live(2))  # the screen that promotes to money is a money rule
+
+    def test_a_legacy_whole_constitution_grant_holds_only_while_money_rules_are_unchanged(self):
+        from league.constitution import LEGACY_GRANT_DIGESTS, money_digest
+        guard, _ = self.expired()
+        guard.activate_live_trading('earned', CAPITAL)
+        legacy = next(iter(LEGACY_GRANT_DIGESTS))
+        stored = {**policy(CAPITAL), 'constitution_digest': legacy}
+        guard.db.execute('UPDATE live_trading SET policy=?', (json.dumps(stored, sort_keys=True, separators=(',', ':')),))
+        with patch.dict(LEGACY_GRANT_DIGESTS, {legacy: money_digest()}):
+            self.assertTrue(guard.live_trading()['active'])
+            with patch.dict(CONSTITUTION['tuition'], max_agents=9):
+                self.assertFalse(guard.live_trading()['active'])
+        with patch.dict(LEGACY_GRANT_DIGESTS, {legacy: '0' * 64}):
+            self.assertFalse(guard.live_trading()['active'])
+
+    def test_the_pre_revision_grant_carries_over(self):
+        """The Sept 21 grant pinned the whole pre-revision constitution; its money rules are unchanged."""
+        from league.constitution import LEGACY_GRANT_DIGESTS, money_digest
+        self.assertEqual(LEGACY_GRANT_DIGESTS['bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1'], money_digest())
+
     def test_exhausted_or_unhealthy_research_cannot_be_reopened(self):
         guard, _ = self.expired()
         with patch.object(guard, 'ready', return_value=False), self.assertRaises(CampaignClosed):
