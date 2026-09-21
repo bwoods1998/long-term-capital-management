@@ -379,6 +379,20 @@ class DailyEvidence(HouseCase):
         self.assertAlmostEqual(row["earned_growth"], 0.014 / 48)
 
 
+class FastLane(HouseCase):
+    def test_a_live_micro_agent_down_twenty_percent_goes_back_to_paper(self):
+        agent = self.seated("live", code=BUYER)
+        self.house.evaluator.promote(agent.id, 2, "test: real money")
+        book = self.house.book_of(agent)
+        for n in range(2):
+            self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": -0.12, "active": True,
+                                                    "book": book.name, "block": f"b{n}"}, agent=agent.id)
+        verdict = self.house.judge(agent)
+        self.assertEqual(verdict.decision, "demote")
+        self.assertEqual(self.house.evaluator.rung(agent.id), 1)
+        self.assertIn("back to paper", verdict.reason)
+
+
 class Refill(HouseCase):
     """A death is only useful if something new sits in the empty seat."""
 

@@ -41,7 +41,8 @@ CONSTITUTION: dict[str, Any] = {
         # from real money for the rest of its life. Death still reads the whole stay.
         "screen_drawdown_blocks": 30,
         # No promotion on fewer closed trades than this, however good the blocks look.
-        "min_closed_trades": 10,
+        # Owner revision, Sept 21, 2026 ~22:30 UTC (the fast lane): 10 -> 5.
+        "min_closed_trades": 5,
         # Rung 0 -> 1: mechanical replay, and the only gate before a PAPER seat, which costs the
         # owner nothing but compute. The deflated Sharpe is the confidence that the idea beats the
         # best of the trials in its line; 0.75 is a three-to-one bet on free information, and the
@@ -60,7 +61,12 @@ CONSTITUTION: dict[str, Any] = {
         # `min_active_blocks` is in BLOCKS, and a block is an hour or a calendar day by the
         # strategy's own declared horizon. This remains an alternative for long or overlapping
         # exposures; completed_exposures below removes a mandatory elapsed-time requirement.
-        "paper": {"gate": "screen", "min_active_blocks": 15, "min_active_blocks_day": 5, "max_drawdown": 0.15},
+        # Owner revision, Sept 21, 2026 ~22:30 UTC, "the fast lane": 15 -> 6 hourly blocks and 5 -> 2
+        # daily. At 22:05 twenty-four agents sat on paper and one had six active blocks; after eight
+        # hours of accelerated research one agent had traded real money. The $25 stake, the frontier
+        # audit, the order caps and the owner's capital envelope are unchanged, and `micro_demotion`
+        # below sends a live loser back down: cheap to try on real money, expensive to scale.
+        "paper": {"gate": "screen", "min_active_blocks": 6, "min_active_blocks_day": 2, "max_drawdown": 0.15},
         # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
         # this is the gate that protects real size. Promotion spends its own alpha: the looks
         # that can only kill (before `min_active_blocks`) spend none of it.
@@ -68,6 +74,8 @@ CONSTITUTION: dict[str, Any] = {
         # Five active blocks retain the conventional route. The completed-exposure route below
         # has no elapsed-time minimum; both routes share the original promotion error budget.
         "micro": {"gate": "bound", "min_active_blocks": 5},
+        # Kept at 10: at 5 the qualifying record was too short a reference for drift, and a fresh
+        # promotion was demoted as "decayed" within minutes in the ladder's own integration test.
         "completed_exposures": {"min_episodes": 10, "look_every_episodes": 5, "promotion_alpha_share": 0.5},
         # A small edge proves itself across a family sooner than in one agent (the first run's
         # favourites edge was only ever measurable pooled). An agent on rung 2 whose own record is
@@ -84,6 +92,10 @@ CONSTITUTION: dict[str, Any] = {
         # agents were down 10-17% on paper and held their seats for a day, and a founding seed
         # sat unprofitable through 41 active blocks. Real money keeps `death` above.
         "paper_death": {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30},
+        # The fast lane's other half: a micro-real agent down this share of its record since
+        # promotion goes back to paper at once (it may earn its way back), rather than waiting
+        # twenty blocks to die or for drift. Rise fast, fall fast.
+        "micro_demotion": {"max_loss": 0.20},
         # Drift at rungs 2 and 3: a CUSUM on block growth against the record that earned the rung.
         # h = 6 is about one false alarm in 1,300 blocks (h = 4 would be one a week on hourly blocks).
         "drift": {"k": 0.5, "h": 6.0, "window_blocks": 60, "min_reference_blocks": 10},
@@ -147,4 +159,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'fb590f2f7888780f5c29604b79d597a483d55d096178d5bbc5124302de6f486a'
+PINNED_DIGEST = 'f7de9c7d5212757ebabe4789fe86ab0fe2ee11c830412d0d6f2490e4d9ec5e87'
