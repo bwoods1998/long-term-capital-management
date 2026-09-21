@@ -68,13 +68,26 @@ EXECUTION_POLICY = {
 
 
 def order_outcomes(ledger: Ledger, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
-    """Orders belong to House ledger rows; identify owners through their allocation shares."""
+    """Include refusals before submission as well as House orders attributed by their shares."""
+    if limit <= 0:
+        return []
     orders = {}
-    for entry in ledger.iter(kinds='book.order'):
+    for entry in ledger.iter(kinds=('book.order', 'book.refused')):
         p = entry.payload
-        if p.get('book') != book or not any(s.get('agent') == agent for s in p.get('shares') or []):
+        if p.get('book') != book:
             continue
-        key = p.get('order_id')
+        if entry.kind == 'book.refused':
+            if entry.agent == agent:
+                key = ('intent', p.get('intent_id') or entry.id)
+                orders.pop(key, None)
+                orders[key] = {'at': entry.at, **{k: p[k] for k in ('intent_id', 'instrument') if p.get(k) is not None},
+                               'status': 'refused',
+                               'reason': '; '.join(str(reason) for reason in p.get('reasons') or []),
+                               'submitted_to_venue': False}
+            continue
+        if not any(s.get('agent') == agent for s in p.get('shares') or []):
+            continue
+        key = ('order', p.get('order_id'))
         previous = orders.pop(key, {})
         row = {'at': entry.at, **{k: p.get(k) for k in ('order_id', 'instrument', 'side', 'quantity', 'status', 'reason')}}
         if p.get('status') == 'unknown' and p.get('reason'):
