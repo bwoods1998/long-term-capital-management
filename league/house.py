@@ -216,6 +216,7 @@ class House:
         self.frontier_month = None
         if self.researcher is not None:
             self.researcher.frontier_tier = self.frontier_tier
+            self.researcher.trades = lambda agent_id: self._recent_trades(agent_id, limit=200)
         self._born_at = self.clock()
         self._inference_ceiling: Decimal | None = None  # the config's hard cap, read once (`_pace_inference`)
         # Written once, on the first ever start, and persisted: `_refill` paces newcomers from it

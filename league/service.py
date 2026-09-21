@@ -179,6 +179,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
             from .overnight import policy_with_turbo
             routes = {'enabled': True, 'cohort': burst['id'], 'fraction': policy_with_turbo(burst)['luna_fraction']}
         house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier)
+    if not canary and house.researcher is not None:
+        # Jev for every researcher (`classify`): one question over many records, at cost.
+        from .semantic_lab import JevClient
+        house.researcher.jev = JevClient(gateway_url, token)
     if not canary:
         from .frontier import FrontierMonth
 

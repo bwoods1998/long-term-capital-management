@@ -591,3 +591,37 @@ class TheDeskCapDoesNotRatchet(ResearchCase):
         self.economy.charge(self.parent.id, "1.00", "today")
         self.researcher([[("finish", {"summary": "done"})]]).research(self.parent, {}, session="s2")
         self.assertEqual(Decimal(str(self.script.kwargs[0]["desk_cap_usd_per_day"])), before - D("1.00") + D("1.00"))
+
+
+class JevClassify(ResearchCase):
+    """Jev as a research instrument: one question over many records, charged at cost."""
+
+    def fake_jev(self):
+        calls = []
+
+        def jev(ident, body):
+            packet = json.loads(body)
+            calls.append(packet)
+            answers = {k: {"type": "noul", "noul": 0.9 if "official" in packet["state"]["items"][k] else 0.1}
+                       for k in packet["questions"]}
+            return {"model": "jev-1.13.0", "answers": answers, "usage": {"input_tokens": 100}}, D("0.00002")
+        return jev, calls
+
+    def test_a_question_over_its_own_trades_splits_the_record(self):
+        trades = [{"what": f"KX-{n}", "why": ("an official data release" if n % 2 else "a hunch"), "pnl_usd": ("1.0" if n % 2 else "-1.0")}
+                  for n in range(20)]
+        r = self.researcher([[("classify", {"question": "Does this trade's reason cite an official source?", "source": "my_trades"})]])
+        r.jev, calls = self.fake_jev()
+        r.trades = lambda agent_id: trades if agent_id == self.parent.id else []
+        before = self.economy.balance(self.parent.id)
+        r.research(self.parent, {}, session="s1")
+        out = self.tool_output(1)
+        self.assertEqual(len(calls), 2)  # 16 questions a request at most
+        self.assertEqual(out["split"]["jev_yes"], {"trades": 10, "win_rate": 1.0, "mean_pnl_usd": 1.0})
+        self.assertEqual(out["split"]["jev_no"]["mean_pnl_usd"], -1.0)
+        self.assertLess(before - self.economy.balance(self.parent.id), D("0.05"))
+
+    def test_without_jev_it_says_so(self):
+        r = self.researcher([[("classify", {"question": "Is this a sports market of any kind?", "source": "items", "items": ["x"]})]])
+        r.research(self.parent, {}, session="s1")
+        self.assertIn("not available", self.tool_output(1)["error"])
