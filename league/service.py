@@ -176,7 +176,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
             house.ledger, balance=house.economy.balance, clock=house.clock)
         routes = load_routes()
         if burst:
-            routes = {'enabled': True, 'cohort': burst['id'], 'fraction': burst['policy']['luna_fraction']}
+            from .overnight import policy_with_turbo
+            routes = {'enabled': True, 'cohort': burst['id'], 'fraction': policy_with_turbo(burst)['luna_fraction']}
         house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier)
     if not canary:
         from .frontier import FrontierMonth

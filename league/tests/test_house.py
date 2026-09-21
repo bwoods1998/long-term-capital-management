@@ -347,6 +347,18 @@ class ResearchPace(HouseCase):
         self.assertAlmostEqual(self.house.research_interval_hours(fresh), 0.25)
 
 
+class DailyEvidence(HouseCase):
+    def test_a_daily_block_counts_as_the_screen_counts_it(self):
+        """15 hourly or 5 daily blocks clear the screen, so a daily block is three observations."""
+        agent = self.seated("daily")
+        for n in range(2):
+            self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": 0.007, "active": True, "horizon": "day",
+                                                    "book": "alpaca-paper", "block": f"d{n}"}, agent=agent.id)
+        row = self.house.standing_of(agent.id)
+        self.assertEqual(row["earned_observations"], 6)
+        self.assertAlmostEqual(row["earned_growth"], 0.014 / 48)
+
+
 class Refill(HouseCase):
     """A death is only useful if something new sits in the empty seat."""
 

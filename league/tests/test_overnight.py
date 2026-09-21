@@ -94,10 +94,36 @@ class BurstGame(HouseCase):
         base=load_game();original=deepcopy(base)
         tuned=game_for(base, {'policy':load_policy()})
         self.assertEqual(base, original)
-        self.assertEqual(tuned['research']['min_hours_between'], .25)
+        from league.overnight import load_turbo
+        turbo = load_turbo()  # the owner's acceleration (turbo.json) sits on top of the burst policy
+        self.assertEqual(tuned['research']['min_hours_between'], turbo.get('research_minutes', 15) / 60)
         for field in ('displace_after_epochs','replay_deadline_epochs'):
             self.assertEqual(tuned['economy'][field]*3600, base['economy'][field]*21600)
-        self.assertEqual(tuned['economy']['newcomer_seconds'], 600)
+        self.assertEqual(tuned['economy']['newcomer_seconds'], turbo.get('newcomer_seconds', 600))
+
+    def test_turbo_speeds_the_loop_without_touching_the_stored_policy(self):
+        from unittest.mock import patch
+        from league import overnight
+        policy = load_policy()
+        stored = deepcopy(policy)
+        with patch.object(overnight, 'load_turbo', return_value={'research_minutes': 5, 'newcomer_seconds': 120,
+                                                                 'max_population': 60, 'research_workers': 20,
+                                                                 'sail_profile': 'pro_asap'}):
+            game = game_for(load_game(), {'policy': policy})
+            accelerated = overnight.policy_with_turbo({'policy': policy})
+        self.assertEqual(policy, stored)
+        self.assertAlmostEqual(game['research']['min_hours_between'], 5 / 60)
+        self.assertEqual((game['economy']['newcomer_seconds'], game['economy']['max_population']), (120, 60))
+        self.assertEqual(game['research']['profile'], 'pro_asap')
+        self.assertEqual(accelerated['research_workers'], 20)
+
+    def test_turbo_out_of_range_is_refused(self):
+        from unittest.mock import patch
+        from league import overnight
+        import json
+        with patch.object(overnight.Path, 'read_text', return_value=json.dumps({'research_minutes': 1})):
+            with self.assertRaises(ValueError):
+                overnight.load_turbo()
 
     def test_faster_frontier_access_is_for_winners_only(self):
         base = load_game()

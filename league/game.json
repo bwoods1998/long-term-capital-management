@@ -47,14 +47,14 @@
     ],
     "max_population": [
       8,
-      48
+      64
     ],
     "min_population": [
       4,
       24
     ],
     "newcomer_seconds": [
-      600,
+      60,
       86400
     ]
   },
