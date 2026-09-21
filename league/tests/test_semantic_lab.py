@@ -92,6 +92,29 @@ class Semantics(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.assertEqual(self.lab.stats()['tasks'][0]['status'],'queued')
 
+    def test_market_backlog_cannot_starve_research_diagnostics_or_expand_the_batch(self):
+        self.lab.batch_size=2
+        self.lab.enqueue('research','agent',self.now-100,'older',{'evidence':'a research failure'})
+        for i in range(4):
+            self.lab.enqueue('market','market-'+str(i),self.now,'new',{'sample':i})
+        with patch('league.semantic_lab.time.sleep',lambda _:None):self.lab.run()
+        self.assertEqual(len(self.calls),2)
+        self.assertTrue(any('missing_input' in body['questions'] for _,body in self.calls))
+        self.assertEqual(len(self.lab.evidence('agent')['latest']),1)
+
+    def test_recent_research_is_available_before_historical_ingestion_catches_up(self):
+        self.ledger.append_many([{'kind':'agent.research','payload':{'tool':'runtime_status'},'agent':'old'} for _ in range(220)])
+        entry=self.ledger.append('agent.research',{'tool':'summary','summary':'A recent falsifiable research result.'},agent='current')
+        self.lab.ingest()
+        with self.lab.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM semantic_tasks WHERE entity='current'").fetchone()[0],1)
+            cursors=dict(db.execute('SELECT source,seq FROM semantic_cursor'))
+        self.assertLess(cursors['research'],entry.seq)
+        self.assertEqual(cursors['research_recent'],entry.seq)
+        self.lab.ingest()
+        with self.lab.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM semantic_tasks WHERE entity='current'").fetchone()[0],1)
+
     def test_invalid_typed_answer_retains_known_cost_but_is_never_shared(self):
         def bad(ident,body):
             answer,cost=self.client(ident,body);answer['answers']['missing_input']['noul']=2;return answer,cost
