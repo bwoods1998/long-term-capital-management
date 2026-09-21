@@ -58,6 +58,7 @@ class Semantics(unittest.TestCase):
         self.assertEqual(len(result['latest']),1)
         self.assertEqual([r['entity'] for r in result['market_labels']],['KXWTI-EVENT-T1'])
         self.assertEqual(result['current_market_questions'],questions('market'))
+        self.assertEqual(result['question_sets'][result['market_labels'][0]['rubric']],questions('market'))
 
     def test_unknown_provider_outcome_is_not_retried(self):
         def lost(ident,body):
