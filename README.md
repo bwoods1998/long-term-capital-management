@@ -17,10 +17,12 @@ was activated by the owner on September 21 at 14:10 UTC, using existing venue ba
 It retains the original $500 foundation plus $325 burst accounting and resumes only unused
 OpenAI/Sail allowance. Deployment alone cannot activate it; inspect `live_trading.active`.
 The [September 21 live watch](docs/runs/2026-09-21-live-hour.md) records current provider funding,
-stock/options readiness and an investigation of legacy paper-account attribution.
-The first passing historical replay has been independently reproduced and entered paper; a
-profitable forward edge and autonomous repair of the whole harness are still unproved.
-Read the [latest run](docs/runs/2026-09-20-foundation-progress.md),
+paid SIP/OPRA readiness, the public agent ladder, and the first earned live execution and
+settlement: a $5.6733 loss including fees. Its receipt exposed a Kalshi price/fee parsing defect;
+the [accounting contract](docs/contracts/2026-09-21-kalshi-fill-accounting.md) documents the fix,
+append-only recovery and exclusion of contaminated performance. A profitable live edge and
+autonomous repair of the whole harness are still unproved.
+Read the [foundation run](docs/runs/2026-09-20-foundation-progress.md),
 [phase policy](docs/phase-one.md), [architect handoff](docs/design/2026-09-20-chief-architect-handoff.md),
 [model comparison](docs/runs/2026-09-20-model-routing.md) and
 [Jev integration](docs/design/2026-09-20-typesafe-pilot.md).
@@ -55,6 +57,13 @@ What is measured is after-cost log growth in hour/day blocks or completed portfo
 | 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active hourly blocks (5 daily), **or 10 completed portfolio exposures**, with at least 10 closed trades, growth above zero and a drawdown under 15% over the last 30 blocks; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below). The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
 | 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | **5 active blocks or 10 completed portfolio exposures**, at least 10 closed trades of real fills, and a one-sided lower confidence bound on mean growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
 | 3. Scaled | the real accounts | a quarter of Kelly on the lower bound of its growth: never under $25, never over 25% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
+
+These are rung ceilings. Event concentration can be tighter: a new $25 live agent has a
+$7.50 single-market cap. The shared cap uses the existing funded venue authorization,
+including unallocated reserve and deducting losses; it does not mistake the first agent's
+stake for the whole authorized account. Strategies and research see effective sizing limits,
+remaining per-market capacity and recent refusals. A fresh refusal can prompt research before
+the normal interval. See the [capital and feedback contract](docs/contracts/2026-09-21-event-capital-and-feedback.md).
 
 The individual block and completed-exposure paths split a 5% sequential allowance equally for
 promotion, and separately for statistical death: look `k` on each path spends
@@ -316,7 +325,7 @@ external repair; the durable API engineering worker has not been built yet.
 
 | Job | When | What it does | May touch |
 |---|---|---|---|
-| Auditor | when a paper record clears the test (at most once per agent every 24 hours; half an hour when the audit did not happen at all, because a gate that fails shut must not also fine the agent a day for its own malfunction) | reads the agent's whole evidence packet and hunts for look-ahead, fee errors, thin data, a record carried by one fill, duplicated exposure. One blocker is a veto. The agent pays. Vetoes are scored afterwards as if taken | nothing |
+| Auditor | when a paper record clears the test; normally a 24-hour retry cooldown, but the accelerated game permits reconsideration after five fresh complete exposures or five fresh active blocks; half an hour after a provider error | reads the agent's whole evidence packet and hunts for look-ahead, fee errors, thin data, a record carried by one fill, duplicated exposure. A fresh audit still must approve promotion. The agent pays. Vetoes are scored afterwards as if taken | nothing |
 | Architect | every 3 hours | reads the league table, the graveyard and the replay trials; writes at most two new strategies, born on rung 0. He aims at the desks where the EVIDENCE is worst, not at empty ones: each specialty reports how many of its members have looked at a live market and placed nothing, how many trade and lose, and the best growth anyone there has managed. An occupied desk full of agents that cannot trade is the emptiest thing on the floor, and twice he declined a pass with "every specialty is occupied" while twenty-six agents had never placed an order | `league/strategies/` |
 | Toolsmith | every 3 hours, when agents have filed requests | builds pure-Python helpers agents may import, with tests; answers every request. The queue is ordered by how many different agents have asked for the same tool by name -- the best evidence the floor produces about what is missing -- then newest first. Unresolved and blocked engineering requests remain visible; an explanation without an implemented capability does not resolve them | `league/tools/`, `league/tests/test_tool_*` |
 | Operator | every 4 hours | reads alerts, health and budget. It carries no bound of its own: the permitted range for every dial is read from `league.ci`, the checker that will judge its pull request, because two places holding one number is how the cap got put back where it throttled the floor | the dials in `league/config.json`, inside bounds |
@@ -334,7 +343,12 @@ sections from the tape:
 3. the balance chart: the real Kalshi and Alpaca accounts against the owner's baseline, deposits
    and withdrawals taken out. Practice money is never added to it;
 4. open and closed positions, each with the agent's own reason (practice positions are tagged);
-5. one self-improvement series: after-cost return on the capital at work, by generation.
+5. [the live ladder](https://blakewoods.us/capital/#improvement): one dot per agent on Replay,
+   Paper, Live or Scaled, recent promotion/demotion arrows, births and retired agents. Hover,
+   keyboard focus or tap shows the agent's record. Invalid accounting is marked for review.
+   The roster refreshes every 30 seconds; stale data is labelled. The
+   [publisher contract](docs/contracts/2026-09-21-game-ladder.md) separates confirmed rank from
+   audit approval, allocation and actual fills.
 
 Strategy source stays private; its hash, parameters, family and results are public. The site
 validates every byte and refuses a whole batch for one bad event
@@ -404,8 +418,8 @@ The `league/` modules:
 Tests. Python 3.11 or later, standard library only; the gateway needs Node.
 
 ```sh
-python3 -m unittest discover -s league/tests -t .   # 1,136 tests, about two and a half minutes (the whole-ladder test is most of it)
-python3 -m unittest discover -s ltcm/tests -t .     # 1,753 tests: the first run's suite, still green
+python3 -m unittest discover -s league/tests -t .   # mechanics, evidence, research and full ladder lifecycle
+python3 -m unittest discover -s ltcm/tests -t .     # the retained runtime's suite
 (cd gateway && npm test)                            # gateway boundary tests
 python3 -m league.ci --no-tests                     # content checks: strategies, tools, game and config bounds
 ```
