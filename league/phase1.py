@@ -78,6 +78,17 @@ def report(root: str | Path, *, now=None):
             research['pending'] = [dict(r) for r in db.execute("SELECT session,agent,status,created,updated,available,reason,resumes FROM research_jobs WHERE status IN ('queued','working','ready','applying') ORDER BY created,session")]
         finally:
             db.close()
+    grants = []
+    if (root / 'grants.sqlite').exists():
+        db = connect(root / 'grants.sqlite')
+        try:
+            for row in db.execute('SELECT agent,family,niche,created,status,reply FROM grants WHERE phase=? ORDER BY created', (f"{phase['started']:.6f}",)):
+                grant = dict(row)
+                reply = json.loads(grant.pop('reply') or '{}')
+                grants.append({**grant, 'model': reply.get('model'), 'cost_usd': reply.get('cost_usd'),
+                               'wrote_code': bool(reply.get('code')), 'error': reply.get('error')})
+        finally:
+            db.close()
     db = connect(root / 'recordings.sqlite')
     try:
         count, size, first, last = db.execute('SELECT COUNT(*),COALESCE(SUM(length(payload)),0),MIN(received),MAX(received) FROM snapshots').fetchone()
@@ -96,6 +107,7 @@ def report(root: str | Path, *, now=None):
                                                 if k == 'agent.mutation' and p.get('status') == 'rejected')),
             'tool_requests': {'by_status': dict(Counter(r['status'] for r in requests.values())),
                               'blocked': [r for r in requests.values() if r['status'] == 'blocked']},
+            'startup_grants': grants,
             'jobs_without_finish': sorted(begun_jobs - {p['job'] for p in jobs}), 'latency': latency, 'research': research,
             'recordings': {'kind': 'sampled_rest_snapshots', 'count': count, 'compressed_bytes': size,
                            'first_received': first, 'last_received': last, 'evicted': evicted},

@@ -4,6 +4,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from league.book import Limits
 from league.economy import load_game
@@ -54,6 +55,11 @@ class FakeAlpacaData:
 
 class HouseCase(unittest.TestCase):
     def setUp(self):
+        # Each mechanics test supplies its own population. Shipping the first architect
+        # strategy must not silently add a real strategy to every unrelated fake-book test.
+        strategies = patch('league.strategies.all_strategies', return_value=[])
+        strategies.start()
+        self.addCleanup(strategies.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.broker = FakeBroker("alpaca-paper")
