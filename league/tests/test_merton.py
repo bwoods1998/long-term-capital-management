@@ -419,6 +419,28 @@ class TheOperatorReadsTheRealBounds(unittest.TestCase):
         self.assertNotIn("real_money", shown["permitted_dials"])
 
 
+class DesignerSourceAndRuntime(unittest.TestCase):
+    def test_temporary_burst_settings_are_not_presented_as_the_repository_file(self):
+        from types import SimpleNamespace
+        from league.economy import load_game
+        from league.merton import evidence_from
+
+        game=load_game();game['economy']['fork_threshold_usd']='2.00'
+        game['economy']['epoch_seconds']=3600
+        house=SimpleNamespace(
+            game=game, registry=SimpleNamespace(living=lambda: [],dead=lambda: []),
+            commons=SimpleNamespace(blocked_requests=lambda **kw: []),
+            ledger=SimpleNamespace(read=lambda **kw: []),
+            evaluator=SimpleNamespace(blocks=lambda _: [],rung=lambda _: 1),
+            economy=SimpleNamespace(balance=lambda _: 0), books={},budget=None,
+            pacer=SimpleNamespace(report=lambda: {},running=lambda: False),
+            settings=SimpleNamespace(real_money=False),registry_path=None)
+        shown=evidence_from(house)('designer')
+        self.assertEqual(shown['game'],load_game())
+        self.assertEqual(shown['active_game']['economy']['epoch_seconds'],3600)
+        self.assertNotEqual(shown['game']['economy']['epoch_seconds'],3600)
+
+
 class NoBriefMayCarryANumberTheCheckerOwns(unittest.TestCase):
     """Three times on Sept 20, 2026 one number lived in two places and they drifted apart in
     silence: the pacer's Sail allowance against the provider's fixed floor cap (research stopped

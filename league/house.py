@@ -1684,7 +1684,9 @@ class House:
         result = describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
                           alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
         if self.semantic_lab is not None:
-            result['semantic_research'] = self.semantic_lab.evidence(agent.id)
+            observed = agent.needs.get('observe') or {}
+            result['semantic_research'] = self.semantic_lab.evidence(agent.id,
+                series=[*(agent.needs.get('series') or []), *(observed.get('series') or [])])
         return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -1725,6 +1727,13 @@ class House:
             'last_trial': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.trial', agent=agent.id)))), None),
             'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') == 'look'), None),
             'can_fork': self.economy.can_fork(agent.id), 'recent_trades': self._recent_trades(agent.id),
+            'candidate_submission': {'allowed': True, 'parent_can_fund_child': self.economy.can_fork(agent.id),
+                'house_can_stake_replay_pass': True, 'full_seats_queue_candidate': True,
+                'style_may_change_within_venue_horizon_specialty': True,
+                'note': 'can_fork describes paying an endowment, not permission to research or submit. '
+                        'You may replace a failed decision rule with a different hypothesis in your specialty. '
+                        'The original lineage and every trial remain counted.'},
+            'parameter_validation': parameters.inspect(agent.params, agent.needs),
             'idle': {**self.idle_run(agent), 'why_now': self.idle_reason(agent)},
             'rewrites_in_place': rung == 0 or (rung == 1 and self.record_is_empty(agent)),
             'runtime_capabilities': self.research_capabilities(agent),
@@ -2037,14 +2046,18 @@ class House:
                 # that is the calendar, not the agent.
                 self.kill(agent, "stuck", f"{self.idle_run(agent)['barren']} wakes in a row with a live market in front of it and nothing done, "
                                           f"and too few credits left to research its way out")
+        if not refill:
+            return  # births buy sandbox work; culling above remains available after spending stops
         for agent in self.registry.living():
             if self.economy.can_fork(agent.id) and self.evaluator.rung(agent.id) >= 1:
                 last = float(self._state.setdefault("last_fork", {}).get(agent.id) or 0)
                 if self.clock() - last >= float(rules["epoch_seconds"]):
                     self._state["last_fork"][agent.id] = self.clock()
-                    self.fork(agent)
-        if not refill:
-            return
+                    if self.fork(agent) is not None:
+                        # The first burst payout launched seven children serially, holding one
+                        # tick for over seven minutes. Give the next parent its turn on the next
+                        # tick; the persisted per-parent cadence survives restart.
+                        return
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
         self.enroll()

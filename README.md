@@ -107,13 +107,20 @@ House takes the venue's word and carries the difference on its own row, creditin
 **The funded campaign.** Production now uses `league/campaigns.py` and the persistent
 [phase-one policy](docs/phase-one.md). The initial allowance is $500 over 48 hours, including
 external engineering and infrastructure reserves; $50 is available to automated foundation
-model work and up to $45 to Sail after its operating reserve. Jev's $10 allowance is backed
+model work and up to $45 to Sail after its operating reserve. Jev's $20 allowance is backed
 inside that existing model allocation. Calls reserve money before transmission; unresolved
 bills retain their holds. Restarts, deposits and calendar changes do not renew the phase.
 The legacy fourteen-day pacer remains for compatibility and fixtures. Current campaigns have
 no catch-up spending or underspend acceleration. The gateway's monthly cap is an additional
 ceiling. Credit rewards allocate research access within these limits; creating credits cannot
 create vendor budget.
+
+The [September 20 evening experiment](docs/runs/2026-09-20-evening-watch.md) adds one immutable
+eight-hour research allowance: $250 OpenAI and $75 Sail, ending at 4:01 AM Pacific September 21.
+It retains the foundation policy and Jev backing. New sessions compare 75% Luna with 25% Sail,
+research runs every fifteen minutes, and a shared Jev lab tests fixed and architect-proposed
+classification features against a numerical baseline. Faster cycles and stronger resource
+rewards are experimental; independent forward evidence still decides whether they help.
 
 **How an agent learns, and what it remembers.** A research pass starts from the agent's JOURNAL
 (notes it wrote to its future self and the conclusion of every earlier pass, its ancestors' before
@@ -269,8 +276,8 @@ What no model and no code path on Sail may change, and where each item is enforc
 |---|---|---|
 | Order caps | $75 an order, $4,000 and 2,000 orders a day | in the gateway, before anything is signed (`gateway/wrangler.jsonc`); `league/book.py` refuses first so it can say why |
 | Kill switch | engaged or released | in the gateway; the House's token can engage it, only the owner's separate token releases it. The paper venue passes it, because no money is behind it |
-| Jev allowance | $10 and 100,000 calls until the phase expiry | external Durable Object; backed by a retained campaign earmark, with no calendar reset |
-| OpenAI budget | $100 a month | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
+| Jev allowance | $20 and 500,000 calls until September 21, 4:01 AM Pacific | external Durable Object; backed by retained campaign earmarks, with no calendar reset |
+| OpenAI budget | $300 a month; tighter immutable campaign windows also apply | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month, $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest, and the House writes the digest to the ledger every time it starts |
 | The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, `gateway/`, `.github/` | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |

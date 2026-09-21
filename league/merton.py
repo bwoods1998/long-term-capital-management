@@ -547,7 +547,12 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
                     # the same reduction three times until one merged and throttled the floor.
                     "permitted_dials": {key: {"min": low, "max": high} for key, (low, high) in CONFIG_DIALS.items()}}
         elif role == "designer":
-            base.update(game=house.game, deaths=[{"agent": a.id, "cause": a.cause, "niche": a.niche} for a in house.registry.dead()][-30:],
+            from .economy import load_game
+
+            base.update(game=load_game(), active_game=house.game,
+                        game_file_note='game is the repository file to edit. active_game includes temporary owner-funded overrides. '
+                                       'Do not copy those overrides into game.json; a base-file edit cannot change the active burst policy or its deadline.',
+                        deaths=[{"agent": a.id, "cause": a.cause, "niche": a.niche} for a in house.registry.dead()][-30:],
                         payouts=[e.payload for e in ledger.read(kinds="ops.budget", limit=30, newest=True) if e.payload.get("what") == "payout"])
         elif role == "teacher":
             base.update(replay_trials=trials, lessons_so_far=[e.payload.get("title") for e in ledger.read(kinds="playbook.entry", limit=40, newest=True)],

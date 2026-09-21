@@ -156,3 +156,29 @@ sessions and failures by route, forward blocks/trades, all-in metered costs and 
 The treatment bundles several game changes, so it tests throughput and operational feasibility;
 it cannot isolate a causal effect for each dial. Model confidence, historical passes, number of
 births and spending alone are not measures of trading success.
+
+## Burst ramp findings and shared classification experiment
+
+The first release passed its canary but was rolled back at 8:11 PM because its health record
+aged past 300 seconds. Ledger receipts identify the long tick: following the enlarged payout at
+8:06:13, it launched children serially until after 8:13. The watchdog acted correctly. An
+automatic retry was healthy at 8:24 PM with 44 living agents and all books unfrozen. A fix limits
+automatic funded births to one per tick, retaining the remaining parents' opportunities for
+later ticks. Stopped spending permits culling but no longer buys automatic births. A private
+180-second thread trace diagnoses future stalls without extending or fabricating health.
+
+At 8:24 PM, the experiment archive contained 36 trials. Hawkins-3 completed a seven-turn Luna
+session in 60.889 seconds, including one replay, for a $0.039028 gateway estimate. Its summary
+reported a passing historical candidate; the archive and adoption receipts must corroborate
+that claim. Faster summaries that merely repeat impossibility claims are counted separately
+from new trials. Research context now clarifies that lack of child-endowment funding does not
+forbid candidate submission, and an agent may change strategy style within its assigned
+venue, horizon and specialty. Long journal summaries carry their recorded cost and trial count.
+
+The shared Jev lab is [PR #29](https://github.com/bwoods1998/long-term-capital-management/pull/29).
+It classifies public market packets and research failures once for the fleet, retaining each
+typed answer and bill. Its first 16 requests produced 128 labels for $0.001616. The follow-up
+adds bounded architect-proposed questions, a two-hour feature freeze, and a three-way comparison
+on later unseen events. See the [design and accounting](../design/2026-09-20-typesafe-pilot.md).
+Runtime acceptance of this follow-up remains pending. Label probabilities are research inputs;
+neither confidence nor a favorable historical replay authorizes a trade or promotion.

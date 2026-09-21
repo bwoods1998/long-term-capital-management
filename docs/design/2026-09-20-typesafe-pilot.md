@@ -30,6 +30,22 @@ outcome, and compares a fixed numerical baseline with added Jev features on late
 The target is a five-minute sampled midpoint direction, **not net profit or fill quality**.
 Training and evaluation must have sufficient forward rows and distinct events before scoring.
 
+The architect can propose two to four additional atomic questions in each of four half-hour
+rounds during the first two hours. It receives only development examples observed before burst
+activation. The fixed eight questions remain intact; proposals and paid receipts persist, and
+an interrupted proposal is never silently purchased again. Questions freeze at 10:01 PM Pacific.
+The later six-hour window compares numerical features alone, the fixed Jev features, and the
+fixed features plus the final proposed questions, using the same rows and logistic solver.
+Question identity includes its complete instructions. A renamed or rewritten question cannot
+silently mix incompatible labels. Insufficient unseen events are reported without a score.
+
+The worker admits up to 1,024 unique packets per batch with eight parallel calls, at most 600
+requests per minute and conservative token pacing. Fresh observations precede the historical
+backlog. The queue retains up to 200,000 distinct packets; the independent gateway's dollar
+cap remains authoritative. The private `semantic-evaluation.json` is refreshed every fifteen
+minutes while the lab runs. These are prospective feature experiments, not automatic trading
+or profit claims.
+
 The first real batch produced 128 typed market labels across 16 requests for **$0.001616**, with
 no unconfirmed calls. It also retained 1,184 additional market packets and 25 research packets.
 This verifies the queue/provider path; it does not validate label correctness or economic value.
@@ -152,17 +168,18 @@ Packet SHA-256: `7621de1f897827b60400fe0776a4ba929e8b478b78c05ec5d2645bf0f190505
 4. Run Jev in shadow first. It earns a production route if it preserves or improves routing
    quality and materially reduces end-to-end cost or elapsed time. Small samples justify
    another test, not broad claims about reliability or trading performance.
-5. Use the installed $10 Jev envelope; the first Luna comparison has its own $2 cumulative
+5. Use the installed $20 Jev envelope; the first Luna comparison has its own $2 cumulative
    reservation ceiling inside foundation-review. Both are within the existing phase, not new
    capital. Later provider comparisons come from the $250 challenger allocation in the
    overall $10,000 plan. Judge spend by downstream benefit, not request count.
 
 At 2,000 total billable input tokens per request, 100,000 requests would cost approximately
 $8.40 at the published rate. Larger inputs cost more; the dollar ceiling can bind before the
-call ceiling. The $10 lane is enough for meaningful throughput experiments without depositing
+call ceiling. The $20 lane is enough for meaningful throughput experiments without depositing
 hundreds of dollars. Account access worked in the live probe; no additional setup is needed now.
 
-The $10 is backed by two retained commitments ($1 plus a $9 expansion) in foundation-review.
+The $20 is backed by three retained commitments ($1, a $9 expansion and a further $10 expansion)
+in foundation-review.
 The existing allocation is internally named OpenAI; this is a cross-provider earmark, not an
 OpenAI invoice or extra phase money. The gateway reports actual Jev usage separately. Keep the
 entire backing reservation until the route closes/expires and billing is reconciled; releasing

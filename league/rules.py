@@ -96,6 +96,11 @@ rung is worth ({w1} on paper, {w2} on real money, {w3} scaled). A desk twice as 
 out, but to the LEAST BAD TRADER -- ranked by how far above the worst you are, among agents that
 have actually traded. An agent with no active block earns none of it. Nothing here pays for
 existing.
+The current minimum for the performance component is {e.get('performance_min_blocks', 0)} active blocks.
+You may replace a failed trading style with another hypothesis inside your venue, horizon and
+specialty. Your family name preserves evidence; it does not lock you to a failed indicator.
+can_fork=false only means you cannot currently pay the child's endowment yourself. It does not
+block research, a replay or a retained candidate; the House may stake and queue a qualifying child.
 
 WHAT YOUR CREDITS BUY. Thinking. A cheap model thinks for you in every research pass; MERTON, the
 frontier model who writes this firm's strategies and audits every candidate for real money, will

@@ -220,6 +220,25 @@ class HouseTest(HouseCase):
         self.house.tick()
         self.assertEqual(len([a for a in self.house.registry.living() if a.parent == agent.id]), 1)  # once an epoch
 
+    def test_a_fleet_windfall_spreads_child_launches_across_ticks(self):
+        parents = [self.seated(name) for name in ('first', 'second')]
+        for agent in parents:
+            self.house.economy.grant(agent.id, '4', 'burst payout')
+        for count in range(1, 3):
+            self.house.keep_population()
+            children = [a for a in self.house.registry.living() if a.parent]
+            self.assertEqual(len(children), count)
+            self.assertEqual(len({a.parent for a in children}), count)
+
+    def test_stopped_population_can_cull_without_buying_child_launches(self):
+        rich, broke = self.seated('rich'), self.seated('broke')
+        self.house.economy.grant(rich.id, '4', 'a windfall')
+        self.house.economy.charge(broke.id, '100', 'exhausted')
+        self.house.keep_population(refill=False)
+        self.assertFalse(broke.alive)
+        self.assertEqual([a.id for a in self.house.registry.living()], [rich.id])
+        self.assertEqual(self.house.sandbox.forks, [])
+
     def test_the_epoch_payout_reaches_the_living(self):
         agent = self.seated()
         before = self.house.economy.balance(agent.id)
