@@ -42,7 +42,8 @@ def validate(p):
 
 
 TURBO_RANGES = {'research_minutes': (3, 180), 'research_workers': (1, 32), 'replay_workers': (1, 12),
-                'newcomer_seconds': (60, 3600), 'max_population': (12, 64), 'luna_fraction': (0, 1)}
+                'newcomer_seconds': (60, 3600), 'max_population': (12, 64), 'luna_fraction': (0, 1),
+                'endowment_usd': (0.25, 10)}
 
 
 def load_turbo():
@@ -97,7 +98,7 @@ def game_for(base, burst):
              replay_deadline_epochs=deadline / 3600, newcomer_seconds=p['newcomer_seconds'],
              performance_exponent=p['performance_exponent'], performance_min_blocks=p['performance_min_blocks'],
              niche_floor_share=str(p['niche_floor_share']), max_population=p['max_population'],
-             endowment_usd='2.00', fork_threshold_usd='2.00')
+             endowment_usd=str(load_turbo().get('endowment_usd', '2.00')), fork_threshold_usd='2.00')
     research = game['research']
     research.update(min_hours_between=p['research_minutes'] / 60, max_turns=12)
     if load_turbo().get('sail_profile'):
