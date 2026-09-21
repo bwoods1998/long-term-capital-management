@@ -4,5 +4,11 @@
     "family": "sports-favorites",
     "file": "sports_fee_capped_taker.py",
     "why": "Seven sports agents are barren, but meriwether-8's latest taker replay passed with 70 closed trades and 0.9554 deflated Sharpe after repeated maker fill failures. Test capped touch execution on NFL YES and soccer NO favourites, reserving rounded fees and limiting event exposure; the reported pass is development evidence, not proof this candidate works."
+  },
+  {
+    "name": "wti-isolated-maker",
+    "family": "prices-favorites",
+    "file": "wti_isolated_maker.py",
+    "why": "Three prices agents are barren and the sole trader loses. The desk reports positive WTI-plus-diesel maker results but losses in Brent, motivating a WTI-only YES control rather than another broad commodities variant. Freeze the 90-93 cent band, cap spending at $2 including a conservative fee reserve, allow one outstanding exposure, and require explicit resolution within 48 hours. Reused evidence does not establish this candidate's edge; normal lineage-adjusted replay and independent forward gates remain mandatory."
   }
 ]
