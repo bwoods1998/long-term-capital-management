@@ -2,7 +2,7 @@
 
 The House runs in a Sail cloud VM. The venue keys, the OpenAI key and the GitHub token do not.
 
-This Worker holds every credential the floor spends with as a Worker secret, authenticates every
+This Worker holds venue, OpenAI, TypeSafe and GitHub credentials as Worker secrets, authenticates every
 request itself, enforces hard caps and a kill switch **before** it forwards anything, and watches
 the floor from outside. The VM holds one bearer token. So the worst a compromised, confused or
 runaway VM can do is *ask*: it cannot sign an order, exceed the caps, spend past the frontier
@@ -37,6 +37,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 | `GET`/`POST`/`DELETE` | `/v1/alpaca-paper/<path>` | The same paths with the paper key pair, forwarded to `https://paper-api.alpaca.markets/<path>` (market data still goes to the data host). Never metered, and not stopped by the kill switch: see below. |
 | `GET` | `/v1/kalshi/ws-auth` | The three handshake headers for Kalshi's WebSocket (`/trade-api/ws/v2`), good for 30 seconds. The only route that hands the VM credential material, and what it hands over is short-lived and read-only: Kalshi takes no order over its WebSocket. The first run used it; the league does not. |
 | `POST` | `/v1/frontier/responses` | One metered call to the frontier model (OpenAI Responses API). See [The frontier month](#the-frontier-month). |
+| `POST` | `/v1/typesafe/systemone` | Bounded Jev shadow pilot; requires `X-LTCM-Request`, pinned `jev-1.13.0`, inline state and choice/noul questions. Uses `TYPE_SAFE_TOKEN` only in this Worker. |
 | `GET` | `/v1/frontier/models` | The model ids the key can reach, and which of them are priced. Free. |
 | `POST` | `/v1/github/pr` | Opens one pull request from a proposal `{role, slug, title, body, files}`. See [Pull requests](#pull-requests). Not stopped by the kill switch: it moves no money. |
 | `GET` | `/v1/github/pr/<number>` | That pull request's `state`, `merged`, `mergeable_state`, `head` and its check runs counted into `success`, `failure` or `pending`, so the VM watches CI with no GitHub credential. Free. |
@@ -108,6 +109,33 @@ A reservation is returned only when the forward never reached the venue. A venue
 all keeps its reservation, however it answered, and so does a timeout after dispatch: an
 unconfirmed write is an order until reconciliation says otherwise.
 
+## Jev shadow pilot
+
+`POST /v1/typesafe/systemone` uses the Worker secret `TYPE_SAFE_TOKEN`. It admits only the
+versioned `jev-1.13.0`, inline text/JSON state, and 1–16 explicit choice/noul questions. The
+request body is limited to 64 KiB. This is an experiment interface; the trading and release
+loops do not consume its answers.
+
+The external gate has a **$10 lifetime allowance and 100,000 accepted calls**, expiring with the
+current foundation phase. These counters never reset by day, month or deployment. A retained
+$10 `foundation-review` campaign reservation must back the allowance before enabling it. This
+is a cross-provider pilot earmark from that existing research allocation, not an OpenAI bill
+or an addition to the phase budget. Keep that reservation until the route has expired or is
+closed and its provider bill is reconciled. `/v1/health.typesafe` reports Jev usage separately.
+
+Every request needs a unique `X-LTCM-Request` (letters, digits, colon, underscore, hyphen;
+maximum 128 characters). Admission stores that id and the request digest before forwarding.
+Reusing an accepted identity returns 409, including after a timeout or restart; it never buys
+a second request. Store the response durably on the caller and investigate ambiguous results
+instead of silently generating a new id. No provider retries or redirects are followed.
+
+At the published $0.042/M input-token price and free output, a 64k-token request costs less
+than $0.003; the gate reserves a full cent. Missing/invalid usage or ambiguous errors retain
+the cent. Valid usage settles in microdollars; a charge exceeding its reservation closes
+further admission. `X-LTCM-Cost-USD` has six decimals; `X-LTCM-Cost-Known` distinguishes a usage
+charge from a retained reservation. Output types and distributions are checked, but a valid
+shape is not evidence that a decision is correct. Source: [TypeSafe models](https://docs.typesafe.ai/models).
+
 ## The frontier month
 
 `POST /v1/frontier/responses` forwards one call to `https://api.openai.com/v1/responses` with
@@ -116,7 +144,10 @@ A call is priced twice. Before it leaves, at its worst case: every byte of the r
 one byte per token plus framing, at the long-context ceiling, every allowed output token used; that much is reserved, and a call whose
 worst case does not fit in what is left of the month is a `402` with `cap: frontier_month`. After
 it returns, at the usage the provider reports, and the difference is given back. The reply carries
-`X-LTCM-Cost-USD`, and `X-LTCM-Agent` on the request attributes the cost in `/v1/health`.
+`X-LTCM-Cost-USD` with six decimal places, and `X-LTCM-Agent` on the request attributes the
+cost in `/v1/health`. The aggregate health display still rounds to cents. Meter receipts must
+retain microdollars: rounding a cheap Luna receipt to one cent previously created a false
+campaign reservation breach, found and corrected during the Jev comparison.
 
 `FRONTIER_MODELS`, in dollars per million tokens. A model absent from it is a `403`: an unpriced
 call is an uncapped one.
@@ -202,7 +233,7 @@ Once there is a checkpoint:
   `idempotency_key`, at most once per `RESTART_COOLDOWN_SECONDS` (1800). The attempt itself opens
   the cooldown, confirmed or not, so a box that cannot come back is not restarted in a loop.
 - box `paused` or `sleeping` **and** Sail credit above `RESERVE_USD` (10) → resume it, then run the
-  restart. A top-up alone brings the floor back with no human step.
+  restart. A top-up can restore this account-level availability check without a human step; it cannot renew the House campaign allowance or its expiry.
 - box stopped with credit at or under the reserve → left stopped, and the owner is told.
   Resuming a box that cannot pay for a model call only spends the remainder faster.
 - box `terminated` or otherwise unrecoverable → never resumed.

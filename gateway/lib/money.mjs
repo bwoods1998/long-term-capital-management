@@ -60,3 +60,11 @@ export function formatUsd(micro) {
   const cents = (absolute + 9999n) / 10000n; // micro -> cents, rounded up
   return `${sign}${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
 }
+
+/** Lossless meter receipts. Display rounding must never manufacture a reservation breach. */
+export function formatUsdMicro(micro) {
+  const value = BigInt(micro ?? 0n);
+  const sign = value < 0n ? '-' : '';
+  const absolute = value < 0n ? -value : value;
+  return `${sign}${absolute / MICRO}.${String(absolute % MICRO).padStart(6, '0')}`;
+}

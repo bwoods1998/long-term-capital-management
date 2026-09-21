@@ -1,5 +1,10 @@
 # The rebuild: architecture, as built (Sept 19 to 20, 2026)
 
+This is the original rebuild baseline. The [active foundation phase](../phase-one.md) supersedes
+its spending schedule, and the [chief architect handoff](2026-09-20-chief-architect-handoff.md)
+describes the next architecture. See [verified current progress](../runs/2026-09-20-foundation-progress.md)
+and [Jev integration](2026-09-20-typesafe-pilot.md) for subsequent changes and remaining gaps.
+
 Companion to `docs/proposals/2026-09-19-the-game.md`. This file was the plan for the overnight
 build of Sept 19 to 20; it has been revised into a description of what was built, and every
 place the build departed from the plan is listed with its reason in

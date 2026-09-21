@@ -11,6 +11,7 @@
 //   POST            /v1/notify               one trade notice mailed to the owner, capped per day
 //   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
 //   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
+//   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
 //
@@ -39,6 +40,7 @@ import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenueP
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
+import * as typesafe from './typesafe.mjs';
 import * as github from './github.mjs';
 
 export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
@@ -139,6 +141,11 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/frontier/responses') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return frontierCall(request, env, { gate, fetcher, now });
+  }
+
+  if (path === '/v1/typesafe/systemone') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return typesafeCall(request, env, { gate, fetcher, now });
   }
 
   if (path === '/v1/github/pr') {
@@ -286,10 +293,43 @@ async function sign({ venue, path }, request, env, { now }) {
   throw new Error(`unknown venue ${String(venue)}`);
 }
 
-/**
- * One metered call to the frontier model. Reserved at its worst case, settled at its real cost;
- * a failure before the provider answers gives the reservation back, a failure after keeps it.
- */
+/** One funded semantic request. Ambiguous responses retain their reservation and identity. */
+async function typesafeCall(request, env, { gate, fetcher, now }) {
+  if (!env.TYPE_SAFE_TOKEN) return fail('TypeSafe is not configured.', 503);
+  const body = await readBody(request, typesafe.MAX_BODY_BYTES);
+  if (body.error) return fail(body.error, 413);
+  let parsed;
+  try { parsed = JSON.parse(body.text || ''); } catch { return fail('The request must be JSON.', 400); }
+  const error = typesafe.admit(parsed);
+  if (error) return fail(error, 400);
+  const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.text)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+  const hold = await gate.typesafeReserve({ id: request.headers.get('X-LTCM-Request'), digest, at: now() });
+  if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
+  let upstream, data;
+  try {
+    upstream = await fetcher(typesafe.ENDPOINT, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json',
+        Authorization: `Bearer ${env.TYPE_SAFE_TOKEN}`, 'User-Agent': 'ltcm-gateway/1.0' },
+      body: body.text, redirect: 'manual', signal: AbortSignal.timeout(30000),
+    });
+    const response = await readBody(upstream, 128 * 1024);
+    if (response.error) throw new Error('oversize response');
+    data = JSON.parse(response.text);
+  } catch {
+    await gate.typesafeSettle({ id: hold.id, actual: null });
+    return fail('TypeSafe did not return a complete JSON response; the reservation is retained.', 502);
+  }
+  const cost = typesafe.actualCost(data?.usage);
+  const settled = await gate.typesafeSettle({ id: hold.id, actual: cost === null ? null : String(cost) });
+  const headers = { 'X-LTCM-Cost-USD': settled.cost_usd, 'X-LTCM-Cost-Known': String(settled.cost_known) };
+  // Never echo provider error text: it can contain request data or authentication diagnostics.
+  if (!upstream.ok) return json({ error: `TypeSafe returned HTTP ${upstream.status}; no automatic retry.` }, 502, headers);
+  if (!typesafe.validAnswers(parsed, data)) return json({ error: 'TypeSafe returned incompatible typed answers.' }, 502, headers);
+  return json(data, 200, headers);
+}
+
+/** One frontier call, reserved at a conservative ceiling and settled from reported usage. */
 async function frontierCall(request, env, { gate, fetcher, now }) {
   if (!env.OPENAI_SECRET_KEY) return fail('The frontier model is not configured.', 503);
   const body = await readBody(request, 512 * 1024);

@@ -9,8 +9,9 @@
 import { caps, venueOrderCap } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
 import { dayCap as pullDayCap } from './github.mjs';
-import { formatUsd } from './money.mjs';
+import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
+import * as typesafe from './typesafe.mjs';
 
 /** The one Gate instance. A single object is what makes a cap a cap and not a per-isolate guess. */
 export const GATE_OBJECT = 'gate-v1';
@@ -23,6 +24,7 @@ export const ALERTS_KEY = 'alerts';
 const NOTICES_KEY = 'notices';
 export const FRONTIER_KEY = 'frontier';
 export const PULLS_KEY = 'pulls';
+export const TYPESAFE_KEY = 'typesafe-pilot-v1';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -169,7 +171,48 @@ export function createGate({ store, env = {}, now = Date.now }) {
       const name = typeof agent === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(agent) ? agent : 'unattributed';
       agents[name] = String(BigInt(agents[name] || 0) + cost);
       write(store, FRONTIER_KEY, { month: row.month, spent: String(spent > 0n ? spent : 0n), calls: row.calls + 1, agents });
-      return { ok: true, cost_usd: formatUsd(cost) };
+      return { ok: true, cost_usd: formatUsdMicro(cost) };
+    },
+
+    // Pilot commitments never reset with a calendar period or a deployment. An accepted id
+    // is never sent upstream a second time, even after an interrupted/ambiguous response.
+    typesafeStatus() {
+      const row = read(store, TYPESAFE_KEY, { spent: '0', calls: 0, pending: 0, breaches: 0 });
+      return { ...row, spent_usd: typesafe.money(row.spent), cap_usd: typesafe.money(typesafe.capMicro(env)),
+        max_calls: typesafe.MAX_CALLS, ends: env.TYPESAFE_PILOT_END || null, model: typesafe.MODEL };
+    },
+
+    typesafeReserve({ id, digest, at = now() }) {
+      if (typeof id !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(id)
+          || typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)) {
+        return { ok: false, status: 400, error: 'A stable request identity and digest are required.' };
+      }
+      const prior = read(store, `${TYPESAFE_KEY}:${id}`, null);
+      if (prior) return { ok: false, status: 409, error: prior.digest === digest
+        ? 'This request was already accepted; it will not be billed again.' : 'This request identity has different content.' };
+      const end = Date.parse(env.TYPESAFE_PILOT_END || '');
+      const cap = typesafe.capMicro(env), row = this.typesafeStatus();
+      if (!Number.isFinite(end) || at >= end || cap <= 0n || row.breaches
+          || row.calls >= typesafe.MAX_CALLS || BigInt(row.spent) + typesafe.RESERVATION_MICRO > cap) {
+        return { ok: false, status: 402, cap: 'typesafe_pilot', error: 'The funded TypeSafe pilot allowance is unavailable.' };
+      }
+      write(store, TYPESAFE_KEY, { spent: String(BigInt(row.spent) + typesafe.RESERVATION_MICRO),
+        calls: row.calls + 1, pending: row.pending + 1, breaches: row.breaches });
+      write(store, `${TYPESAFE_KEY}:${id}`, { digest, at, status: 'pending' });
+      return { ok: true, id, reserved: String(typesafe.RESERVATION_MICRO) };
+    },
+
+    typesafeSettle({ id, actual }) {
+      const request = read(store, `${TYPESAFE_KEY}:${id}`, null);
+      if (!request || request.status !== 'pending') return { ok: false };
+      const cost = actual === null || actual === undefined ? typesafe.RESERVATION_MICRO : BigInt(actual);
+      if (cost < 0n) return { ok: false };
+      const row = this.typesafeStatus();
+      write(store, TYPESAFE_KEY, { spent: String(BigInt(row.spent) - typesafe.RESERVATION_MICRO + cost),
+        calls: row.calls, pending: row.pending - 1,
+        breaches: row.breaches + (cost > typesafe.RESERVATION_MICRO ? 1 : 0) });
+      write(store, `${TYPESAFE_KEY}:${id}`, { ...request, status: actual === null || actual === undefined ? 'unknown' : 'settled', cost: String(cost) });
+      return { ok: true, cost_usd: typesafe.money(cost), cost_known: actual !== null && actual !== undefined };
     },
 
     /**
@@ -284,6 +327,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
             by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
           };
         })(),
+        typesafe: this.typesafeStatus(),
         github: { day: iso(at).slice(0, 10), pull_requests: this.pullsToday(at), cap: pullDayCap(env) },
         watchdog: {
           last_check_at: watch.last_check_at ?? null,

@@ -1,5 +1,21 @@
 # Run records and lab reports
 
+## Current league
+
+- [Foundation progress, September 20](2026-09-20-foundation-progress.md): deployed campaign,
+  research recovery, model grants, replay proof and Jev integration.
+- [Model comparison, September 20](2026-09-20-model-routing.md): what the paid coding pilots measured.
+- [Overnight rebuild](2026-09-20-overnight-build.md) and [initial watch](2026-09-20-the-watch.md):
+  the earlier league baseline and repairs.
+- [Jev probe data](data/2026-09-20-typesafe-probe.json): frozen sanitized cases and measured responses.
+
+The live league's read-only progress command is `python -m league.phase1 --root /workspace/state`
+on the House. Its [phase documentation](../phase-one.md) explains the counts and cost treatment.
+
+## Historical first-run reports
+
+The commands below describe the retired chat-desk runtime, not the current league.
+
 Two kinds of file live in this directory.
 
 - **Run records** (`2026-09-15-ltcm-launch.md`, `2026-09-15-sail-native-launch.md`) are written

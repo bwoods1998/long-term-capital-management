@@ -506,7 +506,7 @@ test('the frontier model is metered: reserved at its worst case, settled at its 
   assert.equal(seen[0].url, 'https://api.openai.com/v1/responses');
   assert.equal(seen[0].init.headers.Authorization, 'Bearer sk-test-key-that-never-leaves-the-worker');
   // 1000 fresh x $10 + 1000 cached x $1 + 1000 out x $50, per million: $0.061.
-  assert.equal(first.response.headers.get('X-LTCM-Cost-USD'), '0.07', 'costs round up to the cent');
+  assert.equal(first.response.headers.get('X-LTCM-Cost-USD'), '0.061000', 'meter receipts retain microdollars');
   let status = await gate.status();
   assert.equal(status.frontier.spent_usd, '0.07');
   assert.deepEqual(status.frontier.by_agent, { auditor: '0.07' });
@@ -538,6 +538,26 @@ test('the frontier model is metered: reserved at its worst case, settled at its 
   assert.equal((await call(ask('POST', '/v1/frontier/responses', { body }), { settings: { ...settings, OPENAI_SECRET_KEY: '' } })).response.status, 503);
   assert.equal((await call(ask('POST', '/v1/frontier/responses', { body }), { settings: { ...settings, FRONTIER_MONTH_USD: '' } })).response.status, 403);
   assert.equal((await call(ask('GET', '/v1/frontier/responses'), { settings })).response.status, 405);
+});
+
+test('a tiny Luna call does not manufacture a budget breach by rounding its receipt to cents', async () => {
+  const settings = {
+    OPENAI_SECRET_KEY: 'test-key', FRONTIER_MONTH_USD: '1',
+    FRONTIER_MODELS: JSON.stringify({ 'gpt-5.6-luna': {
+      input: .25, cached: .02, output: 1.2, long_input: .5, long_cached: .04, long_output: 1.8,
+    } }),
+  };
+  const store = memoryStore();
+  const gate = createGate({ env: env(settings), store, now: () => NOW });
+  const body = { model: 'gpt-5.6-luna', input: 'Classify this claim.', max_output_tokens: 1500 };
+  const usage = { input_tokens: 201, output_tokens: 63 };
+  const fetcher = async () => new Response(JSON.stringify({ model: body.model, usage }));
+  const { response } = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate, fetcher });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('X-LTCM-Cost-USD'), '0.000126');
+  assert.equal(gate.frontierMonth(NOW).spent, 126n);
+  assert.ok(Number(response.headers.get('X-LTCM-Cost-USD')) < 0.005,
+    'a sub-cent reservation must cover the same amount reported to the campaign');
 });
 
 test('a venue may carry a tighter per-order cap than the floor', async () => {
@@ -782,4 +802,3 @@ test('the Durable Object exposes the pull request counter, each step in one tran
   assert.equal((await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate: stub, fetcher: hub.fetcher })).response.status, 200);
   assert.equal(local.status(NOW).github.pull_requests, 1);
 });
-

@@ -5,11 +5,12 @@
   // Worker can authenticate one, and only within the caps below.
   //
   // Secrets, set from gateway/ with `npx wrangler secret put <NAME>` and never written to this
-  // file (eleven; `npx wrangler secret list` prints the names that are placed):
+  // file (`npx wrangler secret list` prints the names that are placed):
   //   KALSHI_KEY_ID, KALSHI_PRIVATE_KEY,
   //   ALPACA_KEY_ID, ALPACA_SECRET_KEY            the real account, venue `alpaca`
   //   ALPACA_PAPER_KEY_ID, ALPACA_PAPER_SECRET_KEY  the paper account, venue `alpaca-paper`
   //   OPENAI_SECRET_KEY                           /v1/frontier/*
+  //   TYPE_SAFE_TOKEN                             the bounded Jev shadow pilot
   //   GITHUB_TOKEN (fine-grained, this one repository, Contents and Pull requests read/write)
   //   GATEWAY_TOKEN                               the runtime's bearer token, 32+ characters
   //   GATEWAY_ADMIN_TOKEN                         the owner's; the only token /v1/unkill accepts
@@ -54,6 +55,10 @@
     "MAX_DAY_ORDERS": "2000",
     // The frontier model's month, in dollars. The owner raises it when the return earns it.
     "FRONTIER_MONTH_USD": "100",
+    // One-off shadow pilot, backed by a retained $10 foundation-review reservation. No reset
+    // by month or restart. No production trading/release decision consumes these answers.
+    "TYPESAFE_PILOT_USD": "10",
+    "TYPESAFE_PILOT_END": "2026-09-22T20:22:14.430Z",
     // Dollars per million tokens: input, cached input, output. A model absent here is refused.
     // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
     // cache-write rate, the dearest an input token can be, so the meter errs high.
