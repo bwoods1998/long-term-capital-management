@@ -60,6 +60,12 @@ the House does not yet consume its judgments in production research or trading.
   even a rollback to an older release sees complete normal fill rows. Risk checks reserve earlier
   accepted intents in the same batch before considering later ones.
 
+The current [gate audit](../docs/runs/2026-09-21-game-gate-audit.md) documents the event-based
+qualification path and prepared live-learning activation. `episodes.py` folds trusted cash and
+position receipts into completed, non-overlapping exposures. `live_pilot.py` records an explicit
+owner activation without changing the original campaign, commitments or deadline. Promotion
+status is exposed in health and agent research context; qualification is distinct from funding.
+
 ## Modules
 
 | Module | What it does |

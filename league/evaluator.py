@@ -340,6 +340,11 @@ class Evaluator:
                                    "drawdown": drawdown, "recent_drawdown": recent}
         if drawdown >= death["max_drawdown"]:
             return self._decide(agent, rung, "die", f"drawdown of {drawdown:.0%} is past the {death['max_drawdown']:.0%} limit", numbers)
+        fast = self._completed_exposure_gate(agent, book, rung, entered, numbers)
+        if fast is not None:
+            numbers['completed_exposure_evidence'] = fast.numbers
+            if fast.decision in ('eligible', 'die'):
+                return fast
         looks = [
             e.payload for e in self.ledger.iter(kinds="eval.verdict", agent=agent)
             if e.seq > entered and e.payload.get("decision") == "look"
@@ -371,7 +376,9 @@ class Evaluator:
         # A row written before the tests were told apart tested both whenever it looked.
         k_death = 1 + sum(1 for row in looks if row.get("tested_death", True))
         k_promote = 1 + sum(1 for row in looks if row.get("tested_promotion", True))
-        alpha_death, alpha_promote = stats.spend(alpha, k_death), stats.spend(alpha, k_promote)
+        episode_share = float(self.ladder.get('completed_exposures', {}).get('promotion_alpha_share', 0))
+        share = episode_share if rung == 2 else 0
+        alpha_death, alpha_promote = stats.spend(alpha * (1 - episode_share), k_death), stats.spend(alpha * (1 - share), k_promote)
         lower, upper = stats.mean_bounds(growth, alpha_promote), stats.mean_bounds(growth, alpha_death)
         if lower is None or upper is None:
             return Verdict(agent, rung, "hold", "not enough blocks for a bound", numbers)
@@ -410,6 +417,100 @@ class Evaluator:
             if pooled is not None:
                 return pooled
         return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
+
+    def _completed_exposure_gate(self, agent, book, rung, entered, block_numbers):
+        rules = self.ladder.get('completed_exposures')
+        if not rules or rung not in (1, 2, 3):
+            return None
+        from .episodes import completed
+        rows = completed(self.ledger, agent, book, since_seq=entered)
+        if not rows:
+            return Verdict(agent, rung, 'hold', 'more completed portfolio exposures are needed',
+                           {'episodes': len(rows), 'required_episodes': rules['min_episodes']})
+        growth = [r['log_growth'] for r in rows]
+        level, wealth = 0.0, [1.0]
+        for value in growth:
+            level += value
+            wealth.append(math.exp(max(min(level, 700), -700)))
+        drawdown = stats.max_drawdown(wealth)
+        numbers = {'book': book, 'via': 'completed_exposures', 'episodes': len(rows),
+                   'trades': sum(r['trades'] for r in rows), 'active_blocks': block_numbers['active_blocks'],
+                   'drawdown': drawdown, 'mean': sum(growth) / len(growth),
+                   'first_seq': rows[0]['first_seq'], 'last_seq': rows[-1]['last_seq'],
+                   'tested_promotion': rung == 2, 'tested_death': False}
+        if drawdown >= self.ladder['death']['max_drawdown']:
+            return self._decide(agent, rung, 'die', 'completed exposures breached the drawdown limit', numbers)
+        if len(rows) < int(rules['min_episodes']) or numbers['trades'] < int(self.ladder['min_closed_trades']):
+            return Verdict(agent, rung, 'hold', 'more completed exposures and closed trades are needed', numbers)
+        looks = [e.payload for e in self.ledger.iter(kinds='eval.verdict', agent=agent, after=entered)
+                 if e.payload.get('decision') == 'episode-look']
+        due = not looks or len(rows) - int(looks[-1]['episodes']) >= int(rules['look_every_episodes'])
+        promotion_budget = self._episode_allowance(agent, entered, 'promotion')
+        death_budget = self._episode_allowance(agent, entered, 'death')
+        alpha = stats.spend(promotion_budget, len(looks) + 1) if promotion_budget > 0 else None
+        alpha_death = stats.spend(death_budget, len(looks) + 1) if death_budget > 0 else None
+        bounds = stats.mean_bounds(growth, alpha) if alpha else None
+        death_bounds = stats.mean_bounds(growth, alpha_death) if alpha_death else None
+        if due:
+            numbers.update(alpha_death=alpha_death, tested_death=bool(alpha_death),
+                           ucb=death_bounds['ucb'] if death_bounds else None)
+        # Promote only from a fully marked, flat portfolio on this fast route. Otherwise a
+        # sequence of realized winners could conceal an open loser between hourly blocks.
+        marks = [e for e in self.ledger.iter(kinds='book.mark', agent=agent, after=entered)
+                 if e.payload.get('book') == book]
+        events = [e for e in self.ledger.iter(kinds=('book.fill', 'book.settle', 'book.stake'), agent=agent, after=entered)
+                  if e.payload.get('book') == book]
+        mark = marks[-1] if marks else None
+        marked_flat = bool(mark and mark.seq >= max((e.seq for e in events), default=rows[-1]['last_seq'])
+                           and mark.payload.get('holdings') == 0)
+        equity, staked = (float(mark.payload.get(k, 'nan')) for k in ('equity', 'staked')) if mark else (math.nan, math.nan)
+        positive = marked_flat and math.isfinite(equity) and math.isfinite(staked) and equity > staked
+        numbers['fresh_flat_profitable_mark'] = bool(positive)
+        if rung == 1:
+            limit = float(self.ladder['paper']['max_drawdown'])
+            recent = stats.max_drawdown(wealth[-(int(self.ladder.get('screen_drawdown_blocks', 30)) + 1):])
+            numbers.update(recent_drawdown=max(recent, block_numbers['recent_drawdown']), alpha_spent=None)
+            if due:
+                self.ledger.append('eval.verdict', {'decision': 'episode-look', 'rung': rung, **numbers}, agent=agent)
+                if death_bounds and death_bounds['ucb'] < 0:
+                    return self._decide(agent, rung, 'die', 'the completed-exposure growth upper bound is below zero', numbers)
+            passed = positive and level > 0 and numbers['recent_drawdown'] < limit
+            return Verdict(agent, rung, 'eligible' if passed else 'hold',
+                'completed-exposure screen passed: closed trades, positive marked equity and bounded drawdown' if passed
+                else 'completed exposures have not cleared positive-equity and drawdown checks', numbers)
+        if not due:
+            return Verdict(agent, rung, 'hold', 'no new completed-exposure look is due', numbers)
+        returns = [r['return'] for r in rows]
+        lopsided = stats.lopsided(returns, float(self.ladder['lopsided_win_rate']))
+        risk = sum(r['risk_fraction'] for r in rows) / len(rows)
+        loss_gate = stats.lopsided_growth_lcb(returns, risk, alpha) if lopsided and alpha else None
+        numbers.update(alpha_spent=alpha if rung == 2 else None, look=len(looks)+1, lopsided=lopsided, loss_gate_lcb=loss_gate,
+                       lcb=bounds['lcb'] if bounds else None, sd=bounds['sd'] if bounds else None)
+        self.ledger.append('eval.verdict', {'decision': 'episode-look', 'rung': rung, **numbers}, agent=agent)
+        if death_bounds and death_bounds['ucb'] < 0:
+            return self._decide(agent, rung, 'die', 'the completed-exposure growth upper bound is below zero', numbers)
+        if rung == 3:
+            return Verdict(agent, rung, 'hold', 'the scaled record remains under observation', numbers)
+        passed = bool(positive and bounds and bounds['sd'] > 0 and bounds['lcb'] > 0 and (loss_gate is None or loss_gate > 0))
+        return Verdict(agent, rung, 'eligible' if passed else 'hold',
+            'the completed-exposure growth bound is above zero' if passed else 'completed-exposure confidence does not establish positive growth', numbers)
+
+    def _episode_allowance(self, agent, entered, test):
+        """Legacy full-alpha block looks remain spent when adding a second evidence route."""
+        alpha = float(self.ladder['alpha'])
+        share = float(self.ladder['completed_exposures']['promotion_alpha_share'])
+        excess, k = 0.0, 0
+        field = 'alpha_spent' if test == 'promotion' else 'alpha_death'
+        for entry in self.ledger.iter(kinds='eval.verdict', agent=agent, after=entered):
+            row = entry.payload
+            if row.get('decision') != 'look' or not row.get('tested_' + test, True):
+                continue
+            k += 1
+            spent = row.get(field)
+            if spent is None and 'tested_' + test not in row:
+                spent = row.get('alpha_spent', stats.spend(alpha, k))
+            excess += max(0.0, float(spent or 0) - stats.spend(alpha * (1 - share), k))
+        return max(0.0, alpha * share - excess)
 
     def _gate(self, rung: int) -> Mapping[str, Any] | None:
         """The promotion rule out of this rung, or None from the top."""
@@ -565,6 +666,27 @@ class Evaluator:
         below = self._record_below(agent, rung)
         minimum = int(self.ladder["drift"].get("min_reference_blocks", 10))
         rules = self.ladder["drift"]
+        admission = next((e.payload for e in self.ledger.iter(kinds='eval.verdict', agent=agent)
+                          if e.seq == entered and e.payload.get('via') == 'completed_exposures'), None)
+        if admission:
+            from .episodes import completed
+            earned = completed(self.ledger, agent, admission['book'],
+                               since_seq=int(admission['first_seq']) - 1, until_seq=entered)
+            recent = completed(self.ledger, agent, book, since_seq=entered)[-int(rules['window_blocks']):]
+            # Normalize the realized result by cash exposed so a larger earned stake alone
+            # does not look like a changed strategy. Keep the qualifying record across rungs.
+            reference = stats.mean_bounds([r['return'] / r['risk_fraction'] for r in earned
+                                           if r['risk_fraction'] > 0], .5)
+            values = [r['return'] / r['risk_fraction'] for r in recent if r['risk_fraction'] > 0]
+            if len(earned) >= int(self.ladder['completed_exposures']['min_episodes']) and values and reference and reference['sd'] > 0:
+                result = stats.cusum_decay(values, reference['mean'], reference['sd'],
+                                          k=float(rules['k']), h=float(rules['h']))
+                numbers = {'book': book, 'measure': 'completed exposure return per risk',
+                           'reference_episodes': len(earned), 'recent_episodes': len(values), **result}
+                self.ledger.append('eval.drift', {'rung': rung, **numbers}, agent=agent)
+                if result['alarm']:
+                    return self.demote(agent, 'completed-exposure performance decayed from the qualifying record', numbers)
+                return Verdict(agent, rung, 'hold', 'no completed-exposure decay', numbers)
         if below and any(r.get("first_mark_seq") for r in below):
             start = min(int(r["first_mark_seq"]) for r in below if r.get("first_mark_seq"))
             earned_blocks = self.trade_edges(agent, str(below[0].get("book")), horizon, since_seq=max(start - 1, 0), until_seq=entered)

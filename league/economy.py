@@ -78,6 +78,21 @@ class Standing:
     #: Whether it has traded lately, or is new enough not to have had the chance. An agent that has
     #: done neither earns no floor: it is not holding a seat in a specialty, it is sitting in one.
     working: bool = True
+    reward_growth: float | None = None
+    reward_observations: int | None = None
+    reward_rung: int | None = None
+
+    @property
+    def score_growth(self):
+        return self.mean_growth if self.reward_growth is None else self.reward_growth
+
+    @property
+    def score_observations(self):
+        return self.active_blocks if self.reward_observations is None else self.reward_observations
+
+    @property
+    def score_rung(self):
+        return self.rung if self.reward_rung is None else self.reward_rung
 
 
 class Economy:
@@ -185,9 +200,9 @@ class Economy:
                 out[s.agent] += floor_pool / len(niches) / len(members)
         weights = self.rules["rung_weights"]
         steep = int(self.rules.get("performance_exponent", 1))
-        evidenced = [s for s in standings if s.active_blocks >= int(self.rules.get('performance_min_blocks', 0))]
+        evidenced = [s for s in standings if s.score_observations >= int(self.rules.get('performance_min_blocks', 0))]
         scores = {
-            s.agent: Decimal(str(max(s.mean_growth, 0.0))) ** steep * Decimal(str(max(s.active_blocks, 0))).sqrt() * usd(weights.get(str(s.rung), "0"))
+            s.agent: Decimal(str(max(s.score_growth, 0.0))) ** steep * Decimal(str(max(s.score_observations, 0))).sqrt() * usd(weights.get(str(s.score_rung), "0"))
             for s in evidenced
         }
         total = sum(scores.values(), ZERO)
@@ -216,11 +231,11 @@ class Economy:
         actually traded this rung. The worst earns nothing, an agent with no active block earns
         nothing, and the ranking is by the same rung weights as profit, so the day somebody is
         profitable this vanishes and the real scores take over."""
-        traded = [s for s in standings if s.active_blocks > 0 and usd(weights.get(str(s.rung), "0")) > 0]
+        traded = [s for s in standings if s.score_observations > 0 and usd(weights.get(str(s.score_rung), "0")) > 0]
         if len(traded) < 2:
             return {}
-        worst = min(s.mean_growth for s in traded)
-        return {s.agent: Decimal(str(s.mean_growth - worst)) * Decimal(str(s.active_blocks)).sqrt() * usd(weights.get(str(s.rung), "0"))
+        worst = min(s.score_growth for s in traded)
+        return {s.agent: Decimal(str(s.score_growth - worst)) * Decimal(str(s.score_observations)).sqrt() * usd(weights.get(str(s.score_rung), "0"))
                 for s in traded}
 
     def last_payout_at(self) -> float | None:

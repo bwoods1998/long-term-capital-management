@@ -492,13 +492,14 @@ def _how_the_desk_is_doing(house: Any, niche_id: str) -> dict[str, Any]:
         if agent.niche != niche_id:
             continue
         standing = house.standing_of(agent.id)
-        if standing["active_blocks"] <= 0:
+        if standing.get('earned_observations', standing['active_blocks']) <= 0:
             barren += 1
             continue
         traded += 1
-        if standing["mean_growth"] <= 0:
+        growth = standing.get('earned_growth', standing['mean_growth'])
+        if growth <= 0:
             losing += 1
-        best = standing["mean_growth"] if best is None else max(best, standing["mean_growth"])
+        best = growth if best is None else max(best, growth)
     return {"barren_agents": barren, "trading_agents": traded, "losing_agents": losing,
             "best_mean_growth": None if best is None else round(best, 6)}
 

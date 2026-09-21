@@ -662,7 +662,14 @@ class House:
                     continue
                 if self.book_of(agent) is not self.books[book_name]:
                     continue
-                intents.extend(outcome.get("intents") or [])
+                rows = list(outcome.get("intents") or [])
+                if (self.books[book_name].real_money and self.campaigns
+                        and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
+                    if any(intent.side == 'buy' for intent in rows):
+                        self.ledger.append('book.refused', {'book': book_name,
+                            'reasons': ['the live allocation window closed before submission']}, agent=agent.id)
+                    rows = [intent for intent in rows if intent.side != 'buy']
+                intents.extend(rows)
             return self.books[book_name].submit(intents) if intents else []
 
     def _offered(self, agent: Agent, ctx: Mapping[str, Any]) -> int:
@@ -704,7 +711,8 @@ class House:
             try:
                 instrument = instrument_for(book.broker.venue, dict(row))
                 side = str(row.get("side") or "").lower()
-                if book.real_money and side == "buy" and self.campaigns and not self.campaigns.policy["allow_new_live_capital"]:
+                if (book.real_money and side == "buy" and self.campaigns
+                        and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
                     raise ValueError("this phase permits exits but no new real-money entries")
                 niche = self.niche_of(agent)
                 if niche is not None and side == "buy" and not niche.holds(instrument):
@@ -1063,6 +1071,8 @@ class House:
             self.evaluator.observe(agent.id, book.name, agent.horizon)
             peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
             verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
+            if verdict.decision != 'eligible':
+                self._promotion_status(agent, verdict, 'evidence', verdict.reason)
             if verdict.decision not in ("die", "eligible") and rung >= 2:
                 drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
                 if drift.decision == "demote":
@@ -1074,6 +1084,20 @@ class House:
             self._promote(agent, verdict, expected_generation=generation)
         return verdict
 
+    def _promotion_status(self, agent: Agent, verdict: Verdict, stage: str, reason: str, **detail) -> None:
+        """Persist why the next transition waits; passing a screen must never disappear silently."""
+        row = {'at': now_iso(self.clock), 'agent': agent.id, 'rung': verdict.rung,
+               'target_rung': verdict.rung + 1, 'code_sha256': agent.code_sha256,
+               'stage': stage, 'reason': reason,
+               'evidence': {k: verdict.numbers[k] for k in ('active_blocks', 'episodes', 'via', 'trades', 'recent_drawdown', 'mean', 'lcb')
+                            if k in verdict.numbers}, **detail}
+        with self._state_lock:
+            states = self._state.setdefault('promotion_status', {})
+            old = states.get(agent.id) or {}
+            states[agent.id] = row
+        if any(old.get(k) != row.get(k) for k in ('stage', 'reason', 'code_sha256')):
+            self.ledger.append('eval.verdict', {'decision': 'progress', **row}, agent=agent.id)
+
     def _promote(self, agent: Agent, verdict: Verdict, *, expected_generation: tuple | None = None) -> None:
         with self._lifecycle_lock:
             generation = self._generation(agent.id)
@@ -1083,13 +1107,24 @@ class House:
             rung = self.evaluator.rung(agent.id)
             if rung != verdict.rung:
                 return
-            if rung >= 1 and self.campaigns and not self.campaigns.policy["allow_new_live_capital"]:
+            if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
+                self._promotion_status(agent, verdict, 'campaign',
+                    'the campaign has not released this live rung; a screen pass alone cannot allocate money')
                 return
             if rung == 1:
                 if not self.settings.real_money or REAL_BOOK[agent.venue] not in self.books:
+                    self._promotion_status(agent, verdict, 'live_book', 'the live venue is not enabled')
                     return  # it stays eligible on paper until the owner turns real money on
                 state = self.tuition()
+                pilot = self.campaigns.live_pilot() if self.campaigns else None
+                verdict = Verdict(verdict.agent, verdict.rung, verdict.decision, verdict.reason,
+                    {**verdict.numbers, 'allocation_context': {
+                        'tuition': {'max_loss_usd': str(state['limit_usd']), 'max_agents': state['max_agents']},
+                        'headroom_usd': str(state['headroom_usd']), 'seated': state['seated'],
+                        'live_pilot': pilot}})
                 if not state["room"]:
+                    self._promotion_status(agent, verdict, 'tuition', 'the aggregate micro risk budget has no free stake',
+                                           headroom_usd=str(state['headroom_usd']))
                     if not self._state.get("tuition_told"):
                         self._state["tuition_told"] = True
                         self.alert("warning", f"{agent.id} cleared the paper screen and was not promoted: the micro rung has "
@@ -1097,18 +1132,32 @@ class House:
                                               f"headroom under its ${state['limit_usd']} tuition. It waits on paper.")
                     return
                 self._state["tuition_told"] = False
-                if self.auditor is None or not self._audit_due(agent):
+                if self.auditor is None:
+                    self._promotion_status(agent, verdict, 'audit_unavailable', 'the production auditor is unavailable')
                     return
+                wait = self._audit_wait(agent)
+                if wait:
+                    self._promotion_status(agent, verdict, **wait)
+                    return
+                self._promotion_status(agent, verdict, 'auditing', 'a fresh production audit is in progress')
         if rung == 1:
             audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
             if not audit.get("approve"):
+                self._promotion_status(agent, verdict, 'audit_veto', str(audit.get('summary') or audit.get('error') or 'audit did not approve'))
                 return  # it stays on paper, where its record is the auditor's counterfactual
         with self._lifecycle_lock:
-            if self._generation(agent.id) != generation or (rung == 1 and not self.tuition()["room"]):
+            if self._generation(agent.id) != generation:
+                return
+            if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
+                self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
+                return
+            if rung == 1 and not self.tuition()["room"]:
+                self._promotion_status(agent, verdict, 'tuition', 'another admission used the available micro stake')
                 return
             agent = self.registry.get(agent.id)
             old = self.book_of(agent)
             self.evaluator.promote(agent.id, rung + 1, verdict.reason, verdict.numbers)
+            self._promotion_status(agent, verdict, 'promoted', 'the screen, audit and allocation gates passed')
             if rung == 1 and old is not None:
                 self._move_books(agent, old)
 
@@ -1239,8 +1288,15 @@ class House:
         new agent is seated only while every active micro stake, the remaining risk of abandoned
         accounts, and its own stake fit under the loss line. A drawdown stop is not a guaranteed
         exit price: an option or a contract held to settlement can lose its entire purchase."""
-        rules = CONSTITUTION["tuition"]
-        active = {agent.id for agent in self.registry.living() if self.evaluator.rung(agent.id) == 2}
+        rules = dict(CONSTITUTION["tuition"])
+        pilot = self.campaigns.live_pilot() if self.campaigns else None
+        if pilot:
+            # The owner explicitly funds this envelope. Reaching rung 3 or expiry must never
+            # erase its losses, reserved stakes or abandoned positions from the experiment.
+            rules['max_loss_usd'] = pilot['policy']['max_loss_usd']
+            rules['max_agents'] = pilot['policy']['max_agents']
+        active = {agent.id for agent in self.registry.living()
+                  if self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3}
         stake = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"])
         pnl, worst_loss, pending_accounts = ZERO, ZERO, 0
         accounted = set()
@@ -1248,7 +1304,7 @@ class House:
             if not book.real_money:
                 continue
             for agent_id in book.agents():
-                if self.evaluator.max_rung(agent_id) < 3:
+                if pilot or self.evaluator.max_rung(agent_id) < 3:
                     account = book.account(agent_id)
                     pnl += book.equity(agent_id) - account.staked
                     working = book.open_orders(agent_id)
@@ -1263,7 +1319,7 @@ class House:
                         # Retired/demoted cash is safe unless an unresolved entry can spend it.
                         safe_cash = min(account.cash, ZERO) if any(w.side == "buy" for w in working) else account.cash
                         worst_loss += account.staked - safe_cash
-        worst_loss += sum((stake for agent_id in active - accounted if self.evaluator.max_rung(agent_id) < 3), ZERO)
+        worst_loss += sum((stake for agent_id in active - accounted if pilot or self.evaluator.max_rung(agent_id) < 3), ZERO)
         worst_loss = max(worst_loss, ZERO)
         seated = len(active)
         spent = max(-pnl, ZERO)
@@ -1288,10 +1344,12 @@ class House:
         if not state["closed"]:
             self._state["tuition_closed"] = False
             return
+        pilot = self.campaigns.live_pilot() if self.campaigns else None
         for agent in self.registry.living():
-            if self.evaluator.rung(agent.id) == 2:
+            if self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3:
                 old = self.book_of(agent)
-                self.evaluator.demote(agent.id, f"the micro rung's tuition of ${state['limit_usd']} is spent", {"spent_usd": str(state["spent_usd"])})
+                while self.evaluator.rung(agent.id) >= 2:
+                    self.evaluator.demote(agent.id, f"the live learning tuition of ${state['limit_usd']} is spent", {"spent_usd": str(state["spent_usd"])})
                 if old is not None:
                     self._move_books(agent, old)
         if not self._state.get("tuition_closed"):
@@ -1312,14 +1370,24 @@ class House:
         An audit that did not happen -- the call refused, the answer unreadable -- is not a verdict
         and must not cost the agent a day at the top of the ladder for the gate's own malfunction.
         It waits the short cooldown instead, long enough not to hammer a frontier that is down."""
+        return self._audit_wait(agent) is None
+
+    def _audit_wait(self, agent: Agent) -> dict | None:
         rules = self.game.get("audit") or {}
         if self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
-            return False
+            return {'stage': 'audit_credits', 'reason': 'the agent cannot cover its audit and operating credit floor'}
         last = self.ledger.last("audit.verdict", agent=agent.id)
         if last is None:
-            return True
-        hours = float(rules.get("error_cooldown_hours", 0.5) if last.payload.get("error") else rules.get("cooldown_hours", 72))
-        return self.clock() - _epoch(last.at) >= hours * 3600
+            return None
+        current = getattr(self.auditor, 'policy_digest', None)
+        revised = bool(current and last.payload.get('policy_digest') != current)
+        short = bool(last.payload.get('error')) or revised
+        hours = float(rules.get("error_cooldown_hours", 0.5) if short else rules.get("cooldown_hours", 72))
+        due = _epoch(last.at) + hours * 3600
+        if self.clock() >= due:
+            return None
+        return {'stage': 'audit_cooldown', 'reason': 'waiting before reconsidering an audit under a corrected policy' if revised
+                else 'waiting before repeating the production audit', 'retry_at': due}
 
     def _move_books(self, agent: Agent, old: Book) -> None:
         """Leave one book for another: cancel, sell what can be sold, and take the stake back."""
@@ -1550,13 +1618,13 @@ class House:
             agent = self.registry.get(standing.agent)
             if agent.id in exclude or (specialty is not None and agent.specialty != specialty):
                 continue
-            if standing.rung >= 2 or standing.mean_growth > 0:
+            if standing.rung >= 2 or standing.mean_growth > 0 or standing.score_growth > 0:
                 continue
             opportunity = _epoch(agent.born_at)
             opportunity_seq = 0
             agent_grace = grace
             if standing.rung == 0 and self._burst:
-                # Research attempts compete on an hour clock, after actual completed work.
+                # Completed research is the opportunity; waiting out an hour adds no evidence.
                 # Queued/paid work and a late-qualified program must not die on a calendar timer.
                 opportunity = max(opportunity, self._burst['started'])
                 if self.research_jobs.active(agent.id):
@@ -1566,7 +1634,7 @@ class House:
                     and not str(e.payload.get('reason') or '').startswith(('provider:', 'tool outcome unconfirmed')))
                 if completed < self._burst['policy']['minimum_research_passes']:
                     continue
-                agent_grace = self._burst['policy']['replay_lease_minutes'] * 60
+                agent_grace = 0
             if standing.rung == 1:
                 # A late replay pass or a new empty-record strategy has not had the old
                 # program's trading opportunity. Meriwether-8 passed replay at 00:21 and
@@ -1584,6 +1652,16 @@ class House:
                             signature = current
                     elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
                         opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                if self._burst:
+                    from .episodes import completed
+                    book = self.book_of(agent)
+                    episodes = completed(self.ledger, agent.id, book.name, since_seq=opportunity_seq) if book else []
+                    if len(episodes) >= int(CONSTITUTION['ladder']['completed_exposures']['min_episodes']):
+                        # An evidenced non-winner can make room once it has finished actual risk.
+                        # The paper clock remains a fallback for strategies without that record.
+                        if self.research_jobs.active(agent.id):
+                            continue
+                        agent_grace = 0
             niche = self.niche_of(agent)
             if standing.rung == 1 and niche is not None and niche.asset_class in ("equity", "option"):
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
@@ -1725,7 +1803,7 @@ class House:
             'rung': rung, 'credits_usd': format(self.economy.balance(agent.id), 'f'),
             'blocks': len(self.evaluator.blocks(agent.id)),
             'last_trial': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.trial', agent=agent.id)))), None),
-            'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') == 'look'), None),
+            'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') in ('look', 'episode-look')), None),
             'can_fork': self.economy.can_fork(agent.id), 'recent_trades': self._recent_trades(agent.id),
             'candidate_submission': {'allowed': True, 'parent_can_fund_child': self.economy.can_fork(agent.id),
                 'house_can_stake_replay_pass': True, 'full_seats_queue_candidate': True,
@@ -1743,7 +1821,12 @@ class House:
                 'hard_trial_limit': None,
                 'paper': {**ladder['paper'], 'required_active_blocks_for_this_horizon': self.evaluator._gate_blocks(1, agent.horizon),
                           'min_closed_trades': ladder['min_closed_trades']},
-                'new_live_capital_allowed_by_campaign': bool(self.campaigns.policy['allow_new_live_capital']) if self.campaigns else self.settings.real_money,
+                'micro': dict(ladder['micro']),
+                'completed_exposures': dict(ladder.get('completed_exposures') or {}),
+                'live_pilot': self.campaigns.live_pilot() if self.campaigns else None,
+                'live_tuition': {k: str(v) if isinstance(v, Decimal) else v for k, v in self.tuition().items()},
+                'promotion_status': self._state.get('promotion_status', {}).get(agent.id),
+                'new_live_capital_allowed_by_campaign': self.campaigns.allows_live(2) if self.campaigns else self.settings.real_money,
                 'note': 'Replay selection penalties depend on the observed record and trial history; there is no fixed five-to-nine-trial cutoff. The paper gate is a screen, not a positive confidence bound.'},
             'peer_replay_passes': peers[-3:],
             'peer_evidence_note': 'Recorded historical passes, including retired peers. Counterexamples to impossibility claims, not proof of edge or independent validation. Source programs and all trials remain in their own lineages.',
@@ -1987,28 +2070,71 @@ class House:
 
     # ----------------------------------------------------------------- economy
     def standing_of(self, agent_id: str) -> dict[str, Any]:
-        """One agent's record at its current rung: what it has earned the right to ask for."""
+        """Current-rung results and earned evidence for purchasing research resources."""
         agent = self.registry.get(agent_id)
-        rung = self.evaluator.rung(agent_id)
-        book = self.book_of(agent)
-        rows = self.evaluator.blocks(agent_id, since_seq=self.evaluator._rung_entered(agent_id), book=book.name) if rung >= 1 and book else []
-        growth = [float(r["log_growth"]) for r in rows]
-        return {"rung": rung, "active_blocks": sum(1 for r in rows if r.get("active")),
-                "mean_growth": (sum(growth) / len(growth)) if growth else 0.0, "niche": agent.niche}
+        row = self._standing(agent, float(self.game['economy']['epoch_seconds']))
+        return {'rung': row.rung, 'active_blocks': row.active_blocks,
+                'mean_growth': row.mean_growth, 'niche': agent.niche,
+                'earned_observations': row.score_observations, 'earned_growth': row.score_growth,
+                'earned_rung': row.score_rung}
 
     def standings(self) -> list[Standing]:
-        epoch = float(self.game["economy"]["epoch_seconds"])
-        out = []
-        for agent in self.registry.living():
-            rung = self.evaluator.rung(agent.id)
-            entered = self.evaluator._rung_entered(agent.id)
-            book = self.book_of(agent)
-            rows = self.evaluator.blocks(agent.id, since_seq=entered, book=book.name) if rung >= 1 and book else []
-            growth = [float(r["log_growth"]) for r in rows]
-            active = sum(1 for r in rows if r.get("active"))
-            out.append(Standing(agent.id, agent.niche, rung, (sum(growth) / len(growth)) if growth else 0.0, active,
-                                working=self._working(agent, epoch)))
-        return out
+        epoch = float(self.game['economy']['epoch_seconds'])
+        return [self._standing(agent, epoch) for agent in self.registry.living()]
+
+    def _standing(self, agent, epoch):
+        rung = self.evaluator.rung(agent.id)
+        entered = self.evaluator._rung_entered(agent.id)
+        book = self.book_of(agent)
+        rows = self.evaluator.blocks(agent.id, since_seq=entered, book=book.name) if rung >= 1 and book else []
+        growth = [float(r["log_growth"]) for r in rows]
+        active = sum(1 for r in rows if r.get("active"))
+        reward_rows, reward_rung = list(rows), rung
+        reward_since = entered
+        if rung >= 3:
+            reward_rows = self.evaluator._record_below(agent.id, 3) + reward_rows
+            changes = [e for e in self.ledger.iter(kinds='eval.verdict', agent=agent.id)
+                       if e.seq < entered and e.payload.get('decision') in ('seat', 'promote', 'demote')
+                       and e.payload.get('to_rung') == 2]
+            if changes:
+                reward_since = changes[-1].seq
+        reward = self._reward_evidence(agent, book, reward_rows, reward_since) if book else (0.0, 0)
+        minimum = int(self.game['economy'].get('performance_min_blocks', 0))
+        if (rung == 2 and reward[1] < max(minimum, 1) and sum(growth) >= 0
+                and book and book.equity(agent.id) >= book.account(agent.id).staked):
+            # Admission must not erase the evidence that earned the research allocation.
+            # Paper evidence retains PAPER weight until a real record earns the live weight.
+            prior = self.evaluator._record_below(agent.id, 2)
+            changes = [e for e in self.ledger.iter(kinds='eval.verdict', agent=agent.id)
+                       if e.seq < entered and e.payload.get('decision') in ('seat', 'promote', 'demote')
+                       and e.payload.get('to_rung') == 1]
+            paper = self.books.get(PRACTICE_BOOK[agent.venue])
+            old = self._reward_evidence(agent, paper, prior, changes[-1].seq if changes else 0,
+                                        until=entered) if paper else (0.0, 0)
+            if old[0] > 0 and old[1] >= minimum:
+                reward, reward_rung = old, 1
+        return Standing(agent.id, agent.niche, rung, (sum(growth) / len(growth)) if growth else 0.0, active,
+                            working=self._working(agent, epoch), reward_growth=reward[0],
+                            reward_observations=reward[1], reward_rung=reward_rung)
+
+    def _reward_evidence(self, agent, book, rows, since, *, until=None):
+        growth = [float(r['log_growth']) for r in rows]
+        active = sum(1 for r in rows if r.get('active'))
+        # A day's return is not compared with an hour's return as though their clocks matched.
+        hours = sum(24 if r.get('horizon', agent.horizon) == 'day' else 1 for r in rows)
+        rate = sum(growth) / hours if hours else 0.0
+        if active > 0 and active >= int(self.game['economy'].get('performance_min_blocks', 0)):
+            return rate, active
+        from .episodes import completed
+        episodes = completed(self.ledger, agent.id, book.name, since_seq=since, until_seq=until)
+        if len(episodes) >= int(CONSTITUTION['ladder']['completed_exposures']['min_episodes']):
+            hours = (_epoch(episodes[-1]['closed_at']) - _epoch(episodes[0]['opened_at'])) / 3600
+            if hours > 0:
+                rate = sum(r['log_growth'] for r in episodes) / hours
+                if until is None and book.equity(agent.id) < book.account(agent.id).staked:
+                    rate = min(rate, 0.0)  # realized winners cannot buy a reward while marked underwater
+                return rate, len(episodes)
+        return rate, active
 
     def _working(self, agent: Agent, epoch: float) -> bool:
         """Has it traded in the last epoch, or is it too new to have had the chance? An agent that
@@ -2231,9 +2357,10 @@ class House:
             self._background("merton:follow", self.merton.follow)
         if open_for_business and self.economy.payout_due():
             self.learn()
-            for agent in self.registry.living():
-                if self.evaluator.rung(agent.id) >= 3:
-                    capital.resize(self, agent)
+            with self._lifecycle_lock:
+                for agent in self.registry.living():
+                    if self.evaluator.rung(agent.id) >= 3:
+                        capital.resize(self, agent)
             capital.recommend(self, {name: (book.venue_cash or ZERO) for name, book in self.books.items() if book.real_money})
             # During the expedition the day's pool IS the day's Sail allowance: what the owner wants
             # spent is what the agents are given to spend.
@@ -2288,6 +2415,9 @@ class House:
                                      for row in Admissions(self.ledger).rows()[-30:]],
             "recordings": self.recorder.stats(),
             "campaign": self.campaigns.report() if self.campaigns else None,
+            "promotion_status": [dict(row) for agent in self.registry.living()
+                                 if (row := self._state.get('promotion_status', {}).get(agent.id))
+                                 and row.get('code_sha256') == agent.code_sha256],
             "semantic_lab": self.semantic_lab.stats() if self.semantic_lab else None,
         }
         tmp = self.root / "health.tmp"

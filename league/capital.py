@@ -62,20 +62,49 @@ def scaled_limits(staked: Decimal) -> tuple[Decimal, Decimal]:
     return max(Decimal(micro["max_position_usd"]), min(half, ceiling)), max(Decimal(micro["max_order_usd"]), min(cap, half, ceiling))
 
 
+def _sizing_record(house, agent, book):
+    """Keep the qualifying real record when promotion starts a fresh rung window."""
+    entered = house.evaluator._rung_entered(agent.id)
+    previous = house.evaluator._record_below(agent.id, 3) if house.evaluator.rung(agent.id) >= 3 else []
+    growth = [float(r["log_growth"]) for r in previous] + [
+        float(r["log_growth"]) for r in house.evaluator.blocks(agent.id, since_seq=entered, book=book.name)
+    ]
+    admissions = [e.payload for e in house.ledger.iter(kinds='eval.verdict', agent=agent.id)
+                  if e.seq == entered and e.payload.get('decision') == 'promote' and e.payload.get('to_rung') == 3]
+    admission = admissions[-1] if admissions else {}
+    if admission.get('via') == 'completed_exposures':
+        from .episodes import completed
+        growth = [r['log_growth'] for r in completed(house.ledger, agent.id, book.name,
+                                                   since_seq=int(admission['first_seq']) - 1)]
+    return growth, admission.get('alpha_spent')
+
+
 def resize(house: Any, agent: Any) -> dict[str, Any] | None:
     """Move a rung-3 agent's stake toward what its record justifies. Returns what was done."""
     book = house.book_of(agent)
     if book is None or not book.real_money or house.evaluator.rung(agent.id) < 3:
         return None
-    entered = house.evaluator._rung_entered(agent.id)
-    growth = [float(r["log_growth"]) for r in house.evaluator._record_below(agent.id, 3)] + [
-        float(r["log_growth"]) for r in house.evaluator.blocks(agent.id, since_seq=entered, book=book.name)
-    ]
+    growth, alpha = _sizing_record(house, agent, book)
     account = book.account(agent.id)
     present = max(account.staked, Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]))
-    target, numbers = kelly_stake(growth, present, book.venue_cash or ZERO, family_lcb=_family_lcb(house, agent, book))
+    target, numbers = kelly_stake(growth, present, book.venue_cash or ZERO,
+                                 alpha=alpha, family_lcb=_family_lcb(house, agent, book))
     equity = book.equity(agent.id)
     delta = target - equity
+    guard = getattr(house, 'campaigns', None)
+    pilot = guard.live_pilot() if guard else None
+    if pilot:
+        if not guard.allows_live(3):
+            return None
+        # Every promoted account stays inside the same experiment's risk envelope. A rung-3
+        # label must not turn $25 of tuition into unrestricted venue capital.
+        room = min(Decimal(pilot['policy']['max_stake_usd']) - account.staked,
+                   house.tuition()['headroom_usd'])
+        if delta > 0:
+            delta = min(delta, max(room, ZERO))
+            target = equity + delta
+        numbers['live_pilot'] = pilot['id']
+        numbers['pilot_max_stake_usd'] = pilot['policy']['max_stake_usd']
     # Small moves are noise: act on a tenth of the stake or more. Shrinking never forces a sale:
     # only free cash comes back, and the position caps shrink with the stake at once.
     if abs(delta) < max(equity, Decimal(1)) / 10:
@@ -109,6 +138,8 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
     """The standing recommendation: where, on the evidence, the owner's next dollar belongs."""
     demand: dict[str, Decimal] = {"kalshi": ZERO, "alpaca": ZERO}
     ranked = []
+    guard = getattr(house, 'campaigns', None)
+    pilot = guard.live_pilot() if guard else None
     for agent in house.registry.living():
         rung = house.evaluator.rung(agent.id)
         if rung < 2:
@@ -116,11 +147,12 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
         book = house.book_of(agent)
         if book is None or not book.real_money:
             continue
-        entered = house.evaluator._rung_entered(agent.id)
-        growth = [float(r["log_growth"]) for r in house.evaluator.blocks(agent.id, since_seq=entered, book=book.name)]
+        growth, alpha = _sizing_record(house, agent, book)
         account = book.account(agent.id)
         present = max(account.staked, Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]))
-        target, numbers = kelly_stake(growth, present, Decimal("1e12"))  # what the evidence asks for, before the venue's cash binds
+        target, numbers = kelly_stake(growth, present, Decimal("1e12"), alpha=alpha)  # before venue cash binds
+        if pilot:
+            target = min(target, Decimal(pilot['policy']['max_stake_usd']))
         if numbers.get("lcb") is not None and numbers["lcb"] > 0:
             demand[agent.venue] += target
             ranked.append({"agent": agent.id, "venue": agent.venue, "rung": rung, "lcb": numbers["lcb"], "blocks": numbers["blocks"], "justified_usd": str(target)})
@@ -128,7 +160,12 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
     cash = {venue: Decimal(str((accounts or {}).get(venue, ZERO))) for venue in demand}
     share = Decimal(str(CONSTITUTION["rungs"]["3"]["max_share_of_venue"]))
     shortfall = {venue: max(demand[venue] - cash[venue] * share * max(len([r for r in ranked if r["venue"] == venue]), 1), ZERO) for venue in demand}
-    if not ranked:
+    if pilot:
+        shortfall = {venue: ZERO for venue in demand}
+        summary = (f"Add nothing for this live-learning window. Its ${pilot['policy']['max_loss_usd']} aggregate risk envelope "
+                   f"and ${pilot['policy']['max_stake_usd']} per-agent capital limit remain binding after promotion. "
+                   "Research evidence cannot authorize an expanded financial experiment.")
+    elif not ranked:
         summary = ("Add nothing yet. No agent has a real-money record with a lower bound on its growth above zero, so no "
                    "dollar has evidence behind it. The cash already at the venues is more than the micro-real rung can use.")
     else:

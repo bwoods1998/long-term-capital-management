@@ -40,20 +40,26 @@ first run's chat desks lost money; its code strategies were the only part that l
 rebuild selects on code.
 
 **The ladder.** Every agent climbs the same four rungs, and only evidence moves it. The thresholds
-are constants in [`league/constitution.py`](league/constitution.py), written before any agent
-traded. What is measured is after-cost log growth of the agent's own account, in blocks of an hour
-or a day.
+are versioned in [`league/constitution.py`](league/constitution.py). The owner-requested
+September 20 revision removes the 30-block micro wait and adds a completed-exposure route;
+see the [gate audit and live-learning window](docs/runs/2026-09-21-game-gate-audit.md).
+What is measured is after-cost log growth in hour/day blocks or completed portfolio exposures.
 
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
 | 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 30 blocks and 8 positive-growth tail blocks (reused development data, not independent forward evidence), and a deflated Sharpe ratio of 0.75 or more against every replay in its own LINE (itself and its ancestors, not its cousins). The seat it wins costs nothing but compute, so the bar is 75% confidence and not 90%: the gates that spend money come later |
-| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active blocks, 10 closed trades, growth above zero and a drawdown under 15% over the last 30 blocks; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below). The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
-| 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | 30 active blocks and 10 closed trades of real fills, and a one-sided lower confidence bound on mean block growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
+| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active hourly blocks (5 daily), **or 10 completed portfolio exposures**, with at least 10 closed trades, growth above zero and a drawdown under 15% over the last 30 blocks; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below). The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
+| 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | **5 active blocks or 10 completed portfolio exposures**, at least 10 closed trades of real fills, and a one-sided lower confidence bound on mean growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
 | 3. Scaled | the real accounts | a quarter of Kelly on the lower bound of its growth: never under $25, never over 25% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
 
-The error rate for every promotion and every statistical death is 5%, spent across looks (look
-`k` may spend `0.05 x 6 / (pi^2 k^2)`, one look every 5 active blocks), so looking often cannot buy
-a false pass. That rationing applies only to a look that runs a statistical test. A **screen** runs
+The individual block and completed-exposure paths split a 5% sequential allowance equally for
+promotion, and separately for statistical death: look `k` on each path spends
+`0.025 x 6 / (pi^2 k^2)`. Statistical looks require five new blocks or five new completed
+exposures. An exposure closes only when the entire portfolio is flat; partial exits and
+overlapping positions do not multiply samples. The fast path requires a fresh profitable
+flat-account mark before promotion. This accounting prevents mechanical duplication; market
+outcomes can remain dependent, and these are not swarm-wide error guarantees. The existing
+family test has its own allowance. That rationing applies only to a look that runs a statistical test. A **screen** runs
 none -- it counts blocks and trades and reads two numbers -- so it costs nothing and is checked
 every block; rationing a free check only made an agent wait, and the rationing counts the looks
 that really spent something so the free ones cannot push the death test out of reach. A record that wins 80% or more of its trades must also clear an exact
@@ -69,7 +75,7 @@ small edge needs about a thousand trades to prove by ANY honest test, and the st
 guarding a $25 stake. So the loss of the micro rung is capped in dollars instead of statistics. The
 constitution's **tuition**: at most 4 agents hold real money on rung 2 at once; a new one is seated
 only while the net loss of every real-money account that has not earned rung 3, plus what the seated
-agents could still lose before the 30% drawdown rule stops them ($7.50 each), fits under **$50**.
+agents could still lose, reserving each **full $25 stake**, fits under **$50**. A drawdown stop cannot guarantee an exit price.
 The rung is CLOSED when no further agent can ever be seated -- at $50, or when the reserve for one
 more no longer fits and nobody is seated to change that -- and then everyone on it goes back to
 paper and only the owner reopens it. Those two were once different numbers, and between $42.50 and
@@ -154,14 +160,24 @@ hour scaled; losing, 8, 3 and 1. So the loop closes: trade well, earn a much lar
 day's pool, buy the best mind in the firm oftener, trade better. The rules text tells every agent
 this in as many words.
 
+The separately prepared live-learning window allows up to eight live agents, starting at $25
+and earning at most $50 of net capital each, inside one **$200 aggregate loss envelope**. Scaled
+agents, prior losses and abandoned positions remain counted. The window needs the account
+owner's explicit [activation command](docs/runs/2026-09-21-game-gate-audit.md#account-action);
+deploying code or funding research does not activate it. It expires with tonight's existing burst.
+
 **Compute credits.** Profit decides an agent's share of the pool, never its size, and the curve is
 steep on purpose: credits are how the firm's intelligence is bought. An epoch is **six hours**, so
 the curve pays out four times a day and a desk that starts trading well is richer by lunchtime
 rather than tomorrow. A quarter of each pool is a floor split evenly across the occupied niches,
 paid only to agents that have reached paper AND are working; the other **three quarters is won**,
-in proportion to mean block growth **squared** x the square root of active blocks x the rung's
+in proportion to mean growth **per hour**, squared, x the square root of earned observations x the rung's
 weight (replay 0, paper 0.2, real money 1.5, scaled 3.0) -- so a desk twice as profitable earns
-four times the share, not twice. Measured on the first steep payout: two agents took 78% of the
+four times the share. Tonight's burst uses a one-hour payout, an exponent of three (8× the
+performance share for twice the matched growth), and a 15% niche floor. A qualifying completed
+exposure record can earn research resources before an hourly block. Promotion preserves earned
+evidence: paper evidence keeps paper weight until real results mature, and loses that fallback
+when real losses appear. Scaled agents keep the real record that qualified them. Measured on the first steep payout: two agents took 78% of the
 pool and eighteen of thirty-five earned nothing at all. Before anyone is profitable the won share
 goes to the least-bad TRADER, ranked by how far above the worst it is; an agent with no active
 block earns none of it. Agents pay for what they use: model
@@ -171,7 +187,7 @@ House row on the ledger. These dials live in [`league/game.json`](league/game.js
 the same file lists.
 
 **Death.** Credits at zero; a 30% drawdown; an upper confidence bound on growth below zero after 20
-active blocks; on rung 0, twelve epochs without passing replay; **stuck and broke** -- thirty wakes
+active blocks or 10 completed exposures; on rung 0, twelve epochs without passing replay; **stuck and broke** -- thirty wakes
 in a row with a live market in front of it and nothing done, and too little left to research its
 way out; or **displaced**, when the league is full and a newcomer takes its seat. Idleness is not
 safety: the niche floor is paid only to an agent that has traded within the epoch or has an order
@@ -345,7 +361,8 @@ The `league/` modules:
 | `venues.py` | The venue adapters in gateway mode (`alpaca`, `alpaca-paper`, `kalshi`). |
 | `constitution.py` | The constants no model may change, and their digest. |
 | `stats.py` | The statistics the ladder decides on: bounds, alpha spending, the loss-rate gate, deflated Sharpe, CUSUM, quarter-Kelly. |
-| `evaluator.py` | The ladder: trials, blocks of log growth, looks, promotion, death, drift. |
+| `evaluator.py`, `episodes.py` | The ladder: trials, blocks and completed portfolio exposures, promotion, death and drift. |
+| `live_pilot.py` | Explicit owner activation and immutable deadline for the bounded live-learning window. |
 | `replay.py` | Rung 0: the mechanical replay simulator. Self-contained; runs inside the agent's box. |
 | `tapes.py` | Recorded history for replay and live snapshots of the same shape, for both venues. |
 | `paper.py` | The Kalshi shadow account: live quotes, conservative fills, no order ever sent. |

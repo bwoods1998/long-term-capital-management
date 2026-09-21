@@ -390,6 +390,12 @@ class Hiring(ResearchCase):
         self.assertIn("Merton is hired by traders", self.tool_output(1)["error"])
         self.assertEqual(self.merton.seen, [])
 
+    def test_fast_earned_evidence_can_hire_without_an_hourly_block(self):
+        r, out = self.hire(record={'active_blocks': 0, 'mean_growth': 0,
+                                  'earned_observations': 10, 'earned_growth': .002})
+        self.assertIn('answer', self.tool_output(1))
+        self.assertEqual(len(self.merton.seen), 1)
+
     def test_profit_buys_more_of_him_than_a_rung_does(self):
         settings = {"min_credits_usd": "1.00", "cooldown_hours": 8, "cooldown_hours_by_rung": {"1": 8},
                     "profitable_cooldown_hours_by_rung": {"1": 3}}

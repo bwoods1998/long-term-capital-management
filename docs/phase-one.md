@@ -10,6 +10,12 @@ Pacific. The [latest run report](runs/2026-09-20-foundation-progress.md) records
 acceptance and the [architect handoff](design/2026-09-20-chief-architect-handoff.md) defines what
 must improve next. Historical passes are not verified forward profits.
 
+Tonight's [eight-hour research burst](runs/2026-09-20-evening-watch.md) adds $250 OpenAI and
+$75 Sail to this foundation without resetting it; Jev has $20 of separately backed allowance.
+The [game gate audit](runs/2026-09-21-game-gate-audit.md) adds faster evidence routes and prepares
+an explicitly activated $200 live-learning window. Base phase policy remains recorded as
+`allow_new_live_capital=false`; consult `live_pilot.active` and `allows_live` for effective policy.
+
 ## Released capital and account setup
 
 | Allocation | Phase ceiling | What the running House may use |
@@ -24,9 +30,9 @@ Existing gateway and account caps remain additional ceilings. Allowances are cei
 spending targets. Unused money does not accelerate tomorrow's calls. Model roles cannot edit
 campaign policy, accounting or the experiment archive.
 
-Jev's external gateway lane now has a $10 lifetime envelope and 100,000-call ceiling, with
-the same expiry. Two retained commitments ($1 plus $9) back it inside foundation-review,
-reducing that allocation's available OpenAI headroom by $10. This is a cross-provider earmark;
+Jev's external gateway lane now has a $20 experiment envelope and 500,000-call ceiling, with
+the overnight burst expiry. Three retained commitments ($1 plus $9 plus $10) back it inside foundation-review,
+reducing that allocation's available OpenAI headroom by $20. This is a cross-provider earmark;
 the internal `openai` label is not a vendor invoice. Actual Jev usage is reported separately by
 the gateway. Keep the backing hold until the route closes/expires and billing is reconciled.
 The aggregate $500 cap, phase start and end have not changed. See the
@@ -54,7 +60,7 @@ pre-phase expenditure remains historical expenditure and is not erased or called
   keep their holds. Over-reservation costs or a decreasing vendor expenditure counter close new
   admission. The Sail period expenditure counter includes non-model costs and cannot be hidden
   by a top-up. Missing/stale meter readings stop new paid research and paper wakes.
-- **No new live capital.** Phase one blocks promotions into live rungs and new live buy intents.
+- **Live capital is separately activated.** The base phase blocks promotions into live rungs and new live buy intents. The owner-only bounded pilot can release them until the existing burst deadline; see the gate audit above.
   Existing position polling, reconciliation and exits continue. At expiry, new paid campaigns and
   paper wakes stop; essential hosting and existing risk management continue. This is application
   admission control, not a provider-enforced cap on every hosting/storage invoice. The operating

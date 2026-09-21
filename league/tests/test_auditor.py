@@ -222,7 +222,7 @@ class CostAndRow(AuditorCase):
         result = self.auditor(says(answer, cost="0.0375")).audit(self.agent, self.verdict)
         (row,) = self.verdict_rows(self.agent.id)
         self.assertEqual(row, result)
-        self.assertEqual(set(row), {"approve", "confidence", "summary", "findings", "cost_usd", "model", "book", "blocks_at_audit"})
+        self.assertEqual(set(row), {"approve", "confidence", "summary", "findings", "cost_usd", "model", "book", "blocks_at_audit", "policy_digest"})
         self.assertEqual((row["approve"], row["confidence"], row["cost_usd"], row["model"]), (True, 0.75, "0.0375", MODEL))
         self.assertEqual((row["book"], row["blocks_at_audit"]), ("kalshi-shadow", 3))
         self.assertEqual(len(row["summary"]), 1200)
