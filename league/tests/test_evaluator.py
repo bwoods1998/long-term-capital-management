@@ -913,11 +913,11 @@ class ReplayTrials(EvalCase):
     def test_each_threshold_is_a_reason_to_hold(self):
         cases = {
             "trades": (replay_result(trades=19), "19 closed trades"),
-            "blocks": (replay_result([0.012, 0.004, -0.004, 0.008] * 7 + [0.01]), "29 blocks"),
+            "blocks": (replay_result([0.012, 0.004, -0.004, 0.008] * 4 + [0.01, 0.01, 0.01]), "19 blocks"),
             "oos-blocks": (replay_result(oos_blocks=7), "out-of-sample"),
             "oos-growth": (replay_result(oos_mean=0.0), "out-of-sample"),
             "oos-missing": (replay_result(out_of_sample=None), "out-of-sample"),
-            "dsr": (replay_result([0.011, -0.010] * 20), "deflated Sharpe"),
+            "dsr": (replay_result([0.010, -0.011] * 20), "deflated Sharpe"),
             "flat": (replay_result([0.0] * 40), "deflated Sharpe undefined"),
         }
         for agent, (result, needle) in cases.items():
@@ -1431,6 +1431,25 @@ class Screen(EvalCase):
     def test_a_thirty_percent_drawdown_kills_on_paper(self):
         verdict = self.run_blocks([-0.2, -0.2])
         self.assertEqual(verdict.decision, "die")
+
+    def test_ten_percent_down_on_paper_dies_after_ten_blocks(self):
+        """Owner revision, Sept 21, 2026: a clear paper loser gives up the seat."""
+        verdict = self.run_blocks([-0.0112] * 9)
+        self.assertNotEqual(verdict.decision, "die")  # nine blocks: not yet judged, however bad
+        verdict = self.run_blocks([-0.0112] * 10)
+        self.assertEqual(verdict.decision, "die")
+        self.assertIn("on paper after 10 active blocks", verdict.reason)
+
+    def test_unprofitable_after_thirty_paper_blocks_dies(self):
+        growth = [0.004 if i % 2 == 0 else -0.0042 for i in range(30)]  # a slow bleed, never 10% down
+        self.assertLess(sum(growth), 0)
+        verdict = self.run_blocks(growth)
+        self.assertEqual(verdict.decision, "die")
+        self.assertIn("not profitable on paper after 30", verdict.reason)
+
+    def test_a_small_winner_lives_on_paper(self):
+        verdict = self.run_blocks([0.004 if i % 2 == 0 else -0.0039 for i in range(30)], trades=9)
+        self.assertNotEqual(verdict.decision, "die")
 
     def test_a_daily_strategy_clears_the_screen_on_five_blocks_not_fifteen(self):
         # A block is a calendar day for a daily strategy: fifteen of them is longer than the whole

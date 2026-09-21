@@ -53,7 +53,7 @@ What is measured is after-cost log growth in hour/day blocks or completed portfo
 
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
-| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 30 blocks and 8 positive-growth tail blocks (reused development data, not independent forward evidence), and a deflated Sharpe ratio of 0.75 or more against every replay in its own LINE (itself and its ancestors, not its cousins). The seat it wins costs nothing but compute, so the bar is 75% confidence and not 90%: the gates that spend money come later |
+| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 20 closed trades, 20 blocks and 8 positive-growth tail blocks (reused development data, not independent forward evidence), and a deflated Sharpe ratio of 0.5 or more against every replay in its own LINE (itself and its ancestors, not its cousins). The seat it wins costs nothing but compute, so the bar is better-than-even and not 90%: the gates that spend money come later (owner revision of Sept 21, 2026; it was 0.75 and 30 blocks) |
 | 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active hourly blocks (5 daily), **or 10 completed portfolio exposures**, with at least 10 closed trades, growth above zero and a drawdown under 15% over the last 30 blocks; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below). The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
 | 2. Micro-real | the real Kalshi and Alpaca accounts | $25 stake, $10 a position, $10 an order | **5 active blocks or 10 completed portfolio exposures**, at least 10 closed trades of real fills, and a one-sided lower confidence bound on mean growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
 | 3. Scaled | the real accounts | a quarter of Kelly on the lower bound of its growth: never under $25, never over 25% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
@@ -98,6 +98,13 @@ agent that clears the screen and is turned away here now says so, once, with the
 headroom. The strict
 test stays where the money is, between micro-real and scaled. Promotion and death spend separate
 alpha series there (a look that can only kill spends none of promotion's).
+
+**Death on paper** (owner revision of Sept 21, 2026). A paper seat is free and scarce, so a clear loser
+gives it up without waiting for a statistical bound: down 10% or more after 10 active blocks, or not
+above where it started after 30. Death on real money is unchanged. The owner's live-trading grant now
+pins only the rules that govern real money (`constitution.money_digest`), so the risk-free rungs can be
+tuned without silently revoking it, and any change to a money rule still does; the grant recorded before
+this revision is honoured only while its money rules are unchanged (`LEGACY_GRANT_DIGESTS`).
 
 **The horizon rule.** Fast results are what a record is built from. The House refuses a Kalshi entry
 expected to pay more than 12 hours out (hourly strategies) or 48 (daily), and closes a crypto

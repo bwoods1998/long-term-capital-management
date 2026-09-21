@@ -349,6 +349,16 @@ class Evaluator:
                                    "drawdown": drawdown, "recent_drawdown": recent}
         if drawdown >= death["max_drawdown"]:
             return self._decide(agent, rung, "die", f"drawdown of {drawdown:.0%} is past the {death['max_drawdown']:.0%} limit", numbers)
+        paper_death = self.ladder.get("paper_death")
+        if rung == 1 and paper_death and active >= int(paper_death["min_active_blocks"]):
+            # A paper seat is the scarcest free thing the league has: a clear loser gives it up.
+            change = math.exp(max(sum(growth), -700.0)) - 1.0
+            if change <= -float(paper_death["max_loss"]):
+                return self._decide(agent, rung, "die", f"down {-change:.1%} on paper after {active} active blocks; "
+                                    f"paper keeps no agent down {float(paper_death['max_loss']):.0%}", numbers)
+            if active >= int(paper_death["unprofitable_blocks"]) and change <= 0:
+                return self._decide(agent, rung, "die", f"not profitable on paper after {active} active blocks "
+                                    f"({change:+.1%}); {int(paper_death['unprofitable_blocks'])} is the chance a paper seat gives", numbers)
         fast = self._completed_exposure_gate(agent, book, rung, entered, numbers)
         if fast is not None:
             numbers['completed_exposure_evidence'] = fast.numbers

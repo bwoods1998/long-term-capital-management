@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def policy(venue_capital):
-    from .constitution import CONSTITUTION, digest
+    from .constitution import CONSTITUTION, money_digest
     if set(venue_capital) != {'alpaca', 'kalshi'}:
         raise ValueError('capital must name Alpaca and Kalshi')
     amounts = {k: Decimal(str(v)) for k, v in venue_capital.items()}
@@ -23,7 +23,7 @@ def policy(venue_capital):
     return {'version': 1, 'max_rung': 3, 'max_agents': int(total // stake),
             'max_loss_usd': str(total), 'stake_usd': str(stake),
             'venue_capital_usd': {k: str(v) for k, v in amounts.items()},
-            'constitution_digest': digest(), 'expires': None,
+            'constitution_digest': money_digest(), 'expires': None,
             'research_funding': 'Only unused original burst allowance within campaign caps; no calendar expiry or replenishment.',
             'scaling': 'Existing performance gates and quarter-Kelly sizing; venue and aggregate capital limits include historical losses.',
             'capital_source': 'Existing cash only; later deposits do not enlarge this allocation.'}
