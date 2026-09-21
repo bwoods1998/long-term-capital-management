@@ -201,6 +201,26 @@ class HouseTest(HouseCase):
         self.assertIn("died on rung 1 of credits", playbook[-1]["text"])
         self.assertTrue(book.reconcile().ok)
 
+    def test_a_wind_down_that_would_meet_the_houses_own_bid_rests_at_the_ask(self):
+        """haghani-2, Sept 21, 2026: its market exit was refused on every wake because another
+        agent rested a bid on the same coin."""
+        from league.book import Intent
+        seller = self.seated("seller")
+        bidder = self.seated("bidder")
+        self.house.tick()
+        book = self.house.books["alpaca-paper"]
+        self.assertTrue(book.account(seller.id).holdings)
+        now = now_iso(self.clock)
+        out = book.submit([Intent.new(agent=bidder.id, instrument=self.btc, side="buy", quantity=D("0.0001"), order_type="limit",
+                                      limit_price=D("79500"), reason="a resting dip bid", created_at=now, nonce="bid")])
+        self.assertTrue(book.open_orders(bidder.id), out)
+        self.house._wind_down(seller, book)
+        sells = [w for w in book.open_orders(seller.id) if w.side == "sell"]
+        refused = [e for e in self.house.ledger.iter(kinds="book.refused", agent=seller.id)]
+        self.assertTrue(sells or not book.account(seller.id).holdings, refused)
+        if sells:
+            self.assertEqual(sells[0].limit_price, D("80005"))
+
     def test_a_rich_agent_forks_a_mutated_child_and_endows_it(self):
         agent = self.seated()
         self.house.economy.grant(agent.id, "3", "a windfall for the test")

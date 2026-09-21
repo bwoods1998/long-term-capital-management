@@ -1486,8 +1486,19 @@ class House:
             quantity = max(holding.quantity - reserved.get(holding.instrument.key, ZERO), ZERO)
             if quantity <= 0:
                 continue
-            exits.append(Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=quantity,
-                                    reason="the House is closing this account", created_at=now, nonce=f"wind-down:{now}"))
+            intent = Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=quantity,
+                                reason="the House is closing this account", created_at=now, nonce=f"wind-down:{now}")
+            if book._would_cross_own(intent, None):
+                # Another agent rests a bid on this symbol and a market sell could hit it, so the
+                # book refuses it -- on every wake, for ever (haghani-2, Sept 21, 2026). Rest the
+                # exit at the ask instead: it cannot cross the House's bid and it still closes.
+                quote = book._quote(holding.instrument)
+                if quote is not None and quote.ask is not None and quote.ask > 0:
+                    intent = Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=quantity,
+                                        order_type="limit", limit_price=quote.ask,
+                                        reason="the House is closing this account at the ask (a market sell would meet the House's own bid)",
+                                        created_at=now, nonce=f"wind-down:{now}")
+            exits.append(intent)
         if exits:
             book.submit(exits)
             book.poll()
