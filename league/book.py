@@ -62,6 +62,8 @@ CASH_PLACES = Decimal("0.00000001")
 #: failed to be polled again and settle itself, short enough that no desk loses an afternoon.
 ADOPT_AFTER = 3
 DUST_USD = Decimal("0.01")
+#: How long an event position the venue no longer shows may wait for its settlement row.
+SETTLEMENT_GRACE_SECONDS = 300
 
 #: What the adapters' open statuses look like to the book.
 OPEN_STATUSES = ("new", "accepted", "partially_filled", "unknown")
@@ -419,6 +421,7 @@ class Book:
         self._receipt_checked: set[str] = set()
         self._accounting_corrections: dict[str, list[dict[str, Any]]] = {}
         self._fills_since_reconcile = 0
+        self._awaiting_settlement: dict[str, float] = {}
         self._unreconciled = 0  # consecutive readings that did not reconcile (see `_adopt_the_venue`)
         #: How far the venue may fairly differ from the book since the last reconciliation because
         #: a limit order was booked as a taker and may have been a maker: dollars, and units by key.
@@ -1816,11 +1819,30 @@ class Book:
                     self._position_dust(instrument, diff)
                 else:
                     diffs[key] = text(diff)
+            # An event contract the venue no longer shows while the ledger still holds it has
+            # usually just SETTLED, and the settlement row lands on the House's next pass (every 90
+            # s). Sept 21, 2026 22:00:43: a 15-minute DOGE contract settled five seconds before its
+            # row, the real book froze for one reading, and the watchdog rolled back a release. So
+            # such a difference waits `SETTLEMENT_GRACE_SECONDS`, with the cash it may have paid.
+            now_ts = float(self.clock())
+            awaiting = {}
+            for key in list(diffs):
+                held = positions.get(key, ZERO)
+                if key.startswith("event:") and venue_positions.get(key, ZERO) == 0 and held > 0 and money(diffs[key]) == -held:
+                    first = self._awaiting_settlement.setdefault(key, now_ts)
+                    if now_ts - first < SETTLEMENT_GRACE_SECONDS:
+                        awaiting[key] = held
+                        del diffs[key]
+            for key in list(self._awaiting_settlement):
+                if key not in awaiting and key not in diffs:
+                    del self._awaiting_settlement[key]
             pending = any(w.status in ("new", "unknown") for w in self.orders.values())
             # A venue shows cash to the cent and rounds each fill's fee its own way: allow a cent
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
             within = abs(cash_diff) < tolerance or ZERO < cash_diff <= self._fee_slack_usd + tolerance
+            if awaiting and not within and -tolerance < cash_diff <= sum(awaiting.values(), ZERO) + tolerance:
+                within = True  # the venue has paid a settlement the ledger has not recorded yet
             if not within and self.fees.family == "alpaca":
                 # Not yet measured (options first trade on Monday Sept 21, 2026): whether Alpaca
                 # takes the premium behind a resting option bid out of `cash`, as it does for a
@@ -1839,7 +1861,9 @@ class Book:
                 problems.append("an order's outcome is unknown")
             detail = "; ".join(problems)
             dust = ZERO
-            if ok and q_cash(cash_diff) != 0:
+            if awaiting:
+                detail = "; ".join([detail] if detail else []) + ("; " if detail else "") + "awaiting settlement: " + ", ".join(sorted(awaiting))
+            if ok and q_cash(cash_diff) != 0 and not awaiting:
                 dust = q_cash(cash_diff)
                 entry = self.ledger.append(
                     "book.fill",
@@ -1858,7 +1882,7 @@ class Book:
                 )
                 self._apply(entry.kind, HOUSE, entry.payload, entry.at)
             self.frozen = None if ok else detail
-            if ok:
+            if ok and not awaiting:
                 self._fills_since_reconcile = 0
                 self._fee_slack_usd = ZERO
                 self._fee_slack_units = {}
