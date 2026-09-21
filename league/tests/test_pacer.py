@@ -125,6 +125,21 @@ class PacerCase(unittest.TestCase):
 
 
 class InTheHouse(HouseCase):
+    def test_research_budget_follows_frozen_provider_after_cohort_changes(self):
+        from types import SimpleNamespace
+        self.house.researcher = SimpleNamespace(provider=SimpleNamespace(
+            settings_for=lambda agent, settings: {**settings, 'profile': 'openai_luna'}))
+        self.house.settings.research = True
+        agent = self.seated()
+        self.house.pacer = SimpleNamespace(may_spend=lambda kind: kind == 'openai', no_catch_up=True)
+        self.assertTrue(self.house.research_due(agent))
+        job = self.house.research_jobs.enqueue(agent.id, list(self.house._generation(agent.id)))
+        self.house.research_jobs.start(job['session'], {})
+        self.house.research_jobs.save(job['session'], {'profile': 'pro_flex'})
+        self.assertEqual(self.house._research_budget_kind(agent), 'sail')
+        self.assertFalse(self.house.research_due(agent))
+        self.assertEqual(self.house._research_permission(agent), 'campaign allowance unavailable')
+
     def test_research_waits_when_todays_sail_allowance_is_spent(self):
         self.house.researcher = object()
         self.house.settings.research = True

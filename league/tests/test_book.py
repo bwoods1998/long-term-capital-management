@@ -744,6 +744,21 @@ class PaperBookTest(BookCase):
         self.book.submit([self.intent("a1", BTC, "sell", str(held))])
         self.assertEqual([i.purpose for i in self.broker.submitted], ["entry", "exit"])
 
+    def test_profitable_micro_exit_above_entry_cap_is_allowed_but_overselling_is_not(self):
+        self.seat("a1", usd="25", position="10", order="10")
+        self.broker.set_quote(BTC, "79995", "80000")
+        self.book.submit([self.intent("a1", BTC, "buy", "0.0001")])
+        held = self.book.account("a1").holdings[BTC.key].quantity
+        self.broker.set_quote(BTC, "120000", "120010")
+        self.assertGreater(held * D("120000"), D("10"))
+        self.book.submit([self.intent("a1", BTC, "sell", held * 2)])
+        self.assertEqual(len(self.broker.submitted), 1)
+        self.assertEqual(self.book.account("a1").holdings[BTC.key].quantity, held)
+        self.book.submit([self.intent("a1", BTC, "sell", held)])
+        self.assertEqual(self.broker.submitted[-1].purpose, "exit")
+        self.assertFalse(self.book.account("a1").holdings)
+        self.assertTrue(self.book.reconcile().ok)
+
     def test_the_ledger_verifies_after_all_of_it(self):
         self.seat("a1")
         self.broker.set_quote(BTC, "80000", "80010")

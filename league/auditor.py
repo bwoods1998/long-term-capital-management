@@ -109,6 +109,12 @@ class Auditor:
             "latest_reconciliations": reconciliations,
             "already_on_real_money": self.live_agents(),
             "micro_real_limits": CONSTITUTION["rungs"]["2"],
+            "execution_policy": {
+                "entry_caps": "The House applies rung order and position caps to entries, including working buys and fees.",
+                "reducing_exits": "Book.check exempts position-reducing sells from entry dollar caps. The risk engine checks held quantity including reserved sells, so an exit cannot reverse into a short position.",
+                "gateway_exit_path": "Book._order_intent labels sells as exits; the gateway exempts that tag from entry dollar caps. Per-agent reducing-quantity validation is in the trusted House, not the gateway.",
+                "source": "league/book.py:Book.check, Book._order_intent; ltcm/risk.py; gateway/lib/router.mjs",
+                "interpretation": "A profitable holding may be sold above the $10 entry cap. These controls do not guarantee a fill, a price, a profitable edge or continuous venue availability."},
         }
 
     # ------------------------------------------------------------------ audit

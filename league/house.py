@@ -1470,11 +1470,23 @@ class House:
             return None
 
     # --------------------------------------------------------------- research
+    def _research_budget_kind(self, agent: Agent) -> str:
+        """A resumed session keeps its provider even when a cohort assignment changes."""
+        pending = self.research_jobs.active(agent.id)
+        saved = self.research_jobs.get(pending['session']) if pending else None
+        checkpoint = (saved or {}).get('checkpoint') or {}
+        settings = self.game.get('research') or {}
+        provider = getattr(self.researcher, 'provider', None)
+        if not checkpoint and hasattr(provider, 'settings_for'):
+            settings = provider.settings_for(agent, settings)
+        profile = checkpoint.get('profile', settings.get('profile'))
+        return 'openai' if profile == 'openai_luna' else 'sail'
+
     def research_due(self, agent: Agent) -> bool:
         if self._closing.is_set() or not agent.alive or self.researcher is None or not self.settings.research:
             return False
-        if not self.pacer.may_spend("sail"):
-            return False  # today's share of the expedition's Sail budget is spent (or the expedition is over)
+        if not self.pacer.may_spend(self._research_budget_kind(agent)):
+            return False
         if self.deploying():
             return False  # existing sessions are checkpointed; do not add work during staging
         pending = self.research_jobs.active(agent.id)
@@ -1643,7 +1655,7 @@ class House:
                 return 'retired or changed'
         if self.stopped() or (self.budget is not None and self.budget.mode == 'stopped'):
             return 'research stopped'
-        if not self.pacer.may_spend('sail'):
+        if not self.pacer.may_spend(self._research_budget_kind(agent)):
             return 'campaign allowance unavailable'
         return ''
 

@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "cohort": "2026-09-20-fast-research-v1",
+  "fraction": 0.5,
+  "note": "New sessions only. Stable agent assignment; persisted sessions keep their original provider. OpenAI uses the metered inline JSON tool protocol, Sail native function calls. Enable after matched-loop acceptance. No additional trading authority."
+}
