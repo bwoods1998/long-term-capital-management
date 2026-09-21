@@ -517,7 +517,13 @@ class Publisher:
         pnl = (equity - staked) if account and staked > 0 else (account.realized if account else ZERO)
         cost = sum((Decimal(e.payload["usd"]) for e in house.ledger.iter(kinds="credit.charge", agent=agent.id)), ZERO)
         intents = house.ledger.count(kinds="agent.intent", agent=agent.id)
-        looks = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=agent.id) if e.payload.get("decision") == "look"]
+        verdicts = list(house.ledger.iter(kinds="eval.verdict", agent=agent.id))
+        looks = [e.payload for e in verdicts if e.payload.get("decision") == "look"]
+        moves = [e for e in verdicts if e.payload.get("decision") in ("promote", "demote")]
+        lifecycle = {"born_at": agent.born_at, "died_at": agent.died_at, "cause": agent.cause,
+                     "last_move": {"id": moves[-1].id, "at": moves[-1].at,
+                                   **{k: moves[-1].payload.get(k) for k in ("decision", "from_rung", "to_rung", "reason")}} if moves else None}
+        accounting_ok = book.evidence_integrity(agent.id)["ok"] if book is not None else True
         positions = []
         if account and book is not None:
             for holding in list(account.holdings.values())[:50]:
@@ -546,7 +552,8 @@ class Publisher:
             "days_live": int(max(self.clock() - born, 0) // 86400), "orders": intents,
             "status": "active" if agent.alive else "retired",
             "gate": {"name": f"rung {rung}", "passed": rung >= 2, "evidence": clean({"decisions": intents, "rung": rung, "credits_usd": money(house.economy.balance(agent.id), 4, signed=True),
-                     "niche": agent.niche, "last_look": {k: looks[-1].get(k) for k in ("look", "active_blocks", "mean", "lcb", "ucb", "alpha_spent")} if looks else None})},
+                     "niche": agent.niche, "accounting_ok": accounting_ok, "lifecycle": lifecycle,
+                     "last_look": {k: looks[-1].get(k) for k in ("look", "active_blocks", "mean", "lcb", "ucb", "alpha_spent")} if looks else None})},
             "updated_at": at, "pnl_usd": money(pnl, 4, signed=True), "positions": positions,
         }
         if agent.alive and next_wake:
