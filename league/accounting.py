@@ -5,6 +5,8 @@ Read-only order receipts must confirm identity, quantity, cost and fees. Ambiguo
 remain subject to reconciliation. Original rows, quantities, stakes and baselines never change.
 """
 from decimal import Decimal
+import json
+from pathlib import Path
 
 ZERO = Decimal(0)
 
@@ -14,6 +16,10 @@ def evidence_cutoffs(ledger, agent):
     result = {}
     for entry in ledger.iter(kinds='book.fill_correction', agent=agent):
         result[entry.payload['book']] = entry.seq
+    # A repaired attribution (`repair_paper_phantoms`) starts the agent's evidence afresh too.
+    for entry in ledger.iter(kinds='book.baseline'):
+        if any(r.get('agent') == agent for r in entry.payload.get('repairs') or []):
+            result[entry.payload['book']] = max(result.get(entry.payload['book'], 0), entry.seq)
     return result
 
 
@@ -142,4 +148,82 @@ def repair_legacy_kalshi_fills(book):
             book._apply(entry.kind, entry.agent, entry.payload, entry.at)
             count += 1
         book._receipt_checked.add(order_id)
+    return count
+
+
+REPAIRS_PATH = Path(__file__).resolve().parent / 'repairs.json'
+
+
+def _repairs():
+    try:
+        rows = json.loads(REPAIRS_PATH.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict) and r.get('book') and r.get('agent') and r.get('broker_order_id')]
+
+
+def repair_paper_phantoms(book, repairs=None):
+    """Recover a sale the ledger never recorded, on a PRACTICE book, from the venue's own receipt.
+
+    The shape it repairs (Sept 20, 2026): an order filled while its record was lost, the venue was
+    adopted by hand, and the adoption wrote the agent's sold units as a NEGATIVE baseline. The
+    aggregate reconciled; the agent kept a phantom holding, was marked on it, could never be flat,
+    and was barred from promotion by `evidence_integrity`. A repair is named in `repairs.json` (book,
+    agent, the venue's order id, why) and applies only when a GET of that order shows a filled SELL
+    of exactly the quantity the agent phantom-holds and the baseline is short. It then books the
+    sale to the agent (the venue's price, the book's fee model) and moves the same cash and units
+    back out of the baseline, in one atomic append: the aggregate is unchanged, so reconciliation
+    cannot drift. Evidence before the repair is excluded from scoring (`evidence_cutoffs`)."""
+    from .book import HOUSE, position_key, q_cash, text
+    from ltcm.broker import BrokerError
+    if book.real_money:
+        return 0
+    count = 0
+    for row in (repairs if repairs is not None else _repairs()):
+        order_id, agent = str(row['broker_order_id']), str(row['agent'])
+        if row.get('book') != book.name or order_id in book._receipt_checked:
+            continue
+        issues = book._evidence_issues.get(agent) or {}
+        account = book.accounts.get(agent)
+        if not issues or account is None:
+            book._receipt_checked.add(order_id)
+            continue
+        try:
+            order = book.broker.get_order(order_id)
+        except BrokerError:
+            continue
+        key = position_key(order.instrument)
+        holding = next((h for h in account.holdings.values() if position_key(h.instrument) == key), None)
+        short = book.baseline_positions.get(key)
+        if not (key in issues and holding is not None and short is not None and order.status == 'filled'
+                and order.side == 'sell' and order.average_price is not None and order.average_price > 0
+                and order.filled_quantity == holding.quantity == -short):
+            book._receipt_checked.add(order_id)
+            continue
+        quantity, price, instrument = holding.quantity, order.average_price, holding.instrument
+        charge = book.fees.charge(instrument, 'sell', quantity, price)
+        cash = q_cash(quantity * price * instrument.multiplier - charge.usd)
+        receipt = {'broker_order_id': order_id, 'client_order_id': order.intent_id, 'side': order.side,
+                   'filled_quantity': text(order.filled_quantity), 'average_price': text(price),
+                   'venue_updated_at': order.updated_at, 'source': 'GET /v2/orders/{order_id}'}
+        fill = {'book': book.name, 'source': 'repair', 'order_id': f'repair:{order_id}', 'intent_id': None,
+                'instrument': instrument.to_dict(), 'side': 'sell', 'quantity': text(quantity), 'price': text(price),
+                'cash_delta': text(cash), 'position_delta': text(-quantity), 'fee_usd': text(charge.usd),
+                'fee_quantity': text(charge.quantity), 'venue_fee': '0', 'liquidity': 'taker',
+                'realized': text(cash - holding.cost), 'opened_at': holding.opened_at, 'entry_reason': holding.reason or None,
+                'flat': len(account.holdings) == 1, 'real_money': False, 'receipt': receipt,
+                'reason': f"recovered from the venue's receipt: {row.get('why') or 'a sale the ledger never recorded'}"}
+        positions = {k: v for k, v in book.baseline_positions.items() if k != key}
+        baseline = {'book': book.name, 'cash': text(q_cash(book.baseline_cash - cash)),
+                    'positions': {k: text(v) for k, v in positions.items()},
+                    'note': f"repaired {agent}'s phantom {key} from the venue's receipt {order_id}: its sale moves from the baseline to its account",
+                    'repairs': [{'agent': agent, 'instrument': key, 'broker_order_id': order_id}]}
+        entries = book.ledger.append_many([
+            {'kind': 'book.fill', 'agent': agent, 'payload': fill, 'id': f'phantom-repair:fill:{order_id}'},
+            {'kind': 'book.baseline', 'agent': HOUSE, 'payload': baseline, 'id': f'phantom-repair:baseline:{order_id}'},
+        ])
+        for entry in entries:
+            book._apply(entry.kind, entry.agent, entry.payload, entry.at)
+        book._receipt_checked.add(order_id)
+        count += 1
     return count

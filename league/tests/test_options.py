@@ -43,6 +43,12 @@ class Parsing(unittest.TestCase):
         self.assertEqual((put.symbol, put.strike, put.right), ("SPY", D("700.5"), "put"))
         self.assertEqual(inst.key, instrument_for("alpaca-paper", {"symbol": "F", "expiry": "2026-10-09", "strike": "13", "right": "call"}).key)
 
+    def test_the_chain_rows_symbol_names_the_contract(self):
+        """The chain gives the OCC code as `symbol`; passed back that way it is the option, not a ticker."""
+        inst = instrument_for("alpaca-paper", {"symbol": "AAL261002P00013500", "side": "buy"})
+        self.assertEqual((inst.asset_class, inst.symbol, inst.strike, inst.right), ("option", "AAL", D("13.5"), "put"))
+        self.assertEqual(instrument_for("alpaca", {"symbol": "AAL"}).asset_class, "equity")
+
     def test_a_bad_occ_symbol_is_refused(self):
         for bad in ("F261009X00013000", "F26100C00013000", "TOOLONGROOT261009C00013000"):
             with self.assertRaises(ValueError):

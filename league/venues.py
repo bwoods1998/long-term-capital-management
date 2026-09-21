@@ -64,6 +64,12 @@ def instrument_for(venue: str, spec: dict[str, Any]) -> Instrument:
             raise ValueError("a Kalshi instrument is {market, leg: yes|no}")
         return Instrument("event", ticker, venue, market_id=ticker, right=leg)
     occ = str(spec.get("occ") or "").strip().upper()
+    if not occ and not (spec.get("expiry") or spec.get("strike")):
+        # The chain's rows carry the OCC code in `symbol` too, and strategies pass it back that way:
+        # read as a ticker, every options entry was refused as outside the specialty (Sept 21, 2026).
+        named = str(spec.get("symbol") or "").strip().upper()
+        if re.fullmatch(r"[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}", named):
+            occ = named
     if occ:
         # The chain names a contract by its OCC symbol (`F260925C00013000`): the shortest way to say which.
         if not re.fullmatch(r"[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}", occ):
