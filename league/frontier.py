@@ -160,3 +160,60 @@ class Frontier:
                 pass  # unknown costs retain the full hold, including across restarts
         return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model),
                       str(payload.get('status') or 'completed'), verified)
+
+
+class FrontierMonth:
+    """What is left of the gateway's monthly frontier budget, read from `GET /v1/health`.
+
+    The House's campaign meters its own holds, but the gateway's month is the line that really
+    refuses (402), and it also carries holds the House never sees: a call that times out keeps its
+    worst case there. On Sept 21, 2026 the campaign believed $77 remained while the gateway had $40,
+    so cheap research would have spent the last of the month and left nothing for the audits that
+    promotion to real money requires. `remaining()` is None when the gateway cannot be read; the
+    callers then leave spending alone, and the gateway's own 402 is still the backstop."""
+
+    def __init__(self, gateway_url: str, token_source: Callable[[], str], *, opener: Any = None, ttl: float = 60.0, clock: Any = None):
+        import time as _time
+
+        self.url = gateway_url.rstrip("/") + "/v1/health"
+        self.token_source = token_source
+        self.opener = opener or urllib.request.urlopen
+        self.ttl = ttl
+        self.clock = clock or _time.time
+        self._at = float("-inf")
+        self._value: Decimal | None = None
+
+    def remaining(self) -> Decimal | None:
+        now = self.clock()
+        if now - self._at < self.ttl:
+            return self._value
+        self._at = now
+        try:
+            request = urllib.request.Request(self.url, headers={"Authorization": "Bearer " + self.token_source(), "User-Agent": "ltcm-floor/1.0"})
+            with self.opener(request, timeout=20) as response:
+                month = json.load(response).get("frontier") or {}
+            value = Decimal(str(month["cap_usd"])) - Decimal(str(month["spent_usd"]))
+            self._value = value if value.is_finite() else None
+        except Exception:  # noqa: BLE001 - unreadable is unknown, never a number
+            self._value = None
+        return self._value
+
+
+def frontier_tier(remaining: Decimal | None, reserve: Any) -> str:
+    """Which frontier work the month still pays for, from `game.json` `frontier_reserve`.
+
+    "all": everything. "earned": the unearned scheduled roles (operator, teacher, designer) and
+    cheap-model research stop, so what is left goes to the roles that write code and to the work
+    agents pay for. "audits": only audits and consultations agents buy with credits they earned.
+    Unknown (None) is "all": the gateway still refuses at its line."""
+    if remaining is None or not reserve:
+        return "all"
+    if remaining < Decimal(str(reserve.get("code_roles_usd", "0"))):
+        return "audits"
+    if remaining < Decimal(str(reserve.get("earned_usd", "0"))):
+        return "earned"
+    return "all"
+
+
+#: The roles each tier still runs.
+TIER_ROLES = {"all": None, "earned": frozenset({"architect", "toolsmith"}), "audits": frozenset()}

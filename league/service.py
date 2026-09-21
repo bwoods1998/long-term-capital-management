@@ -177,7 +177,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         routes = load_routes()
         if burst:
             routes = {'enabled': True, 'cohort': burst['id'], 'fraction': burst['policy']['luna_fraction']}
-        house.researcher.provider = ResearchRouter(provider, fast, routes)
+        house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier)
+    if not canary:
+        from .frontier import FrontierMonth
+
+        house.frontier_month = FrontierMonth(gateway_url, token)
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],

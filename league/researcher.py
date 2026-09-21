@@ -133,6 +133,8 @@ class Researcher:
         self.lineage = lineage
         self.standing = standing
         self.house_budget = house_budget
+        #: () -> the House's frontier tier ("all", "earned", "audits"); None means "all".
+        self.frontier_tier = None
         self.jobs, self.may_continue, self.capabilities = jobs, may_continue, capabilities
         self.coverage = coverage
         self.grants = grants
@@ -486,6 +488,10 @@ class Researcher:
         # can have him every hour and run away with the firm's best thinking. That is the flywheel.
         rung = self.rung(agent.id) if self.rung else 1
         winning = float(standing.get("earned_growth", standing.get("mean_growth")) or 0.0) > 0
+        tier = self.frontier_tier() if self.frontier_tier is not None else "all"
+        if tier != "all" and not winning:
+            return {"error": "the firm's frontier month is nearly spent and what is left is kept for agents whose record is "
+                             "profitable. Win first; the architect, toolsmith and teacher's lessons are still yours for free."}
         table = rules.get("profitable_cooldown_hours_by_rung" if winning else "cooldown_hours_by_rung") or {}
         hours = float(table.get(str(rung), rules.get("cooldown_hours", 24)))
         if last is not None and self.clock() - last < hours * 3600:

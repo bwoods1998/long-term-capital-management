@@ -396,6 +396,18 @@ class Hiring(ResearchCase):
         self.assertIn('answer', self.tool_output(1))
         self.assertEqual(len(self.merton.seen), 1)
 
+    def test_when_the_frontier_month_is_kept_only_winners_hire_him(self):
+        for growth, hired in ((-0.004, False), (0.004, True)):
+            self.merton = self.FakeMerton()
+            r = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead, or is it the parameters?"})]],
+                                merton=self.merton, merton_settings={"min_credits_usd": "1.00", "cooldown_hours": 0},
+                                house_budget=lambda: True, standing=lambda _: {"active_blocks": 6, "mean_growth": growth})
+            r.frontier_tier = lambda: "earned"
+            r.research(self.parent, {}, session=f"s-{hired}")
+            self.assertEqual(len(self.merton.seen), 1 if hired else 0)
+            if not hired:
+                self.assertIn("kept for agents whose record is profitable", self.tool_output(1)["error"])
+
     def test_profit_buys_more_of_him_than_a_rung_does(self):
         settings = {"min_credits_usd": "1.00", "cooldown_hours": 8, "cooldown_hours_by_rung": {"1": 8},
                     "profitable_cooldown_hours_by_rung": {"1": 3}}

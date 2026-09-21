@@ -257,7 +257,7 @@ class AlpacaQuotesTest(unittest.TestCase):
             }}),
             (200, {"quotes": {
                 "SPY": {"bp": D("650.10"), "ap": 650, "ax": "V"},       # crossed
-                "QQQ": {"bp": D("722.12"), "ap": D("722.21"), "bs": 280},
+                "QQQ": {"bp": D("722.12"), "ap": D("722.21"), "bs": 280, "t": "2026-09-10T14:02:00Z"},
             }}),
         )
         out = AlpacaData(client, clock=clock).quotes(["BTC/USD", "SPY", "ETH/USD", "QQQ", "SOL/USD", "IWM"])
@@ -267,9 +267,9 @@ class AlpacaQuotesTest(unittest.TestCase):
         ])
         self.assertEqual(out, {
             "BTC/USD": {"bid": 80941.37, "ask": 80960.4},
-            "ETH/USD": {"bid": 2622.777, "ask": 2623.44},
-            "QQQ": {"bid": 722.12, "ask": 722.21},
-        })
+            "ETH/USD": {"bid": 2622.777, "ask": 2623.44, "t": "2026-09-10T14:01:59.050284Z"},
+            "QQQ": {"bid": 722.12, "ask": 722.21, "t": "2026-09-10T14:02:00.000000Z"},
+        })  # the quote's own time, when the venue gives one: a strategy may refuse a stale touch
         self.assertIs(type(out["QQQ"]["bid"]), float)
 
     def test_quotes_error(self):
