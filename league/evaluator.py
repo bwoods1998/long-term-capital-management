@@ -190,9 +190,13 @@ class Evaluator:
         finished when a mark exists in a later block. Returns how many blocks were added."""
         # Only what has happened since the last finished block is read: the marks of a week are
         # thousands of rows an agent, and this runs for every agent every few minutes.
-        done = [e.payload for e in self.ledger.iter(kinds="eval.block", agent=agent) if e.payload.get("book") == book and e.payload.get("last_mark_seq")]
+        from .accounting import evidence_cutoffs
+        cutoff = evidence_cutoffs(self.ledger, agent).get(book, 0)
+        done = [e.payload for e in self.ledger.iter(kinds="eval.block", agent=agent)
+                if e.payload.get("book") == book and int(e.payload.get("first_mark_seq") or e.seq) > cutoff
+                and e.payload.get("last_mark_seq")]
         resume = done[-1] if done else None
-        since = int(resume["last_mark_seq"]) if resume else 0
+        since = int(resume["last_mark_seq"]) if resume else cutoff
         marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent, after=since) if e.payload.get("book") == book]
         if not marks:
             return 0
@@ -215,7 +219,8 @@ class Evaluator:
             if previous_equity is None:
                 # The first block starts from what was staked before its first mark.
                 first = by_block[key][0]
-                start_equity = sum(float(s.payload["usd"]) for s in stakes if s.seq < first.seq)
+                start_equity = (float(first.payload['equity']) if cutoff else
+                                sum(float(s.payload["usd"]) for s in stakes if s.seq < first.seq))
                 flow = sum(float(s.payload["usd"]) for s in stakes if first.seq < s.seq <= last.seq)
             else:
                 start_equity = previous_equity
@@ -260,10 +265,12 @@ class Evaluator:
 
     def blocks(self, agent: str, *, since_seq: int = 0, until_seq: int | None = None, book: str | None = None) -> list[dict[str, Any]]:
         """Finished blocks that BEGAN after `since_seq` (and at or before `until_seq`)."""
+        from .accounting import evidence_cutoffs
+        cutoffs = evidence_cutoffs(self.ledger, agent)
         out = []
         for e in self.ledger.iter(kinds="eval.block", agent=agent):
             began = int(e.payload.get("first_mark_seq") or e.seq)
-            if began > since_seq and (until_seq is None or began <= until_seq) and (book is None or e.payload.get("book") == book):
+            if began > max(since_seq, cutoffs.get(e.payload.get('book'), 0)) and (until_seq is None or began <= until_seq) and (book is None or e.payload.get("book") == book):
                 out.append(e.payload)
         return out
 
@@ -272,6 +279,8 @@ class Evaluator:
 
         With `until_seq` the record is a finished stay, whose account may since have been swept:
         the stake is then the most the agent was ever lent up to that point, not what is left."""
+        from .accounting import evidence_cutoffs
+        since_seq = max(since_seq, evidence_cutoffs(self.ledger, agent).get(book, 0))
         stakes = [(e.seq, float(e.payload["usd"])) for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
         if until_seq is None:
             staked = sum(usd for _, usd in stakes)
@@ -456,7 +465,9 @@ class Evaluator:
                            ucb=death_bounds['ucb'] if death_bounds else None)
         # Promote only from a fully marked, flat portfolio on this fast route. Otherwise a
         # sequence of realized winners could conceal an open loser between hourly blocks.
-        marks = [e for e in self.ledger.iter(kinds='book.mark', agent=agent, after=entered)
+        from .accounting import evidence_cutoffs
+        clean_since = max(entered, evidence_cutoffs(self.ledger, agent).get(book, 0))
+        marks = [e for e in self.ledger.iter(kinds='book.mark', agent=agent, after=clean_since)
                  if e.payload.get('book') == book]
         events = [e for e in self.ledger.iter(kinds=('book.fill', 'book.settle', 'book.stake'), agent=agent, after=entered)
                   if e.payload.get('book') == book]
@@ -638,6 +649,8 @@ class Evaluator:
         in), grouped by the block it closed in. An edge does not depend on how large the position
         was against the stake, so it can be compared across rungs, where the same strategy has a
         fifth of its stake at work on paper and a third on the micro-real rung."""
+        from .accounting import evidence_cutoffs
+        since_seq = max(since_seq, evidence_cutoffs(self.ledger, agent).get(book, 0))
         by_block: dict[str, list[float]] = {}
         for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=since_seq):
             p = entry.payload

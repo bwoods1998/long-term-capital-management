@@ -407,7 +407,7 @@ class V2DefaultTests(unittest.TestCase):
         self.assertEqual(client.order_api, "v2")
 
     def test_a_market_buy_becomes_an_ioc_limit_at_the_ask(self):
-        client, transport, _ = self.make_v2({("POST", BASE + ORDERS_PATH_V2): {"order_id": "k1", "client_order_id": "x", "fill_count": "10.00", "remaining_count": "0.00", "average_fill_price": "0.4400"}})
+        client, transport, _ = self.make_v2({("POST", BASE + ORDERS_PATH_V2): {"order_id": "k1", "client_order_id": "x", "fill_count": "10.00", "remaining_count": "0.00", "average_fill_price": "0.4400", "average_fee_paid": "0.01733"}})
         order = client.submit(intent(order_type="market", quantity="10"))
         body = transport.last["body"]
         self.assertEqual(body["price"], "0.4400")
@@ -416,6 +416,68 @@ class V2DefaultTests(unittest.TestCase):
         self.assertEqual(order.status, "filled")
         self.assertEqual(str(order.filled_quantity), "10.00")
         self.assertEqual(order.broker_order_id, "k1")
+        self.assertEqual(order.average_price, Decimal('0.44'))
+        self.assertEqual(order.fees, Decimal('0.1733'))
+
+    def test_v2_no_execution_complements_the_yes_price_once_and_keeps_dollar_fees(self):
+        client, _, _ = self.make_v2({})
+        for side in ('buy', 'sell'):
+            order = client.parse_order({'order_id': 'n1', 'fill_count': '10.00', 'remaining_count': '0.00',
+                'average_fill_price': '0.6000', 'average_fee_paid': '0.01680'},
+                intent=intent(instrument=NO, side=side), v2_create=True)
+            self.assertEqual(order.average_price, Decimal('.4'))
+            self.assertEqual(order.fees, Decimal('.168'))
+            self.assertEqual(order.side, side)
+            self.assertEqual(order.instrument.right, 'no')
+
+    def test_v2_incomplete_ack_cannot_book_an_execution_at_the_limit_or_with_a_guessed_fee(self):
+        client, _, _ = self.make_v2({})
+        for missing in ('average_fill_price', 'average_fee_paid'):
+            row = {'order_id': 'k1', 'fill_count': '10.00', 'remaining_count': '0.00',
+                   'average_fill_price': '.55', 'average_fee_paid': '.01733'}
+            del row[missing]
+            order = client.parse_order(row, intent=intent(order_type='limit', limit_price='.67'), v2_create=True)
+            self.assertIsNone(order.average_price)
+
+    def test_v2_ioc_partial_and_zero_fills_keep_requested_quantity_and_terminal_status(self):
+        client, _, _ = self.make_v2({})
+        for count in ('0.00', '3.00'):
+            order = client.parse_order({'order_id': 'k1', 'fill_count': count, 'remaining_count': '0.00',
+                'average_fill_price': '.55', 'average_fee_paid': '.01733'}, intent=intent(quantity='10'), v2_create=True)
+            self.assertEqual(order.quantity, Decimal(10))
+            self.assertEqual(order.status, 'cancelled')
+            self.assertEqual(order.filled_quantity, Decimal(count))
+
+    def test_get_uses_total_execution_cost_not_the_limit_price(self):
+        client, _, _ = self.make_v2({})
+        row = {**ORDER['order'], 'status': 'executed', 'fill_count_fp': '10.00', 'remaining_count_fp': '0.00',
+               'yes_price_dollars': '.6700', 'taker_fill_cost_dollars': '5.500000', 'maker_fill_cost_dollars': '0.000000',
+               'taker_fees_dollars': '.173300', 'maker_fees_dollars': '0.000000'}
+        order = client.parse_order(row)
+        self.assertEqual(order.average_price, Decimal('.55'))
+        self.assertEqual(order.fees, Decimal('.1733'))
+        self.assertTrue(order._raw['receipt_accounting'])
+        self.assertEqual(order.status, 'filled')
+
+    def test_explicit_zero_dollars_does_not_fall_back_to_legacy_cents(self):
+        client, _, _ = self.make_v2({})
+        row = {**ORDER['order'], 'fill_count_fp': '10.00', 'remaining_count_fp': '0.00',
+               'taker_fill_cost_dollars': '0', 'maker_fill_cost_dollars': '0', 'taker_fill_cost': 50,
+               'taker_fees_dollars': '0', 'taker_fees': 17, 'maker_fees_dollars': '0'}
+        order = client.parse_order(row)
+        self.assertEqual(order.average_price, Decimal(0))
+        self.assertEqual(order.fees, Decimal(0))
+
+    def test_legacy_cents_and_mixed_maker_taker_costs(self):
+        client, _, _ = self.make_v2({})
+        row = {**ORDER['order'], 'fill_count': 10, 'remaining_count': 0,
+               'taker_fill_cost': 330, 'maker_fill_cost': 200, 'taker_fees': 17, 'maker_fees': 0}
+        order = client.parse_order(row)
+        self.assertEqual(order.average_price, Decimal('.53'))
+        self.assertEqual(order.fees, Decimal('.17'))
+        del row['taker_fill_cost']; del row['maker_fill_cost']
+        row['average_fill_price'] = 53
+        self.assertEqual(client.parse_order(row).average_price, Decimal('.53'))
 
     def test_a_market_sell_crosses_the_bid_without_reduce_only(self):
         client, transport, _ = self.make_v2({("POST", BASE + ORDERS_PATH_V2): {"order_id": "k2", "remaining_count": "10.00", "fill_count": "0.00"}})

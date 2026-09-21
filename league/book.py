@@ -414,6 +414,8 @@ class Book:
         self.venue_cash: Decimal | None = None
         self.baseline_at: str | None = None
         self._evidence_issues: dict[str, dict[str, Any]] = {}
+        self._receipt_checked: set[str] = set()
+        self._accounting_corrections: dict[str, list[dict[str, Any]]] = {}
         self._fills_since_reconcile = 0
         self._unreconciled = 0  # consecutive readings that did not reconcile (see `_adopt_the_venue`)
         #: How far the venue may fairly differ from the book since the last reconciliation because
@@ -432,7 +434,7 @@ class Book:
     def _fold(self) -> None:
         """Rebuild state from the ledger. Every mutation below appends first and applies the
         appended row through `_apply`, so the live state and a rebuilt one are the same state."""
-        kinds = ("book.stake", "book.fill", "book.settle", "book.order", "book.baseline", "book.cross_plan", "agent.intent")
+        kinds = ("book.stake", "book.fill", "book.fill_correction", "book.settle", "book.order", "book.baseline", "book.cross_plan", "agent.intent")
         for entry in self.ledger.iter(kinds=kinds):
             if entry.payload.get("book") == self.name:
                 self._apply(entry.kind, entry.agent, entry.payload, entry.at)
@@ -474,6 +476,17 @@ class Book:
                 self._apply_fill(agent, p, at)
             if p.get("cross_plan_id"):
                 self._cross_applied.add(f"{p['source']}:{p['intent_id']}")
+        elif kind == "book.fill_correction":
+            from .accounting import apply_correction
+            apply_correction(self._account(agent), p)
+            working = self.orders.get(p['order_id'])
+            if working is not None:
+                working.notional += money(p['notional_delta'])
+                working.fees_seen += money(p['venue_fee_delta'])
+            self._receipt_checked.add(p['order_id'])
+            self._accounting_corrections.setdefault(agent, []).append({
+                'at': at, **{key: p[key] for key in ('original_fill_id', 'corrected', 'cash_delta',
+                                                   'realized_delta', 'receipt', 'evidence')}})
         elif kind == "book.baseline":
             if self.baseline_at is None:
                 self.baseline_at = at  # when this book first looked at its venue: fees from before it are not its own
@@ -623,6 +636,7 @@ class Book:
         with self._lock:
             issues = [dict(row) for row in self._evidence_issues.get(agent, {}).values()]
             return {'ok': not issues, 'book': self.name, 'issues': issues,
+                    'corrections': self._accounting_corrections.get(agent, [])[-4:],
                     'note': 'An accounting repair must also exclude contaminated evidence; changing a baseline alone is not a repair.'}
 
     def agents(self) -> list[str]:
@@ -1210,6 +1224,8 @@ class Book:
             "reason": reason or (intent.reason if intent else ""),
             "real_money": self.real_money,
         }
+        if source == 'venue' and self.fees.family == 'kalshi':
+            payload['venue_accounting_version'] = 2
         return payload
 
     def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None) -> Outcome:
@@ -1733,6 +1749,8 @@ class Book:
 
     def _reconcile(self) -> Reconciliation:
         if True:
+            from .accounting import repair_legacy_kalshi_fills
+            repair_legacy_kalshi_fills(self)
             venue_cash, venue_positions = self._venue()
             self.venue_cash = venue_cash
             cash, positions, instruments = self._ledger_totals()

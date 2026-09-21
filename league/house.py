@@ -2140,9 +2140,13 @@ class House:
 
     def _recent_trades(self, agent_id: str, limit: int = 12) -> list[dict[str, Any]]:
         """Its own last closed trades, forward-tested or real: what research should learn from first."""
+        from .accounting import evidence_cutoffs
+        cutoffs = evidence_cutoffs(self.ledger, agent_id)
         rows = []
         for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent_id):
             p = entry.payload
+            if entry.seq <= cutoffs.get(p.get('book'), 0):
+                continue
             pnl = p.get("pnl") if entry.kind == "book.settle" else p.get("realized")
             if pnl is None or p.get("source") == "dust":
                 continue

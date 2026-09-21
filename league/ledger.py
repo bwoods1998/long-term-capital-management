@@ -75,6 +75,7 @@ KINDS: dict[str, bool] = {
     "book.order": True,
     "book.cancel": True,
     "book.fill": True,  # a venue fill attributed to one agent
+    "book.fill_correction": True,  # receipt-backed money correction; never a new trade or position
     "book.cross": True,  # two agents' opposite intents netted inside the House
     "book.cross_plan": False,  # recoverable internal cross: exact agent and House fills, then completion
     "book.settle": True,  # a Kalshi market resolved
