@@ -49,6 +49,16 @@ class Semantics(unittest.TestCase):
         b=self.lab.enqueue('research','agent',self.now,'test',{'evidence':'a bounded test'},rubrics=q)
         self.assertNotEqual(a,b)
 
+    def test_research_context_includes_its_series_and_excludes_unrelated_markets(self):
+        self.queue()
+        self.lab.ingest_markets([{'market':s+'-EVENT-T1','series':s,'yes_bid':.4,'yes_ask':.42}
+                                for s in ('KXWTI','KXBTC')],self.now,'market source')
+        with patch('league.semantic_lab.time.sleep',lambda _:None):self.lab.run()
+        result=self.lab.evidence('agent',series=['KXWTI'])
+        self.assertEqual(len(result['latest']),1)
+        self.assertEqual([r['entity'] for r in result['market_labels']],['KXWTI-EVENT-T1'])
+        self.assertEqual(result['current_market_questions'],questions('market'))
+
     def test_unknown_provider_outcome_is_not_retried(self):
         def lost(ident,body):
             self.calls.append(ident);raise TimeoutError()

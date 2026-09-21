@@ -284,13 +284,21 @@ class SemanticLab:
                 'question_evolution':rubrics,
                 'interpretation':'Classifications are unverified research features. Costs exclude unknown calls; no label authorizes a trade or promotion.'}
 
-    def evidence(self, agent=None, *, limit=6):
+    def evidence(self, agent=None, *, limit=6, series=()):
         with self.db() as db:
             rows=db.execute("SELECT kind,entity,source,observed,finished,response FROM semantic_tasks WHERE status='completed' "
                 + ('AND kind=\'research\' AND entity=? ' if agent else '') + 'ORDER BY observed DESC LIMIT ?',
                 (agent,limit) if agent else (limit,)).fetchall()
+            relevant=list(dict.fromkeys(str(s) for s in series))[:18]
+            markets=db.execute("SELECT kind,entity,source,observed,finished,response FROM semantic_tasks "
+                "WHERE kind='market' AND status='completed' AND json_extract(body,'$.state.market.series') IN ("
+                + ','.join('?' for _ in relevant) + ') ORDER BY observed DESC LIMIT ?',
+                (*relevant,limit)).fetchall() if relevant else []
         return {'status':self.stats(), 'latest':[{'kind':r['kind'],'entity':r['entity'],'source':r['source'],
             'observed':r['observed'],'labeled':r['finished'],'labels':json.loads(r['response'])['answers']} for r in rows],
+            'market_labels':[{'entity':r['entity'],'source':r['source'],'observed':r['observed'],
+                'labeled':r['finished'],'labels':json.loads(r['response'])['answers']} for r in markets],
+            'current_market_questions':self.market_questions(),
             'instructions':'These are fallible Jev classifications, not established facts. Open the original evidence, test the hypothesis and report contradictions.'}
 
     def market_questions(self):

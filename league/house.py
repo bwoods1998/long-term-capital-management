@@ -1684,7 +1684,9 @@ class House:
         result = describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
                           alpaca=self.alpaca_data is not None, kalshi=self.kalshi_data is not None)
         if self.semantic_lab is not None:
-            result['semantic_research'] = self.semantic_lab.evidence(agent.id)
+            observed = agent.needs.get('observe') or {}
+            result['semantic_research'] = self.semantic_lab.evidence(agent.id,
+                series=[*(agent.needs.get('series') or []), *(observed.get('series') or [])])
         return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
