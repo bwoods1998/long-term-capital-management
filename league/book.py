@@ -406,7 +406,9 @@ class Book:
         self.marks: dict[str, Decimal] = {}  # instrument key -> last liquidation mark
         self.day_open: dict[str, tuple[str, Decimal]] = {}  # agent -> (day, equity at its start)
         self.orders_today: dict[tuple[str, str], int] = {}
-        self.frozen: str | None = None  # a reconciliation mismatch stops new entries
+        # Ledger replay is not a fresh venue check. A restart must not clear a mismatch
+        # and permit an entry before the first reconciliation of this process.
+        self.frozen: str | None = "awaiting startup reconciliation" if self.real_money else None
         #: What the venue account held that is not the book's: cash and positions from before the
         #: book opened (the paper account's $100,000; the real account's unallocated cash).
         self.baseline_cash: Decimal | None = None
