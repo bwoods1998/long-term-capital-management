@@ -7,13 +7,22 @@ now; everything under "History" describes something that no longer runs.
 
 ## The system as it is now
 
+- [Active foundation phase](phase-one.md): the funded campaign, current limits and reproducibility contract.
+- [Latest foundation progress](runs/2026-09-20-foundation-progress.md): deployed changes, verified
+  runtime state, first reproduced replay, Jev probe and unresolved issues.
+- [Chief architect handoff and $10,000 plan](design/2026-09-20-chief-architect-handoff.md): the
+  next architecture, independent acceptance, incentives and evidence-gated capital releases.
+- [Model-routing evidence](runs/2026-09-20-model-routing.md): matched coding tasks, costs,
+  failures and the implemented Luna grant path.
+- [Jev's role and measured comparison](design/2026-09-20-typesafe-pilot.md): a funded integration,
+  shared semantic features, recursive question discovery and development-probe results.
 - [Project overview](../README.md): the game, the trust zones, the constitution, Merton's six jobs,
   what is public, how to run things, status and known limits.
 - [The game](proposals/2026-09-19-the-game.md): the design memo for the rebuild. What the first run
   measured, what the venues reward, why the frontier model audits and never picks, and the game
   that follows from it.
-- [The architecture](design/2026-09-19-architecture.md): trust boundaries, the House's modules, the
-  frontier model's budget, the build order.
+- [The original rebuild architecture](design/2026-09-19-architecture.md): the September 19–20
+  baseline. The active phase and architect handoff above supersede its budget and future-work plan.
 - [The overnight build log](runs/2026-09-20-overnight-build.md): every decision made while
   building the league and its reason, the step log, and what was verified live. The source of
   truth for why things are the way they are. The goal the builder worked to is
@@ -30,8 +39,9 @@ now; everything under "History" describes something that no longer runs.
   accepts from the publisher: transport, formats, event and checkpoint shapes, the test tape.
 - [Running the House](../deploy/README.md): the House's Sailbox, releases, the canary, the two
   watchdogs, the egress allowlist, `scripts/floor_box.py`.
-- [The order gateway](../gateway/README.md): the Cloudflare Worker that holds every credential,
-  the caps, the kill switch, the metered frontier route and the pull-request route.
+- [The gateway](../gateway/README.md): venue/OpenAI/TypeSafe/GitHub credentials, caps, kill switch,
+  inference routes and pull requests. The House still holds its Sail API key; removing that
+  authority is a prerequisite for broad autonomous House editing.
 
 ## History
 

@@ -5,6 +5,11 @@ It starts on the first production activation of `league/campaigns.json`. The sta
 persisted in `state/campaigns.sqlite`; restarting, redeploying, topping up an account or changing
 the calendar cannot renew the allowance. Canaries have separate state and do not activate it.
 
+Production activation was September 20 at 1:22 PM Pacific; expiry is September 22 at 1:22 PM
+Pacific. The [latest run report](runs/2026-09-20-foundation-progress.md) records deployed
+acceptance and the [architect handoff](design/2026-09-20-chief-architect-handoff.md) defines what
+must improve next. Historical passes are not verified forward profits.
+
 ## Released capital and account setup
 
 | Allocation | Phase ceiling | What the running House may use |
@@ -18,6 +23,14 @@ The automated model admission limits are $25 per vendor per UTC day, within the 
 Existing gateway and account caps remain additional ceilings. Allowances are ceilings, not
 spending targets. Unused money does not accelerate tomorrow's calls. Model roles cannot edit
 campaign policy, accounting or the experiment archive.
+
+Jev's external gateway lane now has a $10 lifetime envelope and 100,000-call ceiling, with
+the same expiry. Two retained commitments ($1 plus $9) back it inside foundation-review,
+reducing that allocation's available OpenAI headroom by $10. This is a cross-provider earmark;
+the internal `openai` label is not a vendor invoice. Actual Jev usage is reported separately by
+the gateway. Keep the backing hold until the route closes/expires and billing is reconciled.
+The aggregate $500 cap, phase start and end have not changed. See the
+[Jev design and live probe](design/2026-09-20-typesafe-pilot.md).
 
 At the pre-deployment check Sail had approximately **$79** in credit and the gateway had
 approximately **$85** remaining under its $100 September OpenAI cap. Those existing allowances
@@ -90,6 +103,18 @@ pre-phase expenditure remains historical expenditure and is not erased or called
   its resident, and the newcomer cadence also governs displacement. Existing legacy records
   remain intact; health and current-capability reports identify their invalid parameters for
   research. Options smoke checks use the candidate's parameters and declared inputs.
+- **Candidate coverage and durable engineering blockers.** Coverage accepts candidate NEEDS,
+  so a missing BNB stream cannot conceal available BTC observations. Tool requests distinguish
+  an implemented result from an unresolved external dependency; blocked requests remain in
+  the engineering backlog instead of expiring or being counted as successful answers.
+- **Priced model tiers and startup grants.** Astra, Sol, Terra and Luna are available through
+  the gateway. One Luna grant per family/niche/phase can fund an initial experiment, at most
+  twelve and $0.25 reserved each. Invalid legacy parameters can be repaired with unchanged
+  decision logic on rung zero or an empty paper record; this does not qualify a candidate or
+  erase a protected trading record. Grant use still requires available campaign allowance.
+- **Architect proposal compatibility.** Strategy registry paths are normalized to the required
+  basename. Mechanics fixtures isolate production discovery; a dedicated test still exercises
+  real registry enrollment. The sports proposal that exposed these bugs merged after repair.
 
 These recordings are sampled REST views, not a tick/order-book archive. Alpaca replay execution
 still uses bar prices and a modeled spread, not historical queue position or observed fills.
@@ -144,6 +169,7 @@ workflow. Check checkpoint success and available disk in the normal operational 
 4. The deployed canary and production watch pass, books reconcile, and recordings accumulate.
 5. A measured queue/completion/failure baseline is retained before any model or concurrency pilot.
 
-The next engineering work adds a protected repair worker and matched model pilots, building on
-the resumable research queue. The later-phase allowance is gated by evidence and a ledger/billing reconciliation, not the passage
+Matched model pilots and the first exact sealed replay reproduction are complete. The next
+engineering work adds the protected resource/release boundary and durable API repair worker,
+building on the resumable research queue. The later-phase allowance is gated by evidence and a ledger/billing reconciliation, not the passage
 of 48 hours. More market data or capital is purchased only for a demonstrated constraint.
