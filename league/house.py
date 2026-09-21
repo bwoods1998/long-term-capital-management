@@ -219,9 +219,12 @@ class House:
         # first fill would be folded into the baseline and come back as a mismatch.)
         for name, book in self.books.items():
             try:
-                book.open_baseline()
+                if book.real_money:
+                    book.reconcile()  # repair/check receipts before health, agent wakes or sizing
+                else:
+                    book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
-                self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
+                self.alert("warning", f"{name}: could not initialize venue accounting ({type(exc).__name__}: {str(exc)[:160]})")
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 

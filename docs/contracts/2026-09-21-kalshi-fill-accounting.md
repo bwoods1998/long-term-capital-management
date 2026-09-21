@@ -83,3 +83,18 @@ priced and fee-inclusive allocation without a real venue mutation.
 
 Production acceptance and reconciliation results belong in the dated
 [run report](../runs/2026-09-21-live-hour.md).
+
+## Restart ordering
+
+The production watch exposed a second issue: a freshly constructed real book
+started with `frozen=None`, even when its last process had a cash mismatch.
+The House published that state and could wake agents before its first periodic
+reconciliation. A file deployment was therefore not proof of repaired accounting.
+
+Real books now start with `awaiting startup reconciliation`. House initialization
+reconciles them before the first health publication, agent wake or sizing pass.
+A failed venue read retains the entry refusal and normal periodic reconciliation
+can clear it automatically later. Position-reducing exits remain available.
+Paper initialization, live authorization, capital limits and evidence gates are
+unchanged. Tests cover restart refusal, an existing mismatch, later automatic
+recovery, reducing exits and the ordering of the first health publication.

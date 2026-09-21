@@ -803,6 +803,46 @@ class KalshiBookTest(BookCase):
     real = True
     cash = "500"
 
+    def test_restart_requires_a_fresh_reconciliation_before_new_entries(self):
+        self.assertEqual(self.book.frozen, 'awaiting startup reconciliation')
+        self.book.reconcile()
+        self.seat('a1', usd='100', position='50', order='50')
+        self.broker.set_quote(event(), '.50', '.52')
+        self.book = self.new_book()
+        self.book.limits['a1'] = Limits(D(50), D(50))
+        out = self.book.submit([self.intent('a1', event(), 'buy', '5')])[0]
+        self.assertEqual(out.status, 'refused')
+        self.assertIn('startup reconciliation', out.detail)
+        self.assertEqual(self.broker.submitted, [])
+        self.assertTrue(self.book.reconcile().ok)
+        self.assertIsNone(self.book.frozen)
+        self.assertEqual(self.book.submit([self.intent('a1', event(), 'buy', '5')])[0].status, 'filled')
+
+    def test_restart_cannot_clear_an_existing_cash_mismatch(self):
+        self.book.reconcile()
+        self.seat('a1', usd='100', position='50', order='50')
+        self.broker.set_quote(event(), '.50', '.52')
+        self.book.submit([self.intent('a1', event(), 'buy', '5')])
+        self.broker.cash -= D(1)
+        self.assertFalse(self.book.reconcile().ok)
+        self.book = self.new_book()
+        self.book.limits['a1'] = Limits(D(50), D(50))
+        self.assertEqual(self.book.submit([self.intent('a1', event(), 'buy', '5')])[0].status, 'refused')
+        self.assertFalse(self.book.reconcile().ok)
+        self.assertIn('cash differs', self.book.frozen)
+        self.broker.cash += D(1)
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_startup_pending_check_still_permits_a_position_reducing_exit(self):
+        self.book.reconcile()
+        self.seat('a1', usd='100', position='50', order='50')
+        self.broker.set_quote(event(), '.50', '.52')
+        self.book.submit([self.intent('a1', event(), 'buy', '5')])
+        self.book = self.new_book()
+        self.book.limits['a1'] = Limits(D(50), D(50))
+        self.assertEqual(self.book.submit([self.intent('a1', event(), 'sell', '5')])[0].status, 'filled')
+        self.assertEqual(self.book.account('a1').holdings, {})
+
     def test_a_real_book_will_not_open_over_orders_it_did_not_send(self):
         from ltcm.broker import OrderIntent
 
