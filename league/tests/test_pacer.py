@@ -189,6 +189,13 @@ if __name__ == "__main__":
 
 
 class Catching(HouseCase):
+    def test_catch_up_never_lengthens_an_accelerated_research_interval(self):
+        self.house.behind_the_clock = lambda kind: True
+        for minutes in (10, 15, 30, 60):
+            with self.subTest(minutes=minutes):
+                self.house.game['research']['min_hours_between'] = minutes / 60
+                self.assertLessEqual(self.house.research_interval_hours(), minutes / 60)
+
     def expedition(self, **kw):
         today = __import__("league.ledger", fromlist=["now_iso"]).now_iso(self.clock)[:10]
         self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={"start": today, "days": 10, "sail_usd": "50", "openai_usd": "50", **kw})
