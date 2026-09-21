@@ -168,9 +168,11 @@ later ticks. Stopped spending permits culling but no longer buys automatic birth
 180-second thread trace diagnoses future stalls without extending or fabricating health.
 
 At 8:24 PM, the experiment archive contained 36 trials. Hawkins-3 completed a seven-turn Luna
-session in 60.889 seconds, including one replay, for a $0.039028 gateway estimate. Its summary
-reported a passing historical candidate; the archive and adoption receipts must corroborate
-that claim. Faster summaries that merely repeat impossibility claims are counted separately
+session in 60.889 seconds, including one replay, for a $0.039028 gateway estimate. Ledger trial
+34211 confirms the historical pass: 36 trades, 38 blocks, DSR 0.8114 and six lineage trials.
+Strategy receipts 34221–34222 confirm adoption of the tested program. Its replay records zero
+maker fees; actual fills, applicable fees and forward behavior remain to be validated.
+Faster summaries that merely repeat impossibility claims are counted separately
 from new trials. Research context now clarifies that lack of child-endowment funding does not
 forbid candidate submission, and an agent may change strategy style within its assigned
 venue, horizon and specialty. Long journal summaries carry their recorded cost and trial count.
@@ -182,3 +184,56 @@ adds bounded architect-proposed questions, a two-hour feature freeze, and a thre
 on later unseen events. See the [design and accounting](../design/2026-09-20-typesafe-pilot.md).
 Runtime acceptance of this follow-up remains pending. Label probabilities are research inputs;
 neither confidence nor a favorable historical replay authorizes a trade or promotion.
+
+The follow-up is [PR #32](https://github.com/bwoods1998/long-term-capital-management/pull/32),
+merged as `7be707e`. Full Python 3.11/3.14 CI and all 123 gateway tests pass. Researchers receive
+their own failure classifications plus relevant market-series labels, with the exact question
+definitions identified by a digest. The designer sees the repository game separately from the
+temporary runtime overlay; an earlier proposal had confused those two sources. The autonomous
+teacher independently merged [PR #31](https://github.com/bwoods1998/long-term-capital-management/pull/31),
+requiring descendants' repeated replay results to be distinguished from independent confirmation.
+
+Live Jev acceptance completed 156 market packets for $0.011716, with no unconfirmed requests.
+Twelve queued pre-activation examples were explicitly classified to seed development; they
+are excluded from forward prediction scoring. Astra then proposed four additional semantic
+questions for $0.308275 in round 1: alternative game-result peers, threshold ladders using the
+same observation, sports-statistic cutoffs, and unrelated event peers. All were validated and
+retained. This proves proposal and classification execution, not predictive usefulness.
+
+The gateway proposal ceiling was raised from 12 to 96 per UTC day to accommodate the accelerated
+roles. No role gains additional write paths or bypasses CI. Worker version
+`b25e7ab3-1b77-4eac-8cef-a25835572043` carries this setting, the $20 Jev cap and $300 OpenAI
+monthly ceiling. The stricter immutable research windows still govern paid calls.
+
+## Overnight funding and decision criteria
+
+At 8:36 PM Pacific, Sail reported **$74.59**. A **$25 Sail top-up** provides headroom for its
+remaining incremental allowance and operating reserve. Ensure **$250 available OpenAI credit**
+and **$20 available Jev credit** to fully back their planned limits; existing balances count.
+Only Sail's balance is available here. The gateway's OpenAI/Jev counters are internal estimates,
+not those providers' prepaid balances. No additional Alpaca/Kalshi funding or paid data service
+is required to start this run. The current foundation still disables new live allocations.
+
+The run should produce a route comparison, retained candidate/admission history, forward
+paper outcomes, a frozen Jev-feature comparison when enough unseen events exist, and measured
+architect proposals/failures. More summaries, births or spending alone do not satisfy acceptance.
+Jev's entire $20 is authorized for useful distinct evidence; available input volume may spend
+less. No synthetic padding or repeated identical requests are used to empty the account.
+
+The five highest-value next decisions are:
+
+1. **Improve the observations that can falsify strategies.** Rank missing market depth, trades,
+   source documents and timestamped catalyst data by the hypotheses they would unlock. Buy a
+   small coverage trial with an explicit acceptance test before an ongoing subscription.
+2. **Measure execution before scaling capital.** Compare replay and paper fill assumptions with
+   bounded live execution only after the recorded funding transition, qualification and audit.
+   Include fees, queue uncertainty and exit behavior in the comparison.
+3. **Select research by new information.** Distinguish changed programs and hypotheses from
+   identical returns on inherited tapes; preserve all lineage trials and test diverse controls.
+   Allocate more compute to verified improvements and useful disproofs.
+4. **Evaluate semantic features as experiments.** Retain or discard Jev question sets according
+   to untouched prediction results and downstream research usefulness, including latency and
+   cost. Expand to additional text sources only when their availability is recorded honestly.
+5. **Close the architect's engineering loop.** Measure proposal → tests → deployment → runtime
+   outcome. Give the architect precise failure evidence and bounded ways to fix missing harness
+   capabilities; do not count prose lessons or proposed services as implemented tools.
