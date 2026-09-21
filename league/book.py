@@ -509,6 +509,15 @@ class Book:
                             'instrument': key, 'baseline_quantity': text(quantity), 'detected_at': at,
                             'reason': 'a negative baseline offsets this agent\'s holding; ownership and forward marks require repair',
                         }
+            # A receipt-backed repair (`accounting.repair_paper_phantoms`) clears exactly what it repaired.
+            for repair in p.get("repairs") or []:
+                issues = self._evidence_issues.get(repair["agent"], {})
+                issues.pop(repair["instrument"], None)
+                if not issues:
+                    self._evidence_issues.pop(repair["agent"], None)
+                self._accounting_corrections.setdefault(repair["agent"], []).append(
+                    {"at": at, "repaired": repair["instrument"], "receipt": repair.get("broker_order_id"),
+                     "evidence": "history before this repair is excluded from scoring"})
         elif kind == "book.settle":
             account = self._account(agent)
             instrument = Instrument.from_dict(p["instrument"])
@@ -1758,8 +1767,9 @@ class Book:
 
     def _reconcile(self) -> Reconciliation:
         if True:
-            from .accounting import repair_legacy_kalshi_fills
+            from .accounting import repair_legacy_kalshi_fills, repair_paper_phantoms
             repair_legacy_kalshi_fills(self)
+            repair_paper_phantoms(self)
             venue_cash, venue_positions = self._venue()
             self.venue_cash = venue_cash
             cash, positions, instruments = self._ledger_totals()

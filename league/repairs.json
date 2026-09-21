@@ -1,0 +1,8 @@
+[
+  {
+    "book": "alpaca-paper",
+    "agent": "haghani",
+    "broker_order_id": "99af7736-536a-4970-bdf2-1805281f7ff1",
+    "why": "haghani's resting AVAX exit (4.204425711 at 9.82, submitted 03:46:45 UTC Sept 20) filled at 06:31:50 while its record was lost; the 07:02 hand adoption wrote the units as a negative baseline. Identified by the watch of Sept 21, 2026 from the venue's order list; quantity matches haghani's holding and the baseline to the last unit."
+  }
+]
