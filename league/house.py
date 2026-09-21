@@ -2263,7 +2263,13 @@ class House:
         if not book.evidence_integrity(agent.id)['ok']:
             return 0.0, 0
         growth = [float(r['log_growth']) for r in rows]
-        active = sum(1 for r in rows if r.get('active'))
+        # A daily block is worth as many observations as the constitution's own screen says: it
+        # asks 15 hourly or 5 daily blocks, so a day counts three. Counted one for one, a daily desk
+        # up 1.4% on two days lost the whole performance share to an hourly one up 0.15% on thirty
+        # (Sept 21, 2026), and needed five days to be ranked at all.
+        paper = CONSTITUTION['ladder']['paper']
+        per_day = max(1, int(paper['min_active_blocks']) // int(paper.get('min_active_blocks_day', paper['min_active_blocks'])))
+        active = sum((per_day if r.get('horizon', agent.horizon) == 'day' else 1) for r in rows if r.get('active'))
         # A day's return is not compared with an hour's return as though their clocks matched.
         hours = sum(24 if r.get('horizon', agent.horizon) == 'day' else 1 for r in rows)
         rate = sum(growth) / hours if hours else 0.0
