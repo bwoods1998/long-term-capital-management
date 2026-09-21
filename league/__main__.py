@@ -17,6 +17,8 @@ and the gateway's kill switch stands behind it.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import faulthandler
 import json
 import os
 import signal
@@ -29,6 +31,19 @@ from .service import REPO, build, load_config
 
 #: What a canary founds: one agent per venue family is enough to exercise every path.
 CANARY_SEEDS = ["crypto-reversion", "favorites-maker"]
+
+
+@contextmanager
+def slow_tick_trace(root):
+    """Capture blocked thread stacks before the watchdog acts; never fabricate health."""
+    path = Path(root) / 'slow-tick.log'
+    with path.open('a') as trace:
+        path.chmod(0o600)
+        faulthandler.dump_traceback_later(180, file=trace)
+        try:
+            yield
+        finally:
+            faulthandler.cancel_dump_traceback_later()
 
 
 def table(house) -> dict:
@@ -110,7 +125,8 @@ def main(argv=None) -> int:
             while not stopping["now"] and not stop_file.exists():
                 started = time.time()
                 try:
-                    summary = house.tick()
+                    with slow_tick_trace(root):
+                        summary = house.tick()
                     print(json.dumps({k: summary[k] for k in ("at", "woke", "orders", "deaths", "reconciled", "budget")}, default=str), flush=True)
                 except Exception as exc:  # noqa: BLE001 - the loop outlives any one tick
                     house.alert("error", f"tick failed: {type(exc).__name__}: {str(exc)[:300]}")

@@ -216,6 +216,9 @@ class Researcher:
             for entry in self.ledger.iter(kinds="agent.research", agent=name):
                 p = entry.payload
                 text = p.get("text") if p.get("tool") == "journal" else (p.get("summary") if p.get("tool") == "summary" else None)
+                if text and len(str(text).strip()) >= 20 and p.get('tool') == 'summary':
+                    text = (f"Recorded model cost ${p.get('cost_usd', 'unknown')}; {p.get('trials', 0)} replay tool trials. "
+                            f"Agent conclusion (unverified): {text}")
                 if text and len(str(text).strip()) >= 20:  # "done" is not a memory
                     rows.append({"at": entry.at, "by": name, "text": str(text).strip()[:chars]})
         return rows[-entries:]

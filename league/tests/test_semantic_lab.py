@@ -6,9 +6,11 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from league.ledger import Ledger
 from league.semantic_lab import SemanticLab, MODEL, questions
+from league.frontier import Answer
 
 
 class Semantics(unittest.TestCase):
@@ -120,3 +122,42 @@ class Semantics(unittest.TestCase):
         with self.lab.db() as db:
             db.execute('UPDATE semantic_tasks SET finished=? WHERE observed=?',(self.now+1,start))
         self.assertEqual(self.lab.markouts(self.now+1)['forward_labeled_rows'],0)
+
+    def test_evolution_preserves_baseline_questions_and_never_reads_the_holdout(self):
+        from league.semantic_lab import FEATURES
+        start=self.now
+        self.lab.burst={'id':'test','started':start}
+        self.lab.batch_size=20
+        for i in range(13):
+            self.lab.enqueue('market','event-'+str(i),start-60 if i<12 else start+7201,'source',
+                             {'market':{'title':'development' if i<12 else 'HOLDOUT SECRET'},'sample':i})
+        with patch('league.semantic_lab.time.sleep',lambda _:None):self.lab.run()
+        value={'questions':{
+            'event_identity':{'type':'noul','instructions':'Does the supplied text uniquely identify the event?'},
+            'official_source':{'type':'noul','instructions':'Does the supplied text identify an official resolution source?'}},
+            'hypothesis':'Explicit source labels may distinguish ambiguous contracts.',
+            'acceptance':'Compare frozen added features on later unseen events.'}
+        calls=[]
+        def propose(**kwargs):
+            calls.append(kwargs)
+            return Answer(json.dumps(value),Decimal('.02'),{'input_tokens':100,'output_tokens':100},'gpt-6-astra')
+        self.lab.proposer=SimpleNamespace(ask=propose)
+        self.lab.evolve();self.lab.evolve()
+        self.assertEqual(len(calls),1)
+        self.assertNotIn('HOLDOUT SECRET',calls[0]['user'])
+        self.assertEqual(set(self.lab.market_questions()),set(FEATURES)|set(value['questions']))
+        self.assertEqual(self.lab.stats()['question_evolution'][0]['status'],'completed')
+        self.now=start+7200
+        self.lab.evolve();self.assertEqual(len(calls),1)
+
+    def test_question_proposals_cannot_replace_baseline_or_smuggle_execution_settings(self):
+        good={'questions':{
+            'one':{'type':'noul','instructions':'Does the contract specify an official publication?'},
+            'two':{'type':'noul','instructions':'Is the event identity distinguishable from its peers?'}},
+            'hypothesis':'A falsifiable semantic hypothesis.', 'acceptance':'Score on untouched later observations.'}
+        self.lab.validate_proposal(good)
+        for field,value in [('type','code'),('instructions','too short'),('max_output_tokens',10000)]:
+            changed=json.loads(json.dumps(good));changed['questions']['one'][field]=value
+            with self.subTest(field=field),self.assertRaises(ValueError):self.lab.validate_proposal(changed)
+        changed=json.loads(json.dumps(good));changed['questions']['continuous_threshold']=changed['questions'].pop('one')
+        with self.assertRaises(ValueError):self.lab.validate_proposal(changed)

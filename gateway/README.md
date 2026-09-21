@@ -114,11 +114,12 @@ unconfirmed write is an order until reconciliation says otherwise.
 `POST /v1/typesafe/systemone` uses the Worker secret `TYPE_SAFE_TOKEN`. It admits only the
 versioned `jev-1.13.0`, inline text/JSON state, and 1–16 explicit choice/noul questions. The
 request body is limited to 64 KiB. This is an experiment interface; the trading and release
-loops do not consume its answers.
+loops do not act on its answers. The shared lab supplies fallible classifications to research
+context and evaluates them separately against future observations.
 
-The external gate has a **$10 lifetime allowance and 100,000 accepted calls**, expiring with the
-current foundation phase. These counters never reset by day, month or deployment. A retained
-$10 `foundation-review` campaign reservation must back the allowance before enabling it. This
+The external gate has a **$20 lifetime allowance and 500,000 accepted calls**, expiring at
+**2026-09-21 11:01:16.977 UTC**. These counters never reset by day, month or deployment. Retained
+$20 `foundation-review` campaign reservations back the allowance. This
 is a cross-provider pilot earmark from that existing research allocation, not an OpenAI bill
 or an addition to the phase budget. Keep that reservation until the route has expired or is
 closed and its provider bill is reconciled. `/v1/health.typesafe` reports Jev usage separately.
@@ -139,7 +140,9 @@ shape is not evidence that a decision is correct. Source: [TypeSafe models](http
 ## The frontier month
 
 `POST /v1/frontier/responses` forwards one call to `https://api.openai.com/v1/responses` with
-`OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$100** a UTC calendar month, starting at zero).
+`OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$300** a UTC calendar month). Existing monthly
+spend remains counted when the configured cap increases; the House's immutable campaign
+allowance is an additional restriction.
 A call is priced twice. Before it leaves, at its worst case: every byte of the request as input at
 one byte per token plus framing, at the long-context ceiling, every allowed output token used; that much is reserved, and a call whose
 worst case does not fit in what is left of the month is a `402` with `cap: frontier_month`. After

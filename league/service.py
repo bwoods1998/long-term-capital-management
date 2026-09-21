@@ -164,7 +164,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if campaigns is not None and campaigns.burst():
         from .semantic_lab import JevClient, SemanticLab
         house.semantic_lab = SemanticLab(root, JevClient(gateway_url, token), house.ledger,
-                                         active=campaigns.running, clock=house.clock)
+                                         active=campaigns.running, clock=house.clock,
+                                         proposer=frontier, burst=campaigns.burst())
     if house.researcher is not None and campaigns is not None:
         from .fast_research import FastResearch, ResearchRouter, MODEL as RESEARCH_MODEL, load_routes
 
