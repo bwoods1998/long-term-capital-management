@@ -114,6 +114,21 @@ def parse_time(value: Any) -> float:
     return moment.timestamp()
 
 
+def _quote_time(value: Any) -> str | None:
+    """Alpaca's RFC 3339 quote time (nanoseconds allowed) as UTC ISO with microseconds, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$", value.strip())
+    if not match:
+        return None
+    try:
+        moment = datetime.fromisoformat(match.group(1) + "." + (match.group(2) or "0")[:6].ljust(6, "0")
+                                        + ("+00:00" if match.group(3) == "Z" else match.group(3)))
+    except ValueError:
+        return None
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def iso(ts: float) -> str:
     """Epoch seconds as `2026-09-10T13:35:00Z`."""
     return datetime.fromtimestamp(float(ts), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -369,6 +384,11 @@ class AlpacaData:
                 bid, ask = _float(row.get("bp")), _float(row.get("ap"))
                 if bid is not None and ask is not None and 0.0 < bid <= ask:
                     out[name] = {"bid": bid, "ask": ask}
+                    # When the venue quoted it. A strategy that refuses a stale touch needs this:
+                    # without it every options agent refused every underlying (Sept 21, 2026).
+                    stamp = _quote_time(row.get("t"))
+                    if stamp:
+                        out[name]["t"] = stamp
         return {name: out[name] for name in names if name in out}
 
     # -------------------------------------------------------------------- tape
