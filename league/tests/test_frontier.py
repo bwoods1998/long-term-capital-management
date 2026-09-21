@@ -139,6 +139,12 @@ class RequestShape(unittest.TestCase):
 
 
 class ReadingTheAnswer(unittest.TestCase):
+    def test_incomplete_but_parseable_answer_is_paid_and_cannot_be_a_proposal(self):
+        answer = frontier(FakeOpener(ok('{"answer":"partial"}', status='incomplete'))).ask(system='s', user='u', agent='a')
+        self.assertGreater(answer.cost_usd, 0)
+        with self.assertRaisesRegex(FrontierError, 'no partial proposal'):
+            answer.json()
+
     def test_cost_usage_model_and_text(self):
         answer = frontier(FakeOpener(ok("hello", cost="0.0421"))).ask(system="s", user="u", agent="a")
         self.assertIsInstance(answer, Answer)

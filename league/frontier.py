@@ -45,9 +45,12 @@ class Answer:
     cost_usd: Decimal
     usage: dict[str, Any]
     model: str
+    status: str = 'completed'
 
     def json(self) -> dict[str, Any]:
         """The first JSON object in the answer. Raises FrontierError when there is none."""
+        if self.status != 'completed':
+            raise FrontierError(f'the model response is {self.status}; no partial proposal is accepted')
         return extract_json(self.text)
 
 
@@ -151,4 +154,5 @@ class Frontier:
                     self.spend_guard.settle(commitment, max(confirmed, bounded))
             except InvalidOperation:
                 pass  # unknown costs retain the full hold, including across restarts
-        return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model))
+        return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model),
+                      str(payload.get('status') or 'completed'))

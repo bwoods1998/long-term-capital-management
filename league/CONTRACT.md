@@ -35,6 +35,8 @@ The House validates effective parameters before a birth, adoption or historical 
 structural refusal adds no selection trial. Reading a candidate's module in the sealed probe
 still costs box time. Existing historical records are preserved, and `runtime_status` reports
 the current configuration's errors; repair a legacy configuration by proposing a new candidate.
+An empty rung-0 agent may adopt a valid parameter-only repair with unchanged decision logic and
+NEEDS after a failed replay. It stays on rung 0 and retains its trial history; repair does not qualify it.
 
 Standard names have units: Kalshi `bid_min`, `bid_max`, `no_bid_min`, `no_bid_max`,
 `yes_bid_min`, `yes_bid_max`, `underdog_ask_max` and `max_spread` lie in [0, 1]. RSI thresholds
