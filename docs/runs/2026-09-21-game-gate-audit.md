@@ -63,6 +63,10 @@ evaluation. Jev labels cannot promote agents or authorize orders. The burst rema
 $250 OpenAI + $75 Sail, with $20 of separately backed Jev allowance. These are ceilings, not
 invoices or evidence of positive ROI.
 
+Architect, designer and other role packets now include the actual ladder, remaining experiment
+time, live-pilot state and specific promotion holds. They are asked to seek new forward evidence
+within that window without forcing unprofitable turnover or counting repeated backtests as learning.
+
 At 05:04 UTC, production reported 48 living agents, 354 completed research sessions, 72 archived
 trials (all with manifests), 13 historical passes, and all four books unfrozen. Jev had 19,387
 completed market classifications and 797 research classifications, with about $1.995 of known
