@@ -22,6 +22,7 @@ def main(argv=None):
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--enable', help='Explicit account-owner authorization identity.')
     action.add_argument('--disable', action='store_true', help='Revoke new live entries, keeping exits available.')
+    action.add_argument('--ratify', help='Keep this grant, same capital, under revised money rules.')
     args = parser.parse_args(argv)
     command = ['/workspace/.venv/bin/python', '-c',
         "import os,sys; os.environ['LEAGUE_ENV']='/workspace/.env'; sys.path.insert(0,'/workspace/current'); "
@@ -30,11 +31,13 @@ def main(argv=None):
         command += ['--enable', args.enable]
     elif args.disable:
         command += ['--disable']
+    elif args.ratify:
+        command += ['--ratify', args.ratify]
     api, box = client(), require_box(read_state())
     result = api.exec(box, command, timeout=60, on_output=None)
     result.check()
     print(result.stdout)
-    if args.enable and (json.loads(result.stdout).get('live_trading') or {}).get('active'):
+    if (args.enable or args.ratify) and (json.loads(result.stdout).get('live_trading') or {}).get('active'):
         result = api.exec(box, ['sh', '/workspace/restart.sh'], timeout=45, on_output=None)
         result.check()
         print(result.stdout)

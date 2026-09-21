@@ -130,10 +130,26 @@ class PersistentAuthorization(PhaseCase):
         with patch.dict(LEGACY_GRANT_DIGESTS, {legacy: '0' * 64}):
             self.assertFalse(guard.live_trading()['active'])
 
-    def test_the_pre_revision_grant_carries_over(self):
-        """The Sept 21 grant pinned the whole pre-revision constitution; its money rules are unchanged."""
+    def test_the_pre_revision_grant_needs_the_owner_after_the_fast_lane(self):
+        """The fast lane (Sept 21 ~22:30 UTC) changed money rules, so the grant recorded before it is
+        not carried over silently: the owner ratifies it (`ratify_live_trading`)."""
         from league.constitution import LEGACY_GRANT_DIGESTS, money_digest
-        self.assertEqual(LEGACY_GRANT_DIGESTS['bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1'], money_digest())
+        self.assertNotEqual(LEGACY_GRANT_DIGESTS['bfdbbf8567205153a18eed023819e9bf52e5d989dae5d113d60fd5c1a1e5fad1'], money_digest())
+
+    def test_the_owner_ratifies_a_grant_under_revised_money_rules_without_new_capital(self):
+        guard, _ = self.expired()
+        live = guard.activate_live_trading('earned', CAPITAL)
+        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=3):
+            self.assertFalse(guard.live_trading()['active'])
+            with self.assertRaises(CampaignClosed):
+                guard.ratify_live_trading('someone-else')
+            ratified = guard.ratify_live_trading('earned')
+            self.assertTrue(ratified['active'])
+            self.assertEqual(ratified['policy']['venue_capital_usd'], live['policy']['venue_capital_usd'])
+            self.assertEqual(guard.db.execute('SELECT COUNT(*) FROM live_ratifications').fetchone()[0], 1)
+        guard.revoke_live_trading()
+        with self.assertRaises(CampaignClosed):
+            guard.ratify_live_trading('earned')
 
     def test_exhausted_or_unhealthy_research_cannot_be_reopened(self):
         guard, _ = self.expired()

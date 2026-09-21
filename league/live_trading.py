@@ -66,17 +66,20 @@ def main(argv=None):
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--enable', help='Account-owner authorization identity; enables persistent trading.')
     action.add_argument('--disable', action='store_true', help='Revoke new live entries; keep exits and accounting.')
+    action.add_argument('--ratify', help='Account-owner: keep this grant, same capital, under revised money rules.')
     args = parser.parse_args(argv)
     if not (args.root / 'campaigns.sqlite').is_file():
         parser.error('an existing campaign database is required')
     guard = CampaignBudget(args.root / 'campaigns.sqlite')
     try:
         live = guard.live_trading()
-        capital = live['policy']['venue_capital_usd'] if live else None if args.disable else read_venue_capital()
+        capital = live['policy']['venue_capital_usd'] if live else None if (args.disable or args.ratify) else read_venue_capital()
         if args.enable:
             guard.activate_live_trading(args.enable, capital)
         elif args.disable:
             guard.revoke_live_trading()
+        elif args.ratify:
+            guard.ratify_live_trading(args.ratify)
         print(json.dumps(report(guard, prepared_capital=capital), indent=2))
     finally:
         guard.close()

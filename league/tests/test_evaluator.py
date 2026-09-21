@@ -694,20 +694,20 @@ class Judge(EvalCase):
     def test_fewer_than_ten_closed_trades_holds_and_the_tenth_unlocks(self):
         self.ev.seat("a", 1, "test")
         self.stake("a", 200, at())
-        self.trades("a", [2.0, -1.0, 2.0, -1.0, 2.0, -1.0, 2.0, -1.0, 2.0])
+        self.trades("a", [2.0, -1.0, 2.0, -1.0])  # the fast lane (Sept 21, 2026): five closed trades, not ten
         for i in range(1, 31):
             self.block("a", 0.006 if i % 3 else -0.001)
             if i in (20, 25, 30):
                 verdict = self.ev.judge("a", "paper")
         self.assertGreater(verdict.numbers["lcb"], 0)
-        self.assertEqual(verdict.numbers["trades"], 9)
+        self.assertEqual(verdict.numbers["trades"], 4)
         self.assertEqual(verdict.decision, "hold")
-        self.assertIn("9 closed trades", verdict.reason)
+        self.assertIn("4 closed trades", verdict.reason)
         self.trades("a", [-1.0])
         for _ in range(5):
             self.block("a", 0.006)
         verdict = self.ev.judge("a", "paper")
-        self.assertEqual((verdict.numbers["trades"], verdict.decision), (10, "eligible"))
+        self.assertEqual((verdict.numbers["trades"], verdict.decision), (5, "eligible"))
 
     def test_trades_from_before_the_rung_do_not_count_toward_the_minimum(self):
         self.stake("a", 200, at())
@@ -1372,7 +1372,7 @@ class Screen(EvalCase):
         super().setUp()
         self.ev = Evaluator(self.ledger)  # the real constitution
         self.assertEqual(CONSTITUTION["ladder"]["paper"],
-                         {"gate": "screen", "min_active_blocks": 15, "min_active_blocks_day": 5, "max_drawdown": 0.15})
+                         {"gate": "screen", "min_active_blocks": 6, "min_active_blocks_day": 2, "max_drawdown": 0.15})
 
     def run_blocks(self, growth, *, trades=12, judge_at=None):
         self.ev.seat("a", 1, "test")
@@ -1399,9 +1399,9 @@ class Screen(EvalCase):
         self.assertEqual((verdict.numbers["tested_death"], verdict.numbers["alpha_death"]), (False, None))
 
     def test_no_look_before_fifteen_active_blocks(self):
-        verdict = self.run_blocks([0.004] * 14)
+        verdict = self.run_blocks([0.004] * 5)
         self.assertEqual(verdict.decision, "hold")
-        self.assertIn("next look is at 15", verdict.reason)
+        self.assertIn("next look is at 6", verdict.reason)
         self.assertEqual(self.looks("a"), [])
 
     def test_growth_at_or_below_zero_does_not_clear_it(self):
@@ -1419,9 +1419,9 @@ class Screen(EvalCase):
         self.assertIn("drawdown", verdict.reason)
 
     def test_fewer_than_ten_closed_trades_holds(self):
-        verdict = self.run_blocks([0.004] * 15, trades=9)
+        verdict = self.run_blocks([0.004] * 15, trades=4)
         self.assertEqual(verdict.decision, "hold")
-        self.assertIn("9 closed trades", verdict.reason)
+        self.assertIn("4 closed trades", verdict.reason)
 
     def test_paper_still_kills(self):
         verdict = self.run_blocks([-0.004 if i % 3 else 0.001 for i in range(20)])
@@ -1454,7 +1454,7 @@ class Screen(EvalCase):
     def test_a_daily_strategy_clears_the_screen_on_five_blocks_not_fifteen(self):
         # A block is a calendar day for a daily strategy: fifteen of them is longer than the whole
         # expedition, so no daily agent could ever reach real money inside one.
-        growth = [0.004 if i % 2 == 0 else -0.003 for i in range(5)]
+        growth = [0.004, -0.003]  # the fast lane (Sept 21, 2026): two daily blocks, six hourly
         self.ev.seat("a", 1, "test")
         self.stake("a", 200, at())
         self.mixed_trades("a", n=12)
@@ -1462,14 +1462,14 @@ class Screen(EvalCase):
             self.block("a", g)
             verdict = self.ev.judge("a", "paper", horizon="day")
         self.assertEqual(verdict.decision, "eligible")
-        self.assertIn("5 active day blocks", verdict.reason)
-        self.assertEqual(self.ev._gate_blocks(1, "day"), 5)
-        self.assertEqual(self.ev._gate_blocks(1, "hour"), 15)
+        self.assertIn("2 active day blocks", verdict.reason)
+        self.assertEqual(self.ev._gate_blocks(1, "day"), 2)
+        self.assertEqual(self.ev._gate_blocks(1, "hour"), 6)
 
     def test_an_hourly_strategy_is_not_let_through_on_five(self):
         verdict = self.run_blocks([0.004 if i % 2 == 0 else -0.003 for i in range(5)])
         self.assertEqual(verdict.decision, "hold")
-        self.assertIn("next look is at 15", verdict.reason)
+        self.assertIn("next look is at 6", verdict.reason)
 
     def test_the_conventional_micro_route_requires_five_blocks_of_either_kind(self):
         self.assertEqual((self.ev._gate_blocks(2, "day"), self.ev._gate_blocks(2, "hour")), (5, 5))

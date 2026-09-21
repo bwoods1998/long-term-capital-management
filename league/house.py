@@ -1101,6 +1101,18 @@ class House:
             verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
             if verdict.decision != 'eligible':
                 self._promotion_status(agent, verdict, 'evidence', verdict.reason)
+            fall = (CONSTITUTION["ladder"].get("micro_demotion") or {}).get("max_loss")
+            if verdict.decision not in ("die", "eligible") and rung == 2 and fall:
+                # The fast lane: a live micro agent down this much since promotion goes back to paper.
+                import math
+                rows = self.evaluator.blocks(agent.id, since_seq=self.evaluator._rung_entered(agent.id), book=book.name)
+                change = math.exp(max(sum(float(r["log_growth"]) for r in rows), -700.0)) - 1.0
+                if rows and change <= -float(fall):
+                    demoted = self.evaluator.demote(agent.id, f"down {-change:.1%} on real money since promotion; "
+                                                    f"micro-real keeps no agent down {float(fall):.0%}: back to paper to earn it again",
+                                                    {"change": change, "blocks": len(rows)})
+                    self._move_books(agent, book)
+                    return demoted
             if verdict.decision not in ("die", "eligible") and rung >= 2:
                 drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
                 if drift.decision == "demote":

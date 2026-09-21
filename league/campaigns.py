@@ -77,6 +77,8 @@ class CampaignBudget:
                 ends REAL NOT NULL, policy TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS live_trading(id TEXT PRIMARY KEY, started REAL NOT NULL,
                 policy TEXT NOT NULL, revoked REAL);
+            CREATE TABLE IF NOT EXISTS live_ratifications(id TEXT NOT NULL, at REAL NOT NULL,
+                old_policy TEXT NOT NULL, new_policy TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS topups(id TEXT PRIMARY KEY, at REAL NOT NULL, kind TEXT NOT NULL,
                 amount INTEGER NOT NULL, note TEXT NOT NULL);
         """)
@@ -111,6 +113,30 @@ class CampaignBudget:
     def live_authorization(self) -> dict[str, Any] | None:
         # Even a revoked grant retains its capital accounting; disabling cannot erase losses.
         return self.live_trading() or self.live_pilot()
+
+    def ratify_live_trading(self, ident: str) -> dict[str, Any]:
+        """Account-owner action: keep an existing grant under revised MONEY rules. The same identity,
+        the same capital allocation (never more), re-pinned to the current `money_digest`; the old
+        policy is kept in `live_ratifications`. A revoked grant stays revoked."""
+        from .live_trading import policy
+        with self.lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                row = self.db.execute('SELECT * FROM live_trading').fetchone()
+                if row is None or row['id'] != ident:
+                    raise CampaignClosed('no live grant with that identity to ratify')
+                if row['revoked'] is not None:
+                    raise CampaignClosed('a revoked grant cannot be ratified')
+                old = json.loads(row['policy'])
+                new = canonical(policy(old['venue_capital_usd']))
+                if new != row['policy']:
+                    self.db.execute('INSERT INTO live_ratifications VALUES(?,?,?,?)', (ident, self.clock(), row['policy'], new))
+                    self.db.execute('UPDATE live_trading SET policy=? WHERE id=?', (new, ident))
+                self.db.execute('COMMIT')
+            except BaseException:
+                self.db.execute('ROLLBACK')
+                raise
+        return self.live_trading()
 
     def activate_live_trading(self, ident: str, venue_capital: Mapping[str, Any]) -> dict[str, Any]:
         """Account-owner action. Persistent ladder access; no provider or capital replenishment."""
