@@ -166,6 +166,33 @@ class ParameterAdmission(HouseCase):
         self.assertEqual(agent.params['bid_min'], .9)
         self.assertEqual(self.house.ledger.last('agent.research').payload['status'], 'not_adopted')
 
+    def test_legacy_parameter_repair_stays_unqualified_and_preserves_evidence(self):
+        agent = self.legacy()
+        generation = self.house._generation(agent.id)
+        before_credit = self.house.economy.balance(agent.id)
+        self.house.ledger.append('eval.trial', {'passed': False, 'trades': 0}, agent=agent.id)
+        candidate = {'code': BINARY, 'needs': agent.needs, 'params': {**agent.params, 'bid_min': .9, 'bid_max': .97},
+                     'passed': False, 'purpose': 'repair invalid probabilities', 'numbers': {'trades': 0}}
+        out = SimpleNamespace(candidate=candidate, consulted='')
+        self.assertIsNone(self.house._commit_research(agent.id, generation, out))
+        repaired = self.house.registry.get(agent.id)
+        self.assertEqual(repaired.params['bid_min'], .9)
+        self.assertEqual(repaired.code, BINARY)
+        self.assertEqual(self.house.evaluator.rung(agent.id), 0)
+        self.assertEqual(self.house.ledger.count(kinds='eval.trial', agent=agent.id), 1)
+        self.assertEqual(self.house.ledger.count(kinds='eval.verdict', agent=agent.id), 0)
+        self.assertEqual(self.house.economy.balance(agent.id), before_credit)
+
+    def test_a_failed_repair_cannot_change_decision_logic(self):
+        agent = self.legacy()
+        old = dict(agent.params)
+        candidate = {'code': BINARY.replace("'memory': {}", "'memory': {'changed': True}"),
+                     'needs': agent.needs, 'params': {**old, 'bid_min': .9, 'bid_max': .97},
+                     'passed': False, 'purpose': 'not just a repair', 'numbers': {'trades': 0}}
+        self.house._commit_research(agent.id, self.house._generation(agent.id), SimpleNamespace(candidate=candidate, consulted=''))
+        self.assertEqual(self.house.registry.get(agent.id).params, old)
+        self.assertFalse(parameters.same_logic(BINARY, BINARY.replace("'bid_min': 0.9", "'bid_min': probe()")))
+
     def test_refill_tries_a_valid_parent_after_an_invalid_one(self):
         invalid = self.legacy()
         valid = self.house.spawn('healthy', 'test', BINARY)

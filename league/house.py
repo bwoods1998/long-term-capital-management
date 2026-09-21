@@ -1767,6 +1767,9 @@ class House:
                     'reason': 'invalid parameters: ' + '; '.join(errors), '_candidate': candidate}, agent=agent.id)
                 return None
         barren = self.idle_run(agent)["barren"]
+        repair = bool(candidate and rung == 0 and not parameters.inspect(agent.params, agent.needs)['valid']
+                      and self.record_is_empty(agent) and candidate['needs'] == agent.needs
+                      and parameters.same_logic(agent.code, candidate['code']))
         if candidate is not None and not candidate.get("passed", True):
             # A failed replay buys nothing -- unless the agent is in the one position where replay
             # cannot help it. Measured Sept 20, 2026: the six agents of the sports desk each saw up
@@ -1777,10 +1780,10 @@ class House:
             # to protect and no position in hand, a file that at least TRADES is worth more than
             # one that provably does nothing, and the paper screen is what stands above it.
             traded = float(candidate.get("numbers", {}).get("trades") or 0) > 0
-            if not (traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
+            if not repair and not (traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
                 candidate = None
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
-            candidate = {**candidate, "purpose": "Merton wrote this file for it: " + candidate["purpose"]}
+            candidate = {**candidate, "purpose": "A specialist wrote this file for it: " + candidate["purpose"]}
         if candidate:
             if rung == 0 or (rung == 1 and self.record_is_empty(agent)):
                 # Empty paper records can restart in place. A real-money identity always forks
@@ -1790,6 +1793,12 @@ class House:
                 self.registry.adopt(agent.id, code=candidate["code"], needs=candidate["needs"], params=candidate["params"], reason=candidate["purpose"])
                 self._state["tried"][agent.id] = self.registry.get(agent.id).code_sha256
                 self._state["idle"].pop(agent.id, None)  # new rules, a fresh count of the wakes they sit out
+                if repair and not candidate.get('passed', True):
+                    self.ledger.append('agent.research', {'tool': 'parameter_repair', 'status': 'adopted',
+                        'reason': 'invalid configuration repaired with unchanged decision logic; replay did not qualify',
+                        'rung': 0, 'passed_replay': False, 'prior_code_sha256': was,
+                        'code_sha256': self.registry.get(agent.id).code_sha256}, agent=agent.id)
+                    return None  # preserve rung, trial history, credits and all qualification gates
                 if rung == 0:
                     self.evaluator.promote(agent.id, 1, "its new code passed replay against every trial in its own line", candidate["numbers"])
                 else:

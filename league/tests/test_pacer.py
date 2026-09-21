@@ -463,7 +463,7 @@ class IdleHands(HouseCase):
                                  SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}),
                                  {"idle": {"why_now": "nine wakes and nothing done"}, "rewrites_in_place": True})
         self.assertIn("an eligible candidate can replace your rules after this pass", free)
-        self.assertIn("On rung 0 it MUST pass replay", free)
+        self.assertIn("On rung 0 a strategy MUST pass replay to qualify", free)
         self.assertIn("Submitting a replay is not adoption", free)
         self.assertNotIn("WHY YOU ARE AWAKE", Researcher._state(SimpleNamespace(journal=lambda _: [], specialty=None),
                                                                 SimpleNamespace(id="a1", family="f", niche="n", generation=1, code="x", params={}), {}))

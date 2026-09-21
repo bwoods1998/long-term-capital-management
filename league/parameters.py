@@ -7,6 +7,7 @@ assessment of whether a strategy will trade, whether its data suffices, or wheth
 from __future__ import annotations
 
 from copy import deepcopy
+import ast
 import math
 import random
 from typing import Any, Mapping
@@ -126,6 +127,28 @@ def require_valid(params, needs=None):
     errors = inspect(params, needs)['errors']
     if errors:
         raise ValueError('invalid parameters: ' + '; '.join(errors))
+
+
+def same_logic(before: str, after: str) -> bool:
+    """A repair may change literal PARAMS and comments, never decision code or NEEDS."""
+    def normalized(code):
+        tree = ast.parse(code)
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'PARAMS' for t in node.targets):
+                if len(node.targets) != 1 or not isinstance(ast.literal_eval(node.value), dict):
+                    raise ValueError('only a literal parameter dictionary can be repaired')
+        tree.body = [node for node in tree.body if not (
+            isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name) and node.targets[0].id == 'PARAMS')]
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
+                    node.body.pop(0)
+        return ast.dump(tree, include_attributes=False)
+    try:
+        return normalized(before) == normalized(after)
+    except (SyntaxError, ValueError, TypeError, RecursionError):
+        return False
 
 
 def mutate(params: Mapping[str, Any], *, seed: str, scale: float = 0.2,

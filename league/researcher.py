@@ -50,6 +50,9 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
     {"name": "ask_merton", "description": "Hire Merton, the firm's theorist, to think about YOUR problem. He is the frontier model that writes the firm's strategies and audits every candidate for real money, and he is EXPENSIVE: this costs many times a research pass, out of your own credits, and hiring follows your rung's activity, credit and cooldown rules. He is shown everything you know (your file, your journal, your trades, your replays, your specialty) and answers with advice or with a whole strategy file you can then `replay`. Ask when you are stuck or when your idea may be structurally dead, not for a parameter.",
      "parameters": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}},
+    {"name": "research_grant", "description": "Request one House-funded specialist call for an untraded research/paper family. Use after replay_coverage or a replay in this pass, when there is a specific blocker or new falsifiable hypothesis. Supply the question, hypothesis and acceptance check. It costs no agent credits; family/niche receives only one grant per campaign, including all descendants. The floor has twelve grants, with a $0.75 reservation ceiling each. It writes proposed code for normal replay, never trading capital or qualification.",
+     "parameters": {"type": "object", "properties": {k: {"type": "string"} for k in ("question", "hypothesis", "acceptance_check")},
+                    "required": ["question", "hypothesis", "acceptance_check"]}},
     {"name": "replay", "description": "Run candidate strategy code through the mechanical replay over recorded history. It is COUNTED AS A TRIAL against your lineage, and costs sandbox seconds. Code that PASSES is kept for the House to adopt or fork when this pass ends (the House stakes a child if you cannot). A later failed trial cannot discard a passing file. If you are on PAPER, your OWN rules have not fired for hours and you have no record to protect, code that merely TRADES on the tape can replace yours in place, failed verdict and all: a strategy that never acts cannot be measured, and paper is then the test. Give the complete strategy file and what you changed and why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "purpose": {"type": "string"}}, "required": ["code", "purpose"]}},
     {"name": "finish", "description": "End this research pass with one or two sentences on what you concluded.",
@@ -106,6 +109,7 @@ class Researcher:
         may_continue: Callable[[Agent], str] | None = None,
         capabilities: Callable[[Agent], Mapping[str, Any]] | None = None,
         coverage: Callable[..., Mapping[str, Any]] | None = None,
+        grants: Any = None,
     ):
         self.ledger = ledger
         self.provider = provider
@@ -126,6 +130,7 @@ class Researcher:
         self.house_budget = house_budget
         self.jobs, self.may_continue, self.capabilities = jobs, may_continue, capabilities
         self.coverage = coverage
+        self.grants = grants
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -146,7 +151,10 @@ class Researcher:
             "Your standing's runtime_capabilities and runtime_status describe the deployed House: check them before treating an "
             "old journal or library note about missing infrastructure as current. Preflight proposed inputs with replay_coverage(needs=...) "
             "before spending a replay to diagnose data. One unsupported symbol does not establish that a whole feed is absent. "
-            "A tool request answered as blocked is still unimplemented. All model turns cost credits, including abstention. End with `finish`."
+            "A tool request answered as blocked is still unimplemented. If you have never traded and a concrete blocker or "
+            "new hypothesis needs specialist help, inspect replay_coverage then use research_grant once; it is House-funded "
+            "and does not require trading history. This is separate from earned ask_merton access. "
+            "Your own model turns cost credits, including abstention. End with `finish`."
         )
 
     def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
@@ -163,7 +171,9 @@ class Researcher:
                "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
                "end this pass with the same rules you started it with.\n"
                + ("You have no record to protect, so an eligible candidate can replace your rules after this pass without a fork.\n"
-                  "On rung 0 it MUST pass replay. Only an empty PAPER record with enough barren wakes may accept a failed\n"
+                  "On rung 0 a strategy MUST pass replay to qualify. A parameter-only repair of an invalid configuration\n"
+                  "may be adopted after a failed replay with unchanged decision logic/NEEDS; it stays on rung 0.\n"
+                  "Only an empty PAPER record with enough barren wakes may accept another failed\n"
                   "candidate that at least trades; the House checks those conditions. Submitting a replay is not adoption.\n"
                   "Make the change large enough to answer a concrete question, and report its actual replay verdict.\n"
                   if standing.get("rewrites_in_place") else "") + "\n"
@@ -381,8 +391,14 @@ class Researcher:
                     save()  # write the intent before any side effect
                     result = {'error': call['error']} if call['error'] else self._execute(agent, call['name'], call['arguments'], out, session)
                     out.calls.append(call['name'])
+                    # Complete specialist strategy files must survive the tool receipt. Cutting
+                    # serialized JSON at 12k corrupted precisely the artifact we paid to obtain.
+                    limit = 100000 if call['name'] in ('research_grant', 'ask_merton') else 12000
+                    encoded = json.dumps(result, default=str)
+                    if len(encoded) > limit and call['name'] in ('research_grant', 'ask_merton'):
+                        encoded = json.dumps({'error': 'specialist answer exceeded the bounded tool receipt; no truncated code delivered'})
                     conversation.append({'type': 'function_call_output', 'call_id': call['call_id'],
-                                         'output': json.dumps(result, default=str)[:12000]})
+                                         'output': encoded[:limit]})
                     state['finished'] = state['finished'] or call['name'] == 'finish'
                     state['call_index'] += 1
                     state['stage'] = 'tools'
@@ -506,6 +522,24 @@ class Researcher:
             return {"saved": True, "note": "you will be shown this at the start of every pass from now on"}
         if name == "ask_merton":
             return self._consult(agent, str(args.get("question") or ""), out, session)
+        if name == "research_grant":
+            if self.grants is None:
+                return {'error': 'startup research grants are not configured'}
+            if self.house_budget is not None and not self.house_budget():
+                return {'error': 'the current House research budget is closed'}
+            if not {'replay_coverage', 'replay'}.intersection(out.calls):
+                return {'error': 'inspect replay_coverage or run a replay in this pass before requesting a grant'}
+            evidence = self.consult_evidence(agent)
+            evidence['record']['rung'] = self.rung(agent.id) if self.rung else 0
+            reply = self.grants.request(agent, args, evidence, session=session, contract=self.contract)
+            code = reply.get('code') or ''
+            if code:
+                try:
+                    check_code(code)
+                except CodeRefused as exc:
+                    return {**reply, 'code': None, 'note': f'proposed grant code refused: {exc}'}
+                out.consulted = code
+            return reply
         if name == "web_search":
             self.economy.charge(agent.id, SEARCH_CHARGE_USD, "web search", detail={"query": str(args.get("query"))[:200]})
             return self.commons.web_search(str(args.get("query") or ""))

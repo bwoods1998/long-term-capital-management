@@ -174,6 +174,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .merton import Merton as _Merton
 
         house.researcher.merton = house.merton or _Merton(frontier, None, house.ledger, evidence=lambda role: {})
+        if campaigns is not None:
+            from .grants import ResearchGrants
+
+            house.researcher.grants = ResearchGrants.funded(root / 'grants.sqlite', gateway_url, token,
+                house.ledger, campaigns, clock=house.clock)
     if provider is not None:
         house.budget = Budget(house.ledger, lambda: provider.check_balance())
     if not canary and REPO.parent.name == "releases" and not local_sandbox:

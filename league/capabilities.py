@@ -59,7 +59,7 @@ def describe(agent, settings, niche, *, clock=time.time, alpaca=False, kalshi=Fa
     return {
         'as_of': now_iso(clock), 'revision': revision(),
         'parameters': {**inspect_parameters(agent.params, agent.needs),
-            'note': 'Invalid configurations are refused for new births, adoption and replay. Existing records remain intact; propose a validated candidate through research. House mutations change one bounded numeric knob. Unknown knobs are frozen until NEEDS.parameter_rules declares their bounds. Structural validity is not evidence of an edge.'},
+            'note': 'Invalid configurations are refused for new births, adoption and replay. An empty rung-0 agent may repair invalid parameters through research with unchanged decision logic/NEEDS even after a failed replay; it stays on rung 0 and retains every trial. House mutations change one bounded numeric knob. Unknown knobs are frozen until NEEDS.parameter_rules declares their bounds. Structural validity is not evidence of an edge.'},
         'scope': {'agent': agent.id, 'venue': agent.venue, 'horizon': agent.horizon},
         'authority': 'Current House implementation and configuration. Older journals/library notes may describe earlier releases. Support does not establish data coverage or profitability.',
         'replay': {
