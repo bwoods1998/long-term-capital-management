@@ -70,6 +70,32 @@ class CleaningTest(unittest.TestCase):
 
 
 class PublisherTest(HouseCase):
+    def test_ladder_checkpoint_has_recorded_moves_and_does_not_endorse_tainted_pnl(self):
+        from unittest.mock import patch
+
+        agent = self.seated()
+        self.house.tick()
+        publisher = self.publisher(FakeSite())
+        row = publisher.checkpoint(self.house)["desks"][0]
+        self.assertIsNone(row["gate"]["evidence"]["lifecycle"]["last_move"], "initial seating is not a performance promotion")
+        self.assertTrue(row["gate"]["evidence"]["accounting_ok"])
+        # This fixture has only fake brokers. It tests the public projection, not eligibility.
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.house.evaluator.demote(agent.id, "fixture drift")
+        book = self.house.book_of(agent)
+        with patch.object(book, "evidence_integrity", return_value={"ok": False}):
+            row = publisher.checkpoint(self.house)["desks"][0]
+        evidence = row["gate"]["evidence"]
+        self.assertFalse(evidence["accounting_ok"])
+        self.assertEqual(evidence["lifecycle"]["born_at"], agent.born_at)
+        self.assertEqual(evidence["lifecycle"]["last_move"]["decision"], "demote")
+        self.assertEqual(evidence["lifecycle"]["last_move"]["from_rung"], 2)
+        self.assertEqual(evidence["lifecycle"]["last_move"]["to_rung"], 1)
+        self.house.registry.died(agent.id, "fixture death")
+        row = publisher.checkpoint(self.house)["desks"][0]
+        self.assertEqual(row["gate"]["evidence"]["lifecycle"]["died_at"], agent.died_at)
+        self.assertEqual(row["gate"]["evidence"]["lifecycle"]["cause"], "fixture death")
+
     def publisher(self, site, tape="test"):
         return Publisher(
             "https://blakewoods.us", lambda: "t" * 40, Path(self.dir.name) / "publish.json", tape=tape, opener=site, clock=self.clock,
