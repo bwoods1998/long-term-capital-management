@@ -41,6 +41,40 @@ def validate(p):
         raise ValueError('a learning experiment needs a question and acceptance criteria')
 
 
+TURBO_RANGES = {'research_minutes': (3, 180), 'research_workers': (1, 32), 'replay_workers': (1, 12),
+                'newcomer_seconds': (60, 3600), 'max_population': (12, 64), 'luna_fraction': (0, 1)}
+
+
+def load_turbo():
+    """The owner's acceleration on top of a funded burst (`turbo.json`); {} when absent."""
+    try:
+        value = json.loads(Path(__file__).with_name('turbo.json').read_text())
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for name, (low, high) in TURBO_RANGES.items():
+        if name in value:
+            v = value[name]
+            if type(v) not in (int, float) or not math.isfinite(v) or not low <= v <= high:
+                raise ValueError('invalid turbo '+name)
+            out[name] = v
+    if 'sail_profile' in value:
+        if value['sail_profile'] not in ('pro_flex', 'pro_asap'):
+            raise ValueError('invalid turbo sail_profile')
+        out['sail_profile'] = value['sail_profile']
+    return out
+
+
+def policy_with_turbo(burst):
+    """The burst's policy with the owner's acceleration applied (the stored record is untouched)."""
+    p = dict(burst['policy'])
+    turbo = load_turbo()
+    for name in ('research_minutes', 'research_workers', 'replay_workers', 'newcomer_seconds', 'max_population', 'luna_fraction'):
+        if name in turbo:
+            p[name] = turbo[name]
+    return p
+
+
 def active(guard, clock):
     burst = guard.burst() if guard is not None else None
     live = guard.live_trading() if guard is not None else None
@@ -53,8 +87,8 @@ def game_for(base, burst):
     game = deepcopy(base)
     if not burst:
         return game
-    p = burst['policy']
-    validate(p)
+    validate(burst['policy'])
+    p = policy_with_turbo(burst)
     e = game['economy']
     # Changing the payout clock must not shorten paper opportunity or the old hard replay deadline.
     grace = float(e.get('displace_after_epochs', 2)) * float(e['epoch_seconds'])
@@ -66,6 +100,8 @@ def game_for(base, burst):
              endowment_usd='2.00', fork_threshold_usd='2.00')
     research = game['research']
     research.update(min_hours_between=p['research_minutes'] / 60, max_turns=12)
+    if load_turbo().get('sail_profile'):
+        research['profile'] = load_turbo()['sail_profile']
     research.setdefault('idle', {})['min_hours_between'] = p['research_minutes'] / 60
     game['merton']['schedule_hours'].update(operator=.25, toolsmith=.5, architect=.5, teacher=1, designer=1)
     # Faster frontier access is for WINNERS only. A losing agent keeps the base game's wait:

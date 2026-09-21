@@ -130,8 +130,10 @@ class House:
         self._burst = active(campaigns, clock)
         self.game = game_for(self._base_game, self._burst)
         if self._burst:
-            self.settings.research_workers = self._burst['policy']['research_workers']
-            self.settings.slow_workers = self._burst['policy']['replay_workers']
+            from .overnight import policy_with_turbo
+            accelerated = policy_with_turbo(self._burst)
+            self.settings.research_workers = accelerated['research_workers']
+            self.settings.slow_workers = accelerated['replay_workers']
         self.ledger = Ledger(self.root / "ledger.sqlite", clock=clock)
         from .experiments import Experiments
         from .recordings import Recorder
