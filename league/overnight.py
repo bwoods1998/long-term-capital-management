@@ -68,7 +68,8 @@ def game_for(base, burst):
     research.update(min_hours_between=p['research_minutes'] / 60, max_turns=12)
     research.setdefault('idle', {})['min_hours_between'] = p['research_minutes'] / 60
     game['merton']['schedule_hours'].update(operator=.25, toolsmith=.5, architect=.5, teacher=1, designer=1)
-    game['consult']['cooldown_hours_by_rung'] = {'1': 1, '2': .5, '3': .25}
+    # Faster frontier access is for WINNERS only. A losing agent keeps the base game's wait:
+    # Sept 21, 2026, losing paper agents hired Merton hourly (hilibrand-2 $7, huang-7 $9.69).
     game['consult']['profitable_cooldown_hours_by_rung'] = {'1': .5, '2': .25, '3': .25}
     from .economy import check_bounds
     check_bounds(game)

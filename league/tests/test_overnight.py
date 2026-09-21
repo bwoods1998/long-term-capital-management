@@ -99,6 +99,12 @@ class BurstGame(HouseCase):
             self.assertEqual(tuned['economy'][field]*3600, base['economy'][field]*21600)
         self.assertEqual(tuned['economy']['newcomer_seconds'], 600)
 
+    def test_faster_frontier_access_is_for_winners_only(self):
+        base = load_game()
+        game = game_for(load_game(), {'policy': load_policy()})
+        self.assertEqual(game['consult']['cooldown_hours_by_rung'], base['consult']['cooldown_hours_by_rung'])
+        self.assertLess(game['consult']['profitable_cooldown_hours_by_rung']['1'], base['consult']['profitable_cooldown_hours_by_rung']['1'])
+
     def test_twice_the_evidenced_growth_earns_eight_times_the_performance_share(self):
         game=game_for(load_game(), {'policy':load_policy()})
         economy=Economy(self.house.ledger,game,clock=self.clock)
