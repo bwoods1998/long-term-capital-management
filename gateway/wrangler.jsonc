@@ -53,12 +53,15 @@
     "MAX_ORDER_USD_ALPACA": "75",
     "MAX_DAY_USD": "4000",
     "MAX_DAY_ORDERS": "2000",
-    // The frontier model's month, in dollars. The owner raises it when the return earns it.
-    "FRONTIER_MONTH_USD": "300",
+    // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
+    // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
+    "FRONTIER_MONTH_USD": "174",
     // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
     "TYPESAFE_PILOT_USD": "20",
     "TYPESAFE_PILOT_END": "2026-09-21T11:01:16.977Z",
+    // Continue unused original allowance after the owner resumed the game. No resets or refills.
+    "TYPESAFE_PERSISTENT": "true",
     // Dollars per million tokens: input, cached input, output. A model absent here is refused.
     // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
     // cache-write rate, the dearest an input token can be, so the meter errs high.
