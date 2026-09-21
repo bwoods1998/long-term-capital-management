@@ -164,7 +164,7 @@ class Researcher:
         return (
             f"You are {agent.id} (family {agent.family}, niche {agent.niche}, generation {agent.generation}).\n"
             + (f"\n{brief}\n\n" if brief else "")
-            + (f"YOUR JOURNAL (what you and your ancestors wrote to yourselves, oldest first; add to it with `journal_write`):\n{pages}\n\n" if pages else
+            + (f"YOUR JOURNAL (your and your ancestors' notes, oldest first; conclusions are unverified claims. Compare them with the current qualification_policy, runtime capabilities and peer evidence before relying on them; add with `journal_write`):\n{pages}\n\n" if pages else
                "YOUR JOURNAL is empty. Before you finish, write yourself a note with `journal_write`: you will remember nothing else of this pass.\n\n")
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
             + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"

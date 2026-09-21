@@ -32,9 +32,39 @@ on new live capital. No additional account funding is required to diagnose these
    existing refill path favors parameter mutations and does not retry that deferred candidate.
    Durable, evidence-linked admission is the next investigation.
 
-The screen and opportunity fixes pass 134 focused evaluator/lifecycle tests and the league
-content checks locally. Full CI and runtime acceptance are pending. No constitution thresholds,
-campaign limits, balances or historical ledger records were changed by these fixes.
+The screen and opportunity fixes shipped in [PR #25](https://github.com/bwoods1998/long-term-capital-management/pull/25).
+All 1,331 league tests pass locally. GitHub CI passes on Python 3.11 and 3.14, including the
+retained runtime suite, gateway tests and content checks. Runtime acceptance is pending.
+No constitution thresholds, campaign limits, balances or historical ledger records were changed.
+
+## Admission and research-context repair
+
+The admission queue folds the existing append-only research ledger, including earlier deferred
+receipts with saved session generations. A qualifying child gets priority over an untested mutation
+at the existing newcomer cadence. Admission still respects population/niche limits, paper grace,
+profitable and live incumbents, parent identity and endowment cadence. Candidate validation runs
+in the sealed sandbox before displacement. Status and reason appear in health; source stays private.
+An interrupted lifecycle write is retained as unconfirmed and is not automatically repeated.
+
+The harness itself supplied the misleading “five to nine tries” claim in its rules prompt.
+That claim is removed. Research receives the actual per-horizon paper screen, the absence of a
+fixed replay count cutoff, and up to three recorded peer passes with artifact references.
+Journal conclusions are explicitly unverified. This supplies counterevidence without claiming
+peer success proves profitability or allowing a new identity to erase its inherited trials.
+
+## Advisory readiness reviews
+
+Fresh Astra reviews of the consistent 6:55 PM snapshot cost $0.708188 in gateway tariff estimates.
+These are advisory artifacts, not production audit decisions or permission to change funding.
+Hilibrand-2's accounting and bounded $25 experiment received approval, with concerns about
+correlated positions and live maker execution. Haghani was vetoed because the packet did not
+describe safe exits above the $10 entry cap. Inspection found that `Book.check` already exempts
+verified position-reducing sells and labels them as exits for the gateway. The audit packet needs
+that enforcement evidence before this objection can be assessed accurately.
+
+Read-only account checks found existing cash sufficient for bounded experiments: approximately
+$500 on each venue. Funding is not the present bottleneck. The foundation still blocks new live
+allocation; changing that requires an explicit, recorded policy transition and verified limits.
 
 Private snapshots and the SQLite baseline are retained outside the repository; they include
 account information and agent source. This report publishes the conclusions, not credentials
