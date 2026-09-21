@@ -250,6 +250,26 @@ class CostAndRow(AuditorCase):
 
 
 class Packet(AuditorCase):
+    def test_research_feedback_includes_owned_pre_submission_refusals_on_the_current_book(self):
+        from league.auditor import order_outcomes
+
+        refused = {'book': 'kalshi', 'intent_id': 'same-id', 'instrument': {'symbol': 'KXXRP15M'},
+                   'reasons': ['9.00 exceeds the 7.50 market cap', '9.00 exceeds the 6.25 cohort cap']}
+        self.ledger.append('book.refused', refused, agent=self.agent.id)
+        self.ledger.append('book.refused', {**refused, 'intent_id': 'other'}, agent='other-agent')
+        self.ledger.append('book.refused', {**refused, 'book': 'kalshi-shadow'}, agent=self.agent.id)
+        self.ledger.append('book.order', {'book': 'kalshi', 'order_id': 'same-id', 'status': 'filled',
+                                        'shares': [{'agent': self.agent.id}]}, agent='house')
+        rows = order_outcomes(self.ledger, self.agent.id, 'kalshi')
+        self.assertEqual(len(rows), 2, 'an intent id and venue order id occupy separate namespaces')
+        self.assertEqual(rows[0]['status'], 'refused')
+        self.assertNotIn('order_id', rows[0])
+        self.assertFalse(rows[0]['submitted_to_venue'])
+        self.assertEqual(rows[0]['reason'], '; '.join(refused['reasons']))
+        self.assertEqual(rows[1]['status'], 'filled')
+        self.assertEqual(order_outcomes(self.ledger, self.agent.id, 'kalshi', limit=1), rows[-1:])
+        self.assertEqual(order_outcomes(self.ledger, self.agent.id, 'kalshi', limit=0), [])
+
     def fill_ledger(self):
         book, agent = "kalshi-shadow", self.agent.id
         inst = {"asset_class": "event", "symbol": "KXBTC-26SEP2013-T64000", "right": "no", "venue": "kalshi"}

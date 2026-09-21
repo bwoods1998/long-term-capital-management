@@ -514,7 +514,7 @@ class KalshiBroker:
         row = payload.get("order") if isinstance(payload, dict) and "order" in payload else payload
         if not isinstance(row, dict):
             raise UnknownOutcome("kalshi submit: unreadable response; reconcile before retrying")
-        return self.parse_order(row, intent=intent)
+        return self.parse_order(row, intent=intent, v2_create=self.order_api == "v2")
 
     def orders(self, *, status: "str | None" = None, limit: int = 200) -> list[Order]:
         """`GET /portfolio/orders`. `status` is `resting`, `canceled` or `executed`."""
@@ -705,9 +705,9 @@ class KalshiBroker:
         }
 
     # --------------------------------------------------------------- parsing
-    def parse_order(self, row: dict[str, Any], *, intent: "OrderIntent | None" = None) -> Order:
+    def parse_order(self, row: dict[str, Any], *, intent: "OrderIntent | None" = None, v2_create: bool = False) -> Order:
         ticker = str(row.get("ticker") or (ticker_of(intent.instrument) if intent else "")).upper()
-        leg = str(row.get("outcome_side") or row.get("side") or "yes").lower()
+        leg = str(row.get("outcome_side") or row.get("side") or (contract_side(intent.instrument) if intent else "yes")).lower()
         if leg not in ("yes", "no"):
             leg = "yes"
         instrument = (
@@ -717,11 +717,12 @@ class KalshiBroker:
         )
         client_order_id = str(row.get("client_order_id") or (intent.id if intent else ""))
         field = "no_price" if leg == "no" else "yes_price"
-        limit_price = dec(row.get(field + "_dollars")) or dollars_from_cents(row.get(field))
-        filled = dec(row.get("fill_count_fp")) or dec(row.get("fill_count")) or money(0)
-        remaining = dec(row.get("remaining_count_fp")) or dec(row.get("remaining_count"))
+        limit_price = _wire_money(row, field)
+        filled = _first_decimal(row, "fill_count_fp", "fill_count", default=money(0))
+        remaining = _first_decimal(row, "remaining_count_fp", "remaining_count")
         initial = (
-            dec(row.get("initial_count_fp"))
+            (intent.quantity if v2_create and intent is not None else None)
+            or dec(row.get("initial_count_fp"))
             or dec(row.get("initial_count"))
             or (filled + remaining if remaining is not None else None)
             or (intent.quantity if intent else filled)
@@ -730,13 +731,30 @@ class KalshiBroker:
         if raw_status:
             status = STATUS_MAP.get(raw_status, "unknown")
         else:
-            # The v2 create response has no status; a full fill is the only terminal outcome
-            # it can report inline.
-            status = "filled" if remaining == 0 and filled > 0 else "accepted"
-        fees = (
-            (dec(row.get("taker_fees_dollars")) or money(0))
-            + (dec(row.get("maker_fees_dollars")) or money(0))
-        )
+            # IOC remaining_count is final after cancellation, including partial/zero fills.
+            status = ("filled" if filled >= initial and filled > 0 else "cancelled") if remaining == 0 else "accepted"
+        fees = (_wire_money(row, "taker_fees") or money(0)) + (_wire_money(row, "maker_fees") or money(0))
+        average = None
+        costs = [_wire_money(row, key) for key in ("taker_fill_cost", "maker_fill_cost")]
+        if filled:
+            if v2_create:
+                # The V2 create response quotes the YES book in DOLLARS, including for a
+                # NO intent. Its fee is per contract. GET uses cumulative leg cost instead.
+                average = dec(row.get("average_fill_price"))
+                if average is not None and leg == "no":
+                    average = money(1) - average
+                average_fee = dec(row.get("average_fee_paid"))
+                fees = average_fee * filled if average_fee is not None else None
+            elif all(cost is not None for cost in costs):
+                average = sum(costs, money(0)) / filled
+                if any(_wire_money(row, key) is None for key in ('taker_fees', 'maker_fees')):
+                    fees = None
+            else:
+                average = _wire_money(row, "average_fill_price")
+            # A limit is not an execution receipt. Leave incomplete acknowledgements open
+            # for polling instead of inventing a price or assuming an omitted fee is zero.
+            if fees is None:
+                average = None
         order = Order(
             id="ord-" + client_order_id[3:] if client_order_id.startswith("oi-") else
                ("ord-" + client_order_id if client_order_id else "ord-" + str(row.get("order_id") or "")),
@@ -752,14 +770,30 @@ class KalshiBroker:
             venue=self.venue,
             broker_order_id=str(row.get("order_id") or "") or None,
             filled_quantity=filled,
-            average_price=(dec(row.get("average_fill_price_dollars")) or dollars_from_cents(row.get("average_fill_price")) or limit_price) if filled else None,
-            fees=fees,
+            average_price=average,
+            fees=fees if fees is not None else money(0),
             submitted_at=_stamp(row.get("created_time")) or iso(self.clock()),
             updated_at=_stamp(row.get("last_update_time") or row.get("created_time")),
             reason=message_of(row) if status == "rejected" else None,
         )
-        order._raw = {"status": row.get("status")}
+        order._raw = {"status": row.get("status"), "receipt_accounting": bool(
+            not v2_create and filled and all(cost is not None for cost in costs)
+            and all(_wire_money(row, key) is not None for key in ("taker_fees", "maker_fees")))}
         return order
+
+
+def _first_decimal(row: dict[str, Any], *keys: str, default=None):
+    """Explicit zero is authoritative, not an invitation to use a legacy fallback."""
+    for key in keys:
+        value = dec(row.get(key))
+        if value is not None:
+            return value
+    return default
+
+
+def _wire_money(row: dict[str, Any], field: str):
+    dollars = dec(row.get(field + "_dollars"))
+    return dollars if dollars is not None else dollars_from_cents(row.get(field))
 
 
 def _action_of(row: dict[str, Any], intent: "OrderIntent | None", leg: "str | None" = None) -> str:

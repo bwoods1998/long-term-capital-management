@@ -9,15 +9,22 @@ from decimal import Decimal, InvalidOperation
 
 
 def completed(ledger, agent, book, *, since_seq=0, until_seq=None):
+    from .accounting import evidence_cutoffs
+    since_seq = max(since_seq, evidence_cutoffs(ledger, agent).get(book, 0))
     positions, episodes = {}, []
     cash_balance = Decimal(0)
     known_balance = True
     cycle = None
-    for entry in ledger.iter(kinds=('book.stake', 'book.fill', 'book.settle'), agent=agent):
+    for entry in ledger.iter(kinds=('book.stake', 'book.fill', 'book.settle', 'book.fill_correction'), agent=agent):
         if until_seq is not None and entry.seq > until_seq:
             break
         p = entry.payload
         if p.get('book') != book:
+            continue
+        if entry.kind == 'book.fill_correction':
+            cash_balance += Decimal(p['cash_delta'])
+            if cycle is not None:
+                cycle['valid'] = False
             continue
         if entry.kind == 'book.stake':
             try:

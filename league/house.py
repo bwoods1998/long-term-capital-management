@@ -170,6 +170,7 @@ class House:
                 name, broker, self.ledger, fees=Fees(family_of(name)), real_money=real, clock=clock,
                 market_open=market_hours, kill_switch=kill_switch,
                 resolves_at=self._resolves_at if family_of(name) == "kalshi" else None,
+                event_capital_budget=(lambda venue=family_of(name): self._event_capital_budget(venue)) if family_of(name) == 'kalshi' else None,
             )
         self._state_path = self.root / "house.json"
         self._state = self._load_state()
@@ -218,9 +219,12 @@ class House:
         # first fill would be folded into the baseline and come back as a mismatch.)
         for name, book in self.books.items():
             try:
-                book.open_baseline()
+                if book.real_money:
+                    book.reconcile()  # repair/check receipts before health, agent wakes or sizing
+                else:
+                    book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
-                self.alert("warning", f"{name}: could not take its baseline at start ({type(exc).__name__}: {str(exc)[:160]})")
+                self.alert("warning", f"{name}: could not initialize venue accounting ({type(exc).__name__}: {str(exc)[:160]})")
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
@@ -439,6 +443,12 @@ class House:
         self.economy.charge(agent, cost, "sandbox seconds", detail={"seconds": round(run.seconds, 2), "for": note})
 
     # ------------------------------------------------------------------ books
+    def _event_capital_budget(self, venue: str) -> Decimal | None:
+        """Read an existing explicit venue envelope; never activate or enlarge one."""
+        authorization = self.campaigns.live_authorization() if self.campaigns else None
+        limits = (authorization or {}).get('policy', {}).get('venue_capital_usd') or {}
+        return Decimal(limits[venue]) if venue in limits else None
+
     def book_of(self, agent: Agent) -> Book | None:
         rung = self.evaluator.rung(agent.id)
         if rung >= 2 and REAL_BOOK[agent.venue] in self.books:
@@ -498,6 +508,7 @@ class House:
 
     def snapshot(self, agent: Agent, book: Book) -> dict[str, Any]:
         """Everything a strategy sees, as plain data (floats: the box converts nothing back)."""
+        from .auditor import order_outcomes
         needs = agent.needs
         account = book.account(agent.id)
         limits = book.limits.get(agent.id) or self._limits(1, agent)
@@ -513,6 +524,7 @@ class House:
             "fees": {"crypto_taker": 0.0025, "crypto_maker": 0.0015, "kalshi_taker_rate": 0.07},
             "positions": [],
             "open_orders": [],
+            "recent_order_outcomes": order_outcomes(self.ledger, agent.id, book.name),
         }
         for holding in account.holdings.values():
             inst = holding.instrument
@@ -570,6 +582,14 @@ class House:
                 if busiest:
                     ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}", 120, lambda: self._markets(busiest, hours, age))
                     ctx["note"] = "None of the series your strategy names has a market open inside your window, so these are the busiest live series of your specialty."
+        if agent.venue == 'kalshi':
+            ctx['event_risk'] = book.event_risk(agent.id, (row['market'] for row in ctx['markets']))
+            caps = [value for key, value in ctx['event_risk'].items() if key.endswith('_cap_usd') and value is not None]
+            if caps:
+                # These are upper bounds on a fresh entry. Per-market remaining capacity
+                # accounts for existing holdings and other agents' pending orders below them.
+                for key in ('max_position_usd', 'max_order_usd'):
+                    ctx['limits'][key] = min(ctx['limits'][key], *caps)
         return ctx
 
     # ------------------------------------------------------------------- wake
@@ -1416,6 +1436,18 @@ class House:
         revised = bool(current and last.payload.get('policy_digest') != current)
         short = bool(last.payload.get('error')) or revised
         hours = float(rules.get("error_cooldown_hours", 0.5) if short else rules.get("cooldown_hours", 72))
+        if self._burst and not short:
+            # A full day is a duplicate-request backoff, not a requirement to ignore fresh
+            # forward outcomes. The evaluator must still qualify the agent, and a NEW audit
+            # must approve it. Repeated reads or partial exits do not create observations.
+            from .episodes import completed
+            book = self.book_of(agent)
+            if book is not None and book.evidence_integrity(agent.id)['ok']:
+                new_episodes = completed(self.ledger, agent.id, book.name, since_seq=last.seq)
+                new_blocks = self.evaluator.blocks(agent.id, since_seq=last.seq, book=book.name)
+                if (len(new_episodes) >= int(CONSTITUTION['ladder']['completed_exposures']['look_every_episodes'])
+                        or sum(bool(row.get('active')) for row in new_blocks) >= int(CONSTITUTION['ladder']['look_every_active_blocks'])):
+                    return None
         due = _epoch(last.at) + hours * 3600
         if self.clock() >= due:
             return None
@@ -1604,6 +1636,13 @@ class House:
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
         last = max(float(self._state["last_research"].get(agent.id) or 0), self.research_jobs.last_finished(agent.id))
+        # A new execution failure is actionable evidence. Give it one prompt response,
+        # retaining the provider budget, earned-credit and durable-job checks above.
+        refusal = self.ledger.last('book.refused', agent=agent.id)
+        book = self.book_of(agent)
+        if (refusal is not None and book is not None and refusal.payload.get('book') == book.name
+                and _epoch(refusal.at) > last and self.clock() - last >= 60):
+            return True
         return self.clock() - last >= self.research_interval_hours(agent) * 3600
 
     def idle_run(self, agent: Agent) -> dict[str, int]:
@@ -1749,15 +1788,16 @@ class House:
         return 0.5 if self.behind_the_clock("openai") else 1.0
 
     def research_interval_hours(self, agent: Agent | None = None) -> float:
-        """How long an agent waits between research passes. The game file's number, halved (never
-        under an hour) while today's Sail spending is running behind the clock: the owner wants
+        """How long an agent waits between research passes. Long intervals are halved down to
+        an hour while today's Sail spending is behind; faster configured intervals stay fast.
+        The owner wants
         the expedition's budget used, and an allowance still unspent at noon is research not done.
         An agent that cannot act at all waits the idle interval instead -- it has nothing else to
         spend its time on, and every wake it sits out is a wake it did not learn from."""
         base = float((self.game.get("research") or {}).get("min_hours_between", 6))
         if agent is not None and self.idle_reason(agent):
             base = min(base, float((self.game.get("research") or {}).get("idle", {}).get("min_hours_between", 1)))
-        return max(1.0, base / 2) if self.behind_the_clock("sail") else base
+        return min(base, max(1.0, base / 2)) if self.behind_the_clock("sail") else base
 
     def _research_if_due(self, agent: Agent) -> Any:
         """Recheck after waiting for a research worker: a queued job owns no budget or seat."""
@@ -1863,6 +1903,11 @@ class House:
                           'min_closed_trades': ladder['min_closed_trades']},
                 'micro': dict(ladder['micro']),
                 'completed_exposures': dict(ladder.get('completed_exposures') or {}),
+                'audit_reconsideration': {**self.game.get('audit', {}),
+                    'fresh_evidence_instead_of_cooldown': bool(self._burst),
+                    'fresh_completed_episodes': ladder['completed_exposures']['look_every_episodes'],
+                    'fresh_active_blocks': ladder['look_every_active_blocks'],
+                    'note': 'A new evidence batch can earn another audit during the accelerated game. The screen and fresh audit must still pass; repeated reads and partial exits do not count.'},
                 'live_pilot': self.campaigns.live_pilot() if self.campaigns else None,
                 'live_trading': self.campaigns.live_trading() if self.campaigns else None,
                 'live_tuition': {k: str(v) if isinstance(v, Decimal) else v for k, v in self.tuition().items()},
@@ -2098,9 +2143,13 @@ class House:
 
     def _recent_trades(self, agent_id: str, limit: int = 12) -> list[dict[str, Any]]:
         """Its own last closed trades, forward-tested or real: what research should learn from first."""
+        from .accounting import evidence_cutoffs
+        cutoffs = evidence_cutoffs(self.ledger, agent_id)
         rows = []
         for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent_id):
             p = entry.payload
+            if entry.seq <= cutoffs.get(p.get('book'), 0):
+                continue
             pnl = p.get("pnl") if entry.kind == "book.settle" else p.get("realized")
             if pnl is None or p.get("source") == "dust":
                 continue

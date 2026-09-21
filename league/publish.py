@@ -207,6 +207,10 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
 
 def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     """One plain sentence for the league's own events."""
+    if kind == 'book.fill_correction':
+        return (f"{agent}'s execution accounting was corrected from a venue receipt "
+                f"({money(p.get('cash_delta') or 0, 4, signed=True)} USD). "
+                "The affected performance history is excluded from scoring.")
     if kind == "agent.born":
         origin = f"a child of {p['parent']}" if p.get("parent") else "a founding seed"
         return f"{agent} is born ({origin}, generation {p.get('generation')}, niche {p.get('venue')}/{p.get('horizon')}/{p.get('style')}). {p.get('reason') or ''}".strip()

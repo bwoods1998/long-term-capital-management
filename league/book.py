@@ -49,7 +49,7 @@ from ltcm.broker import (
     RejectedOrder,
     money,
 )
-from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, gross_exposure
+from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_at_risk, event_cluster, gross_exposure
 
 from .fees import QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
@@ -381,6 +381,7 @@ class Book:
         resolves_at: Any = None,
         sleep: Any = time.sleep,
         kill_switch: Any = None,
+        event_capital_budget: Any = None,
     ):
         self.name = name
         self.broker = broker
@@ -393,6 +394,7 @@ class Book:
         self.resolves_at = resolves_at  # callable(instrument) -> epoch seconds | None: when an event market is expected to pay
         self.sleep = sleep
         self.kill_switch = kill_switch  # callable() -> bool
+        self.event_capital_budget = event_capital_budget  # callable() -> explicit venue dollars, or None
         self.engine = RiskEngine()
         self.limits: dict[str, Limits] = {}
         self.accounts: dict[str, Account] = {}
@@ -404,7 +406,9 @@ class Book:
         self.marks: dict[str, Decimal] = {}  # instrument key -> last liquidation mark
         self.day_open: dict[str, tuple[str, Decimal]] = {}  # agent -> (day, equity at its start)
         self.orders_today: dict[tuple[str, str], int] = {}
-        self.frozen: str | None = None  # a reconciliation mismatch stops new entries
+        # Ledger replay is not a fresh venue check. A restart must not clear a mismatch
+        # and permit an entry before the first reconciliation of this process.
+        self.frozen: str | None = "awaiting startup reconciliation" if self.real_money else None
         #: What the venue account held that is not the book's: cash and positions from before the
         #: book opened (the paper account's $100,000; the real account's unallocated cash).
         self.baseline_cash: Decimal | None = None
@@ -412,6 +416,8 @@ class Book:
         self.venue_cash: Decimal | None = None
         self.baseline_at: str | None = None
         self._evidence_issues: dict[str, dict[str, Any]] = {}
+        self._receipt_checked: set[str] = set()
+        self._accounting_corrections: dict[str, list[dict[str, Any]]] = {}
         self._fills_since_reconcile = 0
         self._unreconciled = 0  # consecutive readings that did not reconcile (see `_adopt_the_venue`)
         #: How far the venue may fairly differ from the book since the last reconciliation because
@@ -430,7 +436,7 @@ class Book:
     def _fold(self) -> None:
         """Rebuild state from the ledger. Every mutation below appends first and applies the
         appended row through `_apply`, so the live state and a rebuilt one are the same state."""
-        kinds = ("book.stake", "book.fill", "book.settle", "book.order", "book.baseline", "book.cross_plan", "agent.intent")
+        kinds = ("book.stake", "book.fill", "book.fill_correction", "book.settle", "book.order", "book.baseline", "book.cross_plan", "agent.intent")
         for entry in self.ledger.iter(kinds=kinds):
             if entry.payload.get("book") == self.name:
                 self._apply(entry.kind, entry.agent, entry.payload, entry.at)
@@ -472,6 +478,17 @@ class Book:
                 self._apply_fill(agent, p, at)
             if p.get("cross_plan_id"):
                 self._cross_applied.add(f"{p['source']}:{p['intent_id']}")
+        elif kind == "book.fill_correction":
+            from .accounting import apply_correction
+            apply_correction(self._account(agent), p)
+            working = self.orders.get(p['order_id'])
+            if working is not None:
+                working.notional += money(p['notional_delta'])
+                working.fees_seen += money(p['venue_fee_delta'])
+            self._receipt_checked.add(p['order_id'])
+            self._accounting_corrections.setdefault(agent, []).append({
+                'at': at, **{key: p[key] for key in ('original_fill_id', 'corrected', 'cash_delta',
+                                                   'realized_delta', 'receipt', 'evidence')}})
         elif kind == "book.baseline":
             if self.baseline_at is None:
                 self.baseline_at = at  # when this book first looked at its venue: fees from before it are not its own
@@ -621,6 +638,7 @@ class Book:
         with self._lock:
             issues = [dict(row) for row in self._evidence_issues.get(agent, {}).values()]
             return {'ok': not issues, 'book': self.name, 'issues': issues,
+                    'corrections': self._accounting_corrections.get(agent, [])[-4:],
                     'note': 'An accounting repair must also exclude contaminated evidence; changing a baseline alone is not a repair.'}
 
     def agents(self) -> list[str]:
@@ -686,6 +704,70 @@ class Book:
     def total_equity(self) -> Decimal:
         with self._lock:
             return sum((self.equity(a) for a in self.accounts), ZERO)
+
+    def event_floor_capital(self) -> Decimal | None:
+        """Funded authorization, including unused reserve; never a new trading allocation.
+
+        Only an explicit venue envelope replaces the legacy allocated-equity denominator.
+        Stakes are internal loans, not deposits. Include all booked P&L (also swept/dead
+        accounts and House fees), so a restart or another agent cannot erase losses. Gains
+        and later deposits cannot enlarge the original authorization. Unattributed owner
+        positions supply no capital here. Daily-loss denominators are unchanged.
+        """
+        if not self.real_money or self.event_capital_budget is None:
+            return None
+        budget = self.event_capital_budget()
+        if budget is None:
+            return None
+        with self._lock:
+            if self.baseline_cash is None:
+                return ZERO
+            pnl = sum((self.equity(a) - row.staked for a, row in self.accounts.items()), ZERO)
+            return max(ZERO, min(money(budget) + min(pnl, ZERO), self.baseline_cash + pnl))
+
+    def _event_exposure(self, reservations, *, agent: str | None = None) -> dict[str, Decimal]:
+        exposure: dict[str, Decimal] = {}
+        for owner, account in self.accounts.items():
+            if agent is not None and owner != agent:
+                continue
+            for holding in account.holdings.values():
+                if holding.instrument.asset_class == 'event' and holding.cost > 0:
+                    add_event_exposure(exposure, (holding.instrument.market_id or holding.instrument.symbol).upper(), holding.cost)
+        for owner, instrument, side, quantity, price, _ in reservations:
+            if (agent is None or owner == agent) and side == 'buy' and instrument.asset_class == 'event':
+                add_event_exposure(exposure, (instrument.market_id or instrument.symbol).upper(), quantity * price * instrument.multiplier)
+        return exposure
+
+    def event_risk(self, agent: str, markets: Iterable[str] = ()) -> dict[str, Any]:
+        """The same concentration caps/exposures as check(), visible before a strategy sizes.
+
+        Headroom is principal, not a promise of execution: cash, fees, price changes, other
+        rules and concurrently accepted orders are checked again at submission.
+        """
+        with self._lock:
+            authorized = self.event_floor_capital()
+            capital = self.total_equity() if authorized is None else authorized
+            def cap(rule, basis, enabled=True):
+                pct = money(self.rules[rule])
+                return max(ZERO, basis * pct) if enabled and pct > 0 else None
+            desk = cap('max_event_market_pct', self.equity(agent))
+            market_cap = cap('max_event_market_floor_pct', capital, self.real_money)
+            cluster_cap = cap('max_event_cluster_floor_pct', capital, self.real_money)
+            reservations = self._reservations()
+            own, floor = self._event_exposure(reservations, agent=agent), self._event_exposure(reservations)
+            unknown = any(side == 'buy' and price <= 0 for _, _, side, _, price, _ in reservations)
+            remaining = {}
+            for symbol in markets:
+                market = str(symbol).upper()
+                bounds = [limit - used for limit, used in (
+                    (desk, own.get(market, ZERO)), (market_cap, floor.get(market, ZERO)),
+                    (cluster_cap, cluster_at_risk(floor, event_cluster(market)))) if limit is not None]
+                remaining[str(symbol)] = float(max(ZERO, min(bounds))) if bounds and not unknown else (0.0 if unknown else None)
+            return {'basis': 'authorized_venue' if authorized is not None else 'allocated_equity',
+                    'capital_usd': float(capital), 'desk_market_cap_usd': None if desk is None else float(desk),
+                    'floor_market_cap_usd': None if market_cap is None else float(market_cap),
+                    'floor_cluster_cap_usd': None if cluster_cap is None else float(cluster_cap),
+                    'remaining_by_market_usd': remaining}
 
     # -------------------------------------------------------------------- risk
     def _manifest(self, agent: str, limits: Limits) -> Any:
@@ -773,17 +855,12 @@ class Book:
         working_sells: dict[str, Decimal] = {}
         working_buys: dict[str, Decimal] = {}
         working_event_buys: dict[str, Decimal] = {}
-        floor_event_exposure: dict[str, Decimal] = {}
-        for held_account in self.accounts.values():
-            for holding in held_account.holdings.values():
-                if holding.instrument.asset_class == "event" and holding.cost > 0:
-                    add_event_exposure(floor_event_exposure, (holding.instrument.market_id or holding.instrument.symbol).upper(), holding.cost)
+        floor_event_exposure = self._event_exposure(reservations)
         for owner, instrument, side, quantity, price, _ in reservations:
             key = instrument.key
             value = quantity * price * instrument.multiplier
             if side == "buy" and instrument.asset_class == "event":
                 market = (instrument.market_id or instrument.symbol).upper()
-                add_event_exposure(floor_event_exposure, market, value)
                 if owner == intent.agent:
                     working_event_buys[market] = working_event_buys.get(market, ZERO) + value
             if owner != intent.agent:
@@ -816,6 +893,7 @@ class Book:
             max_event_market_floor_pct=money(self.rules["max_event_market_floor_pct"]),
             max_event_cluster_floor_pct=money(self.rules["max_event_cluster_floor_pct"]),
             floor_event_exposure=floor_event_exposure,
+            event_floor_capital=self.event_floor_capital(),
         )
         decision = self.engine.check(order_intent, ctx)
         reasons.extend(decision.reasons)
@@ -1148,6 +1226,8 @@ class Book:
             "reason": reason or (intent.reason if intent else ""),
             "real_money": self.real_money,
         }
+        if source == 'venue' and self.fees.family == 'kalshi':
+            payload['venue_accounting_version'] = 2
         return payload
 
     def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None) -> Outcome:
@@ -1259,7 +1339,14 @@ class Book:
         if delta < 0 or (delta > 0 and order.average_price is None):
             return  # a stale or incomplete venue response cannot close an unaccounted order
         if delta > 0 and order.average_price is not None:
-            total_notional = money(order.average_price) * filled
+            average = money(order.average_price)
+            if (self.fees.family == 'kalshi' and market_key(order.instrument) == market_key(working.instrument)
+                    and (order.instrument.right or 'yes') != (working.instrument.right or 'yes')):
+                # GET reports directional exposure: selling YES is buying NO. Its cumulative
+                # cost is on that returned leg. Attribute the receipt on the agent's original
+                # leg, just as the V2 acknowledgement already does when an intent is present.
+                average = ONE - average
+            total_notional = average * filled
             price = (total_notional - working.notional) / delta
             venue_fees = money(order.fees or 0)
             fee_delta = max(venue_fees - working.fees_seen, ZERO)
@@ -1671,6 +1758,8 @@ class Book:
 
     def _reconcile(self) -> Reconciliation:
         if True:
+            from .accounting import repair_legacy_kalshi_fills
+            repair_legacy_kalshi_fills(self)
             venue_cash, venue_positions = self._venue()
             self.venue_cash = venue_cash
             cash, positions, instruments = self._ledger_totals()

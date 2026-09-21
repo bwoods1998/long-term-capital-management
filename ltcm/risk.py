@@ -60,12 +60,21 @@ class RiskContext:
     #: market id and by `cluster_key(event_cluster(market))`. The gateway fills it for a live
     #: desk's event buy; an empty map means only this desk's own book is known.
     floor_event_exposure: dict[str, Decimal] = field(default_factory=dict)
+    #: Optional funded, owner-authorized venue capital for event concentration only.
+    #: Daily-loss checks continue to use floor_equity (the agents' allocated equity).
+    event_floor_capital: Decimal | None = None
 
     def __post_init__(self):
         for name in ("min_event_price", "max_event_market_pct", "max_event_market_floor_pct", "max_event_cluster_floor_pct"):
             setattr(self, name, money(getattr(self, name) or 0))
         for name in ("desk_equity", "desk_cash", "desk_daily_pnl", "floor_equity", "floor_daily_pnl"):
             setattr(self, name, money(getattr(self, name)))
+        if self.event_floor_capital is not None:
+            self.event_floor_capital = money(self.event_floor_capital)
+
+    @property
+    def event_capital(self) -> Decimal:
+        return self.floor_equity if self.event_floor_capital is None else self.event_floor_capital
 
 
 @dataclass(frozen=True)
@@ -349,8 +358,11 @@ def rule_event_market_cap(intent: OrderIntent, ctx: RiskContext) -> str | None:
     caps = []
     if ctx.max_event_market_pct > 0 and ctx.desk_equity > 0:
         caps.append((ctx.desk_equity * ctx.max_event_market_pct, f"{ctx.max_event_market_pct:.0%} of desk equity"))
-    if ctx.manifest.live and ctx.max_event_market_floor_pct > 0 and ctx.floor_equity > 0:
-        caps.append((ctx.floor_equity * ctx.max_event_market_floor_pct, f"{ctx.max_event_market_floor_pct:.1%} of the live floor"))
+    if ctx.manifest.live and ctx.max_event_market_floor_pct > 0:
+        if ctx.event_floor_capital is not None and ctx.event_capital <= 0:
+            return "no funded authorized event concentration capital remains"
+        if ctx.event_capital > 0:
+            caps.append((ctx.event_capital * ctx.max_event_market_floor_pct, f"{ctx.max_event_market_floor_pct:.1%} of the live floor's event capital"))
     for cap, label in caps:
         if at_risk > cap:
             return f"{market} would put {at_risk:.2f} at risk on one market, cap {cap:.2f} ({label})"
@@ -483,8 +495,8 @@ def add_event_exposure(book: dict[str, Decimal], market: str, amount: Decimal) -
 
 def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | None:
     """What every live desk together puts at risk on one market, and on one cluster of markets
-    that settle together: at most `max_event_market_floor_pct` (3.5%) and
-    `max_event_cluster_floor_pct` (8%) of the live floor. Legs held at cost, working buys and this
+    that settle together: at most `max_event_market_floor_pct` and
+    `max_event_cluster_floor_pct` of live event capital. Legs held at cost, working buys and this
     order all count; a leg whose close hour is unknown counts against every hour it could close in
     (`cluster_at_risk`), and a live desk whose book could not be read refuses the buy. A shadow desk
     is never checked and never counted, and exits are never refused.
@@ -492,10 +504,12 @@ def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | Non
     Sept 17, 2026: `rule_event_market_cap` read only the desk's own book. `mullins` and `mullins-4`
     run nearly the same favorites settings, so each could put 3.5% of the floor on the same
     market, and bitcoin and ether markets closing in the same hour counted as unrelated bets."""
-    if not ctx.manifest.live or not _opens_event(intent, ctx) or ctx.floor_equity <= 0:
+    if not ctx.manifest.live or not _opens_event(intent, ctx):
         return None
     if ctx.max_event_market_floor_pct <= 0 and ctx.max_event_cluster_floor_pct <= 0:
         return None
+    if ctx.event_capital <= 0:
+        return "no funded authorized event concentration capital remains" if ctx.event_floor_capital is not None else None
     market = intent.instrument.market_id or intent.instrument.symbol
     price = _event_entry_price(intent, ctx)
     if not market or price is None:
@@ -505,18 +519,18 @@ def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | Non
         return "a live desk's book could not be read, so what the live desks hold across the floor is unknown: no event buy until it can"
     cost = intent.quantity * price * intent.instrument.multiplier
     if ctx.max_event_market_floor_pct > 0:
-        cap = ctx.floor_equity * ctx.max_event_market_floor_pct
+        cap = ctx.event_capital * ctx.max_event_market_floor_pct
         own = _desk_market_at_risk(intent, ctx, market, price)
         at_risk = max(own, exposure.get(market, ZERO) + cost)
         # The desk over the cap on its own is `rule_event_market_cap`'s refusal; one reason will do.
         if at_risk > cap and own <= cap:
             return (
                 f"{market} would put {at_risk:.2f} at risk across the live desks, cap {cap:.2f} "
-                f"({ctx.max_event_market_floor_pct:.1%} of the live floor)"
+                f"({ctx.max_event_market_floor_pct:.1%} of live event capital)"
             )
     if ctx.max_event_cluster_floor_pct > 0:
         cluster = event_cluster(market)
-        cap = ctx.floor_equity * ctx.max_event_cluster_floor_pct
+        cap = ctx.event_capital * ctx.max_event_cluster_floor_pct
         # This desk's own book counts even when the floor's map is missing.
         own_book: dict[str, Decimal] = {}
         for position in ctx.positions.values():
@@ -530,7 +544,7 @@ def rule_event_floor_cluster(intent: OrderIntent, ctx: RiskContext) -> str | Non
         if at_risk > cap:
             return (
                 f"{cluster} would put {at_risk:.2f} at risk across the live desks, cap {cap:.2f} "
-                f"({ctx.max_event_cluster_floor_pct:.0%} of the live floor on markets that settle together)"
+                f"({ctx.max_event_cluster_floor_pct:.0%} of live event capital on markets that settle together)"
             )
     return None
 
