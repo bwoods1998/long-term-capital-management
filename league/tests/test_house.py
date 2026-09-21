@@ -351,6 +351,20 @@ class Refill(HouseCase):
         self.clock.advance(601)
         self.assertIsNone(self.house._refill(rules), "the ceiling holds")
 
+    def test_a_newcomer_is_bred_from_an_agent_that_is_making_money(self):
+        """Not from the richest purse: purses were paid to the least-bad LOSERS for a day."""
+        rules = self.house.game["economy"]
+        rules.update(newcomer_seconds=600, max_population=5, min_population=0)
+        rich = self.seated("rich")
+        earner = self.seated("earner")
+        self.house.economy.grant(rich.id, "100", "test: a purse from least-bad payouts")
+        for agent, growth in ((rich, -0.002), (earner, 0.003)):
+            self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": growth, "active": True,
+                                                    "book": "alpaca-paper", "block": "b0"}, agent=agent.id)
+        self.clock.advance(601)
+        child = self.house._refill(rules)
+        self.assertEqual(child.parent, earner.id)
+
     def test_the_wait_for_a_newcomer_outlives_a_restart(self):
         """Sept 20, 2026: the interval was anchored on this process's start, which moves on every
         deploy, and a floor that rewrites itself deploys every half hour. In six hours the hour

@@ -215,6 +215,24 @@ class MertonTest(unittest.TestCase):
         self.assertIn("operator", merton.due())
         self.assertNotIn("architect", merton.due())
 
+    def test_a_role_that_keeps_changing_nothing_sits_down_less_often(self):
+        """Sept 21, 2026: fifteen operator passes in four hours, every one "leave the dials
+        unchanged". One empty pass is normal; each further one doubles the wait, up to eight."""
+        merton = self.merton(FakeFrontier({"files": []}), FakeForge())
+        self.ledger.append("ops.started", {"release": "test"})
+        self.assertEqual(merton.backoff("operator"), 1)
+        for expected in (1, 2, 4, 8, 8):
+            merton.run("operator")
+            self.assertEqual(merton.backoff("operator"), expected)
+        self.clock.advance(24 * 3600 * 7.9)
+        self.assertNotIn("operator", merton.due())
+        self.clock.advance(24 * 3600 * 0.2)
+        self.assertIn("operator", merton.due())
+        self.ledger.append("merton.pass", {"role": "operator", "at_epoch": self.clock(), "files": 1, "summary": "a change"})
+        self.assertEqual(merton.backoff("operator"), 1)
+        self.ledger.append("merton.pass", {"role": "operator", "at_epoch": self.clock(), "files": 0, "skipped": True})
+        self.assertEqual(merton.backoff("operator"), 1)  # a skipped pass neither counts nor resets
+
     def test_following_records_what_ci_decided(self):
         answer = {"summary": "s", "slug": "idea", "title": "t", "body": "b", "files": [{"path": "league/strategies/idea.py", "content": GOOD}]}
         forge = FakeForge()

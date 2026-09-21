@@ -2362,7 +2362,20 @@ class House:
         with self._state_lock:
             self._state["last_newcomer"]["at"] = self.clock()
         child_params = None
-        for best in sorted(here, key=lambda a: (seats.get(a.specialty, 0), self.evaluator.rung(a.id), self.economy.balance(a.id)), reverse=True):
+        # Births follow evidence. A desk where some agent is making money is bred first, from that
+        # agent, before the emptiest desk; only then does exploration spread by open seats. Ranked
+        # by open seats, rung and purse alone, the Sept 21, 2026 floor bred hilibrand-2 (losing, but
+        # rich on least-bad payouts) and the never-trading options desk while the weather desk,
+        # the one where every agent was up, waited its turn.
+        standing = {s.agent: s for s in self.standings()}
+
+        def earning(agent):
+            row = standing.get(agent.id)
+            return bool(row is not None and row.score_growth > 0 and row.score_observations > 0)
+
+        paying = {a.specialty for a in here if earning(a)}
+        for best in sorted(here, key=lambda a: (a.specialty in paying, seats.get(a.specialty, 0), earning(a),
+                                                self.evaluator.rung(a.id), self.economy.balance(a.id)), reverse=True):
             child_params = self._mutated_params(best, seed=f"newcomer:{len(self.registry.agents)}")
             if child_params is not None:
                 break
