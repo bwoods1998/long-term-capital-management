@@ -124,7 +124,13 @@ class House:
         self.root.mkdir(parents=True, exist_ok=True)
         self.clock = clock
         self.settings = settings or Settings()
-        self.game = dict(game or load_game())
+        from .overnight import active, game_for
+        self._base_game = deepcopy(dict(game or load_game()))
+        self._burst = active(campaigns, clock)
+        self.game = game_for(self._base_game, self._burst)
+        if self._burst:
+            self.settings.research_workers = self._burst['policy']['research_workers']
+            self.settings.slow_workers = self._burst['policy']['replay_workers']
         self.ledger = Ledger(self.root / "ledger.sqlite", clock=clock)
         from .experiments import Experiments
         from .recordings import Recorder
@@ -1547,6 +1553,19 @@ class House:
                 continue
             opportunity = _epoch(agent.born_at)
             opportunity_seq = 0
+            agent_grace = grace
+            if standing.rung == 0 and self._burst:
+                # Research attempts compete on an hour clock, after actual completed work.
+                # Queued/paid work and a late-qualified program must not die on a calendar timer.
+                opportunity = max(opportunity, self._burst['started'])
+                if self.research_jobs.active(agent.id):
+                    continue
+                completed = sum(1 for e in self.ledger.iter(kinds='agent.research', agent=agent.id)
+                    if e.payload.get('tool') == 'summary' and _epoch(e.at) >= opportunity
+                    and not str(e.payload.get('reason') or '').startswith(('provider:', 'tool outcome unconfirmed')))
+                if completed < self._burst['policy']['minimum_research_passes']:
+                    continue
+                agent_grace = self._burst['policy']['replay_lease_minutes'] * 60
             if standing.rung == 1:
                 # A late replay pass or a new empty-record strategy has not had the old
                 # program's trading opportunity. Meriwether-8 passed replay at 00:21 and
@@ -1575,7 +1594,7 @@ class House:
                 if first is None:
                     continue
                 opportunity = max(opportunity, _epoch(first.at))
-            if now - opportunity < grace:
+            if now - opportunity < agent_grace:
                 continue
             rank.append((standing.active_blocks > 0, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
@@ -2098,6 +2117,15 @@ class House:
 
     # -------------------------------------------------------------------- tick
     def tick(self) -> dict[str, Any]:
+        if self._burst and not self.campaigns.running():
+            self.game = deepcopy(self._base_game)
+            self.economy.game, self.economy.rules = self.game, self.game['economy']
+            if self.researcher is not None:
+                self.researcher.settings = dict(self.game['research'])
+                self.researcher.rules = rules_text(self.game)
+            self.ledger.append('ops.budget', {'what': 'burst-ended', 'id': self._burst['id'],
+                'reason': 'timed research settings restored; new paid work is closed'}, id='burst-ended:'+self._burst['id'])
+            self._burst = None
         summary: dict[str, Any] = {"at": now_iso(self.clock), "woke": [], "orders": 0, "deaths": [], "reconciled": {}}
         living_before = {a.id for a in self.registry.living()}
         for name, book in self.books.items():

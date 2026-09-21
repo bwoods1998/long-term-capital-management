@@ -185,13 +185,14 @@ class Economy:
                 out[s.agent] += floor_pool / len(niches) / len(members)
         weights = self.rules["rung_weights"]
         steep = int(self.rules.get("performance_exponent", 1))
+        evidenced = [s for s in standings if s.active_blocks >= int(self.rules.get('performance_min_blocks', 0))]
         scores = {
             s.agent: Decimal(str(max(s.mean_growth, 0.0))) ** steep * Decimal(str(max(s.active_blocks, 0))).sqrt() * usd(weights.get(str(s.rung), "0"))
-            for s in standings
+            for s in evidenced
         }
         total = sum(scores.values(), ZERO)
         if total <= 0:
-            scores = self._least_bad(standings, weights)
+            scores = self._least_bad(evidenced, weights)
             total = sum(scores.values(), ZERO)
         if total > 0:
             for agent, score in scores.items():
