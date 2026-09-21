@@ -71,6 +71,8 @@ class CampaignBudget:
             CREATE TABLE IF NOT EXISTS meter(id TEXT PRIMARY KEY, baseline INTEGER NOT NULL, latest INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS responses(id TEXT PRIMARY KEY, commitment TEXT NOT NULL, profile TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS meter_health(id TEXT PRIMARY KEY, checked REAL NOT NULL, failed INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS burst(id TEXT PRIMARY KEY, started REAL NOT NULL, ends REAL NOT NULL,
+                policy TEXT NOT NULL, first_row INTEGER NOT NULL, meters TEXT NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -81,7 +83,62 @@ class CampaignBudget:
         self.ends = self.started + float(self.policy["duration_hours"]) * 3600
 
     def running(self) -> bool:
-        return self.started <= self.clock() < self.ends
+        burst = self.burst()
+        return self.started <= self.clock() < self.ends and (not burst or burst['started'] <= self.clock() < burst['ends'])
+
+    def burst(self) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.db.execute('SELECT * FROM burst').fetchone()
+            if row is None:
+                return None
+            return {**dict(row), 'policy': json.loads(row['policy']), 'meters': json.loads(row['meters'])}
+
+    def activate_burst(self, ident: str, policy: Mapping[str, Any]) -> dict[str, Any]:
+        """Explicit owner action; one immutable, incremental research allowance per phase.
+
+        Never reset the phase, meters, original commitments or Jev backing. New commitments
+        share this window across all processes. Expiry stops new paid work, not reconciliation.
+        """
+        from .overnight import validate
+        validate(policy)
+        if not ident or len(ident) > 100:
+            raise ValueError('burst requires a bounded identity')
+        if micro(self.policy['total_cap_usd']) + sum(micro(v) for v in policy['caps_usd'].values()) > micro('10000'):
+            raise ValueError('burst exceeds the owner project envelope')
+        encoded = canonical(policy)
+        with self.lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                old = self.burst()
+                if old:
+                    if old['id'] != ident or canonical(old['policy']) != encoded:
+                        raise CampaignClosed('a burst already exists; cannot reset its clock or allowance')
+                else:
+                    if not self.running() or not all(self.ready(k) for k in policy['caps_usd']):
+                        raise CampaignClosed('the phase and required meters must be healthy before activation')
+                    started = self.clock()
+                    ends = min(self.ends, started + float(policy['duration_hours']) * 3600)
+                    rowid = self.db.execute('SELECT COALESCE(MAX(rowid),0) FROM commitments').fetchone()[0]
+                    meters = dict(self.db.execute('SELECT id,latest FROM meter').fetchall())
+                    self.db.execute('INSERT INTO burst VALUES(?,?,?,?,?,?)',
+                                    (ident, started, ends, encoded, rowid, canonical(meters)))
+                self.db.execute('COMMIT')
+            except BaseException:
+                self.db.execute('ROLLBACK')
+                raise
+        return self.burst()
+
+    def _burst_used(self, kind: str, burst: Mapping[str, Any]) -> int:
+        settled, pending = self.db.execute('SELECT COALESCE(SUM(cost),0),'
+            'COALESCE(SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END),0) '
+            'FROM commitments WHERE kind=? AND rowid>?', (kind, burst['first_row'])).fetchone()
+        latest = self.db.execute('SELECT latest FROM meter WHERE id=?', (kind,)).fetchone()
+        measured = max(0, latest[0] - burst['meters'].get(kind, latest[0])) if latest else 0
+        return max(settled, measured) + pending
+
+    def allowance(self, kind: str) -> Decimal:
+        burst = self.burst()
+        return Decimal(str((burst['policy']['caps_usd'] if burst else self.policy['daily_caps_usd']).get(kind, '0')))
 
     def ready(self, kind: str) -> bool:
         with self.lock:
@@ -102,6 +159,10 @@ class CampaignBudget:
 
     def remaining(self, kind: str) -> Decimal:
         with self.lock:
+            burst = self.burst()
+            if burst:
+                cap = micro(burst['policy']['caps_usd'].get(kind, '0'))
+                return Decimal(max(0, cap - self._burst_used(kind, burst))) / UNIT if self.running() else Decimal(0)
             return Decimal(max(0, self.caps[kind] - self._used(kind))) / UNIT
 
     def reserve(self, ident: str, campaign: str, amount: Any) -> bool:
@@ -117,15 +178,22 @@ class CampaignBudget:
                         raise CampaignClosed("request identity changed its campaign or commitment")
                     self.db.execute("COMMIT")
                     return False
+                burst = self.burst()
                 used = self.db.execute("SELECT COALESCE(SUM(COALESCE(cost,reserved)),0) FROM commitments WHERE campaign=?", (campaign,)).fetchone()[0]
-                if not self.running() or not self.ready(kind) or self._used(kind) + held > self.caps[kind] or used + held > micro(rule["cap_usd"]):
+                if not self.running() or not self.ready(kind):
                     raise CampaignClosed(f"{campaign}: released allowance is unavailable")
-                daily = self.policy.get("daily_caps_usd", {}).get(kind)
+                if burst:
+                    if held > micro(self.remaining(kind)):
+                        raise CampaignClosed(f'{campaign}: burst allowance is unavailable')
+                elif self._used(kind) + held > self.caps[kind] or used + held > micro(rule['cap_usd']):
+                    raise CampaignClosed(f'{campaign}: released allowance is unavailable')
+                daily = None if burst else self.policy.get("daily_caps_usd", {}).get(kind)
                 if daily is not None and micro(self.today(kind)) + held > micro(daily):
                     raise CampaignClosed(f"{campaign}: daily allowance is unavailable")
                 if self.db.execute("SELECT 1 FROM commitments WHERE cost>reserved LIMIT 1").fetchone():
                     raise CampaignClosed("a charge exceeded its reservation; pricing must be reconciled")
-                if sum(self._used(k) for k in self.caps) + held > micro(self.policy["total_cap_usd"]):
+                extra = sum(micro(v) for v in burst['policy']['caps_usd'].values()) if burst else 0
+                if sum(self._used(k) for k in self.caps) + held > micro(self.policy["total_cap_usd"]) + extra:
                     raise CampaignClosed("aggregate phase allowance is unavailable")
                 self.db.execute("INSERT INTO commitments VALUES(?,?,?,?,NULL,?)", (ident, campaign, kind, held, self.clock()))
                 self.db.execute("COMMIT")
@@ -187,15 +255,23 @@ class CampaignBudget:
 
     def report(self) -> dict[str, Any]:
         with self.lock:
+            burst = self.burst()
+            extra = burst['policy']['caps_usd'] if burst else {}
             return {"phase": self.policy["phase"], "started": self.started, "ends": self.ends,
-                "running": self.running(), "cap_usd": self.policy["total_cap_usd"],
+                "running": self.running(), "cap_usd": usd(micro(self.policy['total_cap_usd']) + sum(micro(v) for v in extra.values())),
+                "foundation_cap_usd": self.policy['total_cap_usd'],
                 "allow_new_live_capital": self.policy["allow_new_live_capital"],
-                "accounts": {kind: {"cap_usd": usd(cap), "committed_usd": usd(self._used(kind)),
+                "accounts": {kind: {"cap_usd": usd(cap + micro(extra.get(kind, '0'))), "committed_usd": usd(self._used(kind)),
                     "external_reserve_usd": usd(self.external.get(kind, 0)), "remaining_usd": str(self.remaining(kind))}
                     for kind, cap in self.caps.items()},
                 "meters_ready": {kind: self.ready(kind) for kind in self.caps},
                 "pending_calls": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost IS NULL").fetchone()[0],
                 "reservation_breaches": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost>reserved").fetchone()[0],
+                "burst": ({'id': burst['id'], 'started': burst['started'], 'ends': burst['ends'],
+                    'running': self.running(), 'caps_usd': burst['policy']['caps_usd'],
+                    'committed_usd': {k: usd(self._burst_used(k, burst)) for k in burst['policy']['caps_usd']},
+                    'remaining_usd': {k: str(self.remaining(k)) for k in burst['policy']['caps_usd']},
+                    'note': 'Additional owner research allowance. Original phase and commitments are retained; expiry closes new paid work.'} if burst else None),
                 "note": "Commitments include unresolved calls and external reserves; this is not a vendor invoice."}
 
     def close(self) -> None:
@@ -220,21 +296,45 @@ class CampaignPacer(Pacer):
         return {"total": self.spent(kind), "today": self.guard.today(kind)}
 
     def spent(self, kind: str) -> Decimal:
+        burst = self.guard.burst()
+        if burst:
+            with self.guard.lock:
+                return Decimal(self.guard._burst_used(kind, burst)) / UNIT
         return self.budget[kind] - self.guard.remaining(kind)
 
     def remaining(self, kind: str) -> Decimal:
         return self.guard.remaining(kind)
 
     def allowance(self, kind: str) -> Decimal:
-        return Decimal(self.guard.policy["daily_caps_usd"][kind]) if self.running() else Decimal(0)
+        return self.guard.allowance(kind) if self.running() else Decimal(0)
 
     def room(self, kind: str) -> Decimal:
         if not self.guard.ready(kind):
             return Decimal(0)
+        if self.guard.burst():
+            return self.remaining(kind)
         return max(Decimal(0), min(self.remaining(kind), self.allowance(kind) - self.guard.today(kind)))
 
     def over(self, kind: str) -> bool:
         return not self.running() or self.remaining(kind) <= 0
 
     def report(self) -> dict[str, Any]:
-        return {**super().report(), "campaign": self.guard.report(), "no_catch_up": True}
+        result = {**super().report(), "campaign": self.guard.report(), "no_catch_up": True}
+        burst = self.guard.burst()
+        if burst:
+            result['allowance_scope'] = 'entire immutable burst, not daily replenishment'
+            for kind in ('sail', 'openai'):
+                result[kind]['budget_usd'] = burst['policy']['caps_usd'][kind]
+        return result
+
+    def credit_pool(self, *, per_seconds=86400, **kwargs):
+        burst = self.guard.burst()
+        if not burst:
+            return super().credit_pool(per_seconds=per_seconds, **kwargs)
+        if not self.running():
+            return Decimal(0)
+        # This is an eight-hour envelope, not a daily allowance. Reserve half of OpenAI
+        # for shared architect work and a quarter of Sail for hosting/validation.
+        total = self.allowance('sail') * Decimal('.75') + self.allowance('openai') * Decimal('.5')
+        duration = Decimal(str(burst['ends'] - burst['started']))
+        return (total * Decimal(str(per_seconds)) / duration).quantize(Decimal('.01'))

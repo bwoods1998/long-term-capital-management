@@ -97,3 +97,47 @@ The funding-audit packet now describes the actual position-reducing exit exempti
 caps and the gateway's reliance on the House's exit tag. A regression test exercises a profitable
 exit above the rung's entry cap and rejects an oversell. The earlier advisory objection remains
 in this report; it is not silently rewritten as a production approval.
+
+The paid three-tool protocol check completed successfully on both routes: Luna took 8.148 seconds
+and $0.001953; Sail Pro Flex took 35.260 seconds and $0.00199484. Both read the frozen runtime
+policy, corrected an obsolete journal claim, wrote the correction and finished. This is one
+matched observation/journal task, not evidence of strategy quality or a general latency guarantee.
+The challenger and read-recovery changes are [PR #27](https://github.com/bwoods1998/long-term-capital-management/pull/27);
+full Python 3.11/3.14 and gateway CI pass. The admission/context release was observed live at
+7:48 PM as `main-c3bd58a58d1a`, with candidate admissions present in health and four books unfrozen.
+
+## Owner-authorized eight-hour learning burst (activation pending)
+
+The proposed additional window funds OpenAI up to **$250** and Sail up to **$75**. The owner
+separately increased Jev to **$20**, bringing tonight's provider envelope to **$345**. Existing
+balances count. These are incremental experiment limits, not estimated invoices or proof that
+every dollar can produce useful new data. The original foundation start, expiry, external reserves,
+Jev backing and unresolved requests remain recorded. The burst has one immutable identity and
+deadline; restart, midnight and settling an older hold cannot replenish it. After expiry, new
+paid research closes while trading exits, reconciliation and observation continue.
+
+| Dial | Foundation | Burst |
+|---|---:|---:|
+| Research interval | 3 hours; 1 hour if idle | 15 minutes |
+| Concurrent research / replay workers | 5 / 3 | 12 / 4 |
+| Population ceiling | 36 | 48 |
+| Newcomer opportunity | 60 minutes | 10 minutes |
+| Payout interval | 6 hours | 1 hour |
+| Performance reward exponent | 2 | 3, after at least 5 active blocks |
+| Niche share of compute pool | 25% | 15% |
+| Frontier architect / toolsmith interval | 3 / 3 hours | 30 / 30 minutes |
+
+New research sessions are assigned stably by agent identity: 75% Luna, 25% Sail Pro Flex.
+Existing sessions retain their provider. A replay researcher becomes replaceable after an hour
+of burst opportunity and two completed research passes, with no active paid session. Replacement
+still requires a valid newcomer or retained qualifying candidate. Original absolute paper grace,
+statistical gates and hard replay deadline are preserved when the payout epoch shortens.
+Lineage evidence survives death; a replacement does not erase selection history. An observed
+twofold difference in positive growth earns eight times the performance component of compute,
+with a minimum evidence requirement so one lucky block cannot take that component.
+
+Morning acceptance measures distinct archived trials, candidate admission latency, completed
+sessions and failures by route, forward blocks/trades, all-in metered costs and unresolved costs.
+The treatment bundles several game changes, so it tests throughput and operational feasibility;
+it cannot isolate a causal effect for each dial. Model confidence, historical passes, number of
+births and spending alone are not measures of trading success.

@@ -26,6 +26,12 @@ def report(root: str | Path, *, now=None):
         policy = json.loads(phase['policy'])
         costs = [dict(r) for r in db.execute('SELECT kind,COUNT(*) calls,SUM(COALESCE(cost,0)) settled_micro_usd,SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END) held_micro_usd,SUM(cost IS NULL) unresolved FROM commitments GROUP BY kind')]
         meters = [dict(r) for r in db.execute('SELECT meter.*,checked,failed FROM meter LEFT JOIN meter_health USING(id)')]
+        burst = None
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='burst'").fetchone():
+            row = db.execute('SELECT * FROM burst').fetchone()
+            if row:
+                burst = {**dict(row), 'policy': json.loads(row['policy']), 'meters': json.loads(row['meters'])}
+                burst['running'] = burst['started'] <= now < burst['ends']
     finally:
         db.close()
     since = datetime.fromtimestamp(phase['started'], timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
@@ -70,6 +76,14 @@ def report(root: str | Path, *, now=None):
                 'with_candidate': sum(bool(p.get('candidate')) for p in conclusions),
                 'reported_cost_usd': str(sum((Decimal(str(p.get('cost_usd') or 0)) for p in conclusions), Decimal(0))),
                 'note': 'Session costs exclude unfinished work. Research latency counts worker attempts, including deferrals. Replay tools can include smoke checks; eval.trial is the counted-trial source.'}
+    research['by_profile'] = {}
+    for profile in sorted({p.get('profile', 'legacy_unrecorded') for p in conclusions}):
+        group = [p for p in conclusions if p.get('profile', 'legacy_unrecorded') == profile]
+        elapsed = sorted(float(p['elapsed_seconds']) for p in group if p.get('elapsed_seconds') is not None)
+        research['by_profile'][profile] = {'completed': len(group), 'with_candidate': sum(bool(p.get('candidate')) for p in group),
+            'reported_cost_usd': str(sum((Decimal(str(p.get('cost_usd') or 0)) for p in group), Decimal(0))),
+            'median_session_seconds': elapsed[len(elapsed)//2] if elapsed else None,
+            'reasons': dict(Counter(p.get('reason', 'unknown') for p in group))}
     if (root / 'research.sqlite').exists():
         db = connect(root / 'research.sqlite')
         try:
@@ -97,7 +111,7 @@ def report(root: str | Path, *, now=None):
         db.close()
     ends = phase['started'] + float(policy['duration_hours']) * 3600
     return {'phase': phase['id'], 'started': phase['started'], 'ends': ends, 'running': phase['started'] <= now < ends,
-            'policy': policy, 'costs': costs, 'vendor_meters': meters,
+            'policy': policy, 'burst': burst, 'costs': costs, 'vendor_meters': meters,
             'experiments': {'started': len(started), 'finished': len(finished),
                             'unfinished_attempts': sorted(set(started)-set(finished)),
                             'latest': list(finished.values())[-5:]},

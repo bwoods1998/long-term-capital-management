@@ -135,7 +135,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         sandbox = SailSandbox(SailboxClient(), root / "sandbox.json", image_checkpoint=config["agent_image_checkpoint"], name_prefix=name_prefix)
 
     campaigns = CampaignBudget(root / "campaigns.sqlite") if not canary else None
-    provider = Provider(root / "provider.sqlite", floor_cap_usd_per_day=config.get("inference_daily_cap_usd", "3.00")) if research else None
+    from .overnight import active
+    burst = active(campaigns, time.time)
+    inference_cap = Decimal(str(config.get('inference_daily_cap_usd', '3.00')))
+    if burst:
+        inference_cap += Decimal(burst['policy']['caps_usd']['sail'])
+    provider = Provider(root / "provider.sqlite", floor_cap_usd_per_day=inference_cap) if research else None
     if provider is not None and campaigns is not None:
         provider.transport = FundedTransport(provider.transport, campaigns)
     house_settings = Settings(
@@ -162,7 +167,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         fast = FastResearch(root / 'fast-research.sqlite',
             Frontier(gateway_url, token, model=RESEARCH_MODEL, spend_guard=campaigns),
             house.ledger, balance=house.economy.balance, clock=house.clock)
-        house.researcher.provider = ResearchRouter(provider, fast, load_routes())
+        routes = load_routes()
+        if burst:
+            routes = {'enabled': True, 'cohort': burst['id'], 'fraction': burst['policy']['luna_fraction']}
+        house.researcher.provider = ResearchRouter(provider, fast, routes)
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
