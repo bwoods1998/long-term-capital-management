@@ -172,7 +172,12 @@ class SemanticLab:
                                    (name,group[-1]['id']))
         last=cursor.get('research',0)
         rows=self.ledger.read(kinds=('agent.research','eval.trial'), after=last, limit=200)
-        for row in rows:
+        recent=self.ledger.read(kinds=('agent.research','eval.trial'),
+                              after=cursor.get('research_recent',0),limit=200,newest=True)
+        # Bring current failures forward while retaining the independent historical cursor.
+        # The request hash deduplicates records encountered by both walks.
+        combined={row.seq:row for row in [*rows,*recent]}
+        for row in sorted(combined.values(),key=lambda r:r.seq):
             p=row.payload
             if row.kind=='eval.trial' or p.get('tool')=='summary':
                 state={'kind':row.kind,'agent':row.agent,'recorded_at':row.at,
@@ -180,10 +185,12 @@ class SemanticLab:
                                                   'deflated_sharpe','reasons','experiment') if k in p}}
                 observed=datetime.fromisoformat(row.at.replace('Z','+00:00')).timestamp()
                 self.enqueue('research',row.agent,observed,'ledger:'+str(row.seq),state)
-            last=row.seq
-        if rows:
+        if rows or recent:
             with self.db() as db:
-                db.execute('INSERT INTO semantic_cursor VALUES(?,?) ON CONFLICT(source) DO UPDATE SET seq=excluded.seq',('research',last))
+                for name,group in [('research',rows),('research_recent',recent)]:
+                    if group:
+                        db.execute('INSERT INTO semantic_cursor VALUES(?,?) ON CONFLICT(source) DO UPDATE SET seq=excluded.seq',
+                                   (name,max(row.seq for row in group)))
 
     def ingest_markets(self, markets, observed, source):
         valid=[m for m in markets if isinstance(m,dict) and isinstance(m.get('market'),str) and point(m)]
@@ -220,7 +227,10 @@ class SemanticLab:
             if not self.active(): return self.stats()
             self.evolve()
             with self.db() as db:
-                ids=[r[0] for r in db.execute("SELECT id FROM semantic_tasks WHERE status='queued' ORDER BY observed DESC,id LIMIT ?",(self.batch_size,))]
+                diagnostics=[r[0] for r in db.execute("SELECT id FROM semantic_tasks WHERE status='queued' AND kind='research' ORDER BY observed DESC,id LIMIT ?",
+                                                     (min(64,self.batch_size),))]
+                latest=[r[0] for r in db.execute("SELECT id FROM semantic_tasks WHERE status='queued' ORDER BY observed DESC,id LIMIT ?",(self.batch_size,))]
+                ids=list(dict.fromkeys([*diagnostics,*latest]))[:self.batch_size]
             with ThreadPoolExecutor(max_workers=self.workers) as pool:
                 list(pool.map(self._call,ids))
             if self.burst and self.clock()-self.last_evaluation>=900:

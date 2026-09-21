@@ -67,7 +67,7 @@
     // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
     // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.
     "GITHUB_REPO": "bwoods1998/long-term-capital-management",
-    "GITHUB_MAX_PULLS_PER_DAY": "12",
+    "GITHUB_MAX_PULLS_PER_DAY": "96",
     // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's
     // notices from noon on once three live favorites desks were filling.
     "NOTIFY_MAX_PER_DAY": "300",

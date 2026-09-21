@@ -208,7 +208,7 @@ Every rule is enforced here first and by the repository's own CI (`league/ci.py`
   files when `main` has moved since) and its open pull request makes nothing and returns them. A
   branch of that name holding anything else is a `409`, never overwritten; so is a proposal that
   changes nothing on `main`.
-- `GITHUB_MAX_PULLS_PER_DAY` (**12**) a UTC day, counted in the `Gate` in one step; over it is
+- `GITHUB_MAX_PULLS_PER_DAY` (**96**) a UTC day, counted in the `Gate` in one step; over it is
   `429`. What is counted is a branch made: a refused proposal, a GitHub outage before the branch,
   and a retry cost nothing, and a branch request that never answered is counted as made.
 - Without `GITHUB_TOKEN` or `GITHUB_REPO` both routes are `503 {"error": "GitHub is not
