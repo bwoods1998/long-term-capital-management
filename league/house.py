@@ -873,9 +873,9 @@ class House:
         """Can this specialty be replayed for these NEEDS? The options desk can once the options
         history covers every underlying it trades over the replay window (Alpaca has option bars
         since Jan 18, 2024 and no historical quotes: `league/options_history.py`)."""
-        if niche.replay:
+        if getattr(niche, "replay", True):
             return True
-        if niche.asset_class != "option" or not self.settings.options_replay or self.options_history is None:
+        if getattr(niche, "asset_class", None) != "option" or not self.settings.options_replay or self.options_history is None:
             return False
         symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
         end = self.clock()
@@ -2036,7 +2036,7 @@ class House:
         paper = self.books.get('alpaca-paper')
         result['observations']['option_feed'] = getattr(paper.broker, 'option_feed', None) if paper else None
         niche = self.niche_of(agent)
-        if niche is not None and niche.asset_class == 'option' and self._replayable(niche, agent.needs):
+        if niche is not None and getattr(niche, 'asset_class', None) == 'option' and self._replayable(niche, agent.needs):
             limits = [x for x in result['replay']['limitations'] if x != 'no historical option-chain replay']
             result['replay'].update(mode='historical_development_estimated_option_quotes',
                                     requested_window_days=self.settings.replay_days * (6 if agent.horizon == 'day' else 1),
