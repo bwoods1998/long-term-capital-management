@@ -146,13 +146,14 @@
     "code_roles_usd": "8"
   },
   "hypotheses": {
-    "_about": "The hypothesis foundry (league/hypotheses.py): Merton writes 3-4 falsifiable strategy cards for the desk the evidence favours (exploration_share of calls go to the least-explored desk), replay admits them before any paper seat, and routine refill stops breeding random mutations. Calls are at most one per call_minutes, only while a seat is open, the frontier tier pays for code work and the day's OpenAI allowance has room, and never past budget_usd within budget_window_hours. A family with retire_after_failures counted replay failures and no pass is retired from House breeding. mutation_share (at least mutation_min_per_day) bounds House mutations, and only of parents earning forward.",
+    "_about": "The hypothesis foundry (league/hypotheses.py): Merton writes 3-4 falsifiable strategy cards for the desk the evidence favours (exploration_share of calls go to the least-explored desk), replay admits them before any paper seat, and routine refill stops breeding random mutations. Calls are at most one per call_minutes, only while a seat is open, the frontier tier pays for code work and the day's OpenAI allowance has room, and never past budget_usd within budget_window_hours. It writes on `model` (GPT-6 Sol from Sept 22, 2026, at high effort and a quarter-hour cadence: about a fifth of Astra's price, so the same budget buys four to five times the cards); the auditor and the engineer keep Astra. A family with retire_after_failures counted replay failures and no pass is retired from House breeding. mutation_share (at least mutation_min_per_day) bounds House mutations, and only of parents earning forward.",
     "enabled": true,
     "replace_mutation_refill": true,
-    "call_minutes": 30,
+    "call_minutes": 15,
     "candidates": 4,
     "max_output_tokens": 16000,
-    "effort": "medium",
+    "effort": "high",
+    "model": "gpt-6-sol",
     "budget_usd": "20",
     "budget_window_hours": 24,
     "exploration_share": 0.2,
