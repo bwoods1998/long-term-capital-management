@@ -201,6 +201,28 @@ class HouseTest(HouseCase):
         self.assertIn("died on rung 1 of credits", playbook[-1]["text"])
         self.assertTrue(book.reconcile().ok)
 
+    def test_a_dead_agents_exit_after_a_restart_is_not_refused_for_want_of_a_seat(self):
+        """Sept 22, 2026: after the night's deploys four dead agents' exits were refused as
+        'has no seat on the alpaca-paper book' on every mark pass."""
+        agent = self.seated()
+        self.house.tick()  # it buys
+        book = self.house.books["alpaca-paper"]
+        self.assertTrue(book.account(agent.id).holdings)
+        # A death whose exit did not finish before the House restarted (an unfilled order, a venue
+        # outage): recorded dead, still holding.
+        self.house.registry.died(agent.id, "credits", "a test death")
+        self.assertTrue(book.account(agent.id).holdings)
+        self.house.close(wait=None)
+        self.house = self.new_house()  # a restart: only the living are seated
+        book = self.house.books["alpaca-paper"]
+        self.assertNotIn(agent.id, book.limits)
+        self.clock.advance(301)
+        self.house.tick()
+        refused = [e.payload for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)
+                   if "has no seat" in str(e.payload.get("reasons"))]
+        self.assertEqual(refused, [])
+        self.assertEqual(book.account(agent.id).holdings, {})
+
     def test_a_wind_down_that_would_meet_the_houses_own_bid_rests_at_the_ask(self):
         """haghani-2, Sept 21, 2026: its market exit was refused on every wake because another
         agent rested a bid on the same coin."""

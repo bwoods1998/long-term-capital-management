@@ -1859,6 +1859,14 @@ class House:
         self.seat(agent)
 
     def _wind_down(self, agent: Agent, book: Book) -> None:
+        # A seat's limits live only in memory, and only living agents are seated on start. After
+        # a restart a dead agent still holding a position had none, so every exit was refused as
+        # "has no seat on the book", every mark pass, forever. Measured Sept 22, 2026, after the
+        # night's deploys: haghani-2, krasker, krasker-3 and krasker-4 were refused 45 times in an
+        # hour on alpaca-paper. An exit needs a seat to be checked against; give it the lowest
+        # rung's, on this book, so closing an account never depends on when the House restarted.
+        if agent.id not in book.limits:
+            book.limits[agent.id] = self._limits(2 if book.real_money else 1, agent, book.account(agent.id).staked)
         # An unfinished sell already closes this account. Keep it in flight and reserve its
         # remaining units so retrying after a venue outage cannot duplicate or cancel that exit.
         for working in book.open_orders(agent.id):
