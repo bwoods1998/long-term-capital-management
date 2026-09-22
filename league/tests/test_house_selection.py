@@ -59,3 +59,59 @@ class SelectionOpportunity(HouseCase):
         self.assertIsNone(self.house._weakest(rules))
         self.clock.advance(grace + 1)
         self.assertEqual(self.house._weakest(rules).id, agent.id)
+
+
+
+class DailyScreenGrace(HouseCase):
+    """A trading daily agent is not displaced before its paper screen could look (Sept 22, 2026)."""
+
+    def setUp(self):
+        super().setUp()
+        self.rules = self.house.game["economy"]
+        self.grace = float(self.rules["epoch_seconds"]) * float(self.rules["displace_after_epochs"])
+
+    def daily(self, name):
+        """A seated agent the House sees as a daily one (no test desk takes a daily BTC buyer)."""
+        from dataclasses import replace
+        agent = self.seated(name)
+        real = self.house.registry.get
+        self.house.registry.get = lambda agent_id: (lambda found: replace(found, horizon="day") if found.id == agent.id else found)(real(agent_id))
+        return agent
+
+    def fill(self, agent):
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "symbol": "BTC/USD", "side": "buy",
+                                               "quantity": "0.001", "price": "60000"}, agent=agent.id)
+
+    def closed_day(self, agent, key):
+        self.house.ledger.append("eval.block", {"book": "alpaca-paper", "key": key, "horizon": "day", "start_equity": 100.0,
+                                                "end_equity": 99.0, "flow": 0.0, "log_growth": -0.01, "active": True},
+                                 agent=agent.id)
+
+    def test_a_trading_daily_agent_keeps_its_seat_until_two_days_have_closed(self):
+        agent = self.daily("weather")
+        self.fill(agent)
+        self.clock.advance(self.grace + 1)
+        self.assertIsNone(self.house._weakest(self.rules))
+        self.closed_day(agent, "2026-09-21")
+        self.assertIsNone(self.house._weakest(self.rules))
+        self.closed_day(agent, "2026-09-22")
+        self.assertEqual(self.house._weakest(self.rules).id, agent.id)
+
+    def test_a_daily_agent_that_never_traded_keeps_the_plain_grace(self):
+        agent = self.daily("idle")
+        self.clock.advance(self.grace + 1)
+        self.assertEqual(self.house._weakest(self.rules).id, agent.id)
+
+    def test_the_protection_ends_a_day_after_the_screen_could_have_looked(self):
+        agent = self.daily("stuck")
+        self.fill(agent)
+        self.clock.advance(3 * 86400 - 60)
+        self.assertIsNone(self.house._weakest(self.rules))
+        self.clock.advance(61)
+        self.assertEqual(self.house._weakest(self.rules).id, agent.id)
+
+    def test_an_hourly_agent_keeps_the_plain_grace(self):
+        agent = self.seated()
+        self.fill(agent)
+        self.clock.advance(self.grace + 1)
+        self.assertEqual(self.house._weakest(self.rules).id, agent.id)
