@@ -222,6 +222,8 @@ class FakeVenue:
                     for right in "CP":
                         rows.append({"symbol": f"SPY{expiry[2:4]}{expiry[5:7]}{expiry[8:]}{right}{strike * 1000:08d}", "size": "100", "status": "inactive"})
             return {"option_contracts": rows}
+        if path == "/v1beta1/options/trades":
+            raise oh.HistoryError("HTTP 403 Not a path this gateway signs.")
         symbols = params["symbols"].split(",")
         if any(s[3:9] in self.fail_once for s in symbols):
             self.fail_once.clear()
@@ -235,8 +237,12 @@ class FakeVenue:
                     continue
                 years = oh.years_to(info["expiry"], datetime.fromisoformat(day + "T21:00:00+00:00").timestamp())
                 price = round(oh.bs_price(100.0, info["strike"], years, 0.25, info["right"]), 4)
-                if price > 0.01:
+                if price > 0.01 and params["timeframe"] == "1Day":
                     rows.append({"t": f"{day}T05:00:00Z", "o": price, "h": price, "l": price, "c": price, "v": 100, "n": 20, "vw": price})
+                elif price > 0.01:  # two 15-minute bars a day, 11:00 and 11:15 New York
+                    for minute, move in (("15:00", 0.0), ("15:15", -0.02)):
+                        p = max(0.01, round(price + move, 2))
+                        rows.append({"t": f"{day}T{minute}:00Z", "o": p, "h": p + 0.01, "l": p - 0.01, "c": p, "v": 100, "n": 20, "vw": p})
             out[occ] = rows
         return {"bars": out}
 
@@ -317,6 +323,49 @@ def decide(ctx):
         self.assertEqual(result["final_memory"]["days"], [["2026-03-02T20:00:00Z", "2026-02-27"], ["2026-03-02T21:00:00Z", "2026-02-27"],
                                                           ["2026-03-03T15:00:00Z", "2026-03-02"]])
 
+    def test_a_refused_prints_endpoint_is_recorded_and_the_bars_still_land(self):
+        store = self.store(FakeVenue(self.DAYS))
+        rows = store.ingest(["SPY"], "2026-02-23", "2026-03-03", underlier_bars=self.underlier, band=0.12, max_days=30, trades=True)
+        self.assertEqual(rows[0]["status"], "complete")
+        failed = store.db.execute("SELECT key, state, detail FROM chunks WHERE key LIKE 'trades:%'").fetchall()
+        self.assertTrue(failed and all(state == "failed" and "403" in detail for _, state, detail in failed))
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM trades").fetchone()[0], 0)  # unavailable, not zero prints
+
+    def test_the_full_path_from_ingestion_to_a_replay_of_the_tape(self):
+        """Store -> tape -> replay: the chain a step shows has printed, is priced from the store,
+        and a buy fills only on a later bar."""
+        store = self.store(FakeVenue(self.DAYS))
+        store.ingest(["SPY"], "2026-02-23", "2026-03-03", underlier_bars=self.underlier, timeframes=("15Min",), band=0.12, max_days=30)
+
+        def underlier(symbol, timeframe, start, end):
+            if timeframe == "1Day":
+                return self.underlier(symbol, timeframe, start, end)
+            return [{"t": f"{d}T{m}:00Z", "o": 100.0, "h": 100.0, "l": 100.0, "c": 100.0, "v": 1e5} for d in self.DAYS
+                    for m in ("15:15", "15:30") if start[:10] <= d <= end[:10]]
+
+        needs = {"symbols": ["SPY"], "bars": {"timeframe": "1Day", "limit": 5}, "max_days_to_expiry": 28}
+        built = store.tape(needs, "2026-02-23T00:00:00Z", "2026-03-04T00:00:00Z", horizon="day", underlier_bars=underlier,
+                           execution="15Min", max_order_usd=500.0)
+        self.assertEqual(len(built["steps"]), 2 * len(self.DAYS))
+        self.assertTrue(all(isinstance(bar, list) and len(bar) == 6 for step in built["steps"] for bar in step["options"].values()))
+        code = '''
+NEEDS = {"venue": "alpaca", "horizon": "day", "style": "t", "asset_class": "option", "symbols": ["SPY"], "bars": {"timeframe": "1Day", "limit": 5}}
+PARAMS = {}
+def decide(ctx):
+    chain = sorted(ctx.get("chain") or [], key=lambda r: r["occ"])
+    if ctx["now"] != "2026-02-24T15:15:00Z" or not chain:
+        return {"intents": []}
+    row = chain[0]
+    return {"intents": [{"occ": row["occ"], "side": "buy", "quantity": 1, "type": "limit", "limit_price": row["ask"], "reason": "test"}]}
+'''
+        result = run_replay(code, {}, json.loads(json.dumps(built)), stake=1000.0,
+                            limits={"max_position_usd": 600.0, "max_order_usd": 500.0}, audit=True)
+        self.assertTrue(result["ok"], result)
+        buys = [f for f in result["fill_log"] if f["side"] == "buy"]
+        self.assertEqual(len(buys), 1)
+        self.assertGreater(buys[0]["t"], "2026-02-24T15:15:00Z")  # not in the bar the decision saw
+        self.assertTrue(all(c["first_print"] >= "2026-02-23T15:15:00Z" for c in built["contracts"].values()))
+
     def test_the_tape_lists_a_contract_only_from_its_first_print(self):
         store = self.store(FakeVenue(self.DAYS))
         store.ingest(["SPY"], "2026-02-23", "2026-03-03", underlier_bars=self.underlier, timeframes=("1Day",), band=0.12, max_days=30)
@@ -384,6 +433,21 @@ class InTheHouse(HouseCase):
             rows = self.house._chain(["F"], 21, 0.75, {"F": {"bid": 12.9, "ask": 13.0}})
             self.assertEqual(len(rows), 1)
             self.assertEqual(store.quotes(["F261009C00013000"])["F261009C00013000"][0]["ask"], 0.44)
+
+    def test_the_history_is_refreshed_once_a_day_after_the_close(self):
+        self.house.options_history = CoveredStore()
+        calls = []
+        self.house._refresh_options_history = lambda: calls.append(self.clock())
+        self.clock.now = datetime(2026, 9, 21, 19, 0, tzinfo=timezone.utc).timestamp()  # 15:00 New York: not yet
+        self.house.tick()
+        self.house.wait(5)
+        self.assertEqual(calls, [])
+        self.clock.now = datetime(2026, 9, 21, 22, 0, tzinfo=timezone.utc).timestamp()  # 18:00 New York
+        self.house.tick()
+        self.house.wait(5)
+        self.house.tick()
+        self.house.wait(5)
+        self.assertEqual(len(calls), 1)
 
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()
