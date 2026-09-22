@@ -491,6 +491,33 @@ class EngineerLoop(Base):
         self.assertEqual(len(frontier.asked), 2)
         self.assertEqual({self.worklist.get(first).state, self.worklist.get(second).state}, {"testing"})
 
+    def test_a_refusal_fixed_by_a_new_strategy_is_not_reopened_by_agents_still_on_the_old_code(self):
+        """Sept 22, 2026: the hawkins horizon repair (#100) shipped as a new child strategy, and
+        hawkins-9 -- still on the old code -- reopened it within the hour."""
+        (self.repo / "league/strategies/old.py").write_text(GOOD)
+        key = self.job(key="order_refusal:kalshi-shadow:this market is expected to resolve in # hours", kind="order_refusal",
+                       agents=("parent", "old-b"), severity="high")
+        answer = {"summary": "guard the horizon", "role": "architect", "slug": "guarded", "title": "Guarded child", "body": "b", "needs_core": None,
+                  "files": [{"path": "league/strategies/parent_guarded.py", "content": GOOD},
+                            {"path": "league/strategies/parent_guarded.json", "content": json.dumps({"name": "parent-guarded", "family": "other", "why": "fix"})}]}
+        forge = FakeGitHub()
+        engineer = self.engineer(FakeFrontier(answer, answer), forge)
+        engineer.step()
+        self.deploy(forge.proposed[0]["files"])
+        self.merton.follow()
+        engineer.step()
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).state, "observing")
+        self.worklist.report(key=key, kind="order_refusal", summary="again", agents=["old-b"], source="refusals", severity="high",
+                             evidence=[{"seq": 999, "at": "2099-01-01T00:00:00.000Z", "agent": "old-b", "excerpt": "old code, refused again"}])
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).state, "observing", "a new file cannot change an agent already on the old code")
+        self.worklist.report(key=key, kind="order_refusal", summary="again", agents=["new-c"], source="refusals", severity="high",
+                             evidence=[{"seq": 1000, "at": "2099-01-01T00:00:01.000Z", "agent": "new-c", "excerpt": "a new agent refused too"}])
+        engineer.step()
+        notes = [h["note"] for h in self.worklist.get(key).history if h["state"] == "revising"]
+        self.assertTrue(any("recurred after deployment" in note for note in notes), notes)
+
     def test_a_strategy_defect_becomes_a_new_child_that_inherits_nothing(self):
         (self.repo / "league/strategies/old.py").write_text(GOOD)
         key = self.job(key="audit_veto:parent", kind="audit_veto", agents=("parent",), severity="blocker")
