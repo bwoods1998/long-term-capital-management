@@ -499,8 +499,11 @@ class Sources:
                     evidence = [{"seq": s.seq, "at": s.at, "agent": s.agent, "excerpt": s.excerpt} for s in fresh]
                     if len(evidence) > self.MAX_EVIDENCE:
                         evidence = evidence[:4] + evidence[-(self.MAX_EVIDENCE - 4):]
-                    self.worklist.report(key=key, kind=head.kind, summary=head.summary or (job.summary if job else key), evidence=evidence,
-                                         agents={s.agent for s in fresh if s.agent != "house"}, source=source, severity=head.severity,
-                                         through_seq=fresh[-1].seq, occurrences=len(fresh), details=details or None)
+                    try:
+                        self.worklist.report(key=key, kind=head.kind, summary=head.summary or (job.summary if job else key), evidence=evidence,
+                                             agents={s.agent for s in fresh if s.agent != "house"}, source=source, severity=head.severity,
+                                             through_seq=fresh[-1].seq, occurrences=len(fresh), details=details or None)
+                    except ValueError:
+                        continue  # LedgerError (a conflicting id): one key must not stop every later scan
                     reported.append(key)
             return reported

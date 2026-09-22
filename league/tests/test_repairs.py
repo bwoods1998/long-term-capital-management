@@ -165,6 +165,20 @@ class DeterministicSources(Base):
         job = self.worklist.get("missing_data:perp_positioning")
         self.assertEqual((job.agents, job.sources), ({"leahy", "hilibrand"}, {"tools", "consult"}))
 
+    def test_a_conflicting_report_id_does_not_stop_the_scan(self):
+        self.ledger.append("audit.verdict", {"approve": False, "summary": "broken", "findings": []}, agent="one")
+        self.ledger.append("audit.verdict", {"approve": False, "summary": "also broken", "findings": []}, agent="two")
+        sources = Sources(self.ledger, self.worklist)
+        real = self.worklist.report
+
+        def report(**kw):
+            if kw["key"] == "audit_veto:one":
+                raise __import__("league.ledger", fromlist=["LedgerConflict"]).LedgerConflict("exists with different content")
+            return real(**kw)
+
+        self.worklist.report = report
+        self.assertEqual(sources.scan(), ["audit_veto:two"])
+
     def test_a_triage_report_is_folded_like_any_other(self):
         self.ledger.append("repair.reported", {"key": "missing_data:funding_rates", "kind": "missing_data", "summary": "funding rates",
                                                "evidence": [self.ev(3, "a")], "agents": ["a"], "source": "triage", "severity": "high"})
@@ -491,6 +505,23 @@ class EngineerLoop(Base):
         self.ledger.append("agent.born", {"founder": "parent-fixed", "family": "fam", "parent": None}, agent="child")
         engineer.step()
         self.assertEqual(self.worklist.get(key).state, "verified")
+
+    def test_a_merged_fix_whose_files_never_run_is_not_verified(self):
+        key = self.job()
+        engineer = self.engineer(FakeFrontier(self.tool_answer()), FakeGitHub())
+        engineer.step()
+        self.merton.follow()
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).state, "canary")
+        self.deploy([{"path": "league/tools/midpoint.py", "content": "def midpoint(bid, ask):\n    return ask\n"}])  # rewritten later
+        self.clock.advance(71 * 3600)
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).state, "canary")
+        self.clock.advance(2 * 3600)
+        engineer.step()
+        job = self.worklist.get(key)
+        self.assertEqual(job.state, "dormant")
+        self.assertIn("never ran as written", job.note)
 
     def test_a_recurrence_after_deployment_reopens_the_job(self):
         key = self.job()

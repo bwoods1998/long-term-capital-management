@@ -66,6 +66,7 @@ DEFAULTS: dict[str, Any] = {
     "effort": "medium",
     "step_seconds": 120.0,
     "failure_text_wait_hours": 6.0,
+    "canary_timeout_hours": 72.0,
 }
 #: Refusals that are a protective rule working as designed. The constitution's money rules and the
 #: books' risk limits are frozen, so a repair has nothing to change there; the strategy that keeps
@@ -506,6 +507,12 @@ class Engineer:
                                          extra={"deployed_at": now_iso(self.clock), "release": release, "digests": digests,
                                                 "exclude": sorted(job.agents) if job.kind in STRATEGY_KINDS else []})
                 return "observing"
+            merged_at = job.last_status.get("merged_at") or job.state_at
+            if self.clock() - _epoch(str(merged_at)) > float(self.settings["canary_timeout_hours"]) * 3600:
+                # Merged, but the running release never held these exact files: a later change
+                # rewrote them, or the updater refused the release. Not a verified repair.
+                return self._dormant(job, f"PR #{job.pr} merged but its files never ran as written for "
+                                          f"{self.settings['canary_timeout_hours']} h; not verified")
             return None
         if job.state == "observing":
             since = str(job.last_status.get("deployed_at") or job.state_at)

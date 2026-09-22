@@ -10,5 +10,6 @@
   "max_output_tokens": 16000,
   "effort": "medium",
   "step_seconds": 120.0,
-  "failure_text_wait_hours": 6.0
+  "failure_text_wait_hours": 6.0,
+  "canary_timeout_hours": 72.0
 }
