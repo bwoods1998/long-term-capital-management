@@ -113,6 +113,20 @@ KINDS: dict[str, bool] = {
     "ops.recommendation": True,
     "ops.constitution": True,  # the digest of the constitution the House started under
     "provider.request": False,  # a metered model call: private, the cost is what is public
+    # The overnight rebuild of Sept 22, 2026. All private: the site validates kinds against a
+    # fixed list, and hypotheses, repairs and traces can carry strategy content.
+    "hypothesis.card": False,  # a candidate's mechanism, data, expected edge, horizon, rejection test
+    "hypothesis.link": False,  # a semantic similarity between two mechanisms; never genealogy
+    "hypothesis.retired": False,  # a mechanism stopped: disproven, or blocked by data or infrastructure
+    "repair.reported": False,  # a defect or missing input, deduplicated by key, with its evidence
+    "repair.status": False,  # a repair job's transition: admitted, patching, testing, ... verified
+    "research.gate": False,  # why a research pass was started, skipped or sampled
+    "triage.item": False,  # a cheap classification of a journal, post-mortem or request
+    "route.decision": False,  # which model a task went to, and why
+    "trace.record": False,  # a versioned research or repair trace with its outcome and cost
+    "data.coverage": False,  # what history was ingested, from where, and what is missing
+    "holdout.access": False,  # a sealed-holdout evaluation: who, what, when, how often
+    "agent.inactive": False,  # an explicit reason an agent is not trading or researching
 }
 
 
