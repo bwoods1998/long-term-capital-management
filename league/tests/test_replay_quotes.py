@@ -24,7 +24,9 @@ class QuoteTouchTest(unittest.TestCase):
         result = play({0: [buy(quantity=1)]}, tape)
         fill = result["fill_log"][0]
         self.assertAlmostEqual(fill["price"], 100.10)  # the quoted ask, not close x (1 + 1bp)
-        self.assertEqual(log_of(result)[0]["quotes"]["BTC/USD"], {"bid": 99.90, "ask": 100.10})
+        shown = log_of(result)[0]["quotes"]["BTC/USD"]
+        self.assertEqual((shown["bid"], shown["ask"]), (99.90, 100.10))
+        self.assertEqual(shown["t"], "2026-09-10T12:59:59.700000Z")  # dated when quoted: now less its 0.3 s age
         self.assertEqual(result["execution"]["touch"], {"assumed": 1, "quoted": 1})
 
     def test_a_stale_quote_is_centred_on_the_close_and_at_least_twice_the_assumed_spread(self):

@@ -271,6 +271,7 @@ class _View:
         self.marks: dict[str, float] = {}  # key -> liquidation value of one unit
         self.bars: dict[str, dict[str, Any]] = {}  # alpaca: symbol -> the bar that closed now
         self.markets: dict[str, dict[str, Any]] = {}  # kalshi: ticker -> cleaned market row
+        self.quote_age: dict[str, float] = {}  # alpaca: seconds a recorded quote is older than now
 
 
 def _touch(close: float, quote: Any, half_spread: float, stress: float) -> tuple[float, float, str]:
@@ -310,6 +311,9 @@ def _alpaca_view(step: dict, half_spread: float, stress: float = 1.0, priced: "d
         bid, ask, how = _touch(close, quotes.get(symbol), half_spread, stress)
         if priced is not None:
             priced[how] = priced.get(how, 0) + 1
+        age = _num((quotes.get(symbol) or {}).get("age")) if how != "assumed" else None
+        if age is not None and age > 0:
+            view.quote_age[symbol] = age
         view.bars[symbol] = {"t": step["t"], "o": open_, "h": high, "l": low, "c": close, "v": volume or 0.0}
         view.quotes[symbol] = (bid, ask)
         view.ranges[symbol] = (low, high)  # trades: a buy needs a print under it, a sell one over it
@@ -876,11 +880,16 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                 # strategy that refuses a stale or undated quote -- the careful ones -- never traded
                 # in replay: measured Sept 22, 2026, four frontier-written megacaps cards made 0
                 # trades each, and 14, 31, 5 and 14 once replay quotes were dated.
-                ctx["quotes"] = {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1], "t": now} for s in shown if s in view.quotes}
+                # A recorded quote (league.history probes) is dated when it was quoted: now less its age.
+                def dated(s):
+                    age = view.quote_age.get(s)
+                    t = now if not age else datetime.fromtimestamp(now_ts - age, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                    return {"bid": view.quotes[s][0], "ask": view.quotes[s][1], "t": t}
+                ctx["quotes"] = {s: dated(s) for s in shown if s in view.quotes}
                 if watched_symbols:
                     ctx["observed"] = {
                         "bars": {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in watched_symbols},
-                        "quotes": {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1], "t": now} for s in watched_symbols if s in view.quotes},
+                        "quotes": {s: dated(s) for s in watched_symbols if s in view.quotes},
                     }
             else:
                 shown_markets, watched_markets = [], []
