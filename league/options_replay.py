@@ -134,6 +134,10 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
     bar_limit = int(_num((needs.get("bars") or {}).get("limit")) or 120)
     bar_limit = max(1, min(MAX_BARS, bar_limit))
     half_bps = float(_num(tape.get("half_spread_bps")) or 1.0) / 10000.0
+    step_seconds = float(_num(tape.get("step_seconds")) or 900.0)
+    declared = (needs.get("bars") or {}).get("timeframe") if isinstance(needs.get("bars"), dict) else None
+    if tape.get("timeframe") and declared and tape["timeframe"] != declared:
+        return failed("unsupported input: tape timeframe does not match declared bars")
     book = _Book(stake, limits, fee, mult, liq, audit)
     history = {s: [dict(b) for b in rows[-MAX_BARS:]] for s, rows in (tape.get("warmup_bars") or {}).items()}
     last_print: dict[str, dict[str, Any]] = {}   # occ -> {"bar", "ts", "half", "bid", "ask"}
@@ -174,10 +178,11 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         volume, trades = float(bar.get("v") or 0), int(bar.get("n") or 0)
         _, _, half = estimate_quote(bar, ranges.get(occ, []), model)
         half *= max(1.0, float(model.get("stress") or 1.0))  # the execution stress: costs, not the quote shown
+        bar_start = now_ts - step_seconds
         for order_id in [k for k, o in book.orders.items() if o["occ"] == occ]:
             order = book.orders[order_id]
-            if order["placed_ts"] >= now_ts:
-                continue
+            if order["placed_ts"] >= now_ts or bar_start >= order["expires_ts"]:
+                continue  # placed at this step, or a day order that had expired before this bar began
             if volume < liq["min_volume"] or trades < liq["min_trades"] or order["quantity"] > liq["max_participation"] * volume + EPS:
                 liquidity_misses += 1
                 continue
@@ -329,7 +334,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 by_under.setdefault(contracts[occ].get("underlying"), set()).add(occ)
                 # A quote recorded after the order was placed is executable for one contract (its
                 # size was not recorded): a buy at or over the ask, a sell at or under the bid.
-                for order_id in [k for k, o in book.orders.items() if o["occ"] == occ and o["placed_ts"] < stamp]:
+                for order_id in [k for k, o in book.orders.items() if o["occ"] == occ and o["placed_ts"] < stamp < o["expires_ts"]]:
                     order = book.orders[order_id]
                     if order["quantity"] > 1:
                         continue

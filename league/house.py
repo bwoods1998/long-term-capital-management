@@ -912,7 +912,9 @@ class House:
                     done["coverage"] += ran["coverage"]
         self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
                                           "features_made": done["features"],
-                                          "not_complete": [r for r in done["coverage"] if r.get("status") != "complete"][:20]})
+                                          "not_complete": [r for r in done["coverage"] if r.get("status") not in ("complete", "current")][:20]})
+        with self._state_lock:
+            self._state["options_history_day"] = _new_york(self.clock)[0]  # done for today only once it ran through
         return done
 
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -932,7 +934,8 @@ class House:
             execution = "15Min"
             under = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
             warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
-            key = f"options:{','.join(under)}:{int(needs.get('max_days_to_expiry') or 21)}:{warmup}:{horizon}:{start_iso[:10]}:{execution}"
+            timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
+            key = f"options:{','.join(under)}:{timeframe}:{int(needs.get('max_days_to_expiry') or 21)}:{warmup}:{horizon}:{start_iso[:10]}:{execution}"
             build = lambda: self.options_history.tape(needs, start_iso, end_iso, horizon=horizon, warmup=warmup, execution=execution,  # noqa: E731
                                                       underlier_bars=adapter_from(self.alpaca_data),
                                                       max_order_usd=float(CONSTITUTION["rungs"]["1"]["max_order_usd"]))
@@ -2617,8 +2620,11 @@ class House:
         summary: dict[str, Any] = {"at": now_iso(self.clock), "woke": [], "orders": 0, "deaths": [], "reconciled": {}}
         if self.options_history is not None and self.settings.options_replay:
             today, hour = _new_york(self.clock)
-            if hour >= 17.0 and self._state.get("options_history_day") != today and self._background("ops:options-history", self._refresh_options_history):
-                self._state["options_history_day"] = today  # once a day, after the session's bars are final
+            # Once a day after the session's bars are final; a failed run is tried again hourly.
+            if (hour >= 17.0 and self._state.get("options_history_day") != today
+                    and self.clock() - float(self._state.get("options_history_tried") or 0) >= 3600
+                    and self._background("ops:options-history", self._refresh_options_history)):
+                self._state["options_history_tried"] = self.clock()
         living_before = {a.id for a in self.registry.living()}
         for name, book in self.books.items():
             try:

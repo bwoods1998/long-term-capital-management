@@ -94,6 +94,23 @@ class Execution(unittest.TestCase):
                      occ=C1, buy_at="2026-03-02T15:00:00Z", limit=0.44)
         self.assertEqual((result["fills"], result["expired_orders"], result["open_orders"]), (0, 1, 0))
 
+    def test_a_day_order_cannot_fill_after_the_close(self):
+        """Found in review: an order working at the bell met the next morning's first bar."""
+        overnight = run([step("2026-03-02T20:45:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),   # 15:45 New York
+                         step("2026-03-03T14:45:00Z", {C1: bar(0.40, 0.41, 0.30, 0.40)})],  # 09:45 the next day, trading through
+                        occ=C1, buy_at="2026-03-02T20:45:00Z", limit=0.40)
+        self.assertEqual((overnight["fills"], overnight["expired_orders"]), (0, 1))
+        last_bar = run([step("2026-03-02T20:45:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
+                        step("2026-03-02T21:00:00Z", {C1: bar(0.40, 0.41, 0.30, 0.40)})],  # the 15:45-16:00 bar: still the order's day
+                       occ=C1, buy_at="2026-03-02T20:45:00Z", limit=0.40)
+        self.assertEqual(last_bar["fills"], 1)
+
+    def test_a_tape_of_another_timeframe_is_refused(self):
+        wrong = tape([step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)})])
+        wrong["timeframe"] = "1Hour"
+        result = run_replay(STRATEGY, {}, wrong, stake=1000.0, limits=LIMITS)
+        self.assertEqual(result["error"], "unsupported input: tape timeframe does not match declared bars")
+
     def test_a_thin_bar_does_not_fill_beyond_its_volume(self):
         result = run([step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
                       step("2026-03-02T15:15:00Z", {C1: bar(0.40, 0.41, 0.30, 0.40, v=6, n=3)})],
@@ -123,6 +140,28 @@ class Execution(unittest.TestCase):
     def test_the_order_cap_counts_the_multiplier(self):
         result = run([step("2026-03-02T15:00:00Z", {C1: bar(0.80, 0.82, 0.78, 0.80)})], occ=C1, buy_at="2026-03-02T15:00:00Z", limit=0.80)
         self.assertEqual(result["refusal_reasons"], {"over the order cap": 1})  # $80 against $75
+
+
+class Underlier(unittest.TestCase):
+    def test_the_underlier_is_read_unadjusted_and_close_stamped(self):
+        """Found in review: `adjustment=all` history is adjusted for dividends paid after each
+        bar, which option strikes never are."""
+        from league.tapes import AlpacaData
+
+        asked = []
+
+        class Client:
+            def request(self, method, url, headers=None, body=None, what=""):
+                asked.append(url)
+                page = "page_token=" in url
+                rows = [{"t": "2026-03-02T15:00:00Z", "o": 10, "h": 10.2, "l": 9.9, "c": 10.1, "v": 5}] if not page else \
+                       [{"t": "2026-03-02T15:15:00Z", "o": 10.1, "h": 10.3, "l": 10.0, "c": 10.2, "v": 6}]
+                return 200, {"bars": {"F": rows}, "next_page_token": None if page else "next"}
+
+        data = AlpacaData(Client(), feed="sip", clock=lambda: datetime(2026, 3, 3, tzinfo=timezone.utc).timestamp())
+        bars = oh.adapter_from(data)("F", "15Min", "2026-03-02T00:00:00Z", "2026-03-03T00:00:00Z")
+        self.assertTrue(all("adjustment=raw" in url and "feed=sip" in url for url in asked))
+        self.assertEqual([b["t"] for b in bars], ["2026-03-02T15:15:00Z", "2026-03-02T15:30:00Z"])  # stamped at the close, both pages
 
 
 class RecordedQuotes(unittest.TestCase):
@@ -231,8 +270,8 @@ def _daily(day, close):
 class FakeVenue:
     """The two endpoints ingestion reads, priced with Black-Scholes at 25% volatility."""
 
-    def __init__(self, days, fail_once=None):
-        self.days, self.calls, self.fail_once = days, [], set(fail_once or ())
+    def __init__(self, days, fail_once=None, fail_bars=False):
+        self.days, self.calls, self.fail_once, self.fail_bars = days, [], set(fail_once or ()), fail_bars
 
     def get(self, path, params):
         self.calls.append((path, dict(params)))
@@ -248,6 +287,8 @@ class FakeVenue:
         if path == "/v1beta1/options/trades":
             raise oh.HistoryError("HTTP 403 Not a path this gateway signs.")
         symbols = params["symbols"].split(",")
+        if self.fail_bars:
+            raise oh.HistoryError("HTTP 429 too many requests")
         if any(s[3:9] in self.fail_once for s in symbols):
             self.fail_once.clear()
             raise oh.HistoryError("HTTP 503 upstream")
@@ -321,6 +362,17 @@ class Store(unittest.TestCase):
         last.start()
         last.join()
         self.assertEqual(len(store._connections), 2)  # the four finished workers' connections were closed
+
+    def test_a_window_whose_chunks_failed_is_not_coverage_even_with_older_bars_stored(self):
+        """Found in review: counting every stored bar of the underlying let a refresh whose every
+        chunk failed still read as coverage of its window."""
+        store = self.store(FakeVenue(self.DAYS))
+        store.ingest(["SPY"], "2026-02-23", "2026-02-27", underlier_bars=self.underlier, band=0.12, max_days=30)
+        store.get = FakeVenue(self.DAYS, fail_bars=True).get
+        rows = store.ingest(["SPY"], "2026-03-02", "2026-03-03", underlier_bars=self.underlier, band=0.12, max_days=30)
+        self.assertEqual((rows[0]["status"], rows[0]["bars"]), ("unavailable", 0))
+        self.assertEqual(store.covers(["SPY"], "1Day", "2026-02-23T00:00:00Z", "2026-02-27T00:00:00Z"), ["SPY"])
+        self.assertEqual(store.covers(["SPY"], "1Day", "2026-02-23T00:00:00Z", "2026-03-10T00:00:00Z"), [])
 
     def test_a_refused_listing_is_unavailable_not_zero(self):
         def refuse(path, params):
@@ -544,6 +596,24 @@ class InTheHouse(HouseCase):
                                         stake=1000.0, limits=LIMITS, timeout=120)
         self.assertTrue(run.result["ok"], run.result)
         self.assertEqual((run.result["asset_class"], run.result["fills"], run.result["fees_usd"]), ("option", 1, 0.05))
+
+    def test_a_failed_daily_job_is_tried_again_an_hour_later_and_a_finished_one_not_again_that_day(self):
+        self.house.options_history = CoveredStore()
+        calls = []
+
+        def job():
+            calls.append(self.clock())
+            if len(calls) == 1:
+                raise RuntimeError("gateway down")
+            self.house._state["options_history_day"] = "2026-09-21"
+
+        self.house._refresh_options_history = job
+        self.clock.now = datetime(2026, 9, 21, 22, 0, tzinfo=timezone.utc).timestamp()  # 18:00 New York
+        for minutes in (0, 10, 61, 75, 130):
+            self.clock.now = datetime(2026, 9, 21, 22, 0, tzinfo=timezone.utc).timestamp() + minutes * 60
+            self.house.tick()
+            self.house.wait(5)
+        self.assertEqual([round((c - calls[0]) / 60) for c in calls], [0, 61])
 
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()

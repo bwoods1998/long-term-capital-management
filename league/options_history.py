@@ -483,7 +483,7 @@ class OptionsHistory:
         held = []
         for symbol in symbols:
             spans = sorted((_day(r["start"]), _day(r["end"])) for r in self.coverage(symbol)
-                           if r.get("timeframe") == timeframe and r.get("status") in ("complete", "partial") and r.get("bars"))
+                           if r.get("timeframe") == timeframe and r.get("status") in ("complete", "current") and r.get("bars"))
             merged: list[list[date]] = []
             for a, b in spans:
                 if merged and a <= merged[-1][1] + timedelta(days=slack_days):
@@ -545,6 +545,7 @@ class OptionsHistory:
                 expiries = sorted(set(last_of_week.values()))
             for timeframe in timeframes:
                 stats = {"contracts": 0, "with_bars": 0, "bars": 0, "failed_chunks": 0, "expiries": 0}
+                asked: list[str] = []
                 for expiry in expiries:
                     win_start = max(_day(start), _day(expiry) - timedelta(days=max_days))
                     win_end = min(_day(end), _day(expiry))
@@ -560,8 +561,10 @@ class OptionsHistory:
                         continue
                     stats["expiries"] += 1
                     stats["contracts"] += len(chosen)
+                    asked += chosen
                     key = f"bars:{timeframe}:{underlying}:{expiry}:{win_start}:{win_end}:{band}"
                     if self.done(key):
+                        stats["bars"] += int((self.db.execute("SELECT rows FROM chunks WHERE key = ?", (key,)).fetchone() or [0])[0] or 0)
                         continue
                     try:
                         rows = self.fetch_bars(chosen, timeframe, f"{win_start}T00:00:00Z", f"{win_end}T23:59:59Z")
@@ -572,15 +575,24 @@ class OptionsHistory:
                                 self._mark(f"trades:{underlying}:{expiry}", "failed", 0, str(exc))
                         final = win_end < _day(today)
                         self._mark(key, "done" if final else "partial", rows)
+                        stats["bars"] += rows
                         say(f"{underlying} {expiry} {timeframe}: {len(chosen)} contracts, {rows} bars")
                     except Exception as exc:  # noqa: BLE001 - one refused chunk is retried next run
                         stats["failed_chunks"] += 1
                         self._mark(key, "failed", 0, f"{type(exc).__name__}: {exc}")
                         say(f"{underlying} {expiry} {timeframe}: FAILED {str(exc)[:120]}")
-                held = self.db.execute("SELECT COUNT(*), COUNT(DISTINCT b.occ) FROM bars b JOIN contracts c ON c.occ = b.occ WHERE c.underlying = ? AND b.timeframe = ? AND c.expiry >= ? AND c.expiry <= ?",
-                                       (underlying, timeframe, start, expiry_to)).fetchone()
-                stats["bars"], stats["with_bars"] = int(held[0]), int(held[1])
-                status = "unavailable" if not stats["bars"] else ("partial" if stats["failed_chunks"] or _day(end) >= _day(today) else "complete")
+                # What THIS window holds (found in review: counting every stored bar of the
+                # underlying let a refresh whose every chunk failed still read as coverage).
+                for i in range(0, len(asked), 500):
+                    group = asked[i:i + 500]
+                    stats["with_bars"] += int(self.db.execute(
+                        f"SELECT COUNT(DISTINCT occ) FROM bars WHERE timeframe = ? AND t >= ? AND t <= ? AND occ IN ({','.join('?' * len(group))})",
+                        (timeframe, f"{start}T00:00:00Z", f"{(_day(end) + timedelta(days=1)).isoformat()}T23:59:59Z", *group)).fetchone()[0])
+                # `complete`: every chunk in, the window closed. `current`: every chunk in, the
+                # window reaches today (refetched next time). `partial`: a chunk failed, so this
+                # window is NOT coverage. `unavailable`: nothing printed or nothing came back.
+                status = ("unavailable" if not stats["bars"] else "partial" if stats["failed_chunks"]
+                          else "current" if _day(end) >= _day(today) else "complete")
                 out.append(self.record_coverage({
                     "underlying": underlying, "timeframe": timeframe, "start": start, "end": end, "status": status,
                     "source": SOURCE_BARS, "listing": SOURCE_CONTRACTS, "band": band, "max_days": max_days, "weekly_only": weekly_only,
@@ -798,10 +810,12 @@ class OptionsHistory:
 
 
 def _in_session(ts: float) -> bool:
-    """A bar CLOSING inside 09:30 (exclusive) to 16:15 New York on a weekday."""
+    """A bar CLOSING inside 09:30 (exclusive) to 16:00 New York on a weekday: the regular session
+    the House trades options in. (SPY, QQQ and IWM options trade until 16:15; a day order does
+    not, and the House's wakes after 16:00 see a shut market.)"""
     moment = datetime.fromtimestamp(ts, NY)
     minutes = moment.hour * 60 + moment.minute
-    return moment.weekday() < 5 and 570 < minutes <= 975
+    return moment.weekday() < 5 and 570 < minutes <= 960
 
 
 def daily_closes(bars: Iterable[Mapping[str, Any]]) -> dict[str, float]:
@@ -810,10 +824,32 @@ def daily_closes(bars: Iterable[Mapping[str, Any]]) -> dict[str, float]:
 
 
 def adapter_from(alpaca_data: Any) -> Callable[[str, str, str, str], list[dict[str, Any]]]:
-    """`underlier_bars(symbol, timeframe, start, end)` backed by the House's `AlpacaData` today
-    (and by the history store once it lands: anything with this signature will do)."""
+    """`underlier_bars(symbol, timeframe, start, end)`: closed, close-stamped stock bars through
+    the House's `AlpacaData` client (the history store can back the same signature later).
+
+    UNADJUSTED prices (`adjustment=raw`). Strikes and premiums are never adjusted, and Alpaca's
+    `adjustment=all` history is adjusted for dividends and splits that came AFTER each bar: a
+    small lookahead against every strike, and a broken moneyness filter across a split (found
+    in review, Sept 22, 2026). The same spot feeds the tape, the chain filter and the IVs."""
+    from .tapes import PAGE_LIMIT as STOCK_PAGE, STOCK_BARS_PATH, TIMEFRAME_SECONDS, iso as stamp, parse_time
+
     def underlier_bars(symbol: str, timeframe: str, start: str, end: str) -> list[dict[str, Any]]:
-        return list((alpaca_data.bars([symbol], timeframe, start=start, end=end, limit=10_000) or {}).get(symbol.upper()) or [])
+        seconds, name = TIMEFRAME_SECONDS[timeframe], symbol.upper()
+        start_ts, end_ts = parse_time(start), min(parse_time(end), float(alpaca_data.clock()))
+        found: dict[int, dict[str, Any]] = {}
+        token = None
+        for _ in range(int(getattr(alpaca_data, "max_pages", 60))):
+            params = {"symbols": name, "timeframe": timeframe, "start": stamp(start_ts - seconds), "end": stamp(end_ts),
+                      "limit": STOCK_PAGE, "feed": alpaca_data.feed, "adjustment": "raw", "page_token": token}
+            payload = alpaca_data._get(alpaca_data.url(STOCK_BARS_PATH, params), what="alpaca stock bars (unadjusted)")
+            for row in (payload.get("bars") or {}).get(name) or []:
+                bar = alpaca_data._bar(row, seconds, daily_equity=timeframe == "1Day")
+                if bar is not None and start_ts <= bar[0] <= end_ts:
+                    found[int(bar[0])] = bar[1]
+            token = payload.get("next_page_token")
+            if not token:
+                break
+        return [found[key] for key in sorted(found)]
     return underlier_bars
 
 
