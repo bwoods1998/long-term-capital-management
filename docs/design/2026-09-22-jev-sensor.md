@@ -64,16 +64,16 @@ Abstention predicts abstention:
 
 ### Offline replay of the gate
 
-`scripts/jev_lab_eval/gate_replay.py` replays the gate's deterministic rules over the same
-7,370 sessions, read-only:
+`scripts/jev_lab_eval/gate_replay.py` replays the gate's deterministic rules, on the v0 dials
+(`after` 2, `max_factor` 8), over the same 7,370 sessions, read-only:
 
 | Measure | Result |
 |---|---:|
-| Sessions the gate would have skipped | **5,428 (73.6%)** |
-| Model cost of those sessions | **$98.33 of $160.17** |
-| Skipped sessions that had abstained | 5,042 |
-| Skipped sessions that were provider failures | 199 |
-| Skipped sessions that retained a candidate (the estimated miss) | **186 (3.4%)** |
+| Sessions the gate would have skipped | **4,978 (67.5%)** |
+| Model cost of those sessions | **$86.56 of $160.17** |
+| Skipped sessions that had abstained | 4,674 |
+| Skipped sessions that were provider failures | 157 |
+| Skipped sessions that retained a candidate (the estimated miss) | **146 (2.9%)** |
 
 Most retained candidates fail replay, so the true miss rate for useful work is lower.
 
@@ -102,8 +102,12 @@ counts, triage groups, the hypothesis index and exposure groups.
 
 ### Research gate rules
 
-- **Where it runs.** The gate runs only after every existing check and the clock say a session
-  is due, so it can only skip.
+- **Where it runs.** The gate runs inside `House._gate`, the overnight v0 gate, and replaces it
+  whenever the Jev floor is wired. It uses the same dials in `game.json` `research.gate`:
+  `enabled`, `after`, `max_factor` and `sample_percent`. It keeps the v0 row shape and adds
+  extra fields: `triggers`, `cost_usd`, `sessions`, `inactive`. It runs only after every existing
+  check and the clock say a session is due, so it can only skip. The refusal fast path is
+  unchanged.
 - **Always run.** The following always run a session:
   - its own fills and settlements;
   - a new `book.refused`;
@@ -116,7 +120,10 @@ counts, triage groups, the hypothesis index and exposure groups.
   - a Kalshi window becoming non-empty;
   - a blocker lifting.
 - **Last session produced something.** A clock-due session runs.
-- **Abstention.** After `n` consecutive abstentions the agent waits `interval × min(2^n, 8)`.
+- **Abstention.** From `after` consecutive empty passes the interval doubles per further empty
+  pass, up to `max_factor`. With the defaults (2 and 8) that is ×2 after two, ×4 after three and
+  ×8 after four. A pass counts as empty when it has no candidate, no replay and no strategy
+  written by Merton, as in v0. A provider failure neither adds to nor resets the count.
 - **Known blockers.** An agent blocked by missing data or a closed market waits for the blocker
   to change.
 - **Heartbeat.** Every agent runs at least once every 24 h.
@@ -125,7 +132,10 @@ counts, triage groups, the hypothesis index and exposure groups.
   - Answers are cached by (note id, strategy sha) and batched 16 notes to a request.
   - Any p ≥ 0.35 runs, so an uncertain answer favours research.
   - If Jev is down or capped, the deterministic decision stands.
-- **Sampling.** 10% of would-be skips run anyway as `sample`.
+- **Sampling.** `sample_percent` (10%) of would-be skips run anyway as `sample`. The choice is a
+  hash of the agent, the window and the slot, so a restart does not re-roll it.
+- **What v0 did not have.** Routine `look`/`progress` verdicts no longer count as news. They
+  arrive every mark, so under v0 a paper agent almost never backed off.
 - **Miss rate.** A miss is a sampled session that retained a candidate or adopted code. `report()`
   prints skipped sessions, estimated savings (skipped × median session cost), the sampled miss
   rate and Jev spend.
@@ -152,9 +162,44 @@ Total development spend was **$0.000097**. This is a small curated set, not a he
 benchmark. The same-feed threshold sits on the edge of a true positive, and a missed merge
 leaves a duplicate report, which is the safe failure.
 
-## 5. Switches (all in `league/config.json`)
+## 5. Triage and hypothesis links on production text (read-only copy, real Jev)
+
+The dry run used 11,192 production rows from Sept 19 to 22 (tool requests, post-mortems,
+research summaries, journals and research thoughts), copied into a local ledger. It ran four
+capped triage runs and three link runs:
+
+- **Triage groups.** The 3-day backfill produced 147 groups and 227 `repair.reported` rows:
+  - 189 `missing_data`;
+  - 19 `shared_defect`;
+  - 18 `bug_report`;
+  - 1 `strategy_defect` (a `stuck` death).
+- **Request merges.** Jev merged 6 differently named requests into older groups. Examples:
+  - `crypto_strike_spot_and_vol` and `kalshi_15m_underlying_spot_on_replay_tap` into
+    `kalshi_crypto_underlier`;
+  - `attention_count_snapshot` into `kalshi_attention_underlying_value_feed_c`;
+  - `kalshi_sports_historical_settlement_tape` into `sports_price_history_with_outcome`.
+- **Unrequested missing data.** Abstentions that cite missing data without a request join one
+  group per niche. A key per sentence had produced 897 groups.
+- **Bug groups.** There are 17 bug groups. They include:
+  - the options desk's OCC exit-routing bug, which it restated across several passes;
+  - "replay still miscounts diesel as wins";
+  - a stale-rest defect that leaves resting bids dead;
+  - underlying SIP quotes without timestamps;
+  - an option chain still stamped Friday on Sunday.
+
+  Some are strategy bugs rather than House bugs. The labels are fallible, and the repair queue
+  decides.
+- **Hypothesis index.** It holds 484 mechanisms, from docstrings and candidate purposes. Jev
+  answered 62 pairs: 22 `related` and 40 `distinct`. None reached the 0.9 bar for `rewording`.
+- **Cost.** Development Jev spend was 77 calls and 322 cached answers for $0.0049, with a median
+  latency of 0.55 s. The live probe in §4 adds $0.0001. One call was refused as a repeated
+  identity (409) and is counted locally at the $0.003 worst case. Request identities are now
+  salted per store, and the total is at most $0.008 of the $0.30 authorized.
+
+## 6. Switches (all in `league/config.json` unless noted)
 
 - `"semantic_lab": false` turns off the continuous lab.
+- `game.json` `research.gate.enabled: false` turns every research gate off, v0's and this one.
 - `"jev": {"enabled": false}` removes the whole sensor; the House behaves exactly as before.
 - `jev.research_gate.enabled`, `jev.triage.enabled`, `jev.hypothesis_links.enabled` and
   `jev.exposure.enabled` each switch one piece off.

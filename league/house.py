@@ -1730,7 +1730,7 @@ class House:
         rules = dict((self.game.get("research") or {}).get("gate") or {})
         if not rules.get("enabled", True):
             return True
-        if self.jev_floor is not None:
+        if self.jev_floor is not None and self.jev_floor.gate is not None:
             return self.jev_floor.research_due(agent, last=last, due=True)
         streak = int((self._state.get("empty_research") or {}).get(agent.id) or 0)
         after = int(rules.get("after", 2))

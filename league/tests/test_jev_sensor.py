@@ -395,13 +395,20 @@ class ResearchGateTest(GateCase):
         self.clock.advance(self.interval)
         self.assertTrue(self.house.research_due(agent))
 
-    def test_switch_off_restores_the_clock(self):
+    def test_switching_this_gate_off_falls_back_to_v0(self):
         agent = self.ready(settings={"enabled": False})
+        self.assertIsNone(self.house.jev_floor.gate)
         summary(self.house.ledger, agent.id)
         self.researched(agent)
         self.clock.advance(self.interval)
         self.assertTrue(self.house.research_due(agent))
         self.assertEqual(self.gates(), [])
+        self.house._state["empty_research"] = {agent.id: 3}  # v0's own count
+        self.researched(agent)
+        self.clock.advance(self.interval)
+        self.house.research_due(agent)
+        self.assertEqual(self.gates()[-1]["empty_streak"], 3, "v0 decided and wrote its row")
+        self.assertNotIn("triggers", self.gates()[-1])
 
 
 class InactivityTest(GateCase):
@@ -434,6 +441,16 @@ class InactivityTest(GateCase):
         self.assertEqual([r["reason"] for r in self.rows(agent)],
                          ["abstained", "provider_failure", "failed_evaluation", "market_closed", "order_rejected", "paused", None])
         self.assertEqual(self.rows(agent)[-1]["was"], "paused")
+
+    def test_barren_wakes_are_an_abstention_but_missing_data_wins(self):
+        agent = self.ready()
+        self.house._state["idle"][agent.id] = {"barren": 12, "shut": 0, "offered": 30}
+        self.house.jev_floor.inactivity.update([agent])
+        self.assertEqual(self.rows(agent)[-1]["reason"], "abstained")
+        self.assertIn("12 wakes", self.rows(agent)[-1]["detail"])
+        summary(self.house.ledger, agent.id, text="The underlying-value feed remains not_supplied; nothing to test.")
+        self.house.jev_floor.inactivity.update([agent])
+        self.assertEqual(self.rows(agent)[-1]["reason"], "missing_data")
 
     def test_missing_data_from_an_unresolved_request(self):
         agent = self.ready()
@@ -737,6 +754,29 @@ class FloorTickTest(HouseCase):
         self.assertEqual(floor.inactivity.current(agent.id), "paused")
         self.assertEqual(self.house.ledger.count(kinds="repair.reported"), 0)
         self.assertEqual(self.jev.calls, [])
+
+
+class ReportCliTest(GateCase):
+    def test_cli_reads_a_ledger_file_without_writing(self):
+        import contextlib
+        import io
+        from league.research_gate import main
+        agent = self.ready()
+        summary(self.house.ledger, agent.id)
+        summary(self.house.ledger, agent.id)
+        self.researched(agent)
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent))
+        head = self.house.ledger.head()
+        before = (self.house.root / "jev.sqlite").read_bytes()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            main([str(self.house.root / "ledger.sqlite"), "--sensor", str(self.house.root / "jev.sqlite")])
+        printed = json.loads(out.getvalue())
+        self.assertEqual(printed["skipped_sessions"], 1)
+        self.assertEqual(printed["jev"]["model"], MODEL)
+        self.assertEqual(self.house.ledger.head(), head)
+        self.assertEqual((self.house.root / "jev.sqlite").read_bytes(), before)
 
 
 class OutcomeTest(unittest.TestCase):

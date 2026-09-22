@@ -33,7 +33,8 @@ for a,rows in summ.items():
             fired=bisect.bisect_right(ts,seq)-bisect.bisect_right(ts,pseq)>0
             fired=fired or any(pseq<s<seq and na==niche.get(a) and aa!=a for s,aa,na in notes)
             gap=t-pt
-            if not fired and streak>0 and gap < min(2**streak,8)*3*3600 and gap<24*3600:
+            AFTER=2  # game.json research.gate.after (v0 dials): x2 after two empty passes, x4 after three, x8 cap
+            if not fired and streak>=AFTER and gap < min(2**(streak-AFTER+1),8)*3*3600 and gap<24*3600:
                 skips+=1; skip_cost+=cost
                 o=outcome(p); by[o]+=1
                 if o=='c': missc+=1

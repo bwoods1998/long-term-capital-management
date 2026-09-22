@@ -51,9 +51,10 @@ class Sensor:
 
     def __init__(self, path: str | Path, client: Callable[[str, str], tuple[Mapping[str, Any], Any]] | None, *,
                  clock: Callable[[], float] = time.time, daily_usd: str | Decimal = "0.25", daily_calls: int = 400,
-                 purpose_calls: Mapping[str, int] | None = None, cooldown_seconds: float = 1800.0):
+                 purpose_calls: Mapping[str, int] | None = None, cooldown_seconds: float = 1800.0,
+                 readonly: bool = False):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.readonly = readonly  # a report reading the House box's store writes nothing to it
         self.client, self.clock = client, clock
         self.daily_usd = Decimal(str(daily_usd))
         self.daily_calls = int(daily_calls)
@@ -61,6 +62,11 @@ class Sensor:
         self.cooldown_seconds = float(cooldown_seconds)
         self.breaker_until = 0.0
         self._lock = threading.Lock()
+        self.salt = ""
+        if readonly:
+            self.client = None
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS answers(key TEXT PRIMARY KEY, purpose TEXT NOT NULL, p REAL NOT NULL,
@@ -81,9 +87,13 @@ class Sensor:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.path, timeout=30)
+        if self.readonly:
+            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=30)
+        else:
+            db = sqlite3.connect(self.path, timeout=30)
         try:
-            db.execute("PRAGMA journal_mode=WAL")
+            if not self.readonly:
+                db.execute("PRAGMA journal_mode=WAL")
             yield db
             db.commit()
         finally:
@@ -131,7 +141,7 @@ class Sensor:
         return found
 
     def _hit(self, purpose: str, n: int) -> None:
-        if n:
+        if n and not self.readonly:
             with self._db() as db:
                 db.execute("INSERT INTO hits VALUES(?,?,?) ON CONFLICT(day,purpose) DO UPDATE SET n=n+excluded.n",
                            (self._day(), purpose, n))

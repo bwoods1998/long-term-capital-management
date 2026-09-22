@@ -10,8 +10,9 @@ Measured on the production ledger, Sept 19-22, 2026 (7,370 research sessions, $1
   of the time; after two, 7%; after three, 6%; after five or more, 3.3% (147 of 4,513).
 - Most abstentions rediscovered a blocker nothing had changed: a closed session, an empty Kalshi
   window, a data feed the House does not have, an open paper position waiting to settle.
-- Replayed offline over those sessions (scripts/jev_lab_eval/gate_replay.py), these rules would
-  have skipped 5,428 sessions ($98 of $160); 186 of the skipped (3.4%) had retained a candidate.
+- Replayed offline over those sessions on the v0 dials (scripts/jev_lab_eval/gate_replay.py),
+  these rules would have skipped 4,978 sessions ($87 of $160); 146 of the skipped (2.9%) had
+  retained a candidate, most of which fail replay.
 
 So the gate sits in `House.research_due`, AFTER every existing check (budget, pause, credits,
 durable jobs) has said yes and the clock says the session is due. It can only SKIP a clock-due
@@ -194,10 +195,8 @@ class Inactivity:
         if idle.get("shut", 0) >= 1 and idle.get("barren", 0) == 0:
             return "market_closed", f"{idle['shut']} wakes in a row with nothing open", {}
         summary = self.last_summary(agent.id)
-        if summary is None:
-            return None, "no research yet", {}
-        outcome = session_outcome(summary.payload)
-        text = str(summary.payload.get("summary") or "")
+        outcome = session_outcome(summary.payload) if summary is not None else None
+        text = str(summary.payload.get("summary") or "") if summary is not None else ""
         if outcome == "provider_failure":
             return "provider_failure", str(summary.payload.get("reason"))[:200], {"seq": summary.seq}
         if outcome == "failed_evaluation":
@@ -208,8 +207,13 @@ class Inactivity:
             requests = sorted({name for member in (lineage or [agent.id]) for name in unresolved.get(member, []) if name})
             if requests or MISSING.search(text):
                 return "missing_data", text[:200], {"seq": summary.seq, "requests": requests}
+        barren = int((((house.game.get("research") or {}).get("idle") or {}).get("barren_wakes")) or 10)
+        if idle.get("barren", 0) >= barren:
+            # Live markets in front of it and its rules did not fire: the strategy is abstaining.
+            return "abstained", f"{idle['barren']} wakes in a row with {idle.get('offered', 0)} live markets and nothing done", {}
+        if outcome == "abstained":
             return "abstained", text[:200], {"seq": summary.seq}
-        return None, outcome, {}
+        return None, outcome or "no research yet", {}
 
     def current(self, agent_id: str) -> str | None:
         return (self.state.data["inactive"].get(agent_id) or {}).get("reason")
@@ -582,7 +586,7 @@ def main(argv: list[str] | None = None) -> int:
     sensor = None
     if args.sensor:
         from .jev import Sensor
-        sensor = Sensor(args.sensor, None)
+        sensor = Sensor(args.sensor, None, readonly=True)
     print(json.dumps(report(ReadOnly(args.ledger), sensor=sensor, after=args.after), indent=1, sort_keys=True))
     return 0
 
