@@ -1,0 +1,8 @@
+{
+  "family": "options-pullback",
+  "name": "krasker_3_occ_first",
+  "repair": {
+    "key": "bug_report:alpaca-options:25e76e7891"
+  },
+  "why": "New child of krasker-3: prefer OCC for holdings, working orders and chain identity, and route option orders through explicit occ fields. Retains the parent's specialty, parameters and trading rules; starts at rung 0 and must qualify independently."
+}
