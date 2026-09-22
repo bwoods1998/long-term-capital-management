@@ -388,6 +388,8 @@ class UniverseTest(unittest.TestCase):
 
 
 
+
+
 from league.tests.test_house import HouseCase  # noqa: E402
 
 
@@ -410,3 +412,46 @@ class HouseHookTest(HouseCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefreshAdjustedTest(unittest.TestCase):
+    def test_refresh_refetches_only_the_adjusted_chunks_fetched_before_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp, clock=lambda: NOW - 10)
+            ing = _ingestor(store, FakeAlpaca())
+            plan = ing.plan(["SPY"], ["1Day"], "2023-01-01", "2025-01-01")
+            ing.run(plan)
+            client = FakeAlpaca()
+            again = Ingestor(store, client, feed="sip", rate_per_minute=1_000_000, clock=lambda: NOW, sleep=lambda s: None,
+                             refresh_adjusted_before=NOW + 1)
+            again.run(again.plan(["SPY"], ["1Day"], "2023-01-01", "2025-01-01"))
+            self.assertEqual(len(client.calls), 2)
+            self.assertTrue(all("adjustment=all" in url for url in client.calls))
+
+
+class CallBudgetTest(unittest.TestCase):
+    def test_a_call_budget_stops_scheduling_and_the_run_resumes_later(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp)
+            client = FakeAlpaca()
+            ing = _ingestor(store, client, workers=1)
+            plan = ing.plan(["SPY"], ["1Hour"], "2025-01-01", "2026-01-01")
+            ing.run(plan, max_calls=5)
+            self.assertEqual(len(client.calls), 5)
+            self.assertEqual(sum(1 for c in plan if ing.pending(c)), len(plan) - 5)
+            rest = _ingestor(store, FakeAlpaca(), workers=1)
+            rest.run(plan)
+            self.assertEqual(sum(1 for c in plan if rest.pending(c)), 0)
+
+
+class ProbeBudgetTest(unittest.TestCase):
+    def test_a_budget_spent_inside_a_probe_day_leaves_that_day_unfetched_not_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp)
+            client = FakeAlpaca()
+            ing = _ingestor(store, client, workers=3)
+            plan = ing.probe_plan(["SPY", "QQQ"], "2025-03-03", "2025-03-06", grid="1Hour")
+            ing.run(plan, max_calls=8)
+            self.assertLessEqual(len(client.calls), 8)
+            self.assertNotIn("failed", {r["state"] for r in store.chunk_rows()})
+            self.assertTrue(any(ing.pending(c) for c in plan))

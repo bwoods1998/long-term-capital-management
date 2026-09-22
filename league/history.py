@@ -6,7 +6,13 @@ since 2016, 10,000 calls a minute) can supply a decade. This module is the first
 it: it fetches history once, keeps it on the House box, and says exactly what it holds.
 
     python -m league.history ingest --universe core --timeframes 1Day,1Hour [--since 2016-01-01] [--max-minutes N]
+                                    [--max-calls N] [--quotes set] [--refresh-adjusted]
     python -m league.history coverage [--json]
+
+**Every call passes through the gateway Worker** (the box holds no Alpaca key). Alpaca pages by
+time span, not by `limit` (measured Sept 22, 2026: about 184 hourly or 2,200 five-minute bars a
+page), so a decade of hourly bars is about two calls per symbol-month. `--max-calls` bounds a run
+so an ingestion can never eat the Worker's request allowance the live House depends on.
 
 **Where.** One SQLite file, `<root>/history/history.sqlite` (on the box `/workspace/state/history/`),
 in WAL mode so the House can read it while an ingestion writes. It is private data and never
@@ -413,6 +419,12 @@ class HistoryStore:
                          ' AND start=? AND "end"=?', (kind, symbol, timeframe, feed, adjustment, str(start), str(end)))
         return row[0]["state"] if row else None
 
+    def fetched_at(self, chunk: Chunk, symbol: str) -> "float | None":
+        row = self._rows('SELECT fetched_at FROM coverage WHERE kind=? AND symbol=? AND timeframe=? AND feed=? AND adjustment=?'
+                         ' AND start=? AND "end"=?', (chunk.kind, symbol, chunk.timeframe, chunk.feed, chunk.adjustment,
+                                                     str(chunk.start), str(chunk.end)))
+        return row[0]["fetched_at"] if row else None
+
     def chunk_rows(self, kind: "str | None" = None) -> list[dict[str, Any]]:
         sql, params = "SELECT * FROM coverage", []
         if kind:
@@ -525,6 +537,10 @@ class VenueFailure(RuntimeError):
     """The venue refused or did not answer after the retries."""
 
 
+class BudgetSpent(RuntimeError):
+    """The run's call budget is spent: the chunk in hand is left unfetched, not failed."""
+
+
 @dataclass
 class Tally:
     calls: int = 0
@@ -537,14 +553,18 @@ class Ingestor:
 
     def __init__(self, store: HistoryStore, client: Any, *, feed: str = "sip", rate_per_minute: float = DEFAULT_RATE,
                  workers: int = DEFAULT_WORKERS, clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], None] = time.sleep, retries: int = 4, log: Callable[[str], None] | None = None):
+                 sleep: Callable[[float], None] = time.sleep, retries: int = 4, log: Callable[[str], None] | None = None,
+                 refresh_adjusted_before: "float | None" = None):
         self.store, self.client, self.feed = store, client, str(feed)
+        #: `all` chunks fetched before this moment are fetched again (see `pending`).
+        self.refresh_adjusted_before = refresh_adjusted_before
         self.limiter = RateLimiter(rate_per_minute, sleep=sleep)
         self.workers = max(1, int(workers))
         self.clock, self.sleep, self.retries = clock, sleep, max(0, int(retries))
         self.log = log or (lambda text: None)
         self.tally = Tally()
         self._tally_lock = threading.Lock()
+        self.max_calls: "int | None" = None
 
     # -------------------------------------------------------------- http
     def _get(self, base: str, path: str, params: Mapping[str, Any]) -> Any:
@@ -552,9 +572,11 @@ class Ingestor:
         url = f"{base}{path}?" + urllib.parse.urlencode(pairs, safe="/,:")
         delay = 2.0
         for attempt in range(self.retries + 1):
-            self.limiter.acquire()
             with self._tally_lock:
+                if self.max_calls is not None and self.tally.calls >= self.max_calls:
+                    raise BudgetSpent(f"{self.max_calls} calls spent")
                 self.tally.calls += 1
+            self.limiter.acquire()
             try:
                 status, payload = self.client.request("GET", url, headers={}, what="alpaca history")
             except Exception as exc:  # noqa: BLE001 - a transport failure: retried, then a chunk failure
@@ -619,9 +641,21 @@ class Ingestor:
         return chunks
 
     def pending(self, chunk: Chunk) -> list[str]:
-        """The symbols of a chunk still to fetch: never fetched, failed, or open (unsettled)."""
-        return [s for s in chunk.symbols if self.store.chunk_state(chunk.kind, s, chunk.timeframe, chunk.feed, chunk.adjustment,
-                                                                   chunk.start, chunk.end) in (None, "failed", "open")]
+        """The symbols of a chunk still to fetch: never fetched, failed, or open (unsettled).
+
+        An `all` chunk is adjusted as of its fetch, so after a split or dividend the chunks fetched
+        before it are stale by that event's factor while a later fetch is not. A deep tape must be
+        built from one consistent fetch; `--refresh-adjusted` re-fetches every `all` chunk fetched
+        before the run began (cheap: daily and hourly only)."""
+        out = []
+        for symbol in chunk.symbols:
+            state = self.store.chunk_state(chunk.kind, symbol, chunk.timeframe, chunk.feed, chunk.adjustment, chunk.start, chunk.end)
+            if state in (None, "failed", "open"):
+                out.append(symbol)
+            elif (self.refresh_adjusted_before is not None and chunk.adjustment == "all"
+                  and (self.store.fetched_at(chunk, symbol) or 0) < self.refresh_adjusted_before):
+                out.append(symbol)
+        return out
 
     def _before_listing(self, symbol: str, chunk: Chunk) -> bool:
         """An intraday chunk wholly before the symbol's first daily bar, when the daily pass has
@@ -656,6 +690,8 @@ class Ingestor:
         params["symbols"] = ",".join(wanted)
         try:
             found, calls = self._paged(DATA_URL, CRYPTO_BARS_PATH if crypto else STOCK_BARS_PATH, params, "bars")
+        except BudgetSpent:
+            return {**states, **{symbol: "skipped" for symbol in wanted}}
         except VenueFailure as exc:
             for symbol in wanted:
                 self.store.commit_chunk(chunk, symbol, state="failed", params=params, run=run, error=str(exc))
@@ -679,9 +715,12 @@ class Ingestor:
         return states
 
     def run(self, chunks: Sequence[Chunk], *, run: "str | None" = None, max_minutes: "float | None" = None,
-            stop: "threading.Event | None" = None) -> Tally:
-        """Fetch every pending chunk, `workers` at a time; stop scheduling at the time limit."""
+            stop: "threading.Event | None" = None, max_calls: "int | None" = None) -> Tally:
+        """Fetch every pending chunk, `workers` at a time; stop at the time limit, or once
+        `max_calls` calls are spent (a chunk cut short by the budget is left unfetched)."""
         deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
+        self.max_calls = max_calls
+        spent = lambda: max_calls is not None and self.tally.calls >= max_calls  # noqa: E731
         stop = stop or threading.Event()
         work = iter(chunks)
         in_flight: dict[Any, Chunk] = {}
@@ -701,7 +740,8 @@ class Ingestor:
         with ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="history") as pool:
             exhausted = False
             while True:
-                while not exhausted and len(in_flight) < self.workers and not stop.is_set() and not (deadline and time.monotonic() > deadline):
+                while (not exhausted and len(in_flight) < self.workers and not stop.is_set()
+                       and not (deadline and time.monotonic() > deadline) and not spent()):
                     exhausted = not submit(pool)
                 if not in_flight:
                     break
@@ -780,6 +820,9 @@ class Ingestor:
             crypto = is_crypto(symbol)
             try:
                 times = self.probe_times(chunk, symbol)
+            except BudgetSpent:
+                states[symbol] = "skipped"
+                continue
             except VenueFailure as exc:
                 self.store.commit_chunk(chunk, symbol, state="failed", run=run, error=f"calendar: {exc}", params={})
                 states[symbol] = "failed"
@@ -795,6 +838,9 @@ class Ingestor:
                     params["feed"] = chunk.feed
                 try:
                     payload = self._get(DATA_URL, CRYPTO_QUOTES_PATH if crypto else STOCK_QUOTES_PATH, params)
+                except BudgetSpent:
+                    error = "budget"
+                    break
                 except VenueFailure as exc:
                     error = str(exc)
                     break
@@ -804,6 +850,9 @@ class Ingestor:
                 rows.append(_probe_row(t, at, quote))
             params_rec = {"grid": chunk.timeframe, "latency_seconds": PROBE_LATENCY_SECONDS, "lookback_seconds": PROBE_LOOKBACK_SECONDS,
                           "sort": "desc", "limit": 1, "feed": chunk.feed if not crypto else None, "probes": len(times)}
+            if error == "budget":
+                states[symbol] = "skipped"
+                continue
             if error:
                 self.store.commit_chunk(chunk, symbol, state="failed", run=run, error=error, params=params_rec, calls=calls)
                 states[symbol] = "failed"
@@ -829,6 +878,9 @@ class Ingestor:
         for symbol in symbols:
             try:
                 times = self.probe_times(chunk, symbol)
+            except BudgetSpent:
+                states[symbol] = "skipped"
+                continue
             except VenueFailure as exc:
                 self.store.commit_chunk(chunk, symbol, state="failed", run=run, error=f"calendar: {exc}", params={})
                 states[symbol] = "failed"
@@ -840,6 +892,9 @@ class Ingestor:
                 params = {"symbols": symbol, "start": iso(t), "end": iso(t + TRADE_WINDOW_SECONDS), "limit": PAGE_LIMIT, "feed": chunk.feed}
                 try:
                     found, used = self._paged(DATA_URL, STOCK_TRADES_PATH, params, "trades")
+                except BudgetSpent:
+                    error = "budget"
+                    break
                 except VenueFailure as exc:
                     error = str(exc)
                     break
@@ -849,6 +904,9 @@ class Ingestor:
                     if parsed is not None:
                         rows.append(parsed)
             params_rec = {"grid": chunk.timeframe, "window_seconds": TRADE_WINDOW_SECONDS, "feed": chunk.feed, "windows": len(times)}
+            if error == "budget":
+                states[symbol] = "skipped"
+                continue
             if error:
                 self.store.commit_chunk(chunk, symbol, state="failed", run=run, error=error, params=params_rec, calls=calls)
                 states[symbol] = "failed"
@@ -980,13 +1038,18 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
     parser.add_argument("--since", default=DEFAULT_SINCE)
     parser.add_argument("--until", default=None)
     parser.add_argument("--max-minutes", type=float, default=None)
+    parser.add_argument("--max-calls", type=int, default=None,
+                        help="stop scheduling after this many venue calls (every call also passes through the gateway Worker)")
     parser.add_argument("--rate", type=float, default=DEFAULT_RATE, help="calls a minute (the plan allows 10,000)")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--feed", default=None, help="stock feed; default: league/config.json alpaca_feed")
     parser.add_argument("--quotes", default="", help="quote probes for these symbols ('set' = the default small liquid set)")
     parser.add_argument("--quote-since", default=None, help="first day of quote probes (default: 200 days ago)")
-    parser.add_argument("--quote-grid", default="5Min")
+    parser.add_argument("--quote-grid", default="5Min", help="equity probe grid inside the regular session")
+    parser.add_argument("--crypto-grid", default="15Min", help="crypto probe grid over the whole day")
     parser.add_argument("--trades", default="", help="trade windows for these symbols ('set' = the equity quote set)")
+    parser.add_argument("--refresh-adjusted", action="store_true",
+                        help="fetch every split/dividend-adjusted chunk again (after a corporate action)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     store = HistoryStore.at_root(args.root)
@@ -1010,7 +1073,8 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()] or universe(args.universe)
     timeframes = [t.strip() for t in args.timeframes.split(",") if t.strip()]
     stamp = lambda text: print(f"{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}  {text}", flush=True)  # noqa: E731
-    ingestor = Ingestor(store, client or _client(config), feed=feed, rate_per_minute=args.rate, workers=args.workers, log=stamp)
+    ingestor = Ingestor(store, client or _client(config), feed=feed, rate_per_minute=args.rate, workers=args.workers, log=stamp,
+                        refresh_adjusted_before=time.time() if args.refresh_adjusted else None)
     run = store.begin_run({**vars(args), "feed": feed, "symbols": symbols, "timeframes": timeframes})
     stop = threading.Event()
     status, error = "finished", None
@@ -1026,10 +1090,10 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
         quote_symbols = list(QUOTE_SET) if args.quotes == "set" else [s.strip().upper() for s in args.quotes.split(",") if s.strip()]
         trade_symbols = [s for s in QUOTE_SET if not is_crypto(s)] if args.trades == "set" else [s.strip().upper() for s in args.trades.split(",") if s.strip()]
         quote_since = args.quote_since or str((datetime.now(timezone.utc) - timedelta(days=200)).date())
-        chunks += ingestor.probe_plan(quote_symbols, quote_since, grid=args.quote_grid) if quote_symbols else []
+        chunks += ingestor.probe_plan(quote_symbols, quote_since, grid=args.quote_grid, crypto_grid=args.crypto_grid) if quote_symbols else []
         chunks += ingestor.trade_plan(trade_symbols, quote_since) if trade_symbols else []
         stamp(f"run {run}: {len(chunks)} chunks planned for {len(symbols)} symbols, {timeframes}, since {args.since}, feed {feed}")
-        tally = ingestor.run(chunks, run=run, max_minutes=args.max_minutes, stop=stop)
+        tally = ingestor.run(chunks, run=run, max_minutes=args.max_minutes, stop=stop, max_calls=args.max_calls)
         # An `open` chunk (it reaches into the present) is fetched again on every run by design;
         # only a chunk never fetched, or failed, means this run stopped short.
         remaining = sum(1 for chunk in chunks for symbol in chunk.symbols
