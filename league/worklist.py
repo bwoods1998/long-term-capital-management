@@ -275,7 +275,11 @@ class Worklist:
         """Proposed jobs whose priority has reached the line become admitted, highest first.
         Operator and synthetic reports are admitted whatever their priority: someone asked."""
         admitted = []
-        for job in self.queue(("proposed",)):
+        # A requested job goes first. Measured Sept 22, 2026: the drill (priority 0.5) sat at
+        # index 42 of 50 proposed jobs while triage kept filing ones above the line, so the ten
+        # admitted each step were always others and "whatever their priority" never came true.
+        requested = {"operator", "synthetic"}
+        for job in sorted(self.queue(("proposed",)), key=lambda j: not (j.sources & requested)):
             if len(admitted) >= limit:
                 break
             if job.priority() >= threshold or job.sources & {"operator", "synthetic"}:

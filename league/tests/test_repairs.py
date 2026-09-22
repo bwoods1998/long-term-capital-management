@@ -82,6 +82,18 @@ class WorklistFold(Base):
         self.worklist.report(key="op", kind="bug_report", summary="s", evidence=[], agents=[], source="operator", severity="low")
         self.assertEqual(self.worklist.admit(threshold=2.0), ["op"], "an operator's report is admitted whatever its priority")
 
+    def test_a_requested_job_is_admitted_even_behind_a_full_step_of_others(self):
+        """Sept 22, 2026: the drill sat at index 42 of 50 proposed jobs; ten others were admitted each step."""
+        for n in range(12):
+            self.worklist.report(key=f"hot{n}", kind="order_refusal", summary="s", evidence=[self.ev(i, f"a{n}{i}") for i in range(1, 4)],
+                                 agents=[], source="refusals", severity="medium", occurrences=3)
+        self.worklist.report(key="synthetic:repair-drill:x", kind="bug_report", summary="drill", evidence=[], agents=[],
+                             source="synthetic", severity="low")
+        admitted = self.worklist.admit(threshold=2.0, limit=10)
+        self.assertEqual(len(admitted), 10)
+        self.assertEqual(admitted[0], "synthetic:repair-drill:x")
+        self.assertEqual(self.worklist.get("synthetic:repair-drill:x").state, "admitted")
+
     def test_costs_add_up_and_the_latest_row_says_the_attempt(self):
         self.worklist.report(key="k", kind="bug_report", summary="s", evidence=[], agents=[], source="operator", severity="low")
         self.worklist.transition("k", "patching", attempt=1, cost_usd="0.40")
