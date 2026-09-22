@@ -18,9 +18,10 @@ EXECUTION IS ESTIMATED, AND CONSERVATIVE, BECAUSE NO HISTORICAL OPTION QUOTES EX
 - Limit orders only (the House refuses option market orders). Nothing fills in the bar the
   decision saw: an order is worked against LATER bars of its contract that printed at least
   `min_volume` contracts in `min_trades` trades, and at most `max_participation` of the bar's
-  volume (all or nothing). A buy fills at the estimated ask at the bar's open if its limit is
-  at least that, else at its own limit only when the bar traded at least one tick THROUGH it
-  (`low <= limit - tick`): a touched limit is not a fill. Sells mirror this.
+  volume (all or nothing). A buy at or over the SHOWN ask at the bar's open is marketable and
+  fills at the worse of the shown and the conservative ask, never above its limit; any other buy
+  fills at its own limit only when the bar traded at least one tick THROUGH it (`low <= limit -
+  tick`): a touched limit is not a fill. Sells mirror this.
 - Orders are day orders: an unfilled one expires at 16:00 New York.
 - One contract is 100 shares: every premium is paid and received times 100. Fees are
   `fee_per_contract_usd` a contract a fill (an assumed regulatory pass-through; Alpaca charges no
@@ -175,11 +176,15 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         return seen
 
     def work(occ: str, bar: dict[str, Any], now: str) -> None:
-        """Later bars meet working orders: at the estimated open touch, or one tick through."""
+        """Later bars meet working orders. An order at or through the quote a strategy is SHOWN
+        (the bar's open +- the displayed half-spread) is marketable, as an order at the touch
+        is live: it fills at the worse of the shown and the conservative touch, never past its
+        limit. Any other order rests and fills at its limit only on a print a tick through it."""
         nonlocal liquidity_misses
         volume, trades = float(bar.get("v") or 0), int(bar.get("n") or 0)
-        _, _, half = estimate_quote(bar, ranges.get(occ, []), model)
-        half *= max(1.0, float(model.get("stress") or 1.0))  # the execution stress: costs, not the quote shown
+        stress = max(1.0, float(model.get("stress") or 1.0))  # the execution stress: costs, not the quote shown
+        half = estimate_quote(bar, ranges.get(occ, []), model)[2] * stress
+        shown = (display_quote(float(bar["o"]), model)[1] - float(bar["o"])) * stress  # the shown half-spread at the open
         bar_start = now_ts - step_seconds
         for order_id in [k for k, o in book.orders.items() if o["occ"] == occ]:
             order = book.orders[order_id]
@@ -189,12 +194,14 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 liquidity_misses += 1
                 continue
             limit, step = order["limit_price"], tick(order["limit_price"])
+            opening = float(bar["o"])
             if order["side"] == "buy":
-                ask_open = float(bar["o"]) + half
-                price = ask_open if limit >= ask_open - EPS else (limit if float(bar["l"]) <= limit - step + EPS else None)
+                price = (min(limit, opening + max(shown, half)) if limit >= opening + shown - EPS
+                         else (limit if float(bar["l"]) <= limit - step + EPS else None))
             else:
-                bid_open = float(bar["o"]) - half
-                price = bid_open if bid_open > 0 and limit <= bid_open + EPS else (limit if float(bar["h"]) >= limit + step - EPS else None)
+                worst = max(opening - max(shown, half), 0.0)
+                price = (max(limit, worst) if opening - shown > 0 and limit <= opening - shown + EPS
+                         else (limit if float(bar["h"]) >= limit + step - EPS else None))
             if price is None:
                 continue
             if order["side"] == "sell" and occ not in book.positions:

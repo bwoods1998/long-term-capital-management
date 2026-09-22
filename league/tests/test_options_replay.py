@@ -126,6 +126,16 @@ class Execution(unittest.TestCase):
         self.assertEqual(result["final_memory"]["chain"], [[0.382, 0.418]])  # shown: 0.40 +- 4.5%
         self.assertEqual([f["price"] for f in result["fill_log"]], [0.48])  # paid: the open 0.40 + half the 0.16 range
 
+    def test_an_order_at_the_shown_touch_is_marketable_and_never_fills_past_its_limit(self):
+        """A sell at the bid a strategy is shown fills at once live; so it must here, at that
+        bid or worse, never better (found when a stop at the shown bid kept missing a falling market)."""
+        steps = [step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
+                 step("2026-03-02T15:15:00Z", {C1: bar(0.40, 0.41, 0.39, 0.40)}),
+                 step("2026-03-02T15:30:00Z", {C1: bar(0.40, 0.40, 0.40, 0.40)}),
+                 step("2026-03-02T15:45:00Z", {C1: bar(0.40, 0.40, 0.40, 0.40)})]
+        result = run(steps, occ=C1, buy_at="2026-03-02T15:15:00Z", limit=0.418, sell_at="2026-03-02T15:30:00Z", sell_limit=0.382)
+        self.assertEqual([(f["side"], f["price"]) for f in result["fill_log"]], [("buy", 0.418), ("sell", 0.382)])  # the limits: the conservative touch is worse
+
     def test_the_execution_stress_changes_what_a_fill_pays_not_the_quote_shown(self):
         steps = [step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
                  step("2026-03-02T15:15:00Z", {C1: bar(0.40, 0.41, 0.40, 0.40)})]
