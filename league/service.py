@@ -163,9 +163,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
-    # The continuous midpoint-direction labeler burned about $1/h of Jev's $20 lifetime allowance
-    # with no measured tradable value (Sept 22, 2026, $16.04 spent, $3.96 left). Off unless the
-    # config turns it back on after a capped evaluation shows value.
+    # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned
+    # about $1/h of Jev's $20 lifetime allowance ($16.04 spent at the gateway by Sept 22, 2026), and
+    # the capped evaluation of its own store found no tradable value: its labels predicted whether a
+    # midpoint moves, not which way, and no threshold trade beat the spread
+    # (docs/design/2026-09-22-jev-sensor.md).
     if campaigns is not None and campaigns.burst() and config.get("semantic_lab", False):
         from .semantic_lab import JevClient, SemanticLab
         house.semantic_lab = SemanticLab(root, JevClient(gateway_url, token), house.ledger,
@@ -186,6 +188,19 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Jev for every researcher (`classify`): one question over many records, at cost.
         from .semantic_lab import JevClient
         house.researcher.jev = JevClient(gateway_url, token)
+    jev = dict(config.get("jev") or {})
+    if not canary and jev.get("enabled", True):
+        # Jev as the cheap sensor in front of expensive work: research gate, explicit inactivity,
+        # triage into repair reports, hypothesis links, exposure groups. Capped and cached here;
+        # the gateway's lifetime allowance stays the authority (league/jev.py).
+        from .jev import Sensor
+        from .semantic_lab import JevClient
+        from .sensors import JevFloor
+
+        sensor = Sensor(root / "jev.sqlite", JevClient(gateway_url, token), clock=house.clock,
+                        daily_usd=str(jev.get("daily_usd", "0.25")), daily_calls=int(jev.get("daily_calls", 400)),
+                        purpose_calls=jev.get("purpose_calls") or None)
+        house.jev_floor = JevFloor(house, sensor, jev)
     if not canary:
         from .frontier import FrontierMonth
 

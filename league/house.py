@@ -159,6 +159,7 @@ class House:
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
         self.semantic_lab: Any = None
+        self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
@@ -1721,10 +1722,16 @@ class House:
         doubles per further empty pass (up to `max_factor`), unless something new reached the
         agent's record since its last pass: a fill, a settlement, a verdict or a new strategy.
         A deterministic `sample_percent` of the skipped windows run anyway, so what the gate
-        misses stays measurable (`research.gate` rows with sampled=true)."""
+        misses stays measurable (`research.gate` rows with sampled=true).
+
+        With the Jev floor wired (`league/sensors.py`) its gate decides instead, on the same dials:
+        exact triggers beyond these four, explicit blockers, a heartbeat and Jev's note relevance
+        (`league/research_gate.py`). This body is the fallback when it is switched off."""
         rules = dict((self.game.get("research") or {}).get("gate") or {})
         if not rules.get("enabled", True):
             return True
+        if self.jev_floor is not None:
+            return self.jev_floor.research_due(agent, last=last, due=True)
         streak = int((self._state.get("empty_research") or {}).get(agent.id) or 0)
         after = int(rules.get("after", 2))
         if streak < after:
@@ -2717,6 +2724,8 @@ class House:
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if open_for_business and self.semantic_lab is not None and self.semantic_lab.due():
             self._background('semantic-lab', self.semantic_lab.run)
+        if self.jev_floor is not None:
+            self.jev_floor.tick(open_for_business)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
         if self.updater is not None and self.updater.due():
@@ -2806,6 +2815,7 @@ class House:
                                  if (row := self._state.get('promotion_status', {}).get(agent.id))
                                  and row.get('code_sha256') == agent.code_sha256],
             "semantic_lab": self.semantic_lab.stats() if self.semantic_lab else None,
+            "jev": self.jev_floor.health() if self.jev_floor else None,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
