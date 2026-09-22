@@ -59,3 +59,24 @@ class SelectionOpportunity(HouseCase):
         self.assertIsNone(self.house._weakest(rules))
         self.clock.advance(grace + 1)
         self.assertEqual(self.house._weakest(rules).id, agent.id)
+
+
+
+class ReplayRulesChange(HouseCase):
+    """When the owner changes the replay rules, rung-0 agents get one fresh replay (Sept 22, 2026)."""
+
+    def test_rung_zero_agents_get_one_fresh_replay_when_the_rules_change(self):
+        young = self.house.spawn("young", "test-family", BUYER, reason="a test agent")
+        seated = self.seated("seated")
+        self.house._state["tried"][young.id] = young.code_sha256
+        self.house._state["replay_rules"] = "an-older-gate"
+        self.house._replay_rules_changed()
+        self.assertNotIn(young.id, self.house._state["tried"])
+        self.assertEqual(self.house._state["tried"][seated.id], seated.code_sha256)
+        self.house._state["tried"][young.id] = young.code_sha256
+        self.house._replay_rules_changed()
+        self.assertEqual(self.house._state["tried"][young.id], young.code_sha256)
+
+    def test_a_new_house_has_no_old_verdict_to_revisit(self):
+        from league.house import _replay_rules_key
+        self.assertEqual(self.house._state["replay_rules"], _replay_rules_key())

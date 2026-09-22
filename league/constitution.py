@@ -55,7 +55,16 @@ CONSTITUTION: dict[str, Any] = {
         # 18:15, 18 passed at 0.75 and 40 would have at 0.5; the deflated Sharpe was the reason in 93
         # of every 99 failures. 0.5 still asks that the idea more likely than not beats the best of
         # the trials in its own line, and paper -- forward evidence -- is where it is really tested.
-        "replay": {"min_trades": 20, "min_blocks": 20, "min_deflated_sharpe": 0.5, "min_oos_blocks": 8},
+        # Owner revision, Sept 22, 2026 ~21:25 UTC ("desperate need of more dynamism ... I would've
+        # expected my alpaca paper trading account to have a ridiculous amount of trading on it"):
+        # deflated Sharpe 0.5 -> 0 (off) and 20 -> 10 closed trades. A paper seat now needs a program
+        # that trades enough to judge and made money out of sample. The multiple-testing penalty
+        # stays where money is at stake: the screen, the audit and the scaled rung's bound. It had
+        # deadlocked whole desks here -- Alpaca megacaps' line reached 59-63 trials, each failure
+        # raised the bar for the next, and its agents stopped trying. Of the 786 replays from Sept 20
+        # 21:20 to Sept 22 21:20, 38 agents passed at the old values (5 on Alpaca desks); 157 would
+        # have at these (54 on Alpaca desks).
+        "replay": {"min_trades": 10, "min_blocks": 20, "min_deflated_sharpe": 0.0, "min_oos_blocks": 8},
         # Rung 1 -> 2: a SCREEN, then the frontier audit. Not a confidence bound: a bound strict
         # enough to mean something needs hundreds of trades (the first run's one measured edge
         # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
@@ -179,4 +188,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'acac3c5fc54cc4e1e8d970215642e017588824cc724d67b89b153f85a78da73b'
+PINNED_DIGEST = '6ebd41acaaca4195da74bb8a387d43efa98f8b52ce9ddd211b10f2a89c784c26'
