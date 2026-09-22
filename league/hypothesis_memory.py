@@ -10,7 +10,8 @@ This module reads the stated mechanisms the floor already writes -- `hypothesis.
 `purpose` of every retained research candidate, and strategy docstrings from `agent.born` and
 `agent.strategy` -- and writes `hypothesis.link {a, b, relation, confidence, method}`:
 
-- **exact**: identical normalized text (numbers removed) in another niche is `related`, never a
+- **exact**: the same words with only numbers changed, in the same niche, is a `rewording` (a
+  parameter variant of one mechanism); identical words in another niche are `related`, never a
   rewording: the same idea on other markets has other evidence.
 - **jev**: pairs in the same venue with word overlap are asked "same mechanism, reworded?" At or
   above `rewording_threshold` the link is `rewording`; in the uncertain band it is `related`;
@@ -51,13 +52,20 @@ DEFAULTS: dict[str, Any] = {
 
 
 def normalize(text: str) -> str:
-    text = re.sub(r"\d+(?:\.\d+)?", " ", str(text).lower())
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z ]+", " ", text)).strip()
+    """Case, spacing and punctuation removed: the text a `hypothesis.card` id is computed from."""
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def wording(text: str) -> str:
+    """The words alone, numbers removed: equal wordings differ only in parameter values."""
+    return re.sub(r"\s+", " ", re.sub(r"[0-9]+", " ", normalize(text))).strip()
 
 
 def mechanism_id(text: str, niche: str | None) -> str:
-    """sha256 prefix of the normalized mechanism text plus the niche (the hypothesis.card rule)."""
-    return hashlib.sha256((normalize(text) + "|" + str(niche or "")).encode()).hexdigest()[:16]
+    """The `hypothesis.card` id rule (league/hypotheses.py `card_id`): a sha256 prefix of the
+    normalized mechanism plus the niche, so a docstring and a card stating the same mechanism
+    on the same desk are one mechanism here."""
+    return hashlib.sha256((normalize(text) + "\n" + str(niche or "")).encode("utf-8")).hexdigest()[:16]
 
 
 def docstring(code: str) -> str:
@@ -97,7 +105,7 @@ class HypothesisMemory:
         p = entry.payload
         if entry.kind == "hypothesis.card":
             text = str(p.get("mechanism") or "")
-            return [(str(p.get("id") or mechanism_id(text, p.get("niche"))), text, p.get("niche"), None)] if text else []
+            return [(str(p.get("id") or mechanism_id(text, p.get("niche"))), text, p.get("niche"), p.get("code_sha256"))] if text else []
         if entry.kind in ("agent.born", "agent.strategy"):
             text = docstring(str(p.get("_code") or ""))
             niche = p.get("specialty") or self.niche_of(entry.agent)
@@ -125,7 +133,9 @@ class HypothesisMemory:
                         row = self.state["mechanisms"][ident] = {"text": text[:1200], "niche": niche, "sources": []}
                         new.append(ident)
                     if len(row["sources"]) < 200:
-                        row["sources"].append({"agent": entry.agent, "code": code, "seq": entry.seq, "kind": entry.kind})
+                        # A card is written by the House for the line it founds (`line_id`).
+                        agent = str(entry.payload.get("line_id") or entry.agent) if entry.kind == "hypothesis.card" else entry.agent
+                        row["sources"].append({"agent": agent, "code": code, "seq": entry.seq, "kind": entry.kind})
             after = rows[-1].seq
         self.state["seq"] = after
         return new
@@ -144,15 +154,22 @@ class HypothesisMemory:
         with self.lock:
             self.state["last_run"] = self.clock()
             new = self.collect()
-            links = self._exact(new) + self._semantic(new)
+            links = self._exact(new)
+            # Jev reads a bounded number of pairs a run; the rest wait their turn instead of being
+            # forgotten once they are no longer new (the first run on production indexes ~800).
+            pending = list(dict.fromkeys([*self.state.get("pending", []), *new]))
+            done, written = self._semantic(pending)
+            self.state["pending"] = [ident for ident in pending if ident not in done]
             self._save()
-            return {"new_mechanisms": len(new), "links": links, "mechanisms": len(self.state["mechanisms"])}
+            return {"new_mechanisms": len(new), "links": links + written, "pending": len(self.state["pending"]),
+                    "mechanisms": len(self.state["mechanisms"])}
 
     def _exact(self, new: list[str]) -> int:
-        """The same normalized words in another niche: related, with certainty about the words only."""
+        """Equal wordings: a rewording in the same niche (only numbers differ), related across niches."""
+        mechanisms = self.state["mechanisms"]
         by_text: dict[str, list[str]] = {}
-        for ident, row in self.state["mechanisms"].items():
-            by_text.setdefault(normalize(row["text"]), []).append(ident)
+        for ident, row in mechanisms.items():
+            by_text.setdefault(wording(row["text"]), []).append(ident)
         written = 0
         fresh = set(new)
         for idents in by_text.values():
@@ -163,22 +180,27 @@ class HypothesisMemory:
                     continue
                 for other in idents:
                     if other != ident and (other not in fresh or other < ident):
-                        written += self._link(ident, other, "related", 1.0, "exact")
+                        same_niche = mechanisms[ident].get("niche") == mechanisms[other].get("niche")
+                        written += self._link(ident, other, "rewording" if same_niche else "related", 1.0, "exact")
         return written
 
-    def _semantic(self, new: list[str]) -> int:
-        if self.sensor is None or not new:
-            return 0
+    def _semantic(self, pending: list[str]) -> tuple[set[str], int]:
+        """(ids fully answered or with nothing to ask, links written)."""
+        if self.sensor is None or not pending:
+            return set(), 0
         mechanisms = self.state["mechanisms"]
-        asked, written = 0, 0
+        asked, written, done = 0, 0, set()
         cap = int(self.settings["max_questions_per_run"])
-        for ident in new:
+        for ident in pending:
+            if ident not in mechanisms:
+                done.add(ident)
+                continue
             row = mechanisms[ident]
             venue = str(row.get("niche") or "").split("-")[0]
             scored = []
             for other, orow in mechanisms.items():
-                if other == ident or normalize(orow["text"]) == normalize(row["text"]):
-                    continue
+                if other == ident or wording(orow["text"]) == wording(row["text"]):
+                    continue  # already linked exactly
                 if venue and str(orow.get("niche") or "").split("-")[0] != venue:
                     continue
                 score = jaccard(row["text"], orow["text"])
@@ -186,11 +208,18 @@ class HypothesisMemory:
                     scored.append((score, other))
             scored.sort(reverse=True)
             pairs = [other for _, other in scored[:int(self.settings["candidates_per_mechanism"])]]
-            if not pairs or asked + len(pairs) > cap:
+            if not pairs:
+                done.add(ident)
                 continue
+            if asked + len(pairs) > cap:
+                if asked or cap <= 0:
+                    break
+                pairs = pairs[:cap]  # a cap below one mechanism's candidates still makes progress
             asked += len(pairs)
             items = {"hyplink:" + sha(sorted((ident, other))): (mechanisms[other]["text"][:900], SAME) for other in pairs}
             answers = self.sensor.ask("links", {"reference_mechanism": row["text"][:900], "reference_niche": row.get("niche")}, items)
+            if all(answers.get(key) is not None for key in items):
+                done.add(ident)
             for other, key in zip(pairs, items):
                 p = answers.get(key)
                 if p is None:
@@ -202,7 +231,7 @@ class HypothesisMemory:
                 else:
                     relation = "related"
                 written += self._link(ident, other, relation, p, "jev")
-        return written
+        return done, written
 
     # ---------------------------------------------------------------- readers
     def resolve(self, ref: str, niche: str | None = None) -> str | None:

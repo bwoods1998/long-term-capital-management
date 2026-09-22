@@ -29,6 +29,7 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -70,7 +71,13 @@ class Sensor:
                 CREATE INDEX IF NOT EXISTS calls_day ON calls(day, purpose);
                 CREATE TABLE IF NOT EXISTS hits(day TEXT NOT NULL, purpose TEXT NOT NULL, n INTEGER NOT NULL,
                     PRIMARY KEY(day, purpose));
+                CREATE TABLE IF NOT EXISTS meta(name TEXT PRIMARY KEY, value TEXT NOT NULL);
             """)
+            # The gateway refuses a request identity it has seen before (409), including one bought
+            # by another store: a fresh or restored jev.sqlite gets its own salt, so its first
+            # question is not refused as a repeat of an older store's (measured Sept 22, 2026).
+            db.execute("INSERT OR IGNORE INTO meta VALUES('salt', ?)", (uuid.uuid4().hex[:8],))
+            self.salt = db.execute("SELECT value FROM meta WHERE name='salt'").fetchone()[0]
 
     @contextmanager
     def _db(self):
@@ -173,8 +180,9 @@ class Sensor:
             with self._db() as db:
                 # The gateway refuses a repeated identity (409), so a body bought again after an
                 # unconfirmed attempt needs a new one; the attempt number keeps it deterministic.
-                attempt = db.execute("SELECT COUNT(*) FROM calls WHERE ident LIKE ?", (f"sensor-{digest[:40]}%",)).fetchone()[0]
-                ident = f"sensor-{digest[:40]}-{attempt}"
+                stem = f"sensor-{self.salt}-{digest[:40]}"
+                attempt = db.execute("SELECT COUNT(*) FROM calls WHERE ident LIKE ?", (f"{stem}%",)).fetchone()[0]
+                ident = f"{stem}-{attempt}"
                 # The intent is durable before the request: an interrupted call is counted at the
                 # worst case against today's cap and never silently bought again under this identity.
                 db.execute("INSERT INTO calls(ident,purpose,at,day,questions,status) VALUES(?,?,?,?,?,?)",

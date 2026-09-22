@@ -94,6 +94,11 @@ class SensorTest(unittest.TestCase):
         self.assertEqual(sensor.ask("gate", {}, {"k0": ("t", "q?")}), {"k0": 0.9})
         # A re-bought body uses a new request identity: the gateway refuses a repeated one.
         self.assertNotEqual(jev.calls[0][0], jev.calls[-1][0])
+        # So does the same body from a fresh store (a lost or restored jev.sqlite).
+        other = Sensor(Path(self.dir.name) / "fresh.sqlite", jev, clock=self.clock)
+        other.ask("gate", {}, {"k0": ("t", "q?")})
+        self.assertNotIn(jev.calls[-1][0], [ident for ident, _ in jev.calls[:-1]])
+        self.assertEqual(Sensor(Path(self.dir.name) / "fresh.sqlite", jev, clock=self.clock).salt, other.salt, "stable per store")
 
 
 def summary(ledger, agent, *, candidate=False, trials=0, reason="finished", text="No credits are worth spending now."):
@@ -370,6 +375,20 @@ class ResearchGateTest(GateCase):
         self.assertTrue(self.house.research_due(agent))
         self.assertEqual(self.gates(), [])
 
+    def test_relevance_is_cached_by_note_and_strategy_sha(self):
+        agent = self.ready(p=0.9)
+        twin = self.seated(name="twin")  # the same file, so the same strategy sha
+        self.house._state["last_research"][twin.id] = self.clock()
+        for member in (agent, twin):
+            summary(self.house.ledger, member.id)
+            summary(self.house.ledger, member.id)
+        self.house.ledger.append("library.note", {"title": "Fee change", "text": "z" * 80, "niche": "alpaca-crypto-alts"}, agent="peer")
+        self.clock.advance(self.interval)
+        self.assertTrue(self.house.research_due(agent))
+        self.assertTrue(self.house.research_due(twin))
+        self.assertEqual(len(self.jev.calls), 1, "one (note, strategy sha) question bought once for both")
+        self.assertEqual(self.gates(twin.id)[-1]["reason"], "jev_relevant_note")
+
     def test_a_failing_gate_fails_open(self):
         agent = self.ready()
         self.house.jev_floor.gate.allow = lambda *a, **k: 1 / 0
@@ -513,6 +532,50 @@ class TriageTest(unittest.TestCase):
         capped.run()
         self.assertEqual(len([r for r in self.reports() if r["kind"] == "bug_report"]), 1)
 
+    def test_the_same_defect_restated_joins_one_group(self):
+        jev = FakeJev(lambda text: 0.95)
+        triage = self.triage(jev)
+        self.ledger.append("agent.research", {"tool": "journal", "text": "Found a material exit bug: _right(occ) checks s[-9] for C/P and misroutes every put exit."}, agent="k-1")
+        triage.run()
+        self.ledger.append("agent.research", {"tool": "journal", "text": "The OCC exit bug is still live: _right(occ) reads s[-9], so put exits are misrouted as calls."}, agent="k-2")
+        triage.state["last_run"] = 0
+        triage.run()
+        keys = {r["key"] for r in self.reports() if r["kind"] == "bug_report"}
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(sorted({a for r in self.reports() for a in r["agents"]}), ["k-1", "k-2"])
+        self.assertTrue(any(e.payload["question"] == "same_defect" for e in self.ledger.iter(kinds="triage.item")))
+
+    def test_capped_bug_questions_wait_for_the_next_run(self):
+        jev = FakeJev(0.9)
+        for n in range(20):
+            self.ledger.append("agent.thought", {"phase": "research", "text": f"Defect {'abcdefghijklmnopqrstuvwxyz'[n]}: the ledger shows a duplicate fill that never reached the venue."}, agent=f"a{n}")
+        triage = self.triage(jev, max_questions_per_run=16)
+        triage.run()
+        self.assertEqual(len(triage.state["pending_bugs"]), 4)
+        triage.state["last_run"] = 0
+        triage.run()
+        self.assertEqual(triage.state["pending_bugs"], [])
+        self.assertEqual(len({a for r in self.reports() if r["kind"] == "bug_report" for a in r["agents"]}), 20,
+                         "every witness is reported, whether or not its text joined an earlier group")
+
+    def test_abstention_without_request_joins_the_request_jev_matches(self):
+        jev = FakeJev(0.9)
+        self.ledger.append("tool.request", {"name": "funding_rates", "description": "perpetual funding rate and open interest feed for BTC ETH"}, agent="r-1")
+        triage = self.triage(jev)
+        triage.run()
+        summary(self.ledger, "r-2", text="Spend nothing. The perpetual funding rate and open interest feed for BTC remains not_supplied.")
+        triage.run()
+        self.assertEqual(self.reports()[-1]["key"], "missing_data:funding_rates")
+        self.assertEqual(self.reports()[-1]["agents"], ["r-2"])
+        # Without Jev it joins its niche's single "unrequested" group instead of a key per sentence.
+        summary(self.ledger, "r-3", text="Nothing to do: the settlement-source history is unavailable for these markets.")
+        summary(self.ledger, "r-4", text="The settlement-source data remains missing; abstaining again.")
+        plain = self.triage()
+        plain.state = {"seq": self.ledger.head()[0] - 2, "last_run": 0, "groups": {}, "aliases": {}, "names": {}}
+        plain.run()
+        self.assertEqual(self.reports()[-1]["key"], "missing_data:kalshi-attention:unrequested")
+        self.assertEqual(self.reports()[-1]["agents"], ["r-3", "r-4"])
+
     def test_postmortems_only_report_defect_causes(self):
         self.ledger.append("agent.postmortem", {"cause": "displaced", "text": "the league was full"}, agent="x-1")
         self.ledger.append("agent.postmortem", {"cause": "stuck", "text": "never woke for a day"}, agent="x-2")
@@ -557,12 +620,37 @@ class HypothesisLinkTest(unittest.TestCase):
         self.assertEqual(self.ledger.count(kinds="eval.trial"), trials_before)
         self.assertEqual(self.ledger.count(kinds=("agent.born", "agent.forked", "agent.strategy")), 0)
 
+    def test_ids_follow_the_card_rule_and_numbers_only_changes_are_rewordings(self):
+        import hashlib
+        text = "Buy NO on favourites priced 0.90 to 0.97 within 12 hours of close."
+        self.assertEqual(mechanism_id(text, "kalshi-weather"),
+                         hashlib.sha256(("buy no on favourites priced 0 90 to 0 97 within 12 hours of close" + "\n" + "kalshi-weather").encode()).hexdigest()[:16])
+        a = self.card(text)
+        b = self.card("Buy NO on favourites priced 0.92 to 0.98 within 6 hours of close.")
+        HypothesisMemory(self.ledger, None, path=Path(self.dir.name) / "m.json", clock=self.clock).run()
+        self.assertEqual(self.links(), [{"a": min(a, b), "b": max(a, b), "relation": "rewording", "confidence": 1.0, "method": "exact"}])
+
     def test_same_words_in_another_niche_are_related_exactly(self):
         text = "Fade the first hour gap on megacap stocks when volume is below its twenty day average and spreads are tight."
         a = self.card(text, "alpaca-megacaps")
         b = self.card(text, "alpaca-index-etfs")
         HypothesisMemory(self.ledger, None, path=Path(self.dir.name) / "m.json", clock=self.clock).run()
         self.assertEqual(self.links(), [{"a": min(a, b), "b": max(a, b), "relation": "related", "confidence": 1.0, "method": "exact"}])
+
+    def test_capped_pairs_wait_for_the_next_run(self):
+        base = "Buy NO on favourite high temperature contracts before close because the daily high is set"
+        for n, extra in enumerate(["early", "late", "cloudy", "sunny", "windy"]):
+            self.card(f"{base} on {extra} days")
+        memory = self.memory(0.5)
+        memory.settings["max_questions_per_run"] = 3
+        first = memory.run()
+        self.assertGreater(first["pending"], 0)
+        for _ in range(10):
+            if not memory.run()["pending"]:
+                break
+        self.assertEqual(memory.state["pending"], [])
+        self.assertTrue(all(l["relation"] == "related" for l in self.links() if l["method"] == "jev"))
+        self.assertGreaterEqual(len([l for l in self.links() if l["method"] == "jev"]), 4)
 
     def test_failure_history_keeps_linked_records_apart(self):
         code = "'''Sell the spike on rain contracts when the forecast probability jumps without a model update behind it.'''\ndef decide(ctx): return {}"
@@ -600,6 +688,55 @@ class ExposureTest(HouseCase):
         self.assertEqual(out["shared_groups"][0]["key"], "underlying:BTC")
         self.assertEqual(out["shared_groups"][0]["agents"], ["a-1", "b-1"])
         self.assertIn("report only", out["authority"])
+
+
+class ExposureJevTest(unittest.TestCase):
+    def test_related_but_not_identical_contracts_are_asked_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clock = Clock()
+            jev = FakeJev(lambda text: 0.9 if "BTC" in text or "KXBTC" in text else 0.1)
+            sensor = Sensor(Path(tmp) / "jev.sqlite", jev, clock=clock)
+            groups = {"series:KXBTCD": {"level": "series", "agents": {"a"}}, "underlying:BTC": {"level": "underlying", "agents": {"b"}},
+                      "series:KXHIGHNY": {"level": "series", "agents": {"c"}}}
+            exposure = Exposure(SimpleNamespace(books={}), sensor, clock=clock)
+            related = exposure._related(groups)
+            self.assertEqual([(r["a"], r["b"]) for r in related], [("series:KXBTCD", "underlying:BTC")])
+            self.assertEqual(related[0]["agents"], ["a", "b"])
+            calls = len(jev.calls)
+            exposure._related(groups)
+            self.assertEqual(len(jev.calls), calls, "cached by pair")
+
+
+class FloorTickTest(HouseCase):
+    def floor(self):
+        self.jev = FakeJev(0.1)
+        self.house.jev_floor = JevFloor(self.house, Sensor(self.house.root / "jev.sqlite", self.jev, clock=self.clock), {})
+        return self.house.jev_floor
+
+    def test_tick_runs_the_jobs_and_publishes_health(self):
+        self.floor()
+        self.house.ledger.append("tool.request", {"name": "funding_rates", "description": "perpetual funding feed for BTC and ETH"}, agent="r-1")
+        self.house.tick()
+        self.house.wait(10)
+        self.clock.advance(60)
+        self.house.tick()
+        self.house.wait(10)
+        health = json.loads((self.house.root / "health.json").read_text())
+        self.assertEqual(health["jev"]["sensor"]["model"], MODEL)
+        self.assertEqual(health["jev"]["exposure"]["positions"], 0)
+        self.assertEqual(health["jev"]["triage"]["groups"], 1)
+        self.assertEqual([e.payload["key"] for e in self.house.ledger.iter(kinds="repair.reported")], ["missing_data:funding_rates"])
+
+    def test_a_pause_stops_paid_jobs_but_not_the_inactivity_sweep(self):
+        floor = self.floor()
+        agent = self.seated()
+        (self.house.root / "PAUSE").write_text("rebuild")
+        self.house.ledger.append("tool.request", {"name": "funding_rates", "description": "perpetual funding feed for BTC and ETH"}, agent="r-1")
+        self.house.tick()
+        self.house.wait(10)
+        self.assertEqual(floor.inactivity.current(agent.id), "paused")
+        self.assertEqual(self.house.ledger.count(kinds="repair.reported"), 0)
+        self.assertEqual(self.jev.calls, [])
 
 
 class OutcomeTest(unittest.TestCase):

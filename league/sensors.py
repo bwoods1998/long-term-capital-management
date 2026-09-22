@@ -76,6 +76,10 @@ class JevFloor:
             if job is not None and job.due():
                 self.house._background(key, job.run)
 
+    def failure_history(self, ref: str, niche: str | None = None) -> dict[str, Any] | None:
+        """A mechanism's failures and its linked mechanisms' failures, kept apart (hypothesis_memory)."""
+        return self.memory.failure_history(ref, niche) if self.memory is not None else None
+
     def health(self) -> dict[str, Any]:
         reasons = Counter(str((row or {}).get("reason")) for row in self.state.data.get("inactive", {}).values())
         return {"sensor": self.sensor.stats() if self.sensor is not None else None,

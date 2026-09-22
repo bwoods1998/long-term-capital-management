@@ -27,6 +27,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
 from .jev import jaccard, sha, words
@@ -43,6 +44,8 @@ BUG_HINT = re.compile(r"\bbug\b|error|exception|traceback|crash|incorrect|wrong|
                       r"never (?:fill|fire|arrive|record)|double|duplicate|phantom|miscount|inconsistent|reconcil", re.I)
 BUG = ("Does this text report a defect in the trading House's own software, data, replay, accounting or order handling "
        "(something engineering should fix), rather than a trading loss, a market condition, a strategy idea or a missing feature?")
+SAME_DEFECT = ("Does this item describe the same defect (the same broken behaviour in the same component or file) as the "
+               "new report in state, so that one fix would resolve both?")
 SAME_FEED = ("Does this item describe the same missing data feed or input (same data, same markets) as the reference request "
              "in state, so that building one would satisfy both?")
 DEFAULTS: dict[str, Any] = {
@@ -50,10 +53,13 @@ DEFAULTS: dict[str, Any] = {
     "interval_seconds": 1800,
     "batch_rows": 10000,
     "max_questions_per_run": 64,
+    "max_merge_questions_per_run": 32,
     "bug_threshold": 0.7,
     "same_feed_threshold": 0.8,
+    "same_defect_threshold": 0.75,
     "pair_overlap": 0.15,
     "evidence_per_row": 50,
+    "pending_limit": 400,
 }
 
 
@@ -127,7 +133,7 @@ class Triage:
     def _run(self) -> dict[str, Any]:
         self.state["last_run"] = self.clock()
         rows = self.ledger.read(kinds=SOURCES, after=int(self.state["seq"]), limit=int(self.settings["batch_rows"]))
-        if not rows:
+        if not rows and not self.state.get("pending_bugs"):
             self._save()
             return {"rows": 0, "reported": 0}
         unresolved: dict[str, list[str]] = {}
@@ -183,15 +189,20 @@ class Triage:
         self._place_missing(found, loose_missing, questions)
         self._bugs(found, bug_candidates, questions)
         reported = self._report(found)
-        self.state["seq"] = rows[-1].seq
+        if rows:
+            self.state["seq"] = rows[-1].seq
         self._save()
-        return {"rows": len(rows), "reported": reported, "questions": questions["asked"], "groups": len(self.state["groups"])}
+        return {"rows": len(rows), "reported": reported, "questions": questions["asked"], "merge_questions": questions.get("merge", 0),
+                "groups": len(self.state["groups"])}
 
     # --------------------------------------------------------------------- Jev
-    def _budget(self, questions: dict[str, int], n: int) -> bool:
-        if self.sensor is None or questions["asked"] + n > int(self.settings["max_questions_per_run"]):
+    def _budget(self, questions: dict[str, int], n: int, pool: str = "asked") -> bool:
+        """Per-run question caps. Deduplication ("same defect?") has its own pool, so a backfill
+        full of new texts to classify cannot starve the merging of what was already found."""
+        cap = int(self.settings["max_questions_per_run" if pool == "asked" else "max_merge_questions_per_run"])
+        if self.sensor is None or questions.get(pool, 0) + n > cap:
             return False
-        questions["asked"] += n
+        questions[pool] = questions.get(pool, 0) + n
         return True
 
     def _same_feed(self, pairs: list[tuple[str, str, str, str]], questions: dict[str, int]) -> dict[tuple[str, str], float | None]:
@@ -283,9 +294,13 @@ class Triage:
             self._add(found, key, "missing_data", summary, _excerpt(entry, text), sentence)
 
     def _bugs(self, found, candidates, questions) -> None:
+        """Texts that may report a defect: exact duplicates (numbers normalized) are one question.
+        What the per-run cap or an outage leaves unasked waits in `pending_bugs` for the next run,
+        oldest first, rather than being passed by the cursor unread."""
         threshold = float(self.settings["bug_threshold"])
+        waiting = [(SimpleNamespace(seq=r["seq"], at=r["at"], agent=r["agent"]), r["text"]) for r in self.state.get("pending_bugs") or []]
         unique: dict[str, list[tuple[Any, str]]] = {}
-        for entry, text in candidates:
+        for entry, text in waiting + list(candidates):
             unique.setdefault("bug:" + sha(_normal(text)[:600]), []).append((entry, text))
         keys = list(unique)
         answers: dict[str, float | None] = {}
@@ -294,14 +309,39 @@ class Triage:
             if not self._budget(questions, len(chunk)):
                 break
             answers.update(self.sensor.ask("triage", {}, {k: (unique[k][0][1][:900], BUG) for k in chunk}))
+        left = [key for key in keys if answers.get(key) is None]
+        self.state["pending_bugs"] = [{"seq": e.seq, "at": e.at, "agent": e.agent, "text": t[:900]}
+                                      for key in left for e, t in unique[key]][-int(self.settings["pending_limit"]):]
         for key, p in answers.items():
             self._item("bug_report", key, None, p)
             if p is None or p < threshold:
                 continue
             entry, text = unique[key][0]
             niche = self.niche_of(entry.agent) or "floor"
+            group = self._same_defect(f"bug_report:{niche}:{key[4:14]}", niche, text, questions)
             for entry, text in unique[key]:
-                self._add(found, f"bug_report:{niche}:{key[4:14]}", "bug_report", f"reported: {text[:240]}", _excerpt(entry, text), text)
+                self._add(found, group, "bug_report", f"reported: {text[:240]}", _excerpt(entry, text), text)
+
+    def _same_defect(self, key: str, niche: str, text: str, questions: dict[str, int]) -> str:
+        """An agent restates a defect pass after pass in new words (the options desk described one
+        OCC exit-routing bug in seven journal notes on Sept 21). Jev compares a new report with
+        the two most similar reports already grouped on its desk; only a confident match joins."""
+        if key in self.state["groups"]:
+            return key
+        prefix = f"bug_report:{niche}:"
+        scored = sorted(((jaccard(text, g.get("text") or ""), k) for k, g in self.state["groups"].items()
+                         if k.startswith(prefix) and k not in self.state["aliases"]), reverse=True)
+        candidates = [k for score, k in scored[:2] if score >= float(self.settings["pair_overlap"])]
+        if not candidates or not self._budget(questions, len(candidates), "merge"):
+            return key
+        items = {"samedefect:" + sha(sorted((key, k))): (str(self.state["groups"][k].get("text") or "")[:900], SAME_DEFECT)
+                 for k in candidates}
+        answers = self.sensor.ask("triage", {"new_report": text[:900]}, items)
+        best = max(((p, k) for k, (ck, p) in zip(candidates, answers.items()) if p is not None), default=None)
+        for k, ck in zip(candidates, items):
+            self._item("same_defect", key, k, answers.get(ck))
+        threshold = float(self.settings["same_defect_threshold"])
+        return best[1] if best and best[0] >= threshold else key
 
     # ------------------------------------------------------------------ output
     def _report(self, found: dict[str, dict[str, Any]]) -> int:
