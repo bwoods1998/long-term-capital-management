@@ -1915,6 +1915,19 @@ class House:
             quantity = max(holding.quantity - reserved.get(holding.instrument.key, ZERO), ZERO)
             if quantity <= 0:
                 continue
+            if holding.instrument.asset_class == "option":
+                # An option sells only at a limit (`Book.check`), so a market wind-down was refused on
+                # every mark pass. Measured Sept 22, 2026: four dead options agents, twelve refusals in
+                # eight minutes. Sell at the bid, as the expiry rule does; one with no bid left is the
+                # expiry rule's to write off.
+                quote = book.broker.quote(holding.instrument)
+                if quote is None or quote.bid is None or quote.bid <= 0:
+                    continue
+                exits.append(Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=quantity,
+                                        order_type="limit", limit_price=quote.bid,
+                                        reason="the House is closing this account at the bid (an option sells only at a limit)",
+                                        created_at=now, nonce=f"wind-down:{now}"))
+                continue
             intent = Intent.new(agent=agent.id, instrument=holding.instrument, side="sell", quantity=quantity,
                                 reason="the House is closing this account", created_at=now, nonce=f"wind-down:{now}")
             if book._would_cross_own(intent, None):

@@ -252,6 +252,24 @@ class HouseTest(HouseCase):
         alerts = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "does not reconcile" in e.payload["text"]]
         self.assertEqual(alerts[-1]["level"], "error")
 
+    def test_a_dead_agents_option_is_sold_at_the_bid_not_refused_as_a_market_order(self):
+        """Sept 22, 2026: dead options agents' exits were refused twelve times in eight minutes as
+        'an option order must be a limit order'."""
+        from league.book import Intent
+        agent = self.seated()
+        self.house.seat(agent)  # its stake, as its first wake would give it
+        book = self.house.books["alpaca-paper"]
+        option = instrument_for("alpaca-paper", {"occ": "F271015C00013000"})
+        self.broker.set_quote(option, "0.40", "0.44")
+        book.limits[agent.id] = Limits(D("100"), D("75"), asset_classes=("option",))
+        out = book.submit([Intent.new(agent=agent.id, instrument=option, side="buy", quantity=D("1"), order_type="limit",
+                                      limit_price=D("0.44"), reason="test", created_at=now_iso(self.clock), nonce="opt")])[0]
+        self.assertEqual(out.status, "filled", out.detail)
+        self.house.kill(agent, "credits", "a test death")
+        refused = [e.payload for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+        self.assertEqual(refused, [])
+        self.assertEqual(book.account(agent.id).holdings, {})
+
     def test_a_wind_down_that_would_meet_the_houses_own_bid_rests_at_the_ask(self):
         """haghani-2, Sept 21, 2026: its market exit was refused on every wake because another
         agent rested a bid on the same coin."""
