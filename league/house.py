@@ -2172,7 +2172,14 @@ class House:
             query, tape = self.tape_for(effective)
             requested = (effective.get('observe') or {}).get('symbols') or []
             missing = [s for s in requested if not (tape.get('observed_bars') or {}).get(s)] if agent.venue == 'kalshi' else []
-            return {'query': query, **tape_coverage(tape), 'effective_needs': effective,
+            history = None
+            if agent.venue == 'alpaca':
+                # Which history judges this: the store's development window, or the live tape
+                # because the store has not fetched these inputs yet (not a fact about the market).
+                history = ({'tape': 'development window before the sealed holdout', **dict(tape.get('source') or {})}
+                           if query.startswith('deep:') else {'tape': 'live recent tape',
+                                                             'why': 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
+            return {'query': query, **tape_coverage(tape), 'effective_needs': effective, **({'history': history} if history else {}),
                     'proposed_inputs': needs is not None,
                     'required_observed_symbols': list(requested), 'missing_observed_symbols': missing,
                     'observed_inputs_available': not missing,

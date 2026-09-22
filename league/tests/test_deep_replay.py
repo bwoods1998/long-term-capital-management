@@ -174,6 +174,14 @@ class HouseDeepReplayTest(HouseCase):
         self.assertTrue(any(step.get("quotes") for step in tape["steps"]))
         self.assertGreater(tape["quote_source"]["quoted_touches"], 0)
 
+    def test_replay_coverage_says_which_history_judges_the_strategy(self):
+        agent = self.house.spawn("deep", "test-deep", SPY_BUYER, reason="a test agent")
+        covered = self.house.research_coverage(agent)
+        self.assertEqual(covered["history"]["tape"], "development window before the sealed holdout")
+        self.assertEqual(covered["history"]["window"], ["2025-05-19", "2025-06-02"])
+        live = self.house.research_coverage(agent, {**self.needs, "symbols": ["QQQ"]})
+        self.assertEqual(live["history"]["tape"], "live recent tape")
+
     def test_an_unfetched_symbol_falls_back_to_the_live_tape(self):
         key, tape = self.house.tape_for({**self.needs, "symbols": ["QQQ"]})
         self.assertFalse(key.startswith("deep:"))
