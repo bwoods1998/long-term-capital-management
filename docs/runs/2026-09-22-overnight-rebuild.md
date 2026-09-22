@@ -13,6 +13,27 @@ Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Op
 - Campaign: OpenAI $90.69 left of the burst (≈ $17/h committed), Sail $79.59 left; live grant
   `earned-live-20260921` active; mullins-2 (weather) the only live agent.
 
+## Baseline: the twelve hours before the start (18:40Z Sept 21 → 06:40Z Sept 22)
+
+Read from the production ledger (read-only). These are the "before" numbers every later claim is measured against.
+
+| Measure | 12 h |
+|---|---:|
+| Research sessions | 4,973 (Luna 3,820, pro_asap 1,116, pro_flex 37) |
+| Research credits charged | $102.75 |
+| Sessions returning a candidate | 228 (4.6%) |
+| Provider failures (503/502/unconfirmed) | 272 |
+| Replay trials / passed | 406 / 30 (7.4%) |
+| Births / deaths (displaced) | 186 / 170 (162) |
+| Merton passes (cost) | 39 ($21.29): teacher 11, architect 11, consultant 7, operator 6, toolsmith 3, designer 1 |
+| Audits (cost) | 3 ($0.64) |
+| Luna requests (metered cost) | 10,488 ($67.17), 0% prompt-cache hits |
+| Campaign committed: OpenAI / Sail | +$169 (≈ $14/h) / +$82 (≈ $6.8/h) |
+| Promotions | 17 to paper, 6 founder seats, 1 to micro-real |
+| Fills | alpaca-paper 103, kalshi-shadow 43, kalshi (real) 15 |
+
+Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per paper promotion ≈ $14.8.
+
 ## Checklist
 
 | Workstream | Implementation | Verification | Remaining |
