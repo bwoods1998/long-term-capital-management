@@ -1,5 +1,6 @@
 """The maintenance pause: nothing that spends or enters, everything that exits or reconciles."""
 from decimal import Decimal
+from types import SimpleNamespace
 
 from league.tests.test_house import BUYER, HouseCase
 
@@ -52,3 +53,36 @@ class Pause(HouseCase):
         self.assertNotIn(agent.id, self.house._state["tried"])  # no replay started
         (self.house.root / "PAUSE").unlink()
         self.assertIsNone(self.house.paused())
+
+
+class LoudStops(HouseCase):
+    """Sept 22, 2026: the floor stopped for 23 minutes on a latched meter and nothing said so."""
+
+    def stopped_alerts(self):
+        return [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "stopped buying work" in e.payload["text"]]
+
+    def test_a_stop_that_lasts_three_ticks_is_said_once_with_its_reason_and_so_is_the_reopening(self):
+        self.house.budget = SimpleNamespace(check=lambda: "stopped", mode="stopped", pacer=None)
+        for n in range(5):
+            summary = self.house.tick()
+            self.clock.advance(61)
+            if n == 1:
+                self.assertEqual(self.stopped_alerts(), [], "a short stop is not announced")
+        self.assertIn("monthly line or reserve", summary["stopped_because"])
+        alerts = self.stopped_alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["level"], "warning")
+        self.assertIn("monthly line or reserve", alerts[0]["text"])
+        self.house.budget = None
+        summary = self.house.tick()
+        self.assertNotIn("stopped_because", summary)
+        self.assertIn("open for business again", self.house.ledger.last("ops.alert").payload["text"])
+
+    def test_a_maintenance_pause_is_the_operators_own_and_is_not_announced(self):
+        (self.house.root / "PAUSE").write_text("rebuilding", encoding="utf-8")
+        for _ in range(4):
+            summary = self.house.tick()
+            self.clock.advance(61)
+        self.assertEqual(summary["stopped_because"], "maintenance pause: rebuilding")
+        self.assertEqual(self.stopped_alerts(), [])
+
