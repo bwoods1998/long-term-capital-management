@@ -91,7 +91,8 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
     worklist = Worklist(house.ledger, clock=house.clock)
     return Engineer(frontier, forge, house.ledger, worklist, clock=house.clock, code_of=code_of,
                     may_spend=lambda: house.pacer.may_spend("openai") and house.frontier_tier() != "audits",
-                    sources=Sources(house.ledger, worklist, niche_of=niche_of), summary_path=Path(house.root) / "repairs.json")
+                    sources=Sources(house.ledger, worklist, niche_of=niche_of), summary_path=Path(house.root) / "repairs.json",
+                    inbox=Path(house.root) / "repairs-inbox")
 
 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,

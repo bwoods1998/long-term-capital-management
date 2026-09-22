@@ -570,9 +570,24 @@ class RegistryCollisions(Base):
         self.assertEqual(out.getvalue(), "::error title=league.ci refused::the test suite failed:%0AFAIL: x (100%25)\n")
 
 
+class TheInbox(Base):
+    def test_an_operator_report_is_filed_once_and_a_bad_file_is_set_aside(self):
+        inbox = self.root / "inbox"
+        inbox.mkdir()
+        (inbox / "seats.json").write_text(json.dumps({"key": "bug_report:seats", "summary": "agents lose their seats", "agents": ["a"]}))
+        (inbox / "junk.json").write_text("[1, 2")
+        engineer = Engineer(None, None, self.ledger, self.worklist, clock=self.clock, repo=self.repo, settings={"enabled": False}, inbox=inbox)
+        self.assertEqual(engineer.step()["filed"], ["bug_report:seats"])
+        self.assertEqual(self.worklist.get("bug_report:seats").sources, {"operator"})
+        self.assertEqual(sorted(p.name for p in inbox.iterdir()), ["junk.json.refused", "junk.json.why", "seats.json.filed"])
+        self.assertEqual(engineer.step()["filed"], [])
+        self.assertEqual(self.ledger.count(kinds="repair.reported"), 1)
+
+
 class TheDrill(Base):
     def test_the_drill_fails_once_is_revised_against_ci_s_text_and_is_verified(self):
-        key = repair_drill.plant(self.ledger, clock=self.clock, stamp="t1")
+        key = repair_drill.plant(self.root / "state", stamp="t1")
+        self.assertEqual(self.ledger.count(kinds="repair.reported"), 0, "the script never writes the ledger itself")
 
         def ci_runs_the_drill_test(files):
             """The drill's own test, run the way CI would run it."""
@@ -585,7 +600,8 @@ class TheDrill(Base):
         frontier = FakeFrontier()
         merton = Merton(frontier, forge, self.ledger, evidence=lambda role: {}, clock=self.clock)
         engineer = Engineer(frontier, forge, self.ledger, self.worklist, clock=self.clock, repo=self.repo,
-                            settings={"synthetic_observe_minutes": 20, "min_seconds_between_calls": 1800})
+                            settings={"synthetic_observe_minutes": 20, "min_seconds_between_calls": 1800},
+                            inbox=self.root / "state" / "repairs-inbox")
         for _ in range(4):
             engineer.step()
             merton.follow()
@@ -603,9 +619,12 @@ class TheDrill(Base):
         self.assertEqual(self.worklist.get(key).cost_usd, Decimal(0))
         shown = repair_drill.inspect(self.root / "l.sqlite", key)
         self.assertEqual(shown[-1]["state"], "verified")
+        self.assertEqual(sorted(p.name for p in (self.root / "state" / "repairs-inbox").iterdir()), ["drill-t1.json.filed"])
 
     def test_a_drill_revision_is_written_only_if_ci_s_text_names_the_test(self):
-        key = repair_drill.plant(self.ledger, clock=self.clock, stamp="t2")
+        from league.engineer import drill_report
+
+        key = drill_report(self.worklist, "t2")
         forge = FakeGitHub(judge=lambda files: "something unrelated broke")
         merton = Merton(None, forge, self.ledger, evidence=lambda role: {}, clock=self.clock)
         engineer = Engineer(None, forge, self.ledger, self.worklist, clock=self.clock, repo=self.repo, settings={})

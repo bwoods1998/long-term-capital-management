@@ -139,7 +139,8 @@ class Engineer:
     def __init__(self, frontier: Any, forge: Any, ledger: Any, worklist: Worklist, *, clock: Callable[[], float] = time.time,
                  settings: Mapping[str, Any] | None = None, may_spend: Callable[[], bool] = lambda: True,
                  code_of: Callable[[str], Mapping[str, Any] | None] = lambda agent: None, repo: Path = REPO,
-                 evidence: Callable[[], Mapping[str, Any]] = lambda: {}, sources: Any = None, summary_path: Path | None = None):
+                 evidence: Callable[[], Mapping[str, Any]] = lambda: {}, sources: Any = None, summary_path: Path | None = None,
+                 inbox: Path | None = None):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
@@ -154,6 +155,9 @@ class Engineer:
         #: Where each step leaves the worklist's summary (the state directory's `repairs.json`), so
         #: the queue can be read without opening the ledger. None writes nothing.
         self.summary_path = Path(summary_path) if summary_path else None
+        #: A directory where the owner (or `scripts/repair_drill.py`) drops a request file; the
+        #: House, the ledger's only writer, turns each into a report on its next step.
+        self.inbox = Path(inbox) if inbox else None
         self._last_step = float("-inf")
         self._last_call: float | None = None
         self._asked = False
@@ -181,6 +185,7 @@ class Engineer:
         self._last_step = self.clock()
         out: dict[str, Any] = {"reported": [], "admitted": [], "advanced": [], "attempted": None}
         try:
+            out["filed"] = self._read_inbox()
             if self.sources is not None:
                 out["reported"] = self.sources.scan()
             if self.settings.get("enabled"):
@@ -188,6 +193,36 @@ class Engineer:
         finally:
             self._summarize(out)
         return out
+
+    def _read_inbox(self) -> list[str]:
+        """Each `<name>.json` in the inbox becomes one report, then `<name>.json.filed`. A drill
+        request is `{"drill": "<stamp>"}`; anything else is an operator's report
+        `{"key", "kind", "summary", "agents", "severity"}`, admitted whatever its priority."""
+        if self.inbox is None or not self.inbox.is_dir():
+            return []
+        filed = []
+        for path in sorted(self.inbox.glob("*.json"))[:20]:
+            try:
+                body = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(body, dict):
+                    raise ValueError("not an object")
+                if body.get("drill"):
+                    key = drill_report(self.worklist, str(body["drill"]))
+                else:
+                    key = str(body["key"])[:200]
+                    self.worklist.report(key=key, kind=str(body.get("kind") or "bug_report"), summary=str(body.get("summary") or key),
+                                         evidence=[{"seq": None, "at": "", "agent": "house", "excerpt": str(body.get("evidence") or body.get("summary") or "")}],
+                                         agents=[str(a) for a in body.get("agents") or [] if isinstance(a, str)], source="operator",
+                                         severity=body.get("severity") or "medium", id=f"repair-inbox:{path.stem}:{digest_of(body)}")
+                filed.append(key)
+                path.replace(path.with_name(path.name + ".filed"))
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                try:
+                    path.replace(path.with_name(path.name + ".refused"))
+                    path.with_name(path.name + ".why").write_text(f"{type(exc).__name__}: {exc}\n", encoding="utf-8")
+                except OSError:
+                    pass
+        return filed
 
     def _summarize(self, out: Mapping[str, Any]) -> None:
         if self.summary_path is None:
@@ -597,8 +632,24 @@ def _epoch(iso: str) -> float:
 
 
 # ------------------------------------------------------------------------------ the drill
+DRILL_PREFIX = "synthetic:repair-drill:"
 DRILL_TOOL = "league/tools/repair_drill.py"
 DRILL_TEST = "league/tests/test_tool_repair_drill.py"
+
+
+def digest_of(body: Any) -> str:
+    return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12]
+
+
+def drill_report(worklist: Worklist, stamp: str) -> str:
+    """The drill's job: `source: synthetic`, a `synthetic:` key, and nothing real to fix."""
+    stamp = "".join(c for c in str(stamp).lower() if c.isalnum())[:32] or "drill"
+    key = DRILL_PREFIX + stamp
+    worklist.report(key=key, kind="bug_report", source="synthetic", severity="low", agents=[],
+                    summary="SYNTHETIC repair drill: prove patch -> CI refusal -> revision against CI's failure text -> merge -> deploy -> verified.",
+                    evidence=[{"seq": None, "at": "", "agent": "house", "excerpt": "Planted by scripts/repair_drill.py; not a real defect."}],
+                    details={"drill": stamp}, id=f"repair-drill:{stamp}")
+    return key
 
 
 def drill_answer(job: Job, attempt: int, packet: Mapping[str, Any]) -> dict[str, Any]:
