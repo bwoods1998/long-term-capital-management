@@ -138,6 +138,12 @@ an edge.
 - **Allowance left (campaign basis).** OpenAI $35.97, Sail $68.58. About $45 of OpenAI and $56 of
   Sail are held for calls whose outcome is unproven. They are left conservative; releasing them
   needs vendor receipts.
+  - **Runway.** On the campaign basis, OpenAI fell from $65.70 at 16:53Z to $34.14 at 20:36Z, about
+    $8.50 an hour. At that rate it closes around 00:30–01:00Z on Sept 23.
+  - The House's notice says what follows: new paid work stops, while reconciliation and exits go
+    on. Promotion audits are frontier-model calls, so promotions would likely stall until the
+    owner funds the next phase or the held $45 is released with receipts.
+  - Sail's allowance lasts longer. Budgets are the owner's call, and none was touched.
 - **Rollback.**
   - One release, on the box:
     `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "..."`.
