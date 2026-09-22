@@ -450,6 +450,18 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
     is visibility.
   - The sensor has spent $0.0149 over 282 Jev calls, with a p50 latency of 0.5 s.
 
+- 18:55:58Z **Third autonomous repair: #119**, a haghani child that keeps sub-cent entry and exit
+  prices. It came from the pre-audit's `strategy_defect` job, while #113 came from the audit veto
+  on the same rounding defect. The queue does not yet merge related jobs across sources, so each
+  child competes on its own evidence. The same minute the teacher's #118 merged, a lesson to
+  reconcile haghani's executions before more mutations.
+- 18:55Z The updater found `main` at commits whose Checks runs were still in progress. With nothing
+  to attest, it waits for its next check (fail-closed, as designed).
+- **Runway.** The OpenAI campaign fell from $61.94 to $52.07 between 17:49 and 18:57Z (about
+  $8.70/h at campaign prices). That leaves roughly $33 at the deadline, and at this rate it is
+  spent around 01:00Z. After that the frontier tiers keep audits and move cheap research to Sail.
+  The Sail balance of about $127 at about $40/day lasts about three days.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
