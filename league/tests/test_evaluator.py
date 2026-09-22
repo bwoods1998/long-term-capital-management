@@ -33,6 +33,9 @@ BOUND["ladder"]["micro"]["min_active_blocks"] = 30
 BOUND["ladder"]["paper"] = {"gate": "bound", "min_active_blocks": 30}
 BOUND["ladder"]["min_closed_trades"] = 5
 BOUND["ladder"]["paper_death"] = {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30}
+#: The Sept 21, 2026 replay gate the rung-0 mechanics tests were written against. The owner took the
+#: deflated Sharpe off the paper gate on Sept 22 (see `ReplaySept22`); the deflation machinery stays.
+BOUND["ladder"]["replay"] = {"min_trades": 20, "min_blocks": 20, "min_deflated_sharpe": 0.5, "min_oos_blocks": 8}
 
 #: The Sept 21, 2026 fast-lane values these mechanics tests were written against. The owner moved
 #: the numbers on Sept 22 (see `Sept22Values`); the mechanics under test did not change.
@@ -900,6 +903,33 @@ def replay_result(growth=None, *, ok=True, trades=25, oos_blocks=12, oos_mean=0.
     }
     result.update(more)
     return result
+
+
+class ReplaySept22(EvalCase):
+    """The owner's Sept 22, 2026 paper gate: enough trades to judge and positive out-of-sample growth."""
+
+    def setUp(self):
+        super().setUp()
+        self.ev = Evaluator(self.ledger, constitution=CONSTITUTION)
+
+    def test_a_long_line_no_longer_deflates_a_paper_seat_away(self):
+        for i, value in enumerate(-1.0 + 2.0 * i / 198 for i in range(199)):
+            self.ledger.append("eval.trial", {"family": "crowded", "sharpe": value, "passed": False}, agent=f"cousin-{i % 7}")
+        late = self.ev.record_trial("latecomer", "crowded", replay_result())
+        self.assertEqual((late.decision, late.numbers["trials"]), ("promote", 200))
+
+    def test_ten_trades_and_positive_out_of_sample_growth_are_still_required(self):
+        self.assertEqual(self.ev.record_trial("ten", "a", replay_result(trades=10)).decision, "promote")
+        nine = self.ev.record_trial("nine", "b", replay_result(trades=9))
+        self.assertEqual(nine.decision, "hold")
+        self.assertIn("9 closed trades, 10 needed", nine.reason)
+        flat = self.ev.record_trial("flat", "c", replay_result(oos_mean=0.0))
+        self.assertEqual(flat.decision, "hold")
+        self.assertIn("out-of-sample", flat.reason)
+
+    def test_the_revision_leaves_the_money_rules_and_the_live_grant_alone(self):
+        from league.constitution import money_digest
+        self.assertEqual(money_digest(), "d715ae7ab5cb72b86dff350f725293953510b39b78ddec666f7188b09acb1bf1")
 
 
 class ReplayTrials(EvalCase):

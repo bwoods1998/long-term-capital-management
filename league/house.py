@@ -114,6 +114,11 @@ class Settings:
     holdout_lineage_budget: int = 3
 
 
+
+def _replay_rules_key() -> str:
+    """The replay gate's rules, hashed: a replay verdict is only as current as the rules it was reached under."""
+    return hashlib.sha256(json.dumps(CONSTITUTION["ladder"]["replay"], sort_keys=True).encode()).hexdigest()[:16]
+
 class House:
     def __init__(
         self,
@@ -338,10 +343,28 @@ class House:
         try:
             state = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            state = {}
+            # A new House has no replay verdict reached under older rules to revisit.
+            state = {"replay_rules": _replay_rules_key()}
         for key in ("next_wake", "memory", "last_research", "tried", "last_mark", "settled", "niche_live", "series_category", "idle"):
             state.setdefault(key, {})
         return state
+
+    def _replay_rules_changed(self) -> None:
+        """A rung-0 agent's code gets one replay (`_replay_own`), judged under the replay rules then
+        in force, and afterwards "only research can change its fate". When the owner changes those
+        rules, each living rung-0 agent gets one fresh replay under the new ones: its old verdict
+        answered a question the league no longer asks. Sept 22, 2026: the revision that took the
+        deflated Sharpe off the paper gate found 33 agents on rung 0 -- whole desks, Alpaca
+        megacaps and crypto majors among them -- whose code had had its replay under the old gate."""
+        key = _replay_rules_key()
+        if self._state.get("replay_rules") == key:
+            return
+        with self._state_lock:
+            retried = [a.id for a in self.registry.living()
+                       if self.evaluator.rung(a.id) == 0 and self._state["tried"].pop(a.id, None) is not None]
+            self._state["replay_rules"] = key
+        if retried:
+            self.alert("info", f"the replay rules changed: {len(retried)} agent(s) on rung 0 get one fresh replay under them")
 
     def _save_state(self) -> None:
         # The write under the lock too: the audit job saves from its own thread (it persists the
@@ -3112,6 +3135,7 @@ class House:
                 'reason': 'timed research settings restored; new paid work is closed'}, id='burst-ended:'+self._burst['id'])
             self._burst = None
         summary: dict[str, Any] = {"at": now_iso(self.clock), "woke": [], "orders": 0, "deaths": [], "reconciled": {}}
+        self._replay_rules_changed()
         if self.options_history is not None and self.settings.options_replay:
             today, hour = _new_york(self.clock)
             # Once a day after the session's bars are final; a failed run is tried again hourly.

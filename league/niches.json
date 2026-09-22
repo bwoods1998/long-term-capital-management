@@ -45,7 +45,8 @@
    ],
    "category": "Crypto",
    "desk": "hilibrand",
-   "desk_note": "Larry Hilibrand, the arbitrageur who pressed the firm's one measured edge hardest"
+   "desk_note": "Larry Hilibrand, the arbitrageur who pressed the firm's one measured edge hardest",
+   "max_members": 3
   },
   {
    "id": "kalshi-crypto-15m",
@@ -90,7 +91,8 @@
    ],
    "category": "Crypto",
    "desk": "huang",
-   "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm"
+   "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm",
+   "max_members": 3
   },
   {
    "id": "kalshi-weather",
@@ -646,7 +648,8 @@
     }
    ],
    "desk": "rosenfeld",
-   "desk_note": "Eric Rosenfeld, the relative-value man who left Harvard for Salomon's arbitrage desk"
+   "desk_note": "Eric Rosenfeld, the relative-value man who left Harvard for Salomon's arbitrage desk",
+   "max_members": 8
   },
   {
    "id": "alpaca-crypto-alts",
@@ -701,7 +704,8 @@
     }
    ],
    "desk": "haghani",
-   "desk_note": "Victor Haghani, who ran the firm's book in London where the spreads were widest"
+   "desk_note": "Victor Haghani, who ran the firm's book in London where the spreads were widest",
+   "max_members": 8
   },
   {
    "id": "alpaca-index-etfs",
@@ -746,7 +750,8 @@
     }
    ],
    "desk": "scholes",
-   "desk_note": "Myron Scholes, Nobel 1997, whose formula priced the options the equity desks live on"
+   "desk_note": "Myron Scholes, Nobel 1997, whose formula priced the options the equity desks live on",
+   "max_members": 8
   },
   {
    "id": "alpaca-megacaps",
@@ -803,7 +808,8 @@
     }
    ],
    "desk": "mcentee",
-   "desk_note": "James McEntee, the old-school bond trader who traded on feel and not on models"
+   "desk_note": "James McEntee, the old-school bond trader who traded on feel and not on models",
+   "max_members": 8
   },
   {
    "id": "alpaca-options",
@@ -844,7 +850,8 @@
    ],
    "replay": false,
    "desk": "krasker",
-   "desk_note": "William Krasker, the model builder: nothing is priced here without one"
+   "desk_note": "William Krasker, the model builder: nothing is priced here without one",
+   "max_members": 8
   }
  ]
 }
