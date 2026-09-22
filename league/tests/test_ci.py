@@ -63,7 +63,7 @@ class ContentTest(unittest.TestCase):
         self.strategy("crashes", 'NEEDS = {"venue": "kalshi", "horizon": "hour", "style": "t", "series": ["KXBTCD"]}\n\ndef decide(ctx):\n    return 1 / 0\n')
         self.assertIn("too many errors", " ".join(ci.check_strategies(self.root)))
         (self.root / "league/strategies/registry.json").write_text("[]")
-        self.assertIn("not listed", " ".join(ci.check_strategies(self.root)))
+        self.assertIn("not described", " ".join(ci.check_strategies(self.root)))
         (self.root / "league/strategies/registry.json").write_text(json.dumps([{"name": "ghost", "family": "t", "file": "ghost.py", "why": "x"}]))
         self.assertIn("does not exist", " ".join(ci.check_strategies(self.root)))
 

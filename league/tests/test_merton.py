@@ -46,14 +46,14 @@ class FakeForge:
 
 
 class ProposalTest(unittest.TestCase):
-    def test_registry_normalizes_only_the_known_repo_prefix(self):
-        rows = [{'file': name} for name in ('league/strategies/new_idea.py', 'old.py',
-                                           'league/strategies/../constitution.py', '/tmp/hidden.py')]
-        proposal = parse_proposal('architect', {'files': [{'path': 'league/strategies/registry.json',
-                                  'content': json.dumps(rows)}]}, Decimal('1'))
-        result = json.loads(proposal.files[0]['content'])
-        self.assertEqual([r['file'] for r in result], ['new_idea.py', 'old.py',
-                          'league/strategies/../constitution.py', '/tmp/hidden.py'])
+    def test_the_retired_registry_becomes_descriptions_of_the_proposal_s_own_files_only(self):
+        rows = [{'name': 'new-idea', 'family': 'f', 'why': 'w', 'file': name} for name in (
+            'league/strategies/new_idea.py', 'old.py', 'league/strategies/../constitution.py', '/tmp/hidden.py')]
+        proposal = parse_proposal('architect', {'files': [
+            {'path': 'league/strategies/new_idea.py', 'content': GOOD},
+            {'path': 'league/strategies/registry.json', 'content': json.dumps(rows)}]}, Decimal('1'))
+        self.assertEqual([f['path'] for f in proposal.files], ['league/strategies/new_idea.py', 'league/strategies/new_idea.json'])
+        self.assertEqual(json.loads(proposal.files[1]['content']), {'name': 'new-idea', 'family': 'f', 'why': 'w'})
 
     def test_only_the_roles_own_paths_survive(self):
         answer = {"summary": "s", "slug": "New Idea!", "title": "t", "body": "b", "files": [
