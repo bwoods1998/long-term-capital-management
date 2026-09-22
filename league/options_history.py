@@ -16,7 +16,7 @@ WHAT ALPACA ACTUALLY PROVIDES (measured through the gateway, Sept 22, 2026):
 - There is NO historical option QUOTE endpoint at all (Alpaca's reference lists historical bars
   and trades, and latest quotes, trades and snapshots only). Every historical bid and ask this
   module produces is therefore an ESTIMATE from trade prints and bar ranges (`estimate_quote`),
-  labelled as such on every row and stressed by the tape's `spread_stress`.
+  labelled as such on every row; the tape's `spread_model.stress` widens what fills pay.
 - Greeks, implied volatility and open interest have no history. The live snapshot's vendor
   greeks are not stored; what is here is COMPUTED (Black-Scholes, below) from prints.
 
@@ -85,7 +85,9 @@ SPREAD_MODEL = {
     # Half-spread floors by premium, from live OPRA quotes of the desk's six underlyings
     # (`measured_floors`; see MEASURED_SPREADS). [max premium, floor], checked in order.
     "measured_floors": [],
-    "stress": 1.0,             # multiplies the half-spread; the demo reports 1.0 and 2.0
+    # EXECUTION stress: multiplies the half-spread a fill at the touch pays, never the quote a
+    # strategy is shown -- so a stressed run changes costs and not the strategy's decisions.
+    "stress": 1.0,
 }
 LIQUIDITY = {"min_volume": 5.0, "min_trades": 2, "max_participation": 0.10, "quote_age_seconds": 1500}
 #: Alpaca charges no options commission (`league/fees.py`); the regulatory and clearing
@@ -205,15 +207,22 @@ def years_to(expiry: str, at_ts: float) -> float:
 # ------------------------------------------------------------------------------ quote estimate
 def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model: Mapping[str, Any] | None = None) -> tuple[float | None, float, float]:
     """`(bid, ask, half)` estimated around a bar's last print. There are no historical quotes, so
-    the half-spread is the largest of one tick, `floor_pct` of the premium and `range_weight` of
-    the median high-low range of the contract's last printed bars (prints bounce between bid
-    and ask), times `stress`. The bid is None when it would be zero or less."""
+    the half-spread is the largest of one tick, `floor_pct` of the premium, `range_weight` of the
+    median high-low range of the contract's last printed bars (prints bounce between bid and
+    ask) and any measured floor. The bid is None when it would be zero or less. (`stress` is not
+    applied here: it is an execution cost, see `league/options_replay.py`.)
+
+    Measured Sept 22, 2026 against live OPRA quotes of the desk's six underlyings (the House's
+    recorded quotes let `spread_check` repeat this every day): the estimate was at least as wide
+    as the quoted half-spread for 75% of 261 contract-times in the first 20 minutes of the
+    session, when quotes are widest; its median sat above the quoted median in every premium
+    bucket."""
     m = {**SPREAD_MODEL, **dict(model or {})}
     last = float(bar["c"])
     ranges = sorted(float(r) for r in recent_ranges if r is not None and r >= 0)
     median = ranges[len(ranges) // 2] if ranges else 0.0
     floor = next((float(f) for cap, f in (m.get("measured_floors") or []) if last < float(cap)), 0.0)
-    half = max(m["min_half_ticks"] * tick(last), m["floor_pct"] * last, m["range_weight"] * median, floor) * float(m["stress"])
+    half = max(m["min_half_ticks"] * tick(last), m["floor_pct"] * last, m["range_weight"] * median, floor)
     half = round(half, 4)
     bid = round(last - half, 4)
     return (bid if bid > 0 else None), round(last + half, 4), half

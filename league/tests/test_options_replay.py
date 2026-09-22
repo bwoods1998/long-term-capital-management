@@ -101,6 +101,17 @@ class Execution(unittest.TestCase):
         self.assertEqual(result["fills"], 0)  # one contract is more than 10% of six
         self.assertEqual(result["options"]["liquidity_misses"], 1)
 
+    def test_the_execution_stress_changes_what_a_fill_pays_not_the_quote_shown(self):
+        steps = [step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
+                 step("2026-03-02T15:15:00Z", {C1: bar(0.40, 0.41, 0.40, 0.40)})]
+        base = run_replay(STRATEGY, {"occ": C1, "buy_at": "2026-03-02T15:00:00Z", "limit": 0.45}, tape(steps), stake=1000.0, limits=LIMITS, audit=True)
+        stressed_tape = tape(steps)
+        stressed_tape["spread_model"]["stress"] = 2.0
+        stressed = run_replay(STRATEGY, {"occ": C1, "buy_at": "2026-03-02T15:00:00Z", "limit": 0.45}, stressed_tape, stake=1000.0, limits=LIMITS, audit=True)
+        self.assertEqual([f["price"] for f in base["fill_log"]], [0.42])  # the open 0.40 plus the estimated half 0.02
+        self.assertEqual([f["price"] for f in stressed["fill_log"]], [0.44])  # twice the half, and still under the limit
+        self.assertEqual(base["final_memory"], stressed["final_memory"])  # the same chain was shown
+
     def test_market_orders_and_plain_tickers_are_refused(self):
         code = STRATEGY.replace('"type": "limit", "limit_price": p["limit"]', '"type": "market"')
         result = run_replay(code, {"occ": C1, "buy_at": "2026-03-02T15:00:00Z"}, tape([step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)})]),

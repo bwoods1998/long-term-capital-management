@@ -11,7 +11,8 @@ EXECUTION IS ESTIMATED, AND CONSERVATIVE, BECAUSE NO HISTORICAL OPTION QUOTES EX
   listing), expires AFTER today (New York), and its last qualifying print is at most
   `quote_age_seconds` old (the book's own option quote-age rule). Otherwise: refused.
 - Its bid and ask are ESTIMATED around the last print (`estimate_quote`): at least a tick, 4% of
-  the premium or half the median recent bar range either side, times `spread_stress`.
+  the premium or half the median recent bar range either side. The tape's `spread_model.stress`
+  widens only what a fill at the touch pays, so a stressed run changes costs, not decisions.
 - Limit orders only (the House refuses option market orders). Nothing fills in the bar the
   decision saw: an order is worked against LATER bars of its contract that printed at least
   `min_volume` contracts in `min_trades` trades, and at most `max_participation` of the bar's
@@ -172,6 +173,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         nonlocal liquidity_misses
         volume, trades = float(bar.get("v") or 0), int(bar.get("n") or 0)
         _, _, half = estimate_quote(bar, ranges.get(occ, []), model)
+        half *= max(1.0, float(model.get("stress") or 1.0))  # the execution stress: costs, not the quote shown
         for order_id in [k for k, o in book.orders.items() if o["occ"] == occ]:
             order = book.orders[order_id]
             if order["placed_ts"] >= now_ts:
