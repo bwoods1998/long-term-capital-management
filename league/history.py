@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import threading
@@ -95,6 +96,10 @@ CRYPTO_TRADES_PATH = "/v1beta3/crypto/us/trades"
 STOCK_QUOTES_PATH = "/v2/stocks/quotes"
 STOCK_TRADES_PATH = "/v2/stocks/trades"
 CALENDAR_PATH = "/v2/calendar"
+#: Listed options (OPRA): bars since Feb 2024 on the owner's plan. Stored like any other symbol,
+#: raw, under feed `opra`, so the options replay can be built on this store.
+OPTION_BARS_PATH = "/v1beta1/options/bars"
+_OCC = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
 PAGE_LIMIT = 10_000
 #: A chunk that still has pages after this many is refused rather than followed forever.
 MAX_PAGES_PER_CHUNK = 200
@@ -208,8 +213,22 @@ def chunk_ranges(timeframe: str, since: date, until: date) -> list[tuple[date, d
     return out
 
 
-def group_size(timeframe: str, crypto: bool) -> int:
+def is_option(symbol: str) -> bool:
+    """An OCC option symbol: root, expiry YYMMDD, C or P, strike x 1000 in eight digits."""
+    return bool(_OCC.match(str(symbol)))
+
+
+def asset_class(symbol: str) -> str:
+    return "crypto" if is_crypto(symbol) else "option" if is_option(symbol) else "equity"
+
+
+FEEDS = {"crypto": "us", "option": "opra"}
+
+
+def group_size(timeframe: str, crypto: bool, option: bool = False) -> int:
     """Symbols per request, so one chunk is about one 10,000-bar page."""
+    if option:
+        return 20  # an option trades sparsely: most minutes of most contracts have no bar
     if timeframe == "1Day":
         return 12
     if timeframe == "1Hour":
@@ -630,14 +649,14 @@ class Ingestor:
                 raise ValueError(f"timeframe must be one of {sorted(TIMEFRAME_SECONDS)}, got {timeframe!r}")
             names = [s for s in symbols if timeframe != "5Min" or s in five_minute or len(symbols) <= 6]
             for start, end in reversed(chunk_ranges(timeframe, lo, hi)):
-                for crypto in (False, True):
-                    group = [s for s in names if is_crypto(s) == crypto]
-                    adjustments = ("raw",) if crypto else (("raw", "all") if timeframe in DUAL_ADJUSTED else ("raw",))
-                    size = group_size(timeframe, crypto)
+                for kind in ("equity", "crypto", "option"):
+                    group = [s for s in names if asset_class(s) == kind]
+                    adjustments = ("raw", "all") if kind == "equity" and timeframe in DUAL_ADJUSTED else ("raw",)
+                    size = group_size(timeframe, kind == "crypto", kind == "option")
                     for adjustment in adjustments:
                         for i in range(0, len(group), size):
                             chunks.append(Chunk("bars", tuple(group[i:i + size]), timeframe,
-                                                "us" if crypto else self.feed, adjustment, start, end))
+                                                FEEDS.get(kind, self.feed), adjustment, start, end))
         return chunks
 
     def pending(self, chunk: Chunk) -> list[str]:
@@ -662,7 +681,7 @@ class Ingestor:
         fetched everything from the chunk's start up to that bar: the venue has nothing there."""
         if chunk.timeframe == "1Day" or chunk.kind != "bars":
             return False
-        feed = "us" if is_crypto(symbol) else self.feed
+        feed = FEEDS.get(asset_class(symbol), self.feed)
         first = self.store.first_bar(symbol, "1Day", feed=feed, adjustment="raw")
         if first is None or _ts(chunk.end) > first:
             return False
@@ -672,12 +691,13 @@ class Ingestor:
     # --------------------------------------------------------------- run
     def fetch_bars(self, chunk: Chunk, symbols: Sequence[str], run: "str | None" = None) -> dict[str, str]:
         """Fetch one bar chunk for these symbols and commit each symbol's part. Returns states."""
-        crypto = is_crypto(symbols[0])
+        kind = asset_class(symbols[0])
         start_ts, end_ts = _ts(chunk.start), _ts(chunk.end)
         params: dict[str, Any] = {"symbols": ",".join(symbols), "timeframe": chunk.timeframe,
                                   "start": iso(start_ts), "end": iso(end_ts - 1), "limit": PAGE_LIMIT}
-        if not crypto:
+        if kind == "equity":
             params.update(feed=chunk.feed, adjustment=chunk.adjustment)
+        path = {"crypto": CRYPTO_BARS_PATH, "option": OPTION_BARS_PATH}.get(kind, STOCK_BARS_PATH)
         states: dict[str, str] = {}
         inferred = [s for s in symbols if self._before_listing(s, chunk)]
         for symbol in inferred:
@@ -689,7 +709,7 @@ class Ingestor:
             return states
         params["symbols"] = ",".join(wanted)
         try:
-            found, calls = self._paged(DATA_URL, CRYPTO_BARS_PATH if crypto else STOCK_BARS_PATH, params, "bars")
+            found, calls = self._paged(DATA_URL, path, params, "bars")
         except BudgetSpent:
             return {**states, **{symbol: "skipped" for symbol in wanted}}
         except VenueFailure as exc:

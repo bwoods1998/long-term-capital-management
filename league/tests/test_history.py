@@ -457,3 +457,21 @@ class ProbeBudgetTest(unittest.TestCase):
             self.assertLessEqual(len(client.calls), 8)
             self.assertNotIn("failed", {r["state"] for r in store.chunk_rows()})
             self.assertTrue(any(ing.pending(c) for c in plan))
+
+
+class OptionBarsTest(unittest.TestCase):
+    def test_an_occ_symbol_is_fetched_from_the_options_endpoint_raw_under_opra(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp)
+            client = FakeAlpaca()
+            ing = _ingestor(store, client)
+            plan = ing.plan(["SPY250321C00580000", "SPY"], ["1Hour"], "2025-03-01", "2025-03-22")
+            self.assertEqual({(c.symbols, c.feed, c.adjustment) for c in plan},
+                             {(("SPY",), "sip", "raw"), (("SPY",), "sip", "all"), (("SPY250321C00580000",), "opra", "raw")})
+            ing.run(plan)
+            option_calls = [u for u in client.calls if "/v1beta1/options/bars" in u]
+            self.assertEqual(len(option_calls), 1)
+            self.assertNotIn("adjustment", option_calls[0])
+            self.assertTrue(store.bars("SPY250321C00580000", "1Hour", 0, NOW, feed="opra", adjustment="raw"))
+            self.assertEqual(history.asset_class("BTC/USD"), "crypto")
+            self.assertEqual(history.asset_class("SOFI"), "equity")
