@@ -414,6 +414,20 @@ class Compatibility(FoundryCase):
         self.assertEqual(self.foundry.evaluations()[other["id"]]["outcome"], "passed")
 
 
+class WaitingCards(FoundryCase):
+    def test_a_card_waiting_on_a_full_desk_does_not_stop_calls_for_other_desks(self):
+        """Sept 22, 2026: a weather card passed replay at 15:50Z, its desk was full of young agents,
+        and the foundry refused every call, for every desk, for two hours."""
+        self.call()  # the sawtooth card passes replay on the crypto majors desk
+        self.assertEqual(len(self.foundry.inventory()), 1)
+        for _ in range(5):  # the desk fills with young agents that may not be displaced yet
+            self.house.spawn("rosenfeld", "crypto-family", PASSER, reason="test")
+        self.clock.advance(31 * 60)
+        self.assertTrue(self.foundry.due(), self.foundry.refusal)
+        desk, _, _ = self.foundry.allocate(fresh=True)
+        self.assertNotEqual(desk.niche, self.DESK, "no more cards for a desk that already has one waiting")
+
+
 class EndToEnd(FoundryCase):
     def test_the_tick_calls_replays_and_seats_a_passer_through_the_house_refill(self):
         self.rules.update(newcomer_seconds=600, max_population=10)
