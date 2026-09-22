@@ -24,10 +24,15 @@ class FundedTransport:
             self.checked = self.clock()
             try:
                 summary = self.transport('GET', '/v2/usage/summary?range=period')
-                amount = summary.get('period_spend')
-                if summary.get('available') is not True or type(amount) not in (float, int):
+                # The account balance, not `period_spend`: on this plan "period" is a rolling
+                # seven-day window that falls as old spend rolls off (CampaignBudget.observe_balance).
+                balance = summary.get('balance')
+                if (summary.get('available') is not True or summary.get('balance_unavailable')
+                        or type(balance) not in (float, int)):
                     return False
-                self.guard.observe_spend('sail', Decimal(str(amount)) / 100)
+                evidence = {key: summary.get(key) for key in ('range', 'effective_range', 'plan_limited', 'rolling_window',
+                                                              'billing_window', 'period_spend')}
+                self.guard.observe_balance('sail', Decimal(str(balance)) / 100, evidence=evidence)
             except Exception:
                 return False
             return self.guard.ready('sail')

@@ -81,6 +81,9 @@ class CampaignBudget:
                 old_policy TEXT NOT NULL, new_policy TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS topups(id TEXT PRIMARY KEY, at REAL NOT NULL, kind TEXT NOT NULL,
                 amount INTEGER NOT NULL, note TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS meter_balance(id TEXT PRIMARY KEY, last INTEGER NOT NULL, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS meter_reconciliations(id TEXT PRIMARY KEY, kind TEXT NOT NULL, at REAL NOT NULL,
+                evidence TEXT NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -413,6 +416,58 @@ class CampaignBudget:
             self.db.execute("INSERT INTO meter VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET latest=MAX(latest,excluded.latest)",
                             (kind, amount, amount))
             self.db.execute("INSERT INTO meter_health VALUES(?,?,0) ON CONFLICT(id) DO UPDATE SET checked=excluded.checked", (kind, self.clock()))
+
+    def observe_balance(self, kind: str, balance: Any, *, evidence: Mapping[str, Any] | None = None) -> Decimal:
+        """Vendor-account expenditure from the account BALANCE: every decrease is spend; an
+        increase (a top-up, a refund) is never credited back, so a top-up cannot hide spend and
+        the meter can never run backwards. Returns the spend this reading added.
+
+        Why not the usage summary's `range=period` figure, which `observe_spend` was fed: on this
+        account it is not a billing period at all but a ROLLING seven-day window
+        (`effective_range: "7d"`, `plan_limited: true`). It falls whenever older spend rolls off
+        faster than new spend arrives, and at 16:47:39Z Sept 22, 2026 it did -- the first run's
+        Sept 15 spend aged out -- so `observe_spend` latched the meter failed and the whole floor
+        (research, Merton, audits, births) stopped on a vendor window, with $73 of Sail allowance
+        unspent. The balance is exact, includes sandboxes and hosting like the old feed, and moves
+        down only when the account is charged.
+
+        The first balance reading continues the existing meter where it stands (its `latest` is
+        kept, so nothing already measured is forgotten), and a latch the old feed set is cleared
+        then, once, with the evidence kept in `meter_reconciliations`. After that the balance
+        feed cannot latch: an unavailable balance just leaves the meter unread (`ready` goes false
+        after 180 s), which stops paid work until the vendor answers again."""
+        amount = micro(balance)
+        now = self.clock()
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self.db.execute("SELECT last FROM meter_balance WHERE id=?", (kind,)).fetchone()
+                meter = self.db.execute("SELECT baseline, latest FROM meter WHERE id=?", (kind,)).fetchone()
+                added = 0
+                if row is None:
+                    if meter is None:
+                        self.db.execute("INSERT INTO meter VALUES(?,?,?)", (kind, 0, 0))
+                    self.db.execute("INSERT INTO meter_balance VALUES(?,?,?)", (kind, amount, now))
+                    health = self.db.execute("SELECT failed FROM meter_health WHERE id=?", (kind,)).fetchone()
+                    if health and health["failed"]:
+                        record = {"cause": "the usage summary's period figure is a rolling window, not a cumulative meter",
+                                  "meter_before": {"baseline": meter["baseline"], "latest": meter["latest"]} if meter else None,
+                                  "balance_micro_usd": amount, "vendor": dict(evidence or {})}
+                        self.db.execute("INSERT INTO meter_reconciliations VALUES(?,?,?,?)",
+                                        (f"{kind}:balance-feed:{int(now)}", kind, now, canonical(record)))
+                        self.db.execute("UPDATE meter_health SET failed=0 WHERE id=?", (kind,))
+                else:
+                    added = max(0, int(row["last"]) - amount)
+                    if added:
+                        self.db.execute("UPDATE meter SET latest=latest+? WHERE id=?", (added, kind))
+                    self.db.execute("UPDATE meter_balance SET last=?, at=? WHERE id=?", (amount, now, kind))
+                self.db.execute("INSERT INTO meter_health VALUES(?,?,0) ON CONFLICT(id) DO UPDATE SET checked=excluded.checked",
+                                (kind, now))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        return Decimal(added) / UNIT
 
     def today(self, kind: str) -> Decimal:
         midnight = int(self.clock() // 86400) * 86400
