@@ -48,6 +48,8 @@ FORBIDDEN: tuple[str, ...] = (
     "gateway/", ".github/",
     "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
     "league/live_trading.py", "league/live_pilot.py", "scripts/live_trading.py", "scripts/live_pilot.py",
+    # The history a strategy is judged on and the seal on its holdout are judges too.
+    "league/history.py", "league/deep_replay.py",
 )
 #: The only keys of league/config.json the operator may move, with their bounds.
 CONFIG_DIALS: dict[str, tuple[float, float]] = {
