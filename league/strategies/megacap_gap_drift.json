@@ -1,0 +1,5 @@
+{
+  "name": "megacap-gap-drift",
+  "family": "megacaps-gap-drift",
+  "why": "Five megacap agents are barren, and the latest supplied reversion replay failed with 101 trades and deflated Sharpe 0.00194 against 64 trials. Test a distinct information-diffusion hypothesis using only supplied daily bars and fresh quotes: next-session continuation after a substantial upward gap, elevated volume and a strong close. This is a price-defined news-shock proxy, not an earnings signal, and no positive edge has been measured for it. Use at most $2 in fractional shares, one exposure, a price stop and a short holding deadline. Starts at rung 0 with no inherited qualification; preserve applicable trial history and require normal replay, holdout, independent paper, audit and capital gates. Insufficient trades are grounds to reject the candidate, not to force turnover."
+}
