@@ -475,3 +475,23 @@ class OptionBarsTest(unittest.TestCase):
             self.assertTrue(store.bars("SPY250321C00580000", "1Hour", 0, NOW, feed="opra", adjustment="raw"))
             self.assertEqual(history.asset_class("BTC/USD"), "crypto")
             self.assertEqual(history.asset_class("SOFI"), "equity")
+
+
+class CoverageCommandTest(unittest.TestCase):
+    def test_coverage_is_read_only_and_says_when_there_is_no_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(history.main(["coverage", "--root", tmp]), 1)
+            self.assertIn("no history store", out.getvalue())
+            self.assertFalse((Path(tmp) / "history").exists())  # nothing created
+            with redirect_stdout(io.StringIO()):
+                history.main(["ingest", "--root", tmp, "--symbols", "SPY", "--timeframes", "1Day", "--since", "2024-01-01",
+                              "--until", "2025-01-01", "--feed", "sip", "--rate", "100000"], client=FakeAlpaca())
+            path = Path(tmp) / "history" / "history.sqlite"
+            path.chmod(0o400)  # a read-only file: only a read-only open can succeed
+            try:
+                with redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(history.main(["coverage", "--root", tmp, "--json"]), 0)
+                self.assertIn('"SPY"', out.getvalue())
+            finally:
+                path.chmod(0o600)

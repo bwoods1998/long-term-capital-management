@@ -1075,8 +1075,13 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
                         help="fetch every split/dividend-adjusted chunk again (after a corporate action)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    store = HistoryStore.at_root(args.root)
     if args.command == "coverage":
+        # Read-only: it is run on the House box beside a live ingestion and must change nothing.
+        path = Path(args.root) / HISTORY_DIR / DB_NAME
+        if not path.exists():
+            print(f"no history store at {path}")
+            return 1
+        store = HistoryStore(path, readonly=True)
         rows = store.summary()
         if args.json:
             print(json.dumps({"series": rows, "runs": store.runs()}, indent=1, default=str))
@@ -1090,6 +1095,7 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
         store.close()
         return 0
 
+    store = HistoryStore.at_root(args.root)
     load_env()
     config = load_config()
     feed = args.feed or config.get("alpaca_feed", "iex")
