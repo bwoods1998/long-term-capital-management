@@ -1602,6 +1602,36 @@ class House:
             self.alert("error", f"The daily backup of the House box failed ({row.get('error')}). The ledger lives on one disk until one succeeds.")
 
     # -------------------------------------------------------------- expedition
+    def _note_stopped(self, reason: str) -> None:
+        """Say so when the floor stops buying work, and why, once a stop has lasted three ticks;
+        and say so again when it reopens.
+
+        Measured Sept 22, 2026: the campaign's Sail meter latched at 16:47:39Z and the floor stopped
+        research, Merton, audits and births with $139 of allowance unspent -- and nothing said so.
+        Every tick summary read "stopped", every alert stayed quiet, and it was found 23 minutes
+        later by reading the ledger. A warning, not an error: a vendor-side stop is no reason to
+        roll back the release being watched. A maintenance pause is the operator's own act and is
+        not announced."""
+        tell = told = None
+        with self._state_lock:
+            row = dict(self._state.get("stopped") or {"reason": "", "ticks": 0, "told": False})
+            if not reason:
+                if row.get("told"):
+                    told = row.get("reason")
+                self._state["stopped"] = {"reason": "", "ticks": 0, "told": False}
+            else:
+                row["ticks"] = int(row.get("ticks") or 0) + 1 if row.get("reason") == reason else 1
+                row["reason"] = reason
+                if row["ticks"] >= 3 and not row.get("told") and not reason.startswith("maintenance pause"):
+                    row["told"] = True
+                    tell = row["ticks"]
+                self._state["stopped"] = row
+        if tell:
+            self.alert("warning", f"the floor has stopped buying work for {tell} ticks: {reason}. "
+                                  "No research, Merton, births or payouts; exits and reconciliation go on.")
+        if told:
+            self.alert("info", f"the floor is open for business again (it had stopped: {told})")
+
     def _expedition_notices(self) -> None:
         """Tell the owner, once each, when a budget is gone or the expedition's last day is over."""
         told = self._state.setdefault("expedition_told", {})
@@ -3066,15 +3096,25 @@ class House:
                 self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
         # Past the monthly compute line only agents holding real money are woken, so they can exit.
         open_for_business = self.budget is None or self.budget.check() == "open"
+        stopped_because = "" if open_for_business else f"the Sail meter's monthly line or reserve (league/budget.py mode {getattr(self.budget, 'mode', '?')})"
         if self.campaigns:
             meter = getattr(self.provider, "transport", None)
             metered = bool(meter and hasattr(meter, "refresh") and meter.refresh())
-            open_for_business = open_for_business and metered and self.pacer.may_spend("sail")
+            allowed = self.pacer.may_spend("sail")
+            if open_for_business and not metered:
+                stopped_because = "the campaign's Sail meter is unread or failed (meter_health in campaigns.sqlite)"
+            elif open_for_business and not allowed:
+                stopped_because = "the campaign's Sail allowance is closed"
+            open_for_business = open_for_business and metered and allowed
         pause = self.paused()
         if pause:
             open_for_business = False
             summary["paused"] = pause["reason"]
+            stopped_because = f"maintenance pause: {pause['reason']}"
         summary["budget"] = "open" if open_for_business else "stopped"
+        if stopped_because:
+            summary["stopped_because"] = stopped_because
+        self._note_stopped(stopped_because)
         batches: dict[str, list[Mapping[str, Any]]] = {}
         waking = [a for a in self.due() if self.economy.alive(a.id)
                   and (open_for_business or self._holds_real_money(a) or (pause and self._holds_position(a)))]
@@ -3235,6 +3275,7 @@ class House:
                                  if (row := self._state.get('promotion_status', {}).get(agent.id))
                                  and row.get('code_sha256') == agent.code_sha256],
             "semantic_lab": self.semantic_lab.stats() if self.semantic_lab else None,
+            "stopped_because": summary.get("stopped_because"),
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
         }
