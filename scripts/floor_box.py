@@ -1220,7 +1220,7 @@ def cmd_maintenance(args: argparse.Namespace) -> int:
     if args.action == "on":
         api.exec(box, ["sh", "-c", f"mkdir -p {STATE_DIR} && printf '%s\\n' \"$1\" > {path}", "floor_box", args.reason],
                  timeout=60, on_output=None).check()
-        say(f"paused for maintenance: {args.reason}")
+        say("paused for maintenance: " + args.reason)
         say("the next tick stops starting paid work and new entries; research in flight defers at its next turn.")
     elif args.action == "off":
         api.exec(box, ["sh", "-c", f"rm -f {path}"], timeout=60, on_output=None).check()
