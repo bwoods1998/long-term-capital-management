@@ -1,0 +1,8 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_minimum_entry",
+  "repair": {
+    "key": "bug_report:alpaca-crypto-alts:2cc3f89502"
+  },
+  "why": "Corrected child of Haghani's maker-reversion strategy for SOL, XRP, DOGE, LTC, LINK and AVAX on Alpaca's hourly horizon. Skip final buy allocations below the venue's $10 minimum after existing cash reservation and limit sizing; preserve signals, exits and allocation order. New rung-0 candidate with no inherited qualification or evidence."
+}
