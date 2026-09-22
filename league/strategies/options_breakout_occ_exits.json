@@ -1,0 +1,8 @@
+{
+  "family": "options-breakout",
+  "name": "options_breakout_occ_exits",
+  "repair": {
+    "key": "bug_report:alpaca-options:2dc39ecc17"
+  },
+  "why": "Corrected child of krasker: match held options by OCC first and index chain OCC/contract-symbol aliases, never underlying aliases; submit option orders with explicit OCC. Preserve the parent's specialty, parameters, freshness gates and trading rules. Born at rung 0 with no inherited record and requiring independent qualification."
+}
