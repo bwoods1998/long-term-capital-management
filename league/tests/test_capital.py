@@ -74,3 +74,25 @@ class RecommendationTest(HouseCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MicroTopUp(HouseCase):
+    def test_a_live_micro_agent_seated_before_the_surge_is_raised_once_inside_the_headroom(self):
+        from unittest.mock import patch
+        from league.capital import top_up_micro
+        agent = self.seated()
+        book = Book("alpaca", FakeBroker("alpaca", cash="500"), self.house.ledger, fees=Fees("alpaca"), real_money=True, clock=self.clock)
+        self.house.books["alpaca"] = book
+        book.reconcile()
+        self.house.evaluator.promote(agent.id, 2, "test: real money")
+        book.stake(agent.id, D(25), note="a pre-surge stake")
+        with patch.object(self.house, "tuition", return_value={"headroom_usd": D(500)}):
+            row = top_up_micro(self.house, agent)
+            self.assertEqual(D(row["moved_usd"]), D(35))
+            self.assertEqual(book.account(agent.id).staked, D(60))
+            self.assertIsNone(top_up_micro(self.house, agent))  # once
+        other = self.seated("other")
+        self.house.evaluator.promote(other.id, 2, "test: real money")
+        book.stake(other.id, D(25), note="a pre-surge stake")
+        with patch.object(self.house, "tuition", return_value={"headroom_usd": D(10)}):
+            self.assertIsNone(top_up_micro(self.house, other))  # not inside the owner's headroom
