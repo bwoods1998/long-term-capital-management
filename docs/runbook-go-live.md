@@ -110,12 +110,24 @@ Until you do, each scheduled pass still runs and is recorded on the public tape 
 concluded, and any change it wanted is dropped with "GitHub is not configured". With the token, a
 proposal becomes a branch `merton/<role>/...` and a pull request; GitHub's `Merton` workflow judges it
 (the path guard from main's copy, the content checks, the replay regression, the whole suite) and
-merges it only when everything is green. Merged code reaches the box by itself: every half hour the
-House downloads `main` (the repository is public, so the box needs no credential), runs the running
-release's own content checks on it, and hands it to the in-box watchdog, which runs it as a canary,
-promotes it, watches the House for ten minutes and rolls back if health degrades. The same is true
-of anything you push to `main`. One thing never travels that way: a change to `real_money` is
-refused by the updater, so that switch is only ever your own `floor_box.py deploy`.
+merges it only when everything is green. Merged code reaches the box by itself.
+
+- **When.** Every half hour the House reads main's head commit and downloads that exact commit. The
+  repository is public, so the box needs no credential.
+- **Only if attested.** GitHub's API must show that the Checks workflow and its required jobs passed
+  on that exact sha. This needs `api.github.com` on the box's egress list:
+  `floor_box.py hosts --add api.github.com`.
+- **Judged by the running release.** The running release's content checks are run against the
+  commit.
+- **Then the watchdog.** The commit goes to the in-box watchdog, which runs it as a canary, promotes
+  it, watches the House for ten minutes and rolls back if health degrades.
+
+The same is true of anything you push to `main`. Some things never travel that way; only your own
+`floor_box.py deploy` lands them:
+
+- a change to `real_money`;
+- a change to the judges (the files `ci.FORBIDDEN` lists);
+- a change to the workflows.
 
 ## 5. Watching it during the week
 

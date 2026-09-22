@@ -238,6 +238,9 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     if kind == "ops.deploy":
         if p.get("action") == "deploying":
             return f"New code on main: release {p.get('release')} is on the canary. The watchdog promotes it only if it stays healthy."
+        if p.get("action") in ("blocked", "waiting"):
+            return (f"New code on main ({str(p.get('sha') or '')[:12]}) is not deployed: the House deploys only a commit whose "
+                    f"checks GitHub confirms passed on that exact commit. {'; '.join(str(r) for r in (p.get('reasons') or [])[:1])}").strip()
         return f"New code on main was refused before the canary: {'; '.join(str(r) for r in (p.get('reasons') or [])[:2])}"
     if kind == "ops.recommendation":
         return f"Capital recommendation: {p.get('summary')}"

@@ -4,6 +4,13 @@ name: Checks
   push:
     branches: [main]
   pull_request:
+  # The House box deploys a commit of main only when THESE checks passed on that exact commit
+  # (`league/updater.py`). A merge made with the Actions token starts no workflow -- GitHub's rule --
+  # so a commit Merton's merge job leaves on main would never carry them: the merge job dispatches
+  # this workflow, and the hourly run catches any head that still has none.
+  workflow_dispatch:
+  schedule:
+    - cron: "23 * * * *"
 
 permissions:
   contents: read

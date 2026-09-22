@@ -1296,8 +1296,9 @@ class LeagueHostsTests(unittest.TestCase):
                 "news.google.com", "*.workers.dev"]
         with mock.patch.object(floor_box, "floor_config", lambda: {"gateway_url": "https://gw.example.workers.dev/"}):
             # The wildcard is accepted by Sail and never resolves: only the exact name counts.
-            self.assertEqual(floor_box.missing_league_hosts(have), ["gw.example.workers.dev", "github.com", "codeload.github.com"])
-            self.assertEqual(floor_box.missing_league_hosts(have + ["gw.example.workers.dev", "github.com", "codeload.github.com"]), [])
+            # api.github.com: the updater deploys only a commit whose checks GitHub's API confirms.
+            self.assertEqual(floor_box.missing_league_hosts(have), ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com"])
+            self.assertEqual(floor_box.missing_league_hosts(have + ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com"]), [])
 
 
 if __name__ == "__main__":  # pragma: no cover

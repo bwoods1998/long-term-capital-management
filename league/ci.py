@@ -48,6 +48,10 @@ FORBIDDEN: tuple[str, ...] = (
     "gateway/", ".github/",
     "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
     "league/live_trading.py", "league/live_pilot.py", "scripts/live_trading.py", "scripts/live_pilot.py",
+    # The seal on the agents' boxes (no network, no credential). The box's updater refuses an
+    # automatic release that changes any file here (league/updater.py), so this is also the list of
+    # what only the owner's deploy may change.
+    "league/sandbox.py",
     # The history a strategy is judged on and the seal on its holdout are judges too.
     "league/history.py", "league/deep_replay.py",
 )
@@ -142,7 +146,9 @@ def regression_tape(venue: str, *, steps: int = 600, seed: int = 7) -> dict[str,
 
 
 # ------------------------------------------------------------------------- content checks
-def check_strategy(path: Path) -> list[str]:
+def check_strategy(path: Path, *, catalogue: dict | None = None) -> list[str]:
+    """`catalogue` is the specialties of the tree being judged (its own `niches.json`, read by this
+    file's code): a strategy must fit the House it will be born into, not the one judging it."""
     from .replay import run_replay
     from .runner import needs_of
 
@@ -160,7 +166,7 @@ def check_strategy(path: Path) -> list[str]:
         return [f"{path.name}: {exc}"]
     from . import niches
 
-    if niches.match(described["needs"], niches.load()) is None:
+    if niches.match(described["needs"], catalogue if catalogue is not None else niches.load()) is None:
         return [f"{path.name}: its NEEDS sit in no open specialty of league/niches.json (the House would refuse to let it be born)"]
     result = run_replay(code, {}, regression_tape(venue, steps=240))
     if not result.get("ok"):
@@ -171,18 +177,23 @@ def check_strategy(path: Path) -> list[str]:
 
 
 def check_strategies(root: Path = REPO) -> list[str]:
-    from . import strategies
+    from . import niches, strategies
 
     directory = root / "league" / "strategies"
     problems = list(strategies.problems(directory))
     rows = strategies.registry(directory)
     listed = {row["file"] for row in rows}
+    own = root / "league" / "niches.json"
+    try:
+        catalogue = niches.load(own) if own.exists() else None
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [f"league/niches.json: {exc}"]
     for path in sorted(directory.glob("*.py")):
         if path.name == "__init__.py":
             continue
         if path.name not in listed:
             problems.append(f"{path.name}: not described; add league/strategies/{path.stem}.json with its name, family and why")
-        problems.extend(check_strategy(path))
+        problems.extend(check_strategy(path, catalogue=catalogue))
     for row in rows:
         if not (directory / row["file"]).exists():
             problems.append(f"{row['name']} is described as {row['file']}, which does not exist")
@@ -213,18 +224,26 @@ def check_game(root: Path = REPO) -> list[str]:
     return []
 
 
-def check_config(base: str | None, root: Path = REPO) -> list[str]:
-    """The operator may move the operating dials, inside bounds, and nothing else in config.json."""
+def check_config(base: str | None, root: Path = REPO, *, baseline: Path | None = None) -> list[str]:
+    """The operator may move the operating dials, inside bounds, and nothing else in config.json.
+
+    `base` is a git ref (a pull request is measured against main); `baseline` is a code tree (the
+    box's updater measures an incoming tree against the release it is running). Without either,
+    only the dials' bounds are checked."""
     now = json.loads((root / "league" / "config.json").read_text(encoding="utf-8"))
     problems = [f"league/config.json: {key} = {now[key]} is outside [{low}, {high}]" for key, (low, high) in CONFIG_DIALS.items()
                 if key in now and not low <= float(now[key]) <= high]
+    before = None
     if base:
         shown = subprocess.run(["git", "show", f"{base}:league/config.json"], cwd=root, capture_output=True, text=True)
         if shown.returncode == 0:
             before = json.loads(shown.stdout)
-            for key in sorted(set(before) | set(now)):
-                if before.get(key) != now.get(key) and key not in CONFIG_DIALS:
-                    problems.append(f"league/config.json: {key} is not an operating dial; only the owner changes it")
+    elif baseline is not None:
+        before = json.loads((Path(baseline) / "league" / "config.json").read_text(encoding="utf-8"))
+    if before is not None:
+        for key in sorted(set(before) | set(now)):
+            if before.get(key) != now.get(key) and key not in CONFIG_DIALS:
+                problems.append(f"league/config.json: {key} is not an operating dial; only the owner changes it")
     return problems
 
 
@@ -290,12 +309,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guard-only", action="store_true", help="only the path guard (run from main's copy of this file)")
     parser.add_argument("--content-only", action="store_true",
                         help="only the content checks, with no git and no test run: what the box's updater asks an incoming tree")
+    parser.add_argument("--root", default=None,
+                        help="with --content-only: the tree to judge (default: this file's own tree). The box's updater runs "
+                             "the RUNNING release's copy of this file against the incoming tree this way")
+    parser.add_argument("--baseline", default=None,
+                        help="with --content-only: the tree the judged one replaces; config.json may move only its dials from it")
+    parser.add_argument("--nonce-stdin", action="store_true",
+                        help="read one line from stdin before anything is judged and end with `VERDICT <line> <json>`")
     args = parser.parse_args(argv)
+    nonce = sys.stdin.readline().strip() if args.nonce_stdin else ""
+    if args.nonce_stdin:
+        # Read, and stdin closed, BEFORE any strategy file is loaded: the verdict line carries a
+        # secret the judged code never had a chance to see, so a module body that prints
+        # "ci: passed" and exits proves nothing (the safety check already bans `input` and `exit`;
+        # this is the second wall).
+        sys.stdin.close()
     if args.content_only:
-        # Run by `Updater.vet` in the INCOMING tree, so a tree is judged by its own rules rather
-        # than by a judge one commit out of date -- the two disagreed, and a commit that widened a
-        # bound and used the wider value could never reach the box.
-        problems = check_strategies() + check_tools() + check_game() + check_config(None)
+        # Run by `Updater.vet` from the RUNNING release (`--root` names the incoming tree), so a
+        # candidate is judged by code it could not have edited. See `league/updater.py` for why
+        # this reversed the Sept 20, 2026 choice to let a tree judge itself.
+        root = Path(args.root).resolve() if args.root else REPO
+        baseline = Path(args.baseline).resolve() if args.baseline else None
+        problems = check_strategies(root) + check_tools(root) + check_game(root) + check_config(None, root, baseline=baseline)
     elif args.guard_only:
         problems = guard_branch(args.base or "origin/main", args.head, args.branch)
     else:
@@ -305,6 +340,8 @@ def main(argv: list[str] | None = None) -> int:
     if os.environ.get("GITHUB_ACTIONS") == "true":
         annotate(problems)
     print("ci:", "refused" if problems else "passed", f"({args.branch or 'no branch'})")
+    if args.nonce_stdin:
+        print("VERDICT", nonce, json.dumps({"passed": not problems, "problems": problems}, sort_keys=True), flush=True)
     return 1 if problems else 0
 
 
