@@ -468,6 +468,20 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   spent around 01:00Z. After that the frontier tiers keep audits and move cheap research to Sail.
   The Sail balance of about $127 at about $40/day lasts about three days.
 
+- 19:05Z **The foundry loop ran end to end.** The third call wrote 4 more sports cards.
+  - 19:05:16Z Card `42bdbb` was written: recreational demand overprices the OVER near the main
+    scoring line, leaving the complementary UNDER cheap.
+  - 19:05:25Z It passed replay: 64 trades, no failing gate.
+  - 19:05:40Z **`meriwether-h42bdbb` was born on paper** (founder `card:42bdbb11739cf4ab`).
+  - The foundry total is now 12 cards, 2 passed and 9 failed, for $2.22.
+  - Research candidates keep arriving too: `mullins-14` (18:54Z) tests the favourite-maker NO
+    strategy restricted to rain markets, a falsifiable narrowing of a failed all-series candidate.
+- 19:05Z One warning: the gateway reset a connection while polling a paper order. It was
+  retried on the next tick.
+- Live on production: the explicit cache layout (`messages-explicit`) served 580 Luna calls since
+  17:45Z, with 51.7% of input tokens read from cache at $0.0032 a call ($0.0064 before). That is
+  below the 59–77% the routing experiment projected; the measured figure stands.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
