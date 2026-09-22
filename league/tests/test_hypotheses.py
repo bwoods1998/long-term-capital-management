@@ -420,7 +420,7 @@ class WaitingCards(FoundryCase):
         and the foundry refused every call, for every desk, for two hours."""
         self.call()  # the sawtooth card passes replay on the crypto majors desk
         self.assertEqual(len(self.foundry.inventory()), 1)
-        for _ in range(5):  # the desk fills with young agents that may not be displaced yet
+        for _ in range(self.house.niches[self.DESK].max_members):  # the desk fills with young agents that may not be displaced yet
             self.house.spawn("rosenfeld", "crypto-family", PASSER, reason="test")
         self.clock.advance(31 * 60)
         self.assertTrue(self.foundry.due(), self.foundry.refusal)
