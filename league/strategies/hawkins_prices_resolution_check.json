@@ -1,0 +1,9 @@
+{
+  "family": "prices-favorites",
+  "name": "hawkins_prices_resolution_check",
+  "repair": {
+    "key": "strategy_defect:hawkins-8:ca63354ca603",
+    "parent": "hawkins-8"
+  },
+  "why": "Corrected child of hawkins-8: retain the Kalshi day WTI/diesel favourite specialty and effective parameters, but require known positive hours_to_resolve no greater than 48 for entries and resting buys. Trading-close time alone admitted markets resolving 177\u2013178 hours away. This new child must qualify independently from rung 0."
+}
