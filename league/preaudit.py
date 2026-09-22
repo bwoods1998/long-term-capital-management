@@ -50,6 +50,10 @@ DEFAULTS: dict[str, Any] = {
     "refusal_rate": 0.5,  # the book refused at least half of what it was sent
     "barren_rate": 0.8,  # live market in front of it, nothing done, and no fill ever
     "dropped": 1,  # any intent the House could not even read
+    # A final look is repeated this often while the agent stays on paper with the same code: the
+    # first look at six wakes can come before any market was open (a barren desk needs six live
+    # markets in front of it), and a defect can surface later. Only NEW findings are reported.
+    "recheck_hours": 6,
 }
 
 #: Coins that trade under a dollar (or near it) on Alpaca's crypto venue, where a cent is a large
@@ -292,7 +296,7 @@ class PreAudit:
                 rung_entered = int(house.evaluator._rung_entered(agent.id))
                 old = marks.get(agent.id) if isinstance(marks.get(agent.id), dict) else None
                 same = bool(old and old.get("code_sha256") == agent.code_sha256 and old.get("rung_entered") == rung_entered)
-                if same and old.get("final"):
+                if same and old.get("final") and self.clock() - float(old.get("checked_ts") or 0) < float(self.settings["recheck_hours"]) * 3600:
                     continue
                 looked += 1
                 results.append(self._conclude(house, agent, rung_entered, old if same else None))
@@ -304,11 +308,12 @@ class PreAudit:
         """What was already reported for this code and rung when the mark itself is gone (a restart
         before the House saved its state): the ledger rows are the record, not house.json."""
         flags: list[str] = []
-        for final in (False, True):
-            entry = self.ledger.get(f"preaudit:{agent_id}:{sha[:12]}:{rung_entered}:{final}")
-            if entry is not None:
-                match = re.search(r" shows ([a-z_, ]+)\. ", str(entry.payload.get("summary") or ""))
-                flags += [f.strip() for f in (match.group(1).split(",") if match else []) if f.strip() and f.strip() not in flags]
+        prefix = f"preaudit:{agent_id}:{sha[:12]}:{rung_entered}:"
+        for entry in self.ledger.iter(kinds="repair.reported", agent=agent_id):
+            if not str(entry.id).startswith(prefix):
+                continue
+            match = re.search(r" shows ([a-z_, ]+)\. ", str(entry.payload.get("summary") or ""))
+            flags += [f.strip() for f in (match.group(1).split(",") if match else []) if f.strip() and f.strip() not in flags]
         return flags
 
     def _conclude(self, house: Any, agent: Any, rung_entered: int, old: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -332,13 +337,15 @@ class PreAudit:
             payload = {"key": key, "kind": "strategy_defect", "summary": summary[:2000], "evidence": found["evidence"],
                        "agents": [agent.id], "source": "audit", "severity": found["severity"]}
             try:
+                # One row per new set of findings for this code and rung: a later look that finds
+                # something new reports it, and the same finding is never reported twice.
                 self.ledger.append("repair.reported", payload, agent=agent.id,
-                                   id=f"preaudit:{agent.id}:{sha[:12]}:{rung_entered}:{found['final']}")
+                                   id=f"preaudit:{agent.id}:{sha[:12]}:{rung_entered}:{'+'.join(sorted(fresh))}")
                 wrote = True
             except LedgerConflict:
                 pass  # this code and rung were already reported at this stage
             reported = reported + fresh
-        mark = {"at": now_iso(self.clock), "code_sha256": sha, "rung_entered": rung_entered, "final": found["final"],
+        mark = {"at": now_iso(self.clock), "checked_ts": self.clock(), "code_sha256": sha, "rung_entered": rung_entered, "final": found["final"],
                 "verdict": "red" if flags else "clear", "flags": flags, "repair_key": key, "wakes": found["wakes"], "reported": reported}
         lock = getattr(house, "_state_lock", None) or threading.RLock()
         with lock:

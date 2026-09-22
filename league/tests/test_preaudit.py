@@ -251,11 +251,30 @@ class PreAuditTests(unittest.TestCase):
         self.woke("haghani", 6, offered=0)
         self.assertTrue(audit.run(house)[0]["final"])
         self.assertEqual(len(self.reports()), 1)  # the same finding at the final look is not reported twice
-        self.assertEqual(audit.run(house), [])  # a final mark on this code and rung is not looked at again
-        # A restart that lost the mark cannot duplicate the report either: the ledger id holds it.
+        self.assertEqual(audit.run(house), [])  # a final mark is not looked at again until the recheck is due
+        # A restart that lost the mark cannot duplicate the report either: the ledger rows hold it.
         house._state.pop(PREAUDIT_STATE_KEY)
         audit.run(house)
         self.assertEqual(len(self.reports()), 1)
+
+    def test_a_final_look_is_repeated_and_reports_only_what_is_new(self):
+        """The first behaviour look can come before any market was open: six wakes with nothing on
+        offer cannot show a barren desk. Measured on the review of PR #93, Sept 22, 2026: without a
+        second look such a desk was never flagged, however many barren wakes followed."""
+        idle = agent("idle", CLEAN)
+        house = House(self.ledger, [idle])
+        audit = PreAudit(self.ledger, clock=self.clock)
+        self.woke("idle", 6, offered=0)
+        self.assertEqual(audit.run(house)[0]["flags"], [])
+        self.woke("idle", 8, offered=3, barren=True)
+        self.assertEqual(audit.run(house), [])  # not before the recheck is due
+        self.clock.advance(6 * 3600)
+        result = audit.run(house)[0]
+        self.assertEqual(result["flags"], ["barren"])
+        self.assertEqual(len(self.reports()), 1)
+        self.clock.advance(6 * 3600)
+        audit.run(house)
+        self.assertEqual(len(self.reports()), 1)  # the same finding again is not a new report
 
     def test_new_code_is_checked_again_under_its_own_key(self):
         haghani = agent("haghani", HAGHANI)

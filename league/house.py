@@ -318,12 +318,15 @@ class House:
         return state
 
     def _save_state(self) -> None:
+        # The write under the lock too: the audit job saves from its own thread (it persists the
+        # audit it starts and the one it finishes), and two writers sharing one temporary file
+        # could lose a replace or leave an older snapshot behind a newer one.
         with self._state_lock:
             text = json.dumps(self._state, sort_keys=True)
-        tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, self._state_path)
+            tmp = self._state_path.with_suffix(".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self._state_path)
 
     def _record_start(self) -> None:
         self.ledger.append(

@@ -204,28 +204,32 @@ def judge_workflow_runs(sha: str, data: Mapping[str, Any], jobs_of: Callable[[in
     """GitHub's workflow runs for one commit -> `{"state": passed | pending | failed, "ok", ...}`.
 
     Counted: runs of `workflow` whose `head_sha` IS this sha, on `branch`, started by one of
-    `events`. Any counted run that completed with a failing conclusion fails the commit. Otherwise
-    the newest successful run decides, and its jobs (read with `jobs_of(run id)`) must include every
-    required name, each completed with `success` on this sha. No successful run yet is pending.
-    Pure apart from `jobs_of`, so the rule is testable alone."""
+    `events`. The newest counted run that finished with a verdict (success, or a failing
+    conclusion; a cancelled or skipped run says nothing) decides, so a flaky failure that a re-run
+    or the next scheduled run turns green does not block the commit for ever, and a later failure
+    does block it. A run still going that is newer than that verdict is waited for. A successful
+    deciding run's jobs (read with `jobs_of(run id)`) must include every required name, each
+    completed with `success` on this sha. Pure apart from `jobs_of`, so the rule is testable alone."""
     runs = data.get("workflow_runs") if isinstance(data, Mapping) else None
     runs = [r for r in runs if isinstance(r, Mapping)] if isinstance(runs, list) else []
     counted = [r for r in runs if r.get("head_sha") == sha and r.get("path") == workflow
                and r.get("event") in events and r.get("head_branch") == branch]
     base = {"sha": sha, "required": list(required), "workflow": workflow, "ignored_runs": len(runs) - len(counted),
             "source": "api.github.com actions runs"}
-    failed = [r for r in counted if r.get("status") == "completed" and r.get("conclusion") in FAILED]
-    if failed:
-        worst = max(failed, key=lambda r: int(r.get("id") or 0))
-        return {**base, "state": "failed", "ok": False, "checks": [], "run": _run_row(worst),
-                "reasons": [f"{workflow} concluded {worst.get('conclusion')!r} on {sha[:12]} ({worst.get('event')} run {worst.get('id')})"]}
-    good = [r for r in counted if r.get("status") == "completed" and r.get("conclusion") == "success"]
-    if not good:
-        waiting = [r for r in counted if r.get("status") != "completed"]
-        why = (f"{workflow} is {waiting[0].get('status')} on {sha[:12]}" if waiting
+    def order(r: Mapping[str, Any]) -> tuple[int, int]:
+        return int(r.get("id") or 0), int(r.get("run_attempt") or 0)
+
+    decided = [r for r in counted if r.get("status") == "completed" and (r.get("conclusion") == "success" or r.get("conclusion") in FAILED)]
+    going = [r for r in counted if r.get("status") != "completed"]
+    newest = max(decided, key=order) if decided else None
+    if newest is None or (going and order(max(going, key=order)) > order(newest)):
+        why = (f"{workflow} is {max(going, key=order).get('status')} on {sha[:12]}" if going
                else f"no completed run of {workflow} on {sha[:12]} yet")
         return {**base, "state": "pending", "ok": False, "checks": [], "reasons": [why]}
-    run = max(good, key=lambda r: (int(r.get("id") or 0), int(r.get("run_attempt") or 0)))
+    if newest.get("conclusion") != "success":
+        return {**base, "state": "failed", "ok": False, "checks": [], "run": _run_row(newest),
+                "reasons": [f"{workflow} concluded {newest.get('conclusion')!r} on {sha[:12]} ({newest.get('event')} run {newest.get('id')})"]}
+    run = newest
     listed = jobs_of(int(run.get("id") or 0))
     jobs = listed.get("jobs") if isinstance(listed, Mapping) else None
     jobs = [j for j in jobs if isinstance(j, Mapping)] if isinstance(jobs, list) else []

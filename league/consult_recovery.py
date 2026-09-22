@@ -355,11 +355,32 @@ class ConsultRecovery:
         if truncated and sources:
             # What lies beyond the batch has not been read, so nothing the batch ends on is settled.
             now = min(now, _epoch(sources[-1]["at"]) or now)
-        reports, pending = scan(sources + context + tools, now=now, settle_hours=float(self.settings["settle_hours"]),
+        rows = sources + context + tools
+        reports, pending = scan(rows, now=now, settle_hours=float(self.settings["settle_hours"]),
                                 claim_settle_hours=float(self.settings["claim_settle_hours"]))
-        emitted = 0
+        emitted = self._append(reports)
+        last = sources[-1]["seq"] if sources else cursor
+        seq = max(cursor, min(last, pending - 1) if pending is not None else last)
+        stuck = 0
+        if truncated and seq <= cursor:
+            # More rows landed within a day of an undecided consult than one batch holds, so the
+            # cursor did not move. Twice in a row means it never will (found in review, Sept 22,
+            # 2026): decide what the batch holds by the real clock and move past it. The cost is
+            # that a consult near the batch's end may be reported although a row beyond the batch
+            # shows it acted on -- an extra report, never a lost one.
+            stuck = int(state.get("stuck") or 0) + 1
+            if stuck >= 2:
+                decided, _ = scan(rows, now=self.clock(), settle_hours=float(self.settings["settle_hours"]),
+                                  claim_settle_hours=float(self.settings["claim_settle_hours"]))
+                emitted += self._append(decided)
+                seq, stuck = last, 0
+        state.update(seq=seq, at=_iso(self.clock()), emitted=int(state.get("emitted") or 0) + emitted, stuck=stuck)
+        return {"scanned": len(sources), "emitted": emitted, "seq": seq}
+
+    def _append(self, reports: list[dict[str, Any]]) -> int:
         from .ledger import LedgerConflict
 
+        emitted = 0
         for report in reports:
             entry_id, agent = report["_id"], report["_agent"]
             if self.ledger.get(entry_id) is not None:
@@ -370,10 +391,7 @@ class ConsultRecovery:
             except LedgerConflict:
                 continue
             emitted += 1
-        last = sources[-1]["seq"] if sources else cursor
-        seq = max(cursor, min(last, pending - 1) if pending is not None else last)
-        state.update(seq=seq, at=_iso(self.clock()), emitted=int(state.get("emitted") or 0) + emitted)
-        return {"scanned": len(sources), "emitted": emitted, "seq": seq}
+        return emitted
 
 
 # ---------------------------------------------------------------------------------- dry run

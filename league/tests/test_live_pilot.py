@@ -134,6 +134,7 @@ class LivePath(unittest.TestCase):
             return {'approve': True}
         f.auditor.audit = audit
         h._promote(agent, Verdict(agent.id, 1, 'eligible', 'synthetic passing screen', {'book': book.name}))
+        h.wait(5)  # the audit runs beside the tick
         self.assertEqual(h.evaluator.rung(agent.id), 1)
         self.assertEqual(h._state['promotion_status'][agent.id]['stage'], 'accounting_integrity')
         self.assertFalse(f.real.submitted)

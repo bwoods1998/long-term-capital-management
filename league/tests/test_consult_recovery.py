@@ -214,6 +214,24 @@ class Recovery(unittest.TestCase):
         ConsultRecovery(self.ledger, clock=self.clock).run(state)
         self.assertEqual(len(self.reported()), 1)
 
+    def test_a_cursor_that_cannot_move_moves_on_the_second_try(self):
+        """More rows within a day of an undecided consult than one batch holds pinned the cursor for
+        ever (found in review, Sept 22, 2026). The second stuck run decides by the real clock."""
+        passed = self.consult("mullins", DEFECT_ANSWER)
+        for n in range(6):
+            self.summary(f"filler-{n}", "Nothing new.")
+        self.clock.advance(48 * HOUR)
+        state = {}
+        job = ConsultRecovery(self.ledger, clock=self.clock, settings={"batch_rows": 3})
+        job.run(state)
+        self.assertEqual(self.reported(), [])
+        self.assertLess(state["seq"], passed.seq)
+        job.run(state)
+        self.assertEqual(len(self.reported()), 1)
+        self.assertGreaterEqual(state["seq"], passed.seq)
+        job.run(state)
+        self.assertEqual(len(self.reported()), 1)  # and never twice
+
     def test_due_follows_the_settings(self):
         job = ConsultRecovery(self.ledger, clock=self.clock, settings={"every_seconds": 600})
         self.assertTrue(job.due())

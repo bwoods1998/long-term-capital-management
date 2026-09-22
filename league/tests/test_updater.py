@@ -284,11 +284,18 @@ class ExactCommitAttestation(UpdaterCase):
         self.assertEqual(judge([run(SHA_A)], jobs(SHA_A, names=("tests (3.11)",)))["state"], "failed")
         self.assertEqual(judge([run(SHA_A)], jobs(SHA_B))["state"], "failed")
         self.assertEqual(judge([run(SHA_A)], jobs(SHA_A, conclusion="skipped"))["state"], "failed")
-        # Any failing run of the workflow on the commit fails it; an unfinished one waits.
+        # The newest run with a verdict decides: a later failure blocks, a later success (a re-run,
+        # the hourly run) clears a flaky one; a newer run still going is waited for; a cancelled
+        # or skipped run says nothing.
         self.assertEqual(judge([run(SHA_A, id=1), run(SHA_A, id=2, conclusion="failure")])["state"], "failed")
+        self.assertEqual(judge([run(SHA_A, id=1, conclusion="failure"), run(SHA_A, id=2)])["state"], "passed")
+        self.assertEqual(judge([run(SHA_A, id=1), run(SHA_A, id=2, status="in_progress", conclusion=None)])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, id=2), run(SHA_A, id=1, status="in_progress", conclusion=None)])["state"], "passed")
         self.assertEqual(judge([run(SHA_A, status="in_progress", conclusion=None)])["state"], "pending")
         self.assertEqual(judge([run(SHA_A, conclusion="cancelled")])["state"], "pending")
         self.assertEqual(judge([run(SHA_A, id=1, conclusion="cancelled"), run(SHA_A, id=2)])["state"], "passed")
+        self.assertEqual(judge([run(SHA_A, id=1), run(SHA_A, id=2, conclusion="cancelled")])["state"], "passed")
+        self.assertEqual(judge([run(SHA_A, id=1, conclusion="timed_out")])["state"], "failed")
 
     def test_a_later_head_never_inherits_an_earlier_heads_approval(self):
         approved = {SHA_A}

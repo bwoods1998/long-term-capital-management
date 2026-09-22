@@ -299,6 +299,7 @@ class AuditConcurrency(Threads, unittest.TestCase):
             release.set()
         death()
         auditing()
+        self.house.wait(5)  # the audit itself runs beside the tick
         self.assertFalse(agent.alive)
         self.assertEqual(self.house.evaluator.rung(agent.id), 1)
         self.assertNotIn(agent.id, self.house.books["alpaca"].accounts)
@@ -321,5 +322,6 @@ class AuditConcurrency(Threads, unittest.TestCase):
                                       params=agent.params, reason="candidate")
         release.set()
         auditing()
+        self.house.wait(5)  # the audit itself runs beside the tick
         self.assertEqual(self.house.evaluator.rung(agent.id), 1)
         self.assertNotIn(agent.id, self.house.books["alpaca"].accounts)
