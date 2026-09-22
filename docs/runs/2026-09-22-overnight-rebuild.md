@@ -2,9 +2,11 @@
 
 Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Opus 5) under the owner's `/goal`.
 
-- **Start:** 2026-09-22T06:40:51Z
-- **Deadline:** 2026-09-22T14:40:51Z (eight hours; fixed, never restarted by a context reset)
-- **Core rebuild operating by:** ~12:40Z, leaving the final two hours to observe and repair
+- **First start:** 2026-09-22T06:40:51Z. The session went down at about 07:05Z and came back at 13:17Z.
+- **The window now in force (the owner, 13:26Z):** "since we got stopped in the middle of this goal, you should still spend a full 8 hours on it ... the full 8 hour rebuild remains".
+  - **Start:** 2026-09-22T13:17:37Z.
+  - **Deadline:** 2026-09-22T21:17:37Z. It is fixed; a context reset never restarts it.
+- **Core rebuild operating by:** about 19:17Z, leaving the final two hours (19:17–21:17Z) to observe and repair.
 
 ## State at the start (06:39Z)
 
@@ -51,3 +53,16 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 - 06:57Z PR #87 (maintenance pause) promoted as release `20260922T065328Z-57fa3c004c29`. First
   paused ticks at 06:59Z: budget "stopped", no background jobs, tick 8 s, eight durable research
   jobs parked for resume.
+- **~07:05Z → 13:17Z: the coordinating Claude Code session was down.** Its process exited; the
+  seven build agents stopped with uncommitted partial work, and nothing was merged or deployed.
+  The House stayed paused for the whole gap. Checked at 13:17Z: zero research, Merton passes,
+  births or deaths; campaign unchanged at OpenAI $85.35 / Sail $78.86; real-money exits still
+  worked (2 Kalshi orders, 1 fill); no error alerts. Six hours of the eight were lost, including
+  the planned two-hour observation window.
+- 13:20Z Resumed. The coordinator built a small, tested v0 on `night/v0`:
+  - research backoff with a measured sample;
+  - evidence-led births with exhausted-line retirement;
+  - the semantic lab off.
+- 13:26Z The owner restarted the full eight-hour window (see above). The seven agents were told to
+  return to their full scope, with ready-for-review PRs due by 16:15–16:30Z. The ingestion PR comes
+  first, so history can load while the rest is built.
