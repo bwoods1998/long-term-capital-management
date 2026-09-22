@@ -169,17 +169,22 @@ research summaries, journals and research thoughts), copied into a local ledger.
 capped triage runs and three link runs:
 
 - **Triage groups.** The 3-day backfill produced 147 groups and 227 `repair.reported` rows:
-  - 189 `missing_data`;
-  - 19 `shared_defect`;
+  - 208 for missing data (tool requests and the abstentions they cost);
   - 18 `bug_report`;
   - 1 `strategy_defect` (a `stuck` death).
+
+  The run predates two changes. Tool requests are now keyed exactly as the repair worklist
+  (night/repairs, #94) keys them, with the same excerpts, so the worklist's fold counts a row
+  once whichever reporter wrote it. Every request is now `missing_data`; the run had split 19 off
+  as `shared_defect`.
 - **Request merges.** Jev merged 6 differently named requests into older groups. Examples:
   - `crypto_strike_spot_and_vol` and `kalshi_15m_underlying_spot_on_replay_tap` into
     `kalshi_crypto_underlier`;
   - `attention_count_snapshot` into `kalshi_attention_underlying_value_feed_c`;
   - `kalshi_sports_historical_settlement_tape` into `sports_price_history_with_outcome`.
 - **Unrequested missing data.** Abstentions that cite missing data without a request join one
-  group per niche. A key per sentence had produced 897 groups.
+  group per niche, `missing_data:research:<niche>`. That is the worklist's own key for research
+  that stops at a missing input. A key per sentence had produced 897 groups.
 - **Bug groups.** There are 17 bug groups. They include:
   - the options desk's OCC exit-routing bug, which it restated across several passes;
   - "replay still miscounts diesel as wins";

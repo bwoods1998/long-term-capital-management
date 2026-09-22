@@ -7,7 +7,8 @@ input ("the perpetual funding/OI feed remains not_supplied", session after sessi
 or Merton had to notice. Triage reads them on a cadence and writes `repair.reported` rows
 (`source: triage`) that the repair queue folds by `key`:
 
-1. **Deterministic first.** A tool request is keyed by its exact normalized name; a post-mortem
+1. **Deterministic first.** A tool request is keyed by its exact normalized name, as the repair
+   worklist keys it (both reporters fold into one job, and identical evidence counts once); a post-mortem
    by family and defect cause; an abstention by the unresolved requests of the agent's line. The
    original evidence (`seq`, `at`, `agent`, excerpt) and every affected agent are kept.
 2. **Jev only for meaning.** "Do these two requests describe the same missing feed?" merges an
@@ -35,8 +36,6 @@ from .ledger import LedgerConflict, now_iso
 from .research_gate import MISSING, session_outcome
 
 SOURCES = ("tool.request", "agent.postmortem", "agent.research", "agent.thought")
-DATA_WORDS = re.compile(r"feed|data|histor|observ|quote|bars?\b|chain|funding|open.interest|tape|point.in.time|source|"
-                        r"settlement.value|order.?book|depth|tick", re.I)
 #: Post-mortem causes that point at code rather than the game: `displaced` (251 of 260 deaths on
 #: Sept 22) and `evidence` are the league working as designed.
 DEFECT_CAUSES = frozenset(("stuck", "crashed", "crash", "error", "invalid", "timeout", "broken"))
@@ -73,8 +72,15 @@ def _normal(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z# ]+", " ", text)).strip()
 
 
+def _name(value: Any) -> str:
+    """A tool name as the repair worklist keys it (league/worklist.py `_name`)."""
+    return re.sub(r"[^a-z0-9_]+", "_", str(value or "").lower()).strip("_")[:60]
+
+
 def _excerpt(entry: Any, text: str) -> dict[str, Any]:
-    return {"seq": entry.seq, "at": entry.at, "agent": entry.agent, "excerpt": str(text).strip()[:300]}
+    """Evidence exactly as the worklist's deterministic reporters quote the same row (the text,
+    unstripped), so the fold's (seq, agent, excerpt) mark counts a row once whoever reports it."""
+    return {"seq": entry.seq, "at": entry.at, "agent": entry.agent, "excerpt": str(text)[:300]}
 
 
 class Triage:
@@ -155,12 +161,12 @@ class Triage:
                 if not name:
                     continue
                 text = f"{name}: {p.get('description') or ''}"
-                kind = "missing_data" if DATA_WORDS.search(text) else "shared_defect"
-                key = self.state["names"].setdefault(name, f"{kind}:{name}")
-                kind = key.split(":", 1)[0]
+                # The worklist's key for the same request (league/worklist.py Sources), so both
+                # reporters fold into one job; Jev's contribution is merging differently named ones.
+                key = self.state["names"].setdefault(name, f"missing_data:{_name(name)}")
                 if self._canonical(key) not in self.state["groups"] and key not in found:
                     new_requests.append((key, text))
-                self._add(found, key, kind, f"requested: {text}", _excerpt(entry, p.get("description") or name), text)
+                self._add(found, key, "missing_data", f"requested: {text}", _excerpt(entry, p.get("description") or ""), text)
             elif entry.kind == "agent.postmortem":
                 cause = str(p.get("cause") or "")
                 if cause in DEFECT_CAUSES:
@@ -177,8 +183,8 @@ class Triage:
                     # The abstention is evidence for the requests the line is still waiting on: how
                     # many paid sessions each missing input has cost.
                     for name in names:
-                        key = self.state["names"].get(name) or f"{'missing_data' if DATA_WORDS.search(name) else 'shared_defect'}:{name}"
-                        self._add(found, key, key.split(":", 1)[0], f"requested: {name}", _excerpt(entry, text))
+                        key = self.state["names"].get(name) or f"missing_data:{_name(name)}"
+                        self._add(found, key, "missing_data", f"requested: {name}", _excerpt(entry, text))
                 elif MISSING.search(text):
                     loose_missing.append((entry, text))
             elif (entry.kind == "agent.research" and p.get("tool") == "journal") or entry.kind == "agent.thought":
@@ -273,7 +279,8 @@ class Triage:
 
     def _place_missing(self, found, loose, questions) -> None:
         """Abstentions that name missing data without a request behind them. Jev may attach one
-        to the closest request group; otherwise it joins its niche's single "unrequested" group.
+        to the closest request group; otherwise it joins its niche's single group, keyed as the
+        worklist keys research that stops at a missing input (`missing_data:research:<niche>`).
         A key per sentence made 897 groups from one production backfill: every abstention is
         worded differently, so exact sentence grouping only multiplied the queue."""
         threshold = float(self.settings["same_feed_threshold"])
@@ -281,7 +288,7 @@ class Triage:
         for entry, text in loose:
             sentence = next((s for s in re.split(r"(?<=[.;])\s+", text) if MISSING.search(s)), text)
             niche = self.niche_of(entry.agent) or "floor"
-            pending.append((entry, text, sentence, f"missing_data:{niche}:unrequested"))
+            pending.append((entry, text, sentence, f"missing_data:research:{niche}"))
         subjects = {id(item): "abstain:" + sha(_normal(item[2]))[:16] for item in pending}
         pairs = [(subjects[id(item)], item[2], ref, rtext) for item in pending
                  for ref, rtext in self._candidates(item[2], item[3])[:1]]

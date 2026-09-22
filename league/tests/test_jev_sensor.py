@@ -509,6 +509,16 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(self.reports()[-1]["agents"], ["leahy-40"])
         self.assertEqual(self.reports()[-1]["all_agents"], 4)
 
+    def test_keys_and_excerpts_match_the_worklist_reporters(self):
+        """The repair worklist (night/repairs) reports the same tool requests and abstentions
+        deterministically; its fold counts a row once only if (seq, agent, excerpt[:200]) match."""
+        description = "  point-in-time observed values for attention series, with source timestamps  "
+        self.ledger.append("tool.request", {"name": "Underlying Value-Feed", "description": description}, agent="leahy-27")
+        self.triage().run()
+        row = self.reports()[0]
+        self.assertEqual(row["key"], "missing_data:underlying_value_feed")
+        self.assertEqual(row["evidence"][0]["excerpt"][:200], description[:200])
+
     def test_jev_merges_a_differently_named_request_for_the_same_feed(self):
         jev = FakeJev(0.95)
         self.ledger.append("tool.request", {"name": "underlying_value_feed", "description": "point-in-time observed values for attention series counts"}, agent="leahy-27")
@@ -590,7 +600,7 @@ class TriageTest(unittest.TestCase):
         plain = self.triage()
         plain.state = {"seq": self.ledger.head()[0] - 2, "last_run": 0, "groups": {}, "aliases": {}, "names": {}}
         plain.run()
-        self.assertEqual(self.reports()[-1]["key"], "missing_data:kalshi-attention:unrequested")
+        self.assertEqual(self.reports()[-1]["key"], "missing_data:research:kalshi-attention")
         self.assertEqual(self.reports()[-1]["agents"], ["r-3", "r-4"])
 
     def test_postmortems_only_report_defect_causes(self):
