@@ -7,6 +7,10 @@ Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Op
   - **Start:** 2026-09-22T13:17:37Z.
   - **Deadline:** 2026-09-22T21:17:37Z. It is fixed; a context reset never restarts it.
 - **Core rebuild operating by:** about 19:17Z, leaving the final two hours (19:17–21:17Z) to observe and repair.
+- **Owner's pause and resume.** At 16:52Z the owner asked the coordinator to stop at a good point;
+  the league itself stayed live. The owner resumed at 17:10:24Z: "continue with your goal given
+  youve spent 4 hours on it already". So four hours remained, and **the deadline in force is
+  2026-09-22T21:10:24Z.**
 
 ## State at the start (06:39Z)
 
@@ -178,6 +182,42 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   - Jev spend $0.005;
   - OpenAI campaign from $85.35 to $70.18. After the first 15 minutes' burst the rate was about
     $6/h, against about $14/h before.
+
+- 16:27Z–16:52Z Watching and repairing: #106, #107 and #108 merged.
+  - The economics report (`scripts/economics.py`, read-only) was run over the twelve hours before
+    the start and over the first live hour after the restart. The figures are in the final report.
+  - 16:41Z The updater attested and deployed `main-bb348cdc203c` (#103, #105–#108) by itself. It was
+    promoted at 16:57:49Z after a clean 20-reading watch.
+- 16:47:39Z **Incident: the whole floor stopped.**
+  - **Cause.** The campaign's Sail meter read the usage summary's `range=period` figure. On this
+    plan that figure is a ROLLING seven-day window (`effective_range: "7d"`, `plan_limited: true`,
+    read live at 17:12Z). It fell from ≥$512.60 to $407.51 as the first run's Sept 15 spend aged
+    out. `CampaignBudget.observe_spend` treats any fall as a vendor reset that needs a manual
+    reconciliation, and it latched `meter_health` failed.
+  - **Effect.** No research, Merton, foundry, engineer, audits, births or payouts. Exits and
+    reconciliation went on, and $73 of Sail and $66 of OpenAI allowance went unused. The repair
+    drill froze at `canary`, because the engineer steps only while the floor is open.
+  - **Missed.** Nothing alerted: the budget simply read "stopped". It was found at 17:10Z when the
+    goal resumed.
+- 17:10Z–17:21Z **The fix, #110.** The meter now reads the account balance.
+  - Every decrease counts as spend; an increase (a top-up, a refund) is never credited back. The
+    meter can never run backwards, and a top-up cannot hide spend.
+  - The first balance reading continues the existing meter where it stands (nothing measured is
+    forgotten). It clears the old feed's latch once, with the vendor evidence kept in
+    `meter_reconciliations`.
+  - An unavailable balance leaves the meter unread, which stops paid work after 180 s as before;
+    it never latches.
+  - This is not a budget reset. The burst caps, the settled and pending commitments and the $47.90
+    measured since the burst began are all unchanged.
+  - The full suite (1,868 tests) and CI passed. `campaigns.py` and `funded.py` are protected, so this
+    needs the owner's deploy.
+- 17:01Z Phase-2 ingestion finished: 160,146 calls, 160,250 quote probes over the development
+  window and the sealed holdout (2025-03-07 → 2026-05-15), 0 failures, 115 minutes, 1.2 GB in the
+  store.
+- 17:20Z The updater began deploying `main-106e68e7c15c` (#109, a teacher lesson). It holds the
+  deploy lock, so the owner's deploy of #110 follows it.
+- 17:23Z #111 (docs): `docs/operations.md`, the operator's page for pausing, inspecting,
+  deploying, rolling back and recovering, plus the README's rebuild summary.
 
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
