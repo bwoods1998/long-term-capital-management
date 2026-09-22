@@ -215,6 +215,7 @@ What the league needs:
 | `api.elections.kalshi.com` | Kalshi market data (orders go through the gateway) |
 | `news.google.com` | the news reader |
 | `github.com`, `codeload.github.com` | pulling merged code without credentials |
+| `api.github.com` | the check runs on the exact commit `league/updater.py` requires before it deploys; without it every automatic update fails closed |
 | `pypi.org`, `files.pythonhosted.org` | `create` only: pip and `cryptography` |
 
 The base list is `FLOOR_HOSTS` in `ltcm/sailbox.py`, which also carries the first run's data
