@@ -14,6 +14,7 @@
 //   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
+//   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
 //
 // Anything else is a 404, and so is any venue name but these three (Coinbase was removed on
 // Sept 19, 2026). A venue path outside `caps.VENUE_PATHS` is a 403 before any key is touched.
@@ -151,6 +152,15 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/github/pr') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return proposePull(request, env, { gate, fetcher, now });
+  }
+  const refusals = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})\/failures$/.exec(path);
+  if (refusals) {
+    // Read-only and free: why CI refused, so a proposal can be revised against the real reason.
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    const account = github.configured(env);
+    if (!account) return fail('GitHub is not configured.', 503);
+    const found = await github.pullFailures({ ...account, number: Number(refusals[1]), fetcher });
+    return found.error ? fail(found.error, found.status) : json(found);
   }
   const watched = /^\/v1\/github\/pr\/([1-9][0-9]{0,8})$/.exec(path);
   if (watched) {

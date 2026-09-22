@@ -99,6 +99,7 @@ class Settings:
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
+    history_coverage: bool = True  # each finished history ingestion (`league.history`) becomes a data.coverage row
 
 
 class House:
@@ -158,6 +159,7 @@ class House:
         self.publisher = publisher
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
+        self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
@@ -837,6 +839,20 @@ class House:
             with self._state_lock:
                 self._state["deploying_at"] = self.clock()
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files")})
+
+    def _history_coverage(self) -> None:
+        """What the history ingestion (a separate process, `python -m league.history`) fetched
+        becomes `data.coverage` ledger rows here, because only the House writes the ledger."""
+        now = self.clock()
+        if not self.settings.history_coverage or now - getattr(self, "_history_checked", 0.0) < 300:
+            return
+        self._history_checked = now
+        try:
+            from .history import publish_coverage
+
+            publish_coverage(self.ledger, self.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001 - a bad store file must never take the tick down
+            self.alert("warning", f"history coverage could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
 
     def deploying(self) -> bool:
         """Is a release on its way in? True from the moment one is staged until the grace is up."""
@@ -1708,7 +1724,63 @@ class House:
         if (refusal is not None and book is not None and refusal.payload.get('book') == book.name
                 and _epoch(refusal.at) > last and self.clock() - last >= 60):
             return True
-        return self.clock() - last >= self.research_interval_hours(agent) * 3600
+        interval = self.research_interval_hours(agent) * 3600
+        if self.clock() - last < interval:
+            return False
+        return self._gate(agent, last, interval)
+
+    def _gate(self, agent: Agent, last: float, interval: float) -> bool:
+        """Back off research that keeps coming back empty while nothing about the agent has changed.
+
+        Measured Sept 21-22, 2026: 82% of research sessions in twelve hours ended with no
+        candidate and no replay ("no credits justified"), about $64 of $94, and agents cited the
+        same missing inputs pass after pass. After `after` empty passes in a row the interval
+        doubles per further empty pass (up to `max_factor`), unless something new reached the
+        agent's record since its last pass: a fill, a settlement, a verdict or a new strategy.
+        A deterministic `sample_percent` of the skipped windows run anyway, so what the gate
+        misses stays measurable (`research.gate` rows with sampled=true)."""
+        rules = dict((self.game.get("research") or {}).get("gate") or {})
+        if not rules.get("enabled", True):
+            return True
+        streak = int((self._state.get("empty_research") or {}).get(agent.id) or 0)
+        after = int(rules.get("after", 2))
+        if streak < after:
+            return True
+        since = now_iso(lambda: last)
+        for kind in ("book.fill", "book.settle", "eval.verdict", "agent.strategy"):
+            row = self.ledger.last(kind, agent=agent.id)
+            if row is not None and row.at > since:
+                self._gate_note(agent, "run", f"new {kind} since the last pass", streak, last)
+                return True
+        factor = min(2 ** (streak - after + 1), float(rules.get("max_factor", 8)))
+        if self.clock() - last >= interval * factor:
+            self._gate_note(agent, "run", f"backoff x{factor:g} elapsed after {streak} empty passes", streak, last)
+            return True
+        digest = hashlib.sha256(f"{agent.id}:{int(last)}".encode()).digest()
+        if digest[0] * 100 < 256 * float(rules.get("sample_percent", 10)):
+            self._gate_note(agent, "sample", f"{streak} empty passes and nothing new; sampled to measure misses", streak, last)
+            return True
+        self._gate_note(agent, "skip", f"{streak} empty passes and nothing new; next pass after x{factor:g} the interval", streak, last)
+        return False
+
+    def _gate_note(self, agent: Agent, decision: str, reason: str, streak: int, last: float) -> None:
+        """One `research.gate` row per agent per research window, not one per tick."""
+        with self._state_lock:
+            noted = self._state.setdefault("gate_noted", {})
+            key = f"{int(last)}:{decision}"
+            if noted.get(agent.id) == key:
+                return
+            noted[agent.id] = key
+        self.ledger.append("research.gate", {"agent": agent.id, "decision": decision, "reason": reason,
+                                             "empty_streak": streak, "sampled": decision == "sample"}, agent=agent.id)
+
+    def _note_research_result(self, agent_id: str, outcome: Any) -> None:
+        """Count empty passes in a row: no candidate, no replay trial and no Merton strategy."""
+        useful = bool(getattr(outcome, "candidate", None) or int(getattr(outcome, "trials", 0) or 0)
+                      or getattr(outcome, "consulted", ""))
+        with self._state_lock:
+            streaks = self._state.setdefault("empty_research", {})
+            streaks[agent_id] = 0 if useful else int(streaks.get(agent_id) or 0) + 1
 
     def idle_run(self, agent: Agent) -> dict[str, int]:
         """This agent's unbroken run of wakes that did nothing, and why (see `_note_wake`)."""
@@ -2112,6 +2184,7 @@ class House:
                         row = Admissions(self.ledger).enqueue(agent.id, generation, candidate, session)
                         self._admit_candidate(row)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
+            self._note_research_result(agent.id, outcome)
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
@@ -2495,8 +2568,37 @@ class House:
             return bool(row is not None and row.score_growth > 0 and row.score_observations > 0)
 
         paying = {a.specialty for a in here if earning(a)}
-        for best in sorted(here, key=lambda a: (a.specialty in paying, seats.get(a.specialty, 0), earning(a),
-                                                self.evaluator.rung(a.id), self.economy.balance(a.id)), reverse=True):
+        lines = self.line_trials()
+        exhaust = int(rules.get("line_exhausted_trials", 15))
+
+        def line_of(agent):
+            return lines.get(agent.line or agent.name) or (0, 0)
+
+        def exhausted(agent):
+            tried, passed = line_of(agent)
+            return passed == 0 and tried >= exhaust and not earning(agent)
+
+        def desk_pass_rate(agent):
+            rows = [line_of(a) for a in here if a.specialty == agent.specialty]
+            tried = sum(t for t, _ in rows)
+            return (sum(p for _, p in rows) + 1) / (tried + 2)  # a desk with no trials starts at one half
+
+        # Births follow evidence first: an earning desk, then a line that is not exhausted, then the
+        # desk's replay pass rate, and only then open seats. Measured Sept 21-22, 2026: seats-first
+        # sent 66% of 210 births to six desks that had never produced a live agent, from lines that
+        # already held a median of 15 failed trials. One birth in `explore_every` still goes by open
+        # seats alone, so an unexplored desk keeps a bounded share of the search.
+        explore = int(rules.get("explore_every", 5))
+        exploring = explore > 0 and len(self.registry.agents) % explore == 0
+        order = (lambda a: (not exhausted(a), seats.get(a.specialty, 0), earning(a), self.evaluator.rung(a.id))) if exploring else \
+                (lambda a: (a.specialty in paying, not exhausted(a), desk_pass_rate(a), earning(a), seats.get(a.specialty, 0),
+                            self.evaluator.rung(a.id), self.economy.balance(a.id)))
+        for agent in here:
+            if exhausted(agent):
+                self._retire_line(agent, *line_of(agent))
+        for best in sorted(here, key=order, reverse=True):
+            if exhausted(best):
+                continue
             child_params = self._mutated_params(best, seed=f"newcomer:{len(self.registry.agents)}")
             if child_params is not None:
                 break
@@ -2505,12 +2607,46 @@ class House:
         if loser is not None:
             self.kill(loser, "displaced", self.postmortem(loser, "displaced",
                 "the league was full and a valid newcomer replaces its weakest eligible agent"))
+        tried, passed = line_of(best)
+        why = ("exploration: open desks with more room were tried first" if exploring else
+               f"evidence: earning desks, live lines and the desk's replay pass rate ({desk_pass_rate(best):.0%}) before open seats")
         child = self.spawn(best.line or best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
                            params=child_params,
-                           reason=f"a House-staked valid mutation of {best.id}: open desks with more room were tried first; the league was {len(living)} of {rules['max_population']}")
+                           reason=f"a House-staked valid mutation of {best.id} by {why}; its line has {passed} passes in {tried} trials; "
+                                  f"the league was {len(living)} of {rules['max_population']}")
         self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False,
                                             "reason": "population", "new_code": False}, agent=best.id)
         return child
+
+    def line_trials(self) -> dict[str, tuple[int, int]]:
+        """Replay trials and passes per line (`Agent.line`, else its name), cached for five minutes."""
+        def build():
+            line = {a.id: (a.line or a.name) for a in self.registry.agents.values()}
+            out: dict[str, list[int]] = {}
+            for entry in self.ledger.iter(kinds="eval.trial"):
+                row = out.setdefault(line.get(entry.agent, entry.agent), [0, 0])
+                row[0] += 1
+                row[1] += bool(entry.payload.get("passed"))
+            return {key: (tried, passed) for key, (tried, passed) in out.items()}
+        hit = self._data_cache.get("line_trials")
+        if hit and self.clock() - hit[0] < 300:
+            return hit[1]
+        value = build()
+        self._data_cache["line_trials"] = (self.clock(), value)
+        return value
+
+    def _retire_line(self, agent: Agent, tried: int, passed: int) -> None:
+        """Say once that a line is no longer bred. Its living agents keep their seats and records;
+        only House-staked mutations stop. It is a heuristic starting point, not a statistical law."""
+        line = agent.line or agent.name
+        with self._state_lock:
+            told = self._state.setdefault("retired_lines", {})
+            if line in told:
+                return
+            told[line] = tried
+        self.ledger.append("hypothesis.retired", {"id": f"line:{line}", "reason": "disproven", "failures": tried - passed,
+                                                  "evidence": f"{tried} replay trials and {passed} passes; House mutations stop"},
+                           id=f"line-retired:{line}:{tried}")
 
     # -------------------------------------------------------------------- tick
     def tick(self) -> dict[str, Any]:
@@ -2604,6 +2740,7 @@ class House:
             self._background('semantic-lab', self.semantic_lab.run)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
+        self._history_coverage()
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
@@ -2619,6 +2756,10 @@ class House:
                 if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
                     self._background(f"merton:{role}", self.merton.run, role)
             self._background("merton:follow", self.merton.follow)
+        if open_for_business and self.engineer is not None and self.engineer.due():
+            # The repair worklist: its sources, its free follow-ups and at most one paid patch a
+            # step, each against its own per-job ceiling and the day's frontier allowance.
+            self._background("engineer", self.engineer.step)
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         if open_for_business and self.economy.payout_due():
