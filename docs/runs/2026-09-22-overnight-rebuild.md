@@ -170,6 +170,11 @@ an edge.
 - **The dynamism revision (#123)** is the newest experiment. Watch whether paper agents now reach
   the screen and the audit within a day, and whether more of them reach micro-real without the
   micro demotion taking them straight back.
+  - First evidence, at 20:29–20:30Z: two agents reached the audit within four minutes, and the
+    auditor vetoed both on substance (haghani's rounding defect; hawkins's screen missing the
+    current day's losses).
+  - Next: count the unfinished day's realised P&L in the daily screen, so that the screen and the
+    auditor judge the same evidence.
 - **The highest-value next step:** decide the replay gate's trade minimum for daily strategies
   judged on deep history. It is the one rule standing between the new evaluation machinery (deep
   history, sealed holdout, quoted fills) and a stream of equity and ETF candidates onto paper.
@@ -547,6 +552,33 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   - The queue does not merge related jobs across sources (audit veto, pre-audit, refusals), so
     the options OCC defect got three children and haghani three. Replay still filters them.
   - Merging related jobs before patching is the engineer's clear next improvement.
+- 20:21–20:25:33Z The owner's deploy of `f6b9035` (#123, #125 and #126 on top of the refused
+  `c3282f3`) **passed the canary's 3 ticks and was promoted** as release
+  `20260922T202128Z-8e17da71d9c7`.
+- 20:26Z **The live grant was re-ratified** (`scripts/live_trading.py --ratify
+  earned-live-20260921`) against money digest `d715ae7a…`, for the same capital. Health reads it
+  active, with no `stopped_because`.
+- 20:29–20:30Z **The first audits under #123.** Within four minutes of the release, two paper
+  agents reached the screen and went to the production audit ($0.57). The independent auditor
+  vetoed both, on substance:
+  - **haghani** (Alpaca paper crypto, 25 blocks). Two-decimal price rounding defeats its minimum
+    entry discount: DOGE buys at $0.10 report discounts of −0.5% to −2.0% against
+    `min_edge_pct` 0.8. Resting buys also skip the stale-bar guard. The engineer's fixes for the
+    rounding live in children (#113, #119, #125). The parent keeps the defect by design, because a
+    child never inherits its parent's results.
+  - **hawkins** (Kalshi shadow commodities, 2 daily blocks, 6 settlements). Its screen reads
+    finished days only. The last finished block (Sept 21) shows about +1.4% growth, but the six
+    settlements, including those at 01:46Z on Sept 22, net −$15.50. The auditor called the screen
+    stale.
+  - So the lower thresholds bring agents to the boundary sooner, and the independent judge still
+    holds the line. The hawkins case exposes a real gap: a daily screen can pass on a snapshot
+    that leaves out the current day's realised losses. Counting the unfinished block's realised
+    P&L in the screen is an evaluator change (a protected file, owner-deployed). It is listed as a
+    next step.
+  - Health says "the next look is at 5" for agents with 0–1 active blocks. The text is computed as
+    `max(needed, last look + look_every_active_blocks)`, even when no look has spent alpha. The
+    look itself runs at 4 blocks (`league/evaluator.py:409–411`). Only the message is wrong, not
+    the gate.
 
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
