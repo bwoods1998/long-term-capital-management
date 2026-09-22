@@ -1010,7 +1010,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             attestation = json.loads(Path(args.attestation).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             # An attested deploy whose record cannot be read is not attested: refuse, and say so.
-            row = releases.record({"release": args.id, "stage": "verdict", "verdict": "refused",
+            # `unjudged`: the tree was never looked at, so `Updater.tried` must not retire it.
+            row = releases.record({"release": args.id, "stage": "verdict", "verdict": "refused", "unjudged": True,
                                    "reasons": [f"the attestation {args.attestation} cannot be read: {type(exc).__name__}"]})
             print(json.dumps({k: v for k, v in row.items()}, indent=1, default=str))
             return EXIT_CODES["refused"]

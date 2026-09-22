@@ -522,3 +522,21 @@ class TheWatchdogRecordsTheAttestation(unittest.TestCase):
             out = dog.deploy(other, "main-candidate2", watch_seconds=0, attestation=attestation)
             self.assertEqual(out["verdict"], "refused")
             self.assertIn("not the attested one", " ".join(out["reasons"]))
+
+
+class AnUnreadableAttestationIsNoAttestation(unittest.TestCase):
+    def test_the_watchdog_refuses_without_retiring_the_tree(self):
+        from league import watchdog
+        from league.updater import Updater as U
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            import contextlib
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = watchdog.main(["deploy", "--base", str(base), "--source", str(base / "nowhere"), "--id", "main-abcdef123456",
+                                      "--attestation", str(base / "missing.json")])
+            self.assertEqual(code, watchdog.EXIT_CODES["refused"])
+            rows = Releases(base).history()
+            self.assertEqual(rows[-1]["verdict"], "refused")
+            self.assertNotIn("main-abcdef123456", U(base).tried())
