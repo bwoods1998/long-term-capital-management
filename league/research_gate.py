@@ -14,9 +14,10 @@ Measured on the production ledger, Sept 19-22, 2026 (7,370 research sessions, $1
   these rules would have skipped 4,978 sessions ($87 of $160); 146 of the skipped (2.9%) had
   retained a candidate, most of which fail replay.
 
-So the gate sits in `House.research_due`, AFTER every existing check (budget, pause, credits,
-durable jobs) has said yes and the clock says the session is due. It can only SKIP a clock-due
-session; it never makes research more frequent than the clock already allows.
+So the gate sits in `House._gate` (the overnight v0 gate, whose dials it shares), AFTER every
+existing check (budget, pause, credits, durable jobs, the refusal fast path) has run and the clock
+says the session is due. It can only SKIP a clock-due session; it never makes research more
+frequent than the clock already allows.
 
 1. **Deterministic triggers since the agent's last research** always run: its own fills and
    settlements, new `book.refused`, a code or rung change, a material `eval.verdict` (not the
@@ -395,7 +396,7 @@ class ResearchGate:
 
     # ---------------------------------------------------------------- decision
     def allow(self, agent: Any, *, last: float, forced: str = "") -> bool:
-        """Called by `House.research_due` once the clock (or the refusal fast path) says due."""
+        """Called from `House._gate` once the clock says due; `forced` records a run it may not skip."""
         if not self.settings.get("enabled", True):
             return True
         now = self.house.clock()

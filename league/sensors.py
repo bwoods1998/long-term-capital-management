@@ -2,9 +2,9 @@
 
 `House` calls four things and nothing else, so its own edits stay small:
 
-- `research_due(agent, last=, due=, forced=)` from `House.research_due`, once every existing
-  check has passed: the research gate (`league/research_gate.py`) may skip a clock-due session.
-  A gate that raises never stops research: the clock decides, as it did before.
+- `research_due(agent, last=, due=)` from `House._gate` (the overnight v0 gate), once every
+  existing check and the clock have said due: the research gate (`league/research_gate.py`) may
+  skip the session. A gate that raises never stops research: the clock decides.
 - `tick(open_for_business)` from `House.tick`: explicit inactivity reasons every
   `inactivity_seconds`, and -- only while the floor is open for business, since a maintenance
   pause stops paid work -- triage, hypothesis links and exposure groups as background jobs.

@@ -91,7 +91,7 @@ Treat it as a planning estimate. The live `report()` numbers are the measurement
 | Piece | Module | House hook |
 |---|---|---|
 | Capped, cached, batched Jev client with a breaker | `league/jev.py` (`Sensor`) | built in `service.build` |
-| Research gate plus `report()` / `python -m league.research_gate LEDGER` | `league/research_gate.py` | `House.research_due` → `JevFloor.research_due` |
+| Research gate plus `report()` / `python -m league.research_gate LEDGER` | `league/research_gate.py` | `House._gate` (v0) → `JevFloor.research_due` |
 | Explicit `agent.inactive` reasons | `league/research_gate.py` (`Inactivity`) | `House.tick` → `JevFloor.tick`, swept every 5 min |
 | Triage into `repair.reported` (`source: triage`) and `triage.item` | `league/triage.py` | background job every 30 min |
 | Hypothesis memory: `hypothesis.link` and `failure_history()` | `league/hypothesis_memory.py` | background job every hour |
