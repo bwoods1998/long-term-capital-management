@@ -328,6 +328,24 @@ class EngineerLoop(Base):
         self.assertEqual(self.worklist.get(key).pr, 100)
         self.assertEqual(len(frontier.asked), 1)
 
+    def test_a_forge_outage_during_a_revision_does_not_follow_the_old_refused_pr(self):
+        key = self.job()
+        forge = FakeGitHub(judge=lambda files: "FAIL: test_mid")
+        frontier = FakeFrontier(self.tool_answer(), self.tool_answer())
+        engineer = self.engineer(frontier, forge)
+        engineer.step()
+        self.merton.follow()
+        real = forge.propose
+        forge.propose = lambda **kw: (_ for _ in ()).throw(ForgeError("HTTP 429: the day's cap"))
+        engineer.step()  # revision 2 is bought, and the forge refuses it
+        job = self.worklist.get(key)
+        self.assertEqual((job.state, job.pr, job.attempt), ("testing", None, 2))
+        engineer.step()  # the refused PR 100 is not followed again, and nothing is bought
+        self.assertEqual((self.worklist.get(key).attempt, len(frontier.asked)), (2, 2))
+        forge.propose = real
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).pr, 101)
+
     def test_a_fix_outside_the_allowlist_is_dormant_as_needing_core_authority(self):
         key = self.job()
         answer = {"summary": "the book must seat them", "role": "toolsmith", "files": [{"path": "league/book.py", "content": "x"}], "needs_core": None}
@@ -469,6 +487,7 @@ class EngineerLoop(Base):
         job = self.worklist.get(key)
         self.assertEqual([h["state"] for h in job.history][-5:], ["revising", "reproducing", "patching", "testing", "testing"])
         self.assertIn("recurred after deployment", job.history[-5]["note"])
+        self.assertIn("still broken", json.loads(engineer.frontier.asked[1]["user"])["previous"]["ci_failure"])
         self.assertEqual(job.attempt, 2, "the recurrence buys a second attempt, within the same bound")
 
 

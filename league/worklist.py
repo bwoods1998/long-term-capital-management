@@ -198,8 +198,10 @@ def apply(jobs: dict[str, Job], kind: str, payload: Mapping[str, Any], *, at: st
             return
         job.state, job.state_at = str(state), at
         job.note = str(payload.get("note") or "")[:2000]
-        if isinstance(payload.get("pr"), int):
-            job.pr = int(payload["pr"])
+        if "pr" in payload:
+            # Every row says which pull request is in play: a new attempt starts with none, so a
+            # revision never goes on following the refused PR of the attempt before it.
+            job.pr = payload["pr"] if isinstance(payload["pr"], int) and not isinstance(payload["pr"], bool) else None
         if isinstance(payload.get("commit"), str) and payload["commit"]:
             job.commit = payload["commit"][:80]
         job.cost_usd += _usd(payload.get("cost_usd"))

@@ -510,7 +510,11 @@ class Engineer:
             excluded = job.last_status.get("exclude") or []
             again = job.evidence_after(since, excluding=excluded)
             if again:
-                return self._after_failure(job, job.attempt, Decimal(0), f"recurred after deployment: {len(again)} new reports since {since}")
+                latest = [row for row in job.evidence if (row.get("at") or "") > since][-3:]
+                text = (f"The fix in PR #{job.pr} was running from {since}, and the problem recurred: {len(again)} new reports. "
+                        "Latest: " + " | ".join(str(r.get("excerpt") or "")[:400] for r in latest))
+                return self._after_failure(job, job.attempt, Decimal(0), f"recurred after deployment: {len(again)} new reports since {since}",
+                                           _failure=text, _files=job.carry.get("_files"), failed_pr=job.pr)
             window = (float(self.settings["synthetic_observe_minutes"]) * 60 if job.key.startswith("synthetic:")
                       else float(self.settings["observe_hours"]) * 3600)
             if self.clock() - _epoch(since) < window:
