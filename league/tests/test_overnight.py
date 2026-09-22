@@ -87,6 +87,11 @@ class BurstBudget(PhaseCase):
         self.assertEqual(guard.remaining('openai'), 1)
         guard.top_up('topup-1:openai', 'openai', '5', 'owner added credit')
         guard.top_up('topup-1:openai', 'openai', '5', 'owner added credit')  # idempotent
+        import time as _time
+        this_month = _time.strftime('%Y-%m', _time.gmtime(guard.clock()))
+        self.assertEqual(guard.topped_up('openai', this_month), Decimal('5'))  # the Sail meter's line follows its kind
+        self.assertEqual(guard.topped_up('sail', this_month), Decimal('0'))
+        self.assertEqual(guard.topped_up('openai', '1999-01'), Decimal('0'))
         self.assertEqual(guard.remaining('openai'), 6)
         self.assertEqual(guard.burst()['policy']['caps_usd']['openai'], '8')
         with self.assertRaises(CampaignClosed):

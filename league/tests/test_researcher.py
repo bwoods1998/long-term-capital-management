@@ -370,8 +370,9 @@ class Hiring(ResearchCase):
             self.reply = reply or {"answer": "Your idea is structurally dead: the average move is under the round trip.", "code": "", "confidence": "high"}
             self.cost, self.seen = cost, []
 
-        def consult(self, agent, question, evidence, *, contract):
+        def consult(self, agent, question, evidence, *, contract, **settings):
             self.seen.append((agent.id, question, evidence, contract))
+            self.settings = settings
             return {**self.reply, "cost_usd": self.cost}
 
     def hire(self, question="Is my idea structurally dead, or is it the parameters?", merton=None, settings=None, budget=True,
@@ -395,6 +396,31 @@ class Hiring(ResearchCase):
                                   'earned_observations': 10, 'earned_growth': .002})
         self.assertIn('answer', self.tool_output(1))
         self.assertEqual(len(self.merton.seen), 1)
+
+    def test_he_is_shown_its_trades_and_where_its_replays_won_and_lost(self):
+        """His brief says he is shown the agent's own trades and where its replays won and lost. Until
+        Sept 22, 2026 the packet held neither: no trades, and a replay `digest` field that trial rows
+        never stored. He wrote strategy files from the code, the journal and six summaries."""
+        self.ledger.append("book.fill", {"book": "kalshi-shadow", "side": "buy", "quantity": "7", "price": "0.93",
+                                         "instrument": {"symbol": "KXNFLGAME-26SEP21-KC"}, "reason": "favourite at 93c"},
+                           agent=self.parent.id)
+        self.ledger.append("book.settle", {"book": "kalshi-shadow", "quantity": "7", "pnl": "-6.51", "result": "no",
+                                           "instrument": {"symbol": "KXNFLGAME-26SEP21-KC"}}, agent=self.parent.id)
+        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "dust", "quantity": "0.001"}, agent=self.parent.id)
+        self.ledger.append("agent.research", {"tool": "candidate", "status": "retained", "session": "s0",
+                                              "_candidate": {"code": "x", "passed": False, "numbers": {"trades": 12, "reasons": ["12 closed trades, 20 needed"]},
+                                                             "digest": {"by_series": {"KXNFLGAME": {"trades": 12, "pnl": -3.1}}}}},
+                           agent=self.parent.id)
+        self.ledger.append("agent.research", {"tool": "candidate", "status": "forked", "session": "s0"}, agent=self.parent.id)
+        r, out = self.hire(settings={"min_credits_usd": "1.00", "cooldown_hours": 24})
+        evidence = self.merton.seen[0][2]
+        self.assertEqual([(t["kind"], t["symbol"]) for t in evidence["recent_trades"]],
+                         [("fill", "KXNFLGAME-26SEP21-KC"), ("settle", "KXNFLGAME-26SEP21-KC")])  # dust is not a trade
+        self.assertEqual(evidence["recent_trades"][1]["pnl"], "-6.51")
+        self.assertEqual(len(evidence["replay_digests"]), 1)
+        self.assertEqual(evidence["replay_digests"][0]["digest"], {"by_series": {"KXNFLGAME": {"trades": 12, "pnl": -3.1}}})
+        self.assertNotIn("digest", evidence["replays"][0] if evidence["replays"] else {})
+        self.assertEqual(self.merton.settings, {"max_output_tokens": 16000, "effort": "medium"})
 
     def test_when_the_frontier_month_is_kept_only_winners_hire_him(self):
         for growth, hired in ((-0.004, False), (0.004, True)):

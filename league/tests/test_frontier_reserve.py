@@ -86,10 +86,35 @@ class HouseTierTest(HouseCase):
         self.house.frontier_month.value = Decimal("15")
         self.assertEqual(self.house.frontier_tier(), "earned")
         self.assertEqual(self.house.frontier_tier(), "earned")
-        alerts = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "frontier month" in e.payload.get("text", "")]
+        alerts = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "frontier budget" in e.payload.get("text", "")]
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0]["level"], "warning")
         self.assertIn("$15.00", alerts[0]["text"])
+
+    def test_the_houses_own_allowance_governs_when_it_is_the_tighter_line(self):
+        """Sept 22, 2026: the gateway's month had $166 left and the House's own campaign $139, at
+        about $17 an hour. The campaign refuses at its own line, audits included, so the reserve
+        that keeps the last dollars for audits must read whichever line is nearer."""
+        self.house.game["frontier_reserve"] = RESERVE
+        self.house.frontier_month = Month(Decimal("166"))
+        allowance = {"openai": Decimal("15")}
+        self.house.campaigns = SimpleNamespace(remaining=lambda kind: allowance[kind], close=lambda: None)
+        self.assertEqual(self.house.frontier_remaining(), Decimal("15"))
+        self.assertEqual(self.house.frontier_tier(), "earned")
+        allowance["openai"] = Decimal("500")
+        self.clock.advance(31)
+        self.assertEqual(self.house.frontier_remaining(), Decimal("166"))  # now the gateway is the nearer line
+        self.assertEqual(self.house.frontier_tier(), "all")
+
+    def test_an_unreadable_allowance_leaves_the_gateway_in_charge(self):
+        self.house.game["frontier_reserve"] = RESERVE
+        self.house.frontier_month = Month(Decimal("12"))
+
+        def broken(kind):
+            raise OSError("locked")
+
+        self.house.campaigns = SimpleNamespace(remaining=broken, close=lambda: None)
+        self.assertEqual(self.house.frontier_tier(), "earned")
 
     def test_without_a_month_reader_everything_runs(self):
         self.house.frontier_month = None

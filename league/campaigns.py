@@ -184,6 +184,16 @@ class CampaignBudget:
             return {**dict(row), 'policy': policy, 'meters': json.loads(row['meters']),
                     'topups_usd': {k: usd(v) for k, v in added.items()}}
 
+    def topped_up(self, kind: str, month: str) -> Decimal:
+        """What the owner recorded adding at `kind`'s provider during the UTC calendar month
+        `month` ("YYYY-MM"). The Sail meter raises its monthly line by it: on Sept 21, 2026 the
+        owner's $100 Sail top-up raised the burst's ceiling but left the account meter's $100 line
+        where it was, and the whole floor would have stopped with his new credit unspent."""
+        with self.lock:
+            rows = self.db.execute('SELECT at, amount FROM topups WHERE kind=?', (kind,)).fetchall()
+        total = sum(int(amount) for at, amount in rows if time.strftime('%Y-%m', time.gmtime(float(at))) == month)
+        return Decimal(total) / UNIT
+
     def top_up(self, ident: str, kind: str, amount: Any, note: str) -> dict[str, Any]:
         """Account-owner action: the owner added money at the provider, and the burst may spend it.
         Append-only and idempotent by identity; it raises a ceiling and resets nothing."""
