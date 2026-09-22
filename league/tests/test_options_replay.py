@@ -535,6 +535,16 @@ class InTheHouse(HouseCase):
         self.assertEqual(calls[1], (["IWM", "QQQ", "SPY"], span, ("1Day",)))
         self.assertEqual([c[1] for c in calls[2:]], [10, 10])  # then the last ten days
 
+    def test_the_sealed_box_runs_an_options_tape_from_the_kit_alone(self):
+        """In the box there is no `league` package: replay.py reaches options_replay.py and
+        options_history.py beside it, and needs no sqlite3."""
+        steps = [step("2026-03-02T15:00:00Z", {C1: [0.40, 0.42, 0.38, 0.40, 50.0, 10]}),
+                 step("2026-03-02T15:15:00Z", {C1: [0.40, 0.41, 0.39, 0.40, 50.0, 10]})]
+        run = self.house.sandbox.replay("box-test", STRATEGY, {"occ": C1, "buy_at": "2026-03-02T15:00:00Z", "limit": 0.40}, tape(steps),
+                                        stake=1000.0, limits=LIMITS, timeout=120)
+        self.assertTrue(run.result["ok"], run.result)
+        self.assertEqual((run.result["asset_class"], run.result["fills"], run.result["fees_usd"]), ("option", 1, 0.05))
+
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()
         self.house.settings.options_replay = False

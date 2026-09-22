@@ -45,7 +45,6 @@ import bisect
 import json
 import math
 import re
-import sqlite3
 import threading
 import time
 import urllib.parse
@@ -273,13 +272,13 @@ class OptionsHistory:
         self.clock = clock
         self._lock = threading.RLock()  # one writer at a time in this process
         self._local = threading.local()
-        self._connections: list[tuple[threading.Thread, sqlite3.Connection]] = []
+        self._connections: list[tuple[threading.Thread, Any]] = []
         with self._lock:
             self.db.executescript(SCHEMA)
             self.db.commit()
 
     @property
-    def db(self) -> sqlite3.Connection:
+    def db(self) -> Any:
         """This thread's connection. The House reads the store from wake threads (quotes,
         features), the replay lane (tapes) and the ops lane (the daily job) at once, and one
         sqlite3 connection must not be shared between threads that use it concurrently. WAL
@@ -288,6 +287,8 @@ class OptionsHistory:
         if conn is None:
             # Used only by this thread; closable by any (a wake thread's connection is closed
             # here once its thread has ended: the House makes new wake threads every tick).
+            import sqlite3  # here, not at the top: the agent's box imports this file for its pure functions only
+
             conn = sqlite3.connect(str(self.path), timeout=60, check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL")
             self._local.conn = conn
