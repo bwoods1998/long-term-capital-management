@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from league.fast_research import ResearchRouter
+from league.fast_research import MODEL as LUNA, ResearchRouter
 from league.ledger import Ledger
 from league.routing import TABLE, TaskRouter, best_profile
 
@@ -76,7 +76,7 @@ class Routing(unittest.TestCase):
         self.assertIn("useful", rows[0]["reason"])
         self.assertEqual(task.flush(), 1)
         luna = [e.payload for e in self.ledger.iter(kinds="route.decision")][-1]
-        self.assertEqual((luna["model"], luna["count"], luna["partial"]), ("gpt-5.6-luna", 1, True))
+        self.assertEqual((luna["model"], luna["count"], luna["partial"]), (LUNA, 1, True))
 
     def test_without_the_evidence_switch_the_configured_profile_stands_and_is_still_recorded(self):
         task = TaskRouter(self.ledger, clock=self.clock, evidence=EVIDENCE, config={"candidates": ["pro_balanced"]})

@@ -18,7 +18,7 @@ from .campaigns import CampaignClosed
 from .frontier import Frontier, FrontierError
 from .merton import CONSULT
 
-MODEL = 'gpt-5.6-luna'
+MODEL = 'gpt-6-luna'  # the research model (league/fast_research.py)
 MAX_GRANTS = 12
 MAX_CALL_USD = Decimal('0.25')  # at most $3 reserved; inside foundation-review, not extra money
 

@@ -22,7 +22,11 @@ from ltcm.provider import FunctionCall, ProviderError, ProviderResponse
 from .frontier import MODEL_CEILINGS
 from .ledger import canonical
 
-MODEL = 'gpt-5.6-luna'
+# GPT-6 Luna from Sept 22, 2026: half GPT-5.6 Luna's input rate and 42% of its output rate
+# ($0.10 / $0.01 cached / $0.50 per million), with fewer factual errors. Research is the floor's
+# largest volume of model calls, so it moves first; the campaign books each call at the ceiling
+# in `frontier.MODEL_CEILINGS`, which halves with it.
+MODEL = 'gpt-6-luna'
 PROFILE = 'openai_luna'
 PROTOCOL = """Continue the research conversation supplied in the JSON packet. Its first system message
 contains the game rules and strategy contract. Use the listed tools and their argument schemas.

@@ -131,7 +131,8 @@ class TaskRouter:
         out = dict(settings)
         profile = str(out.get("profile") or "")
         if profile == "openai_luna":
-            self._note("research_routine", Route("research", "gpt-5.6-luna", "owner cohort: Luna share of new sessions"), None)
+            from .fast_research import MODEL as LUNA
+            self._note("research_routine", Route("research", LUNA, "owner cohort: Luna share of new sessions"), None)
             return out
         chosen, why = profile, "configured Sail profile"
         if self.config.get("sail_by_evidence"):
