@@ -518,6 +518,7 @@ if __name__ == "__main__":
 
 from league import seeds  # noqa: E402
 from league.tests.test_house import HouseCase  # noqa: E402
+from league.ledger import now_iso  # noqa: E402
 
 
 BUYER_WITH_FEATURES = '''
@@ -539,6 +540,7 @@ class CoveredStore:
 
     def tape(self, needs, start, end, **kw):
         self.tapes.append((dict(needs), kw["execution"], kw["max_order_usd"]))
+        self.windows = getattr(self, "windows", []) + [(start, end)]
         return {"venue": "alpaca", "asset_class": "option", "horizon": kw["horizon"], "steps": [{"t": start}], "contracts": {}}
 
     def features_at(self, symbols, now_ts):
@@ -656,6 +658,21 @@ class InTheHouse(HouseCase):
             self.house.tick()
             self.house.wait(5)
         self.assertEqual([round((c - calls[0]) / 60) for c in calls], [0, 61])
+
+    def test_an_options_strategy_never_gets_the_history_stores_equity_tape_nor_the_holdout(self):
+        store = self.house.options_history = CoveredStore()
+        self.house._deep_tape = lambda needs: ("deep:equity", {"venue": "alpaca", "steps": []})  # a store that covers the underlyings
+        agent = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
+        key, built = self.house.tape_for(agent.needs)
+        self.assertTrue(key.startswith("options:"))
+        self.assertEqual(built["asset_class"], "option")
+        now = now_iso(self.clock)
+        self.house.holdout_window = ("2026-01-01", now[:10])  # a holdout that ends today
+        self.house._tapes.clear()
+        self.house.tape_for(agent.needs)
+        self.assertGreater(store.windows[-1][0], now[:10])  # the options window starts after it, never inside it
+        equity = self.house.tape_for({"venue": "alpaca", "horizon": "day", "symbols": ["SPY"], "bars": {"timeframe": "1Day", "limit": 5}})
+        self.assertEqual(equity[0], "deep:equity")  # the equity desks still get the history store
 
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()

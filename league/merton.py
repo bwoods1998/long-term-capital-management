@@ -70,11 +70,10 @@ they may all be failing, and a strategy that works where others fail is worth fa
 Twice on Sept 20, 2026 you declined a pass with "every specialty is occupied" while twenty-six agents across the
 floor had never placed a single order. An occupied desk full of agents that cannot trade is the emptiest thing
 here. Take an empty specialty only when one exists. Prefer structural edges that survive fees (maker fills, favourites,
-settlement mechanics, calendar effects) to pattern-fitting. Each strategy is one file
-`league/strategies/<name>.py` that follows the strategy contract EXACTLY, plus the WHOLE updated
-`league/strategies/registry.json` (a JSON list of {"name", "family", "file", "why"}; keep every existing row).
-Names are lowercase with dashes (under 30 characters); files are the name with underscores.
-Registry `file` values are basenames such as `sports_example.py`, never `league/strategies/sports_example.py`.""",
+settlement mechanics, calendar effects) to pattern-fitting. Each strategy is two files: `league/strategies/<stem>.py`,
+which follows the strategy contract EXACTLY, and its own description `league/strategies/<stem>.json`, a JSON object
+{"name", "family", "why"}. Never write `league/strategies/registry.json`: it is retired, and CI refuses it.
+Names are lowercase with dashes (under 30 characters); the stem is the name with underscores.""",
     "toolsmith": """You are the toolsmith of a small trading league. Agents run strategy programs in sealed boxes with no
 network; they may only import a short list of standard modules plus `tools`, a package of pure helper modules
 you maintain. Agents file requests in plain words. Build what is asked when it can be built as PURE PYTHON over
@@ -138,6 +137,11 @@ class GatewayForge:
     def status(self, number: int) -> dict[str, Any]:
         return self._call("GET", f"{self.base}/{int(number)}")
 
+    def failures(self, number: int) -> dict[str, Any]:
+        """Why CI refused: the failed check runs and their error annotations (`league.ci` writes
+        each refusal as one). Raises ForgeError when the gateway does not offer the read."""
+        return self._call("GET", f"{self.base}/{int(number)}/failures")
+
 
 class GhForge:
     """The same forge from the owner's own machine, through `git` and the `gh` CLI he is signed in
@@ -191,6 +195,21 @@ class GhForge:
         return {"number": int(number), "state": str(row.get("state") or "").lower(), "merged": bool(row.get("mergedAt")), "head": row.get("headRefOid"),
                 "checks": {"total": len(runs), "completed": len(finished), "failed": len(failed), "conclusion": conclusion}}
 
+    def failures(self, number: int) -> dict[str, Any]:
+        head = self.status(number).get("head")
+        done = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{head}/check-runs?per_page=100"], cwd=self.repo, capture_output=True, text=True)
+        if done.returncode != 0:
+            raise ForgeError(f"gh api failed: {done.stderr.strip()[:300]}")
+        failed = []
+        for run in json.loads(done.stdout).get("check_runs") or []:
+            if run.get("status") != "completed" or run.get("conclusion") in ("success", "neutral", "skipped"):
+                continue
+            notes = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/check-runs/{run['id']}/annotations"], cwd=self.repo, capture_output=True, text=True)
+            listed = json.loads(notes.stdout) if notes.returncode == 0 else []
+            failed.append({"name": run.get("name"), "conclusion": run.get("conclusion"),
+                           "annotations": [{"message": str(a.get("message") or "")[:2000], "title": a.get("title")} for a in listed[:20]]})
+        return {"number": int(number), "head": head, "failures": failed}
+
 
 @dataclass
 class Proposal:
@@ -209,6 +228,7 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
     """Merton's answer, reduced to what the role may actually change. Anything else is dropped here,
     refused again by the gateway, and refused a third time by CI."""
     files, dropped = [], []
+    legacy_rows: list[Any] = []
     listed = answer.get("files") if isinstance(answer.get("files"), list) else []
     for row in listed[:12]:
         if not isinstance(row, dict) or not isinstance(row.get("path"), str) or not isinstance(row.get("content"), str):
@@ -224,22 +244,40 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
         if not problems and path.endswith(".json"):
             try:
                 parsed = json.loads(content)
-                if path == 'league/strategies/registry.json' and isinstance(parsed, list):
-                    # The proposal's file paths are repo-relative, while registry references
-                    # are basenames. Normalize exactly that known packaging mismatch. Never
-                    # collapse arbitrary paths or traversal into an allowed filename.
-                    for item in parsed:
-                        if isinstance(item, dict) and isinstance(item.get('file'), str):
-                            match = re.fullmatch(r'league/strategies/([a-z][a-z0-9_]*\.py)', item['file'])
-                            if match:
-                                item['file'] = match[1]
-                    content = json.dumps(parsed, indent=2) + '\n'
+                if path == ci.RETIRED_REGISTRY:
+                    # The shared list is retired (`league/strategies/__init__.py`): a stale whole copy
+                    # of it is how one proposal deleted another's row. Only the rows describing files
+                    # this proposal itself carries are kept, each as that strategy's own file.
+                    legacy_rows.extend(parsed if isinstance(parsed, list) else [])
+                    continue
+                if path.startswith("league/strategies/"):
+                    from .strategies import _row
+
+                    stem = path.rsplit("/", 1)[1][:-5]
+                    described, why = _row(parsed, stem=stem)
+                    if described is None:
+                        problems = [f"{path}: {why}"]
             except ValueError:
                 problems = [f"{path}: not valid JSON"]
         if problems or len(content) > 60_000:
             dropped.extend(problems or [f"{path}: over 60,000 characters"])
         else:
             files.append({"path": path, "content": content})
+    carried = {f["path"] for f in files}
+    for item in legacy_rows:
+        if not isinstance(item, dict) or not isinstance(item.get("file"), str):
+            continue
+        # Repo-relative paths are the one known packaging mismatch; nothing else is collapsed.
+        match = re.fullmatch(r"(?:league/strategies/)?([a-z][a-z0-9_]*)\.py", item["file"])
+        if not match or f"league/strategies/{match[1]}.py" not in carried or f"league/strategies/{match[1]}.json" in carried:
+            continue
+        from .strategies import _row, describe
+
+        described, _ = _row({**item, "file": f"{match[1]}.py"}, stem=None)
+        if described is not None:
+            name, content = describe(described)
+            files.append({"path": f"league/strategies/{name}", "content": content})
+            carried.add(f"league/strategies/{name}")
     slug = re.sub(r"[^a-z0-9-]+", "-", str(answer.get("slug") or role).lower()).strip("-")[:48] or role
     answers = [a for a in (answer.get("answers") if isinstance(answer.get("answers"), list) else []) if isinstance(a, dict)][:20]
     return Proposal(role, str(answer.get("summary") or "")[:1500], slug, str(answer.get("title") or f"Merton ({role})")[:110],
@@ -314,6 +352,8 @@ class Merton:
         self.effort = dict(effort or {})
         #: The most times its usual wait a role's empty passes may stretch it (default eight).
         self.backoff_max = dict(backoff_max or {})
+        #: When `follow` last asked about each refused change (in memory: a restart asks again once).
+        self._polled: dict[int, float] = {}
 
     # ---------------------------------------------------------------- consult
     def consult(self, agent: Any, question: str, evidence: Mapping[str, Any], *, contract: str,
@@ -451,12 +491,32 @@ class Merton:
         return payload
 
     # ------------------------------------------------------------------ follow
+    #: How often a change CI refused is asked about again. It stays followed -- a re-run, a new
+    #: commit on its branch or a merge by hand is how a refused proposal gets repaired -- but it
+    #: is not asked every tick: a dozen refused changes polled each minute is 1,400 GitHub calls
+    #: an hour through one token.
+    REFUSED_POLL_SECONDS = 900.0
+    #: A refused change untouched for this long is no longer asked about.
+    REFUSED_FOLLOW_DAYS = 14.0
+
     def follow(self) -> list[dict[str, Any]]:
-        """Ask the gateway what CI made of each open change, and record the verdicts."""
+        """Ask the gateway what CI made of each change still in play, and record the verdicts.
+
+        Until Sept 22, 2026 a change CI refused was never asked about again, so a refusal was final
+        on the ledger even when the pull request was later fixed and merged: the toolsmith's PR #46
+        answered its requests in `tool_answers`, was refused, and those requests could never be
+        closed. A refused change is now followed until it merges, closes or goes stale; a new
+        refusal of a NEW head is its own row (the repair engineer's revisions are judged per head);
+        and a merge still closes its tool requests only once the running release holds the files
+        (`_fulfil_deployed`: a merge is not a deployment)."""
         latest: dict[int, dict[str, Any]] = {}
+        opened_at: dict[int, str] = {}
         for entry in self.ledger.iter(kinds="merton.change"):
             if entry.payload.get("number") is not None:
                 latest[int(entry.payload["number"])] = dict(entry.payload)
+                opened_at.setdefault(int(entry.payload["number"]), entry.at)
+        polled = self._polled
+        now = self.clock()
         out = []
         for number, row in latest.items():
             if row.get("status") == "merged":
@@ -464,22 +524,33 @@ class Merton:
                 if deployed is not None:
                     out.append(deployed)
                 continue
-            if row.get("status") not in ("opened", "pending"):
+            if row.get("status") == "refused by CI":
+                if now - polled.get(number, float("-inf")) < self.REFUSED_POLL_SECONDS:
+                    continue
+                if now - _epoch(opened_at[number]) > self.REFUSED_FOLLOW_DAYS * 86400:
+                    continue
+            elif row.get("status") not in ("opened", "pending"):
                 continue
+            polled[number] = now
             try:
                 status = self.forge.status(number)
             except ForgeError:
                 continue
             checks = (status.get("checks") or {}).get("conclusion")
-            verdict = "merged" if status.get("merged") else ("refused by CI" if checks == "failure" else ("closed" if status.get("state") == "closed" else "pending"))
-            if verdict != row.get("status") and verdict != "pending":
-                row = {**row, "status": verdict}
-                self.ledger.append("merton.change", row)
-                out.append(row)
-                if verdict == "merged":
-                    deployed = self._fulfil_deployed(row)
-                    if deployed is not None:
-                        out.append(deployed)
+            verdict = ("merged" if status.get("merged") else "closed" if status.get("state") == "closed"
+                       else "refused by CI" if checks == "failure" else "pending")
+            head = status.get("head") if isinstance(status.get("head"), str) else None
+            if verdict == "pending":
+                continue
+            if verdict == row.get("status") and (verdict != "refused by CI" or head is None or head == row.get("head")):
+                continue
+            row = {**row, "status": verdict, **({"head": head} if head else {})}
+            self.ledger.append("merton.change", row)
+            out.append(row)
+            if verdict == "merged":
+                deployed = self._fulfil_deployed(row)
+                if deployed is not None:
+                    out.append(deployed)
         return out
 
     def _fulfil_deployed(self, row: Mapping[str, Any]) -> dict[str, Any] | None:

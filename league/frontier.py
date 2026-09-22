@@ -100,12 +100,25 @@ class Frontier:
         self.spend_guard = spend_guard
 
     def ask(self, *, system: str, user: str, agent: str, max_output_tokens: int = 6000, effort: str = "medium") -> Answer:
+        return self.converse([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                             agent=agent, max_output_tokens=max_output_tokens, effort=effort)
+
+    def converse(self, messages: list[dict[str, Any]], *, agent: str, max_output_tokens: int = 6000, effort: str = "medium",
+                 cache: dict[str, Any] | None = None) -> Answer:
+        """One call over a list of text messages, optionally with prompt-cache hints.
+
+        `cache` carries `prompt_cache_key` / `prompt_cache_options` exactly as the Responses API
+        names them; the gateway admits only bounded values (gateway/lib/frontier.mjs). A cached
+        prefix changes the bill only through the usage block the gateway settles from."""
         body = {
             "model": self.model,
-            "input": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "input": list(messages),
             "max_output_tokens": max(1, min(int(max_output_tokens), MAX_OUTPUT_TOKENS)),
             "reasoning": {"effort": effort},
         }
+        for name in ("prompt_cache_key", "prompt_cache_options"):
+            if cache and cache.get(name) is not None:
+                body[name] = cache[name]
         request = urllib.request.Request(
             self.url, data=json.dumps(body).encode("utf-8"), method="POST",
             headers={"Authorization": "Bearer " + self.token_source(), "Content-Type": "application/json",
