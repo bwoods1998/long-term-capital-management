@@ -294,7 +294,7 @@ from at all. Each of those is now closed:
 | an order fills and its poll fails, so a book cannot reconcile | the book froze, every agent on that venue stopped entering, and nothing could unfreeze it | a practice book takes the venue's word after three readings; a real-money book still freezes, and says so |
 | a frozen book alerts every five minutes | the watchdog rolled back whatever release was being watched, including the one that would have healed it | an alert about a book that was already frozen is inherited, not held against the release |
 | a release is refused because another deploy holds the lock | the commit was recorded as tried and could never deploy again | a busy lock is marked as such, and that tree is offered again |
-| a commit widens a bound and uses the wider value | the box judged it with the previous release's rules and refused it for ever | the incoming tree runs its own checks on itself, as GitHub already did |
+| a commit widens a bound and uses the wider value | the box judged it with the previous release's rules and refused it for ever, silently | the running release still judges (a candidate must not judge itself), but the refusal is a warning naming the commit and the rule, and a change to the judges is the owner's deploy |
 | the expedition's Sail budget is spent | the meter latched "stopped" permanently -- no wakes, no research, no payouts, no deaths -- and the notice that would have said so sat inside the payout the flag closed | the meter guards the account; the pacer stops each kind of spending where it is spent, and says so outside every gate |
 | an agent's rules never fire | it paid for research it could never act on, for ever | ten barren wakes pull research forward within the hour; with no record it adopts a file that merely trades; thirty and no credits left is a death |
 | the league fills up | it stopped searching: nothing died, nothing new could be born | the last seat is a tournament, and never having traded is the weakest thing an agent can be |
@@ -410,6 +410,8 @@ The `league/` modules:
 | `budget.py` | The Sail budget meter. |
 | `frontier.py` | The client for the gateway's metered frontier route. |
 | `auditor.py` | The veto before real money, and its counterfactual score. |
+| `preaudit.py` | A free, deterministic look at a paper agent's code and first wakes (errors, dropped intents, refusals, barren wakes, cent rounding): a repair report and a promotion-status mark, never a kill. |
+| `consult_recovery.py` | Tool requests, missing-data claims and code fixes left in past Merton consults and research summaries, turned into repair reports (backfill, then incremental). |
 | `merton.py` | Merton's five pull-request roles. |
 | `ci.py` | The judge of every change: path guard, content checks, the suite. |
 | `capital.py` | Rung 3 sizing and the standing capital recommendation for the owner. |
@@ -417,7 +419,7 @@ The `league/` modules:
 | `service.py`, `config.json` | Builds the real House from the config and three secrets. |
 | `__main__.py` | The command line. |
 | `watchdog.py` | In-box releases: stage, canary, promote, watch, roll back. |
-| `updater.py` | Pulls `main` every half hour on the House box and hands a changed tree to the watchdog; never lets `real_money` change that way. |
+| `updater.py` | Every half hour on the House box: attests main's exact head commit against GitHub's Checks runs, judges it with the RUNNING release's checks, refuses changes to the judges and to `real_money`, and hands a changed tree to the watchdog. |
 | `CONTRACT.md` | The strategy contract. |
 
 ## Running things
@@ -489,15 +491,26 @@ Known limits:
   and configuration changes. It cannot yet repair failed CI or core House code autonomously.
   PR #21 required external repairs before merging. The next milestone is the
   [durable chief architect and independent verifier](docs/design/2026-09-20-chief-architect-handoff.md).
-- **Merged code reaches the box by itself, and only through the canary.** Every half hour the House
-  downloads `main` (public, so the box holds no GitHub credential), lets that tree run its OWN
-  content checks on itself (`league.ci --content-only`, a subprocess inside the tree, which is what
-  GitHub already did to the same commit) and hands it to the in-box watchdog (`league/updater.py`,
-  `league/watchdog.py`). It used to judge an incoming tree with the RUNNING release's checks, so
-  the two judges disagreed by exactly one commit and a change that widened a bound and used the
-  wider value could never reach the box -- for ever, because main is cumulative. A change to
-  `real_money` is still refused on that path. This incoming-tree checker is insufficient for
-  broad autonomous core editing; a protected verifier must precede that expansion.
+- **Merged code reaches the box by itself, only when it is attested, and only through the canary.**
+  Every half hour the House reads main's head commit and downloads that exact commit (public, so
+  the box holds no GitHub credential).
+  - **Attested.** GitHub's API must show that the pinned Checks workflow and every required job of
+    it passed on that exact sha. A later head never inherits an earlier head's approval.
+  - **Judged by the running release.** The running release's `league/ci.py` judges the candidate
+    tree as its own process with a scrubbed environment. Before Sept 22, 2026 the candidate ran its
+    own checker.
+  - **No self-edits.** A candidate that changes the judges (`ci.FORBIDDEN`: the constitution, the
+    ledger, the evaluator, the auditor, `ci.py`, `updater.py`, `watchdog.py`, the money files, the
+    agent-box seal) or the workflows is refused. Those land only by the owner's `floor_box.py deploy`.
+  - **Recorded.** The attestation goes into the watchdog's deploy record and onto the ledger
+    (`ops.deploy`).
+  - Every failure fails closed, with a warning. A change to `real_money` is still refused on this
+    path.
+  - **Box egress.** The box needs `api.github.com` on its egress list for this; see
+    `deploy/README.md`.
+  - **What it does not cover.** An approved release still runs as the user that owns the release
+    directory, and the House still holds the Sail key. See
+    [the handoff's verifier section](docs/design/2026-09-20-chief-architect-handoff.md).
 - **Practice fills are kinder than real ones.** Alpaca's paper account fills market orders at the
   touch with no queue; the Kalshi shadow book fills a resting order only when the market trades
   through it, but models no depth. Rung 2 exists to measure the difference at $10 a position.

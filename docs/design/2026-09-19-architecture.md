@@ -125,9 +125,13 @@ The frontier model and change control:
 - `league/ci.py`: the judge. Path guard, content checks, the replay regression and the whole
   suite. It asks no model anything.
 - `league/watchdog.py`: the in-box release watchdog: stage, canary, promote, watch, roll back.
-- `league/updater.py`: every half hour the House box downloads `main` (the repository is public,
-  so no credential), runs the current release's content checks on it, refuses any change to
-  `real_money`, and hands a changed tree to the watchdog.
+- `league/updater.py`: every half hour the House box does the following, and every refusal fails
+  closed with a warning (see the handoff's verifier section, Sept 22, 2026):
+  - downloads main's exact head commit (the repository is public, so no credential);
+  - requires GitHub's Checks runs to have passed on that sha;
+  - refuses changes to the judges, the workflows and `real_money`;
+  - runs the RUNNING release's content checks on the tree;
+  - hands a changed tree to the watchdog with the attestation.
 
 The process:
 
