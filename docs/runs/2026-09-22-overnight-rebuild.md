@@ -34,9 +34,10 @@ the restart: 15:27:20–16:47:39Z and 17:45:14Z–⟨T⟩. It leaves out the 58-
       `meriwether-h42bdbb` on paper 24 s after it was written** (19:05:16 → 19:05:40Z);
     - **three autonomous repairs** were written, CI-passed and merged with no human: #100 (hawkins
       horizon guard), #113 (haghani entry rounding) and #119 (haghani sub-cent prices). The
-      updater attested and deployed #100 and #113 by itself;
-    - the attested updater deployed releases by itself and refused the two protected changes
-      (#102, #110);
+      updater attested and deployed all three by itself;
+    - the attested updater deployed **five releases by itself** (15:50–19:26Z). It carried the
+      engineer's #100, #113 and #119 to the box, and refused the protected #102, leaving it for
+      the owner's deploy;
     - the labelled synthetic drill ran end to end and was **verified** at 18:08:32Z (#104 refused
       by CI, #105 revised against CI's failure text, merged, deployed, 20 minutes without
       recurrence).
