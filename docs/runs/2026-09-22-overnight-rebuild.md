@@ -483,6 +483,11 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   17:45Z, with 51.7% of input tokens read from cache at $0.0032 a call ($0.0064 before). That is
   below the 59–77% the routing experiment projected; the measured figure stands.
 
+- 19:26:36Z **The updater attested and deployed `main` `0b4ca33` by itself** (`main-7ac1da5efe95`:
+  #117, the teacher's #118, the engineer's #119). The canary passed; promoted 19:32:11Z. That is
+  three autonomous releases this evening (15:50Z, 18:17Z, 19:26Z). The owner's deploys were used
+  only for the protected changes (#102, #110–#112).
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
