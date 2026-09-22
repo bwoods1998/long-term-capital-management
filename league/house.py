@@ -159,6 +159,7 @@ class House:
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
         self.semantic_lab: Any = None
+        self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
@@ -2471,6 +2472,10 @@ class House:
         last = float(state.get("at") or state.get("since") or self._born_at)
         if self.clock() - last < every:
             return None
+        if self.hypotheses is not None and self.hypotheses.replaces_refill():
+            # Hypotheses, not blind mutations (league/hypotheses.py): a replay-passing card, or a
+            # mutation of a parent that is earning forward, never a draw placed by open seats.
+            return self.hypotheses.refill(rules, living=living, loser=loser)
         seats = {n.id: n.max_members - sum(a.specialty == n.id for a in living)
                  for n in self.niches.values() if not n.dormant}
         seats = {key: value for key, value in seats.items() if value > 0}
@@ -2614,6 +2619,8 @@ class House:
                 if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
                     self._background(f"merton:{role}", self.merton.run, role)
             self._background("merton:follow", self.merton.follow)
+        if self.hypotheses is not None:
+            self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
@@ -2686,6 +2693,7 @@ class House:
                                  if (row := self._state.get('promotion_status', {}).get(agent.id))
                                  and row.get('code_sha256') == agent.code_sha256],
             "semantic_lab": self.semantic_lab.stats() if self.semantic_lab else None,
+            "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")

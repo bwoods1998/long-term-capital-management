@@ -200,6 +200,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
                             pace=house.frontier_pace, backoff_max=pace.get("backoff_max"))
+    if merton and (house.game.get("hypotheses") or {}).get("enabled", True):
+        # Merton writes hypothesis cards for the desks where the evidence is, and replay admits
+        # them; routine refill stops breeding random mutations (league/hypotheses.py).
+        from .hypotheses import Foundry
+
+        house.hypotheses = Foundry(house, frontier)
     if house.researcher is not None and frontier is not None:
         # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
         # what a good record buys is better thinking.
