@@ -438,13 +438,16 @@ class ResearchPace(HouseCase):
 
 class DailyEvidence(HouseCase):
     def test_a_daily_block_counts_as_the_screen_counts_it(self):
-        """15 hourly or 5 daily blocks clear the screen, so a daily block is three observations."""
+        """A daily block is as many observations as the screen's hourly blocks per daily one."""
+        from league.constitution import CONSTITUTION
+        paper = CONSTITUTION["ladder"]["paper"]
+        per_day = paper["min_active_blocks"] / paper["min_active_blocks_day"]
         agent = self.seated("daily")
         for n in range(2):
             self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": 0.007, "active": True, "horizon": "day",
                                                     "book": "alpaca-paper", "block": f"d{n}"}, agent=agent.id)
         row = self.house.standing_of(agent.id)
-        self.assertEqual(row["earned_observations"], 6)
+        self.assertEqual(row["earned_observations"], 2 * per_day)
         self.assertAlmostEqual(row["earned_growth"], 0.014 / 48)
 
 

@@ -237,6 +237,12 @@ class Evaluator:
             else:
                 start_equity = previous_equity
                 flow = sum(float(s.payload["usd"]) for s in stakes if previous_seq < s.seq <= last.seq)
+            if start_equity <= 0 < flow:
+                # The account was funded INSIDE this block: its marks read zero until the stake
+                # landed. The block starts from the stake, not from nothing, and it counts. Measured
+                # Sept 22, 2026: meriwether-32 was marked at $0 from 22:48, staked at 01:00, and its
+                # whole first funded day was dropped from its paper record.
+                start_equity, flow = flow, 0.0
             if finished and start_equity > 0 and key not in recorded:
                 active = any(int(m.payload.get("holdings") or 0) > 0 for m in by_block[key]) or any(
                     block_key(f.at, horizon) == key for f in fills

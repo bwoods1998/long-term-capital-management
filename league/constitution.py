@@ -42,7 +42,9 @@ CONSTITUTION: dict[str, Any] = {
         "screen_drawdown_blocks": 30,
         # No promotion on fewer closed trades than this, however good the blocks look.
         # Owner revision, Sept 21, 2026 ~22:30 UTC (the fast lane): 10 -> 5.
-        "min_closed_trades": 5,
+        # Owner revision, Sept 22, 2026 ~19:50 UTC ("push harder ... more dynamism ... I'm willing to
+        # accept more vol on my accounts"): 5 -> 3. See `paper` below for the measurement.
+        "min_closed_trades": 3,
         # Rung 0 -> 1: mechanical replay, and the only gate before a PAPER seat, which costs the
         # owner nothing but compute. The deflated Sharpe is the confidence that the idea beats the
         # best of the trials in its line; 0.75 is a three-to-one bet on free information, and the
@@ -66,7 +68,15 @@ CONSTITUTION: dict[str, Any] = {
         # hours of accelerated research one agent had traded real money. The $25 stake, the frontier
         # audit, the order caps and the owner's capital envelope are unchanged, and `micro_demotion`
         # below sends a live loser back down: cheap to try on real money, expensive to scale.
-        "paper": {"gate": "screen", "min_active_blocks": 6, "min_active_blocks_day": 2, "max_drawdown": 0.15},
+        # Owner revision, Sept 22, 2026 ~19:50 UTC, for dynamism with more volatility accepted on the
+        # real accounts: 6 -> 4 hourly blocks (daily stays at 2: a look needs two blocks for its
+        # bounds). Measured at 19:45: 29 of 31 paper agents were still at the evidence stage and
+        # 24 had no finished active block, most of them trading, and one agent traded real money.
+        # The same revision stopped the evaluator dropping the block an account is funded in, which
+        # cost a daily agent a whole day. Growth above zero, the drawdown screen, the frontier audit,
+        # accounting integrity, the owner's capital envelope, `micro_demotion` and the statistical
+        # bound for scale are all unchanged.
+        "paper": {"gate": "screen", "min_active_blocks": 4, "min_active_blocks_day": 2, "max_drawdown": 0.15},
         # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
         # this is the gate that protects real size. Promotion spends its own alpha: the looks
         # that can only kill (before `min_active_blocks`) spend none of it.
@@ -91,7 +101,9 @@ CONSTITUTION: dict[str, Any] = {
         # that is not above where it started dies. Measured that day: the five 15-minute crypto
         # agents were down 10-17% on paper and held their seats for a day, and a founding seed
         # sat unprofitable through 41 active blocks. Real money keeps `death` above.
-        "paper_death": {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30},
+        # Owner revision, Sept 22, 2026 ~19:50 UTC: 10 -> 6 and 30 -> 20, so failing paper records
+        # leave as fast as passing ones rise (movement down as well as up); paper costs no money.
+        "paper_death": {"min_active_blocks": 6, "max_loss": 0.10, "unprofitable_blocks": 20},
         # The fast lane's other half: a micro-real agent down this share of its record since
         # promotion goes back to paper at once (it may earn its way back), rather than waiting
         # twenty blocks to die or for drift. Rise fast, fall fast.
@@ -167,4 +179,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '9beefd2cb84cde228fa3b92b0ae4017aaf6a4826d8afc2803181e58f290db4b4'
+PINNED_DIGEST = 'acac3c5fc54cc4e1e8d970215642e017588824cc724d67b89b153f85a78da73b'

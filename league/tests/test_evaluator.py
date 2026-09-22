@@ -31,6 +31,15 @@ BOUND = copy.deepcopy(CONSTITUTION)
 BOUND["ladder"].pop("completed_exposures")  # isolate the original single-route statistical tests
 BOUND["ladder"]["micro"]["min_active_blocks"] = 30
 BOUND["ladder"]["paper"] = {"gate": "bound", "min_active_blocks": 30}
+BOUND["ladder"]["min_closed_trades"] = 5
+BOUND["ladder"]["paper_death"] = {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30}
+
+#: The Sept 21, 2026 fast-lane values these mechanics tests were written against. The owner moved
+#: the numbers on Sept 22 (see `Sept22Values`); the mechanics under test did not change.
+FAST_LANE = copy.deepcopy(CONSTITUTION)
+FAST_LANE["ladder"]["paper"] = {"gate": "screen", "min_active_blocks": 6, "min_active_blocks_day": 2, "max_drawdown": 0.15}
+FAST_LANE["ladder"]["min_closed_trades"] = 5
+FAST_LANE["ladder"]["paper_death"] = {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30}
 
 WINNER = [1.2, 1.0, -0.4]  # dollars a block on a $200 stake: mean +0.3%, two wins in three
 LOSER = [-1.2, -1.0, 0.4]
@@ -378,7 +387,7 @@ class ObserveBlocks(EvalCase):
         self.stake("a", 200, at(0, 0))
         self.assertEqual(self.ev.observe("a", "paper", "hour"), 0)
 
-    def test_a_stake_that_arrives_after_the_first_mark_starts_the_record_one_block_later(self):
+    def test_a_stake_that_arrives_after_the_first_mark_counts_from_the_stake(self):
         self.mark("a", 0, at(0, 10))  # the book marked an account it had opened but not funded
         self.stake("a", 200, at(0, 20))
         self.mark("a", 200, at(0, 50))
@@ -386,8 +395,11 @@ class ObserveBlocks(EvalCase):
         self.mark("a", 202, at(2, 10))
         self.ev.observe("a", "paper", "hour")
         blocks = self.ev.blocks("a")
-        self.assertEqual([b["key"][-2:] for b in blocks], ["01"])
-        self.assertAlmostEqual(blocks[0]["log_growth"], math.log(202 / 200), places=12)
+        # Sept 22, 2026: the block the stake landed in counts, from the stake (meriwether-32's first
+        # funded day had been dropped from its paper record).
+        self.assertEqual([b["key"][-2:] for b in blocks], ["00", "01"])
+        self.assertAlmostEqual(blocks[0]["log_growth"], 0.0, places=12)
+        self.assertAlmostEqual(blocks[1]["log_growth"], math.log(202 / 200), places=12)
 
     def test_an_account_that_goes_to_zero_is_ruin_once_and_then_silence(self):
         self.stake("a", 200, at(0, 0))
@@ -1370,8 +1382,8 @@ class Screen(EvalCase):
 
     def setUp(self):
         super().setUp()
-        self.ev = Evaluator(self.ledger)  # the real constitution
-        self.assertEqual(CONSTITUTION["ladder"]["paper"],
+        self.ev = Evaluator(self.ledger, constitution=FAST_LANE)
+        self.assertEqual(FAST_LANE["ladder"]["paper"],
                          {"gate": "screen", "min_active_blocks": 6, "min_active_blocks_day": 2, "max_drawdown": 0.15})
 
     def run_blocks(self, growth, *, trades=12, judge_at=None):
@@ -1495,6 +1507,47 @@ class Screen(EvalCase):
             self.block("a", 0.004 if i % 2 == 0 else -0.003, book="real", start=25.0)
         numbers = self.ev.judge("a", "real").numbers
         self.assertEqual((numbers["alpha_spent"], numbers["alpha_death"]), (stats.spend(ALPHA / 2, 2), stats.spend(ALPHA / 2, 2)))
+
+
+class Sept22Values(EvalCase):
+    """The owner's Sept 22, 2026 dynamism revision, against the REAL constitution: one active day
+    or four active hours, three closed trades, growth above zero and the drawdown screen."""
+
+    def setUp(self):
+        super().setUp()
+        self.ev = Evaluator(self.ledger)  # the real constitution
+
+    run_blocks = Screen.run_blocks
+
+    def test_a_daily_strategy_is_screened_after_two_active_days_and_three_closed_trades(self):
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        self.mixed_trades("a", n=3)
+        for g in (0.004, -0.001):
+            self.block("a", g)
+            verdict = self.ev.judge("a", "paper", horizon="day")
+        self.assertEqual(verdict.decision, "eligible", verdict.reason)
+        self.assertEqual((self.ev._gate_blocks(1, "day"), self.ev._gate_blocks(1, "hour")), (2, 4))
+
+    def test_an_hourly_strategy_needs_four_active_hours(self):
+        self.assertEqual(self.run_blocks([0.004, -0.003, 0.004]).decision, "hold")
+        self.setUp()
+        self.assertEqual(self.run_blocks([0.004, -0.003, 0.004, 0.001]).decision, "eligible")
+
+    def test_losing_on_the_day_still_holds_and_two_closed_trades_are_not_enough(self):
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        self.mixed_trades("a", n=3)
+        for g in (-0.004, 0.001):
+            self.block("a", g)
+        self.assertEqual(self.ev.judge("a", "paper", horizon="day").decision, "hold")
+        self.setUp()
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        self.mixed_trades("a", n=2)
+        for g in (0.004, -0.001):
+            self.block("a", g)
+        self.assertEqual(self.ev.judge("a", "paper", horizon="day").decision, "hold")
 
 
 class Family(EvalCase):
@@ -1699,7 +1752,7 @@ class AFreeCheckIsNotRationed(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.ledger = Ledger(Path(self.dir.name) / "l.sqlite")
-        self.evaluator = Evaluator(self.ledger)
+        self.evaluator = Evaluator(self.ledger, constitution=FAST_LANE)
 
     def tearDown(self):
         self.ledger.close()
