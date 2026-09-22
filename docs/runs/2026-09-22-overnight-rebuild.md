@@ -232,6 +232,23 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
     reconciled.
   - **The floor was stopped for 57½ minutes (16:47:39Z–17:45:14Z).**
 
+- 17:46:36Z The engineer, stepping again, moved the drill job to `observing`. The running release
+  holds PR #105's files, and its synthetic observation window is 20 minutes.
+- 17:47Z The foundry had made no call since 15:48Z. Its one replay-passing card (weather, `6aed49`)
+  waited for a seat on a desk full of young research candidates, and any waiting card blocked
+  calls for every desk. #114: a waiting card blocks new calls only when its own desk could seat it,
+  and a desk with a card waiting gets no more cards. The regression test reproduces the
+  production refusal.
+- 17:5xZ **Second autonomous repair.** The engineer's #113 is a haghani child whose dip entries
+  round down: the cent-rounding defect the auditor and the pre-audit both named. CI's judge passed
+  it and the Merton workflow merged it with no human.
+- 17:56Z #115. The wind-down sent a market sell, and an option sells only at a limit, so four dead
+  options agents' contracts could never close: 12 refusals in 8 minutes once #106 had seated them.
+  Options are now sold at the bid, as the expiry rule does.
+- Stale holds: $44.84 of OpenAI and $55.72 of Sail burst allowance are pending for calls whose
+  outcome the House cannot prove (timeouts, restarts, unconfirmed posts). They are left
+  conservative; releasing them needs vendor receipts. See the remaining work.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
