@@ -74,9 +74,19 @@ RISK_FREE = 0.04  # roughly the 2024-2026 T-bill rate; a constant, not a curve
 DIVIDEND_YIELD = 0.0
 FEATURE_VERSION = "bs-close-v2"  # v2: the underlying close is unadjusted (v1 used dividend-adjusted closes)
 
-#: The replay's estimated-quote model (labelled and stressed; see `estimate_quote`).
+#: The replay's estimated-quote model (labelled and stressed; see `estimate_quote` and
+#: `display_quote`). Two estimates, on purpose: what a strategy is SHOWN (and marked at) is a
+#: central estimate fitted to the median live OPRA spread, so its decisions and stops meet the
+#: market they would meet live; what a FILL at the touch pays is the wider, conservative one.
 SPREAD_MODEL = {
     "kind": "estimated from trade prints and bar ranges: no historical option quotes exist",
+    # Shown and marked: last print +- max(display_min_half, display_pct x premium). Fitted on
+    # Sept 22, 2026 to 871 live OPRA quotes of the desk's six underlyings: its median half-spread
+    # equals the quoted median and it is at least as wide 60% of the time.
+    "display_min_half": 0.01,
+    "display_pct": 0.045,
+    # Paid by a fill at the touch (below): at least as wide as the quoted half-spread 76% of the
+    # time on the same quotes, with a median about twice the quoted one.
     "min_half_ticks": 1.0,     # at least one tick either side of the last print
     "floor_pct": 0.04,         # half-spread at least 4% of the premium (live Sept 19: 8-100 of 60-900 contracts under a 15% spread)
     "range_weight": 0.5,       # half the median high-low range of the contract's last printed bars
@@ -204,18 +214,26 @@ def years_to(expiry: str, at_ts: float) -> float:
 
 
 # ------------------------------------------------------------------------------ quote estimate
-def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model: Mapping[str, Any] | None = None) -> tuple[float | None, float, float]:
-    """`(bid, ask, half)` estimated around a bar's last print. There are no historical quotes, so
-    the half-spread is the largest of one tick, `floor_pct` of the premium, `range_weight` of the
-    median high-low range of the contract's last printed bars (prints bounce between bid and
-    ask) and any measured floor. The bid is None when it would be zero or less. (`stress` is not
-    applied here: it is an execution cost, see `league/options_replay.py`.)
+def display_quote(last: float, model: Mapping[str, Any] | None = None) -> tuple[float | None, float]:
+    """`(bid, ask)` a replay SHOWS around a last print: the central estimate (see SPREAD_MODEL).
+    The bid is None when it would be zero or less."""
+    m = {**SPREAD_MODEL, **dict(model or {})}
+    half = max(float(m["display_min_half"]), float(m["display_pct"]) * float(last))
+    bid = round(float(last) - half, 4)
+    return (bid if bid > 0 else None), round(float(last) + half, 4)
 
-    Measured Sept 22, 2026 against live OPRA quotes of the desk's six underlyings (the House's
-    recorded quotes let `spread_check` repeat this every day): the estimate was at least as wide
-    as the quoted half-spread for 75% of 261 contract-times in the first 20 minutes of the
-    session, when quotes are widest; its median sat above the quoted median in every premium
-    bucket."""
+
+def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model: Mapping[str, Any] | None = None) -> tuple[float | None, float, float]:
+    """`(bid, ask, half)` a FILL at the touch pays, estimated around a bar's last print: the
+    conservative estimate. There are no historical quotes, so the half-spread is the largest of
+    one tick, `floor_pct` of the premium, `range_weight` of the median high-low range of the
+    contract's last printed bars (prints bounce between bid and ask) and any measured floor. The
+    bid is None when it would be zero or less. (`stress` is applied by the replay, to fills.)
+
+    Measured Sept 22, 2026 against 871 live OPRA quotes of the desk's six underlyings in the
+    session's first hour (the House's recorded quotes let `spread_check` repeat this every day):
+    at least as wide as the quoted half-spread 76% of the time, 68% to 88% by premium bucket,
+    with a median about twice the quoted median."""
     m = {**SPREAD_MODEL, **dict(model or {})}
     last = float(bar["c"])
     ranges = sorted(float(r) for r in recent_ranges if r is not None and r >= 0)
@@ -456,9 +474,10 @@ class OptionsHistory:
         return out
 
     def spread_check(self, timeframe: str = "15Min", model: Mapping[str, Any] | None = None) -> dict[str, Any]:
-        """The estimate against recorded OPRA quotes: for each recorded quote, the estimate from
-        the contract's last print at or before it. Positive `excess` means the estimate is wider
-        (conservative)."""
+        """The execution estimate against recorded OPRA quotes: for each recorded quote, the
+        estimate from the contract's last print at or before it (`share_conservative`: how often
+        it was at least as wide), and the displayed estimate's share (`display_share_wider`,
+        which should sit near a half)."""
         rows = []
         for occ, t, bid, ask in self.db.execute("SELECT occ, t, bid, ask FROM quotes ORDER BY occ, t"):
             bars = self.db.execute("SELECT o, h, l, c, v, n FROM bars WHERE occ = ? AND timeframe = ? AND t <= ? ORDER BY t DESC LIMIT 5",
@@ -467,10 +486,14 @@ class OptionsHistory:
                 continue
             last = dict(zip(("o", "h", "l", "c", "v", "n"), bars[0]))
             _, _, half = estimate_quote(last, [b[1] - b[2] for b in bars], model)
-            rows.append({"occ": occ, "premium": (bid + ask) / 2, "quoted_half": (ask - bid) / 2, "estimated_half": half})
+            shown_bid, shown_ask = display_quote(last["c"], model)
+            rows.append({"occ": occ, "premium": (bid + ask) / 2, "quoted_half": (ask - bid) / 2, "estimated_half": half,
+                         "displayed_half": (shown_ask - (shown_bid if shown_bid is not None else 0.0)) / 2})
         wider = [r for r in rows if r["estimated_half"] >= r["quoted_half"] - 1e-9]
+        shown = [r for r in rows if r["displayed_half"] >= r["quoted_half"] - 1e-9]
         return {"quotes_compared": len(rows), "estimate_at_least_as_wide": len(wider),
-                "share_conservative": round(len(wider) / len(rows), 4) if rows else None}
+                "share_conservative": round(len(wider) / len(rows), 4) if rows else None,
+                "display_share_wider": round(len(shown) / len(rows), 4) if rows else None}
 
     # -- coverage ----------------------------------------------------------------------------
     def record_coverage(self, row: dict[str, Any]) -> dict[str, Any]:

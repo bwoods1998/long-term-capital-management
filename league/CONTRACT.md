@@ -132,15 +132,19 @@ is 100 shares: a 0.40 premium costs $40.
 Live, `bid`/`ask` are the venue's quotes and `iv`/`delta` the feed's greeks (None when absent).
 **On a replay tape they are not**: Alpaca has option trade bars since Jan 18, 2024 and no
 historical option quotes at all, so a replay row's `bid`/`ask` are ESTIMATED around the last
-print (at least a tick, 4% of the premium, or half the median recent bar range either side),
-`iv`/`delta` are computed by Black-Scholes, and the row says so in `quote_source` and
-`greeks_source`; it also carries `last` and `trades`. A contract appears only once it has
+print: the last price +- max($0.01, 4.5% of it), fitted to the median live OPRA spread (Sept 22,
+2026); positions are marked at that bid. A fill at the touch pays a WIDER estimate (at least a
+tick, 4% of the premium, or half the median recent bar range either side), so replay costs lean
+against you. `iv`/`delta` are computed by Black-Scholes, and the row says so in `quote_source`
+and `greeks_source`; it also carries `last` and `trades`. From Sept 22, 2026 the House keeps the
+OPRA quotes it shows live, and a replay over those days shows and marks on them instead. A contract appears only once it has
 printed (no listing dates are published) and only while its last qualifying print is at most 25
 minutes old. Replay fills are conservative (`league/options_replay.py`): nothing fills in the
 bar the decision saw; a later bar with at least 5 contracts in 2 trades fills a buy at the
-estimated ask at its open if the limit reaches it, else at the limit only when it traded at least
-one tick THROUGH it (a touched limit is not a fill), and never more than 10% of the bar's volume.
-Orders are day orders. Each fill pays an assumed $0.05 a contract. From 14:30 New York on its last
+(wider) estimated ask at its open if the limit reaches it, else at the limit only when it traded
+at least one tick THROUGH it (a touched limit is not a fill), and never more than 10% of the bar's
+volume; a recorded OPRA quote after the order fills one contract at its touch. Orders are day
+orders and die at 16:00 New York. Each fill pays an assumed $0.05 a contract. From 14:30 New York on its last
 day the House offers a held contract at the bid; what is unsold at the bell is written off at
 zero. The House replays an options candidate only where its options history covers every
 underlying over the window; elsewhere paper remains the test.

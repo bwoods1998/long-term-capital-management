@@ -10,9 +10,11 @@ EXECUTION IS ESTIMATED, AND CONSERVATIVE, BECAUSE NO HISTORICAL OPTION QUOTES EX
 - A contract is tradable at a step only if it has printed at or before it (point-in-time
   listing), expires AFTER today (New York), and its last qualifying print is at most
   `quote_age_seconds` old (the book's own option quote-age rule). Otherwise: refused.
-- Its bid and ask are ESTIMATED around the last print (`estimate_quote`): at least a tick, 4% of
-  the premium or half the median recent bar range either side. The tape's `spread_model.stress`
-  widens only what a fill at the touch pays, so a stressed run changes costs, not decisions.
+- Its bid and ask are ESTIMATED around the last print, twice. What the strategy is SHOWN and
+  marked at (`display_quote`) is a central estimate fitted to the median live OPRA spread; what
+  a fill at the touch PAYS (`estimate_quote`) is wider: at least a tick, 4% of the premium or
+  half the median recent bar range either side. The tape's `spread_model.stress` widens only
+  what fills pay, so a stressed run changes costs, not decisions.
 - Limit orders only (the House refuses option market orders). Nothing fills in the bar the
   decision saw: an order is worked against LATER bars of its contract that printed at least
   `min_volume` contracts in `min_trades` trades, and at most `max_participation` of the bar's
@@ -41,11 +43,11 @@ from zoneinfo import ZoneInfo
 try:
     from league.replay import (MAX_BARS, MAX_CANCELS, MAX_ERRORS, MAX_INTENTS, RUIN_EQUITY, RUIN_LOG_GROWTH, _block_key,
                                _clean_memory, _mean, _num, _parse_ts, digest)
-    from league.options_history import estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to
+    from league.options_history import display_quote, estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to
 except ImportError:  # in the agent's box the files sit side by side
     from replay import (MAX_BARS, MAX_CANCELS, MAX_ERRORS, MAX_INTENTS, RUIN_EQUITY, RUIN_LOG_GROWTH, _block_key,  # type: ignore
                         _clean_memory, _mean, _num, _parse_ts, digest)
-    from options_history import estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to  # type: ignore
+    from options_history import display_quote, estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to  # type: ignore
 
 NY = ZoneInfo("America/New_York")
 EPS = 1e-9
@@ -319,7 +321,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             day, volume, trades = day_totals.get(occ, ("", 0.0, 0))
             day_totals[occ] = (today, (volume if day == today else 0.0) + float(bar.get("v") or 0), (trades if day == today else 0) + int(bar.get("n") or 0))
             if float(bar.get("v") or 0) >= liq["min_volume"] and int(bar.get("n") or 0) >= liq["min_trades"]:
-                bid, ask, half = estimate_quote(bar, ranges[occ], model)
+                _, _, half = estimate_quote(bar, ranges[occ], model)  # what a fill at the touch would pay
+                bid, ask = display_quote(float(bar["c"]), model)  # what the strategy is shown and marked at
                 info, under = contracts[occ], spot.get(contracts[occ].get("underlying"))
                 vol = None
                 if bid is not None and under is not None:

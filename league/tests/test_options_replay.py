@@ -70,8 +70,8 @@ class Execution(unittest.TestCase):
                      occ=C1, buy_at="2026-03-02T15:00:00Z", limit=0.40)
         self.assertEqual([(f["side"], f["price"], f["quantity"], f["fee"]) for f in result["fill_log"]], [("buy", 0.40, 1.0, 0.05)])
         self.assertAlmostEqual(result["fees_usd"], 0.05)
-        # marked at the estimated bid: last print 0.40 less max(1 tick, 4%, half the median range 0.04/0.02)
-        self.assertAlmostEqual(result["final_equity"], 1000 - 40.05 + (0.40 - 0.02) * 100, places=6)
+        # marked at the SHOWN bid: the last print 0.40 less max($0.01, 4.5% of it)
+        self.assertAlmostEqual(result["final_equity"], 1000 - 40.05 + (0.40 - 0.018) * 100, places=6)
 
     def test_nothing_fills_in_the_bar_the_decision_saw(self):
         result = run([step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.30, 0.40)})], occ=C1, buy_at="2026-03-02T15:00:00Z", limit=0.45)
@@ -117,6 +117,14 @@ class Execution(unittest.TestCase):
                      occ=C1, buy_at="2026-03-02T15:00:00Z", limit=0.40)
         self.assertEqual(result["fills"], 0)  # one contract is more than 10% of six
         self.assertEqual(result["options"]["liquidity_misses"], 1)
+
+    def test_the_quote_shown_is_the_central_estimate_and_a_fill_pays_the_wider_one(self):
+        code = STRATEGY.replace('seen = [r["occ"] for r in ctx.get("chain") or []]', 'seen = [[r["bid"], r["ask"]] for r in ctx.get("chain") or []]')
+        steps = [step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.48, 0.32, 0.40)}),  # a wide bar: the range says 0.08 either side
+                 step("2026-03-02T15:15:00Z", {C1: bar(0.40, 0.41, 0.40, 0.40)})]
+        result = run_replay(code, {"occ": C1, "buy_at": "2026-03-02T15:00:00Z", "limit": 0.50}, tape(steps), stake=1000.0, limits=LIMITS, audit=True)
+        self.assertEqual(result["final_memory"]["chain"], [[0.382, 0.418]])  # shown: 0.40 +- 4.5%
+        self.assertEqual([f["price"] for f in result["fill_log"]], [0.48])  # paid: the open 0.40 + half the 0.16 range
 
     def test_the_execution_stress_changes_what_a_fill_pays_not_the_quote_shown(self):
         steps = [step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
@@ -216,7 +224,8 @@ class RecordedQuotes(unittest.TestCase):
                                  {"symbol": C1, "bid": 0.35, "ask": 0.45, "as_of": "2026-09-22T14:10:00Z"},   # half 0.05: it is not
                                  {"symbol": C1, "bid": 0.30, "ask": 0.50, "as_of": "2026-09-22T13:55:00Z"}],  # before any print: not compared
                                 source="opra")
-            self.assertEqual(store.spread_check(), {"quotes_compared": 2, "estimate_at_least_as_wide": 1, "share_conservative": 0.5})
+            self.assertEqual(store.spread_check(), {"quotes_compared": 2, "estimate_at_least_as_wide": 1, "share_conservative": 0.5,
+                                                    "display_share_wider": 0.5})
 
     def test_only_opra_quotes_are_kept(self):
         with tempfile.TemporaryDirectory() as root:
