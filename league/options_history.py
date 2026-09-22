@@ -271,13 +271,39 @@ class OptionsHistory:
         self.get = get
         self.ledger = ledger
         self.clock = clock
-        self._lock = threading.RLock()
-        self.db = sqlite3.connect(str(self.path), check_same_thread=False)
-        self.db.executescript(SCHEMA)
-        self.db.commit()
+        self._lock = threading.RLock()  # one writer at a time in this process
+        self._local = threading.local()
+        self._connections: list[tuple[threading.Thread, sqlite3.Connection]] = []
+        with self._lock:
+            self.db.executescript(SCHEMA)
+            self.db.commit()
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        """This thread's connection. The House reads the store from wake threads (quotes,
+        features), the replay lane (tapes) and the ops lane (the daily job) at once, and one
+        sqlite3 connection must not be shared between threads that use it concurrently. WAL
+        lets readers go on while the daily job writes."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            # Used only by this thread; closable by any (a wake thread's connection is closed
+            # here once its thread has ended: the House makes new wake threads every tick).
+            conn = sqlite3.connect(str(self.path), timeout=60, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn = conn
+            with self._lock:
+                for thread, old in [pair for pair in self._connections if not pair[0].is_alive()]:
+                    old.close()
+                self._connections = [pair for pair in self._connections if pair[0].is_alive()]
+                self._connections.append((threading.current_thread(), conn))
+        return conn
 
     def close(self) -> None:
-        self.db.close()
+        with self._lock:
+            for _, conn in self._connections:
+                conn.close()
+            self._connections = []
+        self._local = threading.local()
 
     # -- resumable chunks --------------------------------------------------------------------
     def done(self, key: str) -> bool:

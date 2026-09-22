@@ -293,6 +293,23 @@ class Store(unittest.TestCase):
         self.assertEqual([c for c in venue.calls if c[0] == "/v1beta1/options/bars"], [])  # finished: nothing to fetch
         self.assertEqual(store.covers(["SPY", "QQQ"], "1Day", "2026-02-23T00:00:00Z", "2026-03-03T00:00:00Z"), ["SPY"])
 
+    def test_threads_get_their_own_connection_and_a_finished_threads_is_closed(self):
+        import threading
+        store = self.store(FakeVenue(self.DAYS))
+        store.record_quotes([{"symbol": C1, "bid": 0.40, "ask": 0.42, "as_of": "2026-09-22T14:00:00Z"}], source="opra")
+        seen = []
+        workers = [threading.Thread(target=lambda: seen.append(len(store.quotes([C1])[C1]))) for _ in range(4)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        self.assertEqual(seen, [1, 1, 1, 1])
+        store.db.execute("SELECT 1")  # the main thread's own, still open
+        last = threading.Thread(target=store.coverage)
+        last.start()
+        last.join()
+        self.assertEqual(len(store._connections), 2)  # the four finished workers' connections were closed
+
     def test_a_refused_listing_is_unavailable_not_zero(self):
         def refuse(path, params):
             raise oh.HistoryError("HTTP 403 Not a path this gateway signs")
