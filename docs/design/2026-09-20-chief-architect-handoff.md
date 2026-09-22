@@ -240,3 +240,68 @@ The final deployment capture is the [foundation run report](../runs/2026-09-20-f
 evidence and limitations are in the [model comparison](../runs/2026-09-20-model-routing.md). None of these establish an
 autonomous chief architect or a profitable trading business yet. The next release should be
 judged on whether the system can close an engineering loop without this chat doing the repair.
+
+## Independent release verification: what exists (Sept 22, 2026)
+
+Build-order item 2 is implemented inside the House box, in `league/updater.py` and
+`league/watchdog.py`. The external budget broker (item 1) is **out of scope for this change and is
+not built**: the House still holds `SAIL_API_KEY`, and the Sail campaign meter is still House
+code. What the in-box verifier guarantees, and what it cannot, is listed below.
+
+A commit of `main` reaches the box automatically only when all of these hold. Each one fails
+closed: nothing deploys, and a warning goes on the ledger naming the commit and the rule.
+
+1. **Exact-commit attestation.** GitHub's check runs for the exact sha (`api.github.com`,
+   unauthenticated) show `gateway`, `tests (3.11)` and `tests (3.14)` completed with `success`.
+   - Only runs whose `head_sha` is that sha and whose app is `github-actions` count.
+   - The tarball is downloaded by that sha, and every member must sit under `<repo>-<sha>/`.
+   - Nothing carries over from one head to the next.
+2. **The judges do not change by this path.** The candidate may not add, remove or change any
+   file in the running release's `ci.FORBIDDEN`: the constitution, the ledger, the book, the
+   evaluator, the auditor, `ci.py`, `updater.py`, `watchdog.py`, the campaign and live-money files.
+   - Its `.github/workflows/` must also hash to `TRUSTED_WORKFLOWS_SHA256`.
+   - Such a change lands only through the owner's `scripts/floor_box.py deploy`.
+3. **The trusted content checks.** These are the running release's `league/ci.py`, replay
+   simulator, safety scanner and bounds, run against the candidate tree as their own process.
+   - The process gets a scrubbed environment (PR #82).
+   - Its verdict line is keyed by a nonce it reads from stdin before any candidate code loads.
+   - `config.json` may move only its dials from the running release.
+4. **`real_money` may not change by this path.**
+5. **The canary, promotion, watch and rollback**, all unchanged.
+   - The attestation is recorded in the watchdog's `start` row, and every row of the deploy
+     carries the sha.
+   - A staged tree whose digest differs from the attested digest is refused.
+   - The attestation also goes on the ledger as `ops.deploy`.
+
+**Owner steps.**
+- `api.github.com` is **not** on the box's egress allowlist. On Sept 22, 2026 a lookup from the
+  box failed with a name-resolution error, while `github.com` and `codeload.github.com` resolved.
+  Until the owner runs `python3 scripts/floor_box.py hosts --add api.github.com`, every automatic
+  update is blocked. It fails closed, with the fix in the warning.
+- Merton's squash merges are pushed with the Actions token, and GitHub starts no workflow for
+  such a push. Commits #86 and #88 reached `main` with no check run at all. The Merton merge job
+  now dispatches the Checks workflow, and the Checks workflow also runs hourly.
+
+**Why an engineer worker cannot approve its own deployment through this path.**
+- Every signal of approval comes from something its commit cannot change in the same step:
+  - GitHub Actions check runs, created by the pinned workflows.
+  - The running release's checker.
+  - The protected-file list of the running release.
+- A personal token cannot create check runs. A GitHub App creates them only in its own name, and
+  commit statuses are ignored.
+- Changing a workflow or a judge file is refused, and the same edit fails the candidate's own test
+  suite on GitHub (`ThePinsFollowTheRepository`).
+
+**What remains in the authority boundary.**
+- Once a release is deployed, its code runs as the same Unix user that owns `releases/` and
+  `current`. Non-protected House code (`house.py`, `service.py`) could therefore carry a latent
+  bypass for the *next* deploy.
+  - Examples: a second updater, or a direct call to `league.watchdog deploy`.
+  - The in-box verifier judges each candidate; it cannot judge what an approved release does
+    afterwards.
+  - Closing this needs one of two things: release promotion moved out of the box (the gateway or a
+    separate verifier box holding the only write access), or the watchdog run as a separate user
+    with `releases/` unwritable by the House.
+- The House still holds `SAIL_API_KEY` and the shared gateway token. An approved release can spend
+  within the gateway's caps and the Sail account.
+- The spending broker and the trading-mandate service remain unbuilt, as described in section 2.

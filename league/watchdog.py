@@ -601,14 +601,21 @@ class Watchdog:
         return None
 
     # ----------------------------------------------------------------- deploy
-    def deploy(self, source: str | Path, release_id: str, *, canary_ticks: int = 3, watch_seconds: int = 600, watch_every: int = 30) -> dict[str, Any]:
+    def deploy(self, source: str | Path, release_id: str, *, canary_ticks: int = 3, watch_seconds: int = 600, watch_every: int = 30,
+               attestation: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Returns `{"verdict": "promoted" | "refused" | "rolled_back" | "failed", "reasons": [...],
         "current", "previous", "stages": [...]}`. `refused`: the release never became current.
         `rolled_back`: it did, the House went bad, and the release before it is current again.
-        `failed`: it went bad and there was nothing to go back to, so it is still current."""
+        `failed`: it went bad and there was nothing to go back to, so it is still current.
+
+        `attestation` is the updater's record of what GitHub said about the exact commit this tree
+        came from (`league/updater.py`). It is written into the deploy's first row, every row of the
+        deploy carries its sha, and a staged tree whose digest is not the attested one is refused:
+        what runs must be what was attested. The owner's own deploy (`floor_box.py`) has none."""
         try:
             with self.releases.lock():
-                return self._deploy(Path(source), release_id, max(1, int(canary_ticks)), max(0, int(watch_seconds)), max(1, int(watch_every)))
+                return self._deploy(Path(source), release_id, max(1, int(canary_ticks)), max(0, int(watch_seconds)), max(1, int(watch_every)),
+                                    dict(attestation) if attestation else None)
         except DeployBusy as exc:
             started = self.clock()
             # `busy` marks a refusal that says nothing about the release: the lock was held, the
@@ -619,9 +626,12 @@ class Watchdog:
             return {"deploy": row["deploy"], "release": release_id, "verdict": "refused", "busy": True, "reasons": [str(exc)], "current": self.releases.current(),
                     "previous": self.releases.previous(), "started_at": iso(started), "finished_at": iso(started), "readings": 0, "stages": [row]}
 
-    def _deploy(self, source: Path, release_id: str, canary_ticks: int, watch_seconds: int, watch_every: int) -> dict[str, Any]:
+    def _deploy(self, source: Path, release_id: str, canary_ticks: int, watch_seconds: int, watch_every: int,
+                attestation: dict[str, Any] | None = None) -> dict[str, Any]:
         started = self.clock()
         base = {"deploy": f"{release_id}@{int(started)}", "release": release_id}
+        if attestation and attestation.get("sha"):
+            base["sha"] = str(attestation["sha"])
         stages: list[dict[str, Any]] = []
         readings = 0
 
@@ -638,7 +648,8 @@ class Watchdog:
 
         was_current = self.releases.current()
         note(stage="start", source=str(source), current=was_current, previous=self.releases.previous(),
-             canary_ticks=canary_ticks, watch_seconds=watch_seconds, watch_every=watch_every)
+             canary_ticks=canary_ticks, watch_seconds=watch_seconds, watch_every=watch_every,
+             **({"attestation": attestation} if attestation else {}))
 
         # 1. stage
         try:
@@ -648,7 +659,10 @@ class Watchdog:
         except (ReleaseError, OSError) as exc:
             note(stage="stage", ok=False, error=str(exc))
             return verdict("refused", [f"staging failed: {exc}"])
-        note(stage="stage", ok=True, path=str(path), digest=self.releases._manifest(path).get("digest"))
+        staged = self.releases._manifest(path).get("digest")
+        note(stage="stage", ok=True, path=str(path), digest=staged)
+        if attestation and attestation.get("tree_digest") and attestation["tree_digest"] != staged:
+            return verdict("refused", [f"the staged tree ({str(staged)[:12]}) is not the attested one ({str(attestation['tree_digest'])[:12]})"])
         self._say(f"{release_id}: staged at {path}")
 
         # 2. canary
@@ -959,6 +973,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     deploy.add_argument("--max-age-seconds", type=int, default=300, help="how old the House's health.json may be before a reading is bad")
     deploy.add_argument("--restart-within", type=int, default=300,
                         help="a House that has recorded no ops.started this long after the promotion is a bad reading (0: do not ask)")
+    deploy.add_argument("--attestation", default=None,
+                        help="a JSON file: the updater's record of GitHub's checks on the exact commit (league/updater.py)")
     common(sub.add_parser("status", help="current, previous, the staged releases, the House's health, the last verdicts"))
     rollback = sub.add_parser("rollback", help="current := previous, and restart the House")
     common(rollback)
@@ -988,7 +1004,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 5
         print(json.dumps(result, indent=1, default=str))
         return 0 if result["ok"] else 1
-    result = dog.deploy(args.source, args.id, canary_ticks=args.canary_ticks, watch_seconds=args.watch_seconds, watch_every=args.watch_every)
+    attestation = None
+    if args.attestation:
+        try:
+            attestation = json.loads(Path(args.attestation).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            # An attested deploy whose record cannot be read is not attested: refuse, and say so.
+            row = releases.record({"release": args.id, "stage": "verdict", "verdict": "refused",
+                                   "reasons": [f"the attestation {args.attestation} cannot be read: {type(exc).__name__}"]})
+            print(json.dumps({k: v for k, v in row.items()}, indent=1, default=str))
+            return EXIT_CODES["refused"]
+    result = dog.deploy(args.source, args.id, canary_ticks=args.canary_ticks, watch_seconds=args.watch_seconds, watch_every=args.watch_every,
+                        attestation=attestation)
     print(json.dumps({k: v for k, v in result.items() if k != "stages"}, indent=1, default=str))
     return EXIT_CODES.get(result["verdict"], 1)
 

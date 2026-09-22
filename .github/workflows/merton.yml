@@ -71,9 +71,19 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write
     steps:
       - name: Squash-merge and delete the branch
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --squash --delete-branch "$PR_URL"
+      - name: Run the push checks on the merged main
+        # A push made with this token starts no workflow, so the squash commit would never carry
+        # the checks the House box requires on the exact commit it deploys (league/updater.py).
+        # A dispatch is the one event this token may start. Measured Sept 22, 2026: #86 and #88
+        # landed on main with no check run at all.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run checks.yml --ref main

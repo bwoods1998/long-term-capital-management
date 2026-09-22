@@ -173,6 +173,7 @@ class LivePath(unittest.TestCase):
         f.auditor.approve = True
         f.clock.advance(31 * 60)
         h.judge(agent)
+        h.wait(5)  # the audit runs beside the tick
         self.assertEqual(h.evaluator.rung(agent.id), 2)
         self.assertEqual(h.books['alpaca'].account(agent.id).staked, Decimal('25'))
         f.run_hours(1, edge=.78)
@@ -192,6 +193,7 @@ class LivePath(unittest.TestCase):
             return {'approve': True}
         with patch.object(f.auditor, 'audit', side_effect=delayed):
             h._promote(agent, verdict)
+            h.wait(5)  # the audit runs beside the tick
         self.assertEqual(h.evaluator.rung(agent.id), 1)
         self.assertFalse(guard.allows_live(2))
         self.assertFalse(f.real.submitted)
