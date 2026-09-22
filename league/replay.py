@@ -839,11 +839,16 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
             if venue == "alpaca":
                 shown = wanted_symbols or sorted(history)
                 ctx["bars"] = {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in shown}
-                ctx["quotes"] = {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in shown if s in view.quotes}
+                # A replay quote is made at this decision step, so it carries the step's own time as
+                # `t`, as a live quote carries its venue timestamp (CONTRACT.md). Without it, every
+                # strategy that refuses a stale or undated quote -- the careful ones -- never traded
+                # in replay: measured Sept 22, 2026, four frontier-written megacaps cards made 0
+                # trades each, and 14, 31, 5 and 14 once replay quotes were dated.
+                ctx["quotes"] = {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1], "t": now} for s in shown if s in view.quotes}
                 if watched_symbols:
                     ctx["observed"] = {
                         "bars": {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in watched_symbols},
-                        "quotes": {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in watched_symbols if s in view.quotes},
+                        "quotes": {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1], "t": now} for s in watched_symbols if s in view.quotes},
                     }
             else:
                 shown_markets, watched_markets = [], []

@@ -91,7 +91,7 @@ ctx = {
                    "limit_price": 80000.0, "filled": 0.0, "submitted_at": "..."}],
   # alpaca
   "bars": {"BTC/USD": [{"t": "...", "o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 1.0}, ...]},  # oldest first, all closed
-  "quotes": {"BTC/USD": {"bid": 81000.0, "ask": 81020.0, "t": "2026-09-10T14:01:59.050284Z"}},
+  "quotes": {"BTC/USD": {"bid": 81000.0, "ask": 81020.0, "t": "2026-09-10T14:01:59.050284Z"}},  # replay: t == now
   # kalshi
   "markets": [{"market": "KXBTCD-26SEP2017-T80999.99", "series": "KXBTCD", "title": "...",
                "yes_bid": 0.91, "yes_ask": 0.93, "close_time": "...", "hours_to_close": 0.6, "hours_to_resolve": 0.7,
