@@ -1,0 +1,5 @@
+{
+  "family": "sports-favorites",
+  "name": "sports-fee-capped-taker",
+  "why": "Seven sports agents are barren, but meriwether-8's latest taker replay passed with 70 closed trades and 0.9554 deflated Sharpe after repeated maker fill failures. Test capped touch execution on NFL YES and soccer NO favourites, reserving rounded fees and limiting event exposure; the reported pass is development evidence, not proof this candidate works."
+}

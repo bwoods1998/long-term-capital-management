@@ -340,3 +340,30 @@ test('the day s pull requests are counted on a UTC day, reserved in one step and
   assert.deepEqual(gate.pullReserve({ at: next }), { ok: true, day: '2026-09-16', count: 1 });
   assert.equal(gate.status(next).today.day, '2026-09-15', 'the order counters still roll on the floor s own day');
 });
+
+test('why CI refused is read back as failed runs and their annotations, never with the token', async () => {
+  const runs = { total_count: 3, check_runs: [
+    { id: 7, name: 'guard', status: 'completed', conclusion: 'success' },
+    { id: 8, name: 'judge', status: 'completed', conclusion: 'failure', output: { title: 'league.ci', summary: `refused ${GITHUB_TOKEN}` } },
+    { id: 9, name: 'merge', status: 'completed', conclusion: 'skipped' },
+  ] };
+  const notes = [{ annotation_level: 'failure', title: 'league.ci refused', message: 'the test suite failed:\nFAIL: test_tool_drill (expected 3, got 2)' }];
+  const hub = fakeGitHub({
+    checks: runs,
+    script: key => (key === 'GET /check-runs/8/annotations?per_page=20' ? reply(200, notes) : undefined),
+  });
+  const opened = await open(hub);
+  const before = hub.calls.length;
+  const found = await github.pullFailures({ repo: GITHUB_REPO, token: GITHUB_TOKEN, number: opened.number, fetcher: hub.fetcher });
+  assert.deepEqual(found, {
+    number: 41, head: opened.head,
+    failures: [{ name: 'judge', conclusion: 'failure', title: 'league.ci', summary: 'refused [redacted]', annotations: [
+      { level: 'failure', title: 'league.ci refused', message: 'the test suite failed:\nFAIL: test_tool_drill (expected 3, got 2)' },
+    ] }],
+  });
+  assert.deepEqual(hub.calls.slice(before).map(call => call.method), ['GET', 'GET', 'GET'], 'reads only: nothing is re-run, merged or closed');
+  assert.equal(JSON.stringify(found).includes(GITHUB_TOKEN), false);
+
+  const missing = await github.pullFailures({ repo: GITHUB_REPO, token: GITHUB_TOKEN, number: 999, fetcher: hub.fetcher });
+  assert.deepEqual(missing, { error: 'No such pull request.', status: 404 });
+});

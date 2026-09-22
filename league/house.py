@@ -99,6 +99,7 @@ class Settings:
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
+    history_coverage: bool = True  # each finished history ingestion (`league.history`) becomes a data.coverage row
 
 
 class House:
@@ -158,6 +159,7 @@ class House:
         self.publisher = publisher
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
+        self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
@@ -837,6 +839,20 @@ class House:
             with self._state_lock:
                 self._state["deploying_at"] = self.clock()
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files")})
+
+    def _history_coverage(self) -> None:
+        """What the history ingestion (a separate process, `python -m league.history`) fetched
+        becomes `data.coverage` ledger rows here, because only the House writes the ledger."""
+        now = self.clock()
+        if not self.settings.history_coverage or now - getattr(self, "_history_checked", 0.0) < 300:
+            return
+        self._history_checked = now
+        try:
+            from .history import publish_coverage
+
+            publish_coverage(self.ledger, self.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001 - a bad store file must never take the tick down
+            self.alert("warning", f"history coverage could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
 
     def deploying(self) -> bool:
         """Is a release on its way in? True from the moment one is staged until the grace is up."""
@@ -2728,6 +2744,7 @@ class House:
             self.jev_floor.tick(open_for_business)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
+        self._history_coverage()
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
@@ -2743,6 +2760,10 @@ class House:
                 if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
                     self._background(f"merton:{role}", self.merton.run, role)
             self._background("merton:follow", self.merton.follow)
+        if open_for_business and self.engineer is not None and self.engineer.due():
+            # The repair worklist: its sources, its free follow-ups and at most one paid patch a
+            # step, each against its own per-job ceiling and the day's frontier allowance.
+            self._background("engineer", self.engineer.step)
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
