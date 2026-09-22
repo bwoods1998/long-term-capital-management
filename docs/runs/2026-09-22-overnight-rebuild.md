@@ -406,6 +406,33 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   `main` Checks run would block the updater's attestation until the hourly scheduled run passes;
   it fails closed.
 
+- 18:18:57Z The hawkins job's second attempt ended `rejected`. The engineer itself found the
+  recurrence came from hawkins-9, still on the old code, and that its first child (#100) already
+  rejects the out-of-horizon entries: "no change the evidence justifies". That was right, and it
+  cost about $0.20. #117 now keeps such a job observing, with no paid attempt.
+- 18:25:28Z The haghani job (#113) moved to `observing` once the updater's release held its files.
+- 18:25:33Z **The foundry called again**, 90 s after #114 went live. Its 4 cards for
+  `kalshi-sports`: favourite–longshot bias in moneylines, pregame liquidity supply, lineup-news
+  momentum and strike-ladder dominance. All 4 failed replay on 41–50 blocks of real sports markets
+  (0, 0 and 4 trades). They were judged honest failures, not a data gap. The foundry total is now
+  8 cards and 1 pass, for $1.48.
+- 18:28Z **The research gate, measured on production** (`league.research_gate`, read-only):
+  - 802 decisions; 338 runs; 624 sessions skipped; an estimated $8.59 saved for $0.0076 of Jev.
+  - **Sampled miss rate 8.75% (7 of 80).** Split by decision:
+    - sampled skips retained a candidate 8.8% of the time (backoff 3 of 35, blocker 4 of 45);
+    - runs retained one 8.3% of the time (28 of 338);
+    - replay-passing candidates: 1 of 80 skips, 7 of 338 runs.
+  - The evidence does not yet show that the gate skips the less productive sessions. It saves
+    about $4 an hour by throttling volume. It stays as built, with its 10% sample collecting
+    evidence; tuning it is a decision for more data.
+- Options history: 22,178 live OPRA quotes are recorded on the box, but no backfill has run yet.
+  The daily job runs from 17:00 New York (21:00Z). After it, options newcomers must pass the
+  estimate-based replay before paper; `options_history: false` reverts that.
+- Sail `campaign_post_unconfirmed` sessions: Sail's docs say a retry with the same key and body
+  returns the existing request "when it is still available", but not for how long. So the House's
+  refusal to re-POST an unconfirmed request stays. Asking Sail for the retention window would let
+  interrupted sessions be recovered safely.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
