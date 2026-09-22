@@ -136,6 +136,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
     last_print: dict[str, dict[str, Any]] = {}   # occ -> {"bar", "ts", "half", "bid", "ask"}
     ranges: dict[str, list[float]] = {}
     spot: dict[str, tuple[float, str]] = {}
+    by_under: dict[str, set[str]] = {}  # underlying -> contracts that have printed
     memory: dict[str, Any] = {}
     errors, last_error = 0, ""
     blocks: list[dict[str, Any]] = []
@@ -252,9 +253,9 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 continue
             price = s[0]
             rows = []
-            for occ, seen in last_print.items():
-                info = contracts.get(occ)
-                if info is None or info.get("underlying") != symbol or quote(occ, now_ts) is None:
+            for occ in by_under.get(symbol, ()):
+                seen, info = last_print[occ], contracts[occ]
+                if quote(occ, now_ts) is None:
                     continue
                 expiry = info["expiry"]
                 days = (datetime.fromisoformat(expiry).date() - _ny(now_ts).date()).days
@@ -263,8 +264,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 if abs(float(info["strike"]) / price - 1.0) > float(rules.get("moneyness", 0.2)):
                     continue
                 years = years_to(expiry, now_ts)
-                mid = (seen["bid"] + seen["ask"]) / 2.0
-                vol = implied_vol(mid, price, float(info["strike"]), years, info["right"])
+                vol = seen["iv"]  # solved once, at the print, against the underlying then
                 rows.append({"symbol": occ, "occ": occ, "underlying": symbol, "expiry": expiry, "strike": float(info["strike"]), "right": info["right"],
                              "bid": seen["bid"], "ask": seen["ask"], "as_of": seen["bar"]["t"], "last": float(seen["bar"]["c"]),
                              "iv": None if vol is None else round(vol, 6),
@@ -287,6 +287,9 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         steps_walked += 1
         held_before, fills_before = bool(book.positions), book.fills
         today = _ny(now_ts).strftime("%Y-%m-%d")
+        for symbol, bar in (step.get("execution_bars") or {}).items():
+            if _num(bar.get("c")):
+                spot[symbol] = (float(bar["c"]), now)
         # (a) the option bars that closed now meet the orders placed before, then become the quote.
         for occ, bar in (step.get("options") or {}).items():
             if occ not in contracts or not isinstance(bar, dict) or _num(bar.get("c")) is None:
@@ -298,14 +301,16 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             day_totals[occ] = (today, (volume if day == today else 0.0) + float(bar.get("v") or 0), (trades if day == today else 0) + int(bar.get("n") or 0))
             if float(bar.get("v") or 0) >= liq["min_volume"] and int(bar.get("n") or 0) >= liq["min_trades"]:
                 bid, ask, half = estimate_quote(bar, ranges[occ], model)
-                last_print[occ] = {"bar": {"t": now, **bar}, "ts": now_ts, "bid": bid, "ask": ask, "half": half,
+                info, under = contracts[occ], spot.get(contracts[occ].get("underlying"))
+                vol = None
+                if bid is not None and under is not None:
+                    vol = implied_vol((bid + ask) / 2.0, under[0], float(info["strike"]), years_to(info["expiry"], now_ts), info["right"])
+                last_print[occ] = {"bar": {"t": now, **bar}, "ts": now_ts, "bid": bid, "ask": ask, "half": half, "iv": vol,
                                    "day_volume": day_totals[occ][1], "day_trades": day_totals[occ][2]}
+                by_under.setdefault(info.get("underlying"), set()).add(occ)
         for order_id in [k for k, o in book.orders.items() if now_ts >= o["expires_ts"]]:
             del book.orders[order_id]
             book.expired_orders += 1
-        for symbol, bar in (step.get("execution_bars") or {}).items():
-            if _num(bar.get("c")):
-                spot[symbol] = (float(bar["c"]), now)
         for symbol, rows in (step.get("history_bars") or {}).items():
             series = history.setdefault(symbol, [])
             series.extend(dict(b) for b in rows)
