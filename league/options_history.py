@@ -245,6 +245,21 @@ CREATE TABLE IF NOT EXISTS features (symbol TEXT NOT NULL, day TEXT NOT NULL, ve
 """
 
 
+def _retrying(call: Callable[[], Any], *, attempts: int = 3, pause: float = 2.0) -> Any:
+    """A market-data GET is idempotent: a read that timed out is asked again, twice, before the
+    chunk is marked failed (measured Sept 22, 2026: under load the gateway timed out a one-page
+    daily-bar read that succeeded seconds later)."""
+    for attempt in range(attempts):
+        try:
+            return call()
+        except HistoryError:
+            raise  # the venue answered, and said no
+        except Exception as exc:  # noqa: BLE001 - a transport failure
+            if attempt == attempts - 1 or "HTTP 4" in str(exc):
+                raise  # the last attempt, or a refusal the gateway or venue gave
+            time.sleep(pause * (attempt + 1))
+
+
 def gateway_get(broker: Any) -> Callable[[str, Mapping[str, Any]], Any]:
     """`get(path, params)` through an `AlpacaBroker` in gateway mode: the market-data host for
     `/v1beta1`, the trading host for `/v2/options/contracts` (the gateway picks the host)."""
@@ -252,7 +267,7 @@ def gateway_get(broker: Any) -> Callable[[str, Mapping[str, Any]], Any]:
         base = broker.data if path.startswith("/v1beta") else broker.base
         pairs = [(k, v) for k, v in params.items() if v is not None and v != ""]
         url = base + path + ("?" + urllib.parse.urlencode(pairs, safe=",:") if pairs else "")
-        status, payload = broker.client.request("GET", url, headers={}, what=f"options history {path}")
+        status, payload = _retrying(lambda: broker.client.request("GET", url, headers={}, what=f"options history {path}"))
         if status != 200:
             detail = payload.get("error") or payload.get("message") if isinstance(payload, dict) else str(payload)[:200]
             raise HistoryError(f"HTTP {status} {detail}")
@@ -841,7 +856,8 @@ def adapter_from(alpaca_data: Any) -> Callable[[str, str, str, str], list[dict[s
         for _ in range(int(getattr(alpaca_data, "max_pages", 60))):
             params = {"symbols": name, "timeframe": timeframe, "start": stamp(start_ts - seconds), "end": stamp(end_ts),
                       "limit": STOCK_PAGE, "feed": alpaca_data.feed, "adjustment": "raw", "page_token": token}
-            payload = alpaca_data._get(alpaca_data.url(STOCK_BARS_PATH, params), what="alpaca stock bars (unadjusted)")
+            url = alpaca_data.url(STOCK_BARS_PATH, params)
+            payload = _retrying(lambda url=url: alpaca_data._get(url, what="alpaca stock bars (unadjusted)"))
             for row in (payload.get("bars") or {}).get(name) or []:
                 bar = alpaca_data._bar(row, seconds, daily_equity=timeframe == "1Day")
                 if bar is not None and start_ts <= bar[0] <= end_ts:

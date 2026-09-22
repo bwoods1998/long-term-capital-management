@@ -164,6 +164,29 @@ class Underlier(unittest.TestCase):
         self.assertEqual([b["t"] for b in bars], ["2026-03-02T15:15:00Z", "2026-03-02T15:30:00Z"])  # stamped at the close, both pages
 
 
+class Retries(unittest.TestCase):
+    def test_a_timed_out_read_is_asked_again_and_a_refusal_is_not(self):
+        tries = []
+
+        def flaky():
+            tries.append(1)
+            if len(tries) < 3:
+                raise TimeoutError("The read operation timed out")
+            return "ok"
+
+        self.assertEqual(oh._retrying(flaky, pause=0), "ok")
+        self.assertEqual(len(tries), 3)
+        refused = []
+
+        def refuse():
+            refused.append(1)
+            raise oh.HistoryError("HTTP 403 Not a path this gateway signs.")
+
+        with self.assertRaises(oh.HistoryError):
+            oh._retrying(refuse, pause=0)
+        self.assertEqual(len(refused), 1)
+
+
 class RecordedQuotes(unittest.TestCase):
     """From Sept 22, 2026 the House keeps the OPRA quotes it reads for live chains. Where a tape
     has one, the replay uses it instead of an estimate."""
