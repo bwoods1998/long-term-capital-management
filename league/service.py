@@ -174,6 +174,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
         real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
         replay_timeout=120 if canary else 600, kalshi_replay_days=1 if canary else 7, kalshi_replay_markets=60 if canary else 2000,
+        # Deep replay over the history store and the sealed holdout (league/deep_replay.py): on by
+        # default, inert until `python -m league.history ingest` has fetched a strategy's inputs.
+        deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
@@ -188,9 +191,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
-    # The continuous midpoint-direction labeler burned about $1/h of Jev's $20 lifetime allowance
-    # with no measured tradable value (Sept 22, 2026, $16.04 spent, $3.96 left). Off unless the
-    # config turns it back on after a capped evaluation shows value.
+    # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned
+    # about $1/h of Jev's $20 lifetime allowance ($16.04 spent at the gateway by Sept 22, 2026), and
+    # the capped evaluation of its own store found no tradable value: its labels predicted whether a
+    # midpoint moves, not which way, and no threshold trade beat the spread
+    # (docs/design/2026-09-22-jev-sensor.md).
     if campaigns is not None and campaigns.burst() and config.get("semantic_lab", False):
         from .semantic_lab import JevClient, SemanticLab
         house.semantic_lab = SemanticLab(root, JevClient(gateway_url, token), house.ledger,
@@ -220,6 +225,19 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Jev for every researcher (`classify`): one question over many records, at cost.
         from .semantic_lab import JevClient
         house.researcher.jev = JevClient(gateway_url, token)
+    jev = dict(config.get("jev") or {})
+    if not canary and jev.get("enabled", True):
+        # Jev as the cheap sensor in front of expensive work: research gate, explicit inactivity,
+        # triage into repair reports, hypothesis links, exposure groups. Capped and cached here;
+        # the gateway's lifetime allowance stays the authority (league/jev.py).
+        from .jev import Sensor
+        from .semantic_lab import JevClient
+        from .sensors import JevFloor
+
+        sensor = Sensor(root / "jev.sqlite", JevClient(gateway_url, token), clock=house.clock,
+                        daily_usd=str(jev.get("daily_usd", "0.25")), daily_calls=int(jev.get("daily_calls", 400)),
+                        purpose_calls=jev.get("purpose_calls") or None)
+        house.jev_floor = JevFloor(house, sensor, jev)
     if not canary:
         from .frontier import FrontierMonth
 

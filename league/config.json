@@ -18,5 +18,36 @@
     "start_at": "2026-09-19T04:56:53.000Z",
     "start_equity": "1017.3551",
     "_about": "The record's first point. start_equity was reset on Sept 19, 2026 (the owner's decision) to what the two real accounts held that afternoon, before the league's first real trade; the public chart draws start_equity plus the league's own real-money result."
+  },
+  "jev": {
+    "_about": "Jev as the cheap sensor (league/sensors.py). Caps are per UTC day across every purpose; the gateway's lifetime allowance stays the authority. Set enabled false to run the House exactly as before.",
+    "enabled": true,
+    "daily_usd": "0.25",
+    "daily_calls": 400,
+    "purpose_calls": {
+      "gate": 150,
+      "triage": 120,
+      "links": 60,
+      "exposure": 40
+    },
+    "research_gate": {
+      "enabled": true,
+      "max_skip_hours": 24,
+      "blocker_after": 1,
+      "_about": "after, max_factor and sample_percent are the v0 dials in game.json research.gate; game.json research.gate.enabled false turns every research gate off."
+    },
+    "triage": {
+      "enabled": true,
+      "interval_seconds": 1800,
+      "max_questions_per_run": 64
+    },
+    "hypothesis_links": {
+      "enabled": true,
+      "interval_seconds": 3600
+    },
+    "exposure": {
+      "enabled": true,
+      "interval_seconds": 1800
+    }
   }
 }
