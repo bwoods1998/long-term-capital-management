@@ -387,6 +387,25 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   outcome the House cannot prove (timeouts, restarts, unconfirmed posts). They are left
   conservative; releasing them needs vendor receipts. See the remaining work.
 
+- 18:05Z #116: the engineer makes one paid call per 15 minutes (it was 30). Measured yield: four
+  paid calls ($0.94) gave two merged repairs, with 53 jobs admitted. This spends about $1 an hour of
+  the research gate's measured saving on repairs.
+- **18:08:32Z The repair drill reached `verified`** ("no recurrence for 0.33 h after the fix was
+  running"). The whole state sequence ran on production: reported → admitted → reproducing →
+  patching → testing (#104) → revising (CI's failure text read back through the gateway) →
+  reproducing → patching → testing (#105) → canary → observing → verified. It is labelled
+  synthetic and cost $0.
+- 18:10Z #117. The hawkins job (#100) went back to `revising` because hawkins-9, still on the old
+  code, was refused again. A repair that only adds strategy files cannot change running agents,
+  so the agents that reported the problem on the old code no longer count as its recurrence.
+  Any other agent's recurrence still reopens the job.
+- **18:17:19Z The updater attested and deployed main `37bb07f` by itself** (`main-ded16d0d651d`:
+  the engineer's #113, and #114–#116). The canary passed 3 ticks; promoted 18:24:00Z.
+- 18:21Z #117's CI was cancelled at the 10-minute job limit on a slow runner: the `ltcm` suite
+  took 153 s against its usual 35–45 s. A rerun passed and #117 merged. The same slowness on a
+  `main` Checks run would block the updater's attestation until the hourly scheduled run passes;
+  it fails closed.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
