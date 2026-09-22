@@ -516,7 +516,7 @@ Built on September 19 and 20, 2026 ([the build log](docs/runs/2026-09-20-overnig
 every decision and its reason), then watched for twenty hours and repaired where it did not work
 ([the watch](docs/runs/2026-09-20-the-watch.md)).
 
-**At the end of the Sept 22 rebuild (⟨T⟩):**
+**At the end of the Sept 22 rebuild (21:10Z):**
 - **Real money:** earned live trading is active (`earned-live-20260921`, money rules unchanged),
   and mullins-2 (weather) is the one live agent.
 - **The league:** ⟨living⟩ agents live on paper and replay. Births follow evidence and hypothesis
