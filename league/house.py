@@ -99,6 +99,7 @@ class Settings:
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
+    history_coverage: bool = True  # each finished history ingestion (`league.history`) becomes a data.coverage row
 
 
 class House:
@@ -836,6 +837,20 @@ class House:
             with self._state_lock:
                 self._state["deploying_at"] = self.clock()
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files")})
+
+    def _history_coverage(self) -> None:
+        """What the history ingestion (a separate process, `python -m league.history`) fetched
+        becomes `data.coverage` ledger rows here, because only the House writes the ledger."""
+        now = self.clock()
+        if not self.settings.history_coverage or now - getattr(self, "_history_checked", 0.0) < 300:
+            return
+        self._history_checked = now
+        try:
+            from .history import publish_coverage
+
+            publish_coverage(self.ledger, self.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001 - a bad store file must never take the tick down
+            self.alert("warning", f"history coverage could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
 
     def deploying(self) -> bool:
         """Is a release on its way in? True from the moment one is staged until the grace is up."""
@@ -2719,6 +2734,7 @@ class House:
             self._background('semantic-lab', self.semantic_lab.run)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
+        self._history_coverage()
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
