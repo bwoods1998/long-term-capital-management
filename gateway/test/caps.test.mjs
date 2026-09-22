@@ -155,3 +155,16 @@ test('the gateway signs reads of option contracts and option data, and nothing t
   for (const [method, path] of [['POST', 'v2/options/contracts'], ['POST', 'v2/positions/SPY261016C00740000/exercise'], ['GET', 'v1beta1/options/meta/exchanges/../x'],
     ['DELETE', 'v2/positions'], ['GET', 'v1beta1/options/snapshots/SPY/extra']]) assert.ok(!allowedVenuePath('alpaca', method, path), `${method} ${path}`);
 });
+
+test('a v2 order is metered on the leg it trades, not the YES number on the wire', () => {
+  // Buying NO at $0.96: the adapter sends the YES-scale ask 0.04, and it costs $0.96 a contract.
+  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'ask', count: '10.00', price: '0.0400' }).micro), '9.60');
+  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'ask', count: '100.00', price: '0.0400' }).micro), '96.00');
+  // Buying YES is the wire's number.
+  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'bid', count: '10.00', price: '0.9600' }).micro), '9.60');
+  // Exits: selling YES rests on the ask at the YES price; selling NO rests on the bid at its complement.
+  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'ask', count: '10.00', price: '0.9600' }, { exit: true }).micro), '9.60');
+  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'bid', count: '10.00', price: '0.0400' }, { exit: true }).micro), '9.60');
+  // A body without a book side keeps the old reading.
+  assert.equal(usd(notional('kalshi', { count: '100', price: '0.0125' }).micro), '1.25');
+});

@@ -103,9 +103,9 @@ export function caps(env = {}) {
  * What one order is worth, in micro-dollars.
  * `{ micro }` when it can be priced, `{ error }` when it cannot -- which is a refusal, not a pass.
  */
-export function notional(venue, body, { reference = null } = {}) {
+export function notional(venue, body, { reference = null, exit = false } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
-  if (venue === 'kalshi') return kalshiNotional(body);
+  if (venue === 'kalshi') return kalshiNotional(body, exit);
   if (venue === 'alpaca') return alpacaNotional(body, reference);
   return { error: `Cannot price an order for an unknown venue: ${String(venue)}.` };
 }
@@ -113,10 +113,21 @@ export function notional(venue, body, { reference = null } = {}) {
 // Kalshi: count x price, in dollars. The v2 surface quotes decimal dollars (`price`); the legacy
 // surface quotes integer cents (`yes_price` / `no_price`). A contract can never settle above
 // $1.00, so a market order with no price of its own is worth at most its count in dollars.
-function kalshiNotional(body) {
+//
+// A v2 `price` is on the YES scale for BOTH legs, and `side` names the book side: "bid" buys YES
+// (or sells NO), "ask" sells YES (or buys NO). Buying NO at $0.96 goes out as
+// `side: "ask", price: "0.0400"` and costs $0.96 a contract. Metered on the wire's number it was
+// counted at $0.04, so this independent cap let a NO buy through at up to 24 times its real
+// principal (found Sept 22, 2026; the House's own book priced it right). The price is taken on
+// the leg the order really trades: the complement for an entry on the ask and an exit on the bid.
+function kalshiNotional(body, exit = false) {
   const count = parsePico(body.count);
   if (count === null || count <= 0n) return { error: 'Order count is missing or not positive.' };
   let price = parsePico(body.price);
+  if (price !== null && price > 0n && price < PICO && (body.side === 'bid' || body.side === 'ask')
+      && (body.side === 'ask') === !exit) {
+    price = PICO - price;
+  }
   if (price === null) price = centsToPico(body.yes_price);
   if (price === null) price = centsToPico(body.no_price);
   if (price === null) {
