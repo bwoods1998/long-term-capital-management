@@ -219,6 +219,19 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 - 17:23Z #111 (docs): `docs/operations.md`, the operator's page for pausing, inspecting,
   deploying, rolling back and recovering, plus the README's rebuild summary.
 
+- 17:30Z #111 (docs) and #112 merged. #112 makes a stop loud: every tick names its
+  `stopped_because` (also in `health.json`), and a stop that lasts three ticks raises one warning.
+- 17:37Z The owner's deploy of main `dcd97c2` (#110–#112) became release
+  `20260922T173718Z-42913a542843`. It had waited for the updater's release of #109, which was
+  promoted at 17:36:47Z; the lock allows one deploy at a time.
+  - 17:43:22Z promoted.
+  - 17:45:27Z the new House's first balance reading ($127.34) cleared the latch. The reconciliation
+    row `sail:balance-feed:1790099127` keeps the vendor's own evidence (`effective_range: "7d"`,
+    `plan_limited: true`, the rolling window) and the meter as it stood.
+  - 17:45:14Z the first tick reads `budget: "open"`: 5 agents woken, 1 order, all four books
+    reconciled.
+  - **The floor was stopped for 57½ minutes (16:47:39Z–17:45:14Z).**
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
