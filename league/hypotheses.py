@@ -73,6 +73,14 @@ TASK_EVALUATE = "hypothesis.evaluate"
 
 #: The dials, overridden by `game.json` `hypotheses`. Kept here too so an older game file (or a test
 #: game) still gets a sane, bounded foundry.
+def foundry_model(game: Mapping[str, Any]) -> str | None:
+    """The model the foundry writes cards with (`game.json` `hypotheses.model`), or None for the
+    House's frontier model. A card is judged by replay before it costs a seat, so it need not be
+    written by the dearest model: GPT-6 Sol from Sept 22, 2026, at about a fifth of Astra's price."""
+    model = str(((game or {}).get("hypotheses") or {}).get("model") or "").strip()
+    return model or None
+
+
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "replace_mutation_refill": True,
@@ -80,6 +88,7 @@ DEFAULTS: dict[str, Any] = {
     "candidates": 4,
     "max_output_tokens": 16000,
     "effort": "medium",
+    "model": "",  # empty: the House's frontier model
     "budget_usd": "20",
     "budget_window_hours": 24,
     "exploration_share": 0.2,

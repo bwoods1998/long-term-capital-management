@@ -13,7 +13,10 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+import json as _json
+
 from league import fast_research, grants
+from league.hypotheses import foundry_model
 from league.frontier import MODEL, MODEL_CEILINGS
 from league.routing import TABLE
 
@@ -29,7 +32,8 @@ def gateway_prices() -> dict:
 class ModelPrices(unittest.TestCase):
     def test_every_model_the_league_calls_is_priced_twice(self):
         prices = gateway_prices()
-        called = {MODEL, fast_research.MODEL, grants.MODEL} | {r.model for r in TABLE.values() if r.model.startswith("gpt-")}
+        game = _json.loads((REPO / "league" / "game.json").read_text(encoding="utf-8"))
+        called = {MODEL, fast_research.MODEL, grants.MODEL, foundry_model(game) or MODEL} | {r.model for r in TABLE.values() if r.model.startswith("gpt-")}
         for model in sorted(called):
             with self.subTest(model=model):
                 self.assertIn(model, prices, "the gateway would refuse it")
@@ -49,6 +53,17 @@ class ModelPrices(unittest.TestCase):
         self.assertEqual(MODEL_CEILINGS["gpt-6-luna"], (Decimal("0.25"), Decimal("0.75")))
         # The judge is not moved: real-money admission keeps the independent strongest reviewer.
         self.assertEqual(TABLE["audit"].model, "gpt-6-astra")
+
+
+class FoundryModel(unittest.TestCase):
+    def test_the_foundry_writes_on_gpt_6_sol_and_the_judges_keep_astra(self):
+        game = _json.loads((REPO / "league" / "game.json").read_text(encoding="utf-8"))
+        self.assertEqual(foundry_model(game), "gpt-6-sol")
+        self.assertEqual(TABLE["audit"].model, "gpt-6-astra")
+
+    def test_an_empty_setting_keeps_the_house_model(self):
+        self.assertIsNone(foundry_model({"hypotheses": {"model": ""}}))
+        self.assertIsNone(foundry_model({}))
 
 
 if __name__ == "__main__":

@@ -268,9 +268,14 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if merton and (house.game.get("hypotheses") or {}).get("enabled", True):
         # Merton writes hypothesis cards for the desks where the evidence is, and replay admits
         # them; routine refill stops breeding random mutations (league/hypotheses.py).
-        from .hypotheses import Foundry
+        from .hypotheses import Foundry, foundry_model
 
-        house.hypotheses = Foundry(house, frontier)
+        # Its cards are judged by replay before any seat, so it writes on the model game.json names
+        # (GPT-6 Sol from Sept 22, 2026: about a fifth of Astra's price, a call every quarter hour
+        # inside the same daily budget); the auditor and the engineer keep Astra.
+        model = foundry_model(house.game)
+        writer = frontier if model in (None, frontier.model) else Frontier(gateway_url, token, model=model, spend_guard=campaigns)
+        house.hypotheses = Foundry(house, writer)
     if house.researcher is not None and frontier is not None:
         # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
         # what a good record buys is better thinking.
