@@ -30,6 +30,10 @@ MODEL_CEILINGS = {
     "gpt-5.6-sol": (Decimal("10"), Decimal("30")),
     "gpt-5.6-terra": (Decimal("5"), Decimal("18")),
     "gpt-5.6-luna": (Decimal("0.50"), Decimal("1.80")),
+    # GPT-6 Sol and Luna, launched Sept 22, 2026 at half the GPT-5.6 rates: the long-context
+    # cache-write input rate and the long-context output rate (gateway/wrangler.jsonc).
+    "gpt-6-sol": (Decimal("5"), Decimal("15")),
+    "gpt-6-luna": (Decimal("0.25"), Decimal("0.75")),
 }
 
 
