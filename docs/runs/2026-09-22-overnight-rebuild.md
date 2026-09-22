@@ -106,6 +106,27 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   verifier of #93 reads to attest the exact commit. It is a read-only API host beside `github.com`
   and `codeload.github.com`, which were already allowed.
 
+- 15:00Z Ingestion restarted in a better order, which is resumable, so nothing was lost. Phase 2
+  had been running newest-first, so a capped run would probe months that deep replay never uses.
+  The new sequence on the box is:
+  - crypto alts at 15-minute bars since 2021, so the haghani desk can deep-replay;
+  - then quote probes over the holdout and the development window only
+    (`--quote-since 2025-03-07 --quote-until 2026-05-15`, capped at 200k calls).
+- 15:05Z #93 (verifier) and #99 (restart batch: `cache.explicit_hints` on) merged.
+- 15:10Z #91 (options history, options replay, IV/skew/activity features) merged. Gateway
+  version `8f829375-d373-4349-9941-609a04d5b820` deployed; it adds read-only historical option
+  prints. Alpaca has no historical option quotes, so options-replay quotes are labelled estimates.
+- 15:17Z Main `7ca0fae` deployed as release `20260922T151256Z-c7c96474e945`: canary passed 3
+  ticks, promoted 15:17:08Z, watch clean. Before the restart, the free sources filed 66 repair
+  reports (59 missing data, 7 strategy defects), all while the House was still paused.
+- **15:27:20Z Pause lifted (`floor_box.py maintenance off`): the rebuilt league is running.**
+  - The live grant is active and the money digest is unchanged.
+  - The aggressive layer (`turbo.json`) is unchanged: research every 5 minutes, 32/8 workers,
+    population 64. On top of it now sit the research gate, the hypothesis foundry in place of
+    mutation refill, the engineer, the Jev floor, deep replay with the holdout gate, and the
+    cached Luna layout.
+- 15:28Z Repair drill planted: `synthetic:repair-drill:20260922t152804`, labelled synthetic and $0.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
