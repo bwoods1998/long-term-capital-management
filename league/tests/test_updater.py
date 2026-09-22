@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -137,6 +138,31 @@ class UpdaterCase(unittest.TestCase):
         self.main = tarball(tree(tick_seconds=5, extra={"league/ci.py": wider}))
         self.assertEqual(self.updater(judge=lambda incoming: [] if "(5, 600)" in
                                       (incoming / "league" / "ci.py").read_text() else ["tick_seconds"]).check()["action"], "deploying")
+
+    def test_the_incoming_trees_checks_run_without_the_houses_secrets(self):
+        """The checks execute Merton-written strategy code; the House's process holds its three
+        tokens in the environment. The subprocess gets a scrubbed one."""
+        import os
+        from unittest import mock
+
+        from league import updater as module
+
+        seen = {}
+
+        def run(argv, **kw):
+            seen.update(kw.get("env") or {"<inherited>": "everything"})
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        secrets = {"GATEWAY_TOKEN": "g" * 40, "SAIL_API_KEY": "s" * 40, "CAPITAL_PUBLISH_TOKEN": "c" * 40,
+                   "LEAGUE_ENV": "/workspace/.env", "PATH": "/usr/bin"}
+        incoming = Path(self.dir.name) / "incoming-tree"
+        (incoming / "league").mkdir(parents=True)
+        (incoming / "league" / "ci.py").write_text("")
+        with mock.patch.dict(os.environ, secrets), mock.patch.object(module.subprocess, "run", run):
+            self.assertEqual(module.Updater._judged_by_itself(incoming), [])
+        self.assertEqual(seen.get("PATH"), "/usr/bin")
+        for name in ("GATEWAY_TOKEN", "SAIL_API_KEY", "CAPITAL_PUBLISH_TOKEN", "LEAGUE_ENV", "<inherited>"):
+            self.assertNotIn(name, seen)
 
     def test_a_sound_new_strategy_is_let_through(self):
         self.main = tarball(tree(extra={"league/strategies/ok.py": GOOD, "league/strategies/registry.json": json.dumps([{"name": "ok", "family": "t", "file": "ok.py", "why": "x"}])}))

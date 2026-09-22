@@ -178,13 +178,26 @@ class Updater:
             return ["the incoming tree has no league/ci.py to judge itself with"]
         try:
             done = subprocess.run([sys.executable, "-m", "league.ci", "--content-only"], cwd=str(incoming),
-                                  capture_output=True, text=True, timeout=600)
+                                  capture_output=True, text=True, timeout=600, env=vet_environment())
         except (OSError, subprocess.SubprocessError) as exc:
             return [f"the incoming tree's own checks could not be run: {type(exc).__name__}: {str(exc)[:200]}"]
         if done.returncode == 0:
             return []
         refused = [line[len("REFUSED: "):] for line in done.stdout.splitlines() if line.startswith("REFUSED: ")]
         return refused or [f"the incoming tree's own checks refused it (exit {done.returncode}): {(done.stderr or done.stdout)[-300:]}"]
+
+
+#: All the incoming tree's own checks may see of the House's environment. Those checks EXECUTE
+#: strategy code Merton wrote (its module body and a canned replay), and this process holds the
+#: House's three secrets in its environment (`service.load_env`): until Sept 22, 2026 nothing but
+#: the source scanner stood between that code and the gateway, Sail and site tokens. The checks
+#: need no credential and no network, so they get neither the secrets nor the path to the file
+#: that holds them (`LEAGUE_ENV`).
+VET_ENV_KEEP = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "PYTHONHASHSEED", "SYSTEMROOT")
+
+
+def vet_environment() -> dict[str, str]:
+    return {name: value for name, value in os.environ.items() if name in VET_ENV_KEEP}
 
 
 def _remove(path: Path) -> None:

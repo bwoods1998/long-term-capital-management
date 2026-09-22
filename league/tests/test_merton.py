@@ -284,11 +284,19 @@ class Consulting(unittest.TestCase):
         self.assertEqual(row["question"], "Why do my fills lose?")
         self.assertNotIn("code", row)  # the file is the agent's to run, not a line on the public record
         asked = self.frontier.asked[0]
-        self.assertEqual((asked["agent"], asked["effort"]), ("consult-meriwether-3", "high"))
+        # Room to finish: at 12,000 tokens and "high" effort most consultations of Sept 22, 2026
+        # spent the whole allowance reasoning and came back incomplete, paid for and empty.
+        self.assertEqual((asked["agent"], asked["effort"], asked["max_output_tokens"]), ("consult-meriwether-3", "medium", 16000))
         self.assertIn("THE STRATEGY CONTRACT", asked["system"])
         prompt = json.loads(asked["user"])
         self.assertEqual(prompt["question"], "Why do my fills lose?")
         self.assertEqual(prompt["evidence"], {"strategy_file": "x"})
+
+    def test_the_caller_may_set_the_room_and_effort_within_the_gateways_ceiling(self):
+        merton = self.merton({"answer": "ok", "code": "", "confidence": "low"})
+        merton.consult(self.agent, "Why do my fills lose?", {}, contract="C", max_output_tokens=90000, effort="high")
+        merton.consult(self.agent, "Why do my fills lose?", {}, contract="C", max_output_tokens=10, effort="loud")
+        self.assertEqual([(a["max_output_tokens"], a["effort"]) for a in self.frontier.asked], [(16000, "high"), (4000, "medium")])
 
     def test_a_whole_file_comes_back_whole(self):
         code = "NEEDS = {}\nPARAMS = {}\n\ndef decide(ctx):\n    return {}\n"

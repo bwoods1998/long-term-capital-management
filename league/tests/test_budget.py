@@ -4,7 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from league.budget import Budget
-from league.ledger import Ledger
+from league.ledger import Ledger, now_iso
 from league.tests.fakes import Clock
 
 D = Decimal
@@ -43,6 +43,30 @@ class BudgetTest(unittest.TestCase):
         self.assertEqual(self.step("447"), "stopped")  # 47.80 + 53 is over $100 this month
         other = Budget(self.ledger, lambda: D("9.99"), clock=self.clock)
         self.assertEqual(other.check(force=True), "stopped")
+
+    def test_an_owner_top_up_raises_that_months_line(self):
+        """Sept 21, 2026: the owner added $100 at Sail and recorded it with `campaign_topup.py`. That
+        raised the campaign's ceiling and left this meter's $100 line where it was, so the floor
+        would have stopped at $100 of September spend with his new credit unspent."""
+        month = now_iso(self.clock)[:7]
+        budget = Budget(self.ledger, lambda: self.balance, clock=self.clock, every_seconds=900,
+                        topped_up=lambda m: D("100") if m == month else D("0"))
+        self.assertEqual(budget.line(), D("200"))
+        self.assertEqual(budget.line("1999-01"), D("100"))
+        budget.check()  # 97.80
+        for balance, mode in (("40", "open"), ("240", "open"), ("150", "open"), ("90", "stopped")):
+            self.balance = D(balance)
+            self.clock.advance(901)
+            self.assertEqual(budget.check(), mode, balance)
+        # 57.80 + 90 = 147.80 was over the constitution's $100 and under the $200 line; + 60 is over it.
+        last = [e.payload for e in self.ledger.iter(kinds="ops.budget")][-1]
+        self.assertEqual((last["month_usd"], last["cap_usd"]), ("207.80", "200"))
+
+    def test_an_unreadable_top_up_record_raises_nothing(self):
+        def broken(month):
+            raise OSError("locked")
+
+        self.assertEqual(Budget(self.ledger, lambda: self.balance, clock=self.clock, topped_up=broken).line(), D("100"))
 
     def test_it_reads_at_most_once_an_interval_and_survives_an_unreadable_balance(self):
         reads = []

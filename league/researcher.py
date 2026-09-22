@@ -216,10 +216,47 @@ class Researcher:
             "strategy_file": agent.code,
             "params": agent.params,
             "journal": self.journal(agent.id),
-            "replays": [{k: e.payload.get(k) for k in ("passed", "sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "reasons", "digest")}
+            "replays": [{k: e.payload.get(k) for k in ("passed", "sharpe", "deflated_sharpe", "trials", "trades", "return_pct", "reasons")}
                         for e in self.ledger.read(kinds="eval.trial", agent=agent.id, limit=6, newest=True)],
+            # What Merton's brief says he is shown and, until Sept 22, 2026, was not: the agent's own
+            # trades, and where its replays won and lost (the digest a replay returns to the research
+            # pass, kept with each retained candidate).
+            "recent_trades": self._recent_trades(agent.id),
+            "replay_digests": self._replay_digests(agent.id),
             "contract_reminder": "the file you write is run in a sealed box with no network, by `decide(ctx)`",
         }
+
+    def _recent_trades(self, agent_id: str, *, limit: int = 40) -> list[dict[str, Any]]:
+        """Its own fills and settlements on every book it has traded, newest last."""
+        rows = []
+        for entry in self.ledger.read(kinds=("book.fill", "book.settle"), agent=agent_id, limit=limit, newest=True):
+            payload = entry.payload
+            if payload.get("source") == "dust":
+                continue
+            instrument = payload.get("instrument") or {}
+            row = {"at": entry.at, "kind": entry.kind.split(".", 1)[1], "book": payload.get("book"),
+                   "symbol": instrument.get("symbol") or instrument.get("market_id"), "leg": instrument.get("right")}
+            row.update({k: payload.get(k) for k in ("side", "quantity", "price", "fee_usd", "liquidity", "pnl", "result")
+                        if payload.get(k) is not None})
+            if payload.get("reason"):
+                row["reason"] = str(payload["reason"])[:160]
+            rows.append(row)
+        return rows
+
+    def _replay_digests(self, agent_id: str, *, limit: int = 4) -> list[dict[str, Any]]:
+        """Where its latest candidates' replays won and lost, from the candidates the House kept."""
+        rows = []
+        for entry in self.ledger.read(kinds="agent.research", agent=agent_id, limit=300, newest=True):
+            if entry.payload.get("tool") != "candidate":
+                continue
+            candidate = entry.payload.get("_candidate")
+            if not isinstance(candidate, dict):
+                continue  # a status row (forked, deferred...) names a candidate kept elsewhere
+            numbers = candidate.get("numbers") or {}
+            rows.append({"at": entry.at, "passed": bool(candidate.get("passed")), "code_sha256": numbers.get("code_sha256"),
+                         "trades": numbers.get("trades"), "reasons": numbers.get("reasons"),
+                         "digest": candidate.get("digest")})
+        return rows[-limit:]
 
     # ----------------------------------------------------------------- journal
     def journal(self, agent_id: str, *, entries: int = 14, chars: int = 700) -> list[dict[str, Any]]:
@@ -509,7 +546,11 @@ class Researcher:
             waited = (self.clock() - last) / 3600
             return {"error": f"you hired Merton {waited:.1f}h ago; at rung {rung} and {'profitable' if winning else 'not yet profitable'} "
                              f"you may have him every {hours:g}h. Profit buys more of him than anything else."}
-        reply = self.merton.consult(agent, question, self.consult_evidence(agent), contract=self.contract)
+        from .merton import CONSULT_EFFORT, CONSULT_OUTPUT_TOKENS
+
+        reply = self.merton.consult(agent, question, self.consult_evidence(agent), contract=self.contract,
+                                    max_output_tokens=int(rules.get("max_output_tokens") or CONSULT_OUTPUT_TOKENS),
+                                    effort=str(rules.get("effort") or CONSULT_EFFORT))
         asked_for = reply.get("tool") or None
         if asked_for and asked_for.get("name"):
             # What Merton says the agent cannot work without goes to the queue the toolsmith builds
@@ -688,7 +729,9 @@ class Researcher:
                 # hours and has no record to protect takes a file that at least trades).
                 candidate = {"code": code, "needs": outcome.get("needs") or {}, "params": outcome.get("params") or {},
                              "numbers": numbers, "passed": bool(outcome.get("passed")),
-                             "purpose": str(args.get("purpose") or "")[:600]}
+                             "purpose": str(args.get("purpose") or "")[:600],
+                             # Kept so a later consultation can show Merton where this file won and lost.
+                             "digest": outcome.get("digest")}
                 # The House applies one candidate after the pass. Exploring another idea must not
                 # erase a passing file, or the trading file an idle agent could adopt on paper.
                 # Among equally usable candidates, keep the model's latest refinement.

@@ -246,6 +246,14 @@ def parse_proposal(role: str, answer: Mapping[str, Any], cost: Decimal) -> Propo
                     str(answer.get("body") or "")[:7000], files, dropped, cost, answers)
 
 
+#: A consultation's output room and reasoning effort. Measured Sept 22, 2026: at 12,000 tokens and
+#: "high" effort, five of seven consultations after midnight spent the whole allowance reasoning and
+#: came back incomplete -- the agent paid about $0.73 each for nothing, and the ones that finished
+#: cost the same, so they were at the ceiling too. The auditor answers at "medium" in 12,000 and
+#: has never run out. 16,000 is the gateway's ceiling.
+CONSULT_OUTPUT_TOKENS = 16000
+CONSULT_EFFORT = "medium"
+
 CONSULT = """You are Merton, the firm's theorist. One of its trading agents is paying you, out of the compute
 credits it earned by performing, to think about ITS problem. It cannot do this often: the better it trades the
 more it can afford you, so treat its question as expensive and answer the question it asked.
@@ -308,15 +316,18 @@ class Merton:
         self.backoff_max = dict(backoff_max or {})
 
     # ---------------------------------------------------------------- consult
-    def consult(self, agent: Any, question: str, evidence: Mapping[str, Any], *, contract: str) -> dict[str, Any]:
+    def consult(self, agent: Any, question: str, evidence: Mapping[str, Any], *, contract: str,
+                max_output_tokens: int = CONSULT_OUTPUT_TOKENS, effort: str = CONSULT_EFFORT) -> dict[str, Any]:
         """One agent hires Merton with its own credits. Returns `{"answer", "code", "confidence",
         "cost_usd"}`; `code` is empty unless Merton wrote a whole strategy file. Never raises: a
         refused call costs nothing; an unreadable paid answer retains its metered cost."""
         system = CONSULT + "\n\nTHE STRATEGY CONTRACT (the file format any code you write must follow)\n\n" + contract
         reply = None
+        effort = effort if effort in ("low", "medium", "high") else CONSULT_EFFORT
         try:
             reply = self.frontier.ask(system=system, user=json.dumps({"question": question, "evidence": evidence}, default=str),
-                                      agent=f"consult-{agent.id}", max_output_tokens=12000, effort="high")
+                                      agent=f"consult-{agent.id}", max_output_tokens=max(4000, min(int(max_output_tokens), 16000)),
+                                      effort=effort)
             answer = reply.json()
         except FrontierError as exc:
             detail = "could not be reached" if reply is None else "returned an unreadable answer"

@@ -1784,13 +1784,39 @@ class House:
         rank.sort(key=lambda row: row[:4])  # has it traded at all, then growth, then how much, then its purse
         return rank[0][4] if rank else None
 
-    def frontier_tier(self) -> str:
-        """What frontier work the gateway's month still pays for (`frontier.frontier_tier`).
-        A change of tier is written to the ledger once, so the owner reads why Merton went quiet."""
-        from .frontier import frontier_tier
+    def frontier_remaining(self) -> Decimal | None:
+        """The tighter of the two OpenAI lines: the gateway's month (`FrontierMonth`) and the House's
+        own campaign allowance, which refuses at its own line whatever the gateway has left.
 
+        The reserve that keeps the last dollars for audits read only the gateway. On Sept 22, 2026 the
+        campaign -- which books every call at the House's ceiling prices, about twice the gateway's --
+        had $139 left against the gateway's $166 while committing about $17 an hour: it would have
+        refused every call, audits included, while the tier still said "all". None when neither line
+        can be read; the campaign counts only beside a month reader, as in production."""
         month = self.frontier_month
         remaining = month.remaining() if month is not None else None
+        campaigns = self.campaigns if month is not None else None
+        if campaigns is not None:
+            now = self.clock()
+            cached = getattr(self, "_campaign_openai", None)
+            if cached is None or now - cached[0] >= 30:
+                try:
+                    value = Decimal(str(campaigns.remaining("openai")))
+                    cached = (now, value if value.is_finite() else None)
+                except Exception:  # noqa: BLE001 - unreadable is unknown, never a number
+                    cached = (now, None)
+                self._campaign_openai = cached
+            if cached[1] is not None:
+                remaining = cached[1] if remaining is None else min(remaining, cached[1])
+        return remaining
+
+    def frontier_tier(self) -> str:
+        """What frontier work the OpenAI budget still pays for (`frontier.frontier_tier`), on the
+        tighter of its two lines (`frontier_remaining`). A change of tier is written to the ledger
+        once, so the owner reads why Merton went quiet."""
+        from .frontier import frontier_tier
+
+        remaining = self.frontier_remaining()
         tier = frontier_tier(remaining, self.game.get("frontier_reserve"))
         with self._state_lock:
             changed = tier != self._state.get("frontier_tier", "all")
@@ -1798,9 +1824,9 @@ class House:
         if changed:
             shown = f"${remaining:.2f}" if remaining is not None else "unknown"
             self.alert("warning" if tier != "all" else "info", {
-                "all": f"frontier month {shown} left: every role runs again",
-                "earned": f"frontier month {shown} left: cheap research moves to Sail and the unearned roles pause",
-                "audits": f"frontier month {shown} left: only audits and winners' consultations remain"}[tier])
+                "all": f"frontier budget {shown} left: every role runs again",
+                "earned": f"frontier budget {shown} left: cheap research moves to Sail and the unearned roles pause",
+                "audits": f"frontier budget {shown} left: only audits and winners' consultations remain"}[tier])
         return tier
 
     def research_order(self) -> list[Agent]:

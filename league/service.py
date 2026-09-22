@@ -212,7 +212,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
             house.researcher.grants = ResearchGrants.funded(root / 'grants.sqlite', gateway_url, token,
                 house.ledger, campaigns, clock=house.clock)
     if provider is not None:
-        house.budget = Budget(house.ledger, lambda: provider.check_balance())
+        # The owner's recorded Sail top-ups raise the account meter's monthly line as well as the
+        # campaign's ceiling: otherwise the meter stops the floor with the new credit unspent.
+        house.budget = Budget(house.ledger, lambda: provider.check_balance(),
+                              topped_up=(lambda month: campaigns.topped_up("sail", month)) if campaigns is not None else None)
     if not canary and REPO.parent.name == "releases" and not local_sandbox:
         # On the House box only: a daily checkpoint of the box itself, so the ledger (every agent's
         # code, record and journal) outlives the one disk it lives on.
