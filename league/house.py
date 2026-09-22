@@ -100,6 +100,13 @@ class Settings:
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
     history_coverage: bool = True  # each finished history ingestion (`league.history`) becomes a data.coverage row
+    # Alpaca replays walk the history store's development window (`league/deep_replay.py`) when it
+    # holds every input, and the live 21-day tape when it does not; a deep-replay pass is promoted
+    # only after the sealed holdout passes too, at most `holdout_lineage_budget` times a lineage.
+    deep_replay: bool = True
+    deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
+    holdout_gate: bool = True
+    holdout_lineage_budget: int = 3
 
 
 class House:
@@ -153,6 +160,9 @@ class House:
         self.commons = commons or Commons(self.ledger)
         self.sandbox = sandbox
         self.alpaca_data = alpaca_data
+        from .deep_replay import HOLDOUT
+
+        self.holdout_window: tuple[str, str] = HOLDOUT  # the sealed window (tests shorten it)
         self.kalshi_data = kalshi_data
         self.provider = provider
         self.auditor = auditor
@@ -872,6 +882,10 @@ class House:
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
+        if venue == "alpaca" and self.settings.deep_replay:
+            deep = self._deep_tape(needs)
+            if deep is not None:
+                return deep
         end = self.clock()
         if venue == "kalshi":
             # The first dry run's agents asked for this themselves: one day of hourly markets is 17
@@ -920,6 +934,74 @@ class House:
             if hit is None or end - hit[0] > 86400:
                 self._tapes[key] = (end, build())
             return key, self._tapes[key][1]
+
+    def _history_store(self) -> Any:
+        """The history store (`league.history`), read-only, or None before anything was ingested."""
+        from .history import DB_NAME, HISTORY_DIR, HistoryStore
+
+        path = self.root / HISTORY_DIR / DB_NAME
+        return HistoryStore(path, readonly=True) if path.exists() else None
+
+    def _deep_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        """The development-window tape from the history store, or None when it is not all fetched
+        (then the live tape is used, exactly as before). Deep tapes are cached like live ones."""
+        from . import deep_replay
+        from .tapes import TapeError
+
+        store = self._history_store()
+        if store is None:
+            return None
+        feed = getattr(self.alpaca_data, "feed", None) or "sip"
+        horizon = str(needs.get("horizon") or "hour")
+        start, end = deep_replay.dev_window(horizon, days=self.settings.deep_replay_days or None, holdout=self.holdout_window)
+        timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
+        warmup = int((needs.get("bars") or {}).get("limit") or 120)
+        key = f"deep:alpaca:{','.join(deep_replay._symbols_of(needs))}:{timeframe}:{warmup}:{horizon}:{start}:{end}:{feed}"
+        try:
+            with self._tape_lock:
+                hit = self._tapes.get(key)
+                if hit is None or self.clock() - hit[0] > 86400:
+                    self._tapes[key] = (self.clock(), deep_replay.dev_tape(store, needs, feed=feed, days=self.settings.deep_replay_days or None,
+                                                                          holdout=self.holdout_window)[1])
+                return key, self._tapes[key][1]
+        except TapeError:
+            return None  # not fetched yet: a gap in the store is never a result against the strategy
+        finally:
+            store.close()
+
+    def _holdout(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+        """The sealed holdout, once per strategy version, rationed per lineage: the base replay
+        and the double-spread one must both pass the replay gate. Pass or fail and coarse
+        numbers come back; the detail stays in the private `holdout.access` row."""
+        from . import deep_replay
+
+        store = self._history_store()
+        if store is None:
+            return {"evaluated": False, "refused": "no history store"}
+        feed = getattr(self.alpaca_data, "feed", None) or "sip"
+        row = CONSTITUTION["rungs"]["1"]
+        stake = float(row["stake_usd"])
+        limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}
+        lineage = self.registry.lineage(agent.id)
+
+        def run(window: tuple[str, str]) -> dict[str, Any]:
+            out = {}
+            for name, stress in (("base", 1.0), ("stressed", deep_replay.STRESS)):
+                tape = deep_replay.holdout_tape(store, needs, feed=feed, stress=stress, holdout=window)
+                done = self.sandbox.replay(agent.id, code, params, tape, stake=stake, limits=limits, timeout=self.settings.replay_timeout)
+                self._charge_box(agent.id, done, note="a sealed holdout replay")
+                out[name] = done.result
+            return out
+
+        def passed(results: Mapping[str, Any]) -> bool:
+            return all(self.evaluator.replay_gate(agent.family, r, lineage=lineage, counted=True)[0] for r in results.values())
+
+        try:
+            seal = deep_replay.HoldoutSeal(self.ledger, budget=self.settings.holdout_lineage_budget, window=self.holdout_window)
+            return seal.evaluate(agent=agent.id, lineage=lineage[-1] if lineage else agent.id, code=code, params=params,
+                                 run=run, passed=passed)
+        finally:
+            store.close()
 
     def _underlier_bars(self, symbols: Sequence[str], start_iso: str, end_iso: str, *, timeframe: str | None = None, warmup: int = 0) -> dict[str, list[dict[str, Any]]]:
         """Bars of what a Kalshi strategy watches on Alpaca, over the same window as its tape.
@@ -972,7 +1054,8 @@ class House:
             raise
         self._charge_box(agent.id, run, note="a replay")
         artifact = self.experiments.finish(attempt, run.result, seconds=run.seconds)
-        return {**run.result, "experiment": artifact}, attempt["tape"]
+        source = "history-dev" if (tape.get("source") or {}).get("store") == "history" else "live"
+        return {**run.result, "experiment": artifact, "tape_source": source}, attempt["tape"]
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
@@ -1066,6 +1149,9 @@ class House:
         if crash:
             self.alert("warning", f"{agent.id}: its replay was not run ({crash[:160]}); it is not counted as a trial and will be tried again")
             return {"agent": agent.id, "skipped": f"the replay could not be run: {crash[:120]}"}
+        # A pass on the history store's development window is promoted only once the sealed
+        # holdout agrees (`_holdout`); the live tape's pass is promoted as it always was.
+        sealed = self.settings.holdout_gate and result.get("tape_source") == "history-dev"
         with self._lifecycle_lock:
             current = self._generation(agent.id) == generation
             if current:
@@ -1074,10 +1160,22 @@ class House:
             # A stale replay still consumed a trial, but cannot qualify or mark a replacement
             # strategy as tested. Its captured code and parameters remain on the trial row.
             verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id,
-                                                  promote=current, lineage=self.registry.lineage(agent.id))
+                                                  promote=current and not sealed, lineage=self.registry.lineage(agent.id))
             if verdict.decision == "promote":
                 self.seat(self.registry.get(agent.id))
-        return {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
+        holdout = None
+        if sealed and current and verdict.numbers.get("passed") and self.evaluator.rung(agent.id) == 0:
+            holdout = self._holdout(agent, agent.code, agent.needs, agent.params)  # slow: outside the lock
+            with self._lifecycle_lock:
+                if holdout.get("passed") and holdout.get("evaluated") and self._generation(agent.id) == generation \
+                        and self.evaluator.rung(agent.id) == 0:
+                    verdict = self.evaluator.promote(agent.id, 1, "passed deep replay and the sealed holdout",
+                                                     {**verdict.numbers, "holdout": holdout})
+                    self.seat(self.registry.get(agent.id))
+        out = {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
+        if holdout is not None:
+            out["holdout"] = holdout
+        return out
 
     def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
         """The researcher's `replay` tool: a counted trial of candidate code, never a promotion."""

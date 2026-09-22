@@ -800,8 +800,8 @@ class Ingestor:
         return out
 
     def probe_times(self, chunk: Chunk, symbol: str) -> list[int]:
-        """The bar closes a day's probes ask about: every grid close inside the regular session
-        for an equity (none on a closed day), every grid close of the UTC day for crypto."""
+        """The bar closes a day's probes ask about: every clock-aligned grid close inside the
+        regular session for an equity (none on a closed day), every one of the UTC day for crypto."""
         step = TIMEFRAME_SECONDS[chunk.timeframe]
         if is_crypto(symbol):
             start = int(_ts(chunk.start))
@@ -810,7 +810,9 @@ class Ingestor:
                                  date(chunk.start.year + (chunk.start.month == 12), chunk.start.month % 12 + 1, 1))
         for day, open_ts, close_ts in sessions:
             if day == str(chunk.start):
-                return list(range(open_ts + step, close_ts + 1, step))
+                # Bar closes are clock-aligned (an hourly bar closes at 10:00, not 10:30), so the
+                # grid is every multiple of the step after the open, up to and including the close.
+                return list(range((open_ts // step + 1) * step, close_ts + 1, step))
         return []
 
     def fetch_probes(self, chunk: Chunk, symbols: Sequence[str], run: "str | None" = None) -> dict[str, str]:
@@ -1045,6 +1047,7 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
     parser.add_argument("--feed", default=None, help="stock feed; default: league/config.json alpaca_feed")
     parser.add_argument("--quotes", default="", help="quote probes for these symbols ('set' = the default small liquid set)")
     parser.add_argument("--quote-since", default=None, help="first day of quote probes (default: 200 days ago)")
+    parser.add_argument("--quote-until", default=None, help="day after the last day of quote probes (default: today)")
     parser.add_argument("--quote-grid", default="5Min", help="equity probe grid inside the regular session")
     parser.add_argument("--crypto-grid", default="15Min", help="crypto probe grid over the whole day")
     parser.add_argument("--trades", default="", help="trade windows for these symbols ('set' = the equity quote set)")
@@ -1090,8 +1093,9 @@ def main(argv: "Sequence[str] | None" = None, *, client: Any = None) -> int:
         quote_symbols = list(QUOTE_SET) if args.quotes == "set" else [s.strip().upper() for s in args.quotes.split(",") if s.strip()]
         trade_symbols = [s for s in QUOTE_SET if not is_crypto(s)] if args.trades == "set" else [s.strip().upper() for s in args.trades.split(",") if s.strip()]
         quote_since = args.quote_since or str((datetime.now(timezone.utc) - timedelta(days=200)).date())
-        chunks += ingestor.probe_plan(quote_symbols, quote_since, grid=args.quote_grid, crypto_grid=args.crypto_grid) if quote_symbols else []
-        chunks += ingestor.trade_plan(trade_symbols, quote_since) if trade_symbols else []
+        chunks += ingestor.probe_plan(quote_symbols, quote_since, args.quote_until, grid=args.quote_grid,
+                                      crypto_grid=args.crypto_grid) if quote_symbols else []
+        chunks += ingestor.trade_plan(trade_symbols, quote_since, args.quote_until) if trade_symbols else []
         stamp(f"run {run}: {len(chunks)} chunks planned for {len(symbols)} symbols, {timeframes}, since {args.since}, feed {feed}")
         tally = ingestor.run(chunks, run=run, max_minutes=args.max_minutes, stop=stop, max_calls=args.max_calls)
         # An `open` chunk (it reaches into the present) is fetched again on every run by design;
