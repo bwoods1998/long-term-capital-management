@@ -120,6 +120,7 @@ LEAGUE_HOSTS = (
     "news.google.com",               # the commons' news reader
     "github.com",                    # merged code, pulled without credentials
     "codeload.github.com",
+    "api.github.com",                # the check runs on the exact commit the updater deploys (league/updater.py)
 )
 
 

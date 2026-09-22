@@ -180,6 +180,15 @@ class House:
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
+        #: A cheap deterministic look at a paper agent's first wakes and code (`league/preaudit.py`):
+        #: repair reports and a promotion-status mark, never a kill and never a statistic.
+        from .preaudit import PreAudit
+        from .consult_recovery import ConsultRecovery
+
+        self.pre_audit: Any = PreAudit(self.ledger, clock=clock, settings=self.game.get("pre_audit"))
+        #: Actionable work left in past `ask_merton` consults and research summaries, as repair
+        #: reports (`league/consult_recovery.py`): a one-shot backfill, then incremental.
+        self.consult_recovery: Any = ConsultRecovery(self.ledger, clock=clock, settings=self.game.get("consult_recovery"))
         self.kill_switch = kill_switch
         self.books: dict[str, Book] = {}
         for name, broker in brokers.items():
@@ -213,7 +222,9 @@ class House:
         # research, the daily backup and the niche survey all waited behind 28 founders' replays).
         self._lanes = {"replay": threading.Semaphore(max(1, self.settings.slow_workers)),
                        "research": threading.Semaphore(max(1, self.settings.research_workers)),
-                       "ops": threading.Semaphore(max(1, self.settings.ops_workers))}
+                       "ops": threading.Semaphore(max(1, self.settings.ops_workers)),
+                       # Audits wait behind no Merton pass and no backup: one at a time, their own lane.
+                       "audit": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
         self.researcher = None
@@ -332,12 +343,15 @@ class House:
         return state
 
     def _save_state(self) -> None:
+        # The write under the lock too: the audit job saves from its own thread (it persists the
+        # audit it starts and the one it finishes), and two writers sharing one temporary file
+        # could lose a replace or leave an older snapshot behind a newer one.
         with self._state_lock:
             text = json.dumps(self._state, sort_keys=True)
-        tmp = self._state_path.with_suffix(".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, self._state_path)
+            tmp = self._state_path.with_suffix(".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self._state_path)
 
     def _record_start(self) -> None:
         self.ledger.append(
@@ -856,7 +870,8 @@ class House:
 
     def _update(self) -> None:
         outcome = self.updater.check()
-        if outcome.get("action") != "none":
+        action = outcome.get("action")
+        if action == "deploying":
             # A promotion signals this process and a fresh one comes up thirty seconds later, so
             # every research pass still running is thrown away with everything it has read. The
             # canary and its watch give about ten minutes of warning: stop STARTING passes now and
@@ -864,7 +879,15 @@ class House:
             # thirteen minutes killed eleven passes, which is most of an hour's research.
             with self._state_lock:
                 self._state["deploying_at"] = self.clock()
-            self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files")})
+        if action == "deploying" or (action == "refused" and outcome.get("new", True)) or outcome.get("new"):
+            # The attestation is the record of what GitHub said about the exact commit (see
+            # league/updater.py); a head that is merely waiting for its checks is not news.
+            self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files", "sha", "attestation")})
+        if action in ("refused", "blocked", "waiting") and outcome.get("new"):
+            # A warning, never an error: an error alert inside a release's watch rolls THAT release
+            # back, and a head that cannot be deployed says nothing about the one running.
+            self.alert("warning", f"main {str(outcome.get('sha') or '?')[:12]} was not deployed ({action}): "
+                                  + "; ".join(str(r) for r in outcome.get("reasons") or [])[:700])
 
     def _history_coverage(self) -> None:
         """What the history ingestion (a separate process, `python -m league.history`) fetched
@@ -1170,7 +1193,8 @@ class House:
         if running is not None and running.is_alive():
             return False
 
-        lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay") else "ops"]
+        lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay")
+                           else "audit" if key.startswith("audit:") else "ops"]
         with self._state_lock:
             self._job_status[key] = {"queued_at": self.clock(), "started_at": None}
 
@@ -1383,6 +1407,14 @@ class House:
                'stage': stage, 'reason': reason,
                'evidence': {k: verdict.numbers[k] for k in ('active_blocks', 'episodes', 'via', 'trades', 'recent_drawdown', 'mean', 'lcb')
                             if k in verdict.numbers}, **detail}
+        from .preaudit import mark_of
+
+        with self._state_lock:
+            mark = mark_of(self._state, agent)
+        if mark:
+            # The pre-audit's finding rides along with every status, so a broken strategy is seen
+            # (by the agent's research packet and the site) as needing a corrected child.
+            row['pre_audit'] = {k: mark.get(k) for k in ('verdict', 'flags', 'repair_key')}
         with self._state_lock:
             states = self._state.setdefault('promotion_status', {})
             old = states.get(agent.id) or {}
@@ -1437,19 +1469,101 @@ class House:
                 if self.auditor is None:
                     self._promotion_status(agent, verdict, 'audit_unavailable', 'the production auditor is unavailable')
                     return
-                wait = self._audit_wait(agent)
-                if wait:
-                    self._promotion_status(agent, verdict, **wait)
+                inflight = self._audit_inflight(agent.id, generation)
+                if inflight == "running":
+                    return  # one audit at a time: the job in hand commits its own result
+                if inflight is None:
+                    wait = self._audit_wait(agent)
+                    if wait:
+                        self._promotion_status(agent, verdict, **wait)
+                        return
+                    self._promotion_status(agent, verdict, 'auditing', 'a fresh production audit is in progress')
+                    self._start_audit(agent, verdict, generation)
                     return
-                self._promotion_status(agent, verdict, 'auditing', 'a fresh production audit is in progress')
         if rung == 1:
-            audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
-            if not audit.get("approve"):
-                self._promotion_status(agent, verdict, 'audit_veto', str(audit.get('summary') or audit.get('error') or 'audit did not approve'))
-                return  # it stays on paper, where its record is the auditor's counterfactual
+            # An audit that finished before a restart and never reached its commit: its verdict
+            # is on the ledger, bound to this very generation, so it is committed, not bought again.
+            self._finish_audit(agent.id, verdict, generation, inflight)
+            return
+        self._commit_promotion(agent.id, verdict, rung, generation)
+
+    # ------------------------------------------------------------------ audits
+    # The audit is a frontier call of up to ~570 s. It used to run inline in `_promote`, which is
+    # called from `judge`, which the tick calls in its mark pass: one audit stalled every wake of
+    # the floor for up to ten minutes, real-money exits included. It now runs as a background job
+    # with the generation checked before and after; its "auditing" status and the generation it is
+    # bound to are persisted, so a restart neither loses an approval nor pays for a second audit.
+    AUDITS = "audits"
+
+    def _audit_inflight(self, agent_id: str, generation: tuple) -> Any:
+        """"running" while this process audits the agent; the recorded verdict when an audit of
+        this exact generation finished before a restart and its commit never happened; else None.
+        A record for another generation, or one whose audit left no verdict (the process died
+        mid-call), is dropped: the next eligible screen is audited afresh."""
+        job = self._jobs.get(f"audit:{agent_id}")
+        if job is not None and job.is_alive():
+            return "running"
+        with self._state_lock:
+            record = (self._state.get(self.AUDITS) or {}).get(agent_id)
+        if not record:
+            return None
+        if list(record.get("generation") or []) != list(generation):
+            self._drop_audit(agent_id)
+            return None
+        verdicts = list(self.ledger.iter(kinds="audit.verdict", agent=agent_id, after=int(record.get("since_seq") or 0)))
+        if not verdicts:
+            self._drop_audit(agent_id)
+            return None
+        return {**verdicts[-1].payload, "resumed_from_seq": verdicts[-1].seq}
+
+    def _drop_audit(self, agent_id: str) -> None:
+        with self._state_lock:
+            (self._state.get(self.AUDITS) or {}).pop(agent_id, None)
+
+    def _start_audit(self, agent: Agent, verdict: Verdict, generation: tuple) -> None:
+        """Persist the audit before dispatching it (called under the lifecycle lock)."""
+        with self._state_lock:
+            self._state.setdefault(self.AUDITS, {})[agent.id] = {
+                "generation": list(generation), "since_seq": self.ledger.head()[0], "at": now_iso(self.clock),
+                "rung": verdict.rung, "code_sha256": agent.code_sha256}
+        self._save_state()
+        if not self._background(f"audit:{agent.id}", self._run_audit, agent.id, verdict, generation):
+            self._drop_audit(agent.id)  # closing: the next process audits it afresh
+
+    def _run_audit(self, agent_id: str, verdict: Verdict, generation: tuple) -> None:
         with self._lifecycle_lock:
-            if self._generation(agent.id) != generation:
+            if self._generation(agent_id) != generation:
+                self._drop_audit(agent_id)
+                return  # retired, rewritten or moved while it waited for a lane
+            agent = deepcopy(self.registry.get(agent_id))
+        try:
+            audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
+        except Exception as exc:  # noqa: BLE001 - an auditor that raises has not audited
+            # Recorded the way the auditor records its own failures, so the short error cooldown
+            # applies: otherwise a broken audit is retried at every mark pass, five minutes apart.
+            audit = {"approve": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                     "summary": "the audit could not run; the agent stays on paper"}
+            self.ledger.append("audit.verdict", {**audit, "policy_digest": getattr(self.auditor, "policy_digest", None)}, agent=agent_id)
+        self._finish_audit(agent_id, verdict, generation, audit)
+
+    def _finish_audit(self, agent_id: str, verdict: Verdict, generation: tuple, audit: Mapping[str, Any]) -> None:
+        try:
+            if not audit.get("approve"):
+                agent = self.registry.get(agent_id)
+                if agent is not None:
+                    self._promotion_status(agent, verdict, 'audit_veto', str(audit.get('summary') or audit.get('error') or 'audit did not approve'))
+                return  # it stays on paper, where its record is the auditor's counterfactual
+            self._commit_promotion(agent_id, verdict, 1, generation)
+        finally:
+            self._drop_audit(agent_id)
+            self._save_state()
+
+    def _commit_promotion(self, agent_id: str, verdict: Verdict, rung: int, generation: tuple) -> None:
+        """The gates again after the audit, exactly as before it moved off the tick."""
+        with self._lifecycle_lock:
+            if self._generation(agent_id) != generation:
                 return
+            agent = self.registry.get(agent_id)
             source_book = self.book_of(agent)
             if rung >= 1 and source_book is not None and not source_book.evidence_integrity(agent.id)['ok']:
                 self._promotion_status(agent, verdict, 'accounting_integrity',
@@ -1471,6 +1585,16 @@ class House:
             self._promotion_status(agent, verdict, 'promoted', 'the screen, audit and allocation gates passed')
             if rung == 1 and old is not None:
                 self._move_books(agent, old)
+
+    def _recover_consults(self) -> None:
+        # On a copy: `_save_state` must never see the dict change in the middle of its dump.
+        from .consult_recovery import STATE_KEY
+
+        with self._state_lock:
+            state = dict(self._state.get(STATE_KEY) or {})
+        self.consult_recovery.run(state)
+        with self._state_lock:
+            self._state[STATE_KEY] = state
 
     def _run_backup(self) -> None:
         row = self.backup.run()
@@ -2995,6 +3119,11 @@ class House:
             self.jev_floor.tick(open_for_business)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
+        # Both are code over the ledger and cost nothing, so they run while the House is paused too.
+        if self.pre_audit is not None and self.pre_audit.due():
+            self._background("pre-audit", self.pre_audit.run, self)
+        if self.consult_recovery is not None and self.consult_recovery.due():
+            self._background("consult-recovery", self._recover_consults)
         self._history_coverage()
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
