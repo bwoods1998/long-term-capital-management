@@ -127,6 +127,58 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
     cached Luna layout.
 - 15:28Z Repair drill planted: `synthetic:repair-drill:20260922t152804`, labelled synthetic and $0.
 
+- 15:28–15:32Z First open ticks. The first took 246 s: every agent became due for research at
+  once after six paused hours. The Merton roles all fired too; six passes cost $2.23 at gateway
+  prices.
+- 15:29Z–15:56Z **The first real repair, end to end.**
+  - The engineer took a pre-audit finding: hawkins strategies check time to close, not time to
+    payout, so their entries are refused past the 48 h rule.
+  - It wrote a corrected child strategy, and PR #100 was opened in the new per-strategy file
+    format.
+  - CI passed and the Merton workflow merged it.
+  - At 15:50Z **the release verifier's updater attested the exact commit** (the Checks run on that
+    sha) and deployed `main-3fa15113d476` through the canary by itself.
+  - The job moved to `observing`, and is watched 24 h for recurrence before `verified`.
+- 15:48Z **The first hypothesis foundry call** was made for the weather desk. It returned 4 cards,
+  each with a mechanism, an edge after costs and a rejection test:
+  - card `6aed49`, buying the expensive NO leg passively when the YES leg is a lottery ticket,
+    passed replay;
+  - three failed honestly (0 trades, or out-of-sample growth ≤ 0).
+- 15:4xZ py-spy on the House showed the tick thread waiting in `SailSandbox._sleep` for a newborn's
+  box. Ticks were alternating 60 s / 210–250 s. #102 moves box sleeps to a pool, and moves Merton's
+  burst cadence to follow measured yield:
+  - operator 4 h, designer 12 h, toolsmith 3 h, architect 2 h, teacher 1 h;
+  - that is about $5/h at campaign prices, moved to the foundry and the engineer.
+- 15:56Z **The verifier refused an automatic release.** `main c6388d3` (#102) changes
+  `league/sandbox.py`, the agents' box seal, so the updater logged "this one is the owner's deploy".
+  It was deployed with `floor_box.py deploy` as release `20260922T160437Z-fb8d1a3ec7f4`, promoted
+  16:09:15Z with a clean watch. Ticks are now 12–35 s.
+- 16:06Z An error alert on the paper book: `alpaca-paper does not reconcile: cash differs by -0.06`.
+  - Probable cause: two option buys paid venue regulatory fees that the book does not model.
+  - The next reconcile booked it as dust and passed.
+  - It is recorded as a risk: an error during a deploy watch triggers a rollback.
+- 16:08Z–16:20Z **The repair drill, end to end on production** (labelled synthetic, $0):
+  - reported → admitted → reproducing → patching → PR #104;
+  - CI refused #104 as designed;
+  - `revising`: the engineer read CI's own failure text through the gateway's
+    `/v1/github/pr/<n>/failures`;
+  - attempt 2 → PR #105 → CI passed → merged → `canary`;
+  - #104 was closed by hand, as the drill specifies.
+  - The drill had waited 40 minutes for admission, behind higher-priority jobs; #103 now admits
+    requested jobs first.
+- 16:25Z #106 merged. After the night's restarts, the wind-downs of four dead agents were refused as
+  "has no seat on the book" 45 times in an hour: seats live only in memory, and only the living are
+  re-seated. A dead account's exit is now seated first.
+- Measured, 15:27–16:25Z:
+  - 256 research sessions, 25 with a candidate (9.8%, against 4.6% before);
+  - 31 replay trials;
+  - the gate: 196 run, 142 skipped, 28 sampled;
+  - Luna cache: 51% of input tokens read from cache over 725 calls (0% before);
+  - births 6 and deaths 6, every birth evidence-led and every death by displacement;
+  - Jev spend $0.005;
+  - OpenAI campaign from $85.35 to $70.18. After the first 15 minutes' burst the rate was about
+    $6/h, against about $14/h before.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**

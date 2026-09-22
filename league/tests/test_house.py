@@ -223,6 +223,20 @@ class HouseTest(HouseCase):
         self.assertEqual(refused, [])
         self.assertEqual(book.account(agent.id).holdings, {})
 
+    def test_a_death_during_a_venue_outage_is_recorded_and_its_exit_retried(self):
+        agent = self.seated()
+        self.house.tick()  # it buys
+        book = self.house.books["alpaca-paper"]
+        self.broker.raise_on_submit = ConnectionError("venue down while it dies")
+        self.house.kill(agent, "credits", "a test death")
+        self.assertFalse(self.house.registry.get(agent.id).alive)
+        self.assertTrue(book.account(agent.id).holdings)
+        self.assertIn("could not finish winding down", self.house.ledger.last("ops.alert").payload["text"])
+        self.broker.raise_on_submit = None
+        self.clock.advance(301)
+        self.house.tick()  # the mark pass retries the exit
+        self.assertEqual(book.account(agent.id).holdings, {})
+
     def test_a_wind_down_that_would_meet_the_houses_own_bid_rests_at_the_ask(self):
         """haghani-2, Sept 21, 2026: its market exit was refused on every wake because another
         agent rested a bid on the same coin."""
