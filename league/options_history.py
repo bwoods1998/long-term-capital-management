@@ -72,7 +72,7 @@ OCC = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
 #: Black-Scholes inputs that are ASSUMED, not given (labelled on every feature row).
 RISK_FREE = 0.04  # roughly the 2024-2026 T-bill rate; a constant, not a curve
 DIVIDEND_YIELD = 0.0
-FEATURE_VERSION = "bs-close-v1"
+FEATURE_VERSION = "bs-close-v2"  # v2: the underlying close is unadjusted (v1 used dividend-adjusted closes)
 
 #: The replay's estimated-quote model (labelled and stressed; see `estimate_quote`).
 SPREAD_MODEL = {
