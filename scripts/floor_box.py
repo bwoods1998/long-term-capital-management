@@ -1209,6 +1209,27 @@ def cmd_pause(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_maintenance(args: argparse.Namespace) -> int:
+    """The House's maintenance pause (`league.house.House.paused`): the loop keeps running,
+    reconciles and lets holders exit; research, Merton, births, payouts, promotions and new
+    entries wait until the file is gone. Unlike `stop`, nothing is left unmanaged."""
+    state = read_state()
+    box = require_box(state)
+    api = client()
+    path = f"{STATE_DIR}/PAUSE"
+    if args.action == "on":
+        api.exec(box, ["sh", "-c", f"mkdir -p {STATE_DIR} && printf '%s\\n' \"$1\" > {path}", "floor_box", args.reason],
+                 timeout=60, on_output=None).check()
+        say("paused for maintenance: " + args.reason)
+        say("the next tick stops starting paid work and new entries; research in flight defers at its next turn.")
+    elif args.action == "off":
+        api.exec(box, ["sh", "-c", f"rm -f {path}"], timeout=60, on_output=None).check()
+        say("maintenance pause lifted: the next tick opens for business again.")
+    result = api.exec(box, ["sh", "-c", f"cat {path} 2>/dev/null || echo '(not paused)'"], timeout=60, on_output=None)
+    say(f"PAUSE: {result.stdout.strip()}")
+    return 0
+
+
 def cmd_terminate(args: argparse.Namespace) -> int:
     state = read_state()
     box = args.box or require_box(state)
@@ -1309,6 +1330,7 @@ COMMANDS = {
     "sleep": cmd_sleep,
     "resume": cmd_resume,
     "pause": cmd_pause,
+    "maintenance": cmd_maintenance,
     "terminate": cmd_terminate,
     "hosts": cmd_hosts,
 }
@@ -1376,6 +1398,10 @@ def build_parser() -> argparse.ArgumentParser:
         node.add_argument("--box")
         if name == "sleep":
             node.add_argument("--wake-at", help="RFC 3339 time to wake it again")
+
+    maintenance = sub.add_parser("maintenance", help="pause or resume paid work and entries; exits and reconciliation go on")
+    maintenance.add_argument("action", choices=("on", "off", "status"))
+    maintenance.add_argument("--reason", default="operator maintenance")
 
     terminate = sub.add_parser("terminate", help="destroy a box and its disk")
     terminate.add_argument("--box")

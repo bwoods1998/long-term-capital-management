@@ -327,6 +327,29 @@ class House:
     def stopped(self) -> bool:
         return (self.root / "STOP").exists()
 
+    def paused(self) -> dict[str, Any] | None:
+        """The operator's maintenance pause: `PAUSE` in the House root, with the reason as its text.
+
+        STOP ends the loop, and with it reconciliation and every exit. PAUSE keeps the loop and
+        closes everything that spends or enters: no research, Merton, semantic lab, survey, replay,
+        births or payouts; no promotion; only agents already holding a position are woken, and
+        only their exits and cancels reach a book. Research in flight defers at its next paid turn
+        and resumes from its checkpoint when the file is removed. The clock-based culls wait too,
+        because an agent cannot replay or trade its way out of a pause."""
+        path = self.root / "PAUSE"
+        try:
+            text = path.read_text(encoding="utf-8")[:500].strip()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            text = ""
+        return {"reason": text or "maintenance"}
+
+    def _holds_position(self, agent: Agent) -> bool:
+        """Anything on its own book that a pause must still let it manage: holdings or orders."""
+        book = self.book_of(agent)
+        return bool(book and agent.id in book.accounts and (book.account(agent.id).holdings or book.open_orders(agent.id)))
+
     # ------------------------------------------------------------ population
     def founders(self) -> list[dict[str, Any]]:
         """Every founder of every open specialty: a seed's program pointed at the niche's markets."""
@@ -634,7 +657,7 @@ class House:
             agent = deepcopy(self.registry.get(agent.id))
             self._state["next_wake"][agent.id] = self.clock() + agent.wake_minutes * 60
             rung = self.evaluator.rung(agent.id)
-            if self._state["tried"].get(agent.id) != agent.code_sha256:
+            if self._state["tried"].get(agent.id) != agent.code_sha256 and not self.paused():
                 self._background(f"replay:{agent.id}", self._replay_own, agent)
             if rung == 0:
                 return {"agent": agent.id, "skipped": "in replay"}
@@ -692,6 +715,10 @@ class House:
                 if self.book_of(agent) is not self.books[book_name]:
                     continue
                 rows = list(outcome.get("intents") or [])
+                if self.paused() and any(intent.side == 'buy' for intent in rows):
+                    self.ledger.append('book.refused', {'book': book_name,
+                        'reasons': ['the House is paused for maintenance: exits and cancels only']}, agent=agent.id)
+                    rows = [intent for intent in rows if intent.side != 'buy']
                 if (self.books[book_name].real_money and self.campaigns
                         and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
                     if any(intent.side == 'buy' for intent in rows):
@@ -1147,6 +1174,9 @@ class House:
             agent = deepcopy(self.registry.get(agent.id))
             rung = self.evaluator.rung(agent.id)
             if rung != verdict.rung:
+                return
+            if self.paused():
+                self._promotion_status(agent, verdict, 'paused', 'the House is paused for maintenance; promotions wait')
                 return
             source_book = self.book_of(agent)
             if rung >= 1 and source_book is not None and not source_book.evidence_integrity(agent.id)['ok']:
@@ -1657,6 +1687,8 @@ class House:
     def research_due(self, agent: Agent) -> bool:
         if self._closing.is_set() or not agent.alive or self.researcher is None or not self.settings.research:
             return False
+        if self.paused():
+            return False
         if not self.pacer.may_spend(self._research_budget_kind(agent)):
             return False
         if self.deploying():
@@ -1927,6 +1959,8 @@ class House:
                 return 'retired or changed'
         if self.stopped() or (self.budget is not None and self.budget.mode == 'stopped'):
             return 'research stopped'
+        if self.paused():
+            return 'maintenance pause'
         if not self.pacer.may_spend(self._research_budget_kind(agent)):
             return 'campaign allowance unavailable'
         return ''
@@ -2357,7 +2391,7 @@ class House:
         idle = self.idle_run(agent)
         return bool(idle["shut"]) and not idle["barren"] and not idle["offered"]
 
-    def keep_population(self, *, refill: bool = True) -> None:
+    def keep_population(self, *, refill: bool = True, clock: bool = True) -> None:
         rules = self.game["economy"]
         deadline = float(rules.get("replay_deadline_epochs", 3)) * float(rules["epoch_seconds"])
         broke = Decimal(str((self.game.get("research") or {}).get("min_credits_usd", "0.10"))) * 2
@@ -2365,9 +2399,9 @@ class House:
         for agent in self.registry.living():
             if not self.economy.alive(agent.id):
                 self.kill(agent, "credits", "its compute credits reached zero")
-            elif self.evaluator.rung(agent.id) == 0 and self.clock() - _epoch(agent.born_at) > deadline:
+            elif clock and self.evaluator.rung(agent.id) == 0 and self.clock() - _epoch(agent.born_at) > deadline:
                 self.kill(agent, "never qualified", f"it did not pass replay within {rules.get('replay_deadline_epochs', 3)} epochs of its birth")
-            elif self.idle_run(agent)["barren"] >= stuck and self.economy.balance(agent.id) <= broke:
+            elif clock and self.idle_run(agent)["barren"] >= stuck and self.economy.balance(agent.id) <= broke:
                 # Neither able to trade nor able to buy a new idea: it cannot change and it cannot
                 # act, and it will sit at this balance for as long as the floor runs, holding a
                 # seat on its desk that a newcomer could use. A shut market does not count here --
@@ -2508,9 +2542,14 @@ class House:
             meter = getattr(self.provider, "transport", None)
             metered = bool(meter and hasattr(meter, "refresh") and meter.refresh())
             open_for_business = open_for_business and metered and self.pacer.may_spend("sail")
+        pause = self.paused()
+        if pause:
+            open_for_business = False
+            summary["paused"] = pause["reason"]
         summary["budget"] = "open" if open_for_business else "stopped"
         batches: dict[str, list[Mapping[str, Any]]] = {}
-        waking = [a for a in self.due() if self.economy.alive(a.id) and (open_for_business or self._holds_real_money(a))]
+        waking = [a for a in self.due() if self.economy.alive(a.id)
+                  and (open_for_business or self._holds_real_money(a) or (pause and self._holds_position(a)))]
         # Each wake is mostly waiting on the agent's box, so they run side by side; every agent
         # has its own box and its own lock, and the ledger and the books are thread-safe.
         with ThreadPoolExecutor(max_workers=max(1, min(self.settings.wake_workers, len(waking) or 1))) as pool:
@@ -2538,6 +2577,8 @@ class House:
                 self.alert("warning", f"{name}: could not mark or reconcile ({type(exc).__name__}: {str(exc)[:200]})")
             for agent in self.registry.living():
                 if self.book_of(agent) is book:
+                    if pause and not book.real_money:
+                        continue  # a paused paper record is frozen, not failing: judge it after
                     self.judge(agent)
                 elif agent.id in book.accounts:
                     self._retry_wind_down(agent, book)
@@ -2602,7 +2643,7 @@ class House:
         # Culling is not spending: an agent whose credits reached zero should still die, and its
         # post-mortem still be written, when the meter has stopped the floor. Only the refill that
         # follows it costs anything, and that waits for business.
-        self.keep_population(refill=open_for_business)
+        self.keep_population(refill=open_for_business, clock=not pause)
         summary["deaths"] = sorted(living_before - {a.id for a in self.registry.living()})
         self._save_state()
         if self.publisher is not None:
