@@ -1,0 +1,5 @@
+{
+  "family": "equity-overnight",
+  "name": "index-overnight-fractional",
+  "why": "Five index-ETF agents are barren and the supplied momentum replays repeatedly fail. Test the distinct published overnight-drift hypothesis through a fixed late-session SPY entry and next-session morning exit, using fractional market orders capped at $2, fresh inputs, and a bounded spread filter. This is an untested execution variant of the existing equity-overnight hypothesis, not a new alpha claim or a reset of applicable lineage trials; normal replay, independent paper, audit, and capital gates remain mandatory."
+}

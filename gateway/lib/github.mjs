@@ -297,3 +297,47 @@ export async function pullStatus({ repo, token, number, fetcher = fetch }) {
     return refused(error, token);
   }
 }
+
+//: What a failure read returns at most: a few failed runs, a page of annotations each.
+export const MAX_FAILED_RUNS = 6;
+export const MAX_ANNOTATIONS = 20;
+
+// Text GitHub wrote, shortened, never carrying the token. Lines are kept: a test failure is lines.
+const clip = (value, token, limit) => String(value ?? '').split(token).join('[redacted]').slice(0, limit);
+
+/**
+ * Why CI refused a pull request (Sept 22, 2026): the failed check runs on its current head and
+ * their error annotations. `league.ci` writes each refusal as an annotation, so this is the text
+ * the repair engineer revises against; before it, the VM learned only that CI said no. Read-only
+ * and free, like `pullStatus`: it adds no way to merge, push, re-run or close anything.
+ */
+export async function pullFailures({ repo, token, number, fetcher = fetch }) {
+  const github = client({ repo, token, fetcher });
+  try {
+    const found = await github.ask('pull request', 'GET', `/pulls/${number}`);
+    if (found.status === 404) throw new Refusal('No such pull request.', 404);
+    const pull = github.need(found, 'pull request');
+    const head = sha(pull.head?.sha, 'pull request');
+    const checks = await github.get('check runs', 'GET', `/commits/${head}/check-runs?per_page=100`);
+    const failed = (Array.isArray(checks.check_runs) ? checks.check_runs : [])
+      .filter(run => run?.status === 'completed' && !['success', 'neutral', 'skipped'].includes(run?.conclusion));
+    const failures = [];
+    for (const run of failed.slice(0, MAX_FAILED_RUNS)) {
+      const id = Number(run.id);
+      let annotations = [];
+      if (Number.isSafeInteger(id) && id > 0) {
+        const listed = await github.get('annotations', 'GET', `/check-runs/${id}/annotations?per_page=${MAX_ANNOTATIONS}`);
+        annotations = (Array.isArray(listed) ? listed : []).slice(0, MAX_ANNOTATIONS).map(note => ({
+          level: clip(note?.annotation_level, token, 20), title: clip(note?.title, token, 200), message: clip(note?.message, token, 4000),
+        }));
+      }
+      failures.push({
+        name: clip(run.name, token, 100), conclusion: clip(run.conclusion, token, 40),
+        title: clip(run.output?.title, token, 200), summary: clip(run.output?.summary, token, 2000), annotations,
+      });
+    }
+    return { number: pull.number, head, failures };
+  } catch (error) {
+    return refused(error, token);
+  }
+}

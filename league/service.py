@@ -70,6 +70,30 @@ def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, tt
     return engaged
 
 
+def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
+    """The repair worklist's worker, wired to the House's own ledger, frontier client and forge.
+    It spends only while the day's OpenAI allowance is open and the frontier tier still pays for
+    code (`TIER_ROLES`: not in "audits"), like the architect and the toolsmith."""
+    from .engineer import Engineer
+    from .worklist import Sources, Worklist
+
+    def code_of(agent_id: str) -> dict[str, Any] | None:
+        agent = house.registry.agents.get(agent_id)
+        if agent is None:
+            return None
+        return {"family": agent.family, "niche": agent.niche, "venue": agent.venue, "horizon": agent.horizon,
+                "needs": agent.needs, "params": agent.params, "code": agent.code}
+
+    def niche_of(agent_id: str) -> str | None:
+        agent = house.registry.agents.get(agent_id)
+        return agent.niche if agent is not None else None
+
+    worklist = Worklist(house.ledger, clock=house.clock)
+    return Engineer(frontier, forge, house.ledger, worklist, clock=house.clock, code_of=code_of,
+                    may_spend=lambda: house.pacer.may_spend("openai") and house.frontier_tier() != "audits",
+                    sources=Sources(house.ledger, worklist, niche_of=niche_of))
+
+
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
@@ -200,6 +224,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
                             pace=house.frontier_pace, backoff_max=pace.get("backoff_max"))
+    if house.merton is not None:
+        from .engineer import load_settings
+
+        if load_settings().get("enabled"):
+            house.engineer = repair_engineer(house, frontier, house.merton.forge)
     if house.researcher is not None and frontier is not None:
         # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
         # what a good record buys is better thinking.

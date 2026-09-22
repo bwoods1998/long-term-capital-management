@@ -158,6 +158,7 @@ class House:
         self.publisher = publisher
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
+        self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
@@ -2614,6 +2615,10 @@ class House:
                 if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
                     self._background(f"merton:{role}", self.merton.run, role)
             self._background("merton:follow", self.merton.follow)
+        if open_for_business and self.engineer is not None and self.engineer.due():
+            # The repair worklist: its sources, its free follow-ups and at most one paid patch a
+            # step, each against its own per-job ceiling and the day's frontier allowance.
+            self._background("engineer", self.engineer.step)
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
