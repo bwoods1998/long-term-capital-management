@@ -1,0 +1,8 @@
+{
+  "family": "options-pullback",
+  "name": "krasker_occ_routing_child",
+  "repair": {
+    "key": "bug_report:alpaca-options:6261d33bc3"
+  },
+  "why": "Corrected child of krasker-3: prefer OCC over underlying symbol for positions, working orders and chain matching, and emit explicit OCC order identifiers. Preserve the parent's Alpaca options day specialty, symbols, parameters and trading logic. Must qualify independently from rung 0."
+}
