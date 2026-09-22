@@ -93,17 +93,20 @@ the restart: 15:27:20–16:47:39Z and 17:45:14Z–⟨T⟩. It leaves out the 58-
 
 ### Before and after
 
-| Measure | Before (12 h) | After (⟨h⟩ open h) |
+| Measure | Before (12 h, overnight) | After (⟨h⟩ open hours, US session) |
 |---|---:|---:|
 | Research sessions per hour | 414 | ⟨a⟩ |
 | Research cost per hour | $8.56 | ⟨b⟩ |
 | Sessions with a candidate | 4.6% | ⟨c⟩ |
-| Replay pass rate | 7.4% | ⟨d⟩ |
+| Replay trials per hour, pass rate | 33.8, 7.4% | ⟨d⟩ |
 | Research $ per replay pass | $3.42 | ⟨e⟩ |
-| Luna $/h (cache read) | $5.60 (0%) | ⟨f⟩ |
-| Merton $/h | $1.77 | ⟨g⟩ |
-| Births: House-staked mutations | 186 in 12 h, nearly all mutations | ⟨i⟩ |
-| Verified or merged autonomous repairs | 0 | 2 merged, ⟨j⟩ verified |
+| Luna $/h (share of input read from cache) | $5.60 (0%) | ⟨f⟩ |
+| Merton $/h (roles, foundry, engineer, audits) | $1.77 | ⟨g⟩ |
+| All model and box spend per hour (`economics.py`) | $10.70 | ⟨k⟩ |
+| Replay-passing candidates: $ each (`economics.py`) | $2.19 | ⟨l⟩ |
+| Births per hour (kind) | 15.5 (nearly all blind mutations) | ⟨i⟩ |
+| Agents seated on paper per hour | 1.9 | ⟨m⟩ |
+| Autonomous repairs | 0 | 3 merged and deployed (#100, #113, #119); the drill verified |
 
 The after window is hours, not days. Pass rates and candidate shares on samples this small move
 with a handful of trials. The real-money book traded too little either way to say anything about
