@@ -2553,6 +2553,8 @@ class House:
                 for agent in self.registry.living():
                     if self.evaluator.rung(agent.id) >= 3:
                         capital.resize(self, agent)
+                    elif self.evaluator.rung(agent.id) == 2:
+                        capital.top_up_micro(self, agent)
             capital.recommend(self, {name: (book.venue_cash or ZERO) for name, book in self.books.items() if book.real_money})
             # During the expedition the day's pool IS the day's Sail allowance: what the owner wants
             # spent is what the agents are given to spend.

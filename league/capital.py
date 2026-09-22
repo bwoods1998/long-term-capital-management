@@ -194,3 +194,25 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
            "venue_cash_usd": {k: str(v) for k, v in cash.items()}, "shortfall_usd": {k: str(v.quantize(CENT)) for k, v in shortfall.items()}}
     house.ledger.append("ops.recommendation", row)
     return row
+
+
+def top_up_micro(house: Any, agent: Any) -> dict[str, Any] | None:
+    """Raise a rung-2 agent's stake to the constitution's micro stake when that rose after it was
+    seated (the learning surge of Sept 21, 2026: $25 -> $60), inside the owner's capital headroom.
+    Never on a swept, abandoned or losing-below-stake account; never more than the difference."""
+    book = house.book_of(agent)
+    if book is None or not book.real_money or house.evaluator.rung(agent.id) != 2:
+        return None
+    account = book.account(agent.id)
+    target = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"])
+    if not account.funded or account.swept or account.staked >= target or book.equity(agent.id) < account.staked:
+        return None
+    delta = target - account.staked
+    headroom = Decimal(str(house.tuition(agent.venue)["headroom_usd"]))
+    if headroom < delta:
+        return None
+    book.stake(agent.id, delta, note=f"micro stake raised to ${target} (learning surge)")
+    house.seat(agent)  # the limits follow the stake
+    row = {"agent": agent.id, "book": book.name, "stake_usd": str(target), "moved_usd": str(delta), "reason": "micro stake raised to the constitution's"}
+    house.ledger.append("eval.verdict", {"decision": "size", "rung": 2, **{k: v for k, v in row.items() if k != "agent"}}, agent=agent.id)
+    return row
