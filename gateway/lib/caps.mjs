@@ -64,6 +64,9 @@ export const VENUE_PATHS = {
     // rules of `alpacaNotional` below (long premium only, a limit price, one leg).
     ['GET', /^v2\/options\/contracts(\/[A-Za-z0-9._~%-]+)?$/],
     ['GET', /^v1beta1\/options\/(quotes\/latest|trades\/latest|bars|snapshots)$/],
+    // Historical option prints (Sept 22, 2026), read only: the options desk's replay history.
+    // Alpaca has no historical option QUOTES endpoint, so there is nothing else to allow.
+    ['GET', /^v1beta1\/options\/trades$/],
     ['GET', /^v1beta1\/options\/snapshots\/[A-Za-z0-9.]{1,12}$/],
   ],
 };

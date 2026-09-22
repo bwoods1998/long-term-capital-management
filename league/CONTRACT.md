@@ -118,6 +118,56 @@ It does not grow with new deposits or profits. Each agent still has its own stak
 cap. Without that authorization, shared caps retain the allocated-equity basis. Paper/replay
 does not pretend to know live peers' future orders; these forward fields may be absent in replay.
 
+### Options: `ctx["chain"]`, and the options desk's replay
+
+A strategy of the options specialty (`NEEDS["asset_class"] = "option"`, `max_days_to_expiry`
+2 to 45) is also handed `ctx["chain"]`: contracts on its underlyings expiring after today and
+within that many days, within 20% of the underlying's price, two-sided and affordable in one
+order, at most 40 an underlying, nearest the money first. A row is `{"symbol"/"occ" (OCC code),
+"underlying", "expiry", "strike", "right", "bid", "ask", "as_of", "iv", "delta", "volume",
+"underlying_price"}`. Positions and open orders in a contract carry `occ` (and `expiry`,
+`strike`, `right`). Orders name the contract by `occ`, are limit orders only, and one contract
+is 100 shares: a 0.40 premium costs $40.
+
+Live, `bid`/`ask` are the venue's quotes and `iv`/`delta` the feed's greeks (None when absent).
+**On a replay tape they are not**: Alpaca has option trade bars since Jan 18, 2024 and no
+historical option quotes at all, so a replay row's `bid`/`ask` are ESTIMATED around the last
+print: the last price +- max($0.01, 4.5% of it), fitted to the median live OPRA spread (Sept 22,
+2026); positions are marked at that bid. A fill at the touch pays a WIDER estimate (at least a
+tick, 4% of the premium, or half the median recent bar range either side), so replay costs lean
+against you. `iv`/`delta` are computed by Black-Scholes, and the row says so in `quote_source`
+and `greeks_source`; it also carries `last` and `trades`. From Sept 22, 2026 the House keeps the
+OPRA quotes it shows live, and a replay over those days shows and marks on them instead. A contract appears only once it has
+printed (no listing dates are published) and only while its last qualifying print is at most 25
+minutes old. Replay fills are conservative (`league/options_replay.py`): nothing fills in the
+bar the decision saw. On a later bar with at least 5 contracts in 2 trades, a buy at or over the
+shown ask at that bar's open is marketable and fills at the worse of the shown and the wider
+estimated ask, never above its limit; any other buy fills at its limit only when the bar traded
+at least one tick THROUGH it (a touched limit is not a fill); sells mirror this, and no order
+fills more than 10% of a bar's volume. A recorded OPRA quote after the order fills one contract
+at its touch. Orders are day orders and die at 16:00 New York. Each fill pays an assumed $0.05 a contract. From 14:30 New York on its last
+day the House offers a held contract at the bid; what is unsold at the bell is written off at
+zero. The House replays an options candidate only where its options history covers every
+underlying over the window; elsewhere paper remains the test.
+
+### Options-derived features for equity and ETF strategies
+
+`NEEDS["options_features"] = True` adds `ctx["options_features"]`: by symbol, the latest row
+already available, computed from the OPRA daily closing prints of the near-the-money contracts
+the House holds and the underlying's daily close. A row is available from the New York midnight
+after its session (`t`), live and on a replay tape alike, so a replay sees it exactly when a live
+wake would. Fields: `day`, `t`, `atm_iv`, `put_25d_iv`, `call_25d_iv`, `skew_25d` (put minus
+call), `expiry_used`, `days_to_expiry` (the expiry nearest 30 days), `option_volume`,
+`call_volume`, `put_volume`, `put_call_volume_ratio`, `option_trades`, `contracts_printed`,
+`underlying_close`. COMPUTED: the IVs and deltas (European Black-Scholes, 4% rate and no
+dividend assumed; the contracts are American). GIVEN: volumes and trade counts, over the
+ingested band only. NOT AVAILABLE: vendor greeks, point-in-time open interest, trade direction.
+An option's close is its last print, which can be hours before the stock's; contracts with
+fewer than 5 prints that day are not used for IV. A symbol with no row is unavailable data, not
+a zero: a replay of a strategy that asks for features of a symbol the House has no history of is
+refused as unsupported input (not a trial), and the House's daily options job backfills the
+symbols living strategies ask for.
+
 ## What you may watch but not trade
 
 `NEEDS["observe"] = {"symbols": ["BTC/USD"], "series": ["KXBTCD"]}` (up to six of each) asks the

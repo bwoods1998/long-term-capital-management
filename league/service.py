@@ -191,6 +191,11 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
+    if config.get("options_history", True) and not canary:
+        # Listed-option history (market-data GETs only): the options desk's replay and the
+        # equity desks' IV/skew/activity features. Empty until ingested; then refreshed daily.
+        from .options_history import OptionsHistory, gateway_get
+        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(paper), ledger=house.ledger, clock=house.clock)
     # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned
     # about $1/h of Jev's $20 lifetime allowance ($16.04 spent at the gateway by Sept 22, 2026), and
     # the capped evaluation of its own store found no tradable value: its labels predicted whether a

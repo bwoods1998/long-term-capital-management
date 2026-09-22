@@ -778,6 +778,13 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     horizon = tape.get("horizon") or needs.get("horizon") or "hour"
     if horizon not in ("hour", "day"):
         return failed("bad tape: the horizon is hour or day")
+    if tape.get("asset_class") == "option":
+        # The options desk's tape (`league/options_history.py`): its own simulator, same result shape.
+        try:
+            from league.options_replay import replay_options
+        except ImportError:  # in the agent's box the files sit side by side
+            from options_replay import replay_options  # type: ignore
+        return replay_options(decide, needs, effective, tape, stake, limits, oos_fraction, deadline, audit, failed, seed, sha, horizon)
     half_spread_bps = _num(tape.get("half_spread_bps"))
     half_spread = (DEFAULT_HALF_SPREAD_BPS if half_spread_bps is None or half_spread_bps < 0 else half_spread_bps) / 10000.0
     stress = _num(tape.get("spread_stress"))
@@ -891,6 +898,11 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                         "bars": {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in watched_symbols},
                         "quotes": {s: dated(s) for s in watched_symbols if s in view.quotes},
                     }
+                if needs.get("options_features") and isinstance(tape.get("options_features"), dict):
+                    # Options-derived features, each row stamped with when it became available:
+                    # the latest at or before this step, exactly what a live wake is handed.
+                    ctx["options_features"] = {s: dict(rows[-1]) for s, rows in
+                                               ((s, _bars_until(tape["options_features"].get(s) or (), now_ts)) for s in shown) if rows}
             else:
                 shown_markets, watched_markets = [], []
                 for market in view.markets.values():

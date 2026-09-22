@@ -72,7 +72,7 @@ class Local(unittest.TestCase):
         self.assertGreater(run.seconds, 0)
         self.assertFalse(run.created)
         directory = Path(self.dir.name) / "boxes" / "tiny-1"
-        self.assertEqual(sorted(p.name for p in directory.iterdir() if p.is_file()), ["replay.py", "runner.py", "safety.py", "spec.json"])
+        self.assertEqual(sorted(p.name for p in directory.iterdir() if p.is_file()), ["options_history.py", "options_replay.py", "replay.py", "runner.py", "safety.py", "spec.json"])
 
     def test_decide_sees_positions(self):
         run = self.box.decide("tiny-1", TINY, {"positions": [{"symbol": "BTC/USD", "quantity": 0.001}], "params": {}})
@@ -823,7 +823,7 @@ class KitFiles(ToolsCase):
     def test_the_kit_is_the_three_programs_then_every_tool_module_by_name(self):
         (self.tools / "alpha.py").write_text("A = 1\n")
         files = kit_files()
-        self.assertEqual(list(files), ["runner.py", "replay.py", "safety.py", "tools/__init__.py", "tools/alpha.py", "tools/edge.py"])
+        self.assertEqual(list(files), ["runner.py", "replay.py", "safety.py", "options_replay.py", "options_history.py", "tools/__init__.py", "tools/alpha.py", "tools/edge.py"])
         self.assertEqual({k: files[k] for k in KIT_FILES}, KIT_FILES)
         self.assertEqual(files["tools/edge.py"], str(self.tools / "edge.py"))
 
@@ -885,7 +885,7 @@ class LocalTools(ToolsCase):
     def test_the_agents_directory_holds_the_tools_as_a_package_and_nothing_else_from_there(self):
         directory = self.box._dir("tool-user")
         self.assertEqual(sorted(str(p.relative_to(directory)) for p in directory.rglob("*") if p.is_file()),
-                         ["replay.py", "runner.py", "safety.py", "tools/__init__.py", "tools/edge.py"])
+                         ["options_history.py", "options_replay.py", "replay.py", "runner.py", "safety.py", "tools/__init__.py", "tools/edge.py"])
 
     def test_a_tool_that_does_not_exist_is_the_strategys_error(self):
         run = self.box.decide("tool-user", TOOL_USER.replace("tools.edge", "tools.missing"), {"positions": [], "params": {}})
@@ -949,7 +949,7 @@ class SailTools(ToolsCase):
     def test_the_tools_are_uploaded_with_the_kit_as_a_package(self):
         self.sandbox.decide("alpha", TOOL_USER, {})
         kit = kit_dir()
-        self.assertEqual(self.uploads(), [f"{kit}/runner.py", f"{kit}/replay.py", f"{kit}/safety.py", f"{kit}/tools/__init__.py",
+        self.assertEqual(self.uploads(), [f"{kit}/runner.py", f"{kit}/replay.py", f"{kit}/safety.py", f"{kit}/options_replay.py", f"{kit}/options_history.py", f"{kit}/tools/__init__.py",
                                           f"{kit}/tools/edge.py", f"{kit}/spec.json"])
         modes = {c[2]: c[3] for c in self.sail.calls if c[0] == "upload"}
         self.assertEqual(modes[f"{kit}/tools/edge.py"], 0o644)
@@ -991,7 +991,7 @@ class SailTools(ToolsCase):
         ran = self.sail.execs[-1]
         self.assertEqual(ran["cwd"], kit_dir())
         self.assertNotEqual(ran["cwd"], old_kit)
-        self.assertEqual(ran["in_cwd"], ["replay.py", "runner.py", "safety.py", "spec.json", "tools/__init__.py", "tools/other.py"])
+        self.assertEqual(ran["in_cwd"], ["options_history.py", "options_replay.py", "replay.py", "runner.py", "safety.py", "spec.json", "tools/__init__.py", "tools/other.py"])
         self.assertIn(f"{old_kit}/tools/edge.py", ran["files"])  # the old kit is still on the disk, and out of reach of `import tools`
         self.sandbox.fork("alpha", "child")
         self.sandbox.decide("child", TOOL_USER, {})
