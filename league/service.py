@@ -159,7 +159,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if local_sandbox:
         sandbox: Any = LocalSandbox(root / "boxes")
     else:
-        sandbox = SailSandbox(SailboxClient(), root / "sandbox.json", image_checkpoint=config["agent_image_checkpoint"], name_prefix=name_prefix)
+        sandbox = SailSandbox(SailboxClient(), root / "sandbox.json", image_checkpoint=config["agent_image_checkpoint"], name_prefix=name_prefix,
+                              background_sleep=True)
 
     campaigns = CampaignBudget(root / "campaigns.sqlite") if not canary else None
     from .overnight import active

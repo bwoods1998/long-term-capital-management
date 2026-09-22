@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -145,7 +146,8 @@ class SailSandbox:
 
     secure = True
 
-    def __init__(self, client: Any, state_path: str | Path, *, image_checkpoint: str, name_prefix: str = "league", clock=time.time):
+    def __init__(self, client: Any, state_path: str | Path, *, image_checkpoint: str, name_prefix: str = "league", clock=time.time,
+                 background_sleep: bool = False):
         self.client = client
         self.state_path = Path(state_path)
         self.image_checkpoint = image_checkpoint
@@ -154,6 +156,13 @@ class SailSandbox:
         self._lock = threading.RLock()
         self._agent_locks: dict[str, threading.Lock] = {}
         self._state = self._load()
+        # Putting a box to sleep is a Sail call that can take many seconds, and every run ends with
+        # one. Measured Sept 22, 2026 with py-spy: the House's tick thread sat in `client.sleep` for
+        # a newborn's box across three samples 17 s apart, and ticks alternated 60 s / 210-250 s
+        # because every other tick carried a birth. With `background_sleep` the call goes to a
+        # small pool instead; it takes the agent's own lock, so a sleep and a run of the same box
+        # never overlap, and nothing waits for Sail to finish.
+        self._sleeper = ThreadPoolExecutor(max_workers=4, thread_name_prefix="box-sleep") if background_sleep else None
 
     # ------------------------------------------------------------------ state
     def _load(self) -> dict[str, Any]:
@@ -260,11 +269,32 @@ class SailSandbox:
 
     def _sleep(self, agent: str) -> None:
         box = self.box_of(agent)
-        if box:
-            try:
-                self.client.sleep(box)
-            except Exception:  # noqa: BLE001 - auto-sleep is the backstop
-                pass
+        if not box:
+            return
+        if self._sleeper is None:
+            self._sleep_box(box)
+            return
+        try:
+            self._sleeper.submit(self._sleep_later, agent, box)
+        except RuntimeError:  # the pool is shut down: sleep here instead
+            self._sleep_box(box)
+
+    def _sleep_later(self, agent: str, box: str) -> None:
+        with self._agent_lock(agent):
+            if self.box_of(agent) == box:  # retired or replaced meanwhile: nothing to put to sleep
+                self._sleep_box(box)
+
+    def _sleep_box(self, box: str) -> None:
+        try:
+            self.client.sleep(box)
+        except Exception:  # noqa: BLE001 - auto-sleep is the backstop
+            pass
+
+    def drain(self, timeout: float | None = None) -> None:
+        """Wait for background sleeps (tests, shutdown)."""
+        if self._sleeper is not None:
+            self._sleeper.shutdown(wait=True)
+            self._sleeper = ThreadPoolExecutor(max_workers=4, thread_name_prefix="box-sleep")
 
     def decide(self, agent: str, code: str, ctx: Mapping[str, Any]) -> Run:
         return self._run(agent, "runner.py spec.json", {"code": code, "ctx": ctx}, runner_module.MARKER, 30)
@@ -318,8 +348,13 @@ class SailSandbox:
             self._save()
 
     def sleep_all(self) -> int:
+        """At shutdown: every box, synchronously, after any sleeps still in the pool."""
+        if self._sleeper is not None:
+            self._sleeper.shutdown(wait=True)
         count = 0
         for agent in list(self._state["boxes"]):
-            self._sleep(agent)
+            box = self.box_of(agent)
+            if box:
+                self._sleep_box(box)
             count += 1
         return count

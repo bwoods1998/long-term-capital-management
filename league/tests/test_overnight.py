@@ -121,6 +121,15 @@ class BurstGame(HouseCase):
             self.assertEqual(tuned['economy'][field]*3600, base['economy'][field]*21600)
         self.assertEqual(tuned['economy']['newcomer_seconds'], turbo.get('newcomer_seconds', 600))
 
+    def test_turbo_reallocates_merton_cadence_by_measured_yield(self):
+        from unittest.mock import patch
+        with patch('league.overnight.load_turbo', return_value={'merton_schedule_hours': {'operator': 4, 'designer': 12, 'nobody': 1, 'teacher': 0}}):
+            tuned = game_for(load_game(), {'policy': load_policy()})
+        hours = tuned['merton']['schedule_hours']
+        self.assertEqual((hours['operator'], hours['designer']), (4.0, 12.0))  # the turbo's allocation
+        self.assertEqual((hours['architect'], hours['teacher']), (.5, 1))  # burst defaults stand; zero is ignored
+        self.assertNotIn('nobody', hours)
+
     def test_turbo_speeds_the_loop_without_touching_the_stored_policy(self):
         from unittest.mock import patch
         from league import overnight

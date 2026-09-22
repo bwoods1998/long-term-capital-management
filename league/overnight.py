@@ -105,6 +105,11 @@ def game_for(base, burst):
         research['profile'] = load_turbo()['sail_profile']
     research.setdefault('idle', {})['min_hours_between'] = p['research_minutes'] / 60
     game['merton']['schedule_hours'].update(operator=.25, toolsmith=.5, architect=.5, teacher=1, designer=1)
+    # The owner's turbo layer may re-allocate frontier attention by measured yield (Sept 22, 2026):
+    # the same dollars moved from roles that rarely change anything to the foundry and the engineer.
+    game['merton']['schedule_hours'].update({role: float(hours) for role, hours in
+                                             (load_turbo().get('merton_schedule_hours') or {}).items()
+                                             if role in game['merton']['schedule_hours'] and float(hours) > 0})
     # Faster frontier access is for WINNERS only. A losing agent keeps the base game's wait:
     # Sept 21, 2026, losing paper agents hired Merton hourly (hilibrand-2 $7, huang-7 $9.69).
     game['consult']['profitable_cooldown_hours_by_rung'] = {'1': .5, '2': .25, '3': .25}

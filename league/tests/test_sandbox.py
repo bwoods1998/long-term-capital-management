@@ -320,6 +320,44 @@ class SailCase(unittest.TestCase):
         return json.loads(self.state_path.read_text())
 
 
+class BackgroundSleep(SailCase):
+    """Sept 22, 2026: a birth's box sleep held the tick thread for many seconds."""
+
+    def test_a_run_returns_before_its_box_is_asleep_and_the_sleep_follows(self):
+        import threading
+        gate = threading.Event()
+        slow = self.sail.sleep
+
+        def sleep(box):
+            gate.wait(5)
+            return slow(box)
+
+        self.sail.sleep = sleep
+        sandbox = self.new_sandbox(background_sleep=True)
+        sandbox.decide("alpha", TINY, {"now": "n"})
+        box = sandbox.box_of("alpha")
+        self.assertEqual(self.sail._box(box)["status"], "running")  # the run did not wait for Sail
+        gate.set()
+        sandbox.drain()
+        self.assertEqual(self.sail._box(box)["status"], "sleeping")
+
+    def test_a_sleep_never_overlaps_the_next_run_of_the_same_box(self):
+        sandbox = self.new_sandbox(background_sleep=True)
+        for n in range(3):
+            run = sandbox.decide("alpha", TINY, {"now": str(n)})
+            self.assertTrue(run.result.get("ok"), run.result)
+        sandbox.drain()
+        self.assertEqual(self.sail._box(sandbox.box_of("alpha"))["status"], "sleeping")
+
+    def test_shutdown_sleeps_every_box_synchronously(self):
+        sandbox = self.new_sandbox(background_sleep=True)
+        sandbox.decide("alpha", TINY, {"now": "n"})
+        sandbox.decide("beta", TINY, {"now": "n"})
+        self.assertEqual(sandbox.sleep_all(), 2)
+        for agent in ("alpha", "beta"):
+            self.assertEqual(self.sail._box(sandbox.box_of(agent))["status"], "sleeping")
+
+
 class SailFirstRun(SailCase):
     def test_a_new_agents_box_is_made_from_the_image_and_sealed_before_anything_else(self):
         run = self.sandbox.decide("alpha", TINY, {"now": "n"})
