@@ -692,11 +692,13 @@ def adapter_from(alpaca_data: Any) -> Callable[[str, str, str, str], list[dict[s
 
 
 def refresh(store: OptionsHistory, symbols: Sequence[str], underlier_bars: Callable[..., list[dict[str, Any]]], *,
-            days: int = 10, timeframes: Sequence[str] = ("1Day",)) -> dict[str, Any]:
-    """The House's daily job: the last `days` of bars for `symbols`, then their feature rows."""
+            days: int = 10, timeframes: Sequence[str] = ("1Day",), band: float = 0.10, max_days: int = 45) -> dict[str, Any]:
+    """The House's daily job: the last `days` of bars for `symbols`, then their feature rows.
+    The options desk's refresh must use the band of its backfill (0.2, the chain's own 20%),
+    or the recent part of a tape would show fewer contracts than the older part."""
     end = ny_date(store.clock())
     start = (_day(end) - timedelta(days=days)).isoformat()
-    coverage = store.ingest(symbols, start, end, underlier_bars=underlier_bars, timeframes=timeframes)
+    coverage = store.ingest(symbols, start, end, underlier_bars=underlier_bars, timeframes=timeframes, band=band, max_days=max_days)
     made = {}
     for symbol in symbols:
         daily = underlier_bars(symbol, "1Day", f"{start}T00:00:00Z", f"{end}T23:59:59Z")

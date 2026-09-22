@@ -888,7 +888,7 @@ class House:
         wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
                         | {"SPY", "QQQ", "IWM"})
         underlier = adapter_from(self.alpaca_data)
-        done = {"replay": refresh(self.options_history, replay, underlier, timeframes=("1Day", "15Min")),
+        done = {"replay": refresh(self.options_history, replay, underlier, timeframes=("1Day", "15Min"), band=0.2, max_days=45),
                 "features": refresh(self.options_history, [s for s in wanted if s not in replay], underlier)}
         self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
                                           "features_made": {**done["replay"]["features"], **done["features"]["features"]}})

@@ -222,7 +222,9 @@ class Store(unittest.TestCase):
         self.underlier = lambda symbol, timeframe, start, end: [_daily(d, 100.0) for d in self.DAYS if start[:10] <= d <= end[:10]]
 
     def store(self, venue):
-        return oh.OptionsHistory(Path(self.dir.name) / "o.sqlite", venue.get, clock=self.clock)
+        store = oh.OptionsHistory(Path(self.dir.name) / "o.sqlite", venue.get, clock=self.clock)
+        self.addCleanup(store.close)
+        return store
 
     def test_ingestion_resumes_after_an_interruption_and_records_coverage(self):
         venue = FakeVenue(self.DAYS, fail_once={"260320"})
@@ -249,6 +251,7 @@ class Store(unittest.TestCase):
         def refuse(path, params):
             raise oh.HistoryError("HTTP 403 Not a path this gateway signs")
         store = oh.OptionsHistory(Path(self.dir.name) / "r.sqlite", refuse, clock=self.clock)
+        self.addCleanup(store.close)
         rows = store.ingest(["SPY"], "2026-02-23", "2026-03-03", underlier_bars=self.underlier)
         self.assertEqual((rows[0]["status"], rows[0]["bars"]), ("unavailable", 0))
         self.assertIn("refused", rows[0]["reason"])
