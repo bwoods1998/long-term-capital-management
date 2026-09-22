@@ -84,6 +84,7 @@ class Settings:
     research: bool = True
     max_wakes_per_tick: int = 16
     cold_wakes_per_tick: int = 5  # in a House's first five minutes (see `due`)
+    enroll_per_tick: int = 3  # architect strategies born per tick (see `enroll`)
     # No new research from the moment a release is staged. It wants to be a little longer than a
     # research pass (one to three minutes, measured) so the ones in flight finish before the
     # restart, and a good deal SHORTER than a deploy: at fifteen minutes against a half-hourly
@@ -434,9 +435,15 @@ class House:
         seed's endowment, while the population has room. They answer to replay like any child."""
         from . import strategies
 
+        # A few a tick: each birth probes the strategy's NEEDS in a box (about 20 s). Measured Sept 22,
+        # 2026: a fresh canary enrolled all sixteen merged strategies in one tick, its third tick
+        # took over 300 s, and the watchdog refused the release -- every later release would have
+        # failed the same way as the engineer merged more strategies. The rest are born next tick.
         born = []
         known = {a.founder for a in self.registry.agents.values()}
         for row in strategies.all_strategies():
+            if len(born) >= max(1, int(self.settings.enroll_per_tick)):
+                break
             if row["name"] in known or len(self.registry.living()) >= int(self.game["economy"]["max_population"]):
                 continue
             try:

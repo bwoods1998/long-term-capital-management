@@ -269,6 +269,22 @@ class InTheHouse(HouseCase):
         finally:
             strategies.all_strategies = real
 
+    def test_merged_strategies_are_born_a_few_a_tick(self):
+        """Sept 22, 2026: a fresh canary enrolled sixteen strategies in one tick and was refused."""
+        from league import strategies
+        from league.tests.test_house import BUYER
+
+        rows = [{"name": f"btc-{n}", "family": "gap-fade", "why": "a test strategy", "code": BUYER} for n in range(5)]
+        self.house.niches["alpaca-crypto-majors"].max_members = 20
+        real = strategies.all_strategies
+        strategies.all_strategies = lambda: rows
+        try:
+            self.assertEqual(len(self.house.enroll()), 3)
+            self.assertEqual(len(self.house.enroll()), 2)
+            self.assertEqual(self.house.enroll(), [])
+        finally:
+            strategies.all_strategies = real
+
     def test_a_full_specialty_has_no_more_children(self):
         parent = self.seated()
         self.house.economy.grant(parent.id, "10", "test")
