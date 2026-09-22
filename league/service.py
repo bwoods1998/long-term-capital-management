@@ -70,6 +70,31 @@ def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, tt
     return engaged
 
 
+def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
+    """The repair worklist's worker, wired to the House's own ledger, frontier client and forge.
+    It spends only while the day's OpenAI allowance is open and the frontier tier still pays for
+    code (`TIER_ROLES`: not in "audits"), like the architect and the toolsmith."""
+    from .engineer import Engineer
+    from .worklist import Sources, Worklist
+
+    def code_of(agent_id: str) -> dict[str, Any] | None:
+        agent = house.registry.agents.get(agent_id)
+        if agent is None:
+            return None
+        return {"family": agent.family, "niche": agent.niche, "venue": agent.venue, "horizon": agent.horizon,
+                "needs": agent.needs, "params": agent.params, "code": agent.code}
+
+    def niche_of(agent_id: str) -> str | None:
+        agent = house.registry.agents.get(agent_id)
+        return agent.niche if agent is not None else None
+
+    worklist = Worklist(house.ledger, clock=house.clock)
+    return Engineer(frontier, forge, house.ledger, worklist, clock=house.clock, code_of=code_of,
+                    may_spend=lambda: house.pacer.may_spend("openai") and house.frontier_tier() != "audits",
+                    sources=Sources(house.ledger, worklist, niche_of=niche_of), summary_path=Path(house.root) / "repairs.json",
+                    inbox=Path(house.root) / "repairs-inbox")
+
+
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
@@ -149,6 +174,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
         real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
         replay_timeout=120 if canary else 600, kalshi_replay_days=1 if canary else 7, kalshi_replay_markets=60 if canary else 2000,
+        # Deep replay over the history store and the sealed holdout (league/deep_replay.py): on by
+        # default, inert until `python -m league.history ingest` has fetched a strategy's inputs.
+        deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
@@ -163,7 +191,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
-    if campaigns is not None and campaigns.burst():
+    # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned
+    # about $1/h of Jev's $20 lifetime allowance ($16.04 spent at the gateway by Sept 22, 2026), and
+    # the capped evaluation of its own store found no tradable value: its labels predicted whether a
+    # midpoint moves, not which way, and no threshold trade beat the spread
+    # (docs/design/2026-09-22-jev-sensor.md).
+    if campaigns is not None and campaigns.burst() and config.get("semantic_lab", False):
         from .semantic_lab import JevClient, SemanticLab
         house.semantic_lab = SemanticLab(root, JevClient(gateway_url, token), house.ledger,
                                          active=campaigns.running, clock=house.clock,
@@ -171,18 +204,40 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if house.researcher is not None and campaigns is not None:
         from .fast_research import FastResearch, ResearchRouter, MODEL as RESEARCH_MODEL, load_routes
 
+        routes = load_routes()
         fast = FastResearch(root / 'fast-research.sqlite',
             Frontier(gateway_url, token, model=RESEARCH_MODEL, spend_guard=campaigns),
-            house.ledger, balance=house.economy.balance, clock=house.clock)
-        routes = load_routes()
+            house.ledger, balance=house.economy.balance, clock=house.clock, cache=routes.get('cache'))
         if burst:
             from .overnight import policy_with_turbo
             routes = {'enabled': True, 'cohort': burst['id'], 'fraction': policy_with_turbo(burst)['luna_fraction']}
-        house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier)
+        from .routing import TaskRouter
+
+        task_router = TaskRouter(house.ledger, clock=house.clock, config=load_routes().get('routing'))
+        house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier, task_router=task_router)
+        house.researcher.routes = task_router
+    if not canary and house.researcher is not None and config.get("research_traces", True):
+        # Private research transcripts with their cost and outcome, for eventual fine-tuning.
+        from .traces import TraceStore
+
+        house.researcher.traces = TraceStore(root, house.ledger, clock=house.clock)
     if not canary and house.researcher is not None:
         # Jev for every researcher (`classify`): one question over many records, at cost.
         from .semantic_lab import JevClient
         house.researcher.jev = JevClient(gateway_url, token)
+    jev = dict(config.get("jev") or {})
+    if not canary and jev.get("enabled", True):
+        # Jev as the cheap sensor in front of expensive work: research gate, explicit inactivity,
+        # triage into repair reports, hypothesis links, exposure groups. Capped and cached here;
+        # the gateway's lifetime allowance stays the authority (league/jev.py).
+        from .jev import Sensor
+        from .semantic_lab import JevClient
+        from .sensors import JevFloor
+
+        sensor = Sensor(root / "jev.sqlite", JevClient(gateway_url, token), clock=house.clock,
+                        daily_usd=str(jev.get("daily_usd", "0.25")), daily_calls=int(jev.get("daily_calls", 400)),
+                        purpose_calls=jev.get("purpose_calls") or None)
+        house.jev_floor = JevFloor(house, sensor, jev)
     if not canary:
         from .frontier import FrontierMonth
 
@@ -200,6 +255,16 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
                             pace=house.frontier_pace, backoff_max=pace.get("backoff_max"))
+    if house.merton is not None:
+        # Always built with Merton: switched off in league/engineer.json it still reports (free),
+        # and buys nothing.
+        house.engineer = repair_engineer(house, frontier, house.merton.forge)
+    if merton and (house.game.get("hypotheses") or {}).get("enabled", True):
+        # Merton writes hypothesis cards for the desks where the evidence is, and replay admits
+        # them; routine refill stops breeding random mutations (league/hypotheses.py).
+        from .hypotheses import Foundry
+
+        house.hypotheses = Foundry(house, frontier)
     if house.researcher is not None and frontier is not None:
         # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
         # what a good record buys is better thinking.

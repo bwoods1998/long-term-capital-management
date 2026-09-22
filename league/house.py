@@ -99,6 +99,14 @@ class Settings:
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
+    history_coverage: bool = True  # each finished history ingestion (`league.history`) becomes a data.coverage row
+    # Alpaca replays walk the history store's development window (`league/deep_replay.py`) when it
+    # holds every input, and the live 21-day tape when it does not; a deep-replay pass is promoted
+    # only after the sealed holdout passes too, at most `holdout_lineage_budget` times a lineage.
+    deep_replay: bool = True
+    deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
+    holdout_gate: bool = True
+    holdout_lineage_budget: int = 3
 
 
 class House:
@@ -152,13 +160,19 @@ class House:
         self.commons = commons or Commons(self.ledger)
         self.sandbox = sandbox
         self.alpaca_data = alpaca_data
+        from .deep_replay import HOLDOUT
+
+        self.holdout_window: tuple[str, str] = HOLDOUT  # the sealed window (tests shorten it)
         self.kalshi_data = kalshi_data
         self.provider = provider
         self.auditor = auditor
         self.publisher = publisher
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
+        self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
+        self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
+        self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         #: A cheap deterministic look at a paper agent's first wakes and code (`league/preaudit.py`):
@@ -860,6 +874,20 @@ class House:
             self.alert("warning", f"main {str(outcome.get('sha') or '?')[:12]} was not deployed ({action}): "
                                   + "; ".join(str(r) for r in outcome.get("reasons") or [])[:700])
 
+    def _history_coverage(self) -> None:
+        """What the history ingestion (a separate process, `python -m league.history`) fetched
+        becomes `data.coverage` ledger rows here, because only the House writes the ledger."""
+        now = self.clock()
+        if not self.settings.history_coverage or now - getattr(self, "_history_checked", 0.0) < 300:
+            return
+        self._history_checked = now
+        try:
+            from .history import publish_coverage
+
+            publish_coverage(self.ledger, self.root, clock=self.clock)
+        except Exception as exc:  # noqa: BLE001 - a bad store file must never take the tick down
+            self.alert("warning", f"history coverage could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
+
     def deploying(self) -> bool:
         """Is a release on its way in? True from the moment one is staged until the grace is up."""
         since = float(self._state.get("deploying_at") or 0)
@@ -880,6 +908,10 @@ class House:
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
+        if venue == "alpaca" and self.settings.deep_replay:
+            deep = self._deep_tape(needs)
+            if deep is not None:
+                return deep
         end = self.clock()
         if venue == "kalshi":
             # The first dry run's agents asked for this themselves: one day of hourly markets is 17
@@ -928,6 +960,75 @@ class House:
             if hit is None or end - hit[0] > 86400:
                 self._tapes[key] = (end, build())
             return key, self._tapes[key][1]
+
+    def _history_store(self) -> Any:
+        """The history store (`league.history`), read-only, or None before anything was ingested."""
+        from .history import DB_NAME, HISTORY_DIR, HistoryStore
+
+        path = self.root / HISTORY_DIR / DB_NAME
+        return HistoryStore(path, readonly=True) if path.exists() else None
+
+    def _deep_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        """The development-window tape from the history store, or None when it is not all fetched
+        (then the live tape is used, exactly as before). Deep tapes are cached like live ones."""
+        from . import deep_replay
+        from .tapes import TapeError
+
+        store = self._history_store()
+        if store is None:
+            return None
+        feed = getattr(self.alpaca_data, "feed", None) or "sip"
+        horizon = str(needs.get("horizon") or "hour")
+        days = deep_replay.dev_days(needs, self.settings.deep_replay_days or None)
+        start, end = deep_replay.dev_window(horizon, days=days, holdout=self.holdout_window)
+        timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
+        warmup = int((needs.get("bars") or {}).get("limit") or 120)
+        key = f"deep:alpaca:{','.join(deep_replay._symbols_of(needs))}:{timeframe}:{warmup}:{horizon}:{start}:{end}:{feed}"
+        try:
+            with self._tape_lock:
+                hit = self._tapes.get(key)
+                if hit is None or self.clock() - hit[0] > 86400:
+                    self._tapes[key] = (self.clock(), deep_replay.dev_tape(store, needs, feed=feed, days=self.settings.deep_replay_days or None,
+                                                                          holdout=self.holdout_window)[1])
+                return key, self._tapes[key][1]
+        except TapeError:
+            return None  # not fetched yet: a gap in the store is never a result against the strategy
+        finally:
+            store.close()
+
+    def _holdout(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+        """The sealed holdout, once per strategy version, rationed per lineage: the base replay
+        and the double-spread one must both pass the replay gate. Pass or fail and coarse
+        numbers come back; the detail stays in the private `holdout.access` row."""
+        from . import deep_replay
+
+        store = self._history_store()
+        if store is None:
+            return {"evaluated": False, "refused": "no history store"}
+        feed = getattr(self.alpaca_data, "feed", None) or "sip"
+        row = CONSTITUTION["rungs"]["1"]
+        stake = float(row["stake_usd"])
+        limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}
+        lineage = self.registry.lineage(agent.id)
+
+        def run(window: tuple[str, str]) -> dict[str, Any]:
+            out = {}
+            for name, stress in (("base", 1.0), ("stressed", deep_replay.STRESS)):
+                tape = deep_replay.holdout_tape(store, needs, feed=feed, stress=stress, holdout=window)
+                done = self.sandbox.replay(agent.id, code, params, tape, stake=stake, limits=limits, timeout=self.settings.replay_timeout)
+                self._charge_box(agent.id, done, note="a sealed holdout replay")
+                out[name] = done.result
+            return out
+
+        def passed(results: Mapping[str, Any]) -> bool:
+            return all(self.evaluator.replay_gate(agent.family, r, lineage=lineage, counted=True)[0] for r in results.values())
+
+        try:
+            seal = deep_replay.HoldoutSeal(self.ledger, budget=self.settings.holdout_lineage_budget, window=self.holdout_window)
+            return seal.evaluate(agent=agent.id, lineage=lineage[-1] if lineage else agent.id, code=code, params=params,
+                                 run=run, passed=passed)
+        finally:
+            store.close()
 
     def _underlier_bars(self, symbols: Sequence[str], start_iso: str, end_iso: str, *, timeframe: str | None = None, warmup: int = 0) -> dict[str, list[dict[str, Any]]]:
         """Bars of what a Kalshi strategy watches on Alpaca, over the same window as its tape.
@@ -980,7 +1081,12 @@ class House:
             raise
         self._charge_box(agent.id, run, note="a replay")
         artifact = self.experiments.finish(attempt, run.result, seconds=run.seconds)
-        return {**run.result, "experiment": artifact}, attempt["tape"]
+        if (tape.get("source") or {}).get("store") == "history":
+            from .deep_replay import walk_forward
+
+            return {**run.result, "experiment": artifact, "tape_source": "history-dev",
+                    "walk_forward": walk_forward(run.result, tape)}, attempt["tape"]
+        return {**run.result, "experiment": artifact, "tape_source": "live"}, attempt["tape"]
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
@@ -1075,6 +1181,9 @@ class House:
         if crash:
             self.alert("warning", f"{agent.id}: its replay was not run ({crash[:160]}); it is not counted as a trial and will be tried again")
             return {"agent": agent.id, "skipped": f"the replay could not be run: {crash[:120]}"}
+        # A pass on the history store's development window is promoted only once the sealed
+        # holdout agrees (`_holdout`); the live tape's pass is promoted as it always was.
+        sealed = self.settings.holdout_gate and result.get("tape_source") == "history-dev"
         with self._lifecycle_lock:
             current = self._generation(agent.id) == generation
             if current:
@@ -1083,10 +1192,22 @@ class House:
             # A stale replay still consumed a trial, but cannot qualify or mark a replacement
             # strategy as tested. Its captured code and parameters remain on the trial row.
             verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id,
-                                                  promote=current, lineage=self.registry.lineage(agent.id))
+                                                  promote=current and not sealed, lineage=self.registry.lineage(agent.id))
             if verdict.decision == "promote":
                 self.seat(self.registry.get(agent.id))
-        return {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
+        holdout = None
+        if sealed and current and verdict.numbers.get("passed") and self.evaluator.rung(agent.id) == 0:
+            holdout = self._holdout(agent, agent.code, agent.needs, agent.params)  # slow: outside the lock
+            with self._lifecycle_lock:
+                if holdout.get("passed") and holdout.get("evaluated") and self._generation(agent.id) == generation \
+                        and self.evaluator.rung(agent.id) == 0:
+                    verdict = self.evaluator.promote(agent.id, 1, "passed deep replay and the sealed holdout",
+                                                     {**verdict.numbers, "holdout": holdout})
+                    self.seat(self.registry.get(agent.id))
+        out = {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
+        if holdout is not None:
+            out["holdout"] = holdout
+        return out
 
     def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
         """The researcher's `replay` tool: a counted trial of candidate code, never a promotion."""
@@ -1135,8 +1256,14 @@ class House:
                                               "Ask for a smaller question of the tape, or tell the House with `request_tool`.",
                     "numbers": {}, "needs": info["needs"], "params": info.get("params") or {}}
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
-        return {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
-                "digest": result.get("digest")}
+        out = {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
+               "digest": result.get("digest")}
+        if result.get("tape_source") == "history-dev":
+            # Development history, fold by fold. A pass here still needs the sealed holdout to be
+            # promoted, and nothing about the holdout is ever shown.
+            out["walk_forward"] = result.get("walk_forward") or []
+            out["note"] = "replayed on the development window before the sealed holdout; promotion also needs the holdout"
+        return out
 
     # ----------------------------------------------------------------- judging
     def judge(self, agent: Agent) -> Verdict | None:
@@ -1831,7 +1958,69 @@ class House:
         if (refusal is not None and book is not None and refusal.payload.get('book') == book.name
                 and _epoch(refusal.at) > last and self.clock() - last >= 60):
             return True
-        return self.clock() - last >= self.research_interval_hours(agent) * 3600
+        interval = self.research_interval_hours(agent) * 3600
+        if self.clock() - last < interval:
+            return False
+        return self._gate(agent, last, interval)
+
+    def _gate(self, agent: Agent, last: float, interval: float) -> bool:
+        """Back off research that keeps coming back empty while nothing about the agent has changed.
+
+        Measured Sept 21-22, 2026: 82% of research sessions in twelve hours ended with no
+        candidate and no replay ("no credits justified"), about $64 of $94, and agents cited the
+        same missing inputs pass after pass. After `after` empty passes in a row the interval
+        doubles per further empty pass (up to `max_factor`), unless something new reached the
+        agent's record since its last pass: a fill, a settlement, a verdict or a new strategy.
+        A deterministic `sample_percent` of the skipped windows run anyway, so what the gate
+        misses stays measurable (`research.gate` rows with sampled=true).
+
+        With the Jev floor wired (`league/sensors.py`) its gate decides instead, on the same dials:
+        exact triggers beyond these four, explicit blockers, a heartbeat and Jev's note relevance
+        (`league/research_gate.py`). This body is the fallback when it is switched off."""
+        rules = dict((self.game.get("research") or {}).get("gate") or {})
+        if not rules.get("enabled", True):
+            return True
+        if self.jev_floor is not None and self.jev_floor.gate is not None:
+            return self.jev_floor.research_due(agent, last=last, due=True)
+        streak = int((self._state.get("empty_research") or {}).get(agent.id) or 0)
+        after = int(rules.get("after", 2))
+        if streak < after:
+            return True
+        since = now_iso(lambda: last)
+        for kind in ("book.fill", "book.settle", "eval.verdict", "agent.strategy"):
+            row = self.ledger.last(kind, agent=agent.id)
+            if row is not None and row.at > since:
+                self._gate_note(agent, "run", f"new {kind} since the last pass", streak, last)
+                return True
+        factor = min(2 ** (streak - after + 1), float(rules.get("max_factor", 8)))
+        if self.clock() - last >= interval * factor:
+            self._gate_note(agent, "run", f"backoff x{factor:g} elapsed after {streak} empty passes", streak, last)
+            return True
+        digest = hashlib.sha256(f"{agent.id}:{int(last)}".encode()).digest()
+        if digest[0] * 100 < 256 * float(rules.get("sample_percent", 10)):
+            self._gate_note(agent, "sample", f"{streak} empty passes and nothing new; sampled to measure misses", streak, last)
+            return True
+        self._gate_note(agent, "skip", f"{streak} empty passes and nothing new; next pass after x{factor:g} the interval", streak, last)
+        return False
+
+    def _gate_note(self, agent: Agent, decision: str, reason: str, streak: int, last: float) -> None:
+        """One `research.gate` row per agent per research window, not one per tick."""
+        with self._state_lock:
+            noted = self._state.setdefault("gate_noted", {})
+            key = f"{int(last)}:{decision}"
+            if noted.get(agent.id) == key:
+                return
+            noted[agent.id] = key
+        self.ledger.append("research.gate", {"agent": agent.id, "decision": decision, "reason": reason,
+                                             "empty_streak": streak, "sampled": decision == "sample"}, agent=agent.id)
+
+    def _note_research_result(self, agent_id: str, outcome: Any) -> None:
+        """Count empty passes in a row: no candidate, no replay trial and no Merton strategy."""
+        useful = bool(getattr(outcome, "candidate", None) or int(getattr(outcome, "trials", 0) or 0)
+                      or getattr(outcome, "consulted", ""))
+        with self._state_lock:
+            streaks = self._state.setdefault("empty_research", {})
+            streaks[agent_id] = 0 if useful else int(streaks.get(agent_id) or 0) + 1
 
     def idle_run(self, agent: Agent) -> dict[str, int]:
         """This agent's unbroken run of wakes that did nothing, and why (see `_note_wake`)."""
@@ -2116,7 +2305,14 @@ class House:
             query, tape = self.tape_for(effective)
             requested = (effective.get('observe') or {}).get('symbols') or []
             missing = [s for s in requested if not (tape.get('observed_bars') or {}).get(s)] if agent.venue == 'kalshi' else []
-            return {'query': query, **tape_coverage(tape), 'effective_needs': effective,
+            history = None
+            if agent.venue == 'alpaca':
+                # Which history judges this: the store's development window, or the live tape
+                # because the store has not fetched these inputs yet (not a fact about the market).
+                history = ({'tape': 'development window before the sealed holdout', **dict(tape.get('source') or {})}
+                           if query.startswith('deep:') else {'tape': 'live recent tape',
+                                                             'why': 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
+            return {'query': query, **tape_coverage(tape), 'effective_needs': effective, **({'history': history} if history else {}),
                     'proposed_inputs': needs is not None,
                     'required_observed_symbols': list(requested), 'missing_observed_symbols': missing,
                     'observed_inputs_available': not missing,
@@ -2234,12 +2430,27 @@ class House:
                     with self._lifecycle_lock:
                         row = Admissions(self.ledger).enqueue(agent.id, generation, candidate, session)
                         self._admit_candidate(row)
+                self._trace_adoption(agent.id, session, outcome.candidate)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
+            self._note_research_result(agent.id, outcome)
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
                         self._state['last_research'][agent.id] = self.clock()
             return outcome
+
+    def _trace_adoption(self, agent_id: str, session: str, candidate: Mapping[str, Any]) -> None:
+        """Join what became of a pass's candidate to its research trace (league/traces.py)."""
+        traces = getattr(self.researcher, 'traces', None)
+        if traces is None:
+            return
+        from .traces import adoption_outcome, trace_id
+
+        try:
+            outcome, useful = adoption_outcome(self.ledger, self.registry, agent_id, session, candidate)
+            traces.outcome(trace_id('research', session), outcome=outcome, useful=useful, agent=agent_id)
+        except Exception as exc:  # noqa: BLE001 - a trace never costs an adoption
+            self.alert('warning', f'trace outcome for {agent_id}: {type(exc).__name__}: {str(exc)[:160]}')
 
     def _cancel_retired_research(self):
         for job in self.research_jobs.pending():
@@ -2595,6 +2806,10 @@ class House:
         last = float(state.get("at") or state.get("since") or self._born_at)
         if self.clock() - last < every:
             return None
+        if self.hypotheses is not None and self.hypotheses.replaces_refill():
+            # Hypotheses, not blind mutations (league/hypotheses.py): a replay-passing card, or a
+            # mutation of a parent that is earning forward, never a draw placed by open seats.
+            return self.hypotheses.refill(rules, living=living, loser=loser)
         seats = {n.id: n.max_members - sum(a.specialty == n.id for a in living)
                  for n in self.niches.values() if not n.dormant}
         seats = {key: value for key, value in seats.items() if value > 0}
@@ -2614,8 +2829,37 @@ class House:
             return bool(row is not None and row.score_growth > 0 and row.score_observations > 0)
 
         paying = {a.specialty for a in here if earning(a)}
-        for best in sorted(here, key=lambda a: (a.specialty in paying, seats.get(a.specialty, 0), earning(a),
-                                                self.evaluator.rung(a.id), self.economy.balance(a.id)), reverse=True):
+        lines = self.line_trials()
+        exhaust = int(rules.get("line_exhausted_trials", 15))
+
+        def line_of(agent):
+            return lines.get(agent.line or agent.name) or (0, 0)
+
+        def exhausted(agent):
+            tried, passed = line_of(agent)
+            return passed == 0 and tried >= exhaust and not earning(agent)
+
+        def desk_pass_rate(agent):
+            rows = [line_of(a) for a in here if a.specialty == agent.specialty]
+            tried = sum(t for t, _ in rows)
+            return (sum(p for _, p in rows) + 1) / (tried + 2)  # a desk with no trials starts at one half
+
+        # Births follow evidence first: an earning desk, then a line that is not exhausted, then the
+        # desk's replay pass rate, and only then open seats. Measured Sept 21-22, 2026: seats-first
+        # sent 66% of 210 births to six desks that had never produced a live agent, from lines that
+        # already held a median of 15 failed trials. One birth in `explore_every` still goes by open
+        # seats alone, so an unexplored desk keeps a bounded share of the search.
+        explore = int(rules.get("explore_every", 5))
+        exploring = explore > 0 and len(self.registry.agents) % explore == 0
+        order = (lambda a: (not exhausted(a), seats.get(a.specialty, 0), earning(a), self.evaluator.rung(a.id))) if exploring else \
+                (lambda a: (a.specialty in paying, not exhausted(a), desk_pass_rate(a), earning(a), seats.get(a.specialty, 0),
+                            self.evaluator.rung(a.id), self.economy.balance(a.id)))
+        for agent in here:
+            if exhausted(agent):
+                self._retire_line(agent, *line_of(agent))
+        for best in sorted(here, key=order, reverse=True):
+            if exhausted(best):
+                continue
             child_params = self._mutated_params(best, seed=f"newcomer:{len(self.registry.agents)}")
             if child_params is not None:
                 break
@@ -2624,12 +2868,46 @@ class House:
         if loser is not None:
             self.kill(loser, "displaced", self.postmortem(loser, "displaced",
                 "the league was full and a valid newcomer replaces its weakest eligible agent"))
+        tried, passed = line_of(best)
+        why = ("exploration: open desks with more room were tried first" if exploring else
+               f"evidence: earning desks, live lines and the desk's replay pass rate ({desk_pass_rate(best):.0%}) before open seats")
         child = self.spawn(best.line or best.name, best.family, best.code, parent=best.id, endowment=rules["endowment_usd"],
                            params=child_params,
-                           reason=f"a House-staked valid mutation of {best.id}: open desks with more room were tried first; the league was {len(living)} of {rules['max_population']}")
+                           reason=f"a House-staked valid mutation of {best.id} by {why}; its line has {passed} passes in {tried} trials; "
+                                  f"the league was {len(living)} of {rules['max_population']}")
         self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False,
                                             "reason": "population", "new_code": False}, agent=best.id)
         return child
+
+    def line_trials(self) -> dict[str, tuple[int, int]]:
+        """Replay trials and passes per line (`Agent.line`, else its name), cached for five minutes."""
+        def build():
+            line = {a.id: (a.line or a.name) for a in self.registry.agents.values()}
+            out: dict[str, list[int]] = {}
+            for entry in self.ledger.iter(kinds="eval.trial"):
+                row = out.setdefault(line.get(entry.agent, entry.agent), [0, 0])
+                row[0] += 1
+                row[1] += bool(entry.payload.get("passed"))
+            return {key: (tried, passed) for key, (tried, passed) in out.items()}
+        hit = self._data_cache.get("line_trials")
+        if hit and self.clock() - hit[0] < 300:
+            return hit[1]
+        value = build()
+        self._data_cache["line_trials"] = (self.clock(), value)
+        return value
+
+    def _retire_line(self, agent: Agent, tried: int, passed: int) -> None:
+        """Say once that a line is no longer bred. Its living agents keep their seats and records;
+        only House-staked mutations stop. It is a heuristic starting point, not a statistical law."""
+        line = agent.line or agent.name
+        with self._state_lock:
+            told = self._state.setdefault("retired_lines", {})
+            if line in told:
+                return
+            told[line] = tried
+        self.ledger.append("hypothesis.retired", {"id": f"line:{line}", "reason": "disproven", "failures": tried - passed,
+                                                  "evidence": f"{tried} replay trials and {passed} passes; House mutations stop"},
+                           id=f"line-retired:{line}:{tried}")
 
     # -------------------------------------------------------------------- tick
     def tick(self) -> dict[str, Any]:
@@ -2721,6 +2999,8 @@ class House:
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if open_for_business and self.semantic_lab is not None and self.semantic_lab.due():
             self._background('semantic-lab', self.semantic_lab.run)
+        if self.jev_floor is not None:
+            self.jev_floor.tick(open_for_business)
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
         # Both are code over the ledger and cost nothing, so they run while the House is paused too.
@@ -2728,6 +3008,7 @@ class House:
             self._background("pre-audit", self.pre_audit.run, self)
         if self.consult_recovery is not None and self.consult_recovery.due():
             self._background("consult-recovery", self._recover_consults)
+        self._history_coverage()
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
@@ -2743,6 +3024,12 @@ class House:
                 if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
                     self._background(f"merton:{role}", self.merton.run, role)
             self._background("merton:follow", self.merton.follow)
+        if open_for_business and self.engineer is not None and self.engineer.due():
+            # The repair worklist: its sources, its free follow-ups and at most one paid patch a
+            # step, each against its own per-job ceiling and the day's frontier allowance.
+            self._background("engineer", self.engineer.step)
+        if self.hypotheses is not None:
+            self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
@@ -2815,6 +3102,8 @@ class House:
                                  if (row := self._state.get('promotion_status', {}).get(agent.id))
                                  and row.get('code_sha256') == agent.code_sha256],
             "semantic_lab": self.semantic_lab.stats() if self.semantic_lab else None,
+            "jev": self.jev_floor.health() if self.jev_floor else None,
+            "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")

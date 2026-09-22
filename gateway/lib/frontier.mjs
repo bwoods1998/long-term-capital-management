@@ -27,10 +27,16 @@ export function priceTable(env = {}) {
       const input = Number(row?.input), cached = Number(row?.cached ?? row?.input), output = Number(row?.output);
       const longInput = Number(row?.long_input ?? input), longCached = Number(row?.long_cached ?? cached);
       const longOutput = Number(row?.long_output ?? output);
-      if (/^[A-Za-z0-9._:-]{1,80}$/.test(model) && [input, cached, output, longInput, longCached, longOutput].every(Number.isFinite)
+      // `input` is the cache-write rate, the dearest an input token can be. `uncached` is the
+      // plain rate for a token neither read from nor written to the cache; absent, it is `input`,
+      // so a table without it prices exactly as before.
+      const uncached = Number(row?.uncached ?? input), longUncached = Number(row?.long_uncached ?? longInput);
+      if (/^[A-Za-z0-9._:-]{1,80}$/.test(model) && [input, cached, output, longInput, longCached, longOutput, uncached, longUncached].every(Number.isFinite)
           && input > 0 && cached >= 0 && cached <= input && output > 0
-          && longInput >= input && longCached >= cached && longCached <= longInput && longOutput >= output) {
-        out[model] = { input, cached, output, long_input: longInput, long_cached: longCached, long_output: longOutput };
+          && longInput >= input && longCached >= cached && longCached <= longInput && longOutput >= output
+          && uncached >= cached && uncached <= input && longUncached >= longCached && longUncached <= longInput && longUncached >= uncached) {
+        out[model] = { input, cached, output, long_input: longInput, long_cached: longCached, long_output: longOutput,
+          uncached, long_uncached: longUncached };
       }
     }
     return out;
@@ -56,10 +62,54 @@ export function actualCost(price, usage) {
   const input = Number(usage.input_tokens), output = Number(usage.output_tokens);
   if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) return null;
   const cached = Math.min(input, Math.max(0, Number(usage.input_tokens_details?.cached_tokens) || 0));
+  // GPT-5.6 and later report the tokens a call wrote to the prompt cache, billed at 1.25x the
+  // plain input rate; reads are 0.1x (developers.openai.com/api/docs/guides/prompt-caching,
+  // read Sept 22, 2026). A usage block without the field prices every uncached token as a write.
+  const reported = Number(usage.input_tokens_details?.cache_write_tokens);
+  const written = Number.isFinite(reported) && reported >= 0 ? Math.min(input - cached, reported) : input - cached;
+  const plain = input - cached - written;
   const long = input > 272000;
-  return micro(((input - cached) * (long ? price.long_input ?? price.input : price.input)
+  return micro((written * (long ? price.long_input ?? price.input : price.input)
+    + plain * (long ? price.long_uncached ?? price.long_input ?? price.input : price.uncached ?? price.input)
     + cached * (long ? price.long_cached ?? price.cached : price.cached)
     + output * (long ? price.long_output ?? price.output : price.output)) / 1e6);
+}
+
+/** The prompt-cache hints OpenAI documents for the Responses API, and nothing else. */
+const CACHE_KEY = /^[A-Za-z0-9._:-]{1,64}$/;
+const RETENTION = new Set(['in_memory', '24h']);
+
+function cacheHintsValid(body) {
+  if (body.prompt_cache_key !== undefined && !(typeof body.prompt_cache_key === 'string' && CACHE_KEY.test(body.prompt_cache_key))) return false;
+  if (body.prompt_cache_retention !== undefined && !RETENTION.has(body.prompt_cache_retention)) return false;
+  const options = body.prompt_cache_options;
+  if (options !== undefined) {
+    // A prewarm writes the cache without an answer; nothing here needs one, so it is refused
+    // rather than trusted to be metered like an ordinary call.
+    if (!options || typeof options !== 'object' || Array.isArray(options)
+        || Object.keys(options).some(key => !['mode', 'ttl', 'prewarm'].includes(key))
+        || (options.mode !== undefined && !['implicit', 'explicit'].includes(options.mode))
+        || (options.ttl !== undefined && options.ttl !== '30m')
+        || (options.prewarm !== undefined && options.prewarm !== false)) return false;
+  }
+  return true;
+}
+
+/** An input message's content: a string, or text blocks that may mark an explicit cache breakpoint. */
+function textContent(content) {
+  if (typeof content === 'string') return 0;
+  if (!Array.isArray(content) || content.length < 1 || content.length > 16) return null;
+  let breakpoints = 0;
+  for (const block of content) {
+    if (!block || typeof block !== 'object' || block.type !== 'input_text' || typeof block.text !== 'string'
+        || Object.keys(block).some(key => !['type', 'text', 'prompt_cache_breakpoint'].includes(key))) return null;
+    if (block.prompt_cache_breakpoint !== undefined) {
+      const mark = block.prompt_cache_breakpoint;
+      if (!mark || typeof mark !== 'object' || Array.isArray(mark) || Object.keys(mark).length !== 1 || mark.mode !== 'explicit') return null;
+      breakpoints += 1;
+    }
+  }
+  return breakpoints;
 }
 
 /**
@@ -75,13 +125,27 @@ export function admit(body, env) {
   if (body.stream === true || body.background === true) return { error: 'Streaming and background calls cannot be metered and are refused.', status: 400 };
   // The meter prices only inline text and standard inference. A stored conversation, image,
   // paid built-in tool or faster service tier could bill work that is absent from this body.
-  const allowed = new Set(['model', 'input', 'max_output_tokens', 'reasoning', 'stream', 'background', 'service_tier']);
-  const textInput = typeof body.input === 'string' || (Array.isArray(body.input) && body.input.every(item =>
-    item && typeof item === 'object' && ['system', 'developer', 'user', 'assistant'].includes(item.role)
-    && typeof item.content === 'string' && Object.keys(item).every(key => ['role', 'content'].includes(key))));
+  // Prompt-cache hints change what a call costs only through the usage block the bill is settled
+  // from (cache reads are cheaper, writes are priced at `input`), so they are admitted, bounded.
+  const allowed = new Set(['model', 'input', 'max_output_tokens', 'reasoning', 'stream', 'background', 'service_tier',
+    'prompt_cache_key', 'prompt_cache_retention', 'prompt_cache_options']);
+  let breakpoints = 0;
+  const textInput = typeof body.input === 'string' || (Array.isArray(body.input) && body.input.every(item => {
+    if (!item || typeof item !== 'object' || !['system', 'developer', 'user', 'assistant'].includes(item.role)
+        || !Object.keys(item).every(key => ['role', 'content'].includes(key))) return false;
+    // Assistant turns stay plain strings: output blocks are a different type, and none is needed.
+    const marks = item.role === 'assistant' ? (typeof item.content === 'string' ? 0 : null) : textContent(item.content);
+    if (marks === null) return false;
+    breakpoints += marks;
+    return true;
+  }));
   if (!textInput || Object.keys(body).some(key => !allowed.has(key))
       || (body.service_tier !== undefined && body.service_tier !== 'default')) {
     return { error: 'Only inline text on the standard service tier is priced by this gateway.', status: 400 };
+  }
+  // OpenAI takes at most four cache writes a request.
+  if (!cacheHintsValid(body) || breakpoints > 4) {
+    return { error: 'Prompt-cache hints must be a bounded key, a documented retention, a 30m ttl without prewarm and at most four explicit breakpoints.', status: 400 };
   }
   const maxOutput = Number(body.max_output_tokens);
   if (!Number.isInteger(maxOutput) || maxOutput < 1 || maxOutput > MAX_OUTPUT_TOKENS) {

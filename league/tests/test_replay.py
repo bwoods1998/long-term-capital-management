@@ -162,6 +162,27 @@ def decide(ctx):
 
 
 # ------------------------------------------------------------------------------- alpaca fills
+class DatedQuotesTest(unittest.TestCase):
+    def test_a_replay_quote_carries_its_decision_time_like_a_live_quote(self):
+        """Sept 22, 2026: strategies that refuse undated quotes never traded in replay."""
+        code = '''
+NEEDS = {"venue": "alpaca", "symbols": ["BTC/USD"], "bars": {"limit": 5}}
+PARAMS = {}
+def decide(ctx):
+    for quote in ctx["quotes"].values():
+        if quote.get("t") != ctx["now"]:
+            raise ValueError("an undated or stale replay quote")
+    held = [p for p in ctx["positions"] if p["symbol"] == "BTC/USD"]
+    side = "sell" if held else "buy"
+    size = {"quantity": held[0]["quantity"]} if held else {"notional_usd": 50.0}
+    return {"intents": [{"symbol": "BTC/USD", "side": side, "type": "market", "reason": "dated", **size}], "memory": {}}
+'''
+        result = run_replay(code, None, alpaca_tape([100, 101, 102, 103, 104, 105]))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["errors"], 0)
+        self.assertGreater(result["trades"], 0)
+
+
 class AlpacaFillTest(unittest.TestCase):
     def test_resting_buy_is_not_filled_by_a_touch(self):
         result = play({0: [limit("buy", 0.5, 99)]}, alpaca_tape([100, bar(100, l=99), bar(100, l=99)]))

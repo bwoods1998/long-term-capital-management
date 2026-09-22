@@ -24,8 +24,9 @@ append-only recovery and exclusion of contaminated performance. A profitable liv
 autonomous repair of the whole harness are still unproved.
 Read the [foundation run](docs/runs/2026-09-20-foundation-progress.md),
 [phase policy](docs/phase-one.md), [architect handoff](docs/design/2026-09-20-chief-architect-handoff.md),
-[model comparison](docs/runs/2026-09-20-model-routing.md) and
-[Jev integration](docs/design/2026-09-20-typesafe-pilot.md).
+[model comparison](docs/runs/2026-09-20-model-routing.md),
+[Jev integration](docs/design/2026-09-20-typesafe-pilot.md) and the
+[Sept 22 routing, caching and economics run](docs/runs/2026-09-22-model-routing-experiment.md).
 
 Watch it at [blakewoods.us/capital](https://blakewoods.us/capital/). The design is in
 [the game](docs/proposals/2026-09-19-the-game.md) and
@@ -147,6 +148,17 @@ It retains the foundation policy and Jev backing. New sessions compare 75% Luna 
 research runs every fifteen minutes, and a shared Jev lab tests fixed and architect-proposed
 classification features against a numerical baseline. Faster cycles and stronger resource
 rewards are experimental; independent forward evidence still decides whether they help.
+
+**Which model does which work, and what it costs.** `league/routing.py` routes deterministic
+work to code, cheap semantic questions to Jev, routine research to the strongest economical model
+by measured evidence (Luna, on the Sept 22 experiment: a spawn-valid strategy for about $0.011
+against $0.12-0.22 on DeepSeek-V4-Pro) and hard synthesis, repairs and audits to Astra, and records
+each decision as `route.decision`. Luna's research requests put the shared rules, contract and
+tools first and append each turn as its own message, so OpenAI's prompt cache pays: a follow-on
+turn read 97% from cache and cost 81% less, where the old single-packet layout had read nothing in
+15,044 calls. Each finished pass leaves a private transcript and a `trace.record` pointer for
+eventual fine-tuning, and `scripts/economics.py` reports trading P&L (real and practice apart),
+spend by provider and useful work per dollar, read-only.
 
 **How an agent learns, and what it remembers.** A research pass starts from the agent's JOURNAL
 (notes it wrote to its future self and the conclusion of every earlier pass, its ancestors' before

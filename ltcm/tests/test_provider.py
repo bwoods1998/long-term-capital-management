@@ -127,7 +127,10 @@ class RateCardTests(unittest.TestCase):
         expected = {
             "pro_asap": (PRO, "asap", "0.92", "0.04", "2.77"),
             "pro_flex": (PRO, "flex", "0.46", "0.02", "1.39"),
+            # Balanced windows verified on the card and GET /v1/models, Sept 22, 2026.
+            "pro_balanced": (PRO, "balanced", "0.74", "0.03", "2.22"),
             "flash_asap": (FLASH, "asap", "0.09", "0.02", "0.18"),
+            "flash_balanced": (FLASH, "balanced", "0.07", "0.02", "0.14"),
             "flash_flex": (FLASH, "flex", "0.05", "0.01", "0.09"),
             "kimi_asap": ("moonshotai/Kimi-K2.6", "asap", "1.00", "0.20", "4.00"),
             "kimi_balanced": ("moonshotai/Kimi-K2.6", "balanced", "0.45", "0.20", "3.00"),
@@ -876,7 +879,9 @@ class RateCardDriftTests(ProviderCase):
     LIVE = {
         ("DeepSeek V4 Pro", "Default (ASAP)"): ("0.92", "0.04", "2.77"),
         ("DeepSeek V4 Pro", "Flex"): ("0.46", "0.02", "1.39"),
+        ("DeepSeek V4 Pro", "Balanced"): ("0.74", "0.03", "2.22"),
         ("DeepSeek V4 Flash", "Default (ASAP)"): ("0.09", "0.02", "0.18"),
+        ("DeepSeek V4 Flash", "Balanced"): ("0.07", "0.02", "0.14"),
         ("DeepSeek V4 Flash", "Flex"): ("0.05", "0.01", "0.09"),
         ("Kimi K2.6", "Default (ASAP)"): ("1.00", "0.20", "4.00"),
         ("Kimi K2.6", "Balanced"): ("0.45", "0.20", "3.00"),

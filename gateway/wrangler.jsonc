@@ -65,8 +65,10 @@
     "TYPESAFE_PERSISTENT": "true",
     // Dollars per million tokens: input, cached input, output. A model absent here is refused.
     // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
-    // cache-write rate, the dearest an input token can be, so the meter errs high.
-    "FRONTIER_MODELS": "{\"gpt-6-astra\":{\"input\":12.5,\"cached\":1,\"output\":50,\"long_input\":25.0,\"long_cached\":2,\"long_output\":75.0},\"gpt-5.6-sol\":{\"input\":5,\"cached\":0.4,\"output\":20,\"long_input\":10,\"long_cached\":0.8,\"long_output\":30.0},\"gpt-5.6-terra\":{\"input\":2.5,\"cached\":0.2,\"output\":12,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":18.0},\"gpt-5.6-luna\":{\"input\":0.25,\"cached\":0.02,\"output\":1.2,\"long_input\":0.5,\"long_cached\":0.04,\"long_output\":1.7999999999999998}}",
+    // cache-write rate, the dearest an input token can be, so the meter errs high. `uncached` is
+    // the list rate for a token neither read nor written (1/1.25 of the write rate, prompt-caching
+    // guide, Sept 22, 2026); it applies only when the usage block reports `cache_write_tokens`.
+    "FRONTIER_MODELS": "{\"gpt-6-astra\":{\"input\":12.5,\"cached\":1,\"output\":50,\"long_input\":25.0,\"long_cached\":2,\"long_output\":75.0,\"uncached\":10,\"long_uncached\":20},\"gpt-5.6-sol\":{\"input\":5,\"cached\":0.4,\"output\":20,\"long_input\":10,\"long_cached\":0.8,\"long_output\":30.0,\"uncached\":4,\"long_uncached\":8},\"gpt-5.6-terra\":{\"input\":2.5,\"cached\":0.2,\"output\":12,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":18.0,\"uncached\":2,\"long_uncached\":4},\"gpt-5.6-luna\":{\"input\":0.25,\"cached\":0.02,\"output\":1.2,\"long_input\":0.5,\"long_cached\":0.04,\"long_output\":1.7999999999999998,\"uncached\":0.2,\"long_uncached\":0.4}}",
     // Where the frontier model's proposals become pull requests, and how many may open in one
     // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
     // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.

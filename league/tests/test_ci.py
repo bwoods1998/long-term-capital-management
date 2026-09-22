@@ -21,7 +21,7 @@ class GuardTest(unittest.TestCase):
     def test_nobody_touches_the_constitution_or_the_scorekeeper(self):
         for path in ("league/constitution.py", "league/ledger.py", "league/book.py", "league/evaluator.py", "league/stats.py", "league/ci.py",
                      "league/auditor.py", "league/watchdog.py", "league/safety.py", "league/replay.py", "gateway/lib/caps.mjs", ".github/workflows/checks.yml",
-                     "League/Constitution.py"):
+                     "League/Constitution.py", "league/history.py", "league/deep_replay.py"):
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
         self.assertTrue(ci.guard(["league/constitution.py"], None))
@@ -63,7 +63,7 @@ class ContentTest(unittest.TestCase):
         self.strategy("crashes", 'NEEDS = {"venue": "kalshi", "horizon": "hour", "style": "t", "series": ["KXBTCD"]}\n\ndef decide(ctx):\n    return 1 / 0\n')
         self.assertIn("too many errors", " ".join(ci.check_strategies(self.root)))
         (self.root / "league/strategies/registry.json").write_text("[]")
-        self.assertIn("not listed", " ".join(ci.check_strategies(self.root)))
+        self.assertIn("not described", " ".join(ci.check_strategies(self.root)))
         (self.root / "league/strategies/registry.json").write_text(json.dumps([{"name": "ghost", "family": "t", "file": "ghost.py", "why": "x"}]))
         self.assertIn("does not exist", " ".join(ci.check_strategies(self.root)))
 

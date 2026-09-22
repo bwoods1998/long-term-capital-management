@@ -13,7 +13,15 @@ Fills are conservative:
 - a market order, or a limit order that crosses, fills at the touch of the same step as a taker
   (a crossing `post_only` order is refused);
 - a resting limit order fills at its own price, as a maker, only when a later step's range trades
-  strictly through it (`low < price` for a buy, `high > price` for a sell). Touching is not enough;
+  strictly through it (`low < price` for a buy, `high > price` for a sell). Touching is not enough:
+  the tape knows nothing of the queue ahead of the order or the depth behind the touch;
+- the touch is the tape's own quote where it carries one (`step["quotes"]`: the NBBO prevailing
+  when an order decided at the step's close reaches the venue, `league.history` probes), and the
+  close plus or minus `half_spread_bps` where it does not. A quote older than
+  `STALE_QUOTE_SECONDS` says where the market WAS: the touch is then centred on the close and no
+  narrower than twice the assumed spread. `spread_stress` (2.0 for the double-spread variant)
+  widens every touch about its middle. A tape with quotes or stress reports how each step was
+  priced in `execution`;
 - all or nothing: the tape carries no sizes, so an order fills whole or not at all, and the rung's
   order cap is what keeps that honest;
 - Alpaca crypto pays 0.25% as a taker and 0.15% as a maker, equities nothing. The live venue takes
@@ -70,6 +78,9 @@ MAX_MEMORY_BYTES = 8 * 1024
 DEFAULT_BARS = 120
 MAX_BARS = 500
 DEFAULT_HALF_SPREAD_BPS = 2.0
+#: A quote older than this at the moment it is used is stale (Sept 22, 2026: SPY's touch changes
+#: many times a second in the session; a quote ten seconds old is from another market).
+STALE_QUOTE_SECONDS = 10.0
 RUIN_LOG_GROWTH = -13.8  # ln(1e-6): the block in which the account is wiped out, and the floor for any block
 RUIN_EQUITY = 1e-9  # equity at or under this is zero (float dust after spending the last cent)
 EPS = 1e-9
@@ -260,13 +271,30 @@ class _View:
         self.marks: dict[str, float] = {}  # key -> liquidation value of one unit
         self.bars: dict[str, dict[str, Any]] = {}  # alpaca: symbol -> the bar that closed now
         self.markets: dict[str, dict[str, Any]] = {}  # kalshi: ticker -> cleaned market row
+        self.quote_age: dict[str, float] = {}  # alpaca: seconds a recorded quote is older than now
 
 
-def _alpaca_view(step: dict, half_spread: float) -> _View:
+def _touch(close: float, quote: Any, half_spread: float, stress: float) -> tuple[float, float, str]:
+    """(bid, ask, how) a taker meets at this step: `quoted`, `stale` or `assumed` (see above)."""
+    assumed = (close * (1.0 - half_spread * stress), close * (1.0 + half_spread * stress), "assumed")
+    if not isinstance(quote, dict):
+        return assumed
+    bid, ask, age = _num(quote.get("bid")), _num(quote.get("ask")), _num(quote.get("age"))
+    if bid is None or ask is None or not 0.0 < bid <= ask:
+        return assumed
+    if age is None or age < 0 or age > STALE_QUOTE_SECONDS:
+        half = max((ask - bid) / 2.0, close * half_spread * 2.0) * stress
+        return close - half, close + half, "stale"
+    middle, half = (bid + ask) / 2.0, (ask - bid) / 2.0 * stress
+    return middle - half, middle + half, "quoted"
+
+
+def _alpaca_view(step: dict, half_spread: float, stress: float = 1.0, priced: "dict[str, int] | None" = None) -> _View:
     view = _View()
     bars = step.get("execution_bars", step.get("bars"))
     if not isinstance(bars, dict):
         return view
+    quotes = step.get("quotes") if isinstance(step.get("quotes"), dict) else {}
     for symbol, bar in bars.items():
         if not isinstance(symbol, str) or not isinstance(bar, dict):
             continue
@@ -280,7 +308,12 @@ def _alpaca_view(step: dict, half_spread: float) -> _View:
         open_ = close if open_ is None or open_ <= 0 else open_
         high = max(close, high) if high is not None else close
         low = min(close, low) if low is not None and low > 0 else close
-        bid, ask = close * (1.0 - half_spread), close * (1.0 + half_spread)
+        bid, ask, how = _touch(close, quotes.get(symbol), half_spread, stress)
+        if priced is not None:
+            priced[how] = priced.get(how, 0) + 1
+        age = _num((quotes.get(symbol) or {}).get("age")) if how != "assumed" else None
+        if age is not None and age > 0:
+            view.quote_age[symbol] = age
         view.bars[symbol] = {"t": step["t"], "o": open_, "h": high, "l": low, "c": close, "v": volume or 0.0}
         view.quotes[symbol] = (bid, ask)
         view.ranges[symbol] = (low, high)  # trades: a buy needs a print under it, a sell one over it
@@ -747,6 +780,9 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         return failed("bad tape: the horizon is hour or day")
     half_spread_bps = _num(tape.get("half_spread_bps"))
     half_spread = (DEFAULT_HALF_SPREAD_BPS if half_spread_bps is None or half_spread_bps < 0 else half_spread_bps) / 10000.0
+    stress = _num(tape.get("spread_stress"))
+    stress = 1.0 if stress is None or stress < 1.0 else min(stress, 10.0)
+    priced: dict[str, int] = {}
     results = tape.get("results") if isinstance(tape.get("results"), dict) else {}
 
     bars_need = needs.get("bars") if isinstance(needs.get("bars"), dict) else {}
@@ -805,7 +841,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                 close_block()
             block_key, block_active = key, False
         steps_walked += 1
-        view = _alpaca_view(step, half_spread) if venue == "alpaca" else _kalshi_view(step)
+        view = _alpaca_view(step, half_spread, stress, priced) if venue == "alpaca" else _kalshi_view(step)
         held_before, fills_before = bool(account.positions), account.fills
 
         # (a) orders from earlier steps meet this step's range; closed markets settle.
@@ -839,11 +875,21 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
             if venue == "alpaca":
                 shown = wanted_symbols or sorted(history)
                 ctx["bars"] = {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in shown}
-                ctx["quotes"] = {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in shown if s in view.quotes}
+                # A replay quote is made at this decision step, so it carries the step's own time as
+                # `t`, as a live quote carries its venue timestamp (CONTRACT.md). Without it, every
+                # strategy that refuses a stale or undated quote -- the careful ones -- never traded
+                # in replay: measured Sept 22, 2026, four frontier-written megacaps cards made 0
+                # trades each, and 14, 31, 5 and 14 once replay quotes were dated.
+                # A recorded quote (league.history probes) is dated when it was quoted: now less its age.
+                def dated(s):
+                    age = view.quote_age.get(s)
+                    t = now if not age else datetime.fromtimestamp(now_ts - age, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                    return {"bid": view.quotes[s][0], "ask": view.quotes[s][1], "t": t}
+                ctx["quotes"] = {s: dated(s) for s in shown if s in view.quotes}
                 if watched_symbols:
                     ctx["observed"] = {
                         "bars": {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in watched_symbols},
-                        "quotes": {s: {"bid": view.quotes[s][0], "ask": view.quotes[s][1]} for s in watched_symbols if s in view.quotes},
+                        "quotes": {s: dated(s) for s in watched_symbols if s in view.quotes},
                     }
             else:
                 shown_markets, watched_markets = [], []
@@ -959,6 +1005,11 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         "params": effective,
         "code_sha256": sha,
     }
+    if venue == "alpaca" and (stress != 1.0 or priced.get("quoted") or priced.get("stale")):
+        # Only a tape that carries quotes or stress says so: every older tape's result is unchanged.
+        result["execution"] = {"touch": dict(sorted(priced.items())), "spread_stress": stress,
+                               "stale_after_seconds": STALE_QUOTE_SECONDS,
+                               "limits": "no queue position, no depth: a resting limit fills only when later prints trade through it"}
     result["digest"] = digest(account.trade_log)
     if audit:
         result["fill_log"] = account.fill_log
