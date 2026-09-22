@@ -28,6 +28,18 @@ Read the [foundation run](docs/runs/2026-09-20-foundation-progress.md),
 [Jev integration](docs/design/2026-09-20-typesafe-pilot.md) and the
 [Sept 22 routing, caching and economics run](docs/runs/2026-09-22-model-routing-experiment.md).
 
+**The September 22 rebuild** rebuilt the learning loop around evidence. The
+[execution record](docs/runs/2026-09-22-overnight-rebuild.md) has what was built and measured, and
+[operations](docs/operations.md) has how to pause, inspect, deploy, roll back and recover.
+- **Hypotheses, not blind mutations.** Merton writes falsifiable hypothesis cards, and replay
+  admits them before any seat. Blind House mutations into dead desks have stopped.
+- **Criticism becomes work.** A durable repair queue feeds an engineer. It turns audit vetoes,
+  refusals and CI failures into pull requests, which CI and an attested updater carry to the box.
+- **Research is gated.** Exact triggers, with Jev as a cheap second opinion, hold back research
+  that keeps coming back empty. Luna's prompts are cached.
+- **Deeper evaluation.** Alpaca strategies replay on years of SIP history, with a sealed holdout
+  and fills informed by recorded quotes. The options desk has a replay of its own.
+
 Watch it at [blakewoods.us/capital](https://blakewoods.us/capital/). The design is in
 [the game](docs/proposals/2026-09-19-the-game.md) and
 [the architecture](docs/design/2026-09-19-architecture.md).
@@ -311,6 +323,12 @@ from at all. Each of those is now closed:
 | an agent's rules never fire | it paid for research it could never act on, for ever | ten barren wakes pull research forward within the hour; with no record it adopts a file that merely trades; thirty and no credits left is a death |
 | the league fills up | it stopped searching: nothing died, nothing new could be born | the last seat is a tournament, and never having traded is the weakest thing an agent can be |
 | a number is written in two places | they drifted apart in silence, three times in one day | two tests refuse a brief that restates a bound `league.ci` or the constitution owns |
+| the vendor's usage figure falls (Sail's "period" is a rolling seven days on this plan) | the campaign meter latched failed and the whole floor stopped, with money left, until someone reconciled it by hand (16:47Z, Sept 22) | the meter reads the account balance. A top-up is never credited back, and nothing latches (#110) |
+| research keeps coming back empty | 82% of sessions paid for "no credits justified" | the research gate backs off until something about the agent changes, and still runs a 10% sample of the skips so their misses stay measured |
+| a line keeps failing replay | the House bred it again: 66% of births went into six desks that never produced a live agent | 15 failed trials and no pass retires the line, and births follow evidence and hypothesis cards |
+| a strategy or shared defect is found | an explanation in a log | a repair job, which the engineer patches by pull request; CI and the updater carry it to the box, and it is verified when the problem stops recurring |
+| the House restarts while dead agents still hold positions | every exit was refused as "has no seat on the book", 45 times in an hour | a wind-down seats the account before it exits (#106); a death during a venue outage is recorded, and its exits are retried (#107) |
+| a paper book is a few cents short for one pass (the venue's fee activity) | an error, which inside a deploy's watch rolls a good release back | a warning. Real money, or any position difference, is still an error (#108) |
 
 What still needs the owner: a **real-money** book that freezes on a position (deliberately -- there
 the freeze is the point), the `real_money` switch itself, the gateway's keys and its kill switch,
@@ -339,8 +357,18 @@ request, [CI](.github/workflows/merton.yml) judges it (path guard, content check
 regression, the whole league suite) and a workflow job that never runs the branch's code merges a
 green one. The workflow accepts `merton/` and the historical `astra/` prefix; accepting both
 fixed an earlier source/deployment mismatch that left proposals unjudged. The role is the
-second segment either way. Every pass is recorded with its cost. Failed checks still need
-external repair; the durable API engineering worker has not been built yet.
+second segment either way. Every pass is recorded with its cost.
+
+Since Sept 22, 2026 two more workers use the same route and guards:
+- **The hypothesis foundry** (`league/hypotheses.py`) writes 3–4 falsifiable strategy cards for
+  the desk the evidence favours. Each card gives a mechanism, the data it needs, its edge after
+  costs, a horizon and a rejection test. Replay admits a card before it gets a seat.
+- **The repair engineer** (`league/engineer.py`) takes the top job of the repair queue
+  (`league/worklist.py`) and patches it by pull request. When CI refuses a patch, it revises
+  against CI's own failure text, at most three times and within a per-job ceiling.
+
+Both are paced by their own caps as well as the day's frontier allowance. Core House code stays out
+of their reach until the external spending broker described in the handoff exists.
 
 | Job | When | What it does | May touch |
 |---|---|---|---|
@@ -476,6 +504,8 @@ python3 scripts/floor_box.py stop       # finish the tick, sleep the agents' box
 ```
 
 Also `logs`, `checkpoint`, `checkpoints`, `fork`, `sleep`, `resume`, `pause`, `terminate`, `hosts`.
+`python3 scripts/floor_box.py maintenance on|off|status` pauses paid work and new entries while
+exits and reconciliation go on; [docs/operations.md](docs/operations.md) is the operator's page.
 `python3 scripts/gateway_admin.py status | kill | unkill` reads and sets the gateway's kill switch.
 
 **Switching the floor on** is in [docs/runbook-go-live.md](docs/runbook-go-live.md).
@@ -499,10 +529,16 @@ Known limits:
   their market day ends; five-minute execution observations provide trading opportunities.
   Unsupported or missing candidate inputs are reported explicitly. Existing historical tails
   remain development data; corrected clocks do not establish realistic fills or a market edge.
-- **Self-improvement is partial.** Merton can propose and deploy bounded strategy, tool, lesson
-  and configuration changes. It cannot yet repair failed CI or core House code autonomously.
-  PR #21 required external repairs before merging. The next milestone is the
-  [durable chief architect and independent verifier](docs/design/2026-09-20-chief-architect-handoff.md).
+- **Self-improvement is bounded, and it now closes its own loop.** Sept 22, 2026 was the first
+  full cycle with no human in it:
+  - the engineer fixed a live strategy defect found by the pre-audit (#100);
+  - CI passed it, and Merton's workflow merged it;
+  - the updater attested the exact commit and deployed it through the canary.
+
+  A labelled synthetic drill proved the revision path: the first patch was refused by CI, and the
+  second was written against CI's failure text and merged (#104, #105). The engineer still cannot
+  change core House code, the judges or the money rules. The external spending broker is not built
+  yet; see [the handoff](docs/design/2026-09-20-chief-architect-handoff.md).
 - **Merged code reaches the box by itself, only when it is attested, and only through the canary.**
   Every half hour the House reads main's head commit and downloads that exact commit (public, so
   the box holds no GitHub credential).
