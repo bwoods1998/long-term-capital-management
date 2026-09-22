@@ -679,37 +679,52 @@ class OptionsHistory:
             signals[symbol] = [b for b in rows if _ts(b["t"]) >= start_ts]
             execution_rows[symbol] = [b for b in (underlier_bars(symbol, execution, start, end) or []) if _in_session(_ts(b["t"]))]
         contracts: dict[str, dict[str, Any]] = {}
-        option_rows: dict[str, list[dict[str, Any]]] = {}
-        first_day, last_day = ny_date(start_ts), (_day(ny_date(end_ts)) + timedelta(days=days)).isoformat()
-        for symbol in symbols:
-            listed = self.contracts(symbol, first_day, last_day)
-            got = self.bars([r["occ"] for r in listed], execution, iso(start_ts), end)
-            for row in listed:
-                # Nothing can be shown or bought before its last `days` (plus a few days of bars
-                # for the spread estimate), so the tape does not carry the months before.
-                shown_from = iso(datetime.combine(_day(row["expiry"]) - timedelta(days=days + 4), datetime.min.time(), NY).timestamp())
-                bars = [b for b in got.get(row["occ"]) or [] if b["t"] >= shown_from]
-                # A superset of what any step could show: it printed, and at some print its
-                # premium was within one order. (Held contracts were affordable when bought.)
-                if not bars or min(b["c"] for b in bars) > afford:
-                    continue
-                contracts[row["occ"]] = {"underlying": symbol, "expiry": row["expiry"], "strike": row["strike"], "right": row["right"],
-                                         "first_print": (got.get(row["occ"]) or bars)[0]["t"]}
-                option_rows[row["occ"]] = bars
+        live = {**LIQUIDITY, **dict(liquidity or {})}
         by_time: dict[str, dict[str, Any]] = {}
         for symbol, rows in execution_rows.items():
             for bar in rows:
                 by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}})["execution_bars"][symbol] = {k: bar[k] for k in ("o", "h", "l", "c", "v")}
-        live = {**LIQUIDITY, **dict(liquidity or {})}
-        for occ, rows in option_rows.items():
-            for bar in rows:
-                if bar["v"] < live["min_volume"] or (bar["n"] or 0) < live["min_trades"]:
-                    continue  # never a quote, a fill or a spread sample (46% of the 15-minute bars, Sept 22, 2026)
-                step = by_time.get(bar["t"])
-                if step is None:
-                    step = by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}}) if _in_session(_ts(bar["t"])) else None
-                if step is not None:
-                    step["options"][occ] = [bar[k] for k in ("o", "h", "l", "c", "v", "n")]  # compact: o h l c v n
+        first_day, last_day = ny_date(start_ts), (_day(ny_date(end_ts)) + timedelta(days=days)).isoformat()
+        for symbol in symbols:
+            listed = {r["occ"]: r for r in self.contracts(symbol, first_day, last_day)}
+            names = list(listed)
+            for i in range(0, len(names), 500):
+                group = names[i:i + 500]
+                marks = ",".join("?" * len(group))
+                window = (execution, iso(start_ts), end, *group)
+                # When each first printed in the window (any bar at all is evidence it existed).
+                first = dict(self.db.execute(f"SELECT occ, MIN(t) FROM bars WHERE timeframe = ? AND t >= ? AND t <= ? AND occ IN ({marks}) GROUP BY occ", window))
+                # Only bars that can quote or fill ride on the tape (46% of the 15-minute bars
+                # cannot, Sept 22, 2026), as compact rows, read one contract at a time.
+                cur = self.db.execute(f"SELECT occ, t, o, h, l, c, v, n FROM bars WHERE timeframe = ? AND t >= ? AND t <= ? AND occ IN ({marks}) "
+                                      "AND v >= ? AND n >= ? ORDER BY occ, t", (*window, float(live["min_volume"]), int(live["min_trades"])))
+                current, kept = None, []
+
+                def flush(occ: str | None, rows: list[tuple]) -> None:
+                    # A superset of what any step could show: it printed, at some qualifying print
+                    # its premium was within one order, and it was inside its last `days` (plus
+                    # four for the spread estimate). A held contract was affordable when bought.
+                    if occ is None or not rows or min(r[4] for r in rows) > afford:
+                        return
+                    row = listed[occ]
+                    contracts[occ] = {"underlying": symbol, "expiry": row["expiry"], "strike": row["strike"], "right": row["right"],
+                                      "first_print": first.get(occ) or rows[0][0]}
+                    for t, o, h, l, c, v, n in rows:
+                        step = by_time.get(t)
+                        if step is None and _in_session(_ts(t)):
+                            step = by_time.setdefault(t, {"execution_bars": {}, "options": {}})
+                        if step is not None:
+                            step["options"][occ] = [o, h, l, c, v, n]  # compact: o h l c v n
+
+                shown_from = ""
+                for occ, t, o, h, l, c, v, n in cur:
+                    if occ != current:
+                        flush(current, kept)
+                        current, kept = occ, []
+                        shown_from = iso(datetime.combine(_day(listed[occ]["expiry"]) - timedelta(days=days + 4), datetime.min.time(), NY).timestamp())
+                    if t >= shown_from:
+                        kept.append((t, o, h, l, c, v, int(n or 0)))
+                flush(current, kept)
         # Recorded OPRA quotes (from Sept 22, 2026, when the House began keeping them): the last
         # one of each contract in (previous step, step] rides on the step; nothing is carried.
         recorded = self.quotes(list(contracts), iso(start_ts), end)
