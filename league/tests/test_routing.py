@@ -54,6 +54,9 @@ class Routing(unittest.TestCase):
         # More samples are not more usefulness: 8 of 20 is worse than 7 of 10, however cheap.
         diluted = {"arms": {**EVIDENCE["arms"], "pro_balanced": {"samples": 20, "useful": 8, "cost_usd": "0.10"}}}
         self.assertEqual(best_profile(diluted, "pro_asap", ["pro_balanced"])[0], "pro_asap")
+        # Provider errors are failed attempts: an unreliable challenger does not win on its answers alone.
+        flaky = {"arms": {**EVIDENCE["arms"], "pro_balanced": {"samples": 10, "useful": 7, "cost_usd": "0.10", "provider_errors": 5}}}
+        self.assertEqual(best_profile(flaky, "pro_asap", ["pro_balanced"])[0], "pro_asap")
         # A latency bound keeps a slower window out.
         self.assertEqual(best_profile(EVIDENCE, "pro_asap", ["pro_balanced"], max_median_seconds=60)[0], "pro_asap")
 

@@ -96,7 +96,9 @@ def best_profile(evidence: Mapping[str, Any], baseline: str, candidates: list[st
 
 
 def _rate(arm: Mapping[str, Any]) -> float:
-    return int(arm.get("useful") or 0) / max(1, int(arm.get("samples") or 0))
+    """Useful artifacts per ATTEMPT: a provider error (a 503, a 25-minute timeout) is a turn the
+    House waited for and got nothing from, so it counts against the route like a useless answer."""
+    return int(arm.get("useful") or 0) / max(1, int(arm.get("samples") or 0) + int(arm.get("provider_errors") or 0))
 
 
 def _per_dollar(arm: Mapping[str, Any]) -> float | None:

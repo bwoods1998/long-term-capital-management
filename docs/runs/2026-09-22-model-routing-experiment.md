@@ -68,6 +68,20 @@ Luna session averages about three calls, so the expected blended hit rate is rou
 Luna research cost roughly 55–65% lower; that is a projection, to be confirmed from the new
 `cache` fields after restart.
 
+End to end through the real `Researcher` → `ResearchRouter` → `FastResearch` (v2) → deployed
+gateway, on mullins-11's strategy with its recorded market view and a temporary local ledger
+(four turns, $0.0051), the `provider.request` rows read:
+
+| turn | tool the model chose | input tokens | cached | written | billed |
+|---:|---|---:|---:|---:|---:|
+| 0 | `runtime_status` | 10,265 | 0 | 10,262 | $0.002623 |
+| 1 | `markets_now` | 10,297 | 10,262 (99.7%) | 32 | $0.000266 |
+| 2 | `replay_coverage` | 15,450 | 10,294 (66.6%) | 5,153 | $0.001698 |
+| 3 | `library_search` | 15,597 | 15,447 (99.0%) | 147 | $0.000510 |
+
+Blended hit rate 69.8% over the pass; the same four turns under v1 would have written every token
+at the write rate (about $0.013). One `route.decision` row recorded the session's route and reason.
+
 **Coordinator step after deploying the gateway** (explicit hints add the cross-agent breakpoint
 on every first turn): set `research_routes.json` `cache.explicit_hints` to `true`, release, then
 on the box:
@@ -123,33 +137,103 @@ conversation and tools, twice (r1, r2). Scoring is mechanical:
 Arms: `luna` (production Luna, v1 packet, medium effort, 6,000 tokens), `luna_v2` (the new layout,
 same settings; r2 only), `pro_asap` (the production Sail profile, 32,000 tokens, medium,
 `tool_choice: required`, `prompt_cache_key league:<family>`), `pro_balanced` (same, balanced
-window) and `flash_asap` (DeepSeek-V4-Flash, same settings). Hard cap $4; spent **$0.84** on the
-experiment (Sail meter $0.63 plus Luna gateway receipts) and $0.07 on the live cache check.
+window) and `flash_asap` (DeepSeek-V4-Flash, same settings). Hard cap $4; spent **$0.97** on the
+experiment (Sail meter $0.76 plus Luna gateway receipts $0.21) and $0.07 on the live cache check.
 
 ### Results
 
-RESULTS_TABLE
+Answers across three repeats (`luna_v2` two). "Cold $/call" prices each arm's provider-reported
+tokens at list rates with no cache reads, because identical repeats read each other's caches (up
+to 100% on the third repeat) and would flatter later runs; "billed" is what the meters charged.
+Useful = a valid strategy on a code packet or a correct abstention on an abstain packet.
+Provider errors (HTTP 503 "temporarily unavailable", 25-minute foreground timeouts) count as
+failed attempts in the routing rule.
 
-Sail latency is from the Provider's own request rows (created to settled); a few r1 rows were
-resumed after an interruption and their time includes the gap, which inflates `pro_*` p90.
+| arm | answered | provider errors | valid strategies (code) | correct abstentions | useful | cold $/call | cold $ per valid strategy | useful per cold $ | billed | median s | p90 s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| luna (v1 packet, production) | 30 | 0 | 13/18 | 11/12 | 24 | $0.0080 | $0.011 | 101 | $0.133 | 7 | 20 |
+| luna_v2 (new layout) | 20 | 0 | 8/12 | 5/8 | 13 | $0.0073 | $0.011 | 89 | $0.078 | 5 | 18 |
+| pro_asap (production Sail) | 26 | 4 | 2/15 | 11/11 | 13 | $0.0299 | $0.224 | 17 | $0.320 | 32 | 242 |
+| pro_balanced | 30 | 0 | 4/18 | 11/12 | 15 | $0.0262 | $0.118 | 19 | $0.384 | 40 | 374 |
+| flash_asap | 30 | 0 | 4/18 | 9/12 | 13 | $0.0027 | $0.012 | 160 | $0.052 | 37 | 97 |
+
+Per decision point and repeat:
+
+**r1**
+
+| packet | kind | luna | luna_v2 | pro_asap | pro_balanced | flash_asap |
+|---|---|---|---|---|---|---|
+| krasker-3 | code | no artifact (finish) | - | valid strategy | valid strategy | valid strategy |
+| mullins-11 | code | valid strategy | - | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) |
+| haghani-33 | code | valid strategy | - | provider timeout (25 min) | no artifact (journal_write) | valid strategy |
+| scholes-23 | code | no well-formed tool call | - | no artifact (journal_write) | no artifact (library_search) | no artifact (markets_now) |
+| huang-24 | code | valid strategy | - | no artifact (finish) | no artifact (journal_write) | no artifact (journal_write) |
+| meriwether-37 | code | no artifact (library_read) | - | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) |
+| mullins-6 | abstain | correct abstention | - | correct abstention | correct abstention | correct abstention |
+| hufschmid-29 | abstain | correct abstention | - | correct abstention | correct abstention | free detour (library_search) |
+| krasker-2 | abstain | correct abstention | - | correct abstention | correct abstention | correct abstention |
+| scholes-22 | abstain | correct abstention | - | correct abstention | correct abstention | correct abstention |
+
+**r2**
+
+| packet | kind | luna | luna_v2 | pro_asap | pro_balanced | flash_asap |
+|---|---|---|---|---|---|---|
+| krasker-3 | code | valid strategy | valid strategy | provider HTTP 503 | valid strategy | valid strategy |
+| mullins-11 | code | valid strategy | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) |
+| haghani-33 | code | valid strategy | valid strategy | provider timeout (25 min) | no artifact (journal_write) | no artifact (library_read) |
+| scholes-23 | code | no artifact (markets_now) | no artifact (markets_now) | no artifact (replay_coverage) | no artifact (replay_coverage) | no artifact (markets_now) |
+| huang-24 | code | valid strategy | valid strategy | no artifact (finish) | no artifact (finish) | no artifact (journal_write) |
+| meriwether-37 | code | valid strategy | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) |
+| mullins-6 | abstain | correct abstention | correct abstention | correct abstention | correct abstention | correct abstention |
+| hufschmid-29 | abstain | correct abstention | free detour (library_search) | correct abstention | free detour (library_search) | correct abstention |
+| krasker-2 | abstain | correct abstention | correct abstention | correct abstention | correct abstention | correct abstention |
+| scholes-22 | abstain | correct abstention | correct abstention | provider HTTP 503 | correct abstention | free detour (library_search) |
+
+**r3**
+
+| packet | kind | luna | luna_v2 | pro_asap | pro_balanced | flash_asap |
+|---|---|---|---|---|---|---|
+| krasker-3 | code | valid strategy | valid strategy | valid strategy | valid strategy | no artifact (journal_write) |
+| mullins-11 | code | valid strategy | valid strategy | no artifact (journal_write) | no artifact (library_read) | no artifact (library_read) |
+| haghani-33 | code | valid strategy | valid strategy | no artifact (library_search) | no artifact (library_search) | invalid strategy (safety check) |
+| scholes-23 | code | no artifact (markets_now) | valid strategy | no artifact (replay_coverage) | valid strategy | valid strategy |
+| huang-24 | code | valid strategy | valid strategy | no artifact (journal_write) | no artifact (journal_write) | no artifact (journal_write) |
+| meriwether-37 | code | valid strategy | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) | no artifact (library_read) |
+| mullins-6 | abstain | correct abstention | correct abstention | correct abstention | correct abstention | correct abstention |
+| hufschmid-29 | abstain | free detour (library_search) | correct abstention | correct abstention | correct abstention | free detour (library_search) |
+| krasker-2 | abstain | correct abstention | free detour (library_search) | correct abstention | correct abstention | correct abstention |
+| scholes-22 | abstain | correct abstention | free detour (runtime_status) | correct abstention | correct abstention | correct abstention |
+
+
+Sail latency is from the Provider's own request rows (created to settled); two r1 rows were
+resumed after an interruption and their time includes the gap, which inflates the `pro_*` p90.
 
 ### What the evidence says
 
-- **Luna is the strongest economical research route** on these packets: the most valid
-  strategies and correct abstentions per dollar, and the fastest. That supports keeping routine
-  research on Luna (the owner's 75% cohort) and makes the caching fix the largest saving.
-- **Pro balanced vs pro asap**: about 20% cheaper per token with the same useful rate within
-  noise, and slower in the tail. Not enough to move Sail sessions automatically; the evidence
-  rule (`league/routing.py best_profile`) would need a higher useful rate to switch, and the
-  switch ships off.
-- **Flash** is the cheapest per useful artifact among Sail arms but made fewer valid strategies
-  and missed abstentions (a free detour where it should have stopped). Cheap tokens are not
-  cheap work here; it is not a research replacement.
-- **Luna v2 layout** stayed well-formed on every call. On these single decision points its
-  strategy yield was below v1's r2 run (see table); with n=6 code packets this is within noise
-  and it must be watched on production after the restart (`trace.record` outcomes and
-  `agent.research` candidates by `protocol`).
-- Sample sizes are small (10 packets, 1–2 repeats, one turn each). None of this measures
+- **Luna is the strongest economical research route.** 13 of 18 code decision points produced a
+  strategy that passes the spawn checks, against 2–4 of 15–18 for every DeepSeek arm, at a
+  seventh of pro's cost per call and a fifth of its median latency. A valid strategy cost $0.011
+  on Luna against $0.12–0.22 on DeepSeek-V4-Pro. That supports routine research on Luna (the
+  owner's 75% cohort) and makes the caching fix the largest single saving available.
+- **Pro balanced against pro asap**: 12% cheaper per call cold, as useful (15 of 30 against 13
+  of 26 answered), no provider errors against four for asap in this window (two HTTP 503s and
+  two 25-minute foreground timeouts on the largest packet), but a slower tail (p90 374 s against
+  242 s). The evidence rule picks balanced when switched on; it ships **off** because the
+  owner chose asap for speed (`turbo.json`) and the saving is small next to Luna's. Flip
+  `routing.sail_by_evidence` if cost matters more than the tail.
+- **Flash** costs a ninth of pro per call and about the same as Luna per valid strategy, but
+  writes fewer strategies (4 of 18), detours on a quarter of abstain packets and is five times
+  slower than Luna. Cheap tokens are not cheap work: it is not a research replacement, and the
+  rule refuses it (lower useful rate).
+- **The DeepSeek arms mostly read before they write** (`library_read`, `journal_write`,
+  `replay_coverage`). A single-turn test scores that as no artifact, so it understates what a
+  whole pro session produces; it is still the turn the House pays for.
+- **Luna v2 layout** stayed well-formed on every call and wrote strategies at the same cost per
+  valid strategy ($0.011), but took a free detour on 3 of 8 abstain packets (a library search or
+  runtime status) where v1 did on 1 of 12. That costs a cached turn (about $0.0015), not a paid
+  action, and n=8 is small; watch the share of v2 passes that end in `finish` after the restart
+  and roll the layout back (`cache.layout: packet`) if abstaining passes grow a turn.
+- Sample sizes are small (10 decision points, 2–3 repeats, one turn each). None of this measures
   trading edge; it measures whether a model produces an artifact the House can evaluate.
 
 ## 4. Task-aware routing (`league/routing.py`)
@@ -164,7 +248,10 @@ into one row per hour, task, route, model and reason with a count. With `sail_by
 a Sail session moves to a challenger only when its useful-artifact rate (not raw count) is at
 least the baseline's, with at least 10 samples, and its useful artifacts are cheaper per dollar
 (`league/routing_evidence.json`, from this experiment). Switch: `research_routes.json`
-`routing.record` (on) and `routing.sail_by_evidence` (off).
+`routing.record` (on) and `routing.sail_by_evidence` (off). Provider errors count as failed
+attempts in the rule, so a flaky route cannot win on the answers it did return. Earned
+consultations (`consult` → Astra) and agents' `classify` calls (`agent_classify` → Jev) are
+recorded the same way.
 
 ## 5. Traces for eventual fine-tuning (`league/traces.py`)
 
@@ -173,8 +260,10 @@ settings; outputs: every later turn; the kept candidate) to a private gzip file 
 `<House root>/traces/` (0700 directory, 0600 files) and a `trace.record` pointer on the ledger:
 `{task, id, version, model, inputs_sha256, outcome, cost_usd, useful}`. Outcomes:
 `candidate_passed`, `candidate_failed`, `abstained` (useful unknown) or `ended: <reason>`. A
-later outcome (adoption, repair verified) is a new version of the same id, append-only
-(`TraceStore.outcome`). A capture failure raises an `ops.alert`, never a failed pass. Switch:
+later outcome is a new version of the same id, append-only (`TraceStore.outcome`):
+`House.research` joins what it did with the candidate (`adopted`, `forked`, `fork_deferred`,
+`not_adopted`; useful only when installed AND replay-passing), and a verified repair can be
+joined the same way. A capture failure raises an `ops.alert`, never a failed pass. Switch:
 `config.json` `research_traces` (default on). Collection only; no training.
 
 ## 6. Economics (`scripts/economics.py`)
@@ -237,10 +326,12 @@ Ticks: Sept 20–21 p50 60 s / p90 60 s (5.7% overran); Sept 22 p75 83 s, p90 13
   sleep/resume (4 in `_refill` → `spawn` → `sandbox.needs`, 1 in `_admit_candidate` → `fork` under
   the lock), 3 waiting on the lock in `_enforce_tuition`, 1 ledger scan, 1 publisher checkpoint,
   1 research queue.
-- **Best small fix (not applied, because the Jev agent is editing `semantic_lab.py` tonight):**
-  a `max_age` on `SemanticLab.stats()` (default 0, so nothing else changes), used with 60 s from
-  `evidence()` and from `House._health`. Expected to cut about 1.4 of the 1.9 s held per new
-  session and about 1.4 s from every health write (estimate from idle timings).
+- **Applied (the one trivial fix):** `SemanticLab.stats()` takes a `max_age`, default 0 so every
+  other caller is unchanged, and `evidence()` (the call inside the research lock) reuses a copy up
+  to 60 s old; the cooldown is never stale. Expected to cut about 1.4 of the 1.9 s each new session
+  holds the lock (estimate from idle timings; the House is paused, so unmeasured under load).
+  `House._health` still takes a fresh count each tick (about 1.4 s); passing `max_age=60` there is
+  a one-line follow-up left out to avoid colliding with the Jev branch's edit on the next line.
 - Safe next: compute `research_capabilities` before taking the lock; checkpoint the publisher
   every 300 s instead of every tick; cap new research sessions per tick (a policy call).
 - Risky: moving births or `_admit_candidate`'s Sailbox work off the lock, taking submit, cancel
@@ -260,8 +351,11 @@ Ticks: Sept 20–21 p50 60 s / p90 60 s (5.7% overran); Sept 22 p75 83 s, p90 13
 ## Unfinished
 
 - Explicit cache hints are unverified live until the gateway is deployed (step above).
-- The Astra, Jev and repair call sites do not yet ask the `TaskRouter` for their route; the
-  table documents them and `TaskRouter.route()` is ready for those owners to call.
-- Trace outcomes after the pass (adoption, fork, repair verified) are not yet joined by the
-  House; `TraceStore.outcome` is the hook.
-- The lock-convoy fix above is described, not applied.
+- The Astra role and audit call sites, the Jev floor and the repair worker do not yet ask the
+  `TaskRouter` for their route; research sessions, earned consultations and agent `classify`
+  calls do. The table documents the rest and `TaskRouter.route()` is ready for those owners.
+- Trace outcomes are joined when the research pass commits (adopted in place, forked, fork
+  deferred, not adopted); a fork admitted on a later tick is not re-joined yet. Repair traces
+  need the repair worker to call `TraceStore.capture('repair', ...)`.
+- The lock-convoy fix is applied only to `evidence()`; the other safe fixes above are described.
+- The Luna v2 abstention detour (3 of 8) needs production confirmation.
