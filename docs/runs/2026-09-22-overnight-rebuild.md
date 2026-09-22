@@ -1,12 +1,190 @@
 # Overnight rebuild — September 22, 2026
 
-Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Opus 5) under the owner's `/goal`.
+Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Opus 5; Opus 5.5 from 17:10Z) under the owner's `/goal`.
 
 - **First start:** 2026-09-22T06:40:51Z. The session went down at about 07:05Z and came back at 13:17Z.
 - **The window now in force (the owner, 13:26Z):** "since we got stopped in the middle of this goal, you should still spend a full 8 hours on it ... the full 8 hour rebuild remains".
   - **Start:** 2026-09-22T13:17:37Z.
   - **Deadline:** 2026-09-22T21:17:37Z. It is fixed; a context reset never restarts it.
 - **Core rebuild operating by:** about 19:17Z, leaving the final two hours (19:17–21:17Z) to observe and repair.
+- **Owner's pause and resume.** At 16:52Z the owner asked the coordinator to stop at a good point;
+  the league itself stayed live. The owner resumed at 17:10:24Z: "continue with your goal given
+  youve spent 4 hours on it already". So four hours remained, and **the deadline in force is
+  2026-09-22T21:10:24Z.**
+
+## Final report
+
+The figures below are measured through 20:15Z. The **after** window is the league's open hours since
+the restart: 15:27:20–16:47:39Z and 17:45:14Z–20:15Z. It leaves out the 58-minute meter stall.
+
+### What was built, and what is verified live
+
+- **Astra (Merton, gpt-6-astra).**
+  - **Built:**
+    - the hypothesis foundry, replacing House-staked parameter mutations (#90, #92, #114);
+    - the durable repair queue and engineer, which revises against CI's own failure text through
+      a read-only gateway route (#94, #103, #116);
+    - the pre-audit and consult recovery (#93);
+    - an independent release verifier with exact-commit attestation (#93);
+    - per-strategy registry files, with no more registry collisions (#94);
+    - `follow()` keeps watching refused PRs (#94).
+  - **Verified live:**
+    - three foundry calls ($2.22) wrote 12 falsifiable cards (weather, then sports twice); 2
+      passed replay and 9 failed honestly on real data. **Card `42bdbb` became
+      `meriwether-h42bdbb` on paper 24 s after it was written** (19:05:16 → 19:05:40Z);
+    - **seven autonomous repairs** were written, CI-passed and merged with no human: #100
+      (hawkins horizon guard), #113 and #119 (haghani entry rounding and sub-cent prices), #120
+      (sports two-way game guard), and #121, #122 and #124 (option contract identity). Related
+      jobs are not yet merged, so some are near-duplicates. The updater attested and deployed the
+      first three by itself;
+    - the attested updater deployed **five releases by itself** (15:50–19:26Z). It carried the
+      engineer's #100, #113 and #119 to the box, and refused the protected #102, leaving it for
+      the owner's deploy;
+    - the labelled synthetic drill ran end to end and was **verified** at 18:08:32Z (#104 refused
+      by CI, #105 revised against CI's failure text, merged, deployed, 20 minutes without
+      recurrence).
+- **Jev.**
+  - **Built:** the research gate on exact triggers with Jev relevance, explicit inactivity reasons,
+    triage into repair reports, hypothesis memory (rewordings linked, never genealogy) and
+    report-only exposure groups (#95). The continuous semantic lab is off (#92) after a capped
+    evaluation of 128,179 labels found no tradable value.
+  - **Verified live:** the gate skips more than half of due sessions. Through 20:15Z it skipped
+    792 of 1,457, ran 501, and ran 164 more as a sample of its skips. It costs under a cent of Jev
+    over the window, and it measures itself. **Sampled skips still produced a candidate 6.7% of the
+    time (11 of 164), against 8.4% for runs, and a replay-passing one 0.6% of the time (1) against
+    1.6% (8).** The direction is right, but these counts are too small for the gap to be
+    significant. So far it mostly throttles volume (about $3.70 an hour of research saved) rather
+    than reliably picking out empty sessions. Triage has turned the swarm's writing into 127 deduplicated repair
+    groups, and exposure groups show up to 7 agents on one event.
+- **Sail and model routing.**
+  - **Built:**
+    - the Luna cache layout, with explicit hints admitted by the gateway (#98, #99);
+    - the task routing table, research traces, the economics report and a bounded model
+      experiment ($0.97; balanced ships off, Flash rejected);
+    - box sleeps moved off the tick thread (#102);
+    - the Sail meter now reads the balance, not a rolling window (#110).
+  - **Verified live:** 51% of Luna input tokens are now read from cache (0% over 15,044 calls
+    before). Ticks fell from 60–250 s to 9–45 s.
+- **Alpaca.**
+  - **Built:**
+    - a resumable history store (#89);
+    - deep walk-forward replay, a sealed holdout (2025-11-14 → 2026-05-15) and quote-informed fills
+      (#96, #97);
+    - options history and replay, with IV/skew/activity features (#91).
+  - **Verified live:**
+    - 13,358 bar calls (11.7M rows) and 160,146 quote probes, with 0 failures;
+    - deep tapes build for 15 of 25 living Alpaca agents;
+    - the demo holdouts returned +7.1% (equity-trend) and +2.3% (equity-rsi2);
+    - SPY's quoted spread is 0.21 bp, against the old 2 bp assumption.
+
+### The synergies that mattered
+
+1. **Cache + evidence-led births + a volume gate: research got cheaper per useful result.**
+   - Luna's cached layout halves the price of a research call.
+   - Births now go to replay passers, earning parents and cards, not to the emptiest desk. Paper
+     seats per hour rose even as births fell by more than three quarters.
+   - The gate cuts the number of sessions. Its own sample says it throttles rather than selects.
+   - So most of the fall in cost per replay pass comes from the first two.
+   - The after window is also daytime US hours and the baseline was overnight, so part of the
+     rise in candidate and pass rates may be the clock.
+2. **Pre-audit → repair queue → engineer → CI → attested updater: the league repairs its own
+   strategies.** The pre-audit names a defect in a strategy on paper; the queue deduplicates it and
+   ranks it; the engineer writes a corrected child; CI judges it; the Merton workflow merges it;
+   and the updater deploys that exact commit through the canary. No step needs a person, and none
+   can approve its own spending or release.
+3. **History store → deep replay and holdout → the foundry's packet.** Merton is shown what history
+   exists and what the gate needs, never the holdout. So cards are written against a replay that
+   can reject them honestly.
+
+### Before and after
+
+| Measure | Before (12 h, overnight) | After (3.8 open hours, US session) |
+|---|---:|---:|
+| Research sessions per hour | 414 | 176 |
+| Research cost per hour | $8.56 | $3.12 (−64%) |
+| Sessions with a candidate | 4.6% | 8.3% |
+| Replay trials per hour, pass rate | 33.8, 7.4% | 20.6, 10.1% |
+| Research $ per replay pass | $3.42 | $1.49 |
+| Luna $/h (share of input read from cache) | $5.60 (0%) | $1.69 (51.8%) |
+| Merton $/h (roles, foundry, engineer, audits) | $1.77 | $3.20 (engineer 14 passes, foundry 4 calls, roles 16) |
+| All model and box spend per hour (`economics.py`) | $10.70 | $6.42 (−40%) |
+| Replay-passing candidates: $ each (`economics.py`) | $2.19 | $1.18 (10 unique) |
+| Births per hour (kind) | 15.5 (nearly all blind mutations) | 2.9 (evidence-led: replay passers, cards, earning parents) |
+| Agents seated on paper per hour | 1.9 | 3.1 |
+| Autonomous repairs | 0 | 7 merged (#100, #113, #119–#122, #124); the drill verified |
+
+The after window is hours, not days. Pass rates and candidate shares on samples this small move
+with a handful of trials. The real-money book traded too little either way to say anything about
+an edge.
+
+### State at the deadline
+
+- **Real money.** mullins-2 (weather, Kalshi) is the only live agent.
+  - At the owner's request for more dynamism, and with more volatility on the accounts accepted,
+    #123 changed two money rules: `min_closed_trades` 5 → 3 and the paper screen 6 → 4 hourly
+    blocks.
+  - The live grant `earned-live-20260921` was **ratified at 20:26Z** for the same capital
+    (Alpaca $500, Kalshi $517.75, a $1,017.75 loss cap, 16 agents). It is re-pinned to money
+    digest `d715ae7a…` and reads active.
+  - League-basis account equity is $1,012.03 against the $1,017.36 start: tracked −$5.33, far too
+    few trades to say anything about an edge.
+  - The Alpaca real account ($500) has no agent on the micro rung yet.
+- **Paper.** 64 agents are living. Births follow replay passers, earning parents and
+  hypothesis cards, and 6 exhausted families are retired.
+- **Deployed.**
+  - House release `20260922T202128Z-8e17da71d9c7` = main `f6b9035`.
+  - Gateway version `8f829375-d373-4349-9941-609a04d5b820`.
+  - Pre-rebuild box checkpoint `sbcp_9dc7fd6b-88e4-4e59-9b2e-78cf031114a0` (expires 2026-10-22).
+- **Allowance left (campaign basis).** OpenAI $35.97, Sail $68.58. About $45 of OpenAI and $56 of
+  Sail are held for calls whose outcome is unproven. They are left conservative; releasing them
+  needs vendor receipts.
+  - **Runway.** On the campaign basis, OpenAI fell from $65.70 at 16:53Z to $34.14 at 20:36Z, about
+    $8.50 an hour. At that rate it closes around 00:30–01:00Z on Sept 23.
+  - The House's notice says what follows: new paid work stops, while reconciliation and exits go
+    on. Promotion audits are frontier-model calls, so promotions would likely stall until the
+    owner funds the next phase or the held $45 is released with receipts.
+  - Sail's allowance lasts longer. Budgets are the owner's call, and none was touched.
+- **Rollback.**
+  - One release, on the box:
+    `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "..."`.
+  - A feature: its switch in [operations](../operations.md). Each new feature has one, and "off"
+    restores the old behaviour.
+  - The gateway: `npx wrangler rollback`.
+  - Everything: fork the pre-rebuild checkpoint.
+- **Outstanding blockers.**
+  1. The replay gate's `min_trades` = 20 blocks daily strategies on deep history. The demo
+     strategies were positive on the sealed holdout with 8–14 trades. This is a ladder
+     threshold, so it is the owner's call.
+  2. The external Sail spending broker is not built, so the engineer keeps Merton's path allowlist
+     and core House code stays the owner's.
+  3. Options desks now need a replay before paper (`options_history: false` reverts that).
+  4. The foundry is seat-bound whenever the league is full and no resident is displaceable.
+  5. A CI runner that is slow enough to hit the 10-minute job limit blocks attestation until the
+     hourly scheduled Checks run passes. It fails closed.
+
+### Still collecting evidence, and the next step
+
+- **Collecting evidence.**
+  - The hawkins horizon repair (#100) and the haghani child (#113): 24 h observation windows and
+    their paper records.
+  - The weather card `6aed49`, waiting for a seat.
+  - The sealed holdout: no development pass has reached it yet, so it has 0 accesses.
+  - The research gate's miss rate: 1 replay-passing candidate in 164 sampled skips so far, against
+    8 in 501 runs. It needs a longer sample before the gap means anything.
+  - The Luna cache on the explicit-hint layout.
+  - Options replay admissions.
+- **The dynamism revision (#123)** is the newest experiment. Watch whether paper agents now reach
+  the screen and the audit within a day, and whether more of them reach micro-real without the
+  micro demotion taking them straight back.
+  - First evidence, at 20:29–20:30Z: two agents reached the audit within four minutes, and the
+    auditor vetoed both on substance (haghani's rounding defect; hawkins's screen missing the
+    current day's losses).
+  - Next: count the unfinished day's realised P&L in the daily screen, so that the screen and the
+    auditor judge the same evidence.
+- **The highest-value next step:** decide the replay gate's trade minimum for daily strategies
+  judged on deep history. It is the one rule standing between the new evaluation machinery (deep
+  history, sealed holdout, quoted fills) and a stream of equity and ETF candidates onto paper.
+  Right now the gate turns them away before the holdout can judge them.
 
 ## State at the start (06:39Z)
 
@@ -40,14 +218,15 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 
 | Workstream | Implementation | Verification | Remaining |
 |---|---|---|---|
-| 0. Pause the expensive loop | #87 `House.paused()`, `floor_box.py maintenance on/off` | Six paused hours: no research, Merton, births or deaths; exits and reconciliation kept working; spend flat | Lift the pause at the restart |
-| 1a. Astra hypotheses, not mutations | #90 hypothesis foundry (`hypotheses.py`) replaces the House's mutation refill; #92 v0 evidence-led refill and exhausted-line retirement | 24 tests; dry run: 8 of 8 cards were valid code and 1 of 7 replayed cards passed ($1.17); on deploy it retired 6 exhausted families | First live foundry calls after the restart |
-| 1b. Criticism becomes work | #94 repair queue (`worklist.py`), deterministic sources, engineer (`engineer.py`), `follow()` repair, per-strategy registry files, drill; #93 pre-audit and consult recovery | 41 + tests; production dry runs: 140 queued jobs, 7 of 32 paper agents flagged, 123 recovered consult items | The drill end to end on production; the first engineer PR |
-| 1c. Autonomous engineering loop | #94 engineer (bounded allowlist, per-job ceiling, retries against CI's own failure text via gateway route `/v1/github/pr/<n>/failures`); #93 independent release verifier (exact-commit attestation, the running release judges) | Gateway route live on version 7e3a180b; tests | External Sail broker not built; engineer keeps the existing Merton allowlist |
-| 2. Jev as sensor and router | #95 research gate, inactivity reasons, triage, hypothesis memory, exposure groups; semantic lab off (#92) with a capped evaluation | Lab: no tradable value on 128k labels; gate replay would skip 67.5% of past sessions; 48 tests | Live gate numbers; `python -m league.research_gate LEDGER` |
-| 3. Sail and model routing | #98 Luna cache layout, routing table, traces, economics, experiment | Cache: 97% read on a follow-on turn; 0% over 15,044 old calls; experiment $0.97; explicit hints admitted by gateway 7e3a180b | Live cache rates after restart; balanced tier ships off |
-| 4. Alpaca data | #89 history store and ingestion; #96 deep walk-forward replay, sealed holdout, quote-informed fills; #97 dated replay quotes; options (#91, in progress) | Phase 1: 13,358 calls, 11.7M rows, 0 failed; demo holdouts +7.1% / +2.3% | Phase-2 quote probes running; `min_trades` decision; options replay |
-| 5. Compounding loop | Ledger kinds for cards, links, repairs, gates, routes, traces, coverage, holdout access, inactivity | — | Observe the full path live |
+| 0. Pause the expensive loop | #87 `House.paused()`, `floor_box.py maintenance on/off`; #112 names every stop (`stopped_because`) and warns when one lasts | Six paused hours: no research, Merton, births or deaths; exits and reconciliation kept working; spend stayed flat | — |
+| 1a. Astra hypotheses, not mutations | #90 hypothesis foundry replaces the House's mutation refill; #92 evidence-led refill and exhausted-line retirement; #114 a card waiting on a full desk no longer blocks the foundry | Live 15:48Z: 4 cards for the weather desk, 1 passed replay and 3 failed honestly; 6 exhausted families retired; births since the restart are evidence-driven | More live calls; the waiting card needs a seat |
+| 1b. Criticism becomes work | #94 repair queue, deterministic sources, engineer, `follow()` repair, per-strategy registry files; #93 pre-audit and consult recovery; #103 requested jobs first | **Two autonomous repairs merged with no human: #100 (hawkins horizon guard, deployed by the attested updater) and #113 (haghani entry rounding)** | #100 is observing (24 h window); #113 awaits deployment |
+| 1c. Autonomous engineering loop | #94 engineer (bounded allowlist, per-job ceiling, revises against CI's own failure text via the gateway's read-only failures route); #93 independent release verifier (exact-commit attestation, the running release judges, protected files are the owner's) | **Drill on production: patch 1 refused by CI (#104), patch 2 written against CI's failure text, passed and merged (#105), deployed.** The updater attested and deployed four releases by itself and refused the protected #102 and #110 | External Sail broker not built; the engineer keeps the existing Merton allowlist |
+| 2. Jev as sensor and router | #95 research gate, inactivity reasons, triage, hypothesis memory, exposure groups; semantic lab off (#92) after a capped evaluation | Lab: no tradable value on 128k labels. Live gate (through 20:15Z): 792 of 1,457 due sessions skipped; sampled skips produced candidates 6.7% of the time vs 8.4% for runs, replay passes 1 of 164 vs 8 of 501; Jev under a cent over the window | Longer sample for the miss rate |
+| 3. Sail and model routing | #98 Luna cache layout, routing table, traces, economics, experiment; #102 box sleeps off the tick and Merton cadence by yield | Live: 51% of Luna input tokens read from cache (0% before); Luna $/h down 58%; ticks down from 60–250 s to 9–45 s | Balanced tier ships off; batch inference has no consumer yet |
+| 4. Alpaca data | #89 history store and ingestion; #96 deep walk-forward replay, sealed holdout, quote-informed fills; #97 dated replay quotes; #91 options history and replay, IV/skew/activity features | Phase 1: 13,358 calls and 11.7M rows; phase 2: 160,146 quote probes; 0 failures. 15 of 25 living Alpaca agents' inputs are covered. Demo holdouts +7.1% and +2.3% | `min_trades` = 20 blocks daily strategies (the owner's call); no holdout pass yet |
+| 5. Compounding loop | Private ledger kinds link cards, links, repairs, gates, routes, traces, coverage, holdout access and inactivity to the existing trials, births, fills and deploys | The full path ran live: evidence → pre-audit → repair job → engineer PR → CI → merge → attested deploy → observing | Attribution of fills to cards and repairs over days |
+| Operations | #110 Sail meter on the balance (it was a rolling window); #106–#108, #115 wind-down, death and reconcile robustness; `docs/operations.md` | Floor reopened 17:45Z after the meter latch; each fix has a regression test that fails on the old code | Stale holds need receipts before they can be released |
 
 ## Log
 
@@ -178,6 +357,234 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   - Jev spend $0.005;
   - OpenAI campaign from $85.35 to $70.18. After the first 15 minutes' burst the rate was about
     $6/h, against about $14/h before.
+
+- 16:27Z–16:52Z Watching and repairing: #106, #107 and #108 merged.
+  - The economics report (`scripts/economics.py`, read-only) was run over the twelve hours before
+    the start and over the first live hour after the restart. The figures are in the final report.
+  - 16:41Z The updater attested and deployed `main-bb348cdc203c` (#103, #105–#108) by itself. It was
+    promoted at 16:57:49Z after a clean 20-reading watch.
+- 16:47:39Z **Incident: the whole floor stopped.**
+  - **Cause.** The campaign's Sail meter read the usage summary's `range=period` figure. On this
+    plan that figure is a ROLLING seven-day window (`effective_range: "7d"`, `plan_limited: true`,
+    read live at 17:12Z). It fell from ≥$512.60 to $407.51 as the first run's Sept 15 spend aged
+    out. `CampaignBudget.observe_spend` treats any fall as a vendor reset that needs a manual
+    reconciliation, and it latched `meter_health` failed.
+  - **Effect.** No research, Merton, foundry, engineer, audits, births or payouts. Exits and
+    reconciliation went on, and $73 of Sail and $66 of OpenAI allowance went unused. The repair
+    drill froze at `canary`, because the engineer steps only while the floor is open.
+  - **Missed.** Nothing alerted: the budget simply read "stopped". It was found at 17:10Z when the
+    goal resumed.
+- 17:10Z–17:21Z **The fix, #110.** The meter now reads the account balance.
+  - Every decrease counts as spend; an increase (a top-up, a refund) is never credited back. The
+    meter can never run backwards, and a top-up cannot hide spend.
+  - The first balance reading continues the existing meter where it stands (nothing measured is
+    forgotten). It clears the old feed's latch once, with the vendor evidence kept in
+    `meter_reconciliations`.
+  - An unavailable balance leaves the meter unread, which stops paid work after 180 s as before;
+    it never latches.
+  - This is not a budget reset. The burst caps, the settled and pending commitments and the $47.90
+    measured since the burst began are all unchanged.
+  - The full suite (1,868 tests) and CI passed. `campaigns.py` and `funded.py` are protected, so this
+    needs the owner's deploy.
+- 17:01Z Phase-2 ingestion finished: 160,146 calls, 160,250 quote probes over the development
+  window and the sealed holdout (2025-03-07 → 2026-05-15), 0 failures, 115 minutes, 1.2 GB in the
+  store.
+- 17:20Z The updater began deploying `main-106e68e7c15c` (#109, a teacher lesson). It holds the
+  deploy lock, so the owner's deploy of #110 follows it.
+- 17:23Z #111 (docs): `docs/operations.md`, the operator's page for pausing, inspecting,
+  deploying, rolling back and recovering, plus the README's rebuild summary.
+
+- 17:30Z #111 (docs) and #112 merged. #112 makes a stop loud: every tick names its
+  `stopped_because` (also in `health.json`), and a stop that lasts three ticks raises one warning.
+- 17:37Z The owner's deploy of main `dcd97c2` (#110–#112) became release
+  `20260922T173718Z-42913a542843`. It had waited for the updater's release of #109, which was
+  promoted at 17:36:47Z; the lock allows one deploy at a time.
+  - 17:43:22Z promoted.
+  - 17:45:27Z the new House's first balance reading ($127.34) cleared the latch. The reconciliation
+    row `sail:balance-feed:1790099127` keeps the vendor's own evidence (`effective_range: "7d"`,
+    `plan_limited: true`, the rolling window) and the meter as it stood.
+  - 17:45:14Z the first tick reads `budget: "open"`: 5 agents woken, 1 order, all four books
+    reconciled.
+  - **The floor was stopped for 57½ minutes (16:47:39Z–17:45:14Z).**
+
+- 17:46:36Z The engineer, stepping again, moved the drill job to `observing`. The running release
+  holds PR #105's files, and its synthetic observation window is 20 minutes.
+- 17:47Z The foundry had made no call since 15:48Z. Its one replay-passing card (weather, `6aed49`)
+  waited for a seat on a desk full of young research candidates, and any waiting card blocked
+  calls for every desk. #114: a waiting card blocks new calls only when its own desk could seat it,
+  and a desk with a card waiting gets no more cards. The regression test reproduces the
+  production refusal.
+- 17:5xZ **Second autonomous repair.** The engineer's #113 is a haghani child whose dip entries
+  round down: the cent-rounding defect the auditor and the pre-audit both named. CI's judge passed
+  it and the Merton workflow merged it with no human.
+- 17:56Z #115. The wind-down sent a market sell, and an option sells only at a limit, so four dead
+  options agents' contracts could never close: 12 refusals in 8 minutes once #106 had seated them.
+  Options are now sold at the bid, as the expiry rule does.
+- Stale holds: $44.84 of OpenAI and $55.72 of Sail burst allowance are pending for calls whose
+  outcome the House cannot prove (timeouts, restarts, unconfirmed posts). They are left
+  conservative; releasing them needs vendor receipts. See the remaining work.
+
+- 18:05Z #116: the engineer makes one paid call per 15 minutes (it was 30). Measured yield: four
+  paid calls ($0.94) gave two merged repairs, with 53 jobs admitted. This spends about $1 an hour of
+  the research gate's measured saving on repairs.
+- **18:08:32Z The repair drill reached `verified`** ("no recurrence for 0.33 h after the fix was
+  running"). The whole state sequence ran on production: reported → admitted → reproducing →
+  patching → testing (#104) → revising (CI's failure text read back through the gateway) →
+  reproducing → patching → testing (#105) → canary → observing → verified. It is labelled
+  synthetic and cost $0.
+- 18:10Z #117. The hawkins job (#100) went back to `revising` because hawkins-9, still on the old
+  code, was refused again. A repair that only adds strategy files cannot change running agents,
+  so the agents that reported the problem on the old code no longer count as its recurrence.
+  Any other agent's recurrence still reopens the job.
+- **18:17:19Z The updater attested and deployed main `37bb07f` by itself** (`main-ded16d0d651d`:
+  the engineer's #113, and #114–#116). The canary passed 3 ticks; promoted 18:24:00Z.
+- 18:21Z #117's CI was cancelled at the 10-minute job limit on a slow runner: the `ltcm` suite
+  took 153 s against its usual 35–45 s. A rerun passed and #117 merged. The same slowness on a
+  `main` Checks run would block the updater's attestation until the hourly scheduled run passes;
+  it fails closed.
+
+- 18:18:57Z The hawkins job's second attempt ended `rejected`. The engineer itself found the
+  recurrence came from hawkins-9, still on the old code, and that its first child (#100) already
+  rejects the out-of-horizon entries: "no change the evidence justifies". That was right, and it
+  cost about $0.20. #117 now keeps such a job observing, with no paid attempt.
+- 18:25:28Z The haghani job (#113) moved to `observing` once the updater's release held its files.
+- 18:25:33Z **The foundry called again**, 90 s after #114 went live. Its 4 cards for
+  `kalshi-sports`: favourite–longshot bias in moneylines, pregame liquidity supply, lineup-news
+  momentum and strike-ladder dominance. All 4 failed replay on 41–50 blocks of real sports markets
+  (0, 0 and 4 trades). They were judged honest failures, not a data gap. The foundry total is now
+  8 cards and 1 pass, for $1.48.
+- 18:28Z **The research gate, measured on production** (`league.research_gate`, read-only):
+  - 802 decisions; 338 runs; 624 sessions skipped; an estimated $8.59 saved for $0.0076 of Jev.
+  - **Sampled miss rate 8.75% (7 of 80).** Split by decision:
+    - sampled skips retained a candidate 8.8% of the time (backoff 3 of 35, blocker 4 of 45);
+    - runs retained one 8.3% of the time (28 of 338);
+    - replay-passing candidates: 1 of 80 skips, 7 of 338 runs.
+  - The evidence does not yet show that the gate skips the less productive sessions. It saves
+    about $4 an hour by throttling volume. It stays as built, with its 10% sample collecting
+    evidence; tuning it is a decision for more data.
+- Options history: 22,178 live OPRA quotes are recorded on the box, but no backfill has run yet.
+  The daily job runs from 17:00 New York (21:00Z). After it, options newcomers must pass the
+  estimate-based replay before paper; `options_history: false` reverts that.
+- Sail `campaign_post_unconfirmed` sessions: Sail's docs say a retry with the same key and body
+  returns the existing request "when it is still available", but not for how long. So the House's
+  refusal to re-POST an unconfirmed request stays. Asking Sail for the retention window would let
+  interrupted sessions be recovered safely.
+
+- 18:36Z The Jev floor's shared views (health.json; report only, and never trading authority):
+  - **Triage** has 127 deduplicated groups (107 missing data, 19 bug reports, 1 strategy defect).
+    The most shared missing inputs, as the swarm asks for them:
+    | Missing input | Agents |
+    |---|---:|
+    | Live sports scores | 43 |
+    | Point-in-time earnings surprises | 33 |
+    | Perp positioning / funding | 32 |
+    | Attention-market underlier values | 31 |
+    | Lineups and inactive players | 30 |
+
+    None of these is an Alpaca feed. They are the ranked case for the next data spend.
+  - **Exposure:** up to 7 agents sit on one event. On `KXWNBAGAME-26SEP22CONNWSH`, 7 meriwether
+    agents hold 9 practice positions costing $85. The deterministic risk layer still decides; this
+    is visibility.
+  - The sensor has spent $0.0149 over 282 Jev calls, with a p50 latency of 0.5 s.
+
+- 18:55:58Z **Third autonomous repair: #119**, a haghani child that keeps sub-cent entry and exit
+  prices. It came from the pre-audit's `strategy_defect` job, while #113 came from the audit veto
+  on the same rounding defect. The queue does not yet merge related jobs across sources, so each
+  child competes on its own evidence. The same minute the teacher's #118 merged, a lesson to
+  reconcile haghani's executions before more mutations.
+- 18:55Z The updater found `main` at commits whose Checks runs were still in progress. With nothing
+  to attest, it waits for its next check (fail-closed, as designed).
+- **Runway.** The OpenAI campaign fell from $61.94 to $52.07 between 17:49 and 18:57Z (about
+  $8.70/h at campaign prices). That leaves roughly $33 at the deadline, and at this rate it is
+  spent around 01:00Z. After that the frontier tiers keep audits and move cheap research to Sail.
+  The Sail balance of about $127 at about $40/day lasts about three days.
+
+- 19:05Z **The foundry loop ran end to end.** The third call wrote 4 more sports cards.
+  - 19:05:16Z Card `42bdbb` was written: recreational demand overprices the OVER near the main
+    scoring line, leaving the complementary UNDER cheap.
+  - 19:05:25Z It passed replay: 64 trades, no failing gate.
+  - 19:05:40Z **`meriwether-h42bdbb` was born on paper** (founder `card:42bdbb11739cf4ab`).
+  - The foundry total is now 12 cards, 2 passed and 9 failed, for $2.22.
+  - Research candidates keep arriving too: `mullins-14` (18:54Z) tests the favourite-maker NO
+    strategy restricted to rain markets, a falsifiable narrowing of a failed all-series candidate.
+- 19:05Z One warning: the gateway reset a connection while polling a paper order. It was
+  retried on the next tick.
+- Live on production: the explicit cache layout (`messages-explicit`) served 580 Luna calls since
+  17:45Z, with 51.7% of input tokens read from cache at $0.0032 a call ($0.0064 before). That is
+  below the 59–77% the routing experiment projected; the measured figure stands.
+
+- 19:26:36Z **The updater attested and deployed `main` `0b4ca33` by itself** (`main-7ac1da5efe95`:
+  #117, the teacher's #118, the engineer's #119). The canary passed; promoted 19:32:11Z.
+  - **Five autonomous releases this evening:** 15:50, 16:41, 17:20, 18:17 and 19:26Z, each with the
+    exact commit attested and each through the canary.
+  - **One refusal:** the protected #102 at 15:56Z, logged as the owner's deploy.
+  - The owner's deploys were used for the protected changes and the start: #102 and #110–#112,
+    plus the restart releases.
+
+- 19:40Z **The owner asked for more dynamism** "up and down the rungs ... we don't want to make
+  the game design too easy", and accepted "more vol on my accounts" to get it. Measured at 19:45Z:
+  - 29 of 31 paper agents were at the evidence stage, and 24 had no finished active block,
+    though most were trading (2–10 fills a day, no refusals);
+  - hawkins and haghani reached the audit and were vetoed; their defects are now repair children;
+  - tuition was not the limit: the live grant's envelope ($1,017.75 loss cap, 16 agents)
+    replaces the constitution's $50/4 line;
+  - a daily Kalshi agent promoted at 02:16Z could first be looked at about 46 hours later;
+  - meriwether-32's first funded day was dropped from its paper record, because it was funded
+    two hours after its first $0 mark.
+- 19:5xZ **#123, the dynamism revision.**
+  - Money rules: `min_closed_trades` 5 → 3; the paper screen 6 → 4 active hourly blocks. Daily
+    stays at 2, because a look needs two blocks for its bounds.
+  - Risk-free: paper death after 6 active blocks (was 10), unprofitable after 20 (was 30).
+  - Evaluator: the block an account is funded in counts, starting from the stake.
+  - Unchanged: the drawdown screen, growth above zero, the audit, accounting integrity, the
+    capital envelope, micro demotion at −20% and the statistical bound for scale.
+  - The mechanics tests pin the fast-lane values they were written against; `Sept22Values` tests
+    the new ones.
+  - The full suites passed: league 1,876 and ltcm 1,779.
+- 19:57:03Z **The agent-image fix (#85) was verified.** Sail refused the old Sept 15 checkpoint
+  ("sailbox checkpoint not found": it expired at about 19:55Z), and the new one-year checkpoint
+  booted a box, which was terminated straight away. Without #85, every new agent box would have
+  failed from 19:55Z.
+- 20:04–20:13Z The owner's deploy of `c3282f3` (#123 plus the engineer's #122 and #124) **was
+  refused by the canary**: "after tick 3: health.json is 346s old".
+  - The canary starts a fresh House, and it enrolled all 16 merged strategies in one tick, at
+    about 23 s of sandbox probing each.
+  - The engineer's children had pushed the count past what fits in 300 s. Every later release
+    would have failed the same way.
+  - #126: three strategies are born per tick, and the rest follow on the next tick.
+  - Production kept running the previous release throughout.
+- The engineer's merged repairs by 20:16Z: #100, #113, #119, #120 (sports two-way game guard),
+  #121 and #122 (option OCC-first exits), and #124 (krasker-3 contract identity). #125 is in CI.
+  - The queue does not merge related jobs across sources (audit veto, pre-audit, refusals), so
+    the options OCC defect got three children and haghani three. Replay still filters them.
+  - Merging related jobs before patching is the engineer's clear next improvement.
+- 20:21–20:25:33Z The owner's deploy of `f6b9035` (the refused `c3282f3` plus #125 and #126)
+  **passed the canary's 3 ticks and was promoted** as release `20260922T202128Z-8e17da71d9c7`.
+  The watchdog's 10-minute watch ended with it still promoted at 20:35:33Z.
+- 20:26Z **The live grant was re-ratified** (`scripts/live_trading.py --ratify
+  earned-live-20260921`) against money digest `d715ae7a…`, for the same capital. Health reads it
+  active, with no `stopped_because`.
+- 20:29–20:30Z **The first audits under #123.** Within four minutes of the release, two paper
+  agents reached the screen and went to the production audit ($0.57). The independent auditor
+  vetoed both, on substance:
+  - **haghani** (Alpaca paper crypto, 25 blocks). Two-decimal price rounding defeats its minimum
+    entry discount: DOGE buys at $0.10 report discounts of −0.5% to −2.0% against
+    `min_edge_pct` 0.8. Resting buys also skip the stale-bar guard. The engineer's fixes for the
+    rounding live in children (#113, #119, #125). The parent keeps the defect by design, because a
+    child never inherits its parent's results.
+  - **hawkins** (Kalshi shadow commodities, 2 daily blocks, 6 settlements). Its screen reads
+    finished days only. The last finished block (Sept 21) shows about +1.4% growth, but the six
+    settlements, including those at 01:46Z on Sept 22, net −$15.50. The auditor called the screen
+    stale.
+  - So the lower thresholds bring agents to the boundary sooner, and the independent judge still
+    holds the line. The hawkins case exposes a real gap: a daily screen can pass on a snapshot
+    that leaves out the current day's realised losses. Counting the unfinished block's realised
+    P&L in the screen is an evaluator change (a protected file, owner-deployed). It is listed as a
+    next step.
+  - Health says "the next look is at 5" for agents with 0–1 active blocks. The text is computed as
+    `max(needed, last look + look_every_active_blocks)`, even when no look has spent alpha. The
+    look itself runs at 4 blocks (`league/evaluator.py:409–411`). Only the message is wrong, not
+    the gate.
 
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
