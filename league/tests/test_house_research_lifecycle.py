@@ -178,3 +178,21 @@ class ResearchLifecycle(HouseCase):
         self.house.research(agent)
         self.assertEqual(agent.code_sha256, original)
         self.assertEqual(forks, [])
+
+    def test_an_adopted_candidate_is_joined_to_its_research_trace(self):
+        from league.traces import TraceStore
+        agent = self.house.spawn("buyer", "test-family", BUYER)
+        better = BUYER + "\n# improvement\n"
+        store = TraceStore(self.house.root, self.house.ledger, clock=self.house.clock)
+
+        def finish(agent, standing, session):
+            store.capture("research", key=session, model="openai_luna", inputs={}, outputs=[], cost_usd="0.01",
+                          outcome="candidate_passed", useful=True, agent=agent.id)
+            return SimpleNamespace(candidate={"code": better, "needs": agent.needs, "params": agent.params,
+                                              "purpose": "an improvement", "numbers": {}, "passed": True}, consulted="")
+
+        self.house.researcher = SimpleNamespace(research=finish, traces=store)
+        self.house.research(agent)
+        rows = [e.payload for e in self.house.ledger.iter(kinds="trace.record", agent=agent.id)]
+        self.assertEqual([(r["version"], r["outcome"], r["useful"]) for r in rows],
+                         [(1, "candidate_passed", True), (2, "adopted", True)])

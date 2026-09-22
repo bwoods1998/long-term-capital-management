@@ -571,6 +571,35 @@ test('a tiny Luna call does not manufacture a budget breach by rounding its rece
     'a sub-cent reservation must cover the same amount reported to the campaign');
 });
 
+test('cache hints reach OpenAI byte for byte and a cache read settles cheaper than a write', async () => {
+  const settings = {
+    OPENAI_SECRET_KEY: 'test-key', FRONTIER_MONTH_USD: '1',
+    FRONTIER_MODELS: JSON.stringify({ 'gpt-5.6-luna': {
+      input: .25, uncached: .2, cached: .02, output: 1.2, long_input: .5, long_uncached: .4, long_cached: .04, long_output: 1.8,
+    } }),
+  };
+  const gate = createGate({ env: env(settings), store: memoryStore(), now: () => NOW });
+  const seen = [];
+  const body = { model: 'gpt-5.6-luna', max_output_tokens: 100, prompt_cache_key: 'research:openai_luna:v2',
+    prompt_cache_options: { mode: 'explicit', ttl: '30m' },
+    input: [{ role: 'developer', content: [{ type: 'input_text', text: 'rules', prompt_cache_breakpoint: { mode: 'explicit' } }] },
+      { role: 'user', content: 'now' }] };
+  const reply = usage => async (url, init) => { seen.push(init.body); return new Response(JSON.stringify({ model: body.model, usage })); };
+  const write = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate,
+    fetcher: reply({ input_tokens: 10000, output_tokens: 0, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 10000 } }) });
+  const read = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate,
+    fetcher: reply({ input_tokens: 10000, output_tokens: 0, input_tokens_details: { cached_tokens: 10000, cache_write_tokens: 0 } }) });
+  assert.equal(write.response.status, 200);
+  assert.equal(JSON.parse(seen[0]).prompt_cache_key, 'research:openai_luna:v2');
+  assert.deepEqual(JSON.parse(seen[0]), body);
+  assert.equal(write.response.headers.get('X-LTCM-Cost-USD'), '0.002500');
+  assert.equal(read.response.headers.get('X-LTCM-Cost-USD'), '0.000200');
+  const refused = await call(ask('POST', '/v1/frontier/responses', { body: { ...body, prompt_cache_key: 'no spaces allowed' } }),
+    { settings, gate, fetcher: reply({}) });
+  assert.equal(refused.response.status, 400);
+  assert.equal(seen.length, 2, 'a malformed hint never reaches the provider');
+});
+
 test('a venue may carry a tighter per-order cap than the floor', async () => {
   const settings = { MAX_ORDER_USD: '50', MAX_ORDER_USD_ALPACA: '20' };
   const order = qty => ({ symbol: 'AAPL', qty, side: 'buy', type: 'limit', time_in_force: 'day', limit_price: '10.00' });

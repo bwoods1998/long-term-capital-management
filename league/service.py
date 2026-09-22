@@ -171,14 +171,23 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if house.researcher is not None and campaigns is not None:
         from .fast_research import FastResearch, ResearchRouter, MODEL as RESEARCH_MODEL, load_routes
 
+        routes = load_routes()
         fast = FastResearch(root / 'fast-research.sqlite',
             Frontier(gateway_url, token, model=RESEARCH_MODEL, spend_guard=campaigns),
-            house.ledger, balance=house.economy.balance, clock=house.clock)
-        routes = load_routes()
+            house.ledger, balance=house.economy.balance, clock=house.clock, cache=routes.get('cache'))
         if burst:
             from .overnight import policy_with_turbo
             routes = {'enabled': True, 'cohort': burst['id'], 'fraction': policy_with_turbo(burst)['luna_fraction']}
-        house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier)
+        from .routing import TaskRouter
+
+        task_router = TaskRouter(house.ledger, clock=house.clock, config=load_routes().get('routing'))
+        house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier, task_router=task_router)
+        house.researcher.routes = task_router
+    if not canary and house.researcher is not None and config.get("research_traces", True):
+        # Private research transcripts with their cost and outcome, for eventual fine-tuning.
+        from .traces import TraceStore
+
+        house.researcher.traces = TraceStore(root, house.ledger, clock=house.clock)
     if not canary and house.researcher is not None:
         # Jev for every researcher (`classify`): one question over many records, at cost.
         from .semantic_lab import JevClient

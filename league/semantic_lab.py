@@ -281,7 +281,20 @@ class SemanticLab:
                 if self.failures>=5:self.cooldown=self.clock()+600
             # Never retry an uncertain paid request. The gateway retains its full hold.
 
-    def stats(self):
+    def stats(self, *, max_age: float = 0.0):
+        """Counts and known cost of the lab's work. `max_age` > 0 may answer from a copy that
+        old: `evidence()` runs inside `House.research` while the lifecycle lock is held, and on
+        Sept 22, 2026 these two full scans of a 137k-row table took ~1.4 s of the ~1.9 s each new
+        session held the lock, the largest cause of ticks overrunning their minute (p90 139 s).
+        The numbers are informational; nothing is decided from them."""
+        hit = getattr(self, '_stats_cache', None)
+        if max_age > 0 and hit is not None and 0 <= self.clock() - hit[0] < max_age:
+            return {**hit[1], 'cooldown_until': self.cooldown if self.cooldown > self.clock() else None}
+        value = self._stats()
+        self._stats_cache = (self.clock(), value)
+        return value
+
+    def _stats(self):
         with self.db() as db:
             counts=[dict(r) for r in db.execute('SELECT kind,status,COUNT(*) count FROM semantic_tasks GROUP BY kind,status')]
             costs=[Decimal(r[0]) for r in db.execute("SELECT cost FROM semantic_tasks WHERE cost IS NOT NULL")]
@@ -310,7 +323,7 @@ class SemanticLab:
             ident=hashlib.sha256(canonical(qs).encode()).hexdigest()
             definitions[ident]=qs
             return ident
-        result={'status':self.stats(), 'latest':[{'kind':r['kind'],'entity':r['entity'],'source':r['source'],
+        result={'status':self.stats(max_age=60), 'latest':[{'kind':r['kind'],'entity':r['entity'],'source':r['source'],
             'observed':r['observed'],'labeled':r['finished'],'rubric':rubric_id(r),
             'labels':json.loads(r['response'])['answers']} for r in rows],
             'market_labels':[{'entity':r['entity'],'source':r['source'],'observed':r['observed'],

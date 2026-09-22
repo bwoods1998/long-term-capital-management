@@ -2110,12 +2110,26 @@ class House:
                     with self._lifecycle_lock:
                         row = Admissions(self.ledger).enqueue(agent.id, generation, candidate, session)
                         self._admit_candidate(row)
+                self._trace_adoption(agent.id, session, outcome.candidate)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
                         self._state['last_research'][agent.id] = self.clock()
             return outcome
+
+    def _trace_adoption(self, agent_id: str, session: str, candidate: Mapping[str, Any]) -> None:
+        """Join what became of a pass's candidate to its research trace (league/traces.py)."""
+        traces = getattr(self.researcher, 'traces', None)
+        if traces is None:
+            return
+        from .traces import adoption_outcome, trace_id
+
+        try:
+            outcome, useful = adoption_outcome(self.ledger, self.registry, agent_id, session, candidate)
+            traces.outcome(trace_id('research', session), outcome=outcome, useful=useful, agent=agent_id)
+        except Exception as exc:  # noqa: BLE001 - a trace never costs an adoption
+            self.alert('warning', f'trace outcome for {agent_id}: {type(exc).__name__}: {str(exc)[:160]}')
 
     def _cancel_retired_research(self):
         for job in self.research_jobs.pending():
