@@ -157,6 +157,17 @@ test('an order over the per-order cap is refused before anything is signed', asy
   assert.equal(gate.status(NOW).today.orders, 0, 'and nothing was spent');
 });
 
+test('a NO buy is capped at what it really costs, not the YES price on the wire', async () => {
+  // 100 NO at $0.96 goes out as side "ask" at 0.0400: it costs $96, over the cap.
+  const { response, body, calls } = await call(
+    ask('POST', '/v1/kalshi/portfolio/events/orders', { body: { ...KALSHI_ORDER, side: 'ask', count: '100', price: '0.0400' } }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal(body.cap, 'order');
+  assert.match(body.error, /\$96\.00 exceeds the per-order cap/);
+  assert.equal(calls.length, 0, 'nothing reached the venue');
+});
+
 test('an exit order passes the per-order cap when the header says so', async () => {
   const { response, calls } = await call(
     ask('POST', '/v1/kalshi/portfolio/events/orders', { body: { ...KALSHI_ORDER, count: '100', price: '0.9900' }, headers: { 'X-LTCM-Purpose': 'exit' } }),

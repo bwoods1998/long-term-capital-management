@@ -218,9 +218,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       if (!(price > 0)) return fail('Cannot independently price this order: no venue quote.', 503);
       reference = String(price * 1.10);  // a market order may fill through the touch
     }
-    const priced = notional(target.venue, parsed, { reference });
-    if (priced.error) return fail(priced.error, 400);
     const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
+    const priced = notional(target.venue, parsed, { reference, exit });
+    if (priced.error) return fail(priced.error, 400);
     const decision = await gate.reserve({ micro: String(priced.micro), exit, venue: target.venue });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
     reservation = decision;
