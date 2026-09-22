@@ -21,7 +21,7 @@ class GuardTest(unittest.TestCase):
     def test_nobody_touches_the_constitution_or_the_scorekeeper(self):
         for path in ("league/constitution.py", "league/ledger.py", "league/book.py", "league/evaluator.py", "league/stats.py", "league/ci.py",
                      "league/auditor.py", "league/watchdog.py", "league/safety.py", "league/replay.py", "gateway/lib/caps.mjs", ".github/workflows/checks.yml",
-                     "League/Constitution.py"):
+                     "League/Constitution.py", "league/history.py", "league/deep_replay.py"):
             for role in ci.ROLE_PATHS:
                 self.assertTrue(ci.guard([path], role), (path, role))
         self.assertTrue(ci.guard(["league/constitution.py"], None))

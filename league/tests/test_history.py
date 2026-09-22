@@ -320,10 +320,12 @@ class QuoteTest(unittest.TestCase):
             plan = ing.probe_plan(["SPY"], "2025-03-03", "2025-03-05", grid="1Hour")
             ing.run(plan)
             rows = store.probes("SPY", 0, NOW, feed="sip")
-            # 09:30-16:00 New York in March 2025 before DST: 14:30-21:00 UTC, hourly closes 15:30..20:30
-            self.assertEqual(len(rows), 12)
+            # 09:30-16:00 New York in March 2025 before DST: 14:30-21:00 UTC; hourly bars close on the
+            # hour, so the probes are 15:00..21:00, seven a day.
+            self.assertEqual(len(rows), 14)
             first = rows[0]
-            self.assertEqual(iso(first["t"]), "2025-03-03T15:30:00Z")
+            self.assertEqual(iso(first["t"]), "2025-03-03T15:00:00Z")
+            self.assertEqual(iso(rows[6]["t"]), "2025-03-03T21:00:00Z")
             self.assertAlmostEqual(first["at"], first["t"] + history.PROBE_LATENCY_SECONDS)
             self.assertEqual(first["quote_ns"] % 1000, 123)  # nanoseconds survive
             self.assertLess(first["quote_ns"] / 1e9, first["at"])
@@ -351,7 +353,7 @@ class QuoteTest(unittest.TestCase):
             ing.run(ing.probe_plan(["SPY"], "2025-03-08", "2025-03-10", grid="1Hour"))
             self.assertFalse([u for u in client.calls if "/quotes" in u])
             ing.run(ing.trade_plan(["SPY", "BTC/USD"], "2025-03-10", "2025-03-11"))
-            self.assertEqual(len([u for u in client.calls if "/trades" in u]), 6)
+            self.assertEqual(len([u for u in client.calls if "/trades" in u]), 7)
 
 
 class RateTest(unittest.TestCase):
@@ -455,3 +457,41 @@ class ProbeBudgetTest(unittest.TestCase):
             self.assertLessEqual(len(client.calls), 8)
             self.assertNotIn("failed", {r["state"] for r in store.chunk_rows()})
             self.assertTrue(any(ing.pending(c) for c in plan))
+
+
+class OptionBarsTest(unittest.TestCase):
+    def test_an_occ_symbol_is_fetched_from_the_options_endpoint_raw_under_opra(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp)
+            client = FakeAlpaca()
+            ing = _ingestor(store, client)
+            plan = ing.plan(["SPY250321C00580000", "SPY"], ["1Hour"], "2025-03-01", "2025-03-22")
+            self.assertEqual({(c.symbols, c.feed, c.adjustment) for c in plan},
+                             {(("SPY",), "sip", "raw"), (("SPY",), "sip", "all"), (("SPY250321C00580000",), "opra", "raw")})
+            ing.run(plan)
+            option_calls = [u for u in client.calls if "/v1beta1/options/bars" in u]
+            self.assertEqual(len(option_calls), 1)
+            self.assertNotIn("adjustment", option_calls[0])
+            self.assertTrue(store.bars("SPY250321C00580000", "1Hour", 0, NOW, feed="opra", adjustment="raw"))
+            self.assertEqual(history.asset_class("BTC/USD"), "crypto")
+            self.assertEqual(history.asset_class("SOFI"), "equity")
+
+
+class CoverageCommandTest(unittest.TestCase):
+    def test_coverage_is_read_only_and_says_when_there_is_no_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(history.main(["coverage", "--root", tmp]), 1)
+            self.assertIn("no history store", out.getvalue())
+            self.assertFalse((Path(tmp) / "history").exists())  # nothing created
+            with redirect_stdout(io.StringIO()):
+                history.main(["ingest", "--root", tmp, "--symbols", "SPY", "--timeframes", "1Day", "--since", "2024-01-01",
+                              "--until", "2025-01-01", "--feed", "sip", "--rate", "100000"], client=FakeAlpaca())
+            path = Path(tmp) / "history" / "history.sqlite"
+            path.chmod(0o400)  # a read-only file: only a read-only open can succeed
+            try:
+                with redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(history.main(["coverage", "--root", tmp, "--json"]), 0)
+                self.assertIn('"SPY"', out.getvalue())
+            finally:
+                path.chmod(0o600)
