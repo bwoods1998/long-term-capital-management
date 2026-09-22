@@ -1,0 +1,8 @@
+{
+  "family": "options-pullback",
+  "name": "krasker-contract-identity",
+  "repair": {
+    "key": "order_refusal:alpaca-paper:limit price deviates #% from reference"
+  },
+  "why": "Corrected child of krasker-3, starting at rung 0 with no inherited record. Prefer validated OCC contract identity over the underlying symbol and emit explicit occ entry and exit intents, preventing option premiums from being submitted as underlying-stock prices. Preserve the parent's specialty, parameters, signals and pricing rules; independent qualification and floor evidence remain required."
+}
