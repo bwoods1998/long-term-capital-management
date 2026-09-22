@@ -66,7 +66,7 @@ from .agents import Agent, niche_of
 from .constitution import CONSTITUTION
 from .ledger import now_iso
 
-PROMPT_VERSION = "foundry-2026-09-22.1"
+PROMPT_VERSION = "foundry-2026-09-22.2"
 ROLE = "foundry"
 TASK_CALL = "hypothesis.foundry"
 TASK_EVALUATE = "hypothesis.evaluate"
@@ -87,6 +87,7 @@ DEFAULTS: dict[str, Any] = {
     "retire_after_failures": 15,
     "blocked_share": 0.5,
     "repair_after_blocked": 3,
+    "infra_failures": 5,
     "blocked_hours": 24,
     "max_evaluation_attempts": 3,
     "mutation_share": 0.2,
@@ -102,7 +103,23 @@ DEFAULTS: dict[str, Any] = {
 _DATA_WORDS = ("unsupported input", "missing", "no tape", "no data", "empty tape", "not recorded", "no recorded")
 #: And the words of a harness failure: the box, the clock or the platform, not the strategy.
 _INFRA_WORDS = ("sandbox", "timed out", "timeout", "killed", "could not be run", "exit 137", "no result line",
-                "connection", "urlerror", "httperror", "oserror", "brokenpipe")
+                "connection", "urlerror", "httperror", "oserror", "brokenpipe", "transporterror", ": http 5", ": http 429",
+                "response is not an object")
+
+#: What a strategy sees on the REPLAY tape, which is not everything a live wake sees (league/replay.py).
+#: Measured in the Sept 22, 2026 dry run: three of four megacaps cards guarded against stale quotes by
+#: their `t` stamp, which replay quotes do not carry, and so never traded at all -- a counted trial
+#: that tested nothing. Merton is told this as a fact of the test, not a hint about edge.
+REPLAY_VIEW = {
+    "every_step": ["now", "venue", "rung (0)", "params", "memory", "cash", "equity", "limits", "fees",
+                   "positions (symbol or market/leg, quantity, average_cost, mark, opened_at, reason)",
+                   "open_orders (order_id, side, quantity, limit_price, filled, submitted_at)"],
+    "alpaca": "bars: closed bars, oldest first, up to NEEDS.bars.limit; quotes: {bid, ask} ONLY, derived from the bar with the "
+              "tape's half-spread -- there is NO quote timestamp `t` in replay, so a staleness check must treat a missing `t` as fresh",
+    "kalshi": "markets: the rows the contract lists, with hours_to_close; watched symbols arrive as observed.bars only",
+    "absent_in_replay": ["quotes[...].t", "recent_order_outcomes", "event_risk"],
+    "rule": "Code that REQUIRES a field replay does not supply never trades on replay and cannot pass. Use such fields only when present.",
+}
 
 FOUNDRY_BRIEF = """You are Merton, the theorist of a small real-money trading league, writing NEW STRATEGY
 HYPOTHESES for one desk. You do not pick trades. You write programs that the House replays on recorded
@@ -130,6 +147,8 @@ Rules.
   least min_deflated_sharpe. A program that never fires cannot pass; one that trades noise after fees
   will not either. Most replays fail: be specific rather than hopeful.
 - Respect `horizon_rule` and `limits`. No shorts, no leverage; exits are always allowed.
+- Read `replay_view`: replay does not supply everything a live wake does (quotes there have no
+  timestamp). A program that requires a missing field never trades on replay and cannot pass.
 - Follow the strategy contract below EXACTLY (imports, NEEDS, PARAMS, decide(ctx), the return shape).
   Declare custom numeric knobs in NEEDS.parameter_rules so they are valid.
 - `rejection` is your public commitment: the replay or paper result that would show you were wrong.
@@ -310,8 +329,11 @@ class Foundry:
         return {member: group for group in groups.values() for member in group}
 
     def retired(self) -> dict[str, dict[str, Any]]:
-        """Retired ids (`family:<family>` or a card id) that still stand. A later pass in that
-        family lifts any retirement; a verified repair of its key lifts a blocked one."""
+        """Retired ids (`family:<family>`, `line:<line>` or a card id) that still stand. A later
+        pass in that family lifts any retirement; a verified repair of its key lifts a blocked one."""
+        return self._folded("retired", self._retired)
+
+    def _retired(self) -> dict[str, dict[str, Any]]:
         rows: dict[str, dict[str, Any]] = {}
         for entry in self.house.ledger.iter(kinds="hypothesis.retired"):
             rows[str(entry.payload.get("id"))] = {**entry.payload, "_seq": entry.seq}
@@ -334,6 +356,40 @@ class Foundry:
             if row.get("reason") != "disproven" and repair and verified.get(repair, 0) > row["_seq"]:
                 continue
             out[key] = row
+        return out
+
+    def _retired_niche(self, key: str, row: Mapping[str, Any]) -> str | None:
+        """The desk a retirement belongs to, whoever wrote it. The v0 refill guard writes
+        `line:<line>` with a text `evidence`; this module writes `family:<family>` or a card id with
+        a dict that names the niche."""
+        evidence = row.get("evidence")
+        if isinstance(evidence, dict) and evidence.get("niche"):
+            return str(evidence["niche"])
+        kind, _, name = key.partition(":")
+        for agent in self.house.registry.agents.values():
+            if (kind == "line" and (agent.line or agent.name) == name) or (kind == "family" and agent.family == name):
+                return agent.specialty
+        return (self.cards().get(key) or {}).get("niche")
+
+    def _is_retired(self, agent: Agent, retired: Mapping[str, Any]) -> bool:
+        """A family retired here, or a line retired by the House's own refill guard."""
+        return f"family:{agent.family}" in retired or f"line:{agent.line or agent.name}" in retired
+
+    def _retired_mechanisms(self, retired: Mapping[str, Any]) -> set[str]:
+        """Mechanism ids the Jev hypothesis memory would give the strategies of retired families and
+        lines (`league/hypothesis_memory.py`, when it is installed), so that a card linked to one of
+        them as a rewording is not replayed. Without that module this is empty: exact card ids and
+        card-to-card links still apply."""
+        try:
+            from .hypothesis_memory import docstring, mechanism_id  # type: ignore[attr-defined]
+        except ImportError:
+            return set()
+        out = set()
+        for agent in self.house.registry.agents.values():
+            if self._is_retired(agent, retired):
+                text = docstring(agent.code)
+                if text:
+                    out.add(mechanism_id(text, agent.specialty))
         return out
 
     # --------------------------------------------------------------- evidence
@@ -424,12 +480,16 @@ class Foundry:
         self._scores = (now, out)
         return out
 
-    def _seat_available(self, desk: DeskScore) -> bool:
+    def _seat_available(self, desk: DeskScore, weakest: dict[str | None, bool]) -> bool:
         rules = self.house.game["economy"]
         if desk.open_seats > 0 and len(self.house.registry.living()) < int(rules["max_population"]):
             return True
         # A full desk or league seats a replay passer only over its weakest eligible resident.
-        return self.house._weakest(rules, specialty=None if desk.open_seats > 0 else desk.niche) is not None
+        # (`weakest` memoizes `_weakest` per specialty within one allocation: it reads standings.)
+        key = None if desk.open_seats > 0 else desk.niche
+        if key not in weakest:
+            weakest[key] = self.house._weakest(rules, specialty=key) is not None
+        return weakest[key]
 
     def allocate(self, *, fresh: bool = False) -> tuple[DeskScore, str, str] | None:
         """(desk, route, reason) for the next foundry call, or None when no desk can take a newcomer.
@@ -445,9 +505,9 @@ class Foundry:
         return picked
 
     def _allocate(self) -> tuple[DeskScore, str, str] | None:
-        desks = [d for d in self.desk_scores() if d.eligible and self._seat_available(d)]
         blocked = self._blocked_desks()
-        desks = [d for d in desks if d.niche not in blocked]
+        weakest: dict[str | None, bool] = {}
+        desks = [d for d in self.desk_scores() if d.eligible and d.niche not in blocked and self._seat_available(d, weakest)]
         if not desks:
             return None
         settings = self.settings
@@ -464,6 +524,9 @@ class Foundry:
 
     def _blocked_desks(self) -> set[str]:
         """Desks with an open foundry repair report: no more cards until it is verified."""
+        return self._folded("blocked", self._blocked)
+
+    def _blocked(self) -> set[str]:
         reported = {}
         for entry in self.house.ledger.iter(kinds="repair.reported"):
             key = str(entry.payload.get("key") or "")
@@ -496,11 +559,8 @@ class Foundry:
     def last_call(self) -> float:
         """The last call's time, from the ledger and the state file (whichever is later), so neither
         a lost `house.json` nor a restart can start a paid call early."""
-        stamp = float(self._state().get("last_call") or 0)
-        for call in reversed(self.calls()):
-            stamp = max(stamp, float(call.get("at_epoch") or 0))
-            break
-        return stamp
+        calls = self.calls()
+        return max(float(self._state().get("last_call") or 0), float(calls[-1].get("at_epoch") or 0) if calls else 0.0)
 
     def inventory(self) -> list[dict[str, Any]]:
         """Replay-passing cards waiting for a seat."""
@@ -581,7 +641,8 @@ class Foundry:
         if not getattr(self.house, "campaigns", None) or self.house.pacer.may_spend("sail"):
             attempts = state.setdefault("attempts", {})
             ready = []
-            for card in self.pending():
+            busy = any(k.startswith("replay:hypothesis:") and j.is_alive() for k, j in list(self.house._jobs.items()))
+            for card in [] if busy else self.pending():
                 count, last = attempts.get(card["id"], [0, 0])
                 if now - float(last) < 600:
                     continue  # a card whose replay could not start waits ten minutes, not one tick
@@ -589,8 +650,7 @@ class Foundry:
                     self._outcome(card, "blocked_infra", f"its replay did not complete in {count} attempts")
                     continue
                 ready.append((card["id"], int(count)))
-            busy = any(k.startswith("replay:hypothesis:") and j.is_alive() for k, j in list(self.house._jobs.items()))
-            if ready and not busy and self.house._background("replay:hypothesis:pending", self.evaluate_all, [c for c, _ in ready]):
+            if ready and self.house._background("replay:hypothesis:pending", self.evaluate_all, [c for c, _ in ready]):
                 with self.house._state_lock:
                     for ident, count in ready:
                         attempts[ident] = [count + 1, now]
@@ -614,8 +674,7 @@ class Foundry:
             capabilities = house.research_capabilities(probe)
         except Exception as exc:  # noqa: BLE001 - the packet is still worth sending without it
             capabilities = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
-        coverage = [e.payload for e in house.ledger.read(kinds="data.coverage", limit=200, newest=True)
-                    if niche_id in json.dumps(e.payload, default=str) or niche.venue == e.payload.get("venue")][-8:]
+        coverage = self._coverage(niche)
         retired = self.retired()
         cards = self.cards()
         evaluations = self.evaluations()
@@ -668,16 +727,31 @@ class Foundry:
                      "alpaca_equities_and_options": "no commission; you cross the spread (replay fills market orders at the touch)",
                      "replay_fills": "market orders at the touch; resting limits fill only when a later step trades strictly through them"},
             "replay_gate": dict(CONSTITUTION["ladder"]["replay"]),
+            "replay_view": REPLAY_VIEW,
             "replay_window": {"days": replay_days, "step": "Kalshi day tapes step every 30 minutes; hour tapes every 5 minutes; Alpaca at NEEDS.bars.timeframe"},
             "limits": {"stake_usd": float(row["stake_usd"]), "max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])},
             "horizon_rule": dict(house.game.get("horizon") or {}),
             "failed_on_this_desk": failed[:16],
             "retired_on_this_desk": [{"id": k, "reason": v.get("reason"), "failures": v.get("failures")} for k, v in retired.items()
-                                     if (v.get("evidence") or {}).get("niche") == niche_id][:16],
+                                     if self._retired_niche(k, v) == niche_id][:16],
             "passed_on_this_desk": passed[:8],
             "founder_ideas": seeds,
             "recent_postmortems": deaths,
         }
+
+    def _coverage(self, niche: Any) -> dict[str, Any] | None:
+        """What the newest `data.coverage` row (the history ingestion) says it holds for this desk's
+        universe: counts and date ranges only, never the data."""
+        rows = self.house.ledger.read(kinds="data.coverage", limit=3, newest=True)
+        if not rows:
+            return None
+        latest = rows[-1].payload
+        universe = {str(x).upper() for x in niche.universe}
+        series = [{k: item.get(k) for k in ("kind", "symbol", "timeframe", "feed", "rows", "first_day", "last_day", "empty", "done")}
+                  for item in (latest.get("series") or []) if isinstance(item, dict) and str(item.get("symbol") or "").upper() in universe]
+        return {"source": latest.get("source"), "status": latest.get("status"), "finished_at": latest.get("finished_at"),
+                "series": series[:24], "limitations": list(latest.get("limitations") or [])[:8], "states": latest.get("states"),
+                "note": "Ingested history in the House's store. The replay window in `data.replay` is what a candidate is judged on."}
 
     # -------------------------------------------------------------------- call
     def run(self, niche_id: str, route: str = "evidence", reason: str = "") -> dict[str, Any]:
@@ -745,7 +819,7 @@ class Foundry:
         if ident in known:
             return None, f"{ident}: this exact mechanism already has a card on this desk"
         group = links.get(ident, {ident})
-        if any(member in retired for member in group):
+        if any(member in retired for member in group) or group & self._retired_mechanisms(retired):
             return None, f"{ident}: a retired mechanism (or a rewording of one)"
         name = re.sub(r"[^a-z0-9-]+", "-", str(raw.get("name") or "hypothesis").lower()).strip("-")[:20] or "hypothesis"
         niche = self.house.niches[niche_id]
@@ -784,11 +858,24 @@ class Foundry:
                      needs=dict(needs), specialty=niche.id, line=line, founder=None)
 
     def _outcome(self, card: Mapping[str, Any], outcome: str, detail: str, **extra: Any) -> None:
+        """A card's one evaluation outcome. The first one written stands: a replay that finishes
+        after its card was given up on (or the reverse) must not fight over the row."""
+        from .ledger import LedgerConflict
+
+        key = f"hypothesis.evaluate:{card['id']}"
+        if self.house.ledger.get(key) is not None:
+            return
+        try:
+            self._append_outcome(card, outcome, detail, key, **extra)
+        except LedgerConflict:
+            pass
+
+    def _append_outcome(self, card: Mapping[str, Any], outcome: str, detail: str, key: str, **extra: Any) -> None:
         self.house.ledger.append("trace.record", {"task": TASK_EVALUATE, "id": card["id"], "version": PROMPT_VERSION,
                                                   "model": card.get("model"), "inputs_sha256": card.get("code_sha256"),
                                                   "outcome": outcome, "cost_usd": "0", "useful": outcome == "passed",
                                                   "detail": str(detail)[:600], "niche": card.get("niche"), "line_id": card.get("line_id"),
-                                                  **extra}, id=f"hypothesis.evaluate:{card['id']}")
+                                                  **extra}, id=key)
 
     def evaluate_all(self, idents: Sequence[str]) -> None:
         for ident in idents:
@@ -807,12 +894,33 @@ class Foundry:
         if niche is None or niche.dormant or not niche.replay:
             self._outcome(card, "invalid", "its desk is closed or has no replay")
             return None
+        retired = self.retired()
+        group = self.links().get(ident, {ident})
+        closed = set(retired) | self._retired_mechanisms(retired)
+        if closed & group:
+            self._outcome(card, "retired_mechanism", "linked as a rewording of a retired mechanism before its replay: "
+                          + ", ".join(sorted(closed & group))[:300])
+            return None
         code = self._code(card)
         needs = static_needs(code) or {"venue": niche.venue, "horizon": niche.horizons[0]}
         agent = self._virtual(niche, card["line_id"], needs, code, {}, family=card["family"])
         if agent.venue != niche.venue or agent.horizon not in niche.horizons:
             self._outcome(card, "invalid", f"its NEEDS say {agent.venue}/{agent.horizon}, outside the {niche.id} desk")
             return None
+        declared = static_needs(code)
+        if declared is not None:
+            # The House would show a strategy that names nothing on its desk the head of the desk's
+            # universe instead (`niches.constrain`), and replay a program that was never about those
+            # markets: a counted trial that tests nothing. Refuse it before the replay instead.
+            from . import niches as niches_module
+            try:
+                home = niches_module.match(declared, house.niches)
+            except Exception:  # noqa: BLE001 - an odd literal is the probe's to judge
+                home = niche
+            if home is None or home.id != niche.id:
+                where = f"the {home.id} desk" if home is not None else f"nothing in the {niche.id} universe"
+                self._outcome(card, "invalid", f"its NEEDS name {where}; a card must trade its own desk's markets")
+                return None
         result = house._candidate_replay(agent, code)
         if not result.get("passed"):
             try:
@@ -828,7 +936,11 @@ class Foundry:
             return result
         error = str(result.get("error") or "")
         if "allowance is closed" in error or "allowance" in error and "unavailable" in error:
-            return result  # not the card's fault: it stays pending and is tried again
+            with house._state_lock:  # not the card's fault: it stays pending, and this try is not counted
+                row = self._state().setdefault("attempts", {}).get(ident)
+                if row:
+                    row[0] = max(int(row[0]) - 1, 0)
+            return result
         self._outcome(card, classify_error(error), error or "the replay did not run")
         return result
 
@@ -866,7 +978,7 @@ class Foundry:
             members[a.specialty] = members.get(a.specialty, 0) + 1
         for card in waiting:
             niche = house.niches.get(card["niche"])
-            if niche is None or niche.dormant or f"family:{card['family']}" in retired:
+            if niche is None or niche.dormant or f"family:{card['family']}" in retired or f"line:{card['line_id']}" in retired:
                 continue
             evaluation = self.evaluations()[card["id"]]
             displaced = loser
@@ -948,8 +1060,8 @@ class Foundry:
                 continue
             if not (s.score_observations > 0 and s.score_growth > 0):
                 continue  # positive forward evidence, or no House-staked child
-            if f"family:{agent.family}" in retired:
-                continue
+            if self._is_retired(agent, retired):
+                continue  # an exhausted mechanism is not bred, however well one of its members trades
             niche = house.niche_of(agent)
             if niche is None or niche.dormant or members.get(niche.id, 0) >= niche.max_members:
                 continue
@@ -1072,8 +1184,64 @@ class Foundry:
                              f"the {family} family on {row['niche']} failed {row['empty']} of {row['failures']} replays on an empty tape: "
                              "its inputs are missing, so it is retired from breeding until the data exists",
                              row["evidence"], sorted(row["agents"]), "medium")
+        written.extend(self._retire_unrunnable(families, already))
         written.extend(self._retire_cards(cards, already, limit))
         written.extend(self._report_blocked_cards(cards))
+        return written
+
+    def _retire_unrunnable(self, families: Mapping[str, Mapping[str, Any]], already: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Lines whose replays mostly cannot RUN. Those are not trials, so the failure count above
+        never sees them, and a mutation of such a line buys another replay that will not run. The
+        House says so in its alerts (`<agent>: replay could not run (...)`, `... was not run (...)`);
+        a family with `infra_failures` of them in distinct hours, at least as many as its counted
+        trials and no pass, is retired `blocked_data` (a missing input) or `blocked_infra` (the box,
+        a timeout, a crash), and reported for repair instead of being bred."""
+        house = self.house
+        since = now_iso(lambda: self._now() - float(self.settings["evidence_days"]) * 86400)
+        pattern = re.compile(r"^([a-z][a-z0-9-]{1,40}): (?:replay could not run|its replay was not run|a candidate's replay was not run) \((.*)")
+        seen: dict[str, dict[str, Any]] = {}
+        for entry in house.ledger.iter(kinds="ops.alert"):
+            if entry.at < since:
+                continue
+            match = pattern.match(str(entry.payload.get("text") or ""))
+            if not match:
+                continue
+            agent = house.registry.get(match.group(1))
+            detail = match.group(2)
+            if agent is None or "allowance" in detail:
+                continue  # a closed budget is the owner's line, not the strategy's
+            kind = "blocked_data" if classify_error(detail) == "blocked_data" or "unsupported input" in detail.lower() else "blocked_infra"
+            row = seen.setdefault(agent.family, {"hours": {"blocked_data": set(), "blocked_infra": set()}, "niche": agent.specialty,
+                                                 "agents": set(), "evidence": []})
+            key = (agent.id, entry.at[:13])
+            if key in row["hours"][kind]:
+                continue
+            row["hours"][kind].add(key)
+            row["agents"].add(agent.id)
+            row["evidence"] = (row["evidence"] + [{"seq": entry.seq, "at": entry.at, "agent": agent.id, "excerpt": detail[:240]}])[-5:]
+        written = []
+        floor = int(self.settings["infra_failures"])
+        for family, row in seen.items():
+            counted = families.get(family) or {}
+            if f"family:{family}" in already or counted.get("passes"):
+                continue
+            kind = max(row["hours"], key=lambda k: len(row["hours"][k]))
+            failures = len(row["hours"][kind])
+            if failures < floor or failures < int(counted.get("failures") or 0):
+                continue
+            repair_key = (f"missing_data:replay-input:{row['niche']}:{family}" if kind == "blocked_data"
+                          else f"shared_defect:replay-harness:{row['niche']}:{family}")
+            payload = {"id": f"family:{family}", "reason": kind, "failures": failures,
+                       "evidence": {"family": family, "niche": row["niche"], "counted_failures": int(counted.get("failures") or 0),
+                                    "agents": sorted(row["agents"])[:24], "last": row["evidence"], "repair_key": repair_key,
+                                    "rule": f"{floor} replays that could not run, in distinct hours, and no pass"}}
+            house.ledger.append("hypothesis.retired", payload, id=f"hypothesis.retired:family:{family}:{kind}:{failures}")
+            written.append(payload)
+            self._report(repair_key, "missing_data" if kind == "blocked_data" else "shared_defect",
+                         f"the {family} family on {row['niche']} could not replay {failures} times "
+                         + ("for a missing input" if kind == "blocked_data" else "because the replay harness failed")
+                         + "; it is retired from breeding until the repair is verified",
+                         row["evidence"], sorted(row["agents"]), "medium")
         return written
 
     def _retire_cards(self, cards: Mapping[str, Any], already: Mapping[str, Any], limit: int) -> list[dict[str, Any]]:
@@ -1137,6 +1305,12 @@ class Foundry:
 
     # ------------------------------------------------------------------ health
     def stats(self) -> dict[str, Any]:
+        try:
+            return self._stats()
+        except Exception as exc:  # noqa: BLE001 - health must be written whatever this says
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
+    def _stats(self) -> dict[str, Any]:
         evaluations = self.evaluations()
         outcomes: dict[str, int] = {}
         for row in evaluations.values():

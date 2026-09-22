@@ -105,7 +105,7 @@ class Cards(FoundryCase):
         self.assertEqual(passes[0]["allocation"]["desk"], self.DESK)
         # What Merton was shown: the desk, the data, the fees and the gate -- never a tape.
         shown = self.frontier.asked[0]["user"]
-        for key in ("desk", "data", "fees", "replay_gate", "failed_on_this_desk", "retired_on_this_desk", "horizon_rule"):
+        for key in ("desk", "data", "fees", "replay_gate", "replay_view", "failed_on_this_desk", "retired_on_this_desk", "horizon_rule"):
             self.assertIn(key, shown)
         self.assertNotIn("steps", json.dumps(shown))
         self.assertIn("THE STRATEGY CONTRACT", self.frontier.asked[0]["system"])
@@ -144,6 +144,40 @@ class Cards(FoundryCase):
         self.clock.advance(601)
         self.assertIsNone(self.house._refill(self.rules), "the failed and the invalid cards are never born")
         self.assertNotEqual(seed.id, child.id)
+
+    def test_a_card_that_names_another_desks_markets_is_refused_before_its_replay(self):
+        self.frontier.candidates = self.frontier.candidates[:1]
+        self.call("alpaca-megacaps")  # the BTC sawtooth sent to the megacaps desk
+        card = self.card_of("sawtooth")
+        outcome = self.foundry.evaluations()[card["id"]]
+        self.assertEqual(outcome["outcome"], "invalid")
+        self.assertIn("alpaca-crypto-majors", outcome["detail"])
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent=card["line_id"]), 0)
+
+    def test_the_packet_shows_ingested_coverage_for_this_desk_only(self):
+        self.house.ledger.append("data.coverage", {"source": "alpaca-history", "status": "finished", "series": [
+            {"kind": "bars", "symbol": "BTC/USD", "timeframe": "1Hour", "rows": 900, "first_day": "2024-01-01", "last_day": "2026-09-21"},
+            {"kind": "bars", "symbol": "SPY", "timeframe": "1Hour", "rows": 900, "first_day": "2016-01-04", "last_day": "2026-09-21"}],
+            "limitations": ["no depth"]})
+        shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
+        self.assertEqual([row["symbol"] for row in shown["series"]], ["BTC/USD"])
+        self.assertEqual(shown["limitations"], ["no depth"])
+
+    def test_replays_that_fail_to_fetch_data_are_infrastructure_not_invalid_code(self):
+        from league.hypotheses import classify_error
+        self.assertEqual(classify_error("TapeError: alpaca stock bars: TransportError: GET https://gateway/v1/alpaca-paper/v2/stocks/bars"), "blocked_infra")
+        self.assertEqual(classify_error("TapeError: kalshi candles: HTTP 503 upstream"), "blocked_infra")
+        self.assertEqual(classify_error("ValueError: unsupported input: required observed bars are missing for BTC/USD"), "blocked_data")
+        self.assertEqual(classify_error("NameError: name 'foo' is not defined"), "invalid")
+
+    def test_a_closed_allowance_leaves_a_card_pending_without_using_an_attempt(self):
+        card, _ = self.foundry._card(candidate("late", "a card the allowance holds back", PASSER), self.DESK, "c", None, {}, {}, {})
+        self.foundry._state().setdefault("attempts", {})[card["id"]] = [1, 0]
+        self.house._candidate_replay = lambda agent, code: {"counted_as_trial": False, "passed": False,
+                                                            "error": "ValueError: campaign allowance is closed", "numbers": {}}
+        self.foundry.evaluate(card["id"])
+        self.assertNotIn(card["id"], self.foundry.evaluations())
+        self.assertEqual(self.foundry._state()["attempts"][card["id"]][0], 0)
 
     def test_an_exact_mechanism_is_not_carded_twice(self):
         self.call()
@@ -335,6 +369,72 @@ class Labels(FoundryCase):
         self.foundry.annotate_births()
         row = self.house.ledger.get(f"birth-route:{child.id}").payload
         self.assertEqual((row["route"], row["evidence"]["replay_passed"]), ("earner_fork", False))
+
+
+class Compatibility(FoundryCase):
+    def test_a_line_retired_by_the_refill_guard_is_not_bred_either(self):
+        """The House's v0 refill guard writes `line:<line>` with a text `evidence`."""
+        earner = self.seated("earner")
+        self.earn(earner)
+        self.house.ledger.append("hypothesis.retired", {"id": f"line:{earner.line}", "reason": "disproven", "failures": 15,
+                                                        "evidence": "15 replay trials and 0 passes; House mutations stop"})
+        self.assertIsNone(self.foundry._evidence_mutation(self.rules, living=self.house.registry.living(), loser=None))
+        shown = self.foundry.packet(self.DESK)["retired_on_this_desk"]
+        self.assertEqual([row["id"] for row in shown], [f"line:{earner.line}"])
+
+    def test_replays_that_cannot_run_retire_a_family_for_repair_not_for_disproof(self):
+        agent = self.seated("boxless")
+        for hour in range(5):
+            self.house.alert("warning", f"{agent.id}: replay could not run (SandboxError: {agent.id}: the box would not start)")
+            self.house.alert("warning", f"{agent.id}: replay could not run (ValueError: campaign allowance is closed)")
+            self.clock.advance(3600)
+        self.house.alert("warning", f"{agent.id}: replay could not run (SandboxError: the same hour twice)")
+        self.house.alert("warning", f"{agent.id}: replay could not run (SandboxError: and again)")
+        rows = self.foundry.retire_exhausted()
+        self.assertEqual([(r["id"], r["reason"], r["failures"]) for r in rows], [(f"family:{agent.family}", "blocked_infra", 6)])
+        report = self.house.ledger.last("repair.reported").payload
+        self.assertEqual(report["kind"], "shared_defect")
+        self.assertTrue(report["key"].startswith("shared_defect:replay-harness:"))
+        self.assertEqual(self.foundry.retire_exhausted(), [])
+        # A verified repair lifts a blocked retirement; a disproof it would not.
+        self.house.ledger.append("repair.status", {"key": report["key"], "state": "verified"})
+        self.assertNotIn(f"family:{agent.family}", self.foundry.retired())
+
+    def test_a_card_linked_to_a_retired_mechanism_before_its_replay_is_not_replayed(self):
+        card, _ = self.foundry._card(candidate("late", "a card linked to a retired idea", PASSER), self.DESK, "c", None, {}, {}, {})
+        self.house.ledger.append("hypothesis.retired", {"id": "old-card", "reason": "disproven", "failures": 15, "evidence": {"niche": self.DESK}})
+        self.house.ledger.append("hypothesis.link", {"a": card["id"], "b": "old-card", "relation": "rewording", "confidence": 0.95, "method": "jev"})
+        self.foundry.evaluate(card["id"])
+        self.assertEqual(self.foundry.evaluations()[card["id"]]["outcome"], "retired_mechanism")
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial", agent=card["line_id"]), 0)
+        # An uncertain label is not a rewording.
+        other, _ = self.foundry._card(candidate("near", "a card only related to a retired idea", PASSER), self.DESK, "c", None, {}, {}, {})
+        self.house.ledger.append("hypothesis.link", {"a": other["id"], "b": "old-card", "relation": "related", "confidence": 0.7, "method": "jev"})
+        self.foundry.evaluate(other["id"])
+        self.assertEqual(self.foundry.evaluations()[other["id"]]["outcome"], "passed")
+
+
+class EndToEnd(FoundryCase):
+    def test_the_tick_calls_replays_and_seats_a_passer_through_the_house_refill(self):
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        seed = self.seated()
+        for _ in range(3):  # the crypto majors desk has the best replay record, so the call goes there
+            self.trial(seed.id, seed.family, passed=True)
+        self.house.tick()
+        self.house.wait()   # the call
+        self.house.wait()   # its cards' replays
+        self.assertEqual(len(self.foundry.inventory()), 1)
+        self.clock.advance(31 * 60)
+        self.assertFalse(self.foundry.due())
+        self.assertIn("waiting for a seat", self.foundry.refusal)  # no new call while a passer waits
+        self.house.tick()
+        card = self.card_of("sawtooth")
+        child = self.house.registry.get(card["line_id"])
+        self.assertIsNotNone(child)
+        self.assertEqual(self.house.evaluator.rung(child.id), 1)
+        health = json.loads((Path(self.house.root) / "health.json").read_text())
+        self.assertEqual(health["hypotheses"]["cards"], 3)
+        self.assertEqual(health["hypotheses"]["outcomes"], {"passed": 1, "failed": 1, "invalid": 1})
 
 
 if __name__ == "__main__":
