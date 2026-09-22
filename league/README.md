@@ -95,15 +95,18 @@ status is exposed in health and agent research context; qualification is distinc
 | `researcher.py` | `Researcher`: a cheap Sail model's tool loop for one agent, every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. |
 | `rules.py` | `rules_text(game)`: what every agent is told, generated from the constitution and `game.json` so it cannot drift from what is enforced. |
 | `seeds/` | The fourteen founding strategy files (Kalshi, crypto, equity and options) and `all_seeds()`. They are data, not modules: nothing imports them. |
-| `strategies/` | Strategies Merton adds as architect; `registry.json` lists them and the House enrolls each once, on rung 0. Empty at the start. |
+| `strategies/` | Strategies Merton adds as architect; each `<stem>.py` is described by its own `<stem>.json` (`name`, `family`, `why`, and `repair` for a corrected child), so two proposals never rewrite one shared file. The House enrolls each once, on rung 0. The shared `registry.json` is retired (Sept 22, 2026) and CI refuses a Merton branch that writes it. |
 | `tools/` | Pure helper modules Merton adds as toolsmith; uploaded beside the strategy so it may `from tools.<name> import ...`. Empty at the start. |
 | `playbook/` | Lessons Merton adds as teacher, one markdown file each; the House loads them into the ledger's playbook. |
 | `house.py` | `House`: `found`, `spawn`, `seat`, `wake`, `judge`, `kill`, `fork`, `research`, `keep_population`, `tick`. `Settings` are the House's own dials. |
 | `budget.py` | `Budget`: reads Sail's credit balance, counts a month's spend as the sum of its falls, returns `open` or `stopped`, and says on the ledger when that changes. It guards the ACCOUNT only -- the month's line and the reserve -- because it once also latched on the expedition's budget and, since `Pacer.spent` only grows, that latch had no key. |
 | `grants.py` | Phase-scoped Luna startup grants, claimed durably before the call; one per family/niche, twelve maximum and $0.25 reserved each. |
 | `frontier.py` | `Frontier.ask`: one metered call through the gateway's `/v1/frontier/responses`; the cost comes back in `X-LTCM-Cost-USD`. Priced Astra, Sol, Terra and Luna routes; the default is Astra. |
+| `hypotheses.py` | `Foundry`: the hypothesis foundry that replaced routine House-staked mutation refill (Sept 22, 2026). It asks Merton for 3-4 `hypothesis.card`s for the desk the evidence favours. Each card has a mechanism, data, edge after costs, horizon, rejection evidence and a whole strategy file. A card is replayed through `House._candidate_replay` under the id its child would carry, and only a passer is born, onto paper. A family with 15 counted failures and no pass is retired (`disproven`, or `blocked_data`/`blocked_infra` plus a `repair.reported` row). Every birth gets a `route.decision` saying why it happened. Dials in `game.json` `hypotheses`. |
 | `auditor.py` | `Auditor.audit` (the evidence packet, the veto, charged to the agent) and `score` (what each veto cost or saved, scaled to the micro stake). |
 | `merton.py` | `Merton`: the schedule and one pass of each pull-request role, brought round sooner while the day's frontier allowance is unspent; `consult`, where he WRITES the hiring agent a strategy file rather than advising it; `GatewayForge` (production) and `GhForge` (the owner's machine, through `gh`); `evidence_from(house)`, which shows the architect how each desk's members are really faring and the operator the checker's own bounds. |
+| `worklist.py` | The repair worklist: the fold over `repair.reported` / `repair.status` (dedupe by key, original evidence kept, priority = agents x recurrence x severity, states proposed ... verified / rejected / dormant) and `Sources`, the deterministic reporters: audit vetoes, refusal reasons across 3+ agents or wakes, CI-refused Merton PRs, tool requests and the toolsmith's blocked verdicts, research that names a missing input. Jev triage writes `source: triage` rows and is folded the same way. |
+| `engineer.py` | The repair engineer, Merton's sixth job with no more authority than the others: one paid patch a step for the top admitted job, a pull request through the same gateway route and path guard, CI's failure text read back (`GET /v1/github/pr/<n>/failures`) for at most `max_attempts` revisions, then `canary` (the running release holds the files), `observing` and `verified` only if the signal has not recurred. Strategy defects become new child strategies on rung 0; anything outside the role paths is `dormant: needs core authority`. Settings in `engineer.json` (owner-only). `scripts/repair_drill.py --plant` files a labeled synthetic job through the House's `repairs-inbox/` (the House stays the ledger's only writer); a drill asks no model and spends nothing. Each step leaves the queue in `<state>/repairs.json`. |
 | `ci.py` | `python3 -m league.ci`: the path guard (`ROLE_PATHS`, `FORBIDDEN`, `CONFIG_DIALS`), content checks for strategies, tools, `game.json` and `config.json`, then the suite. Also makes the canned regression tapes. |
 | `capital.py` | `kelly_stake` and `resize` (rung 3), `recommend` (the standing capital recommendation, an `ops.recommendation` row). |
 | `publish.py` | `Publisher`: cleans ledger rows into the site's exact event and checkpoint shapes and posts them. Cursor in `publish.json`. |
@@ -151,14 +154,29 @@ status is exposed in health and agent research context; qualification is distinc
    whose later fork is deferred or fails. That journal preserves work; it does not automatically
    retry admission or resume an interrupted provider conversation.
 7. **Start Merton's due roles** in the background, and ask the gateway what CI made of each open
-   pull request.
+   pull request (a refused one is still asked, every 15 minutes, for 14 days). Step the repair
+   engineer (`engineer.py`) beside them: new reports, admissions, free follow-ups, and at most one
+   paid patch, paced and inside the frontier tier that still pays for code.
+   Then the **hypothesis foundry** (`hypotheses.py`). On every tick it labels new
+   births, and every ten minutes it retires exhausted families. It makes at most one paid call per
+   `call_minutes`, and only when all of the following hold:
+   - a seat is open;
+   - the frontier tier still pays for code work;
+   - the day's OpenAI allowance and the foundry's own window budget have room;
+   - no replay-passing card is already waiting for a seat.
+
+   The call's cards are replayed one after another in the replay lane.
 8. **Once an epoch:** load new lessons from `playbook/`, resize rung-3 stakes, write the capital
    recommendation, pay the pool, score the auditor's vetoes.
 9. **Keep the population:** kill agents at zero credits, rung-0 agents past the replay deadline, and
    agents stuck barren with too little left to research their way out (the culling runs even when
    the Sail meter has stopped the floor; only the refill waits for business); fork agents above the
    fork threshold (rung 1 and up, once an epoch); re-found any seed never born if the population is
-   under its floor; enroll Merton's registered strategies; and fill the last seat -- when the league
+   under its floor; enroll Merton's registered strategies; and fill the last seat. Research
+   candidates that passed replay go first. With the foundry on, the next is a replay-passing
+   hypothesis card, taken from the desk with the best evidence first. After that comes a mutation of
+   a parent that is earning forward and whose family is not retired, capped at a share of the day's
+   births. Otherwise nobody is added: a desk's emptiness no longer breeds anything. When the league
    is full, a newcomer displaces the worst agent that has had a fair chance, which is never one on
    real money, never a profitable one, and never one that has traded while an idle one remains.
    Paper equity and option agents begin their grace period at their first offered trading

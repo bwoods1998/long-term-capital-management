@@ -49,6 +49,8 @@ FORBIDDEN: tuple[str, ...] = (
     "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
     "league/live_trading.py", "league/live_pilot.py", "scripts/live_trading.py", "scripts/live_pilot.py",
 )
+#: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
+RETIRED_REGISTRY = "league/strategies/registry.json"
 #: The only keys of league/config.json the operator may move, with their bounds.
 CONFIG_DIALS: dict[str, tuple[float, float]] = {
     "tick_seconds": (30, 600), "mark_every_seconds": (60, 1800), "replay_days": (7, 60), "inference_daily_cap_usd": (0.5, 25.0),
@@ -169,18 +171,19 @@ def check_strategy(path: Path) -> list[str]:
 def check_strategies(root: Path = REPO) -> list[str]:
     from . import strategies
 
-    problems = []
-    rows = strategies.registry(root / "league" / "strategies")
+    directory = root / "league" / "strategies"
+    problems = list(strategies.problems(directory))
+    rows = strategies.registry(directory)
     listed = {row["file"] for row in rows}
-    for path in sorted((root / "league" / "strategies").glob("*.py")):
+    for path in sorted(directory.glob("*.py")):
         if path.name == "__init__.py":
             continue
         if path.name not in listed:
-            problems.append(f"{path.name}: not listed in league/strategies/registry.json")
+            problems.append(f"{path.name}: not described; add league/strategies/{path.stem}.json with its name, family and why")
         problems.extend(check_strategy(path))
     for row in rows:
-        if not (root / "league" / "strategies" / row["file"]).exists():
-            problems.append(f"registry.json lists {row['file']}, which does not exist")
+        if not (directory / row["file"]).exists():
+            problems.append(f"{row['name']} is described as {row['file']}, which does not exist")
     return problems
 
 
@@ -251,6 +254,11 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
         if role is None:
             problems.append(f"{branch}: not a branch name of the form merton/<role>/<slug>")
         problems.extend(guard(paths, role))
+        if RETIRED_REGISTRY in paths:
+            # Every proposal rewrote this one shared file from a stale copy and dropped the rows
+            # merged after it (PRs #72/#73 against #71, Sept 21, 2026). Each strategy now carries
+            # its own description file, so two proposals cannot overwrite each other.
+            problems.append(f"{RETIRED_REGISTRY}: retired; describe a strategy in league/strategies/<its file stem>.json")
     problems.extend(check_strategies(root))
     problems.extend(check_tools(root))
     problems.extend(check_game(root))
@@ -258,6 +266,17 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
     if tests and not problems:
         problems.extend(run_tests(root))
     return problems
+
+
+def annotate(problems: list[str], *, out: Any = None) -> None:
+    """Each refusal again as a GitHub error annotation, which the check run keeps and the gateway
+    can read back (`GET /v1/github/pr/<n>/failures`). The plain log is not reachable without a
+    download credential, so until Sept 22, 2026 the House learned only that CI said no, never why,
+    and a failed proposal could not be revised. Annotations add nothing to the verdict."""
+    stream = out or sys.stdout
+    for problem in problems[:40]:
+        text = str(problem)[:4000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=league.ci refused::{text}", file=stream)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -281,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         problems = check(args.base, args.branch, tests=not args.no_tests, head=args.head)
     for problem in problems:
         print("REFUSED:", problem)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        annotate(problems)
     print("ci:", "refused" if problems else "passed", f"({args.branch or 'no branch'})")
     return 1 if problems else 0
 

@@ -842,3 +842,14 @@ test('the Durable Object exposes the pull request counter, each step in one tran
   assert.equal((await call(ask('POST', '/v1/github/pr', { body: PROPOSAL }), { settings: GITHUB, gate: stub, fetcher: hub.fetcher })).response.status, 200);
   assert.equal(local.status(NOW).github.pull_requests, 1);
 });
+
+test('the failure read is a GET behind the gateway token, and nothing else at that path', async () => {
+  const hub = fakeGitHub();
+  const { response } = await call(ask('GET', '/v1/github/pr/41/failures', { token: 'wrong' }), { settings: GITHUB, fetcher: hub.fetcher });
+  assert.equal(response.status, 401);
+  assert.equal((await call(ask('POST', '/v1/github/pr/41/failures'), { settings: GITHUB, fetcher: hub.fetcher })).response.status, 405);
+  assert.equal(hub.calls.length, 0, 'GitHub heard nothing');
+  assert.equal((await call(ask('GET', '/v1/github/pr/41/failures'), { settings: {}, fetcher: hub.fetcher })).response.status, 503);
+  const missing = await call(ask('GET', '/v1/github/pr/41/failures'), { settings: GITHUB, fetcher: hub.fetcher });
+  assert.equal(missing.response.status, 404, 'no such pull request on the fake');
+});
