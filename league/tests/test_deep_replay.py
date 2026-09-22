@@ -221,5 +221,50 @@ class HouseDeepReplayTest(HouseCase):
         sealed.assert_not_called()
 
 
+
+
+class DevDaysTest(unittest.TestCase):
+    def test_a_development_tape_is_never_larger_than_the_largest_live_one(self):
+        from league.deep_replay import dev_days
+        five = {"horizon": "day", "symbols": ["SPY", "QQQ", "IWM", "TLT", "GLD"]}
+        twelve = {"horizon": "day", "symbols": [f"S{i}" for i in range(12)], "observe": {"symbols": ["X1", "X2"]}}
+        self.assertEqual(dev_days(five), 252)
+        self.assertEqual(dev_days(twelve), 126)  # 14 symbols: cut to one fold, the live tape's own length
+        self.assertEqual(dev_days({"horizon": "hour", "symbols": ["BTC/USD"]}), 63)
+        self.assertEqual(dev_days({"horizon": "hour", "symbols": ["SPY"]}, 14), 14)
+
+
+
+
+class CoverageGapTest(unittest.TestCase):
+    def test_an_intraday_signal_needs_its_raw_series_and_the_daily_pairs_not_an_adjusted_one(self):
+        from league.deep_replay import coverage_gaps
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp)
+            ing = _ingestor(store, FakeAlpaca(), workers=2)
+            ing.run(ing.plan(["SPY"], ["5Min"], "2025-03-01", "2025-04-01", five_minute=("SPY",)))
+            gaps = coverage_gaps(store, ["SPY"], "5Min", "2025-03-01", "2025-03-10", "2025-04-01")
+            self.assertTrue(gaps and all("1Day" in g for g in gaps))  # the scaling pairs are missing, nothing else
+            ing.run(ing.plan(["SPY"], ["1Day"], "2025-01-01", "2025-05-01"))
+            self.assertEqual(coverage_gaps(store, ["SPY"], "5Min", "2025-03-01", "2025-03-10", "2025-04-01"), [])
+            store.close()
+
+
+
+
+class WalkForwardTest(unittest.TestCase):
+    def test_blocks_are_cut_into_their_folds_oldest_first(self):
+        from league.deep_replay import walk_forward
+        tape = {"horizon": "day", "source": {"window": ["2025-03-07", "2025-11-14"]}}
+        blocks = [{"key": "2025-03-10", "log_growth": 0.01, "active": True}, {"key": "2025-07-10", "log_growth": -0.02, "active": True},
+                  {"key": "2025-07-11", "log_growth": 0.03, "active": False}, {"key": "2025-11-13", "log_growth": 0.01, "active": True}]
+        out = walk_forward({"blocks": blocks}, tape)
+        self.assertEqual([f["fold"] for f in out], [["2025-03-07", "2025-07-11"], ["2025-07-11", "2025-11-14"]])
+        self.assertEqual([f["blocks"] for f in out], [2, 2])
+        self.assertAlmostEqual(out[0]["log_growth"], -0.01)
+        self.assertEqual(out[1]["active_blocks"], 1)
+        self.assertEqual(walk_forward({"blocks": blocks}, {"horizon": "day"}), [])  # a live tape has no folds
+
+
 if __name__ == "__main__":
     unittest.main()

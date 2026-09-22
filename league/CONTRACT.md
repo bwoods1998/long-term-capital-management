@@ -173,10 +173,15 @@ longer than 48 hours. Equities are not bounded. Exits are never refused.
 The simulator (`league/replay.py`) walks a recorded tape step by step. At each step it builds
 `ctx` from data at or before that moment only, calls `decide`, and fills conservatively:
 
+- the touch is the recorded NBBO where the tape carries one for an Alpaca symbol (the quote
+  prevailing when an order decided at the step's close reaches the venue, two seconds later); a
+  quote over ten seconds old is stale and the touch is then centred on the close and at least twice
+  the assumed spread; without a quote it is the close plus or minus the tape's assumed half spread;
 - a market order fills at the touch of the same step (buy at the ask, sell at the bid), as a taker;
 - a limit order that crosses the touch fills at the touch as a taker, or is refused if `post_only`;
 - a resting limit order fills at its own price, as a maker, only when a later step's range trades
-  strictly through it (`low < price` for a buy, `high > price` for a sell);
+  strictly through it (`low < price` for a buy, `high > price` for a sell). A touch is not a fill:
+  the tape knows nothing of the queue ahead of you or the depth behind the touch;
 - fees are close to the venue's: Alpaca crypto 0.25% taker and 0.15% maker, Kalshi
   `0.07 x contracts x price x (1 - price)` rounded UP to the cent for a taker, and for a maker
   nothing on most series and that same formula on the few that charge them (your specialty's brief
@@ -184,6 +189,15 @@ The simulator (`league/replay.py`) walks a recorded tape step by step. At each s
   surprise waiting on paper;
 - Kalshi contracts settle at 1 or 0 on the tape's recorded result;
 - the same rung limits and no-shorts, no-leverage rules apply.
+
+**Which history.** An Alpaca strategy is replayed on the House's history store when it holds every
+input the strategy declares: the development window just before a sealed holdout (252 days for a
+daily strategy, 63 for an hourly one, ending 2025-11-14; shorter when many symbols would make the
+tape too large), in split- and dividend-adjusted prices. Otherwise it is replayed on the recent
+live tape, as before. A pass on the development window is promoted only when the SEALED HOLDOUT
+(2025-11-14 to 2026-05-15, never shown to anyone) passes the same gate twice, at the recorded
+spread and at double it. Each version of your strategy gets one holdout evaluation and your line
+gets three in its whole life; you are told pass or fail and coarse numbers, nothing else.
 
 The result is the per-block series of after-cost log growth of the account. Every replay ever run
 is recorded as a trial and counted against your own LINE -- yourself, your parent, your parent's

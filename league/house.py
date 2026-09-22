@@ -953,7 +953,8 @@ class House:
             return None
         feed = getattr(self.alpaca_data, "feed", None) or "sip"
         horizon = str(needs.get("horizon") or "hour")
-        start, end = deep_replay.dev_window(horizon, days=self.settings.deep_replay_days or None, holdout=self.holdout_window)
+        days = deep_replay.dev_days(needs, self.settings.deep_replay_days or None)
+        start, end = deep_replay.dev_window(horizon, days=days, holdout=self.holdout_window)
         timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
         warmup = int((needs.get("bars") or {}).get("limit") or 120)
         key = f"deep:alpaca:{','.join(deep_replay._symbols_of(needs))}:{timeframe}:{warmup}:{horizon}:{start}:{end}:{feed}"
@@ -1054,8 +1055,12 @@ class House:
             raise
         self._charge_box(agent.id, run, note="a replay")
         artifact = self.experiments.finish(attempt, run.result, seconds=run.seconds)
-        source = "history-dev" if (tape.get("source") or {}).get("store") == "history" else "live"
-        return {**run.result, "experiment": artifact, "tape_source": source}, attempt["tape"]
+        if (tape.get("source") or {}).get("store") == "history":
+            from .deep_replay import walk_forward
+
+            return {**run.result, "experiment": artifact, "tape_source": "history-dev",
+                    "walk_forward": walk_forward(run.result, tape)}, attempt["tape"]
+        return {**run.result, "experiment": artifact, "tape_source": "live"}, attempt["tape"]
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
@@ -1224,8 +1229,14 @@ class House:
                                               "Ask for a smaller question of the tape, or tell the House with `request_tool`.",
                     "numbers": {}, "needs": info["needs"], "params": info.get("params") or {}}
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
-        return {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
-                "digest": result.get("digest")}
+        out = {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
+               "digest": result.get("digest")}
+        if result.get("tape_source") == "history-dev":
+            # Development history, fold by fold. A pass here still needs the sealed holdout to be
+            # promoted, and nothing about the holdout is ever shown.
+            out["walk_forward"] = result.get("walk_forward") or []
+            out["note"] = "replayed on the development window before the sealed holdout; promotion also needs the holdout"
+        return out
 
     # ----------------------------------------------------------------- judging
     def judge(self, agent: Agent) -> Verdict | None:

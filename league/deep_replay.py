@@ -46,7 +46,7 @@ import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Mapping, Sequence
 
-from .history import NEW_YORK, HistoryStore, _day, _ts
+from .history import DUAL_ADJUSTED, NEW_YORK, HistoryStore, _day, _ts
 from .tapes import AlpacaData, TapeError, is_crypto, iso, parse_time
 
 #: The sealed window, [start, end). Fixed on purpose; see the module docstring.
@@ -60,6 +60,10 @@ FOLD_DAYS = {"day": 126, "hour": 21}
 DEV_DAYS = {"day": 252, "hour": 63}
 #: The stressed variant of every sealed evaluation: twice the spread (goal section 4).
 STRESS = 2.0
+#: A development tape is no larger than the largest live one (12 symbols x 126 days of 5-minute
+#: execution bars, about 25 MB of JSON): measured Sept 22, 2026, 5 symbols x 252 days is 33,573
+#: steps and 20 MB, and a box was killed for a tape of hundreds of MB on Sept 19.
+MAX_SYMBOL_DAYS = 12 * 126
 ADJUSTMENT_LABEL = "all-adjusted as of the fetch; 5-minute execution bars scaled by the day's all/raw factor"
 
 
@@ -160,11 +164,16 @@ def coverage_gaps(store: HistoryStore, symbols: Sequence[str], timeframe: str, s
     execution = "5Min" if timeframe == "1Day" else timeframe
     for symbol in symbols:
         crypto = is_crypto(symbol)
-        wanted = [(timeframe, "raw" if crypto else "all", signal_start)]
+        # What `StoreClient` reads: an adjusted series where one is stored, else the raw one and
+        # the daily pairs that scale it.
+        dual = not crypto and timeframe in DUAL_ADJUSTED
+        wanted = [(timeframe, "all" if dual else "raw", signal_start)]
+        if not crypto and not dual:
+            wanted += [("1Day", "raw", signal_start), ("1Day", "all", signal_start)]
         if execution != timeframe:
             wanted.append((execution, "raw", start))
-        if not crypto and execution not in ("1Day", "1Hour"):
-            wanted += [("1Day", "raw", start), ("1Day", "all", start)]
+            if not crypto:
+                wanted += [("1Day", "raw", start), ("1Day", "all", start)]
         for frame, adjustment, first in dict.fromkeys(wanted):
             cover = store.coverage(symbol, frame, first, end, feed="us" if crypto else feed, adjustment=adjustment)
             if cover["status"] == "unfetched":
@@ -176,7 +185,7 @@ def fold_tape(store: HistoryStore, needs: Mapping[str, Any], start: str, end: st
               sealed: "tuple[str, str] | None" = HOLDOUT) -> dict[str, Any]:
     """One tape over [start, end) for a strategy's NEEDS, built by `AlpacaData.tape` from the store.
     Raises `TapeError` naming the unfetched inputs rather than build a tape with holes."""
-    symbols = sorted(str(s) for s in (needs.get("symbols") or []))[:12]
+    symbols = sorted({str(s) for s in (needs.get("symbols") or [])})  # callers cap it (`_symbols_of`)
     timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
     warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
     horizon = str(needs.get("horizon") or "hour")
@@ -230,6 +239,30 @@ def _symbols_of(needs: Mapping[str, Any]) -> list[str]:
     return sorted(set(own) | {str(s) for s in (watched.get("symbols") or [])[:6]})
 
 
+def dev_days(needs: Mapping[str, Any], days: "int | None" = None) -> int:
+    """How long a development window this strategy gets: `DEV_DAYS` (or `days`), cut so the tape
+    is no larger than `MAX_SYMBOL_DAYS`, and never shorter than one fold."""
+    horizon = str(needs.get("horizon") or "hour")
+    wanted = int(days or DEV_DAYS.get(horizon, 252))
+    return max(FOLD_DAYS.get(horizon, 21) if not days else 1, min(wanted, MAX_SYMBOL_DAYS // max(1, len(_symbols_of(needs)))))
+
+
+def walk_forward(result: Mapping[str, Any], tape: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """A development replay's blocks cut into its folds, oldest first: whether an edge held in
+    each stretch of history or came from one of them. Development diagnostics, never the holdout's."""
+    window = (tape.get("source") or {}).get("window")
+    if not window or not result.get("blocks"):
+        return []
+    horizon = str(tape.get("horizon") or "hour")
+    out = []
+    for start, end in folds(window[0], window[1], horizon=horizon) or [tuple(window)]:
+        rows = [b for b in result["blocks"] if start <= str(b.get("key") or "")[:10] < end]
+        growth = [float(b["log_growth"]) for b in rows]
+        out.append({"fold": [start, end], "blocks": len(rows), "active_blocks": sum(1 for b in rows if b.get("active")),
+                    "log_growth": round(sum(growth), 6), "mean_log_growth": round(sum(growth) / len(growth), 8) if growth else None})
+    return out
+
+
 def dev_window(horizon: str, *, days: "int | None" = None, holdout: tuple[str, str] = HOLDOUT) -> tuple[str, str]:
     """The development window: `DEV_DAYS` of history ending where the holdout begins."""
     end = _day(holdout[0])
@@ -240,7 +273,7 @@ def dev_tape(store: HistoryStore, needs: Mapping[str, Any], *, feed: str = "sip"
              holdout: tuple[str, str] = HOLDOUT) -> tuple[str, dict[str, Any]]:
     """(tape id, tape): the development window's tape, quotes attached where they were fetched."""
     horizon = str(needs.get("horizon") or "hour")
-    start, end = dev_window(horizon, days=days, holdout=holdout)
+    start, end = dev_window(horizon, days=dev_days(needs, days), holdout=holdout)
     wanted = {**dict(needs), "symbols": _symbols_of(needs)}
     tape = fold_tape(store, wanted, start, end, feed=feed, sealed=holdout)
     attach_quotes(store, tape, feed=feed)

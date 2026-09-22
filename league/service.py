@@ -149,6 +149,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
         real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
         replay_timeout=120 if canary else 600, kalshi_replay_days=1 if canary else 7, kalshi_replay_markets=60 if canary else 2000,
+        # Deep replay over the history store and the sealed holdout (league/deep_replay.py): on by
+        # default, inert until `python -m league.history ingest` has fetched a strategy's inputs.
+        deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
