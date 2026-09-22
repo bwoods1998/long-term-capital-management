@@ -2302,12 +2302,34 @@ class House:
                 if first is None:
                     continue
                 opportunity = max(opportunity, _epoch(first.at))
+            if standing.rung == 1 and agent_grace > 0 and agent.horizon == "day" and self._screen_pending(agent, opportunity_seq, now - opportunity):
+                continue
             if now - opportunity < agent_grace:
                 continue
             rank.append((standing.active_blocks > 0, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
         rank.sort(key=lambda row: row[:4])  # has it traded at all, then growth, then how much, then its purse
         return rank[0][4] if rank else None
+
+    def _screen_pending(self, agent: Agent, since_seq: int, seated_for: float) -> bool:
+        """Is a trading daily agent still short of the closed days its paper screen needs?
+
+        A daily agent is judged on closed New York days, and the screen wants
+        `min_active_blocks_day` of them, so it cannot be screened until a day and a half to two
+        days after its seat. The twelve-hour grace let the league displace it first: of the 32
+        paper agents that died Sept 21-22, 2026, 25 were displaced -- 24 of them daily, half after
+        a day or less on paper -- and not one had reached a screen, so no daily agent could climb.
+        One that is trading keeps its seat until that many days have closed since its opportunity,
+        and never for more than a day beyond them. One that has never traded is judged by nobody
+        and keeps the plain grace."""
+        days = int(CONSTITUTION["ladder"]["paper"].get("min_active_blocks_day", 2))
+        if seated_for >= (days + 1) * 86400:
+            return False
+        if next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id, after=since_seq)), None) is None:
+            return False
+        # The screen's own view: finished blocks that began after the seat, past any accounting cutoff.
+        closed = sum(1 for row in self.evaluator.blocks(agent.id, since_seq=since_seq) if row.get("horizon") == "day")
+        return closed < days
 
     def frontier_remaining(self) -> Decimal | None:
         """The tighter of the two OpenAI lines: the gateway's month (`FrontierMonth`) and the House's
