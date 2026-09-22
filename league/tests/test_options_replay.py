@@ -114,6 +114,35 @@ class Execution(unittest.TestCase):
         self.assertEqual(result["refusal_reasons"], {"over the order cap": 1})  # $80 against $75
 
 
+class RecordedQuotes(unittest.TestCase):
+    """From Sept 22, 2026 the House keeps the OPRA quotes it reads for live chains. Where a tape
+    has one, the replay uses it instead of an estimate."""
+
+    def test_a_recorded_quote_after_the_order_fills_one_contract_at_its_ask(self):
+        first = step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)})
+        later = {**step("2026-03-02T15:15:00Z"), "quotes": {C1: {"t": "2026-03-02T15:07:00Z", "bid": 0.39, "ask": 0.41}}}
+        result = run([first, later], occ=C1, buy_at="2026-03-02T15:00:00Z", limit=0.41)
+        self.assertEqual([(f["price"], f["how"]) for f in result["fill_log"]], [(0.41, "recorded quote")])
+        self.assertEqual(result["options"]["recorded_quote_fills"], 1)
+
+    def test_a_recorded_ask_above_the_limit_does_not_fill_and_the_chain_says_where_its_quote_came_from(self):
+        first = step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)})
+        later = {**step("2026-03-02T15:15:00Z"), "quotes": {C1: {"t": "2026-03-02T15:10:00Z", "bid": 0.40, "ask": 0.43}}}
+        code = STRATEGY.replace('seen = [r["occ"] for r in ctx.get("chain") or []]', 'seen = [[r["occ"], r["bid"], r["ask"], r["quote_source"]] for r in ctx.get("chain") or []]')
+        result = run_replay(code, {"occ": C1, "buy_at": "2026-03-02T15:00:00Z", "limit": 0.41}, tape([first, later]), stake=1000.0, limits=LIMITS, audit=True)
+        self.assertEqual(result["fills"], 0)
+        self.assertEqual(result["final_memory"]["chain"], [[C1, 0.40, 0.43, "recorded OPRA quote"]])
+
+    def test_only_opra_quotes_are_kept(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = oh.OptionsHistory(Path(root) / "q.sqlite")
+            self.addCleanup(store.close)
+            row = {"symbol": C1, "bid": 0.40, "ask": 0.42, "as_of": "2026-09-22T14:00:01.5Z"}
+            self.assertEqual(store.record_quotes([row], source="indicative"), 0)
+            self.assertEqual(store.record_quotes([row, {**row, "bid": 0.0}], source="opra"), 1)
+            self.assertEqual(store.quotes([C1]), {C1: [{"t": "2026-09-22T14:00:01Z", "bid": 0.40, "ask": 0.42}]})
+
+
 class PointInTime(unittest.TestCase):
     def test_a_contract_that_has_not_printed_yet_is_not_listed(self):
         result = run([step("2026-03-02T15:00:00Z", {C1: bar(0.40, 0.42, 0.38, 0.40)}),
@@ -342,6 +371,19 @@ class InTheHouse(HouseCase):
         self.assertTrue(key.startswith("options:"))
         self.assertEqual(built["asset_class"], "option")
         self.assertEqual(store.tapes[0][1:], ("15Min", 75.0))
+
+    def test_the_live_chain_keeps_its_opra_quotes_for_the_replay(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = self.house.options_history = oh.OptionsHistory(Path(root) / "q.sqlite")
+            self.addCleanup(store.close)
+            broker = self.house.books["alpaca-paper"].broker
+            broker.option_feed = "opra"
+            broker.option_chain = lambda symbol, *, expiry_from, expiry_to: [
+                {"symbol": "F261009C00013000", "underlying": "F", "expiry": "2026-10-09", "strike": 13.0, "right": "call",
+                 "bid": 0.40, "ask": 0.44, "as_of": "2026-09-22T14:00:00Z", "iv": 0.3, "delta": 0.5, "volume": 1.0}]
+            rows = self.house._chain(["F"], 21, 0.75, {"F": {"bid": 12.9, "ask": 13.0}})
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(store.quotes(["F261009C00013000"])["F261009C00013000"][0]["ask"], 0.44)
 
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()

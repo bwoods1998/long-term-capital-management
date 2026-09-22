@@ -260,6 +260,12 @@ class House:
             except Exception as exc:  # noqa: BLE001 - one underlying's outage is not the wake's
                 self.alert("warning", f"option chain {symbol}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
+            if self.options_history is not None:
+                try:  # the quotes are already in hand: keeping them is the options replay's quote history
+                    self.options_history.record_quotes([c for c in chain if spot is None or abs(c["strike"] / spot - 1) <= 0.20],
+                                                       source=str(getattr(broker, "option_feed", "") or ""))
+                except Exception as exc:  # noqa: BLE001 - a full disk is not the wake's problem
+                    self.alert("warning", f"option quotes not kept ({type(exc).__name__}: {str(exc)[:120]})")
             near = [c for c in chain if c["ask"] <= afford and (spot is None or abs(c["strike"] / spot - 1) <= 0.20)]
             near.sort(key=lambda c: (abs(c["strike"] / spot - 1) if spot else 0, c["expiry"]))
             rows += [{**c, "occ": c["symbol"], "underlying_price": spot} for c in near[:40]]
@@ -2029,6 +2035,13 @@ class House:
         result['observations']['stock_feed'] = getattr(self.alpaca_data, 'feed', None)
         paper = self.books.get('alpaca-paper')
         result['observations']['option_feed'] = getattr(paper.broker, 'option_feed', None) if paper else None
+        niche = self.niche_of(agent)
+        if niche is not None and niche.asset_class == 'option' and self._replayable(niche, agent.needs):
+            limits = [x for x in result['replay']['limitations'] if x != 'no historical option-chain replay']
+            result['replay'].update(mode='historical_development_estimated_option_quotes',
+                                    requested_window_days=self.settings.replay_days * (6 if agent.horizon == 'day' else 1),
+                                    limitations=limits + ['options: Alpaca has trade bars since 2024-01-18 and no historical quotes; replay bid/ask are '
+                                                          'ESTIMATES from prints, fills are bar-based and conservative (see CONTRACT.md)'])
         if self.semantic_lab is not None:
             observed = agent.needs.get('observe') or {}
             result['semantic_research'] = self.semantic_lab.evidence(agent.id,
@@ -2038,14 +2051,19 @@ class House:
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
         from .capabilities import coverage_needs, tape_coverage
         niche = self.niche_of(agent)
-        if niche is not None and not niche.replay:
+        if niche is not None and not self._replayable(niche, dict(needs or agent.needs)):
             return {'mode': 'smoke_only', 'counted_as_trial': False,
-                    'note': 'No historical option-chain replay. A smoke check cannot measure edge or fills.'}
+                    'note': 'No historical option-chain replay here: the options history does not cover these underlyings. A smoke check cannot measure edge or fills.'}
         try:
             effective = coverage_needs(agent, needs, niche)
-            if effective.get('asset_class') == 'option':
+            if effective.get('asset_class') == 'option' and not (niche is not None and self._replayable(niche, effective)):
                 return {'mode': 'smoke_only', 'counted_as_trial': False,
                         'note': 'No historical option-chain replay.'}
+            if effective.get('asset_class') == 'option':
+                query, tape = self.tape_for(effective)
+                return {'query': query, **tape_coverage(tape), 'effective_needs': effective, 'counted_as_trial': False,
+                        'options': {'contracts': len(tape.get('contracts') or {}), 'coverage': tape.get('coverage'),
+                                    'quotes': 'estimated from trade prints: Alpaca has no historical option quotes'}}
             query, tape = self.tape_for(effective)
             requested = (effective.get('observe') or {}).get('symbols') or []
             missing = [s for s in requested if not (tape.get('observed_bars') or {}).get(s)] if agent.venue == 'kalshi' else []

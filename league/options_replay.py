@@ -137,6 +137,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
     ranges: dict[str, list[float]] = {}
     spot: dict[str, tuple[float, str]] = {}
     by_under: dict[str, set[str]] = {}  # underlying -> contracts that have printed
+    recorded: dict[str, dict[str, Any]] = {}  # occ -> the last recorded OPRA quote {"bid", "ask", "ts", "source"}
+    quote_fills = 0
     memory: dict[str, Any] = {}
     errors, last_error = 0, ""
     blocks: list[dict[str, Any]] = []
@@ -153,8 +155,13 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         previous_equity = block_equity
 
     def quote(occ: str, at: float) -> dict[str, Any] | None:
-        seen = last_print.get(occ)
-        if seen is None or at - seen["ts"] > float(liq["quote_age_seconds"]) + EPS:
+        """The freshest quote within the age limit: a recorded OPRA quote where one exists, else
+        the estimate around the last qualifying print."""
+        age = float(liq["quote_age_seconds"]) + EPS
+        seen, real = last_print.get(occ), recorded.get(occ)
+        if real is not None and at - real["ts"] <= age and (seen is None or real["ts"] >= seen["ts"]):
+            return {**(seen or {}), **real}
+        if seen is None or at - seen["ts"] > age:
             return None
         return seen
 
@@ -254,9 +261,9 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             price = s[0]
             rows = []
             for occ in by_under.get(symbol, ()):
-                seen, info = last_print[occ], contracts[occ]
-                if quote(occ, now_ts) is None:
-                    continue
+                info, seen = contracts[occ], quote(occ, now_ts)
+                if seen is None or "bar" not in seen:
+                    continue  # a recorded quote alone, with no print yet: not listed by the replay's rule
                 expiry = info["expiry"]
                 days = (datetime.fromisoformat(expiry).date() - _ny(now_ts).date()).days
                 if expiry <= today or days > max_days or seen["bid"] is None or seen["ask"] > afford:
@@ -264,13 +271,14 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 if abs(float(info["strike"]) / price - 1.0) > float(rules.get("moneyness", 0.2)):
                     continue
                 years = years_to(expiry, now_ts)
-                vol = seen["iv"]  # solved once, at the print, against the underlying then
+                vol = seen.get("iv")  # solved once, at the print, against the underlying then
                 rows.append({"symbol": occ, "occ": occ, "underlying": symbol, "expiry": expiry, "strike": float(info["strike"]), "right": info["right"],
                              "bid": seen["bid"], "ask": seen["ask"], "as_of": seen["bar"]["t"], "last": float(seen["bar"]["c"]),
                              "iv": None if vol is None else round(vol, 6),
                              "delta": None if vol is None else round(bs_delta(price, float(info["strike"]), years, vol, info["right"]), 6),
                              "volume": seen["day_volume"], "trades": seen["day_trades"], "underlying_price": price,
-                             "quote_source": "estimated from trade prints (no historical quotes)", "greeks_source": "computed (Black-Scholes)"})
+                             "quote_source": seen.get("source") or "estimated from trade prints (no historical quotes)",
+                             "greeks_source": "computed (Black-Scholes)"})
             rows.sort(key=lambda r: (abs(r["strike"] / price - 1), r["expiry"]))
             rows_out += rows[:int(rules.get("per_underlying", 40))]
         return rows_out
@@ -308,6 +316,25 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 last_print[occ] = {"bar": {"t": now, **bar}, "ts": now_ts, "bid": bid, "ask": ask, "half": half, "iv": vol,
                                    "day_volume": day_totals[occ][1], "day_trades": day_totals[occ][2]}
                 by_under.setdefault(info.get("underlying"), set()).add(occ)
+        for occ, q in (step.get("quotes") or {}).items():
+            bid, ask, stamp = _num(q.get("bid")), _num(q.get("ask")), _parse_ts(q.get("t"))
+            if occ in contracts and bid and ask and 0 < bid < ask and stamp is not None and stamp <= now_ts:
+                recorded[occ] = {"bid": bid, "ask": ask, "ts": stamp, "source": "recorded OPRA quote"}
+                by_under.setdefault(contracts[occ].get("underlying"), set()).add(occ)
+                # A quote recorded after the order was placed is executable for one contract (its
+                # size was not recorded): a buy at or over the ask, a sell at or under the bid.
+                for order_id in [k for k, o in book.orders.items() if o["occ"] == occ and o["placed_ts"] < stamp]:
+                    order = book.orders[order_id]
+                    if order["quantity"] > 1:
+                        continue
+                    if order["side"] == "buy" and order["limit_price"] >= ask - EPS:
+                        del book.orders[order_id]
+                        book.fill(order, ask, now, "recorded quote")
+                        quote_fills += 1
+                    elif order["side"] == "sell" and order["limit_price"] <= bid + EPS and occ in book.positions:
+                        del book.orders[order_id]
+                        book.fill(order, bid, now, "expiry rule" if order.get("house") else "sold at a recorded bid")
+                        quote_fills += 1
         for order_id in [k for k, o in book.orders.items() if now_ts >= o["expires_ts"]]:
             del book.orders[order_id]
             book.expired_orders += 1
@@ -325,7 +352,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 book._close(p, "expired: written off at zero", now)
             elif p["expiry"] == today and ny.hour * 60 + ny.minute >= 870:
                 book.orders = {k: o for k, o in book.orders.items() if o["occ"] != occ}
-                seen = last_print.get(occ)
+                seen = quote(occ, now_ts) or last_print.get(occ)
                 if seen and seen["bid"]:
                     book.seq += 1
                     book.orders[f"ord-{book.seq:06d}"] = {"order_id": f"ord-{book.seq:06d}", "occ": occ, "ident": {}, "side": "sell", "quantity": p["quantity"],
@@ -333,7 +360,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                                                           "reason": "The House's expiry rule", "house": True}
                     book.forced += 1
         for occ, p in book.positions.items():
-            seen = last_print.get(occ)
+            seen = quote(occ, now_ts) or last_print.get(occ)
             if seen is not None:
                 p["mark"] = seen["bid"] or 0.0
         equity = book.equity()
@@ -400,7 +427,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                                         "fee_per_contract_usd": fee, "multiplier": mult,
                                         "fills": "limit only; later bars only; at the estimated open touch or one tick through; all or nothing"},
                     "contracts_on_tape": len(contracts), "chain_rows_shown": shown_rows, "forced_expiry_offers": book.forced,
-                    "written_off_at_expiry": book.written_off, "liquidity_misses": liquidity_misses},
+                    "written_off_at_expiry": book.written_off, "liquidity_misses": liquidity_misses,
+                    "recorded_quote_fills": quote_fills, "recorded_quotes_seen": len(recorded)},
     }
     result["digest"] = digest(book.trade_log)
     if audit:

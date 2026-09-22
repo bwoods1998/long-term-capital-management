@@ -41,6 +41,7 @@ Standard library only; floats (this is statistics, not the money ledger).
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import math
 import re
@@ -62,6 +63,9 @@ HISTORY_STARTS = "2024-01-18"
 TIMEFRAMES = {"1Min": 60, "5Min": 300, "15Min": 900, "1Hour": 3600, "1Day": 86400}
 BATCH = 100  # option symbols per bars request
 PAGE_LIMIT = 10_000
+#: Contracts per listing page. SPY's listing at 10,000 a page is over the 4 MB the venue client
+#: accepts (measured Sept 22, 2026: the whole SPY/QQQ ingestion was refused for it).
+CONTRACT_PAGE = 1_000
 MAX_PAGES = 400
 MULTIPLIER = 100
 OCC = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
@@ -78,6 +82,9 @@ SPREAD_MODEL = {
     "floor_pct": 0.04,         # half-spread at least 4% of the premium (live Sept 19: 8-100 of 60-900 contracts under a 15% spread)
     "range_weight": 0.5,       # half the median high-low range of the contract's last printed bars
     "range_bars": 5,
+    # Half-spread floors by premium, from live OPRA quotes of the desk's six underlyings
+    # (`measured_floors`; see MEASURED_SPREADS). [max premium, floor], checked in order.
+    "measured_floors": [],
     "stress": 1.0,             # multiplies the half-spread; the demo reports 1.0 and 2.0
 }
 LIQUIDITY = {"min_volume": 5.0, "min_trades": 2, "max_participation": 0.10, "quote_age_seconds": 1500}
@@ -205,7 +212,8 @@ def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model
     last = float(bar["c"])
     ranges = sorted(float(r) for r in recent_ranges if r is not None and r >= 0)
     median = ranges[len(ranges) // 2] if ranges else 0.0
-    half = max(m["min_half_ticks"] * tick(last), m["floor_pct"] * last, m["range_weight"] * median) * float(m["stress"])
+    floor = next((float(f) for cap, f in (m.get("measured_floors") or []) if last < float(cap)), 0.0)
+    half = max(m["min_half_ticks"] * tick(last), m["floor_pct"] * last, m["range_weight"] * median, floor) * float(m["stress"])
     half = round(half, 4)
     bid = round(last - half, 4)
     return (bid if bid > 0 else None), round(last + half, 4), half
@@ -220,6 +228,8 @@ CREATE TABLE IF NOT EXISTS bars (occ TEXT NOT NULL, timeframe TEXT NOT NULL, t T
     o REAL, h REAL, l REAL, c REAL, v REAL, n INTEGER, vw REAL, PRIMARY KEY (occ, timeframe, t));
 CREATE TABLE IF NOT EXISTS trades (occ TEXT NOT NULL, t TEXT NOT NULL, p REAL, s REAL, x TEXT, c TEXT,
     PRIMARY KEY (occ, t, p, s, x));
+CREATE TABLE IF NOT EXISTS quotes (occ TEXT NOT NULL, t TEXT NOT NULL, bid REAL NOT NULL, ask REAL NOT NULL,
+    source TEXT NOT NULL, PRIMARY KEY (occ, t));
 CREATE TABLE IF NOT EXISTS chunks (key TEXT PRIMARY KEY, state TEXT NOT NULL, rows INTEGER, at TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS coverage (key TEXT PRIMARY KEY, payload TEXT NOT NULL, at TEXT);
 CREATE TABLE IF NOT EXISTS features (symbol TEXT NOT NULL, day TEXT NOT NULL, version TEXT NOT NULL,
@@ -297,7 +307,7 @@ class OptionsHistory:
         now = iso(self.clock())
         for status in ("inactive", "active"):
             params = {"underlying_symbols": underlying, "status": status, "expiration_date_gte": expiry_from,
-                      "expiration_date_lte": expiry_to, "limit": PAGE_LIMIT,
+                      "expiration_date_lte": expiry_to, "limit": CONTRACT_PAGE,
                       "strike_price_gte": None if strike_from is None else f"{strike_from:.2f}",
                       "strike_price_lte": None if strike_to is None else f"{strike_to:.2f}"}
             for page in self._pages("/v2/options/contracts", params, "option_contracts"):
@@ -366,6 +376,50 @@ class OptionsHistory:
             for occ, t, o, h, l, c, v, n, vw in cur:
                 out.setdefault(occ, []).append({"t": t, "o": o, "h": h, "l": l, "c": c, "v": v, "n": n, "vw": vw})
         return out
+
+    # -- recorded live quotes ------------------------------------------------------------------
+    def record_quotes(self, rows: Iterable[Mapping[str, Any]], *, source: str) -> int:
+        """Keep the two-sided OPRA quotes the House already read for a live chain (no extra
+        call). From Sept 22, 2026 on this is a real quote history: a replay over those days uses
+        it instead of an estimate, and `spread_check` measures the estimate against it. Only
+        OPRA is kept: the older indicative feed's quotes were modified."""
+        if source != "opra":
+            return 0
+        batch = []
+        for row in rows:
+            occ, bid, ask, stamp = str(row.get("symbol") or row.get("occ") or ""), _float(row.get("bid")), _float(row.get("ask")), row.get("as_of")
+            if parse_occ(occ) and bid and ask and 0 < bid < ask and stamp and not str(stamp).startswith("1970"):
+                batch.append((occ.upper(), iso(_ts(stamp)), bid, ask, source))
+        with self._lock:
+            self.db.executemany("INSERT OR IGNORE INTO quotes VALUES (?, ?, ?, ?, ?)", batch)
+            self.db.commit()
+        return len(batch)
+
+    def quotes(self, occs: Sequence[str], start: str = "", end: str = "9999") -> dict[str, list[dict[str, Any]]]:
+        out: dict[str, list[dict[str, Any]]] = {}
+        for i in range(0, len(occs), 500):
+            group = list(occs[i:i + 500])
+            marks = ",".join("?" * len(group))
+            for occ, t, bid, ask in self.db.execute(f"SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? AND occ IN ({marks}) ORDER BY occ, t", (start, end, *group)):
+                out.setdefault(occ, []).append({"t": t, "bid": bid, "ask": ask})
+        return out
+
+    def spread_check(self, timeframe: str = "15Min", model: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """The estimate against recorded OPRA quotes: for each recorded quote, the estimate from
+        the contract's last print at or before it. Positive `excess` means the estimate is wider
+        (conservative)."""
+        rows = []
+        for occ, t, bid, ask in self.db.execute("SELECT occ, t, bid, ask FROM quotes ORDER BY occ, t"):
+            bars = self.db.execute("SELECT o, h, l, c, v, n FROM bars WHERE occ = ? AND timeframe = ? AND t <= ? ORDER BY t DESC LIMIT 5",
+                                   (occ, timeframe, t)).fetchall()
+            if not bars:
+                continue
+            last = dict(zip(("o", "h", "l", "c", "v", "n"), bars[0]))
+            _, _, half = estimate_quote(last, [b[1] - b[2] for b in bars], model)
+            rows.append({"occ": occ, "premium": (bid + ask) / 2, "quoted_half": (ask - bid) / 2, "estimated_half": half})
+        wider = [r for r in rows if r["estimated_half"] >= r["quoted_half"] - 1e-9]
+        return {"quotes_compared": len(rows), "estimate_at_least_as_wide": len(wider),
+                "share_conservative": round(len(wider) / len(rows), 4) if rows else None}
 
     # -- coverage ----------------------------------------------------------------------------
     def record_coverage(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -646,6 +700,15 @@ class OptionsHistory:
                     step = by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}}) if _in_session(_ts(bar["t"])) else None
                 if step is not None:
                     step["options"][occ] = {k: bar[k] for k in ("o", "h", "l", "c", "v", "n")}
+        # Recorded OPRA quotes (from Sept 22, 2026, when the House began keeping them): the last
+        # one of each contract in (previous step, step] rides on the step; nothing is carried.
+        recorded = self.quotes(list(contracts), iso(start_ts), end)
+        times = sorted(by_time)
+        for occ, rows in recorded.items():
+            for q in rows:
+                index = bisect.bisect_left(times, q["t"])  # the first step at or after the quote
+                if index < len(times):
+                    by_time[times[index]].setdefault("quotes", {})[occ] = q
         steps = []
         cursors = {s: 0 for s in symbols}
         for t in sorted(by_time):
@@ -665,7 +728,9 @@ class OptionsHistory:
             "chain_rules": {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford},
             "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": {**LIQUIDITY, **dict(liquidity or {})},
             "fee_per_contract_usd": float(fee_per_contract), "multiplier": MULTIPLIER,
+            "recorded_quotes": sum(len(r) for r in recorded.values()),
             "provenance": {"options": SOURCE_BARS, "listing": SOURCE_CONTRACTS, "quotes": SPREAD_MODEL["kind"],
+                           "recorded_quotes": "OPRA quotes the House read for live chains, where they exist (Sept 22, 2026 on)",
                            "underlying": "the House's underlier bars adapter", "history_starts": HISTORY_STARTS},
             "coverage": {s: [{k: r.get(k) for k in ("status", "start", "end", "contracts", "with_bars", "bars")} for r in rows] for s, rows in coverage.items()},
         }
