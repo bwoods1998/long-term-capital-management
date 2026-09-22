@@ -3100,7 +3100,14 @@ class House:
                 result = book.reconcile()
                 summary["reconciled"][name] = result.ok
                 if not result.ok:
-                    self.alert("error", f"{name} does not reconcile: {result.detail}")
+                    # A few cents short on a PAPER book, with every position agreeing, is the venue's
+                    # end-of-day fee activity not posted yet (`Book._book_venue_fees` books it when it
+                    # is). Measured Sept 22, 2026: two paper option buys left the book $0.06 over the
+                    # venue for one mark pass, and an error then -- inside a deploy's watch -- rolls a
+                    # good release back. Real money, or any position difference, stays an error.
+                    minor = (not book.real_money and not result.position_diffs
+                             and abs(Decimal(result.cash_diff)) <= Decimal("1.00"))
+                    self.alert("warning" if minor else "error", f"{name} does not reconcile: {result.detail}")
             except Exception as exc:  # noqa: BLE001
                 self.alert("warning", f"{name}: could not mark or reconcile ({type(exc).__name__}: {str(exc)[:200]})")
             for agent in self.registry.living():
