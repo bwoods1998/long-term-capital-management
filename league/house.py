@@ -887,17 +887,30 @@ class House:
             return False
 
     def _refresh_options_history(self) -> dict[str, Any]:
-        """The daily options-history job (ops lane): the options desk's underlyings at 1Day and
-        15Min, the feature symbols of living equity strategies at 1Day, then their feature rows."""
+        """The daily options-history job (ops lane, market-data GETs only): the options desk's
+        underlyings at 1Day and 15Min, the feature symbols of living equity strategies (and SPY,
+        QQQ, IWM) at 1Day, then their feature rows. A symbol the store does not yet cover over
+        the replay window is backfilled across it first; the chunk journal makes that a one-off
+        (the six-underlying, three-month demo took about ten minutes, Sept 22, 2026)."""
         from .options_history import adapter_from, refresh
         replay = sorted({s for n in self.niches.values() if n.asset_class == "option" for s in n.universe})
         wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
                         | {"SPY", "QQQ", "IWM"})
+        wanted = [s for s in wanted if s not in replay]
         underlier = adapter_from(self.alpaca_data)
-        done = {"replay": refresh(self.options_history, replay, underlier, timeframes=("1Day", "15Min"), band=0.2, max_days=45),
-                "features": refresh(self.options_history, [s for s in wanted if s not in replay], underlier)}
+        span = self.settings.replay_days * 6 + 5
+        start, end = now_iso(lambda: self.clock() - span * 86400), now_iso(self.clock)
+        done: dict[str, Any] = {"features": {}, "coverage": []}
+        for group, timeframes, band in ((replay, ("1Day", "15Min"), 0.2), (wanted, ("1Day",), 0.10)):
+            covered = set(self.options_history.covers(group, timeframes[-1], start, end))
+            for days, symbols in ((10, [s for s in group if s in covered]), (span, [s for s in group if s not in covered])):
+                if symbols:
+                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45)
+                    done["features"].update(ran["features"])
+                    done["coverage"] += ran["coverage"]
         self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
-                                          "features_made": {**done["replay"]["features"], **done["features"]["features"]}})
+                                          "features_made": done["features"],
+                                          "not_complete": [r for r in done["coverage"] if r.get("status") != "complete"][:20]})
         return done
 
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -1006,6 +1019,12 @@ class House:
                              + "; use replay_coverage with the candidate NEEDS to inspect each symbol")
         if needs.get("venue") == "alpaca" and observed.get("series"):
             raise ValueError("unsupported input: cross-venue event observations are not recorded on equity tapes")
+        if needs.get("options_features") and str(needs.get("asset_class") or "") != "option":
+            # Unavailable data, not a result: a strategy that reads a feature the House has no
+            # history of would be tested on nothing. The daily job backfills what living agents ask for.
+            missing = [s for s in (needs.get("symbols") or [])[:12] if not (tape.get("options_features") or {}).get(str(s).upper())]
+            if missing:
+                raise ValueError("unsupported input: no options-feature history for " + ", ".join(map(str, missing)))
         row = CONSTITUTION["rungs"]["1"]
         stake = float(row["stake_usd"])
         limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}

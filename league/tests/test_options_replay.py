@@ -386,6 +386,14 @@ from league import seeds  # noqa: E402
 from league.tests.test_house import HouseCase  # noqa: E402
 
 
+BUYER_WITH_FEATURES = '''
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "t", "symbols": ["BTC/USD"], "bars": {"timeframe": "5Min", "limit": 5}, "options_features": True}
+PARAMS = {}
+def decide(ctx):
+    return {"intents": [], "memory": {"seen": sorted((ctx.get("options_features") or {}))}}
+'''
+
+
 class CoveredStore:
     """An options history that covers everything asked of it, and records the tapes asked for."""
 
@@ -448,6 +456,25 @@ class InTheHouse(HouseCase):
         self.house.tick()
         self.house.wait(5)
         self.assertEqual(len(calls), 1)
+
+    def test_a_strategy_reading_features_the_house_has_no_history_of_is_not_replayed(self):
+        store = self.house.options_history = CoveredStore()
+        code = BUYER_WITH_FEATURES
+        needs = {"venue": "alpaca", "horizon": "hour", "style": "t", "symbols": ["BTC/USD"], "bars": {"timeframe": "5Min", "limit": 5}, "options_features": True}
+        agent = self.seated(code=code)
+        store.feature_series = lambda symbols: {}
+        with self.assertRaises(ValueError) as caught:
+            self.house._run_replay(agent, code, needs, {})
+        self.assertIn("unsupported input: no options-feature history for BTC/USD", str(caught.exception))
+        self.assertEqual(list(self.house.ledger.iter(kinds="eval.trial")), [])  # unavailable data is not a trial
+
+    def test_a_live_wake_is_handed_the_same_stored_feature_rows(self):
+        self.house.options_history = CoveredStore()
+        agent = self.seated(code=BUYER_WITH_FEATURES)
+        ctx = self.house.snapshot(agent, self.house.book_of(agent))
+        self.assertEqual(ctx["options_features"], {"BTC/USD": {"t": "2026-09-10T04:00:00Z", "atm_iv": 0.2}})
+        plain = self.seated(name="plain")
+        self.assertNotIn("options_features", self.house.snapshot(plain, self.house.book_of(plain)))
 
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()

@@ -159,7 +159,9 @@ dividend assumed; the contracts are American). GIVEN: volumes and trade counts, 
 ingested band only. NOT AVAILABLE: vendor greeks, point-in-time open interest, trade direction.
 An option's close is its last print, which can be hours before the stock's; contracts with
 fewer than 5 prints that day are not used for IV. A symbol with no row is unavailable data, not
-a zero.
+a zero: a replay of a strategy that asks for features of a symbol the House has no history of is
+refused as unsupported input (not a trial), and the House's daily options job backfills the
+symbols living strategies ask for.
 
 ## What you may watch but not trade
 
