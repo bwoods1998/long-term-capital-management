@@ -163,7 +163,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
     house.frontier = frontier
-    if campaigns is not None and campaigns.burst():
+    # The continuous midpoint-direction labeler burned about $1/h of Jev's $20 lifetime allowance
+    # with no measured tradable value (Sept 22, 2026, $16.04 spent, $3.96 left). Off unless the
+    # config turns it back on after a capped evaluation shows value.
+    if campaigns is not None and campaigns.burst() and config.get("semantic_lab", False):
         from .semantic_lab import JevClient, SemanticLab
         house.semantic_lab = SemanticLab(root, JevClient(gateway_url, token), house.ledger,
                                          active=campaigns.running, clock=house.clock,
