@@ -103,11 +103,51 @@ an edge.
 
 ### State at the deadline
 
-⟨state⟩
+- **Real money.** mullins-2 (weather, Kalshi) is the only live agent. The live grant
+  `earned-live-20260921` is active, and the money-rule digest is unchanged (`6b55f3fb…`); no
+  money rule was touched tonight. League-basis account equity is ⟨equity⟩ against the $1,017.36
+  start. The Alpaca real account ($500) has no agent on the micro rung yet.
+- **Paper.** ⟨living⟩ agents are living. Births follow replay passers, earning parents and
+  hypothesis cards, and 6 exhausted families are retired.
+- **Deployed.**
+  - House release ⟨release⟩ = main ⟨sha⟩.
+  - Gateway version `8f829375-d373-4349-9941-609a04d5b820`.
+  - Pre-rebuild box checkpoint `sbcp_9dc7fd6b-88e4-4e59-9b2e-78cf031114a0` (expires 2026-10-22).
+- **Allowance left (campaign basis).** OpenAI ⟨oa⟩, Sail ⟨sail⟩. About $45 of OpenAI and $56 of
+  Sail are held for calls whose outcome is unproven. They are left conservative; releasing them
+  needs vendor receipts.
+- **Rollback.**
+  - One release, on the box:
+    `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "..."`.
+  - A feature: its switch in [operations](../operations.md). Each new feature has one, and "off"
+    restores the old behaviour.
+  - The gateway: `npx wrangler rollback`.
+  - Everything: fork the pre-rebuild checkpoint.
+- **Outstanding blockers.**
+  1. The replay gate's `min_trades` = 20 blocks daily strategies on deep history. The demo
+     strategies were positive on the sealed holdout with 8–14 trades. This is a ladder
+     threshold, so it is the owner's call.
+  2. The external Sail spending broker is not built, so the engineer keeps Merton's path allowlist
+     and core House code stays the owner's.
+  3. Options desks now need a replay before paper (`options_history: false` reverts that).
+  4. The foundry is seat-bound whenever the league is full and no resident is displaceable.
+  5. A CI runner that is slow enough to hit the 10-minute job limit blocks attestation until the
+     hourly scheduled Checks run passes. It fails closed.
 
 ### Still collecting evidence, and the next step
 
-⟨next⟩
+- **Collecting evidence.**
+  - The hawkins horizon repair (#100) and the haghani child (#113): 24 h observation windows and
+    their paper records.
+  - The weather card `6aed49`, waiting for a seat.
+  - The sealed holdout: no development pass has reached it yet, so it has 0 accesses.
+  - The research gate's miss rate: 0 candidates in the sampled skips so far.
+  - The Luna cache on the explicit-hint layout.
+  - Options replay admissions.
+- **The highest-value next step:** decide the replay gate's trade minimum for daily strategies
+  judged on deep history. It is the one rule standing between the new evaluation machinery (deep
+  history, sealed holdout, quoted fills) and a stream of equity and ETF candidates onto paper.
+  Right now the gate turns them away before the holdout can judge them.
 
 ## State at the start (06:39Z)
 
