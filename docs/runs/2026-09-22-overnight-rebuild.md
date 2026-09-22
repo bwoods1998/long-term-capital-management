@@ -72,12 +72,14 @@ the restart: 15:27:20–16:47:39Z and 17:45:14Z–⟨T⟩. It leaves out the 58-
 
 ### The synergies that mattered
 
-1. **Gate + cache + evidence-led births: less spent on research, more candidates per dollar.**
-   - The gate stops paying for passes that keep coming back empty.
-   - The cache makes the passes that do run cheaper.
-   - Births come from replay passers, earning parents and cards, instead of the emptiest desk.
-   - Together: research cost per hour fell by more than half, while the share of sessions with a
-     candidate and the replay pass rate both rose (table below).
+1. **Cache + evidence-led births + a volume gate: research got cheaper per useful result.**
+   - Luna's cached layout halves the price of a research call.
+   - Births now go to replay passers, earning parents and cards, not to the emptiest desk. Paper
+     seats per hour rose even as births fell by more than three quarters.
+   - The gate cuts the number of sessions. Its own sample says it throttles rather than selects.
+   - So most of the fall in cost per replay pass comes from the first two.
+   - The after window is also daytime US hours and the baseline was overnight, so part of the
+     rise in candidate and pass rates may be the clock.
 2. **Pre-audit → repair queue → engineer → CI → attested updater: the league repairs its own
    strategies.** The pre-audit names a defect in a strategy on paper; the queue deduplicates it and
    ranks it; the engineer writes a corrected child; CI judges it; the Merton workflow merges it;
