@@ -7,8 +7,8 @@
   "observe_hours": 24.0,
   "synthetic_observe_minutes": 20.0,
   "min_seconds_between_calls": 1800.0,
-  "max_output_tokens": 12000,
-  "effort": "high",
+  "max_output_tokens": 16000,
+  "effort": "medium",
   "step_seconds": 120.0,
   "failure_text_wait_hours": 6.0
 }

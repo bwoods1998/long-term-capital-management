@@ -156,6 +156,15 @@ class DeterministicSources(Base):
         self.assertEqual(sources.scan(), ["missing_data:research:kalshi-attention"])
         self.assertEqual(self.worklist.get("missing_data:research:kalshi-attention").agents, {"leahy-3", "leahy-5"})
 
+    def test_a_consultation_that_named_a_missing_tool_joins_the_agents_own_requests(self):
+        self.ledger.append("tool.request", {"name": "perp_positioning", "description": "funding and open interest"}, agent="leahy")
+        self.ledger.append("merton.pass", {"role": "consultant", "agent": "hilibrand", "answer": "you need positioning data",
+                                           "tool": {"name": "Perp Positioning", "description": "point-in-time funding"}, "cost_usd": "0.7"})
+        self.ledger.append("merton.pass", {"role": "consultant", "agent": "x", "answer": "advice only", "tool": None, "cost_usd": "0.5"})
+        self.scan()
+        job = self.worklist.get("missing_data:perp_positioning")
+        self.assertEqual((job.agents, job.sources), ({"leahy", "hilibrand"}, {"tools", "consult"}))
+
     def test_a_triage_report_is_folded_like_any_other(self):
         self.ledger.append("repair.reported", {"key": "missing_data:funding_rates", "kind": "missing_data", "summary": "funding rates",
                                                "evidence": [self.ev(3, "a")], "agents": ["a"], "source": "triage", "severity": "high"})
@@ -345,6 +354,18 @@ class EngineerLoop(Base):
         forge.propose = real
         engineer.step()
         self.assertEqual(self.worklist.get(key).pr, 101)
+
+    def test_a_reported_ci_failure_is_reproduced_from_ci_s_own_text(self):
+        forge = FakeGitHub()
+        forge.verdicts[72] = "league/strategies/registry.json lists x.py, which does not exist"
+        self.worklist.report(key="ci_failure:pr-72", kind="ci_failure", summary="CI refused #72", evidence=[], agents=[],
+                             source="operator", severity="medium", details={"pr": 72})
+        frontier = FakeFrontier({"summary": "nothing to do", "role": "teacher", "files": [], "needs_core": None})
+        engineer = self.engineer(frontier, forge)
+        engineer.step()
+        self.assertIn("does not exist", json.loads(frontier.asked[0]["user"])["ci_failure_of_the_reported_pr"])
+        self.assertEqual(self.worklist.get("ci_failure:pr-72").state, "rejected")
+        self.assertEqual((frontier.asked[0]["max_output_tokens"], frontier.asked[0]["effort"]), (16000, "medium"))
 
     def test_a_fix_outside_the_allowlist_is_dormant_as_needing_core_authority(self):
         key = self.job()

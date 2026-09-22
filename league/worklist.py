@@ -347,7 +347,8 @@ class Sources:
     of the same specialty; one audit veto is enough -- the auditor already names the defect."""
 
     #: Kinds each scan reads. `merton.change` is read whole (it is small) to know the latest state.
-    READS = ("audit.verdict", "book.refused", "merton.change", "tool.request", "tool.blocked", "tool.fulfilled", "agent.research")
+    READS = ("audit.verdict", "book.refused", "merton.change", "tool.request", "tool.blocked", "tool.fulfilled", "agent.research",
+             "merton.pass")
     REFUSAL_MIN = 3
     RESEARCH_MIN = 2
     MAX_EVIDENCE = 12
@@ -420,6 +421,17 @@ class Sources:
             self._emit(Signal(key=key, kind="missing_data", summary="", source="tools", severity="medium", agent="house",
                               seq=entry.seq, at=entry.at, excerpt=("The toolsmith found it cannot be a pure tool: " + outcome)[:EXCERPT_CHARS],
                               details=(("blocked", True),)))
+        elif kind == "merton.pass":
+            # A consultation that named a missing tool: the same key as an agent's own request for
+            # it, so the paid advice and the requests become one job (4 of 40 consults by Sept 22).
+            tool = p.get("tool") if isinstance(p.get("tool"), dict) else None
+            if p.get("role") != "consultant" or not tool or not _name(tool.get("name")):
+                return
+            agent = str(p.get("agent") or entry.agent)
+            self._emit(Signal(key=f"missing_data:{_name(tool.get('name'))}", kind="missing_data",
+                              summary=f"Merton, consulted by {agent}, names a missing tool {_name(tool.get('name'))}: {str(tool.get('description') or '')[:600]}",
+                              source="consult", severity="medium", agent=agent, seq=entry.seq, at=entry.at,
+                              excerpt=f"{str(tool.get('description') or '')[:700]} (answer: {str(p.get('answer') or '')[:400]})"))
         elif kind == "agent.research":
             if p.get("tool") != "summary":
                 return

@@ -60,8 +60,10 @@ DEFAULTS: dict[str, Any] = {
     "observe_hours": 24.0,
     "synthetic_observe_minutes": 20.0,
     "min_seconds_between_calls": 1800.0,
-    "max_output_tokens": 12000,
-    "effort": "high",
+    # Measured Sept 22, 2026 on consultations: at 12,000 tokens and "high" effort five of seven
+    # spent the whole allowance reasoning and came back incomplete; the auditor at "medium" never has.
+    "max_output_tokens": 16000,
+    "effort": "medium",
     "step_seconds": 120.0,
     "failure_text_wait_hours": 6.0,
 }
@@ -534,19 +536,22 @@ class Engineer:
                 return "admitted"
         return None
 
-    def _refused(self, job: Job) -> str:
-        text = None
+    def _failure_text(self, number: int) -> str | None:
+        """CI's own words for why it refused a pull request, or None when they cannot be read."""
         try:
-            found = self.forge.failures(job.pr)
-            parts = []
-            for run in found.get("failures") or []:
-                for note in run.get("annotations") or []:
-                    parts.append(str(note.get("message") or ""))
-                if not run.get("annotations") and run.get("summary"):
-                    parts.append(str(run.get("summary")))
-            text = "\n".join(p for p in parts if p.strip())[:8000] or None
+            found = self.forge.failures(int(number))
         except Exception:  # noqa: BLE001 - ForgeError: the gateway does not offer the read yet
-            text = None
+            return None
+        parts = []
+        for run in found.get("failures") or []:
+            for note in run.get("annotations") or []:
+                parts.append(str(note.get("message") or ""))
+            if not run.get("annotations") and run.get("summary"):
+                parts.append(str(run.get("summary")))
+        return "\n".join(p for p in parts if p.strip())[:8000] or None
+
+    def _refused(self, job: Job) -> str:
+        text = self._failure_text(job.pr)
         if text is None:
             # Not bought blind. The read may simply not be deployed yet: wait for it, boundedly.
             waiting = job.last_status.get("waiting_for_failure")
@@ -605,6 +610,11 @@ class Engineer:
         if job.attempt and job.carry.get("_failure"):
             packet["previous"] = {"ci_failure": job.carry.get("_failure"), "files": job.carry.get("_files") or [],
                                   "pr": job.carry.get("failed_pr")}
+        if job.kind == "ci_failure" and isinstance(job.details.get("pr"), int) and "previous" not in packet:
+            # The refused proposal's own CI text is its reproduction; its files are not readable here.
+            text = self._failure_text(job.details["pr"])
+            if text:
+                packet["ci_failure_of_the_reported_pr"] = text
         packet["permitted_dials"] = {key: {"min": low, "max": high} for key, (low, high) in ci.CONFIG_DIALS.items()}
         packet["existing_tools"] = sorted(p.name for p in (self.repo / "league" / "tools").glob("*.py"))
         packet["existing_strategies"] = sorted(p.name for p in (self.repo / "league" / "strategies").glob("*.py"))
