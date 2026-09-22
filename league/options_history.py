@@ -81,12 +81,13 @@ FEATURE_VERSION = "bs-close-v2"  # v2: the underlying close is unadjusted (v1 us
 SPREAD_MODEL = {
     "kind": "estimated from trade prints and bar ranges: no historical option quotes exist",
     # Shown and marked: last print +- max(display_min_half, display_pct x premium). Fitted on
-    # Sept 22, 2026 to 871 live OPRA quotes of the desk's six underlyings: its median half-spread
-    # equals the quoted median and it is at least as wide 60% of the time.
+    # Sept 22, 2026 to 871 live OPRA quotes of the desk's six underlyings in the session's first
+    # hour; checked on 1,190: its median half-spread equals the quoted median and it is at least
+    # as wide 60.5% of the time.
     "display_min_half": 0.01,
     "display_pct": 0.045,
-    # Paid by a fill at the touch (below): at least as wide as the quoted half-spread 76% of the
-    # time on the same quotes, with a median about twice the quoted one.
+    # Paid by a fill at the touch (below): at least as wide as the quoted half-spread 76.6% of the
+    # time on the same 1,190 quotes, with a median about twice the quoted one.
     "min_half_ticks": 1.0,     # at least one tick either side of the last print
     "floor_pct": 0.04,         # half-spread at least 4% of the premium (live Sept 19: 8-100 of 60-900 contracts under a 15% spread)
     "range_weight": 0.5,       # half the median high-low range of the contract's last printed bars
@@ -230,9 +231,9 @@ def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model
     contract's last printed bars (prints bounce between bid and ask) and any measured floor. The
     bid is None when it would be zero or less. (`stress` is applied by the replay, to fills.)
 
-    Measured Sept 22, 2026 against 871 live OPRA quotes of the desk's six underlyings in the
+    Measured Sept 22, 2026 against 1,190 live OPRA quotes of the desk's six underlyings in the
     session's first hour (the House's recorded quotes let `spread_check` repeat this every day):
-    at least as wide as the quoted half-spread 76% of the time, 68% to 88% by premium bucket,
+    at least as wide as the quoted half-spread 76.6% of the time, 68% to 87% by premium bucket,
     with a median about twice the quoted median."""
     m = {**SPREAD_MODEL, **dict(model or {})}
     last = float(bar["c"])
