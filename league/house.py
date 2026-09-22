@@ -1940,7 +1940,9 @@ class House:
             agent = self.registry.get(agent.id)
             for book in self.books.values():
                 if agent.id in book.accounts:
-                    self._wind_down(agent, book)
+                    # A venue that is down when an agent dies must not keep it alive: the death is
+                    # recorded now and the mark pass retries its exits (`_retry_wind_down`).
+                    self._retry_wind_down(agent, book)
             text = self.postmortem(agent, cause, detail)
             self.ledger.append("agent.postmortem", {"text": text, "cause": cause}, agent=agent.id)
             self.commons.playbook_add(f"Post-mortem: {agent.id}", text, source="graveyard", agent=agent.id)
