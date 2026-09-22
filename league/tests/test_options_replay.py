@@ -144,6 +144,18 @@ class RecordedQuotes(unittest.TestCase):
         self.assertEqual(result["fills"], 0)
         self.assertEqual(result["final_memory"]["chain"], [[C1, 0.40, 0.43, "recorded OPRA quote"]])
 
+    def test_the_estimate_is_measured_against_recorded_quotes(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = oh.OptionsHistory(Path(root) / "c.sqlite")
+            self.addCleanup(store.close)
+            store.db.execute("INSERT INTO bars VALUES (?, '15Min', '2026-09-22T14:00:00Z', 0.40, 0.42, 0.38, 0.40, 50, 10, 0.4)", (C1,))
+            store.db.commit()
+            store.record_quotes([{"symbol": C1, "bid": 0.39, "ask": 0.41, "as_of": "2026-09-22T14:05:00Z"},   # half 0.01: the estimate (0.02) is wider
+                                 {"symbol": C1, "bid": 0.35, "ask": 0.45, "as_of": "2026-09-22T14:10:00Z"},   # half 0.05: it is not
+                                 {"symbol": C1, "bid": 0.30, "ask": 0.50, "as_of": "2026-09-22T13:55:00Z"}],  # before any print: not compared
+                                source="opra")
+            self.assertEqual(store.spread_check(), {"quotes_compared": 2, "estimate_at_least_as_wide": 1, "share_conservative": 0.5})
+
     def test_only_opra_quotes_are_kept(self):
         with tempfile.TemporaryDirectory() as root:
             store = oh.OptionsHistory(Path(root) / "q.sqlite")
