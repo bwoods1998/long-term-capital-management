@@ -558,9 +558,9 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   - The queue does not merge related jobs across sources (audit veto, pre-audit, refusals), so
     the options OCC defect got three children and haghani three. Replay still filters them.
   - Merging related jobs before patching is the engineer's clear next improvement.
-- 20:21–20:25:33Z The owner's deploy of `f6b9035` (#123, #125 and #126 on top of the refused
-  `c3282f3`) **passed the canary's 3 ticks and was promoted** as release
-  `20260922T202128Z-8e17da71d9c7`.
+- 20:21–20:25:33Z The owner's deploy of `f6b9035` (the refused `c3282f3` plus #125 and #126)
+  **passed the canary's 3 ticks and was promoted** as release `20260922T202128Z-8e17da71d9c7`.
+  The watchdog's 10-minute watch ended with it still promoted at 20:35:33Z.
 - 20:26Z **The live grant was re-ratified** (`scripts/live_trading.py --ratify
   earned-live-20260921`) against money digest `d715ae7a…`, for the same capital. Health reads it
   active, with no `stopped_because`.
