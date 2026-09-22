@@ -63,7 +63,17 @@ DEFAULTS: dict[str, Any] = {
     "max_output_tokens": 12000,
     "effort": "high",
     "step_seconds": 120.0,
+    "failure_text_wait_hours": 6.0,
 }
+#: Refusals that are a protective rule working as designed. The constitution's money rules and the
+#: books' risk limits are frozen, so a repair has nothing to change there; the strategy that keeps
+#: asking is the thing to fix, and only when it is named as a defect. Read from the production
+#: ledger on Sept 22, 2026, where these were five of the fourteen refusal reasons.
+PROTECTIVE = ("daily loss", "at risk on one market", "at risk across the live desks", "gross exposure would be",
+              "paused for maintenance", "only risk-reducing orders", "trade against the house's own resting order",
+              "one account cannot hold both")
+#: Refusals caused by House code (seat allocation, reconciliation): outside every role's paths.
+CORE_REFUSALS = ("has no seat on the", "is frozen until it reconciles")
 #: The kinds whose fix is a corrected child of one agent's strategy.
 STRATEGY_KINDS = ("strategy_defect", "audit_veto")
 NEEDS_CORE = "needs core authority"
@@ -84,6 +94,9 @@ You may write ONLY these paths, and one answer uses ONE role's paths:
 Everything else -- the House, the books, the venues, replay, data adapters, the evaluator, CI, the gateway -- is
 outside your authority. If the real fix needs any of it, answer with needs_core naming the paths; do not write a
 workaround that hides the defect, and do not write a lesson that only restates it.
+
+Never loosen, bypass or route around a risk limit, a money rule, a venue rule or the horizon rule: a refusal by one
+of them is the rule working. The thing to fix is the strategy or the knowledge that keeps asking for what it forbids.
 
 A defect in ONE agent's strategy is fixed by a NEW corrected child strategy: a new file with a new name, never an
 edit of an existing file. It is born on rung 0 with no record and must qualify on its own evidence. Keep it in the
@@ -126,7 +139,7 @@ class Engineer:
     def __init__(self, frontier: Any, forge: Any, ledger: Any, worklist: Worklist, *, clock: Callable[[], float] = time.time,
                  settings: Mapping[str, Any] | None = None, may_spend: Callable[[], bool] = lambda: True,
                  code_of: Callable[[str], Mapping[str, Any] | None] = lambda agent: None, repo: Path = REPO,
-                 evidence: Callable[[], Mapping[str, Any]] = lambda: {}, sources: Any = None):
+                 evidence: Callable[[], Mapping[str, Any]] = lambda: {}, sources: Any = None, summary_path: Path | None = None):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
@@ -138,22 +151,57 @@ class Engineer:
         self.repo = Path(repo)
         self.evidence = evidence
         self.sources = sources
+        #: Where each step leaves the worklist's summary (the state directory's `repairs.json`), so
+        #: the queue can be read without opening the ledger. None writes nothing.
+        self.summary_path = Path(summary_path) if summary_path else None
         self._last_step = float("-inf")
-        self._last_call = float("-inf")
+        self._last_call: float | None = None
+        self._asked = False
 
     # ------------------------------------------------------------------------ schedule
     def due(self) -> bool:
-        return bool(self.settings.get("enabled")) and self.clock() - self._last_step >= float(self.settings["step_seconds"])
+        return self.clock() - self._last_step >= float(self.settings["step_seconds"])
+
+    def last_call(self) -> float:
+        """When the engineer last bought a call. Read from its own `merton.pass` rows the first
+        time, so a restart does not reset the pace and buy the next patch at once."""
+        if self._last_call is None:
+            rows = [e.payload for e in self.ledger.read(kinds="merton.pass", limit=2000, newest=True)
+                    if e.payload.get("role") == "engineer" and not e.payload.get("interrupted")]
+            paid = [float(r.get("at_epoch") or 0) for r in rows if Decimal(str(r.get("cost_usd") or "0")) > 0]
+            self._last_call = max(paid) if paid else float("-inf")
+        return self._last_call
 
     def step(self) -> dict[str, Any]:
         """One bounded unit of work: report what is new, admit, move every job waiting on the
-        outside world (free), and make at most one paid attempt. Never raises for one job."""
+        outside world (free), and make at most one paid attempt. Never raises for one job.
+
+        Switched off (`enabled: false` in `engineer.json`) it still reports -- the sources are
+        code and free -- but admits, follows and buys nothing; its jobs keep their states."""
         self._last_step = self.clock()
         out: dict[str, Any] = {"reported": [], "admitted": [], "advanced": [], "attempted": None}
-        if not self.settings.get("enabled"):
-            return out
-        if self.sources is not None:
-            out["reported"] = self.sources.scan()
+        try:
+            if self.sources is not None:
+                out["reported"] = self.sources.scan()
+            if self.settings.get("enabled"):
+                self._work(out)
+        finally:
+            self._summarize(out)
+        return out
+
+    def _summarize(self, out: Mapping[str, Any]) -> None:
+        if self.summary_path is None:
+            return
+        try:
+            body = {"at": now_iso(self.clock), "enabled": bool(self.settings.get("enabled")), "last_step": dict(out),
+                    **self.worklist.summary()}
+            temporary = self.summary_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(body, indent=1, default=str), encoding="utf-8")
+            temporary.replace(self.summary_path)
+        except (OSError, TypeError, ValueError):
+            pass  # a summary is a convenience; the ledger is the record
+
+    def _work(self, out: dict[str, Any]) -> None:
         out["admitted"] = self.worklist.admit(threshold=float(self.settings["admit_priority"]))
         for job in self.worklist.queue(("reproducing", "patching")):
             self._interrupted(job)
@@ -161,14 +209,19 @@ class Engineer:
             moved = self._advance(job)
             if moved:
                 out["advanced"].append({"key": job.key, "state": moved})
+        out["decided"] = []
         for job in self.worklist.queue(("revising", "admitted")):
-            if self.clock() - self._last_call < float(self.settings["min_seconds_between_calls"]) and not self._scripted(job):
-                break
+            self._asked = False
             result = self._attempt(job)
-            if result is not None:
-                out["attempted"] = {"key": job.key, "state": result}
-                break
-        return out
+            if result is None:
+                if self._asked:
+                    break  # the frontier refused a call: no second call this step
+                continue
+            if not self._asked:
+                out["decided"].append({"key": job.key, "state": result})  # settled by code, for free
+                continue
+            out["attempted"] = {"key": job.key, "state": result}
+            break
 
     # ----------------------------------------------------------------------- one attempt
     def _scripted(self, job: Job) -> bool:
@@ -191,6 +244,15 @@ class Engineer:
                 return self._dormant(job, f"{NEEDS_CORE}: research keeps naming a missing input, and acquiring data is House work; "
                                           "a matching tool request would reach the toolsmith")
             return None  # the toolsmith reads tool requests first, on its own schedule; its verdict decides
+        if job.kind == "order_refusal":
+            reason = job.key.lower()
+            if any(marker in reason for marker in PROTECTIVE):
+                self.worklist.transition(job.key, "rejected", attempt=job.attempt, pr=job.pr,
+                                         note="a protective rule working as designed: money and risk rules are not a repair's to loosen")
+                return "rejected"
+            if any(marker in reason for marker in CORE_REFUSALS):
+                return self._dormant(job, f"{NEEDS_CORE}: the refusal comes from House code (seats, reconciliation), "
+                                          "outside every Merton role's paths")
         if job.attempt >= int(settings["max_attempts"]):
             return self._dormant(job, f"attempt limit reached ({job.attempt} of {settings['max_attempts']}); costs kept")
         scripted = self._scripted(job)
@@ -206,7 +268,10 @@ class Engineer:
             return self._dormant(job, f"per-job spend limit: ${job.cost_usd:.4f} spent of ${ceiling}; the next attempt could cost up to ${worst:.4f}")
         if not scripted and not self.may_spend():
             return None  # the day's allowance or the frontier tier says not now; the job waits
+        if not scripted and self.clock() - self.last_call() < float(settings["min_seconds_between_calls"]):
+            return None  # paced: one paid patch per interval, across restarts
         attempt = job.attempt + 1
+        self._asked = True
         self.worklist.transition(job.key, "reproducing", attempt=job.attempt, pr=job.pr,
                                  note=f"attempt {attempt}: {len(job.evidence)} evidence rows, {len(packet.get('code') or {})} code excerpts"
                                       + (", CI's failure text" if packet.get("previous") else ""))
@@ -226,12 +291,20 @@ class Engineer:
                     cost = reply.cost_usd
                     answer = reply.json()
                 except FrontierError as exc:
-                    if reply is None:
-                        # Refused or unreachable: nothing was bought, and the attempt is not counted.
+                    if reply is None and not _ambiguous(exc):
+                        # Refused before anything was bought (the campaign's line, the gateway's 4xx):
+                        # the attempt is not counted, and the job waits.
                         self._pass(job, attempt, Decimal(0), f"the frontier call was refused: {exc}", error=True)
                         self.worklist.transition(job.key, prior, attempt=job.attempt, pr=job.pr,
                                                  note=f"the frontier call was refused ({str(exc)[:200]}); the job waits")
                         return None
+                    if reply is None:
+                        # No answer, but the provider may have done the work and billed it: book the
+                        # worst case and count the attempt, as for a restart mid-call.
+                        self._pass(job, attempt, worst, f"no answer ({exc}); the worst-case hold is counted as spent",
+                                   error=True, ambiguous=True)
+                        return self._after_failure(job, attempt, worst, f"patch {attempt} got no answer ({str(exc)[:200]}); "
+                                                   f"its worst-case hold ${worst:.4f} is counted as spent")
                     self._pass(job, attempt, cost, f"the answer was unreadable: {exc}", error=True)
                     return self._after_failure(job, attempt, cost, f"patch {attempt}'s answer was unreadable ({str(exc)[:200]})")
         except Exception as exc:  # noqa: BLE001 - one job's crash must not stop the worker
@@ -436,8 +509,18 @@ class Engineer:
         except Exception:  # noqa: BLE001 - ForgeError: the gateway does not offer the read yet
             text = None
         if text is None:
+            # Not bought blind. The read may simply not be deployed yet: wait for it, boundedly.
+            waiting = job.last_status.get("waiting_for_failure")
+            if not waiting:
+                self.worklist.transition(job.key, "testing", attempt=job.attempt, pr=job.pr,
+                                         note=f"CI refused PR #{job.pr}; waiting for its failure text (GET /v1/github/pr/{job.pr}/failures)",
+                                         extra={"waiting_for_failure": now_iso(self.clock)})
+                return "testing"
+            if self.clock() - _epoch(str(waiting)) < float(self.settings["failure_text_wait_hours"]) * 3600:
+                return None
             return self._dormant(job, f"CI refused PR #{job.pr} and its failure text could not be read (the gateway's "
-                                      f"GET /v1/github/pr/{job.pr}/failures); a blind revision is not bought")
+                                      f"GET /v1/github/pr/{job.pr}/failures) for {self.settings['failure_text_wait_hours']} h; "
+                                      "a blind revision is not bought")
         previous = job.carry.get("_files") or (job.carry.get("_proposal") or {}).get("files")
         return self._after_failure(job, job.attempt, Decimal(0), f"CI refused PR #{job.pr}: {text[:600]}",
                                    _failure=text, _files=previous, failed_pr=job.pr)
@@ -497,6 +580,13 @@ class Engineer:
         self.ledger.append("merton.pass", {"role": "engineer", "at_epoch": self.clock(), "repair": job.key, "attempt": attempt,
                                            "summary": str(summary)[:600], "cost_usd": format(cost, "f"),
                                            "files": int(extra.pop("files", 0)), **extra})
+
+
+def _ambiguous(exc: FrontierError) -> bool:
+    """A call that may have reached the provider: the transport failed (no status) or the
+    gateway answered 5xx. A 4xx, or the campaign's own refusal before sending, bought nothing."""
+    status = getattr(exc, "status", None)
+    return (status is None and str(exc).startswith("frontier call failed")) or (status is not None and status >= 500)
 
 
 def _epoch(iso: str) -> float:

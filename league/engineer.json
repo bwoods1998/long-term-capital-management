@@ -1,5 +1,5 @@
 {
-  "_about": "The repair engineer (league/engineer.py). Owner-only: no Merton role may write this file, so the engineer cannot raise its own ceiling. enabled=false stops it; jobs keep their state and resume when it is back on.",
+  "_about": "The repair engineer (league/engineer.py). Owner-only: no Merton role may write this file, so the engineer cannot raise its own ceiling. enabled=false stops every admission, follow-up and paid call (the free sources still report); jobs keep their state and resume when it is back on.",
   "enabled": true,
   "max_attempts": 3,
   "max_job_usd": "5.00",
@@ -9,5 +9,6 @@
   "min_seconds_between_calls": 1800.0,
   "max_output_tokens": 12000,
   "effort": "high",
-  "step_seconds": 120.0
+  "step_seconds": 120.0,
+  "failure_text_wait_hours": 6.0
 }

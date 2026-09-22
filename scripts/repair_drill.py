@@ -53,9 +53,12 @@ def plant(ledger, *, clock=time.time, stamp: str | None = None):
 def inspect(path: Path, key: str | None = None) -> list[dict]:
     """The drill jobs' rows, oldest first, from a read-only connection (never a write on the box)."""
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        found = db.execute("SELECT seq, kind, at, payload FROM ledger WHERE kind IN ('repair.reported', 'repair.status') ORDER BY seq").fetchall()
+    finally:
+        db.close()
     rows = []
-    for seq, kind, at, payload in db.execute(
-            "SELECT seq, kind, at, payload FROM ledger WHERE kind IN ('repair.reported', 'repair.status') ORDER BY seq"):
+    for seq, kind, at, payload in found:
         body = json.loads(payload)
         if not str(body.get("key") or "").startswith(key or PREFIX):
             continue

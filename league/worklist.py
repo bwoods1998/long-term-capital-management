@@ -316,7 +316,8 @@ def normalize_reason(reason: str, agent: str = "") -> str:
     agent's own name, numbers and market tickers."""
     text = str(reason or "")
     if agent:
-        text = text.replace(agent, "<agent>")
+        # As a whole name only: agent "a" must not turn "market" into "m<agent>rket".
+        text = re.sub(rf"(?<![\w-]){re.escape(agent)}(?![\w-])", "<agent>", text)
     text = _NUMBER.sub("#", text)
     text = _TICKER.sub("<market>", text)
     return re.sub(r"\s+", " ", text).strip()[:160]

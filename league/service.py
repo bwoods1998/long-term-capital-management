@@ -91,7 +91,7 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
     worklist = Worklist(house.ledger, clock=house.clock)
     return Engineer(frontier, forge, house.ledger, worklist, clock=house.clock, code_of=code_of,
                     may_spend=lambda: house.pacer.may_spend("openai") and house.frontier_tier() != "audits",
-                    sources=Sources(house.ledger, worklist, niche_of=niche_of))
+                    sources=Sources(house.ledger, worklist, niche_of=niche_of), summary_path=Path(house.root) / "repairs.json")
 
 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
@@ -225,10 +225,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
                             pace=house.frontier_pace, backoff_max=pace.get("backoff_max"))
     if house.merton is not None:
-        from .engineer import load_settings
-
-        if load_settings().get("enabled"):
-            house.engineer = repair_engineer(house, frontier, house.merton.forge)
+        # Always built with Merton: switched off in league/engineer.json it still reports (free),
+        # and buys nothing.
+        house.engineer = repair_engineer(house, frontier, house.merton.forge)
     if house.researcher is not None and frontier is not None:
         # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
         # what a good record buys is better thinking.
