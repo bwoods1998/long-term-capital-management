@@ -31,20 +31,24 @@ the restart: 15:27:20–16:47:39Z and 17:45:14Z–⟨T⟩. It leaves out the 58-
   - **Verified live:**
     - the first foundry call wrote 4 falsifiable weather cards; 1 passed replay and 3 failed
       honestly;
-    - **two autonomous repairs** were written, CI-passed and merged with no human: #100 (hawkins
-      horizon guard) and #113 (haghani entry rounding);
+    - **three autonomous repairs** were written, CI-passed and merged with no human: #100 (hawkins
+      horizon guard), #113 (haghani entry rounding) and #119 (haghani sub-cent prices). The
+      updater attested and deployed #100 and #113 by itself;
     - the attested updater deployed releases by itself and refused the two protected changes
       (#102, #110);
-    - the synthetic drill ran end to end (#104 refused by CI, #105 revised against CI's text and
-      merged) ⟨drill final state⟩.
+    - the labelled synthetic drill ran end to end and was **verified** at 18:08:32Z (#104 refused
+      by CI, #105 revised against CI's failure text, merged, deployed, 20 minutes without
+      recurrence).
 - **Jev.**
   - **Built:** the research gate on exact triggers with Jev relevance, explicit inactivity reasons,
     triage into repair reports, hypothesis memory (rewordings linked, never genealogy) and
     report-only exposure groups (#95). The continuous semantic lab is off (#92) after a capped
     evaluation of 128,179 labels found no tradable value.
-  - **Verified live:** the gate skips about 41% of due sessions. Its sampled skips found 0
-    candidates in ⟨n⟩, and triggered runs for agents on empty streaks found 0 in ⟨n⟩. Jev spend is
-    about $0.02 a day.
+  - **Verified live:** the gate skips more than half of due sessions (⟨gate⟩). It is cheap (Jev
+    $0.015 over 282 calls) and it measures itself. **Its sampled miss rate is 8.75% (7 of 80),
+    no lower than the runs' 8.3%.** So far it throttles volume (about $4/h saved) rather than
+    picking out empty sessions. Triage has turned the swarm's writing into 127 deduplicated repair
+    groups, and exposure groups show up to 7 agents on one event.
 - **Sail and model routing.**
   - **Built:**
     - the Luna cache layout, with explicit hints admitted by the gateway (#98, #99);
