@@ -1,0 +1,9 @@
+{
+  "family": "attention-favorites",
+  "name": "leahy_resolution_guard",
+  "repair": {
+    "key": "strategy_defect:leahy:53deff71f09b",
+    "parent": "leahy"
+  },
+  "why": "Corrected child of Leahy retaining its Kalshi attention series, day horizon and maker-favourite logic. Require finite hours_to_resolve between zero and 48 independently of hours_to_close, preventing the reported requests for contracts resolving in 199 hours. Missing resolution data is not permission to enter. Starts at rung 0 with no record and must qualify on its own evidence."
+}
