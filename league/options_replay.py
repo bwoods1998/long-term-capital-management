@@ -99,15 +99,17 @@ class _Book:
         if order["side"] == "buy":
             self.cash -= gross + fee
             p = self.positions.setdefault(occ, {**order["ident"], "occ": occ, "quantity": 0.0, "cost": 0.0, "pnl": 0.0, "mark": price,
-                                                "opened_at": now, "reason": order["reason"], "entry": price})
+                                                "opened_at": now, "reason": order["reason"], "entry": price, "fees": 0.0})
             p["quantity"] += qty
             p["cost"] += gross
+            p["fees"] += fee
             p["pnl"] -= fee
         else:
             p = self.positions[occ]
             average = p["cost"] / p["quantity"]
             self.cash += gross - fee
             p["pnl"] += gross - average * qty - fee
+            p["fees"] *= max(0.0, p["quantity"] - qty) / p["quantity"]
             p["quantity"] -= qty
             p["cost"] = average * p["quantity"]
             if p["quantity"] <= EPS:
@@ -300,6 +302,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 spot[symbol] = (float(bar["c"]), now)
         # (a) the option bars that closed now meet the orders placed before, then become the quote.
         for occ, bar in (step.get("options") or {}).items():
+            if isinstance(bar, list) and len(bar) == 6:
+                bar = dict(zip(("o", "h", "l", "c", "v", "n"), bar))  # the compact form tapes carry
             if occ not in contracts or not isinstance(bar, dict) or _num(bar.get("c")) is None:
                 continue
             work(occ, bar, now)
@@ -372,7 +376,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 "cash": book.cash, "equity": equity, "limits": dict(limits),
                 "fees": {"crypto_taker": 0.0025, "crypto_maker": 0.0015, "kalshi_taker_rate": 0.07, "option_per_contract": fee},
                 "positions": [{"occ": p["occ"], "symbol": p["symbol"], "expiry": p["expiry"], "strike": p["strike"], "right": p["right"],
-                               "quantity": p["quantity"], "average_cost": p["cost"] / p["quantity"] / mult if p["quantity"] else 0.0,
+                               # per share, fees included, as the House's book reports it
+                               "quantity": p["quantity"], "average_cost": (p["cost"] + p["fees"]) / p["quantity"] / mult if p["quantity"] else 0.0,
                                "mark": p["mark"], "opened_at": p["opened_at"], "reason": p["reason"]} for p in book.positions.values()],
                 "open_orders": [{"order_id": o["order_id"], "occ": o["occ"], "symbol": o["ident"].get("symbol"), "side": o["side"], "quantity": o["quantity"],
                                  "limit_price": o["limit_price"], "filled": 0.0, "submitted_at": o["submitted_at"]} for o in book.orders.values() if not o.get("house")],

@@ -492,8 +492,12 @@ class OptionsHistory:
                 self.list_contracts(underlying, start, expiry_to, strike_from=math.floor(lo), strike_to=math.ceil(hi))
             except Exception as exc:  # noqa: BLE001
                 out.append(self.record_coverage({"underlying": underlying, "timeframe": None, "start": start, "end": end, "status": "unavailable",
-                                                 "reason": f"contract listing refused: {str(exc)[:160]}", "source": SOURCE_CONTRACTS, "bars": 0}))
+                                                 "reason": f"contract listing refused: {str(exc)[:300]}", "source": SOURCE_CONTRACTS, "bars": 0}))
                 continue
+            listed = len(self.contracts(underlying, start, expiry_to))
+            # The listing row of this window: a later success replaces an earlier refusal.
+            self.record_coverage({"underlying": underlying, "timeframe": None, "start": start, "end": end, "status": "complete" if listed else "unavailable",
+                                  "reason": "contract listing", "source": SOURCE_CONTRACTS, "contracts": listed, "bars": 0})
             by_expiry: dict[str, list[dict[str, Any]]] = {}
             for row in self.contracts(underlying, start, expiry_to):
                 by_expiry.setdefault(row["expiry"], []).append(row)
@@ -681,25 +685,31 @@ class OptionsHistory:
             listed = self.contracts(symbol, first_day, last_day)
             got = self.bars([r["occ"] for r in listed], execution, iso(start_ts), end)
             for row in listed:
-                bars = got.get(row["occ"]) or []
+                # Nothing can be shown or bought before its last `days` (plus a few days of bars
+                # for the spread estimate), so the tape does not carry the months before.
+                shown_from = iso(datetime.combine(_day(row["expiry"]) - timedelta(days=days + 4), datetime.min.time(), NY).timestamp())
+                bars = [b for b in got.get(row["occ"]) or [] if b["t"] >= shown_from]
                 # A superset of what any step could show: it printed, and at some print its
                 # premium was within one order. (Held contracts were affordable when bought.)
                 if not bars or min(b["c"] for b in bars) > afford:
                     continue
                 contracts[row["occ"]] = {"underlying": symbol, "expiry": row["expiry"], "strike": row["strike"], "right": row["right"],
-                                         "first_print": bars[0]["t"]}
+                                         "first_print": (got.get(row["occ"]) or bars)[0]["t"]}
                 option_rows[row["occ"]] = bars
         by_time: dict[str, dict[str, Any]] = {}
         for symbol, rows in execution_rows.items():
             for bar in rows:
                 by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}})["execution_bars"][symbol] = {k: bar[k] for k in ("o", "h", "l", "c", "v")}
+        live = {**LIQUIDITY, **dict(liquidity or {})}
         for occ, rows in option_rows.items():
             for bar in rows:
+                if bar["v"] < live["min_volume"] or (bar["n"] or 0) < live["min_trades"]:
+                    continue  # never a quote, a fill or a spread sample (46% of the 15-minute bars, Sept 22, 2026)
                 step = by_time.get(bar["t"])
                 if step is None:
                     step = by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}}) if _in_session(_ts(bar["t"])) else None
                 if step is not None:
-                    step["options"][occ] = {k: bar[k] for k in ("o", "h", "l", "c", "v", "n")}
+                    step["options"][occ] = [bar[k] for k in ("o", "h", "l", "c", "v", "n")]  # compact: o h l c v n
         # Recorded OPRA quotes (from Sept 22, 2026, when the House began keeping them): the last
         # one of each contract in (previous step, step] rides on the step; nothing is carried.
         recorded = self.quotes(list(contracts), iso(start_ts), end)
@@ -726,7 +736,7 @@ class OptionsHistory:
             "step_seconds": TIMEFRAMES[execution], "symbols": symbols, "warmup_bars": warmup_bars, "warmup_requested": warmup,
             "half_spread_bps": 1.0, "steps": steps, "contracts": contracts,
             "chain_rules": {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford},
-            "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": {**LIQUIDITY, **dict(liquidity or {})},
+            "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": live,
             "fee_per_contract_usd": float(fee_per_contract), "multiplier": MULTIPLIER,
             "recorded_quotes": sum(len(r) for r in recorded.values()),
             "provenance": {"options": SOURCE_BARS, "listing": SOURCE_CONTRACTS, "quotes": SPREAD_MODEL["kind"],
