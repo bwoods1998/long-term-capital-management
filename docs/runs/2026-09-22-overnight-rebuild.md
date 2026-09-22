@@ -29,8 +29,9 @@ the restart: 15:27:20–16:47:39Z and 17:45:14Z–⟨T⟩. It leaves out the 58-
     - per-strategy registry files, with no more registry collisions (#94);
     - `follow()` keeps watching refused PRs (#94).
   - **Verified live:**
-    - the first foundry call wrote 4 falsifiable weather cards; 1 passed replay and 3 failed
-      honestly;
+    - three foundry calls ($2.22) wrote 12 falsifiable cards (weather, then sports twice); 2
+      passed replay and 9 failed honestly on real data. **Card `42bdbb` became
+      `meriwether-h42bdbb` on paper 24 s after it was written** (19:05:16 → 19:05:40Z);
     - **three autonomous repairs** were written, CI-passed and merged with no human: #100 (hawkins
       horizon guard), #113 (haghani entry rounding) and #119 (haghani sub-cent prices). The
       updater attested and deployed #100 and #113 by itself;
