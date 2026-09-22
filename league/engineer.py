@@ -477,6 +477,15 @@ class Engineer:
         self._after_failure(job, attempt, hold, note)
 
     # --------------------------------------------------------------------- following
+    @staticmethod
+    def _strategy_only(digests: Mapping[str, Any]) -> bool:
+        """A fix that only adds strategy files cannot change an agent already running: its effect
+        is the corrected child it brings. So the agents that reported the problem on the old code
+        do not count as its recurrence; any other agent still does. Measured Sept 22, 2026: the
+        hawkins horizon repair (#100) shipped as a new child strategy, and hawkins-9, still on the
+        old code, reopened it within the hour."""
+        return bool(digests) and all(str(path).startswith("league/strategies/") for path in digests)
+
     def _change(self, number: int) -> dict[str, Any] | None:
         rows = [e.payload for e in self.ledger.read(kinds="merton.change", limit=2000, newest=True) if e.payload.get("number") == number]
         return dict(rows[-1]) if rows else None
@@ -505,7 +514,7 @@ class Engineer:
                 self.worklist.transition(job.key, "observing", attempt=job.attempt, pr=job.pr, commit=job.commit,
                                          note=f"the running release ({release}) holds PR #{job.pr}'s files; watching for recurrence",
                                          extra={"deployed_at": now_iso(self.clock), "release": release, "digests": digests,
-                                                "exclude": sorted(job.agents) if job.kind in STRATEGY_KINDS else []})
+                                                "exclude": sorted(job.agents) if job.kind in STRATEGY_KINDS or self._strategy_only(digests) else []})
                 return "observing"
             merged_at = job.last_status.get("merged_at") or job.state_at
             if self.clock() - _epoch(str(merged_at)) > float(self.settings["canary_timeout_hours"]) * 3600:
