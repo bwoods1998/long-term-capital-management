@@ -96,7 +96,14 @@ for label, spread, fee in (('base', 1.0, None), ('spread x1.5', 1.5, None), ('sp
                                               'options': {k: v for k, v in (r.get('options') or {}).items() if k != 'execution_model'},
                                               'digest': (r.get('digest') or {}).get('all'), 'gate': judge(r, 'options-breakout'), 'seconds': round(time.time() - t0, 1)}
 
-eq = data.tape(['SPY'], '1Day', start=START, end=END, horizon='day', warmup_bars=30)
+for attempt in range(3):  # the gateway times out a long page under load now and then
+    try:
+        eq = data.tape(['SPY'], '1Day', start=START, end=END, horizon='day', warmup_bars=30)
+        break
+    except Exception:
+        if attempt == 2:
+            raise
+        time.sleep(5)
 eq['options_features'] = store.feature_series(['SPY'])
 r = run_replay(IV_TEST, {}, eq, stake=stake, limits=limits, audit=True)
 out['equity IV test strategy (SPY, labelled test)'] = {'replay': {k: r.get(k) for k in ('ok', 'error', 'trades', 'fills', 'final_equity', 'steps')},
