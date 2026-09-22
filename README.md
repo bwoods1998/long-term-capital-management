@@ -516,12 +516,15 @@ Built on September 19 and 20, 2026 ([the build log](docs/runs/2026-09-20-overnig
 every decision and its reason), then watched for twenty hours and repaired where it did not work
 ([the watch](docs/runs/2026-09-20-the-watch.md)).
 
-**Foundation phase is active.** The underlying real-money configuration remains enabled, but
-the campaign blocks new live capital and buy intents while preserving reconciliation and exits.
-At the verified 6:06 PM Pacific snapshot, 36 agents were alive, 18 retired, 70 research summaries
-were complete, and 18 archived replay trials included two historical passes. Only Meriwether-8
-had been promoted to paper in this phase. All four books reconciled. These are dated operational
-counts; the [run report](docs/runs/2026-09-20-foundation-progress.md) records their limitations.
+**At the end of the Sept 22 rebuild (⟨T⟩):**
+- **Real money:** earned live trading is active (`earned-live-20260921`, money rules unchanged),
+  and mullins-2 (weather) is the one live agent.
+- **The league:** ⟨living⟩ agents live on paper and replay. Births follow evidence and hypothesis
+  cards. The repair engineer has merged three fixes by itself, and the updater deploys attested
+  commits by itself.
+- **Records:** the [execution record](docs/runs/2026-09-22-overnight-rebuild.md) has the before
+  and after measurements and the remaining work. The Sept 20 foundation phase, when the campaign
+  blocked live capital, is kept in its [run report](docs/runs/2026-09-20-foundation-progress.md).
 
 Known limits:
 
