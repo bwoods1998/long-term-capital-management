@@ -48,10 +48,13 @@ the restart: 15:27:20–16:47:39Z and 17:45:14Z–20:15Z. It leaves out the 58-m
     triage into repair reports, hypothesis memory (rewordings linked, never genealogy) and
     report-only exposure groups (#95). The continuous semantic lab is off (#92) after a capped
     evaluation of 128,179 labels found no tradable value.
-  - **Verified live:** the gate skips more than half of due sessions (through 20:15Z it skipped 792 due sessions, against 501 runs and 164 sampled skips). It is cheap (Jev
-    $0.015 over 282 calls) and it measures itself. **Its sampled miss rate is 8.75% (7 of 80),
-    no lower than the runs' 8.3%.** So far it throttles volume (about $4/h saved) rather than
-    picking out empty sessions. Triage has turned the swarm's writing into 127 deduplicated repair
+  - **Verified live:** the gate skips more than half of due sessions. Through 20:15Z it skipped
+    792 of 1,457, ran 501, and ran 164 more as a sample of its skips. It costs under a cent of Jev
+    over the window, and it measures itself. **Sampled skips still produced a candidate 6.7% of the
+    time (11 of 164), against 8.4% for runs, and a replay-passing one 0.6% of the time (1) against
+    1.6% (8).** The direction is right, but these counts are too small for the gap to be
+    significant. So far it mostly throttles volume (about $3.70 an hour of research saved) rather
+    than reliably picking out empty sessions. Triage has turned the swarm's writing into 127 deduplicated repair
     groups, and exposure groups show up to 7 agents on one event.
 - **Sail and model routing.**
   - **Built:**
@@ -160,7 +163,8 @@ an edge.
     their paper records.
   - The weather card `6aed49`, waiting for a seat.
   - The sealed holdout: no development pass has reached it yet, so it has 0 accesses.
-  - The research gate's miss rate: 0 candidates in the sampled skips so far.
+  - The research gate's miss rate: 1 replay-passing candidate in 164 sampled skips so far, against
+    8 in 501 runs. It needs a longer sample before the gap means anything.
   - The Luna cache on the explicit-hint layout.
   - Options replay admissions.
 - **The dynamism revision (#123)** is the newest experiment. Watch whether paper agents now reach
@@ -207,7 +211,7 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 | 1a. Astra hypotheses, not mutations | #90 hypothesis foundry replaces the House's mutation refill; #92 evidence-led refill and exhausted-line retirement; #114 a card waiting on a full desk no longer blocks the foundry | Live 15:48Z: 4 cards for the weather desk, 1 passed replay and 3 failed honestly; 6 exhausted families retired; births since the restart are evidence-driven | More live calls; the waiting card needs a seat |
 | 1b. Criticism becomes work | #94 repair queue, deterministic sources, engineer, `follow()` repair, per-strategy registry files; #93 pre-audit and consult recovery; #103 requested jobs first | **Two autonomous repairs merged with no human: #100 (hawkins horizon guard, deployed by the attested updater) and #113 (haghani entry rounding)** | #100 is observing (24 h window); #113 awaits deployment |
 | 1c. Autonomous engineering loop | #94 engineer (bounded allowlist, per-job ceiling, revises against CI's own failure text via the gateway's read-only failures route); #93 independent release verifier (exact-commit attestation, the running release judges, protected files are the owner's) | **Drill on production: patch 1 refused by CI (#104), patch 2 written against CI's failure text, passed and merged (#105), deployed.** The updater attested and deployed four releases by itself and refused the protected #102 and #110 | External Sail broker not built; the engineer keeps the existing Merton allowlist |
-| 2. Jev as sensor and router | #95 research gate, inactivity reasons, triage, hypothesis memory, exposure groups; semantic lab off (#92) after a capped evaluation | Lab: no tradable value on 128k labels. Live gate: about 41% of due sessions skipped; sampled skips found 0 candidates in 54; Jev spend about $0.02/day | Longer sample for the miss rate |
+| 2. Jev as sensor and router | #95 research gate, inactivity reasons, triage, hypothesis memory, exposure groups; semantic lab off (#92) after a capped evaluation | Lab: no tradable value on 128k labels. Live gate (through 20:15Z): 792 of 1,457 due sessions skipped; sampled skips produced candidates 6.7% of the time vs 8.4% for runs, replay passes 1 of 164 vs 8 of 501; Jev under a cent over the window | Longer sample for the miss rate |
 | 3. Sail and model routing | #98 Luna cache layout, routing table, traces, economics, experiment; #102 box sleeps off the tick and Merton cadence by yield | Live: 51% of Luna input tokens read from cache (0% before); Luna $/h down 58%; ticks down from 60–250 s to 9–45 s | Balanced tier ships off; batch inference has no consumer yet |
 | 4. Alpaca data | #89 history store and ingestion; #96 deep walk-forward replay, sealed holdout, quote-informed fills; #97 dated replay quotes; #91 options history and replay, IV/skew/activity features | Phase 1: 13,358 calls and 11.7M rows; phase 2: 160,146 quote probes; 0 failures. 15 of 25 living Alpaca agents' inputs are covered. Demo holdouts +7.1% and +2.3% | `min_trades` = 20 blocks daily strategies (the owner's call); no holdout pass yet |
 | 5. Compounding loop | Private ledger kinds link cards, links, repairs, gates, routes, traces, coverage, holdout access and inactivity to the existing trials, births, fills and deploys | The full path ran live: evidence → pre-audit → repair job → engineer PR → CI → merge → attested deploy → observing | Attribution of fills to cards and repairs over days |
