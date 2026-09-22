@@ -743,16 +743,26 @@ class FloorTickTest(HouseCase):
     def test_tick_runs_the_jobs_and_publishes_health(self):
         self.floor()
         self.house.ledger.append("tool.request", {"name": "funding_rates", "description": "perpetual funding feed for BTC and ETH"}, agent="r-1")
-        self.house.tick()
-        self.house.wait(10)
-        self.clock.advance(60)
-        self.house.tick()
-        self.house.wait(10)
+        for _ in range(4):  # one Jev job starts per tick
+            self.house.tick()
+            self.house.wait(10)
+            self.clock.advance(60)
         health = json.loads((self.house.root / "health.json").read_text())
         self.assertEqual(health["jev"]["sensor"]["model"], MODEL)
         self.assertEqual(health["jev"]["exposure"]["positions"], 0)
         self.assertEqual(health["jev"]["triage"]["groups"], 1)
         self.assertEqual([e.payload["key"] for e in self.house.ledger.iter(kinds="repair.reported")], ["missing_data:funding_rates"])
+
+    def test_health_never_waits_for_or_breaks_on_a_running_job(self):
+        floor = self.floor()
+        floor.triage.run()
+        first = floor.health()["triage"]
+        with floor.triage.lock:  # a run in flight, waiting on Jev
+            during = floor.health()["triage"]
+        self.assertTrue(during["running"])
+        self.assertEqual(during["groups"], first["groups"])
+        floor.sensor.stats = lambda: 1 / 0
+        self.assertIn("ZeroDivisionError", floor.health()["sensor"]["error"])
 
     def test_a_pause_stops_paid_jobs_but_not_the_inactivity_sweep(self):
         floor = self.floor()

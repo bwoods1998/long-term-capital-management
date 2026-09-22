@@ -376,6 +376,17 @@ class Triage:
         return written
 
     def stats(self) -> dict[str, Any]:
+        """For health.json on the tick thread: never waits on a run in flight (it may be waiting
+        on Jev), and never iterates groups a run is changing -- the last summary stands instead."""
+        if not self.lock.acquire(blocking=False):
+            return {**getattr(self, "_last_stats", {}), "running": True}
+        try:
+            self._last_stats = self._stats()
+            return self._last_stats
+        finally:
+            self.lock.release()
+
+    def _stats(self) -> dict[str, Any]:
         groups = self.state["groups"]
         kinds: dict[str, int] = {}
         for group in groups.values():

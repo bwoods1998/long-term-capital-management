@@ -72,19 +72,29 @@ class JevFloor:
                 self.house.alert("warning", f"inactivity sweep failed ({type(exc).__name__}: {str(exc)[:160]})")
         if not open_for_business:
             return
+        # One job a tick at most: they share the House's three-slot ops lane with the backup, the
+        # updater and Merton, and none of them is urgent.
         for key, job in (("jev:triage", self.triage), ("jev:links", self.memory), ("jev:exposure", self.exposure)):
             if job is not None and job.due():
-                self.house._background(key, job.run)
+                if self.house._background(key, job.run):
+                    break
 
     def failure_history(self, ref: str, niche: str | None = None) -> dict[str, Any] | None:
         """A mechanism's failures and its linked mechanisms' failures, kept apart (hypothesis_memory)."""
         return self.memory.failure_history(ref, niche) if self.memory is not None else None
 
     def health(self) -> dict[str, Any]:
-        reasons = Counter(str((row or {}).get("reason")) for row in self.state.data.get("inactive", {}).values())
-        return {"sensor": self.sensor.stats() if self.sensor is not None else None,
-                "gate": dict(self.state.data.get("totals") or {}) if self.gate is not None else None,
-                "inactive": dict(reasons),
-                "triage": self.triage.stats() if self.triage is not None else None,
-                "hypothesis_memory": self.memory.stats() if self.memory is not None else None,
+        """health.json's `jev` block. Written at the end of every tick, so no part may raise."""
+        def safe(read):
+            try:
+                return read()
+            except Exception as exc:  # noqa: BLE001 - a report must not stop the tick that writes it
+                return {"error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+        return {"sensor": safe(self.sensor.stats) if self.sensor is not None else None,
+                "gate": safe(lambda: dict(self.state.data.get("totals") or {})) if self.gate is not None else None,
+                "inactive": safe(lambda: dict(Counter(str((row or {}).get("reason"))
+                                                     for row in list(self.state.data.get("inactive", {}).values())))),
+                "triage": safe(self.triage.stats) if self.triage is not None else None,
+                "hypothesis_memory": safe(self.memory.stats) if self.memory is not None else None,
                 "exposure": self.exposure.latest if self.exposure is not None else None}
