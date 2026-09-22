@@ -5,9 +5,9 @@
   "note": "New sessions only. Stable agent assignment; persisted sessions keep their original provider. OpenAI uses the metered inline JSON tool protocol, Sail native function calls. Enable after matched-loop acceptance. No additional trading authority.",
   "cache": {
     "layout": "messages",
-    "explicit_hints": false,
+    "explicit_hints": true,
     "key": "ltcm-research-v2",
-    "note": "Luna request layout (league/fast_research.py). 'messages' works through the deployed gateway and caches turn N+1 on turn N. Set explicit_hints true only after the gateway that admits prompt_cache_key/prompt_cache_options and input_text breakpoints is deployed (Sept 22, 2026 PR); that adds the cross-agent shared-prefix hit. 'packet' is the old single-message layout."
+    "note": "Luna request layout (league/fast_research.py). 'messages' works through the deployed gateway and caches turn N+1 on turn N. Set explicit_hints true only after the gateway that admits prompt_cache_key/prompt_cache_options and input_text breakpoints is deployed (Sept 22, 2026 PR); that adds the cross-agent shared-prefix hit. 'packet' is the old single-message layout. Turned on Sept 22, 2026 after gateway version 7e3a180b admitted a live Luna call with prompt_cache_key and an explicit breakpoint (HTTP 200, $0.00001)."
   },
   "routing": {
     "record": true,

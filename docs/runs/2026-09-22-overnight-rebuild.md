@@ -40,7 +40,14 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 
 | Workstream | Implementation | Verification | Remaining |
 |---|---|---|---|
-| 0. Pause the expensive loop | `House.paused()` + `floor_box.py maintenance on/off` | `league/tests/test_pause.py` | deploy, verify on the box |
+| 0. Pause the expensive loop | #87 `House.paused()`, `floor_box.py maintenance on/off` | Six paused hours: no research, Merton, births or deaths; exits and reconciliation kept working; spend flat | Lift the pause at the restart |
+| 1a. Astra hypotheses, not mutations | #90 hypothesis foundry (`hypotheses.py`) replaces the House's mutation refill; #92 v0 evidence-led refill and exhausted-line retirement | 24 tests; dry run: 8 of 8 cards were valid code and 1 of 7 replayed cards passed ($1.17); on deploy it retired 6 exhausted families | First live foundry calls after the restart |
+| 1b. Criticism becomes work | #94 repair queue (`worklist.py`), deterministic sources, engineer (`engineer.py`), `follow()` repair, per-strategy registry files, drill; #93 pre-audit and consult recovery | 41 + tests; production dry runs: 140 queued jobs, 7 of 32 paper agents flagged, 123 recovered consult items | The drill end to end on production; the first engineer PR |
+| 1c. Autonomous engineering loop | #94 engineer (bounded allowlist, per-job ceiling, retries against CI's own failure text via gateway route `/v1/github/pr/<n>/failures`); #93 independent release verifier (exact-commit attestation, the running release judges) | Gateway route live on version 7e3a180b; tests | External Sail broker not built; engineer keeps the existing Merton allowlist |
+| 2. Jev as sensor and router | #95 research gate, inactivity reasons, triage, hypothesis memory, exposure groups; semantic lab off (#92) with a capped evaluation | Lab: no tradable value on 128k labels; gate replay would skip 67.5% of past sessions; 48 tests | Live gate numbers; `python -m league.research_gate LEDGER` |
+| 3. Sail and model routing | #98 Luna cache layout, routing table, traces, economics, experiment | Cache: 97% read on a follow-on turn; 0% over 15,044 old calls; experiment $0.97; explicit hints admitted by gateway 7e3a180b | Live cache rates after restart; balanced tier ships off |
+| 4. Alpaca data | #89 history store and ingestion; #96 deep walk-forward replay, sealed holdout, quote-informed fills; #97 dated replay quotes; options (#91, in progress) | Phase 1: 13,358 calls, 11.7M rows, 0 failed; demo holdouts +7.1% / +2.3% | Phase-2 quote probes running; `min_trades` decision; options replay |
+| 5. Compounding loop | Ledger kinds for cards, links, repairs, gates, routes, traces, coverage, holdout access, inactivity | — | Observe the full path live |
 
 ## Log
 
@@ -66,3 +73,89 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 - 13:26Z The owner restarted the full eight-hour window (see above). The seven agents were told to
   return to their full scope, with ready-for-review PRs due by 16:15–16:30Z. The ingestion PR comes
   first, so history can load while the rest is built.
+- 13:33Z Recoverable checkpoint of the House box: `sbcp_9dc7fd6b-88e4-4e59-9b2e-78cf031114a0`
+  (expires 2026-10-22; it holds the box's credentials, so treat it like the box). The first attempt
+  at 13:29Z failed with a Sail-side 503 while the guest prepared its snapshot. The House was
+  unaffected, and every book reconciled.
+- 13:52Z #92 (v0) merged. CI on Python 3.11 first hit the 10-minute job limit, then passed on a
+  rerun in 9m21s. Timing on this machine: v0 costs about 20% on the slowest lifecycle test, and the
+  runner's variance is larger than that; later runs took 3m29s–6m50s.
+- 14:05Z #89 (history store and ingestion) merged. Main (v0 + #89) deployed as release
+  `20260922T140503Z-8257fa020126`, promoted 14:09:45Z, still paused.
+- 14:10Z Phase-1 history ingestion started on the box (pid 5237): 27 core symbols; 1Day, 1Hour and
+  5Min since 2016; capped at 30,000 calls, 1,500 a minute, through the gateway. By 14:16Z: 4,984
+  calls, 1.2M rows, 1Day complete from 2016, no failures.
+  - The Workers plan was checked first. Account-wide Worker requests were 127,286 on Sept 21, and
+    ltcm-gateway served 10–13k an hour while the league ran, with no failures. That is above the
+    free tier's 100k a day, so the account is on Workers Paid.
+- 14:20Z #94 (repair queue, engineer, `follow()` repair, registry collision fix, drill) merged.
+- 14:36Z #90 (hypothesis foundry) merged.
+- 14:4xZ #95 (Jev research gate, inactivity reasons, triage, hypothesis memory, exposure groups,
+  semantic lab evaluation) merged.
+  - It replaces v0's gate body, and fixes a v0 flaw: routine `look`/`progress` verdicts had counted
+    as news, so a paper agent almost never backed off.
+- #97 (dated replay quotes) was found by the foundry's dry run and folded into #96. A recorded quote
+  is dated when it was quoted (now − age); a synthesized one is dated at its step.
+- 14:36Z Phase-2 ingestion (quote probes since 2024-10-31, tier-1 symbols, 120k-call cap) started (pid 5514).
+- 14:40Z #98 (routing, caching, traces, economics) merged; main deployed as release
+  `20260922T143927Z-02148288a0b8` (canary passed 3 ticks, promoted 14:43:48Z), still paused.
+  Gateway deployed from the same main: version `7e3a180b-5e11-435f-a633-23adbed8fdcb` (the CI
+  failures route of #94 and the cache-aware frontier meter of #98). Verified: `/v1/github/pr/73/failures`
+  returns the failed runs; a Luna call with `prompt_cache_key` and an explicit breakpoint is admitted.
+- 14:58Z `api.github.com` added to the House box's egress allowlist (32 hosts), which the release
+  verifier of #93 reads to attest the exact commit. It is a read-only API host beside `github.com`
+  and `codeload.github.com`, which were already allowed.
+
+## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
+
+**Store and ingestion (#89).**
+- Where: `league/history.py` keeps Alpaca history in `/workspace/state/history/history.sqlite`, fetched through the gateway like the House's own data reads, at 1,500 calls a minute by default.
+- What it holds:
+  - daily and hourly bars since 2016, both raw and adjusted for splits and dividends;
+  - raw 5-minute bars for the 24 most-used symbols;
+  - quote probes: the NBBO at each regular-session 5-minute close + 2 s;
+  - optional trade windows.
+- Resumable: each chunk commits together with its completion record, so a killed run resumes where it stopped.
+- Unavailable vs unfetched: `empty` means the venue returned nothing and the input is unavailable; an absent chunk is unfetched, a gap in the store rather than a fact about the market.
+- Each finished run becomes a private `data.coverage` row.
+- Measured: Alpaca pages by time span, about 2 calls per symbol-month. Phase 1 on the box (27 core symbols; 1Day, 1Hour and 5Min since 2016; about 20k calls) started at 14:10Z at about 770 calls a minute.
+
+**Deep replay (#96).**
+- Which history: an Alpaca strategy replays on the store's development window when every input it declares has been fetched.
+  - The window is the 252 days (daily) or 63 days (hourly) before the holdout, capped at the largest live tape.
+  - Otherwise the strategy gets the live 21/126-day tape, as before.
+- Same code as live: the same `AlpacaData.tape` builder runs through `StoreClient`, with bars stamped at their close.
+- Adjustments: signal bars are adjusted; execution bars and quotes are raw, scaled by that day's factor.
+- A development fold can read nothing past its own end and nothing in the holdout.
+
+**The sealed holdout (#96).**
+- Window: fixed at 2025-11-14 → 2026-05-15. Replays began Sept 19 and the oldest daily tape reaches back to May 16, so no agent has seen this window.
+- Promotion: a development pass reaches paper only if the holdout also passes. The holdout runs at the recorded spread and at double spread, and both must clear the evaluator's own gate (`Evaluator.replay_gate`; no statistics changed).
+- Rationing: one evaluation per strategy version and three per lineage root. Every access writes a private `holdout.access` row first.
+- Callers see only pass/fail, return rounded to a whole percent, and a trade-count band.
+
+**Quote-informed fills (#96).**
+- A market order pays the recorded NBBO touch. A quote more than 10 s old is stale: the touch is centred on the close and at least twice the assumed spread.
+- `spread_stress` = 2 is the double-spread variant.
+- A touched limit is not a fill. Queue and depth are unknown, and the output says so.
+- Tapes without quotes replay byte-identically.
+- Measured over the holdout: SPY's quoted spread was 0.21 bp and QQQ's 0.27 bp, against the old fixed 2 bp assumption.
+
+**Switches.**
+- `league/config.json`: `"deep_replay"` and `"holdout_gate"`, both default on. They do nothing until a strategy's inputs are fetched.
+- `Settings.holdout_lineage_budget` (3) and `Settings.deep_replay_days`.
+- `history.py` and `deep_replay.py` are in `league/ci.py`'s FORBIDDEN list.
+
+**Demonstration (real SIP data, through a House).**
+- Development window, 2025-03-07 → 2025-11-14:
+  - equity-trend: +13.9%, 9 trades, DSR 0.97.
+  - equity-rsi2: +2.7%, 8 trades.
+- Holdout:
+  - equity-trend: +7.1% at the recorded spread, +7.0% at double spread.
+  - equity-rsi2: +2.3% at both.
+- Both fail only on `min_trades` = 20. That threshold assumes short hourly tapes, and changing it is an open decision.
+
+**Still open.**
+- Historical options replay and IV features (the options PR).
+- Phase-2 quote probes, about 255k calls.
+- The `min_trades` decision.
