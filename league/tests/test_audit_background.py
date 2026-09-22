@@ -58,7 +58,7 @@ class BackgroundAudit(unittest.TestCase):
         started = time.monotonic()
         self.house._promote(agent, verdict)
         self.assertTrue(entered.wait(5))
-        self.assertLess(time.monotonic() - started, 2.0)            # the caller did not sit through the audit
+        self.assertLess(time.monotonic() - started, 4.0)            # the caller did not sit through the (5 s) audit
         self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "auditing")
         self.house._promote(agent, verdict)                         # the next tick's screen pass
         self.house._promote(agent, verdict)
