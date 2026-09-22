@@ -140,11 +140,12 @@ and `greeks_source`; it also carries `last` and `trades`. From Sept 22, 2026 the
 OPRA quotes it shows live, and a replay over those days shows and marks on them instead. A contract appears only once it has
 printed (no listing dates are published) and only while its last qualifying print is at most 25
 minutes old. Replay fills are conservative (`league/options_replay.py`): nothing fills in the
-bar the decision saw; a later bar with at least 5 contracts in 2 trades fills a buy at the
-(wider) estimated ask at its open if the limit reaches it, else at the limit only when it traded
-at least one tick THROUGH it (a touched limit is not a fill), and never more than 10% of the bar's
-volume; a recorded OPRA quote after the order fills one contract at its touch. Orders are day
-orders and die at 16:00 New York. Each fill pays an assumed $0.05 a contract. From 14:30 New York on its last
+bar the decision saw. On a later bar with at least 5 contracts in 2 trades, a buy at or over the
+shown ask at that bar's open is marketable and fills at the worse of the shown and the wider
+estimated ask, never above its limit; any other buy fills at its limit only when the bar traded
+at least one tick THROUGH it (a touched limit is not a fill); sells mirror this, and no order
+fills more than 10% of a bar's volume. A recorded OPRA quote after the order fills one contract
+at its touch. Orders are day orders and die at 16:00 New York. Each fill pays an assumed $0.05 a contract. From 14:30 New York on its last
 day the House offers a held contract at the bid; what is unsold at the bell is written off at
 zero. The House replays an options candidate only where its options history covers every
 underlying over the window; elsewhere paper remains the test.
