@@ -42,4 +42,12 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
 
 ## Log
 
-- 06:40Z Goal set. PAUSE written on the box at 06:5xZ (effective once the pause release deploys).
+- 06:40Z Goal set.
+- 06:44Z `PAUSE` written on the box (`floor_box.py maintenance on`).
+- 06:4xZ Seven build workstreams started in parallel worktrees: hypotheses (Astra births), repairs
+  (queue + engineer), jev (gate, triage, memory), routing (caching, routes, experiments, traces,
+  economics), verifier (trusted release, audits off the tick, pre-audit, consult recovery), alpaca
+  (deep history, walk-forward, holdout, quote-informed fills), options (options replay, IV features).
+- 06:57Z PR #87 (maintenance pause) promoted as release `20260922T065328Z-57fa3c004c29`. First
+  paused ticks at 06:59Z: budget "stopped", no background jobs, tick 8 s, eight durable research
+  jobs parked for resume.
