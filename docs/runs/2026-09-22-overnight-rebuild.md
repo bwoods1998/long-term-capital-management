@@ -1,6 +1,6 @@
 # Overnight rebuild — September 22, 2026
 
-Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Opus 5) under the owner's `/goal`.
+Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Opus 5; Opus 5.5 from 17:10Z) under the owner's `/goal`.
 
 - **First start:** 2026-09-22T06:40:51Z. The session went down at about 07:05Z and came back at 13:17Z.
 - **The window now in force (the owner, 13:26Z):** "since we got stopped in the middle of this goal, you should still spend a full 8 hours on it ... the full 8 hour rebuild remains".
@@ -11,6 +11,103 @@ Execution record for `docs/goals/LTCM_OVERNIGHT_GOAL.md`, run by Claude Code (Op
   the league itself stayed live. The owner resumed at 17:10:24Z: "continue with your goal given
   youve spent 4 hours on it already". So four hours remained, and **the deadline in force is
   2026-09-22T21:10:24Z.**
+
+## Final report
+
+The figures below are measured through ⟨T⟩. The **after** window is the league's open hours since
+the restart: 15:27:20–16:47:39Z and 17:45:14Z–⟨T⟩. It leaves out the 58-minute meter stall.
+
+### What was built, and what is verified live
+
+- **Astra (Merton, gpt-6-astra).**
+  - **Built:**
+    - the hypothesis foundry, replacing House-staked parameter mutations (#90, #92, #114);
+    - the durable repair queue and engineer, which revises against CI's own failure text through
+      a read-only gateway route (#94, #103, #116);
+    - the pre-audit and consult recovery (#93);
+    - an independent release verifier with exact-commit attestation (#93);
+    - per-strategy registry files, with no more registry collisions (#94);
+    - `follow()` keeps watching refused PRs (#94).
+  - **Verified live:**
+    - the first foundry call wrote 4 falsifiable weather cards; 1 passed replay and 3 failed
+      honestly;
+    - **two autonomous repairs** were written, CI-passed and merged with no human: #100 (hawkins
+      horizon guard) and #113 (haghani entry rounding);
+    - the attested updater deployed releases by itself and refused the two protected changes
+      (#102, #110);
+    - the synthetic drill ran end to end (#104 refused by CI, #105 revised against CI's text and
+      merged) ⟨drill final state⟩.
+- **Jev.**
+  - **Built:** the research gate on exact triggers with Jev relevance, explicit inactivity reasons,
+    triage into repair reports, hypothesis memory (rewordings linked, never genealogy) and
+    report-only exposure groups (#95). The continuous semantic lab is off (#92) after a capped
+    evaluation of 128,179 labels found no tradable value.
+  - **Verified live:** the gate skips about 41% of due sessions. Its sampled skips found 0
+    candidates in ⟨n⟩, and triggered runs for agents on empty streaks found 0 in ⟨n⟩. Jev spend is
+    about $0.02 a day.
+- **Sail and model routing.**
+  - **Built:**
+    - the Luna cache layout, with explicit hints admitted by the gateway (#98, #99);
+    - the task routing table, research traces, the economics report and a bounded model
+      experiment ($0.97; balanced ships off, Flash rejected);
+    - box sleeps moved off the tick thread (#102);
+    - the Sail meter now reads the balance, not a rolling window (#110).
+  - **Verified live:** 51% of Luna input tokens are now read from cache (0% over 15,044 calls
+    before). Ticks fell from 60–250 s to 9–45 s.
+- **Alpaca.**
+  - **Built:**
+    - a resumable history store (#89);
+    - deep walk-forward replay, a sealed holdout (2025-11-14 → 2026-05-15) and quote-informed fills
+      (#96, #97);
+    - options history and replay, with IV/skew/activity features (#91).
+  - **Verified live:**
+    - 13,358 bar calls (11.7M rows) and 160,146 quote probes, with 0 failures;
+    - deep tapes build for 15 of 25 living Alpaca agents;
+    - the demo holdouts returned +7.1% (equity-trend) and +2.3% (equity-rsi2);
+    - SPY's quoted spread is 0.21 bp, against the old 2 bp assumption.
+
+### The synergies that mattered
+
+1. **Gate + cache + evidence-led births: less spent on research, more candidates per dollar.**
+   - The gate stops paying for passes that keep coming back empty.
+   - The cache makes the passes that do run cheaper.
+   - Births come from replay passers, earning parents and cards, instead of the emptiest desk.
+   - Together: research cost per hour fell by more than half, while the share of sessions with a
+     candidate and the replay pass rate both rose (table below).
+2. **Pre-audit → repair queue → engineer → CI → attested updater: the league repairs its own
+   strategies.** The pre-audit names a defect in a strategy on paper; the queue deduplicates it and
+   ranks it; the engineer writes a corrected child; CI judges it; the Merton workflow merges it;
+   and the updater deploys that exact commit through the canary. No step needs a person, and none
+   can approve its own spending or release.
+3. **History store → deep replay and holdout → the foundry's packet.** Merton is shown what history
+   exists and what the gate needs, never the holdout. So cards are written against a replay that
+   can reject them honestly.
+
+### Before and after
+
+| Measure | Before (12 h) | After (⟨h⟩ open h) |
+|---|---:|---:|
+| Research sessions per hour | 414 | ⟨a⟩ |
+| Research cost per hour | $8.56 | ⟨b⟩ |
+| Sessions with a candidate | 4.6% | ⟨c⟩ |
+| Replay pass rate | 7.4% | ⟨d⟩ |
+| Research $ per replay pass | $3.42 | ⟨e⟩ |
+| Luna $/h (cache read) | $5.60 (0%) | ⟨f⟩ |
+| Merton $/h | $1.77 | ⟨g⟩ |
+| Births: House-staked mutations | 186 in 12 h, nearly all mutations | ⟨i⟩ |
+| Verified or merged autonomous repairs | 0 | 2 merged, ⟨j⟩ verified |
+
+The after window is hours, not days. Pass rates and candidate shares on samples this small move
+with a handful of trials. The real-money book traded too little either way to say anything about
+an edge.
+
+### State at the deadline
+
+⟨state⟩
+
+### Still collecting evidence, and the next step
+
+⟨next⟩
 
 ## State at the start (06:39Z)
 
