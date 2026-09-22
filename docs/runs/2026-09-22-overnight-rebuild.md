@@ -484,9 +484,12 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   below the 59–77% the routing experiment projected; the measured figure stands.
 
 - 19:26:36Z **The updater attested and deployed `main` `0b4ca33` by itself** (`main-7ac1da5efe95`:
-  #117, the teacher's #118, the engineer's #119). The canary passed; promoted 19:32:11Z. That is
-  three autonomous releases this evening (15:50Z, 18:17Z, 19:26Z). The owner's deploys were used
-  only for the protected changes (#102, #110–#112).
+  #117, the teacher's #118, the engineer's #119). The canary passed; promoted 19:32:11Z.
+  - **Five autonomous releases this evening:** 15:50, 16:41, 17:20, 18:17 and 19:26Z, each with the
+    exact commit attested and each through the canary.
+  - **One refusal:** the protected #102 at 15:56Z, logged as the owner's deploy.
+  - The owner's deploys were used for the protected changes and the start: #102 and #110–#112,
+    plus the restart releases.
 
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
