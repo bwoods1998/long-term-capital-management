@@ -433,6 +433,23 @@ Cost per replay pass ≈ $8.4 of combined OpenAI + Sail commitment. Cost per pap
   refusal to re-POST an unconfirmed request stays. Asking Sail for the retention window would let
   interrupted sessions be recovered safely.
 
+- 18:36Z The Jev floor's shared views (health.json; report only, and never trading authority):
+  - **Triage** has 127 deduplicated groups (107 missing data, 19 bug reports, 1 strategy defect).
+    The most shared missing inputs, as the swarm asks for them:
+    | Missing input | Agents |
+    |---|---:|
+    | Live sports scores | 43 |
+    | Point-in-time earnings surprises | 33 |
+    | Perp positioning / funding | 32 |
+    | Attention-market underlier values | 31 |
+    | Lineups and inactive players | 30 |
+
+    None of these is an Alpaca feed. They are the ranked case for the next data spend.
+  - **Exposure:** up to 7 agents sit on one event. On `KXWNBAGAME-26SEP22CONNWSH`, 7 meriwether
+    agents hold 9 practice positions costing $85. The deterministic risk layer still decides; this
+    is visibility.
+  - The sensor has spent $0.0149 over 282 Jev calls, with a p50 latency of 0.5 s.
+
 ## Alpaca: deep history, deep replay, the sealed holdout, quoted fills (#89, #96)
 
 **Store and ingestion (#89).**
