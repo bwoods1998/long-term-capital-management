@@ -1,0 +1,8 @@
+{
+  "family": "prices-favorites",
+  "name": "hawkins-commodity-resolve-guard",
+  "repair": {
+    "key": "order_refusal:kalshi-shadow:this market is expected to resolve in # hours; entries must resolve within #"
+  },
+  "why": "New corrected child of hawkins-3, retaining Kalshi/day WTI and diesel favourites. The parent checks trading-close time but not payout time. Require finite hours_to_resolve in [0, 48] for entries and cancel resting buys that fail that same check, without substituting hours_to_close. All other strategy logic and parameters are preserved. Starts at rung 0 with no inherited qualification or performance record."
+}
