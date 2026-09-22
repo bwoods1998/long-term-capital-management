@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from league.tests.fakes import Clock
-from league.updater import (REQUIRED_CHECKS, TRUSTED_WORKFLOWS_SHA256, UpdateError, Updater, judge_check_runs, unpack,
+from league.updater import (REQUIRED_CHECKS, TRUSTED_WORKFLOWS_SHA256, UpdateError, Updater, judge_workflow_runs, unpack,
                             workflows_digest)
 from league.watchdog import Releases
 
@@ -17,11 +17,23 @@ SHA_B = "b" * 40
 WORKFLOWS = {".github/workflows/checks.yml": "name: Checks\n"}
 
 
+def run(sha, *, id=1, event="push", status="completed", conclusion="success", path=".github/workflows/checks.yml", branch="main"):
+    return {"id": id, "head_sha": sha, "event": event, "status": status, "conclusion": conclusion, "path": path, "head_branch": branch,
+            "run_attempt": 1}
+
+
+def jobs(sha, *, conclusion="success", names=REQUIRED_CHECKS):
+    return {"jobs": [{"id": 100 + i, "name": name, "head_sha": sha, "status": "completed", "conclusion": conclusion}
+                     for i, name in enumerate(names)]}
+
+
 def passed(sha):
-    """GitHub's answer for a commit whose required checks all succeeded, from GitHub Actions."""
-    return judge_check_runs(sha, {"total_count": len(REQUIRED_CHECKS), "check_runs": [
-        {"id": 100 + i, "name": name, "head_sha": sha, "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}}
-        for i, name in enumerate(REQUIRED_CHECKS)]})
+    """GitHub's answer for a commit whose Checks run and every required job of it succeeded."""
+    return judge_workflow_runs(sha, {"workflow_runs": [run(sha)]}, lambda run_id: jobs(sha))
+
+
+def nothing_yet(sha):
+    return judge_workflow_runs(sha, {"workflow_runs": []}, lambda run_id: {"jobs": []})
 
 GOOD = 'NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "t", "symbols": ["BTC/USD"]}\nPARAMS = {}\n\ndef decide(ctx):\n    return {"intents": []}\n'
 
@@ -255,31 +267,32 @@ class ABusyLockDoesNotRetireACommit(UpdaterCase):
 class ExactCommitAttestation(UpdaterCase):
     """GitHub's check runs on the exact commit, or nothing deploys."""
 
-    def test_the_rule_counts_only_this_sha_and_only_github_actions(self):
-        good = passed(SHA_A)
-        self.assertEqual(good["state"], "passed")
-        other_head = judge_check_runs(SHA_B, {"check_runs": [dict(run, head_sha=SHA_A) for run in
-                                                             [{"id": 1, "name": n, "status": "completed", "conclusion": "success",
-                                                               "app": {"slug": "github-actions"}} for n in REQUIRED_CHECKS]]})
-        self.assertEqual(other_head["state"], "pending")
-        self.assertEqual(other_head["ignored_runs"], len(REQUIRED_CHECKS))
-        forged = judge_check_runs(SHA_A, {"check_runs": [{"id": 1, "name": n, "head_sha": SHA_A, "status": "completed", "conclusion": "success",
-                                                          "app": {"slug": "engineer-bot"}} for n in REQUIRED_CHECKS]})
-        self.assertEqual(forged["state"], "pending")
-        runs = [{"id": 1, "name": n, "head_sha": SHA_A, "status": "completed", "conclusion": "success", "app": {"slug": "github-actions"}}
-                for n in REQUIRED_CHECKS]
-        runs.append({"id": 2, "name": REQUIRED_CHECKS[1], "head_sha": SHA_A, "status": "completed", "conclusion": "failure",
-                     "app": {"slug": "github-actions"}})
-        self.assertEqual(judge_check_runs(SHA_A, {"check_runs": runs})["state"], "failed")  # the re-run that failed decides
-        runs[-1] = dict(runs[-1], status="in_progress", conclusion=None)
-        self.assertEqual(judge_check_runs(SHA_A, {"check_runs": runs})["state"], "pending")
-        for conclusion in ("cancelled", "skipped", "neutral", "timed_out"):
-            runs[-1] = dict(runs[-1], status="completed", conclusion=conclusion)
-            self.assertEqual(judge_check_runs(SHA_A, {"check_runs": runs})["state"], "failed", conclusion)
+    def test_only_a_real_run_of_the_pinned_workflow_on_this_sha_counts(self):
+        judge = lambda runs, listed=None: judge_workflow_runs(SHA_A, {"workflow_runs": runs},  # noqa: E731
+                                                              lambda run_id: listed if listed is not None else jobs(SHA_A))
+        self.assertEqual(judge([run(SHA_A)])["state"], "passed")
+        self.assertEqual(judge([run(SHA_A, event="workflow_dispatch")])["state"], "passed")
+        self.assertEqual(judge([run(SHA_A, event="schedule")])["state"], "passed")
+        # Another commit's green, a pull request's preview, another workflow, another branch: none of them.
+        self.assertEqual(judge([run(SHA_B)])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, event="pull_request")])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, event="pull_request_target")])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, path=".github/workflows/evil.yml")])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, branch="feature")])["state"], "pending")
+        # A green run whose jobs are not the required ones, or not on this sha, is a failure:
+        # check runs created through the API by some other workflow are not jobs of this run.
+        self.assertEqual(judge([run(SHA_A)], jobs(SHA_A, names=("tests (3.11)",)))["state"], "failed")
+        self.assertEqual(judge([run(SHA_A)], jobs(SHA_B))["state"], "failed")
+        self.assertEqual(judge([run(SHA_A)], jobs(SHA_A, conclusion="skipped"))["state"], "failed")
+        # Any failing run of the workflow on the commit fails it; an unfinished one waits.
+        self.assertEqual(judge([run(SHA_A, id=1), run(SHA_A, id=2, conclusion="failure")])["state"], "failed")
+        self.assertEqual(judge([run(SHA_A, status="in_progress", conclusion=None)])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, conclusion="cancelled")])["state"], "pending")
+        self.assertEqual(judge([run(SHA_A, id=1, conclusion="cancelled"), run(SHA_A, id=2)])["state"], "passed")
 
     def test_a_later_head_never_inherits_an_earlier_heads_approval(self):
         approved = {SHA_A}
-        attest = lambda sha: passed(sha) if sha in approved else judge_check_runs(sha, {"check_runs": []})  # noqa: E731
+        attest = lambda sha: passed(sha) if sha in approved else nothing_yet(sha)  # noqa: E731
         self.main = tarball(tree(extra={"league/house.py": "# A\n"}), sha=SHA_A)
         out = self.updater(attest=attest).check()
         self.assertEqual((out["action"], out["sha"]), ("deploying", SHA_A))
@@ -329,9 +342,44 @@ class ExactCommitAttestation(UpdaterCase):
         self.assertEqual(broken.check()["action"], "blocked")
         self.assertEqual(self.launched, [])
 
+    def test_the_production_attestor_reads_the_run_then_its_jobs(self):
+        import email.message
+        import urllib.error
+
+        from league.updater import GitHubChecks
+
+        asked = []
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def opener(request, timeout=None):
+            asked.append(request.full_url)
+            if "/jobs" in request.full_url:
+                return Response(json.dumps(jobs(SHA_A)).encode())
+            return Response(json.dumps({"workflow_runs": [run(SHA_A, id=77)]}).encode())
+
+        out = GitHubChecks(opener=opener)(SHA_A)
+        self.assertEqual((out["state"], out["run"]["id"]), ("passed", 77))
+        self.assertIn(f"actions/runs?head_sha={SHA_A}", asked[0])
+        self.assertIn("actions/runs/77/jobs", asked[1])
+
+        def limited(request, timeout=None):
+            headers = email.message.Message()
+            headers["X-RateLimit-Remaining"] = "0"
+            raise urllib.error.HTTPError(request.full_url, 403, "rate limited", headers, None)
+
+        out = GitHubChecks(opener=limited)(SHA_A)
+        self.assertEqual(out["state"], "unavailable")
+        self.assertIn("rate limit", out["reasons"][0])
+
     def test_pending_checks_wait_quietly_then_tell_the_owner(self):
         self.main = tarball(tree(extra={"league/house.py": "# new\n"}))
-        updater = self.updater(attest=lambda sha: judge_check_runs(sha, {"check_runs": []}))
+        updater = self.updater(attest=nothing_yet)
         self.assertEqual((updater.check()["action"], updater.check()["new"]), ("waiting", False))
         self.clock.advance(2 * 3600 + 1)
         self.assertTrue(updater.check()["new"])

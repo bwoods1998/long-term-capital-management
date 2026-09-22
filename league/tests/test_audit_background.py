@@ -95,6 +95,27 @@ class BackgroundAudit(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(self.house.evaluator.rung(agent.id), 1)
 
+    def test_an_auditor_that_raises_is_recorded_as_an_error_and_waits_the_short_cooldown(self):
+        agent = self.fixture.on_micro("unlucky", rung=1)
+        calls = []
+
+        def broken(a, v):
+            calls.append(a.id)
+            raise ValueError("the packet could not be built")
+
+        self.house.auditor = SimpleNamespace(audit=broken, policy_digest="policy")
+        verdict = Verdict(agent.id, 1, "eligible", "screen", {})
+        self.house._promote(agent, verdict)
+        self.house.wait(5)
+        row = self.house.ledger.last("audit.verdict", agent=agent.id).payload
+        self.assertFalse(row["approve"])
+        self.assertIn("ValueError", row["error"])
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_veto")
+        self.house._promote(agent, verdict)  # the next mark pass, five minutes later
+        self.house.wait(5)
+        self.assertEqual(calls, [agent.id])
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_cooldown")
+
     def test_a_veto_in_the_background_keeps_the_agent_on_paper(self):
         agent = self.fixture.on_micro("vetoed", rung=1)
         entered, release, calls = self.blocking_auditor(approve=False)
@@ -105,6 +126,10 @@ class BackgroundAudit(unittest.TestCase):
         self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_veto")
 
 
+class Killed(BaseException):
+    """The process dying mid-call: nothing after it runs, not even the House's own error handling."""
+
+
 class RestartDuringAnAudit(unittest.TestCase):
     """The status and the generation the audit is bound to are on disk before the call is made."""
 
@@ -112,6 +137,9 @@ class RestartDuringAnAudit(unittest.TestCase):
         self.fixture = test_tuition.TuitionTest()
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)
+        hook = threading.excepthook
+        threading.excepthook = lambda args: None if issubclass(args.exc_type, Killed) else hook(args)
+        self.addCleanup(setattr, threading, "excepthook", hook)
 
     def restart(self, auditor):
         f = self.fixture
@@ -133,7 +161,7 @@ class RestartDuringAnAudit(unittest.TestCase):
         def audit(a, v):
             entered.set()
             release.wait(5)
-            raise RuntimeError("the process was killed mid-call")  # nothing after the call runs
+            raise Killed()
 
         house.auditor = SimpleNamespace(audit=audit, policy_digest=None)
         house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {}))

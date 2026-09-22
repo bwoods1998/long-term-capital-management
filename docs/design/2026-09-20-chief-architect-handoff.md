@@ -251,14 +251,19 @@ code. What the in-box verifier guarantees, and what it cannot, is listed below.
 A commit of `main` reaches the box automatically only when all of these hold. Each one fails
 closed: nothing deploys, and a warning goes on the ledger naming the commit and the rule.
 
-1. **Exact-commit attestation.** GitHub's check runs for the exact sha (`api.github.com`,
-   unauthenticated) show `gateway`, `tests (3.11)` and `tests (3.14)` completed with `success`.
-   - Only runs whose `head_sha` is that sha and whose app is `github-actions` count.
+1. **Exact-commit attestation.** `api.github.com` (unauthenticated) must show a run of
+   `.github/workflows/checks.yml` on the exact sha, on `main`, started by a push, a dispatch or the
+   schedule, completed with `success`. That run's jobs `gateway`, `tests (3.11)` and
+   `tests (3.14)` must each have completed with `success` on the same sha.
+   - Workflow runs and their jobs are read, not bare check runs or commit statuses. Any workflow
+     granted `checks: write` can create a check run in GitHub Actions' name through the API, but
+     only a real run of the workflow file has jobs.
    - The tarball is downloaded by that sha, and every member must sit under `<repo>-<sha>/`.
    - Nothing carries over from one head to the next.
 2. **The judges do not change by this path.** The candidate may not add, remove or change any
    file in the running release's `ci.FORBIDDEN`: the constitution, the ledger, the book, the
-   evaluator, the auditor, `ci.py`, `updater.py`, `watchdog.py`, the campaign and live-money files.
+   evaluator, the auditor, `ci.py`, `updater.py`, `watchdog.py`, the campaign and live-money files,
+   and now `league/sandbox.py`, which seals the agents' boxes.
    - Its `.github/workflows/` must also hash to `TRUSTED_WORKFLOWS_SHA256`.
    - Such a change lands only through the owner's `scripts/floor_box.py deploy`.
 3. **The trusted content checks.** These are the running release's `league/ci.py`, replay
@@ -284,11 +289,11 @@ closed: nothing deploys, and a warning goes on the ledger naming the commit and 
 
 **Why an engineer worker cannot approve its own deployment through this path.**
 - Every signal of approval comes from something its commit cannot change in the same step:
-  - GitHub Actions check runs, created by the pinned workflows.
-  - The running release's checker.
-  - The protected-file list of the running release.
-- A personal token cannot create check runs. A GitHub App creates them only in its own name, and
-  commit statuses are ignored.
+  - a real run of the pinned Checks workflow and its jobs;
+  - the running release's checker;
+  - the protected-file list of the running release.
+- Commit statuses and bare check runs are ignored, since a write token or another workflow can
+  create those.
 - Changing a workflow or a judge file is refused, and the same edit fails the candidate's own test
   suite on GitHub (`ThePinsFollowTheRepository`).
 

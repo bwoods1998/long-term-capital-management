@@ -847,7 +847,7 @@ class House:
             # thirteen minutes killed eleven passes, which is most of an hour's research.
             with self._state_lock:
                 self._state["deploying_at"] = self.clock()
-        if action in ("deploying", "refused") or outcome.get("new"):
+        if action == "deploying" or (action == "refused" and outcome.get("new", True)) or outcome.get("new"):
             # The attestation is the record of what GitHub said about the exact commit (see
             # league/updater.py); a head that is merely waiting for its checks is not news.
             self.ledger.append("ops.deploy", {k: v for k, v in outcome.items() if k in ("action", "release", "reasons", "files", "sha", "attestation")})
@@ -1309,7 +1309,14 @@ class House:
                 self._drop_audit(agent_id)
                 return  # retired, rewritten or moved while it waited for a lane
             agent = deepcopy(self.registry.get(agent_id))
-        audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
+        try:
+            audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
+        except Exception as exc:  # noqa: BLE001 - an auditor that raises has not audited
+            # Recorded the way the auditor records its own failures, so the short error cooldown
+            # applies: otherwise a broken audit is retried at every mark pass, five minutes apart.
+            audit = {"approve": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                     "summary": "the audit could not run; the agent stays on paper"}
+            self.ledger.append("audit.verdict", {**audit, "policy_digest": getattr(self.auditor, "policy_digest", None)}, agent=agent_id)
         self._finish_audit(agent_id, verdict, generation, audit)
 
     def _finish_audit(self, agent_id: str, verdict: Verdict, generation: tuple, audit: Mapping[str, Any]) -> None:

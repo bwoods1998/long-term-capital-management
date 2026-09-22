@@ -11,13 +11,15 @@ A tree that was refused on its content or rolled back once is never tried again:
 
 The walls, in the order they are asked, each one fail-closed (no deploy, a warning on the ledger):
 
-1. **Exact-commit attestation.** GitHub's own check runs, read from its public API, must show that
-   every required job (`REQUIRED_CHECKS`) of the Checks workflow completed with `success` on the
-   exact sha the tarball was downloaded for, reported by the GitHub Actions app itself
-   (`CHECKS_APP`). Nothing is cached from one head to the next, and a check run for any other sha
-   is ignored, so a later head never inherits an earlier head's approval. Commit statuses are
-   ignored too: any token with write access can set one, while only GitHub Actions can create a
-   check run in its own name. No answer from GitHub is no attestation: nothing deploys.
+1. **Exact-commit attestation.** GitHub's public API must show a run of the pinned Checks workflow
+   (`CHECKS_WORKFLOW`) on the exact sha the tarball was downloaded for, started by a push to main,
+   a dispatch or the schedule, completed with `success`, and every required job of it
+   (`REQUIRED_CHECKS`) completed with `success` on that sha. Workflow runs and their jobs, not bare
+   check runs or commit statuses: a status can be set by any token with write access, and a check
+   run can be created through the API by ANY workflow granted `checks: write`, in the name of
+   GitHub Actions itself -- but only a real run of the workflow file has jobs. Nothing is cached
+   from one head to the next and anything about another sha is ignored, so a later head never
+   inherits an earlier head's approval. No answer from GitHub is no attestation: nothing deploys.
 2. **The judges do not change by this path.** A candidate that changes any file the RUNNING
    release's `league/ci.py` lists as `FORBIDDEN` (the constitution, the ledger, the book, the
    evaluator, the auditor, this file, the watchdog, ci.py itself, the campaign and live-money
@@ -71,13 +73,15 @@ MAX_TARBALL_BYTES = 40 * 1024 * 1024
 MAX_FILE_BYTES = 5 * 1024 * 1024
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
-#: The jobs of `.github/workflows/checks.yml` whose check runs must all have succeeded on the exact
-#: commit. `league/tests/test_updater.py` holds this list to the workflow file.
+#: The jobs of `.github/workflows/checks.yml` that must all have succeeded on the exact commit.
+#: `league/tests/test_updater.py` holds this list to the workflow file.
 REQUIRED_CHECKS = ("gateway", "tests (3.11)", "tests (3.14)")
-#: The only app whose check runs count. A personal token cannot create a check run at all, and a
-#: GitHub App can create them only in its own name, so nothing an engineer holds can forge one of
-#: these; it can forge a commit status, which is why statuses are not read.
-CHECKS_APP = "github-actions"
+#: The workflow whose runs attest a commit, and the events on main that may start one. A pull
+#: request's run tests a merge preview, not the commit on main; a `pull_request_target` run is the
+#: Merton judge, which never runs the suite.
+CHECKS_WORKFLOW = ".github/workflows/checks.yml"
+ATTESTING_EVENTS = ("push", "workflow_dispatch", "schedule")
+FAILED = ("failure", "timed_out", "action_required", "startup_failure", "stale")
 #: sha256 over every file under `.github/workflows/` (see `workflows_digest`). The workflows decide
 #: what a green check run means, so a candidate that changes them is refused here and reaches the
 #: box only as the owner's deploy. The test suite fails on GitHub when this pin and the files
@@ -194,61 +198,81 @@ def unpack(tarball: bytes, target: Path, *, sha: str | None = None) -> int:
 
 
 # ------------------------------------------------------------------------------ attestation
-def judge_check_runs(sha: str, data: Mapping[str, Any], *, required: tuple[str, ...] = REQUIRED_CHECKS,
-                     app: str = CHECKS_APP) -> dict[str, Any]:
-    """GitHub's check runs for one commit -> `{"state": passed | pending | failed, "ok", ...}`.
+def judge_workflow_runs(sha: str, data: Mapping[str, Any], jobs_of: Callable[[int], Mapping[str, Any]], *,
+                        required: tuple[str, ...] = REQUIRED_CHECKS, workflow: str = CHECKS_WORKFLOW,
+                        events: tuple[str, ...] = ATTESTING_EVENTS, branch: str = "main") -> dict[str, Any]:
+    """GitHub's workflow runs for one commit -> `{"state": passed | pending | failed, "ok", ...}`.
 
-    Only runs whose `head_sha` IS this sha and whose app is GitHub Actions count; for each required
-    name the newest such run decides (a re-run supersedes the run it repeats). Anything missing or
-    still running is pending; any other conclusion than `success` -- failure, cancelled, timed_out,
-    skipped, neutral, action_required, stale -- is a failure. Pure, so the rule is testable alone."""
-    runs = data.get("check_runs") if isinstance(data, Mapping) else None
+    Counted: runs of `workflow` whose `head_sha` IS this sha, on `branch`, started by one of
+    `events`. Any counted run that completed with a failing conclusion fails the commit. Otherwise
+    the newest successful run decides, and its jobs (read with `jobs_of(run id)`) must include every
+    required name, each completed with `success` on this sha. No successful run yet is pending.
+    Pure apart from `jobs_of`, so the rule is testable alone."""
+    runs = data.get("workflow_runs") if isinstance(data, Mapping) else None
     runs = [r for r in runs if isinstance(r, Mapping)] if isinstance(runs, list) else []
-    counted = [r for r in runs if r.get("head_sha") == sha and ((r.get("app") or {}).get("slug") == app)]
-    ignored = len(runs) - len(counted)
+    counted = [r for r in runs if r.get("head_sha") == sha and r.get("path") == workflow
+               and r.get("event") in events and r.get("head_branch") == branch]
+    base = {"sha": sha, "required": list(required), "workflow": workflow, "ignored_runs": len(runs) - len(counted),
+            "source": "api.github.com actions runs"}
+    failed = [r for r in counted if r.get("status") == "completed" and r.get("conclusion") in FAILED]
+    if failed:
+        worst = max(failed, key=lambda r: int(r.get("id") or 0))
+        return {**base, "state": "failed", "ok": False, "checks": [], "run": _run_row(worst),
+                "reasons": [f"{workflow} concluded {worst.get('conclusion')!r} on {sha[:12]} ({worst.get('event')} run {worst.get('id')})"]}
+    good = [r for r in counted if r.get("status") == "completed" and r.get("conclusion") == "success"]
+    if not good:
+        waiting = [r for r in counted if r.get("status") != "completed"]
+        why = (f"{workflow} is {waiting[0].get('status')} on {sha[:12]}" if waiting
+               else f"no completed run of {workflow} on {sha[:12]} yet")
+        return {**base, "state": "pending", "ok": False, "checks": [], "reasons": [why]}
+    run = max(good, key=lambda r: (int(r.get("id") or 0), int(r.get("run_attempt") or 0)))
+    listed = jobs_of(int(run.get("id") or 0))
+    jobs = listed.get("jobs") if isinstance(listed, Mapping) else None
+    jobs = [j for j in jobs if isinstance(j, Mapping)] if isinstance(jobs, list) else []
     checks, reasons, state = [], [], "passed"
     for name in required:
-        mine = [r for r in counted if r.get("name") == name]
+        mine = [j for j in jobs if j.get("name") == name and j.get("head_sha") == sha]
         if not mine:
-            reasons.append(f"no check run named {name!r} from {app} on {sha[:12]} yet")
-            state = "failed" if state == "failed" else "pending"
-            continue
-        newest = max(mine, key=lambda r: (int(r.get("id") or 0), str(r.get("started_at") or "")))
-        row = {"name": name, "id": newest.get("id"), "status": newest.get("status"), "conclusion": newest.get("conclusion"),
-               "completed_at": newest.get("completed_at"), "details_url": newest.get("details_url")}
-        checks.append(row)
-        if newest.get("status") != "completed":
-            reasons.append(f"{name!r} is {newest.get('status')} on {sha[:12]}")
-            state = "failed" if state == "failed" else "pending"
-        elif newest.get("conclusion") != "success":
-            reasons.append(f"{name!r} concluded {newest.get('conclusion')!r} on {sha[:12]}")
+            reasons.append(f"run {run.get('id')} of {workflow} has no job named {name!r}")
             state = "failed"
-    total = data.get("total_count") if isinstance(data, Mapping) else None
-    if isinstance(total, int) and total > len(runs):
-        reasons.append(f"GitHub reported {total} check runs and returned {len(runs)}; the rest were not read")
-        state = "failed" if state == "failed" else "pending"
-    return {"sha": sha, "state": state, "ok": state == "passed", "checks": checks, "required": list(required),
-            "app": app, "ignored_runs": ignored, "reasons": reasons, "source": "api.github.com check-runs"}
+            continue
+        job = max(mine, key=lambda j: int(j.get("id") or 0))
+        checks.append({"name": name, "id": job.get("id"), "status": job.get("status"), "conclusion": job.get("conclusion"),
+                       "completed_at": job.get("completed_at"), "url": job.get("html_url")})
+        if job.get("status") != "completed" or job.get("conclusion") != "success":
+            reasons.append(f"job {name!r} is {job.get('status')}/{job.get('conclusion')} on {sha[:12]}")
+            state = "failed"
+    return {**base, "state": state, "ok": state == "passed", "checks": checks, "run": _run_row(run), "reasons": reasons}
+
+
+def _run_row(run: Mapping[str, Any]) -> dict[str, Any]:
+    return {k: run.get(k) for k in ("id", "event", "path", "head_branch", "status", "conclusion", "run_attempt", "html_url", "updated_at")}
 
 
 class GitHubChecks:
     """The production attestor: `(sha) -> attestation`, unauthenticated, from api.github.com.
 
-    Unauthenticated means 60 requests an hour per address; the updater asks once per new tree, at
-    most every half hour. A refusal, a rate limit, an unreachable host or an unreadable answer is
-    `unavailable`, and unavailable deploys nothing."""
+    Two requests per new tree (the commit's workflow runs, then the jobs of the one that decides),
+    at most every half hour, against an unauthenticated limit of 60 an hour per address. A
+    refusal, a rate limit, an unreachable host or an unreadable answer is `unavailable`, and
+    unavailable deploys nothing."""
 
     def __init__(self, repo: str = REPO, *, opener: Any = None, timeout: float = 30.0, api: str = "https://api.github.com",
-                 required: tuple[str, ...] = REQUIRED_CHECKS, app: str = CHECKS_APP):
+                 required: tuple[str, ...] = REQUIRED_CHECKS):
         self.repo, self.opener, self.timeout, self.api = repo, opener, timeout, api.rstrip("/")
-        self.required, self.app = tuple(required), app
+        self.required = tuple(required)
+
+    def _get(self, path: str) -> Any:
+        request = urllib.request.Request(f"{self.api}/repos/{self.repo}/{path}",
+                                         headers={"Accept": "application/vnd.github+json", "User-Agent": "ltcm-floor/1.0",
+                                                  "X-GitHub-Api-Version": "2022-11-28"})
+        return json.loads(_open(self.opener, request, self.timeout, 4 * 1024 * 1024).decode("utf-8"))
 
     def __call__(self, sha: str) -> dict[str, Any]:
-        url = f"{self.api}/repos/{self.repo}/commits/{sha}/check-runs?per_page=100"
-        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "ltcm-floor/1.0",
-                                                       "X-GitHub-Api-Version": "2022-11-28"})
         try:
-            data = json.loads(_open(self.opener, request, self.timeout, 4 * 1024 * 1024).decode("utf-8"))
+            runs = self._get(f"actions/runs?head_sha={sha}&per_page=100")
+            return judge_workflow_runs(sha, runs, lambda run_id: self._get(f"actions/runs/{int(run_id)}/jobs?per_page=100"),
+                                       required=self.required)
         except urllib.error.HTTPError as exc:
             limited = exc.headers.get("X-RateLimit-Remaining") == "0" if exc.headers else False
             return unavailable(sha, f"api.github.com answered HTTP {exc.code}" + (" (the hourly rate limit is spent)" if limited else ""))
@@ -256,14 +280,13 @@ class GitHubChecks:
             reason = str(getattr(exc, "reason", exc))
             hint = f": {EGRESS_HINT}" if "name resolution" in reason or "Name or service" in reason or "nodename" in reason else ""
             return unavailable(sha, f"api.github.com could not be reached ({reason[:160]}){hint}")
-        except (OSError, ValueError, UpdateError) as exc:
+        except (OSError, ValueError, TypeError, UpdateError) as exc:
             return unavailable(sha, f"api.github.com gave no readable answer ({type(exc).__name__}: {str(exc)[:160]})")
-        return judge_check_runs(sha, data, required=self.required, app=self.app)
 
 
 def unavailable(sha: str | None, reason: str) -> dict[str, Any]:
     return {"sha": sha, "state": "unavailable", "ok": False, "checks": [], "required": list(REQUIRED_CHECKS),
-            "reasons": [reason], "source": "api.github.com check-runs"}
+            "reasons": [reason], "source": "api.github.com actions runs"}
 
 
 # ---------------------------------------------------------------------------------- updater
