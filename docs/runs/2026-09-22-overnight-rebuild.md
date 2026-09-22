@@ -116,17 +116,23 @@ an edge.
 
 ### State at the deadline
 
-- **Real money.** mullins-2 (weather, Kalshi) is the only live agent. The live grant
-  `earned-live-20260921` is active, and the money-rule digest is unchanged (`6b55f3fb…`); no
-  money rule was touched tonight. League-basis account equity is ⟨equity⟩ against the $1,017.36
-  start. The Alpaca real account ($500) has no agent on the micro rung yet.
-- **Paper.** ⟨living⟩ agents are living. Births follow replay passers, earning parents and
+- **Real money.** mullins-2 (weather, Kalshi) is the only live agent.
+  - At the owner's request for more dynamism, and with more volatility on the accounts accepted,
+    #123 changed two money rules: `min_closed_trades` 5 → 3 and the paper screen 6 → 4 hourly
+    blocks.
+  - The live grant `earned-live-20260921` was **ratified at 20:26Z** for the same capital
+    (Alpaca $500, Kalshi $517.75, a $1,017.75 loss cap, 16 agents). It is re-pinned to money
+    digest `d715ae7a…` and reads active.
+  - League-basis account equity is $1,012.03 against the $1,017.36 start: tracked −$5.33, far too
+    few trades to say anything about an edge.
+  - The Alpaca real account ($500) has no agent on the micro rung yet.
+- **Paper.** 64 agents are living. Births follow replay passers, earning parents and
   hypothesis cards, and 6 exhausted families are retired.
 - **Deployed.**
-  - House release ⟨release⟩ = main ⟨sha⟩.
+  - House release `20260922T202128Z-8e17da71d9c7` = main `f6b9035`.
   - Gateway version `8f829375-d373-4349-9941-609a04d5b820`.
   - Pre-rebuild box checkpoint `sbcp_9dc7fd6b-88e4-4e59-9b2e-78cf031114a0` (expires 2026-10-22).
-- **Allowance left (campaign basis).** OpenAI ⟨oa⟩, Sail ⟨sail⟩. About $45 of OpenAI and $56 of
+- **Allowance left (campaign basis).** OpenAI $35.97, Sail $68.58. About $45 of OpenAI and $56 of
   Sail are held for calls whose outcome is unproven. They are left conservative; releasing them
   needs vendor receipts.
 - **Rollback.**
@@ -157,6 +163,9 @@ an edge.
   - The research gate's miss rate: 0 candidates in the sampled skips so far.
   - The Luna cache on the explicit-hint layout.
   - Options replay admissions.
+- **The dynamism revision (#123)** is the newest experiment. Watch whether paper agents now reach
+  the screen and the audit within a day, and whether more of them reach micro-real without the
+  micro demotion taking them straight back.
 - **The highest-value next step:** decide the replay gate's trade minimum for daily strategies
   judged on deep history. It is the one rule standing between the new evaluation machinery (deep
   history, sealed holdout, quoted fills) and a stream of equity and ETF candidates onto paper.

@@ -517,9 +517,9 @@ every decision and its reason), then watched for twenty hours and repaired where
 ([the watch](docs/runs/2026-09-20-the-watch.md)).
 
 **At the end of the Sept 22 rebuild (21:10Z):**
-- **Real money:** earned live trading is active (`earned-live-20260921`, money rules unchanged),
-  and mullins-2 (weather) is the one live agent.
-- **The league:** ⟨living⟩ agents live on paper and replay. Births follow evidence and hypothesis
+- **Real money:** earned live trading is active (`earned-live-20260921`, ratified at 20:26Z under
+  the owner's dynamism revision, #123), and mullins-2 (weather) is the one live agent.
+- **The league:** 64 agents live on paper and replay. Births follow evidence and hypothesis
   cards. The repair engineer has merged three fixes by itself, and the updater deploys attested
   commits by itself.
 - **Records:** the [execution record](docs/runs/2026-09-22-overnight-rebuild.md) has the before
