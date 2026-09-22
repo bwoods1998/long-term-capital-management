@@ -16,6 +16,17 @@ order. Each fix below is tested; none changes a money rule, so the live grant
 | Merton-written code ran beside the House's secrets | The updater's vet runs `league.ci --content-only`, which executes strategy code Merton wrote, in a subprocess that inherited the House's environment: the gateway, Sail and site tokens (`service.load_env`). Only the source scanner stood between them | The vet subprocess gets a scrubbed environment (`updater.vet_environment`: PATH, HOME, locale, TZ, TMPDIR only; not `LEAGUE_ENV`) |
 | The gateway's independent order cap under-counted Kalshi NO buys | A v2 order's `price` is on the YES scale for both legs. Buying NO at $0.96 goes out as `side: "ask", price: "0.0400"` and was metered at $0.04 a contract: the $75 cap admitted up to 24 times its real principal. The House's own book priced it right; the gateway is the boundary that must hold if the House does not | `kalshiNotional` takes the price on the leg the order trades: the complement for an entry on the ask and for an exit on the bid |
 
+## Later the same morning: the agent image would have expired
+
+Every new agent box that does not fork a living parent (founders, the architect's strategies,
+re-founded seeds, any box that has to be rebuilt) starts from `agent_image_checkpoint`. That
+checkpoint (`sbcp_23274d1a…`) was taken on Sept 15 at 19:55:33 UTC by `scripts/lab_image.py`
+with no lifetime, and Sail expires a checkpoint after seven days by default: about 19:55 UTC on
+Sept 22. The same clean image box was checkpointed again with a one-year lifetime
+(`sbcp_e47dddfa-f362-4ef8-8ae7-70c9d1bbd7b8`, expires 2027-09-22T05:49:11Z); a sealed box started
+from it and ran Python 3.11 before it was terminated. `league/config.json` now names it, and
+`LabImage.build` sets a year's lifetime and records `expires_at`.
+
 ## Not fixed here, recorded for the next pass
 
 - **The House tick is overloaded.** On one vCPU at load ~2, ticks took a median 60 s, p90 151 s and

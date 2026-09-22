@@ -94,7 +94,8 @@ class FakeClient:
 
     def checkpoint(self, box, *, name=None, ttl_seconds=None, **kwargs):
         self.calls.append(("checkpoint", box, name))
-        return {"checkpoint_id": "sbcp_image", "name": name}
+        self.ttl_seconds = ttl_seconds
+        return {"checkpoint_id": "sbcp_image", "name": name, "expires_at": "2027-09-22T00:00:00Z"}
 
 
 class SandboxCase(unittest.TestCase):
@@ -368,6 +369,9 @@ class LabImageTests(unittest.TestCase):
         self.assertIn("/lab/labkit.py", uploads)
         self.assertIn("/lab/floor/ltcm/data/__init__.py", uploads)
         self.assertIn(("checkpoint", "sb_image", "ltcm-lab-image"), client.calls)
+        # Sail's default lifetime is seven days; the image every agent box starts from must outlive that.
+        self.assertEqual(client.ttl_seconds, 365 * 86400)
+        self.assertEqual(image.record()["expires_at"], "2027-09-22T00:00:00Z")
         self.assertIn(("sleep", "sb_image"), client.calls)
         self.assertEqual(image.record()["checkpoint_id"], "sbcp_image")
         self.assertTrue(any("labkit ok" in line for line in said))
