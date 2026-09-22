@@ -887,13 +887,15 @@ class House:
             return False
 
     def _refresh_options_history(self) -> dict[str, Any]:
-        """The daily options-history job (ops lane, market-data GETs only): the options desk's
-        underlyings at 1Day and 15Min, the feature symbols of living equity strategies (and SPY,
-        QQQ, IWM) at 1Day, then their feature rows. A symbol the store does not yet cover over
-        the replay window is backfilled across it first; the chunk journal makes that a one-off
-        (the six-underlying, three-month demo took about ten minutes, Sept 22, 2026)."""
+        """The daily options-history job (ops lane, market-data GETs only): the underlyings living
+        options strategies trade, at 1Day and 15Min; the feature symbols of living equity
+        strategies (and SPY, QQQ, IWM) at 1Day; then their feature rows. A symbol the store does
+        not yet cover over the replay window is backfilled across it first; the chunk journal
+        makes that a one-off (six underlyings over three and a half months took about ten
+        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay."""
         from .options_history import adapter_from, refresh
-        replay = sorted({s for n in self.niches.values() if n.asset_class == "option" for s in n.universe})
+        options = {n.id for n in self.niches.values() if n.asset_class == "option"}
+        replay = sorted({str(s).upper() for a in self.registry.living() if a.specialty in options for s in (a.needs.get("symbols") or [])[:8]})
         wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
                         | {"SPY", "QQQ", "IWM"})
         wanted = [s for s in wanted if s not in replay]

@@ -487,6 +487,25 @@ class InTheHouse(HouseCase):
         plain = self.seated(name="plain")
         self.assertNotIn("options_features", self.house.snapshot(plain, self.house.book_of(plain)))
 
+    def test_the_daily_job_backfills_what_living_options_agents_trade_then_keeps_it_current(self):
+        from unittest import mock
+        store = self.house.options_history = CoveredStore(covered=False)
+        agent = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
+        calls = []
+
+        def refresh(store_, symbols, underlier, **kw):
+            calls.append((sorted(symbols), kw["days"], tuple(kw["timeframes"])))
+            return {"features": {}, "coverage": []}
+
+        with mock.patch("league.options_history.refresh", refresh):
+            self.house._refresh_options_history()
+            store.covered = True
+            self.house._refresh_options_history()
+        span = self.house.settings.replay_days * 6 + 5
+        self.assertEqual(calls[0], (sorted(agent.needs["symbols"]), span, ("1Day", "15Min")))  # backfill the whole window once
+        self.assertEqual(calls[1], (["IWM", "QQQ", "SPY"], span, ("1Day",)))
+        self.assertEqual([c[1] for c in calls[2:]], [10, 10])  # then the last ten days
+
     def test_the_switch_turns_it_off(self):
         self.house.options_history = CoveredStore()
         self.house.settings.options_replay = False
