@@ -3,7 +3,7 @@
   "gateway_url": "https://ltcm-gateway.blake-woods-personal-site.workers.dev",
   "site_url": "https://blakewoods.us",
   "site_tape": null,
-  "agent_image_checkpoint": "sbcp_23274d1a-93a5-44c3-ab32-bec6321241ea",
+  "agent_image_checkpoint": "sbcp_e47dddfa-f362-4ef8-8ae7-70c9d1bbd7b8",
   "sail_app": "ltcm",
   "alpaca_feed": "sip",
   "alpaca_option_feed": "opra",

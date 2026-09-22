@@ -705,6 +705,10 @@ def execute_run_code(manager: "SandboxManager | None", desk_id: str, arguments: 
     }
 
 
+#: How long the agent image checkpoint lives: Sail's default is seven days.
+IMAGE_TTL_SECONDS = 365 * 86400
+
+
 class LabImage:
     """Provision the lab image once and checkpoint it. The checkpoint id is the image."""
 
@@ -756,9 +760,14 @@ class LabImage:
         probe = self.client.exec(box, ["sh", "-c", check], timeout=120).check()
         say(f"  {probe.output.strip()[-200:]}")
         say("  checkpointing")
-        checkpoint = self.client.checkpoint(box, name=name)
+        # Every new agent box starts from this checkpoint, and Sail expires a checkpoint after
+        # seven days unless told otherwise. The image built on Sept 15, 2026 had no lifetime set
+        # and would have expired on Sept 22, 19:55 UTC, taking every parentless birth (founders,
+        # the architect's strategies) and every box rebuild with it. A year, and say when.
+        checkpoint = self.client.checkpoint(box, name=name, ttl_seconds=IMAGE_TTL_SECONDS)
         record = {
             "checkpoint_id": checkpoint.get("checkpoint_id") or checkpoint.get("id"),
+            "expires_at": checkpoint.get("expires_at"),
             "box_id": box,
             "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "egress_allowlist": normalize_hosts(BUILD_HOSTS),
