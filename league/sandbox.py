@@ -29,7 +29,10 @@ from . import replay as replay_module
 from . import runner as runner_module
 from . import safety as safety_module
 
-KIT_FILES = {"runner.py": runner_module.__file__, "replay.py": replay_module.__file__, "safety.py": safety_module.__file__}
+KIT_FILES = {"runner.py": runner_module.__file__, "replay.py": replay_module.__file__, "safety.py": safety_module.__file__,
+             # The options desk's simulator and the estimates it shares with the House's tape builder.
+             "options_replay.py": str(Path(__file__).resolve().parent / "options_replay.py"),
+             "options_history.py": str(Path(__file__).resolve().parent / "options_history.py")}
 TOOLS_DIR = Path(__file__).resolve().parent / "tools"
 
 

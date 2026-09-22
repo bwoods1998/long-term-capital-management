@@ -151,8 +151,8 @@ test('only an OCC symbol is an option', () => {
 
 test('the gateway signs reads of option contracts and option data, and nothing that writes them', () => {
   for (const path of ['v2/options/contracts', 'v2/options/contracts/SPY261016C00740000', 'v1beta1/options/snapshots/SPY', 'v1beta1/options/snapshots',
-    'v1beta1/options/quotes/latest', 'v1beta1/options/trades/latest', 'v1beta1/options/bars']) assert.ok(allowedVenuePath('alpaca', 'GET', path), path);
-  for (const [method, path] of [['POST', 'v2/options/contracts'], ['POST', 'v2/positions/SPY261016C00740000/exercise'], ['GET', 'v1beta1/options/meta/exchanges/../x'],
+    'v1beta1/options/quotes/latest', 'v1beta1/options/trades/latest', 'v1beta1/options/bars', 'v1beta1/options/trades']) assert.ok(allowedVenuePath('alpaca', 'GET', path), path);
+  for (const [method, path] of [['POST', 'v2/options/contracts'], ['POST', 'v2/positions/SPY261016C00740000/exercise'], ['GET', 'v1beta1/options/meta/exchanges/../x'], ['POST', 'v1beta1/options/trades'], ['GET', 'v1beta1/options/trades/SPY'],
     ['DELETE', 'v2/positions'], ['GET', 'v1beta1/options/snapshots/SPY/extra']]) assert.ok(!allowedVenuePath('alpaca', method, path), `${method} ${path}`);
 });
 

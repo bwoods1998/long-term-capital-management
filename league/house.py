@@ -99,6 +99,10 @@ class Settings:
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
+    # Historical options replay and options-derived features (`league/options_history.py`). ON:
+    # with no ingested history nothing changes (paper stays the options desk's replay), so it is
+    # safe by default; once the store covers a strategy's underlyings, it is replayed like any other.
+    options_replay: bool = True
 
 
 class House:
@@ -159,6 +163,7 @@ class House:
         self.budget = budget
         self.merton: Any = None  # set by the service: Merton's pull-request roles, and the consultancy agents hire
         self.semantic_lab: Any = None
+        self.options_history: Any = None  # set by the service: listed-option history (`league/options_history.py`)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
         self.updater: Any = None  # set by the service on the House box: pulls main, hands it to the watchdog
         self.kill_switch = kill_switch
@@ -460,8 +465,8 @@ class House:
             name=name or (niche.desk if niche else ""), family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
             parent=parent, reason=reason, specialty=niche.id if niche else None, founder=founder,
         )
-        if niche is not None and not niche.replay:
-            # The House cannot replay this specialty (no recorded option chains): paper is its replay.
+        if niche is not None and not self._replayable(niche, needs):
+            # The House cannot replay this specialty here (no recorded option chains): paper is its replay.
             self.evaluator.seat(agent.id, 1, f"paper is the {niche.id} specialty's replay")
             self._state["tried"][agent.id] = agent.code_sha256
         if parent is None or endowment is not None:
@@ -597,6 +602,10 @@ class House:
             key = f"bars:{','.join(symbols)}:{timeframe}:{limit}"
             ctx["bars"] = self._cached(key, 50, lambda: self.alpaca_data.bars(symbols, timeframe, limit=limit))
             ctx["quotes"] = self._cached(f"quotes:{','.join(symbols)}", 20, lambda: self.alpaca_data.quotes(symbols))
+            if needs.get("options_features") and self.options_history is not None:
+                # The same stored rows a replay tape carries, the latest already available now.
+                ctx["options_features"] = self._cached(f"options-features:{','.join(symbols)}", 300,
+                                                       lambda: self.options_history.features_at(symbols, self.clock()))
             niche = self.niche_of(agent)
             if niche is not None and niche.asset_class == "option":
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
@@ -854,6 +863,37 @@ class House:
         return bool(book and agent.id in book.accounts and (book.account(agent.id).holdings or book.open_orders(agent.id)))
 
     # ----------------------------------------------------------------- replay
+    def _replayable(self, niche: Any, needs: Mapping[str, Any]) -> bool:
+        """Can this specialty be replayed for these NEEDS? The options desk can once the options
+        history covers every underlying it trades over the replay window (Alpaca has option bars
+        since Jan 18, 2024 and no historical quotes: `league/options_history.py`)."""
+        if niche.replay:
+            return True
+        if niche.asset_class != "option" or not self.settings.options_replay or self.options_history is None:
+            return False
+        symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
+        end = self.clock()
+        start = end - self.settings.replay_days * (6 if str(needs.get("horizon")) == "day" else 1) * 86400
+        try:
+            return bool(symbols) and len(self.options_history.covers(symbols, "15Min", now_iso(lambda: start), now_iso(lambda: end))) == len(symbols)
+        except Exception as exc:  # noqa: BLE001 - an unreadable store is no history, and paper stays the replay
+            self.alert("warning", f"options history unreadable ({type(exc).__name__}: {str(exc)[:120]})")
+            return False
+
+    def _refresh_options_history(self) -> dict[str, Any]:
+        """The daily options-history job (ops lane): the options desk's underlyings at 1Day and
+        15Min, the feature symbols of living equity strategies at 1Day, then their feature rows."""
+        from .options_history import adapter_from, refresh
+        replay = sorted({s for n in self.niches.values() if n.asset_class == "option" for s in n.universe})
+        wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
+                        | {"SPY", "QQQ", "IWM"})
+        underlier = adapter_from(self.alpaca_data)
+        done = {"replay": refresh(self.options_history, replay, underlier, timeframes=("1Day", "15Min")),
+                "features": refresh(self.options_history, [s for s in wanted if s not in replay], underlier)}
+        self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
+                                          "features_made": {**done["replay"]["features"], **done["features"]["features"]}})
+        return done
+
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
@@ -866,7 +906,16 @@ class House:
             days = self.settings.replay_days * (6 if horizon == "day" else 1)
         start_iso, end_iso = now_iso(lambda: end - days * 86400), now_iso(lambda: end)
         watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
-        if venue == "alpaca":
+        if venue == "alpaca" and str(needs.get("asset_class") or "") == "option" and self.options_history is not None:
+            from .options_history import adapter_from
+            execution = "15Min"
+            under = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
+            warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
+            key = f"options:{','.join(under)}:{int(needs.get('max_days_to_expiry') or 21)}:{warmup}:{horizon}:{start_iso[:10]}:{execution}"
+            build = lambda: self.options_history.tape(needs, start_iso, end_iso, horizon=horizon, warmup=warmup, execution=execution,  # noqa: E731
+                                                      underlier_bars=adapter_from(self.alpaca_data),
+                                                      max_order_usd=float(CONSTITUTION["rungs"]["1"]["max_order_usd"]))
+        elif venue == "alpaca":
             symbols = sorted(str(s) for s in (needs.get("symbols") or []))[:12]
             # What the strategy watches rides on the same tape, so a replay sees what a wake sees.
             symbols = sorted(set(symbols) | {str(s) for s in (watched.get("symbols") or [])[:6]})
@@ -874,6 +923,14 @@ class House:
             warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
             key = f"alpaca:{','.join(symbols)}:{timeframe}:{warmup}:{horizon}:{start_iso[:10]}:{getattr(self.alpaca_data, 'feed', 'unknown')}"
             build = lambda: self.alpaca_data.tape(symbols, timeframe, start=start_iso, end=end_iso, horizon=horizon, warmup_bars=warmup)  # noqa: E731
+            if needs.get("options_features") and self.options_history is not None:
+                key += ":options-features"
+                plain = build
+
+                def build(plain=plain, symbols=symbols):  # the feature rows carry their availability stamps
+                    tape = plain()
+                    tape["options_features"] = self.options_history.feature_series(symbols)
+                    return tape
         else:
             series = sorted(str(s) for s in (needs.get("series") or []))[:12]
             # What it watches rides on the tape too, so a replay sees what a wake sees: the series
@@ -1079,7 +1136,7 @@ class House:
             if niche is not None:
                 info["needs"] = niches_module.constrain(info["needs"], niche)
             parameters.require_valid(info.get("params") or {}, info["needs"])
-            if niche is not None and not niche.replay:
+            if niche is not None and not self._replayable(niche, info["needs"]):
                 # No history to walk: the candidate must at least decide on what its parent sees now.
                 # It is not a counted trial and proves no edge; its child answers on paper.
                 book = self.book_of(agent)
@@ -2519,6 +2576,10 @@ class House:
                 'reason': 'timed research settings restored; new paid work is closed'}, id='burst-ended:'+self._burst['id'])
             self._burst = None
         summary: dict[str, Any] = {"at": now_iso(self.clock), "woke": [], "orders": 0, "deaths": [], "reconciled": {}}
+        if self.options_history is not None and self.settings.options_replay:
+            today, hour = _new_york(self.clock)
+            if hour >= 17.0 and self._state.get("options_history_day") != today and self._background("ops:options-history", self._refresh_options_history):
+                self._state["options_history_day"] = today  # once a day, after the session's bars are final
         living_before = {a.id for a in self.registry.living()}
         for name, book in self.books.items():
             try:
