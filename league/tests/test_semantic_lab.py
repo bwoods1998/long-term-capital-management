@@ -35,6 +35,23 @@ class Semantics(unittest.TestCase):
     def queue(self, **kw):
         return self.lab.enqueue('research','agent',self.now,'test',kw or {'evidence':'a bounded test'})
 
+    def test_evidence_under_the_research_lock_reuses_a_minute_old_count(self):
+        """Sept 22, 2026: stats() scanned 137k rows inside House.research's lifecycle lock for
+        every new session. evidence() may reuse a copy up to 60 s old; stats() alone is fresh."""
+        self.queue(); self.lab.run()
+        self.now += 61  # whatever the run itself counted is now too old
+        with patch.object(SemanticLab, '_stats', wraps=self.lab._stats) as scans:
+            for _ in range(5):
+                self.lab.evidence('agent')
+            self.assertEqual(scans.call_count, 1)
+            self.now += 61
+            self.lab.evidence('agent')
+            self.assertEqual(scans.call_count, 2)
+            self.lab.stats(); self.lab.stats()
+            self.assertEqual(scans.call_count, 4)  # the default is always a fresh count
+        self.lab.cooldown = self.now + 600
+        self.assertEqual(self.lab.stats(max_age=60)['cooldown_until'], self.now + 600)  # never a stale cooldown
+
     def test_identical_evidence_is_paid_once_and_saved_answers_survive_restart(self):
         a=self.queue();b=self.queue()
         self.assertEqual(a,b)

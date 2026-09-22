@@ -169,3 +169,98 @@ class FastResearchLoop(ResearchCase):
         self.assertEqual(router.settings_for(self.parent, settings), settings)
         response = router.respond('pro_flex', [], desk_id='x')
         self.assertEqual(response.function_calls[0].name, 'finish')
+
+
+class CacheLayout(unittest.TestCase):
+    """Sept 22, 2026: 15,044 Luna calls wrote 368M tokens to OpenAI's prompt cache and read none,
+    because every turn rewrote the end of the single packet message. These pin the fix."""
+
+    def state(self, agent='a1', standing='{"cash": 1}'):
+        from league.researcher import STATE_MARKER
+        return f'You are {agent}.\nYour current strategy file:\n```python\nNEEDS={{}}\n```\n' + STATE_MARKER + f'Your standing: {standing}'
+
+    def conversation(self, agent='a1', standing='{"cash": 1}', turns=1):
+        items = [{'role': 'system', 'content': 'THE GAME ' * 50}, {'role': 'user', 'content': self.state(agent, standing)}]
+        for n in range(turns):
+            items += [{'type': 'function_call', 'call_id': f'c{n}', 'name': 'markets_now', 'arguments': '{}'},
+                      {'type': 'function_call_output', 'call_id': f'c{n}', 'output': json.dumps({'turn': n})}]
+        return items
+
+    def test_consecutive_turns_share_a_byte_identical_prefix(self):
+        from league.fast_research import build_messages
+        for explicit in (False, True):
+            first = build_messages(self.conversation(turns=1), TOOLS, explicit=explicit)
+            second = build_messages(self.conversation(turns=2), TOOLS, explicit=explicit)
+            self.assertEqual([m['role'] for m in second], ['developer', 'user', 'assistant', 'user', 'assistant', 'user'])
+            # Every message but the newest is byte-identical; the newest differs only by its breakpoint mark.
+            self.assertEqual(json.dumps(first[:-1]), json.dumps(second[:len(first) - 1]))
+            text = lambda m: m['content'] if isinstance(m['content'], str) else ''.join(b['text'] for b in m['content'])
+            self.assertEqual(text(first[-1]), text(second[len(first) - 1]))
+
+    def test_every_agent_shares_the_protocol_tools_and_rules_and_volatile_state_comes_last(self):
+        from league.fast_research import build_messages
+        a = build_messages(self.conversation('a1', '{"cash": 1}'), TOOLS, explicit=True)
+        b = build_messages(self.conversation('b2', '{"cash": 9}'), TOOLS, explicit=True)
+        self.assertEqual(json.dumps(a[0]), json.dumps(b[0]))
+        self.assertIn('THE GAME', a[0]['content'][0]['text'])
+        self.assertIn('"name":"replay"', a[0]['content'][0]['text'])
+        # Two passes of one agent: the static block (strategy file) matches, the standing does not.
+        again = build_messages(self.conversation('a1', '{"cash": 7}'), TOOLS, explicit=True)
+        self.assertEqual(a[1]['content'][0], again[1]['content'][0])
+        self.assertNotEqual(a[1]['content'][1], again[1]['content'][1])
+        self.assertNotIn('standing', a[1]['content'][0]['text'])
+        marks = sum(1 for m in a for blk in (m['content'] if isinstance(m['content'], list) else [])
+                    if blk.get('prompt_cache_breakpoint'))
+        self.assertLessEqual(marks, 4)
+
+    def test_the_researcher_puts_the_strategy_before_the_standing(self):
+        from league.researcher import STATE_MARKER
+        agent = SimpleNamespace(id='a1', family='f', niche='n', generation=1, code='NEEDS = {}', params={'b': 1, 'a': 2})
+        make = lambda standing: Researcher._state(SimpleNamespace(journal=lambda _: [], specialty=None), agent, standing)
+        one, two = make({'cash': 1, 'at': '2026-09-22T01:00'}), make({'cash': 2, 'at': '2026-09-22T02:00'})
+        self.assertEqual(one.split(STATE_MARKER)[0], two.split(STATE_MARKER)[0])
+        self.assertLess(one.index('NEEDS = {}'), one.index('Your standing'))
+        self.assertIn('{"a": 2, "b": 1}', one)
+
+
+class ConverseFrontier(FakeFrontier):
+    def __init__(self, usage):
+        super().__init__([{'name': 'finish', 'arguments': {'summary': 'measured answer'}}] * 3)
+        self.usage = usage
+
+    def converse(self, messages, **kwargs):
+        self.calls.append({'messages': messages, **kwargs})
+        reply = self.replies.pop(0)
+        return Answer(json.dumps(reply), Decimal('.0012'), dict(self.usage), MODEL)
+
+
+class CacheMetering(FastProvider):
+    usage = {'input_tokens': 20000, 'output_tokens': 50,
+             'input_tokens_details': {'cached_tokens': 15000, 'cache_write_tokens': 4000}}
+
+    def test_cached_and_written_tokens_and_the_billed_cost_reach_the_ledger(self):
+        self.frontier = ConverseFrontier(self.usage)
+        fast = FastResearch(self.root/'fast.sqlite', self.frontier, self.ledger, balance=lambda _: Decimal('1'),
+                            cache={'layout': 'messages', 'explicit_hints': True, 'key': 'ltcm-research-v2'})
+        self.call(fast)
+        sent = self.frontier.calls[0]
+        self.assertEqual(sent['cache'], {'prompt_cache_key': 'ltcm-research-v2', 'prompt_cache_options': {'mode': 'explicit', 'ttl': '30m'}})
+        row = [e for e in self.ledger.read(kinds='provider.request')][-1].payload
+        self.assertEqual(row['cost_usd'], '0.0012')
+        self.assertEqual(row['cache'], {'input_tokens': 20000, 'cached_tokens': 15000, 'cache_write_tokens': 4000,
+                                        'hit_rate': 0.75, 'layout': 'messages-explicit', 'key': 'ltcm-research-v2'})
+        self.assertEqual(row['protocol'], 'inline_json_tool_v2')
+
+    def test_a_turn_bought_under_the_old_layout_is_rebuilt_under_it_after_the_default_changes(self):
+        self.call(key='s:0')  # the v1 packet layout, as production bought it
+        self.assertEqual(self.fast.record('s:0')['layout'], 'packet')
+        switched = FastResearch(self.root/'fast.sqlite', ConverseFrontier(self.usage), self.ledger, balance=lambda _: Decimal('1'),
+                                cache={'layout': 'messages', 'explicit_hints': True})
+        again = self.call(switched, key='s:0')  # same bytes, stored answer, no identity error and no new call
+        self.assertEqual(again.function_calls[0].name, 'finish')
+        self.assertEqual(switched.frontier.calls, [])
+
+    def test_an_unknown_layout_or_unsafe_key_is_refused_at_construction(self):
+        for cache in ({'layout': 'mystery'}, {'layout': 'messages', 'key': 'has spaces'}):
+            with self.assertRaises(ValueError):
+                FastResearch(self.root/'x.sqlite', self.frontier, self.ledger, balance=lambda _: Decimal('1'), cache=cache)

@@ -57,7 +57,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES: dict[str, tuple[str, str, str, str, str]] = {
     "pro_asap": ("deepseek-ai/DeepSeek-V4-Pro-0813", "asap", "0.92", "0.04", "2.77"),
     "pro_flex": ("deepseek-ai/DeepSeek-V4-Pro-0813", "flex", "0.46", "0.02", "1.39"),
+    # The balanced window, verified on the rate card and `GET /v1/models` on Sept 22, 2026 for the
+    # owner's balanced-tier experiment (docs/runs/2026-09-22-model-routing-experiment.md).
+    "pro_balanced": ("deepseek-ai/DeepSeek-V4-Pro-0813", "balanced", "0.74", "0.03", "2.22"),
     "flash_asap": ("deepseek-ai/DeepSeek-V4-Flash-0731", "asap", "0.09", "0.02", "0.18"),
+    "flash_balanced": ("deepseek-ai/DeepSeek-V4-Flash-0731", "balanced", "0.07", "0.02", "0.14"),
     "flash_flex": ("deepseek-ai/DeepSeek-V4-Flash-0731", "flex", "0.05", "0.01", "0.09"),
     "kimi_asap": ("moonshotai/Kimi-K2.6", "asap", "1.00", "0.20", "4.00"),
     "kimi_balanced": ("moonshotai/Kimi-K2.6", "balanced", "0.45", "0.20", "3.00"),

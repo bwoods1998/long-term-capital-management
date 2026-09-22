@@ -155,17 +155,25 @@ campaign reservation breach, found and corrected during the Jev comparison.
 `FRONTIER_MODELS`, in dollars per million tokens. A model absent from it is a `403`: an unpriced
 call is an uncapped one.
 
-| Model | Input | Cached input | Output |
-| --- | --- | --- | --- |
-| `gpt-6-astra` | 12.50 | 1.00 | 50 |
-| `gpt-5.6-sol` | 5.00 | 0.40 | 20 |
-| `gpt-5.6-terra` | 2.50 | 0.20 | 12 |
-| `gpt-5.6-luna` | 0.25 | 0.02 | 1.20 |
+| Model | Input (cache write) | Uncached | Cached input | Output |
+| --- | --- | --- | --- | --- |
+| `gpt-6-astra` | 12.50 | 10.00 | 1.00 | 50 |
+| `gpt-5.6-sol` | 5.00 | 4.00 | 0.40 | 20 |
+| `gpt-5.6-terra` | 2.50 | 2.00 | 0.20 | 12 |
+| `gpt-5.6-luna` | 0.25 | 0.20 | 0.02 | 1.20 |
 
 Input is priced at the cache-write rate, the dearest an input token can be, so the meter errs
-high. Requests above 272,000 input tokens use the configured long-context rates (2x input
+high. When the usage block reports `input_tokens_details.cache_write_tokens` (GPT-5.6 and later
+do), the written tokens settle at the write rate, cached reads at the cached rate and the rest at
+`uncached`, the list rate; a table row without `uncached` settles every unread token as a write,
+as before. Requests above 272,000 input tokens use the configured long-context rates (2x input
 and cached input, 1.5x output). Only inline text and standard service are admitted; stored
 conversations, attachments, built-in tools and other service tiers have no price here.
+Prompt-cache hints are admitted because they change the bill only through that usage block
+(Sept 22, 2026): `prompt_cache_key` (`[A-Za-z0-9._:-]{1,64}`), `prompt_cache_retention`
+(`in_memory` or `24h`), `prompt_cache_options` (`mode` implicit or explicit, `ttl` `30m`, no
+`prewarm`) and, on system, developer and user messages, `input_text` blocks carrying
+`prompt_cache_breakpoint: {"mode": "explicit"}`, at most four per request. Anything else is a `400`.
 These are conservative estimates, not provider invoices. Also refused: a streaming or background call (`400`: the usage that settles the bill arrives
 only with a complete response), `max_output_tokens` missing or outside 1 to 16,000 (`400`), a body
 over 512 KiB (`413`), no `OPENAI_SECRET_KEY` (`503`). A provider `4xx` is settled at zero; a
