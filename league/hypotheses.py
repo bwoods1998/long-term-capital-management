@@ -504,10 +504,26 @@ class Foundry:
         self._allocation = (now, picked)
         return picked
 
+    def _waiting_with_a_seat(self) -> bool:
+        """Is a replay-passing card waiting for a seat its desk could give it now? Then the next
+        refill seats it, and no new card is bought meanwhile. A card whose desk has no seat -- full
+        of agents that have earned theirs -- does not hold up calls for other desks. Measured Sept
+        22, 2026: one weather card passed replay at 15:50Z, the weather desk filled with young
+        research candidates, and the foundry refused every call, for every desk, for two hours."""
+        waiting = self.inventory()
+        if not waiting:
+            return False
+        scores = {d.niche: d for d in self.desk_scores()}
+        weakest: dict[str | None, bool] = {}
+        return any(card.get("niche") in scores and self._seat_available(scores[card["niche"]], weakest) for card in waiting)
+
     def _allocate(self) -> tuple[DeskScore, str, str] | None:
         blocked = self._blocked_desks()
+        # A desk that already has a replay-passing card waiting gets no more cards until it is seated.
+        waiting = {card.get("niche") for card in self.inventory()}
         weakest: dict[str | None, bool] = {}
-        desks = [d for d in self.desk_scores() if d.eligible and d.niche not in blocked and self._seat_available(d, weakest)]
+        desks = [d for d in self.desk_scores() if d.eligible and d.niche not in blocked and d.niche not in waiting
+                 and self._seat_available(d, weakest)]
         if not desks:
             return None
         settings = self.settings
@@ -612,7 +628,7 @@ class Foundry:
             reason = "the day's OpenAI allowance is spent"
         elif self.spent() >= Decimal(str(settings["budget_usd"])):
             reason = f"the foundry's ${settings['budget_usd']} window budget is spent"
-        elif self.inventory():
+        elif self._waiting_with_a_seat():
             reason = "a replay-passing card is already waiting for a seat"
         elif self.pending() or any(k.startswith("replay:hypothesis:") and j.is_alive() for k, j in list(house._jobs.items())):
             reason = "earlier cards are still being evaluated"
