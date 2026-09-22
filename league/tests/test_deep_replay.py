@@ -211,6 +211,16 @@ class HouseDeepReplayTest(HouseCase):
             self.assertEqual(out["holdout"], holdout)
             self.assertEqual(self.house.evaluator.rung(agent.id), rung)
 
+    def test_a_researchers_replay_is_development_history_fold_by_fold_and_never_the_holdout(self):
+        agent = self.house.spawn("deep", "test-deep", SPY_BUYER, reason="a test agent")
+        out = self.house._candidate_replay(agent, SPY_BUYER.replace('"notional": 20.0', '"notional": 25.0'))
+        self.assertTrue(out["counted_as_trial"], out)
+        self.assertTrue(out["walk_forward"])
+        self.assertTrue(all(fold["fold"][1] <= self.house.holdout_window[0] for fold in out["walk_forward"]))
+        self.assertIn("holdout", out["note"])
+        self.assertNotIn("holdout", {k for k in out if k != "note"})
+        self.assertEqual(self.house.ledger.count(kinds="holdout.access"), 0)
+
     def test_a_live_tape_pass_is_promoted_as_before(self):
         self.house.settings.deep_replay = False
         agent = self.house.spawn("deep", "test-deep", SPY_BUYER, reason="a test agent")
