@@ -1,0 +1,9 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_downward_entry",
+  "repair": {
+    "key": "audit_veto:haghani",
+    "parent": "haghani"
+  },
+  "why": "Corrected child of haghani, starting at rung 0 with no inherited record. Preserve the parent's Alpaca hourly altcoin specialty and decision rules, but round cent-priced dip entries downward and cancel resting buys above the current unrounded entry ceiling regardless of replacement tolerance. This repairs the audited minimum-discount violation without assuming finer venue ticks or claiming maker fills or an established edge."
+}
