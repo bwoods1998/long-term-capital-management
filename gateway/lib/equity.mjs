@@ -67,7 +67,7 @@ export function effectiveCap(env = {}, reading = null, at = Date.now()) {
     share: String(env.COMPUTE_PROFIT_SHARE ?? ''),
     baseline_usd: baseline === null ? null : formatUsd(baseline),
     max_cap_usd: ceiling === null ? null : formatUsd(ceiling),
-    equity_usd: null, kalshi_usd: null, alpaca_usd: null, profit_usd: '0.00', bonus_usd: '0.00',
+    equity_usd: null, kalshi_usd: null, alpaca_usd: null, profit_usd: '0.00', earned_usd: '0.00', bonus_usd: '0.00',
     read_at: reading?.at ? new Date(Number(reading.at)).toISOString() : null,
     read_ok: reading ? reading.ok === true : null,
     reason: null,
@@ -90,7 +90,8 @@ export function effectiveCap(env = {}, reading = null, at = Date.now()) {
     capMicro: cap,
     parts: {
       ...parts, equity_usd: formatUsd(equity), kalshi_usd: formatUsd(kalshiMicro), alpaca_usd: formatUsd(alpacaMicro),
-      profit_usd: formatUsd(profit), bonus_usd: formatUsd(cap - base),
+      // `earned_usd` is what the profit share buys; `bonus_usd` is what the cap in force carries of it.
+      profit_usd: formatUsd(profit), earned_usd: formatUsd(bonus), bonus_usd: formatUsd(cap - base),
       reason: profit > 0n ? (cap - base < bonus ? 'profit above the baseline, held to FRONTIER_MONTH_MAX_USD' : 'profit above the baseline')
         : 'no profit above the baseline',
     },

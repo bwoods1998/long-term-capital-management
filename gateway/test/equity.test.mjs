@@ -91,7 +91,13 @@ test('an unknown profit is no profit: failed, missing, stale or future readings 
 
 test('FRONTIER_MONTH_MAX_USD holds the raise, and never pushes the cap below the month', () => {
   assert.equal(effectiveCap(env({ FRONTIER_MONTH_MAX_USD: '390' }), reading(600, 517.75), NOW).capMicro, 390_000_000n);
-  assert.match(effectiveCap(env({ FRONTIER_MONTH_MAX_USD: '390' }), reading(600, 517.75), NOW).parts.reason, /held to FRONTIER_MONTH_MAX_USD/);
+  const held = effectiveCap(env({ FRONTIER_MONTH_MAX_USD: '390' }), reading(600, 517.75), NOW).parts;
+  assert.match(held.reason, /held to FRONTIER_MONTH_MAX_USD/);
+  assert.deepEqual([held.earned_usd, held.bonus_usd], ['30.00', '16.00']);
+  // A ceiling at the month itself: profit is measured and reported, and buys nothing until funded.
+  const funded = effectiveCap(env({ FRONTIER_MONTH_MAX_USD: '374' }), reading(600, 517.75), NOW);
+  assert.equal(funded.capMicro, 374_000_000n);
+  assert.deepEqual([funded.parts.earned_usd, funded.parts.bonus_usd], ['30.00', '0.00']);
   assert.equal(effectiveCap(env({ FRONTIER_MONTH_MAX_USD: '500' }), reading(600, 517.75), NOW).capMicro, 404_000_000n);
   assert.equal(effectiveCap(env({ FRONTIER_MONTH_MAX_USD: '100' }), reading(600, 517.75), NOW).capMicro, 374_000_000n);
 });
