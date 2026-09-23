@@ -23,9 +23,9 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | A | The allocator: evidence as wealth, bands, stakes, death, performance fee | live: PR #163, release `20260923T082402Z-7c69b3eb57f0` |
 | B | The capital board (publisher + site) | live: site #4 (`5772ac0c`, 06:54Z), House #162 in release `20260923T090513Z-7009e67356f0` |
 | C | Exit splitting and stake-scaled positions | live: #164 + #168 in release `20260923T090513Z-7009e67356f0` |
-| D | The Alpha Lab (box, batch evaluator, evolution, graduation, royalties, tools) | ⟨⟩ |
-| E | Profit-indexed compute and envelope; a tick that never blocks | ⟨⟩ |
-| F | Open desks (stretch) | ⟨⟩ |
+| D | The Alpha Lab (box, batch evaluator, evolution, graduation, royalties, tools) | live: #170 (supersedes #167, #160) in release `20260923T104142Z-5d86b468fbde`; lab box `sb_742fe765` |
+| E | Profit-indexed compute and envelope; a tick that never blocks | live: E2 in A; E3 + E1 (House) in #170; E1 gateway `3eef1b8a` |
+| F | Open desks (stretch) | live: #171 (`kalshi-open`, `alpaca-open`, 8 seats each) in release `20260923T104142Z-5d86b468fbde` |
 | Deploy 1 | A (B's publisher follows through the updater; C in Deploy 2), ratified at promotion | done 08:27:54Z, ratified 08:28:13Z |
 | Deploy 2 | B + C (+ #168: positions follow stakes) | done 09:09:29Z (no money rule changed; no ratify) |
 | Watch | ≥ 90 minutes, every 15 minutes through `scripts/floor_watch.py` | ⟨⟩ |
@@ -144,4 +144,33 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   `night/lab-integration`): E3 + E1 + D-core + D-evo onto main, the two conflicts (sandbox.py E3 vs
   D-core, house.py E3 vs D-evo), D-core's minors, and the lab's birth taking the probe box before
   the lifecycle lock.
+- 09:10-10:23Z — **Deploy 3 integration** (#170): E3 (#159), E1 (#166), D-core (#167) and D-evo (#160)
+  merged onto main, with both conflicts resolved (`sandbox.py`: the lab box's batch goes through
+  E3's `_turn`, patience and `SandboxBusy`; `house.py`: the lab's tick sits in E3's `_tick`).
+  - Integration fixes:
+    - a corrupt gzip tape reads as missing;
+    - a failed fork is infrastructure;
+    - a terminated lab box raises `BoundBoxGone` instead of leaking a replacement;
+    - `Lab._birth` makes no Sail call under the lifecycle lock;
+    - the service binds `config.json` `lab.box_id`.
+  - The integration review found one major: the lab spent a living line's holdout budget. The
+    lab now leaves a living line its last evaluation (`holdout_reserve` 1).
+  - I added two more:
+    - the gateway's `/v1/health` no longer reads both venues inline, because the House reads its
+      kill switch there and treats a slow answer as engaged;
+    - the lab stops with the Sail meter, and a graduate waiting for a seat is re-ranked at most
+      every 10 minutes.
+  - 88 modules and 2,257 tests green; CI green on the PR head.
+- 10:30Z — #170 merged (`bf202d4`); F #171 (open desks) merged (`3ae144c`; its review found no
+  major).
+- 10:41:41Z — **Deploy 3** (main `3ae144c`: E3 + E1 + the Alpha Lab + open desks). Release
+  `20260923T104142Z-5d86b468fbde` promoted at 10:43:05Z. Money digest unchanged (`44e8d48d`), so
+  no ratify was needed.
+- 10:42Z — **gateway `3eef1b8a`**: E1's profit-indexed OpenAI cap (`COMPUTE_PROFIT_SHARE` 0.3 over
+  the $1,017.75 baseline, ceiling `FRONTIER_MONTH_MAX_USD` = the funded $408, so it measures profit
+  and reports it but buys no compute above funded money) and the health fix. `/v1/health` answered
+  in 0.23 s.
+- 10:46Z — the lab started: 212 seeds queued. The first batch (10:51Z) evaluated 2 candidates at
+  0.33 per box-second. Early batches are tape-bound: each seed carries its own NEEDS, so its own
+  tape, and the lab builds 4 tapes a step on the House box and keeps 6.
 
