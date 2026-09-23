@@ -114,6 +114,11 @@ class TheDesks(unittest.TestCase):
         self.assertEqual(home(venue="alpaca", horizon="hour", symbols=["BTC/USD", "PEPE/USD"]), "alpaca-open")
         self.assertEqual(home(venue="alpaca", horizon="day", symbols=["COIN"]), "alpaca-open")
         self.assertEqual(home(venue="kalshi", horizon="day", series=["KXHIGHNY", "BTC/USD"]), "kalshi-weather")  # a stray is no evidence
+        # A new season's series the survey has not added yet is still its desk's by pattern (three
+        # sports cards of the last 108 on the floor, Sept 23, 2026, named one beside a listed one).
+        self.assertEqual(home(venue="kalshi", horizon="day", series=["KXMLBTOTAL", "KXARGPREMDIVTOTAL"]), "kalshi-sports")
+        # ... but a desk that can show it none of it yet is no home: the open desk can.
+        self.assertEqual(home(venue="kalshi", horizon="day", series=["KXUCLWGAME"]), "kalshi-open")
         # The open desk is not a way around a desk's clock, nor a home for options or for nothing.
         self.assertIsNone(home(venue="kalshi", horizon="hour", series=["KXEPLGAME"]))           # sports is judged by the day
         self.assertEqual(home(venue="kalshi", horizon="hour", series=["KXHIGHNY", "KXHIGHCHI", "KXBTCD"]), "kalshi-crypto-strikes")  # as before

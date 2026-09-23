@@ -286,21 +286,23 @@ def match(needs: Mapping[str, Any], niches: Mapping[str, Niche]) -> Niche | None
     """The open specialty a strategy with these NEEDS belongs to (the architect's strategies, the
     foundry's cards and the lab's graduates arrive with NEEDS and no specialty).
 
-    A specific desk when one holds MOST of what the strategy names (more than half): it is shown
-    that desk's markets and the stray names are cut, as always. A strategy whose markets are mostly
-    one desk's but on a horizon that desk does not judge is placed as before (the desk of its horizon
-    holding the most, or none): the open desk is not a way around a desk's clock. Otherwise the
-    strategy spans desks, or names markets no desk lists, and belongs on its venue's open desk, where
-    everything it names is kept. With no open desk for it (none listed, dormant, or an options
-    strategy) the desk holding the most is still the answer, and one naming nothing any desk holds
-    has none."""
+    A specific desk when one CLAIMS most of what the strategy names (more than half: in its
+    universe, or fitting its patterns, as a new season's series does before the survey adds it) and
+    can show it some of it now: it is shown that desk's markets and the stray names are cut, as
+    always. A strategy whose markets are mostly one desk's but on a horizon that desk does not judge
+    is placed as before (the desk of its horizon holding the most, or none): the open desk is not a
+    way around a desk's clock. Otherwise the strategy spans desks, or names markets no desk lists,
+    and belongs on its venue's open desk, where everything it names is kept. With no open desk for
+    it (none listed, dormant, or an options strategy) the desk holding the most is the answer, as it
+    always was, and one naming nothing any desk holds has none."""
     venue, horizon = str(needs.get("venue") or "").lower(), str(needs.get("horizon") or "").lower()
     wants_options = str(needs.get("asset_class") or "").lower() == "option"
     key = "series" if venue == "kalshi" else "symbols"
     asked = list(dict.fromkeys(str(x).upper() for x in (needs.get(key) or [])))
-    best, score = None, 0  # the desk of this horizon holding the most (file order on a tie)
-    most, held = None, 0   # the desk of any horizon holding the most
-    opened = []
+    best, score = None, 0      # the desk of this horizon holding the most now (file order on a tie)
+    most, claimed = None, 0    # the desk of any horizon claiming the most
+    shown = 0                  # how much of it that desk holds now
+    desks, opened = [], []
     for niche in niches.values():
         if niche.dormant or niche.venue != venue:
             continue
@@ -310,18 +312,23 @@ def match(needs: Mapping[str, Any], niches: Mapping[str, Niche]) -> Niche | None
             if horizon in niche.horizons:
                 opened.append(niche)
             continue
+        desks.append(niche)
         inside = len(set(asked) & set(niche.universe))
-        if inside > held:
-            most, held = niche, inside
+        claims = sum(1 for x in asked if x in niche.universe or niche.fits(x))
+        if claims > claimed:
+            most, claimed, shown = niche, claims, inside
         if horizon in niche.horizons and inside > score:
             best, score = niche, inside
-    # A name no desk of the venue could hold (a typo, another venue's symbol) is no evidence either way.
-    known = [x for x in asked if any(x in n.universe for n in niches.values() if n.venue == venue and not n.open)
-             or any(n.admits(x) for n in opened)] if opened else asked
-    if most is not None and 2 * held > len(known):
+    if not opened:
         return best
-    home = next((n for n in opened if any(n.admits(x) for x in asked)), None)
-    return home or best
+    # A name no desk of the venue could hold (a typo, another venue's symbol) is no evidence either way.
+    known = [x for x in asked if any(x in n.universe or n.fits(x) for n in desks) or any(n.admits(x) for n in opened)]
+    if most is not None and 2 * claimed > len(known):
+        if horizon not in most.horizons:
+            return best
+        if shown:
+            return most
+    return next((n for n in opened if any(n.admits(x) for x in asked)), None) or best
 
 
 def spanning(needs: Mapping[str, Any], niches: Mapping[str, Niche]) -> Niche | None:
