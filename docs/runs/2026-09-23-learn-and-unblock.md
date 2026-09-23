@@ -555,3 +555,64 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   the quarter hour), no book frozen, the grant active on `c2b0e09c`; OpenAI House line $11.32,
   gateway month $16.92 left of $408; seats: 28 graduates and 5 cards waiting, 21 residents
   displaceable. 23:03:18Z — hilibrand-h6ca596-3's first real settlement lost $2.20.
+- 23:2xZ — **why CI's 3.14 job keeps meeting its 10-minute limit:** not the second look (a count of
+  real sleeps of a second or more found one in the House tests and none in `test_ladder`,
+  `test_live_trading` and `test_live_pilot`, which take 307 s together). The 3.14 runner runs the
+  ltcm suite about three times slower than 3.11 (144 s against 46 s on #213), and the run's ~170
+  added tests put the league suite at the edge of the job's `timeout-minutes: 10`. A re-run usually
+  passes. The fix is a longer job timeout in `.github/workflows/checks.yml`, a protected path
+  (it would block the updater until an owner deploy), so it is left for the next build.
+
+## Paused at the owner's request (23:30Z Sept 23, T+7:07)
+
+The owner asked at about 23:25Z to come to a good stopping point. The run stops before its
+02:22:40Z deadline; this is the state it leaves.
+
+**Live on the floor** (release `20260923T222246Z-cede38138dff`, Deploy C, plus the Sail-floor dials
+of #216 once deployed; see the last log line): the grant `earned-live-20260921` active on money
+digest `c2b0e09c` (40 agents over a $25 stake line). Deploys A (17:34Z), B (22:03Z, after a rollback
+at 21:49Z and the #212 fix) and C (22:24Z) are verified on the box as recorded above.
+
+**Workstreams:**
+
+| # | State at the pause |
+|---|---|
+| L study | published (`docs/research/2026-09-23-agent-study.md`, version 1 at 17:13Z, refresh 3a at 21:36Z); the T+7:30 refresh not taken |
+| U1 daily-loss keys | live, verified with a live instance (huang-l23cdb7 kept entering at −20% on the day, 20:21Z) |
+| U2 shard funding | live, verified (a $30 move 0 → 3 at 20:40Z; the credit landed about an hour later; a shard-3 fill) |
+| U5 winners compound | live, verified (mullins-2 re-staked toward $34.84; targets grow with W_real) |
+| U4 use the envelope | live in Deploy A: Kalshi bunt $30, `swing_at` 1.25, `kappa` 2, options bunt $80 |
+| A7 fractional limits + wind-down hold | live; no agent has sent an equity limit order: the Sept 24 open (13:30Z) is its window |
+| A8 haircut per class | live in Deploy C (crypto 4, equity 2, option 24 bps) |
+| C2 lab off the tier | live, verified below "all" (Luna calls skipped, the lab kept evaluating) |
+| C3 OpenAI pacing | live (#194); the month is at the "earned" tier, the House line $11.26 at 23:14Z, the gateway month $16.86 left, over the $8 floor |
+| C4 Sail floor | **at risk:** balance $74.79 at 23:17Z, 24-hour burn $44.16 a day (runway 1.47 days, under the 1.5-day floor) because research moved to Sail; #216 cuts research to a 120-minute base interval and 6 workers |
+| S1 seats | live (Deploy B): graduates, cards and merged strategies seated first; 112 living |
+| S2 forward windows | live (Deploy B): the lab re-scores elites on post-freeze data; LLM children evaluated |
+| S3 compute follows yield | live (Deploy B, #202): research on evidence; the foundry by forward yield |
+| S4 lab throughput | not built: the lab does not bind (seats do; 28 graduates waiting at 23:00Z) |
+| V1 kalshi-open maker fees | live (Deploy A) |
+| V2 open desks' members | not built: scheduled for the next build |
+| V3 uncovered hours | listed in the study (L5) |
+| O level-3 options | draft PR #210 (design and pure pieces, CI green); not for deploy |
+| B bugs | fixed and live: the order path (#203 and its review), the reconcile race (#212), the base-raise lending and day-open (#211); invariants added (quiet desk, frozen bunt, lab closed, graduate waiting, shard refusal, dead agent's refusal, 24/7 desk without wakes) |
+| H cleanup | done at 16:49Z (34 worktrees, 72 branches, 11 PRs); the run's own worktrees remain for the resume |
+| W2-house (wake skip, pause and size-down tools for agents, attention desk, options mandate) | not built: scheduled for the next build |
+
+**Real money:** Kalshi: 7 bunts at the 23:00Z board (mullins-2 E 1.208, 0.04 below the swing line);
+real P&L since the grant about −$8 (the lab graduate's two losses). Alpaca: no agent on real money;
+the reason is evidence: no Alpaca agent has reached E ≥ 1.01 on 5 closed practice trades (the best,
+haghani-56, E 1.0083 on 8 trades at 22:32Z).
+
+**What the resume should do first:**
+1. Check that #216 is live (`turbo.json` `research_minutes` 120 in `/workspace/current`) and that Sail
+   spend falls back toward $1-2 an hour (the campaign's hourly Sail commitments); ask the owner
+   for Sail auto-recharge.
+2. Merge this run branch (`run/learn-and-unblock-2026-09-23`) to main: its latest record and docs are
+   ahead of main.
+3. Remove the run's worktrees and merged branches (everything is pushed): `ltcm-w0-*`, `ltcm-w1-*`,
+   `ltcm-w2-*`, `ltcm-*-rev`, `ltcm-w1-bugs-fu`, `ltcm-pacing`, `ltcm-rules`, `ltcm-secondlook`,
+   `ltcm-sailfloor`, then `ltcm-run`; keep `w2-options/design` (draft #210).
+4. The owner's decisions: the one-loss trial (hysteresis grace or a 15% event-book position share),
+   Sail auto-recharge and an OpenAI top-up, the four data hosts, a second Alpaca practice account
+   for level-3, and CI's job timeout (`.github/workflows/checks.yml`).
