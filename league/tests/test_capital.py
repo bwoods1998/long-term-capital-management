@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 
-from league.book import Book
+from league.book import GATEWAY_MARKET_MARKUP, Book
 from league.capital import kelly_stake, recommend, resize, scaled_limits
 from league.constitution import CONSTITUTION
 from league.fees import Fees
@@ -48,15 +48,19 @@ class ScaledLimitsTest(unittest.TestCase):
         cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
         position, order = scaled_limits(Decimal("400"))
         self.assertEqual(position, Decimal("200"))  # half the stake: once $60 at most
-        self.assertEqual(order, cap)
+        self.assertEqual(order, Decimal("60.00"))
         self.assertGreater(position, cap)
 
-    def test_every_order_stays_within_the_gateway_cap(self):
+    def test_every_order_passes_the_gateway_on_its_own_pricing(self):
+        """The gateway counts an Alpaca market order at the touch plus ten per cent: an order limit
+        of $75 was $82.50 there, and every rung-3 market entry from $68.19 to $75 would have had a 403."""
         cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
-        for staked in ("0", "20", "60", "100", "150", "151", "1000", "100000"):
+        for staked in ("0", "20", "60", "100", "120", "136", "137", "150", "151", "400", "1000", "100000"):
             with self.subTest(staked=staked):
                 position, order = scaled_limits(Decimal(staked))
                 self.assertLessEqual(order, cap)
+                self.assertLessEqual(order * GATEWAY_MARKET_MARKUP, cap)
+                self.assertLess(order * GATEWAY_MARKET_MARKUP, cap * Decimal("0.9"))  # room for the touch to move
                 self.assertLessEqual(order, position)
 
     def test_never_below_the_micro_rung(self):

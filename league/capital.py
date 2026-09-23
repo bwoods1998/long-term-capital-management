@@ -55,18 +55,27 @@ def kelly_stake(growth: list[float], present_stake: Decimal, venue_cash: Decimal
     return max(floor, min(target, ceiling)), {**numbers, "reason": basis}
 
 
+#: The share of the gateway's per-order cap one rung-3 ORDER may use. The gateway counts an Alpaca
+#: market order (the adapter always sends `qty`) at the venue's touch plus ten per cent
+#: (`book.GATEWAY_MARKET_MARKUP`), so an order the book counts at $75 is $82.50 there and refused.
+#: Four fifths of $75 is $60, $66 on the gateway's pricing: under the cap with room for the touch to
+#: move between the book's quote and the gateway's own read of it.
+ORDER_SHARE_OF_CAP = Decimal("0.8")
+
+
 def scaled_limits(staked: Decimal) -> tuple[Decimal, Decimal]:
     """(max position, max order) for a rung-3 account lent `staked`: half the stake a position, and
-    an order of at most the gateway's cap. Never below the micro rung's.
+    an order of at most four fifths of the gateway's cap (`ORDER_SHARE_OF_CAP`). Never below the
+    micro rung's.
 
-    Until Sept 23, 2026 the position was also held to four fifths of the order cap, so that it
+    Until Sept 23, 2026 the POSITION was also held to four fifths of the order cap, so that it
     could be closed in ONE order even after appreciating by a quarter: a swing could never be
     larger than $60. The book now sends a sell over the cap in slices of at most the cap
     (`Book._start_exit_plan`), so the position follows the stake and only each ORDER is capped."""
     micro = CONSTITUTION["rungs"]["2"]
-    cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
+    ceiling = (Decimal(CONSTITUTION["order_caps"]["max_order_usd"]) * ORDER_SHARE_OF_CAP).quantize(CENT)
     half = (staked / 2).quantize(CENT)
-    return max(Decimal(micro["max_position_usd"]), half), min(cap, max(Decimal(micro["max_order_usd"]), half))
+    return max(Decimal(micro["max_position_usd"]), half), min(ceiling, max(Decimal(micro["max_order_usd"]), half))
 
 
 def _sizing_record(house, agent, book):

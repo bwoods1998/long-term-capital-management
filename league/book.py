@@ -997,8 +997,16 @@ class Book:
             if need > ctx.desk_cash:
                 reasons.append(f"needs ${need:.2f} with fees; free cash is ${ctx.desk_cash:.2f}")
         if notional is not None and not reducing:
+            gateway = self._gateway_entry_price(intent, reference) if self.real_money else None
             if notional > money(self.rules["max_order_usd"]):
                 reasons.append(f"order of ${notional:.2f} is over the ${self.rules['max_order_usd']} order cap")
+            elif gateway is not None and intent.quantity * gateway * intent.instrument.multiplier > money(self.rules["max_order_usd"]):
+                # The gateway would refuse it with a 403. Say so here, and why, before it is sent.
+                counted = intent.quantity * gateway * intent.instrument.multiplier
+                how = "its limit price" if intent.order_type == "limit" else "the touch plus ten per cent, as a market order may fill through it"
+                reasons.append(
+                    f"order of ${notional:.2f} counts as ${counted:.2f} at the gateway ({how}), over its ${self.rules['max_order_usd']} order cap"
+                )
             if notional > limits.max_order_usd:
                 reasons.append(f"order of ${notional:.2f} is over this rung's ${limits.max_order_usd} an order")
             held = account.holdings.get(intent.instrument.key)
@@ -1149,9 +1157,10 @@ class Book:
         touch = {"buy": quote.ask, "sell": quote.bid}
         for intents in (buys, sells):
             rest = [i for i in intents if residual[i.id] > 0]
-            # A sell is counted as the gateway would count it (`_cap_price`), so a pool of exits is
-            # never one order over the cap on the gateway's own pricing either.
-            price = (touch["buy"] if intents is buys else self._cap_price(instrument, "market", None, quote)) or ZERO
+            # Both sides are counted as the gateway would count them (`_cap_price`: for Alpaca the
+            # touch plus ten per cent), so a pool of entries or of exits is never one order over the
+            # cap on the gateway's own pricing, though each of its parts is under it.
+            price = self._cap_price(instrument, "market", None, quote) or ZERO
             pooled = sum((residual[i.id] for i in rest), ZERO) * price * instrument.multiplier
             # The gateway refuses any order over the cap, and each intent was checked against it
             # alone: a pool that would be larger is sent as its parts, one venue order each. A
@@ -1528,6 +1537,23 @@ class Book:
         if self.fees.family == "alpaca" and order_type == "market":
             price *= GATEWAY_MARKET_MARKUP
         return price
+
+    def _gateway_entry_price(self, intent: Intent, reference: Decimal | None) -> Decimal | None:
+        """What the gateway counts one unit of an ENTRY at against its per-order cap
+        (`gateway/lib/caps.mjs`, `router.mjs`), which can be dearer than the book's own count: a
+        limit order at its own limit even where the ask is lower (the book counts a marketable limit
+        at the ask it will fill at), and an Alpaca market order -- the adapter always sends `qty` --
+        at the venue's touch plus ten per cent (`GATEWAY_MARKET_MARKUP`), since it may fill through
+        the touch. A Kalshi market order goes out as a limit at the touch, so it counts at the touch.
+        Found in review, Sept 23, 2026: a rung-3 order limit of $75 let the book approve a $75 market
+        buy of BTC/USD that the gateway counted at $82.50 and refused."""
+        if intent.order_type == "limit" and intent.limit_price is not None and intent.limit_price > 0:
+            return intent.limit_price
+        if reference is None or reference <= 0:
+            return None
+        if self.fees.family == "alpaca" and intent.instrument.asset_class != "option":
+            return reference * GATEWAY_MARKET_MARKUP
+        return reference
 
     def _over_cap(self, intent: Intent, quantity: Decimal, quote: Quote | None) -> bool:
         price = self._cap_price(intent.instrument, intent.order_type, intent.limit_price, quote)

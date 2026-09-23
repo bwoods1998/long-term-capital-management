@@ -70,11 +70,11 @@ def event(leg="yes", venue="kalshi", ticker="KXBTCD-26SEP2317-T80999"):
 def gateway_usd(family, intent, bid, ask):
     """What the gateway counts one order at (`gateway/lib/caps.mjs`, `router.mjs`): an Alpaca market
     order at the venue's ask plus ten per cent, a limit at its limit; a Kalshi order at its own price
-    on the leg it trades (a market sell crosses at the leg's bid)."""
+    on the leg it trades (a market order crosses at the leg's touch: the ask to buy, the bid to sell)."""
     if family == "alpaca":
         price = intent.limit_price if intent.limit_price is not None else ask * GATEWAY_MARKET_MARKUP
         return intent.quantity * price * intent.instrument.multiplier
-    price = intent.limit_price if intent.limit_price is not None else bid
+    price = intent.limit_price if intent.limit_price is not None else (ask if intent.side == "buy" else bid)
     return intent.quantity * price
 
 
@@ -149,8 +149,11 @@ class SliceCase(unittest.TestCase):
         return [e.payload for e in self.ledger.iter(kinds="book.exit_plan")]
 
     def assert_sound(self, parent_ids=None, unanswered=()):
-        """Every sell order within the cap on the gateway's pricing, labelled an exit, sent once;
-        every slice followed by a reconciling book; the agents' records intact."""
+        """Every order within the cap on the gateway's pricing (the entries that built the position
+        too), every sell labelled an exit and sent once; every slice followed by a reconciling book;
+        the agents' records intact."""
+        for order, bid, ask in self.broker.sent:
+            self.assertLessEqual(gateway_usd(self.family, order, bid, ask), CAP, order)
         sells = self.sells()
         for order, bid, ask in sells:
             self.assertLessEqual(gateway_usd(self.family, order, bid, ask), CAP, order)
@@ -183,8 +186,9 @@ class CryptoSlices(SliceCase):
 
     instrument = Instrument("crypto", "BTC-USD", "alpaca-paper", market_id="BTC/USD")
 
-    def position_worth(self, usd, entries=("0.0009", "0.0009", "0.0007")):
-        """Hold BTC in entries of at most the cap, then move the market so it is worth `usd` at the bid."""
+    def position_worth(self, usd, entries=("0.0008", "0.0008", "0.0008", "0.0001")):
+        """Hold BTC in entries of at most the cap on the gateway's own pricing ($64 at the ask is
+        $70.41 there), then move the market so it is worth `usd` at the bid."""
         self.seat()
         self.broker.set_quote(self.instrument, "80000", "80010")
         self.buy(self.instrument, *entries)
@@ -238,6 +242,55 @@ class CryptoSlices(SliceCase):
         self.assertEqual(out.status, "refused")
         self.assertIn("order cap", out.detail)
         self.assertEqual(self.broker.sent, [])
+
+    def test_a_market_entry_is_held_to_the_cap_on_the_gateways_own_pricing(self):
+        """Review, Sept 23, 2026: the gateway counts an Alpaca market buy (the adapter sends `qty`) at
+        the touch plus ten per cent, so a buy of $74.41 at the ask is $81.85 there and gets a 403.
+        The real book refuses it first and says why; the paper account, whose gateway route takes no
+        caps, is unchanged. A $60 order, the most `capital.scaled_limits` now gives, passes."""
+        self.seat()
+        self.broker.set_quote(self.instrument, "80000", "80010")
+        out = self.book.submit([self.intent("a1", self.instrument, "buy", "0.00093")])[0]
+        if self.real:
+            self.assertEqual(out.status, "refused")
+            self.assertIn("counts as $81.85 at the gateway", out.detail)
+            self.assertEqual(self.broker.sent, [])
+        else:
+            self.assertEqual(out.status, "filled", out.detail)
+        out = self.book.submit([self.intent("a1", self.instrument, "buy", "0.00075")])[0]  # $60.01 at the ask, $66.01 there
+        self.assertEqual(out.status, "filled", out.detail)
+        if self.real:
+            self.assert_sound()  # every order that reached the venue fits the gateway's cap
+
+    def test_a_limit_entry_counts_at_its_own_limit(self):
+        """The gateway counts a limit order at its limit, so a marketable limit above the ask is dearer
+        there than on the book's count at the ask; a bid resting under the touch is not."""
+        self.seat()
+        self.broker.set_quote(self.instrument, "80000", "80010")
+        over = self.book.submit([self.intent("a1", self.instrument, "buy", "0.00093", order_type="limit", limit_price="81000")])[0]
+        if self.real:  # $74.41 at the ask, $75.33 at its limit
+            self.assertEqual(over.status, "refused")
+            self.assertIn("counts as $75.33 at the gateway (its limit price)", over.detail)
+            self.assertEqual(self.broker.sent, [])
+        else:
+            self.assertNotEqual(over.status, "refused", over.detail)
+        under = self.book.submit([self.intent("a1", self.instrument, "buy", "0.00093", order_type="limit", limit_price="79990")])[0]
+        self.assertNotEqual(under.status, "refused", under.detail)  # $74.39 on both counts
+        self.assertLessEqual(gateway_usd(self.family, *self.broker.sent[-1]), CAP)
+
+    def test_a_pool_of_market_entries_is_never_one_order_over_the_cap_at_the_gateway(self):
+        """Two agents' $35 buys are $70.40 at the ask but $77.45 on the gateway's pricing: pooled into
+        one venue order, both were refused with a 403. Each now goes as its own order."""
+        self.seat("a1")
+        self.seat("a2")
+        self.broker.set_quote(self.instrument, "80000", "80010")
+        outs = self.book.submit([self.intent("a1", self.instrument, "buy", "0.00044"), self.intent("a2", self.instrument, "buy", "0.00044")])
+        self.assertEqual([o.status for o in outs], ["filled", "filled"], [o.detail for o in outs])
+        buys = [(o, bid, ask) for o, bid, ask in self.broker.sent if o.side == "buy"]
+        self.assertEqual(len(buys), 2)
+        for sent in buys:
+            self.assertLessEqual(gateway_usd(self.family, *sent), CAP)
+        self.assertTrue(self.book.reconcile().ok)
 
     def test_a_venue_that_fills_a_moment_later_gets_every_slice_at_once(self):
         """Alpaca's habit: an order is accepted first and filled on a later read. Each working slice
@@ -506,7 +559,7 @@ class EquitySlices(SliceCase):
     def test_a_fractional_equity_exit_is_cut_under_the_cap(self):
         self.seat()
         self.broker.set_quote(self.instrument, "500.00", "500.05")
-        self.buy(self.instrument, "0.14", "0.14", "0.14")
+        self.buy(self.instrument, "0.13", "0.13", "0.13", "0.03")  # $65 at the ask is $71.51 at the gateway
         held = self.held(self.instrument)
         sell = self.intent("a1", self.instrument, "sell", held)
         self.assertEqual(self.book.submit([sell])[0].status, "filled")
@@ -526,8 +579,8 @@ class EquitySlices(SliceCase):
 
     def test_one_whole_share_worth_more_than_the_cap_goes_as_one_unit(self):
         self.seat()
-        self.broker.set_quote(self.instrument, "70.00", "70.01")
-        self.buy(self.instrument, "1")
+        self.broker.set_quote(self.instrument, "65.00", "65.01")
+        self.buy(self.instrument, "1")  # $71.51 on the gateway's pricing
         self.broker.set_quote(self.instrument, "90.00", "90.01")
         sell = self.intent("a1", self.instrument, "sell", "1", order_type="limit", limit_price="89.00")
         self.assertEqual(self.book.submit([sell])[0].status, "filled")
@@ -556,6 +609,24 @@ class KalshiSlices(SliceCase):
         self.buy(instrument, count)  # $60: one order
         self.broker.set_quote(instrument, "0.94", "0.95")
         return instrument
+
+    def test_a_kalshi_entry_counts_at_its_own_price_not_marked_up(self):
+        """Kalshi's v2 wire has no market order: the adapter crosses at the leg's touch, and the
+        gateway counts a contract at the price it carries. A $75 market buy passes; a marketable
+        limit above the ask counts at its limit, and the real book refuses it before the gateway."""
+        instrument = event("yes", self.venue)
+        self.seat()
+        self.broker.set_quote(instrument, "0.28", "0.30")
+        over = self.book.submit([self.intent("a1", instrument, "buy", "250", order_type="limit", limit_price="0.31")])[0]
+        if self.real:  # $75.00 at the ask, $77.50 at its limit
+            self.assertEqual(over.status, "refused")
+            self.assertIn("counts as $77.50 at the gateway (its limit price)", over.detail)
+            self.assertEqual(self.broker.sent, [])
+        else:
+            self.assertNotEqual(over.status, "refused", over.detail)
+        out = self.book.submit([self.intent("a1", instrument, "buy", "250")])[0]  # $75.00 at the touch on both counts
+        self.assertNotEqual(out.status, "refused", out.detail)
+        self.assertLessEqual(gateway_usd(self.family, *self.broker.sent[-1]), CAP)
 
     def test_a_contract_exit_is_cut_into_whole_contracts_under_the_cap(self):
         instrument = self.contracts()
