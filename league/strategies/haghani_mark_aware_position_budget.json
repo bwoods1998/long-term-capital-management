@@ -1,0 +1,8 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_mark_aware_position_budget",
+  "repair": {
+    "key": "order_refusal:alpaca:position would be #% of desk equity, cap #%"
+  },
+  "why": "Corrected child of haghani-37 retaining the same Alpaca hourly alternative-coin maker-reversion specialty, signals and exits. Explicit quantities are bounded at current market value and the limit price, with 2% headroom below the supplied position ceiling; oversized resting buys are cancelled. Starts at rung 0 and must qualify independently."
+}
