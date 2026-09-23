@@ -114,7 +114,8 @@ counts, triage groups, the hypothesis index and exposure groups.
   - a code or rung change;
   - a material `eval.verdict` (not `look`/`progress`);
   - a `tool.fulfilled` for a request from its line;
-  - new credits;
+  - new credits, except the routine epoch payout (Sept 23, 2026: during the burst every working
+    paper agent was paid each hour, so the payout alone woke each one's research hourly);
   - another agent's note in its niche;
   - a market opening or closing;
   - a Kalshi window becoming non-empty;
