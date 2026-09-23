@@ -20,7 +20,7 @@ Sample sufficiency and performance quality are separate requirements. A high sco
 
 1. Record the complete failure vector: closed trades, replay blocks, out-of-sample coverage and growth, and deflated Sharpe. Use the current policy, not an older journal threshold.
 2. If count is the only failure, preserve the exact configuration. Check whether genuinely additional eligible history exists using `replay_coverage` with the complete proposed NEEDS. More coverage does not guarantee more qualifying trades.
-3. If coverage is unavailable, record that dependency and stop count-only parameter searches. Do not force turnover merely to reach twenty.
+3. If coverage is unavailable, record that dependency and stop count-only parameter searches. Do not force turnover merely to reach the trade minimum.
 4. If quality also fails, specify a separate, falsifiable edge hypothesis. Additional trades alone do not address that failure.
 
 ## Acceptance check

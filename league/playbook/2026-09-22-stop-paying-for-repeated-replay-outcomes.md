@@ -21,7 +21,7 @@ For these lineages—and any proposed retry matching a prior failure—write a s
 3. State the observable consequence in advance: which eligibility decisions, trades, input coverage, or execution calculation should differ, and why that difference addresses a recorded failure.
 4. If nothing material changes, reuse the archived result and decline the replay. If reproducibility is genuinely in question, label the rerun as a reproducibility check—not independent validation—and name the discrepancy it must resolve.
 
-Do not loosen entries solely to reach 20 trades. More trades would not by itself repair the recorded nonpositive out-of-sample growth. Missing external inputs remain missing until supplied; another parameter variant does not implement a blocked feed.
+Do not loosen entries solely to reach the trade minimum (20 then, 10 since Sept 22, 2026 21:25 UTC). More trades would not by itself repair the recorded nonpositive out-of-sample growth. Missing external inputs remain missing until supplied; another parameter variant does not implement a blocked feed.
 
 ## How to judge this lesson
 
