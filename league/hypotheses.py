@@ -1386,18 +1386,23 @@ class Foundry:
         return str((entry.payload if entry else card).get("_code") or "")
 
     # ------------------------------------------------------------------ refill
-    def refill(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None) -> Agent | None:
+    def refill(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None,
+               mutations: bool = True, reserved: Sequence[str] = ()) -> Agent | None:
         """The newcomer, when routine refill is the foundry's: a replay-passing card first (best desk
-        evidence first), else an evidence-driven mutation inside its share, else nobody."""
-        child = self._admit(rules, living=living, loser=loser)
-        if child is None:
+        evidence first), else an evidence-driven mutation inside its share, else nobody.
+
+        `mutations` off and `reserved` (Sept 23, 2026, the seat market): while a lab graduate waits
+        for a seat the House stakes no mutation, and the desks graduates wait for are theirs first."""
+        child = self._admit(rules, living=living, loser=loser, reserved=reserved)
+        if child is None and mutations:
             child = self._evidence_mutation(rules, living=living, loser=loser)
         if child is not None:
             with self.house._state_lock:
                 self.house._state.setdefault("last_newcomer", {})["at"] = self._now()
         return child
 
-    def _admit(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None) -> Agent | None:
+    def _admit(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None,
+               reserved: Sequence[str] = ()) -> Agent | None:
         house = self.house
         waiting = self.inventory()
         if not waiting:
@@ -1412,11 +1417,15 @@ class Foundry:
             niche = house.niches.get(card["niche"])
             if niche is None or niche.dormant or f"family:{card['family']}" in retired or f"line:{card['line_id']}" in retired:
                 continue
+            if niche.id in reserved:
+                continue  # a lab graduate waits for this desk: its next seat is the graduate's
             evaluation = self.evaluations()[card["id"]]
             displaced = loser
             if members.get(niche.id, 0) >= niche.max_members:
-                # A full desk makes room from its own weakest (which also frees a full league's seat).
-                displaced = house._weakest(rules, specialty=niche.id)
+                # A full desk makes room from its own weakest (which also frees a full league's
+                # seat). The card passed replay: a replay-only or never-traded resident makes way
+                # inside its grace (`House._weakest`, `evidenced`, Sept 23, 2026).
+                displaced = house._weakest(rules, specialty=niche.id, evidenced=True)
                 if displaced is None:
                     continue  # this desk is full of agents that have earned their seats
             code = self._code(card)
@@ -1482,9 +1491,9 @@ class Foundry:
             return None
         retired = self.retired()
         rank = {d.niche: d for d in self.desk_scores()}
-        members = {}
-        for a in living:
-            members[a.specialty] = members.get(a.specialty, 0) + 1
+        # Seats a rung-0 mutation may take, a desk: never a desk's last free seat while it has no
+        # member that trades (`House._mutation_room`, Sept 23, 2026).
+        room = house._mutation_room(living)
         candidates = []
         for s in house.standings():
             agent = house.registry.get(s.agent)
@@ -1494,8 +1503,10 @@ class Foundry:
                 continue  # positive forward evidence, or no House-staked child
             if self._is_retired(agent, retired):
                 continue  # an exhausted mechanism is not bred, however well one of its members trades
+            if house._losing_family(agent.family):
+                continue  # one earning member does not outvote the family's pooled forward record
             niche = house.niche_of(agent)
-            if niche is None or niche.dormant or members.get(niche.id, 0) >= niche.max_members:
+            if niche is None or niche.dormant or room.get(niche.id, 0) <= 0:
                 continue
             desk = rank.get(niche.id)
             candidates.append(((desk.score if desk else 0.0), s.score_growth, agent, s, desk))
