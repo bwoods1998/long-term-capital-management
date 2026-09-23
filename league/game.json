@@ -95,7 +95,7 @@
       "loser_min_observations": 5,
       "unproven_multiple": 6,
       "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry.",
-      "_about_sept23_pacing": "Sept 23, 2026, 16:50 UTC (C3 pacing): an agent with no earned record researches every 6 intervals (90 minutes at the 15-minute burst interval; was 45 minutes): 82-84% of such sessions abstained on Sept 22, and the paced OpenAI line goes first to agents with a record and to audits."
+      "_about_sept23_pacing": "Sept 23, 2026, 16:41 UTC (C3 pacing): an agent with no earned record researches every 6 intervals (90 minutes at the 15-minute burst interval; was 45 minutes): 82-84% of such sessions abstained on Sept 22, and the paced OpenAI line goes first to agents with a record and to audits."
     },
     "gate": {
       "_about": "Sept 22, 2026 overnight v0: after `after` empty passes in a row (no candidate, no replay, no Merton strategy) and nothing new on the agent's record, the interval doubles per further empty pass up to max_factor; sample_percent of skipped windows still run so misses stay measurable.",
@@ -226,6 +226,6 @@
     "royalty_share": "0.10",
     "luna_model": "gpt-6-luna",
     "sol_model": "gpt-6-sol",
-    "_about_sept23_pacing": "Sept 23, 2026, 16:50 UTC (C3 pacing, the learn-and-unblock run): the lab's Luna seeds and Sol leaps share the paced September OpenAI line, so the lab's own LLM line is $0.75 an hour until the month resets on Oct 1; parameter children, batch replay on the lab box and graduation spend no OpenAI and are unchanged."
+    "_about_sept23_pacing": "Sept 23, 2026, 16:41 UTC (C3 pacing, the learn-and-unblock run): the lab's Luna seeds and Sol leaps share the paced September OpenAI line, so the lab's own LLM line is $0.75 an hour until the month resets on Oct 1; parameter children, batch replay on the lab box and graduation spend no OpenAI and are unchanged."
   }
 }
