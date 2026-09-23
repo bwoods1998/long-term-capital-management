@@ -7,6 +7,10 @@
    with deposits and withdrawals taken out. Practice money is never added to it.
 4. Open and closed positions with the agent's own reason for each.
 5. One self-improvement series: after-cost return on the capital at work, by generation.
+6. The capital board (Sept 23, 2026): each agent's band, real stake, evidence and last band move,
+   and the board's summary (count and capital per band per venue, the last 50 moves, the throttle),
+   read from the House's allocator (`house.allocator.board()`). Without an allocator, or when it
+   fails, each agent's band follows its rung and nothing else is claimed.
 
 The site validates every byte (`personal-site/capital/schema.js`; the contract this file is
 written against is `league/tests/fixtures/site_contract.md`). One bad event refuses its whole
@@ -25,6 +29,7 @@ import time
 import urllib.error
 import urllib.request
 from decimal import ROUND_HALF_UP, Decimal
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -36,9 +41,14 @@ MAX_BATCH = 100
 MARK_EVERY_SECONDS = 300
 # The site's `MAX_DESKS` (capital/schema.js): a checkpoint with more desk rows is refused whole.
 # Found Sept 23, 2026: population 96 plus the last 8 dead made 104 rows, and every checkpoint from
-# 05:30Z was refused until the roster was bounded here.
-MAX_DESKS = 100
+# 05:30Z was refused until the roster was bounded here (at the site's 100 then). The site raised its
+# limit to 160 (personal-site #4, deployed 06:54Z Sept 23, 2026, version 5772ac0c): the population
+# bound is 128, plus the recent dead.
+MAX_DESKS = 160
 MAX_DEAD_SHOWN = 8
+# The site's `MAX_CHECKPOINT_BYTES` (512 KiB since personal-site #4; 100 rows measured 139 KiB). A
+# larger body is refused whole, so the least important rows are left out until it fits.
+MAX_CHECKPOINT_BYTES = 512 * 1024
 ALLOWED_LINK_HOSTS = ("sec.gov", "www.sec.gov", "efts.sec.gov", "blakewoods.us", "github.com", "kalshi.com", "finance.yahoo.com")
 RESEARCH_TOOLS = ("web_search", "library_search", "library_read", "library_write", "replay", "request_tool", "playbook_read")
 
@@ -57,6 +67,27 @@ class PublishError(RuntimeError):
 
 
 # ------------------------------------------------------------------------------- cleaning
+def js_length(text: str) -> int:
+    """A string's length as JavaScript counts it (UTF-16 code units), which is how every one of the
+    site's validators measures text: a character outside the Basic Multilingual Plane, such as an
+    emoji, is two there and one in Python."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def js_cut(text: str, limit: int) -> str:
+    """The longest prefix of `text` at most `limit` long in JavaScript's count, never splitting a
+    character. Cutting by Python's count would let 300 characters with one emoji in them reach the
+    site as 301, and the site refuses the whole checkpoint for one field that is too long."""
+    if js_length(text) <= limit:
+        return text
+    units = 0
+    for index, char in enumerate(text):
+        units += 2 if ord(char) > 0xFFFF else 1
+        if units > limit:
+            return text[:index]
+    return text
+
+
 def clean_text(value: Any, limit: int = 8000) -> str:
     text = str(value if value is not None else "")
     text = _CONTROL.sub(" ", text).replace("<", "‹")
@@ -69,7 +100,7 @@ def clean_text(value: Any, limit: int = 8000) -> str:
     text = _LINK.sub(link, text)
     text = _SCHEME.sub(lambda m: m.group(1) + ": ", text)
     text = _SECRET.sub("[removed] ", text)
-    return text[:limit]
+    return js_cut(text, limit)
 
 
 def clean(value: Any, depth: int = 0) -> Any:
@@ -119,6 +150,176 @@ def hours_between(start: str | None, end: str) -> float | None:
     if a is None or b is None:
         return None
     return round(max((b - a).total_seconds(), 0.0) / 3600, 2)
+
+
+# ------------------------------------------------------------------------- the capital board
+# The allocator's bands, lowest first (Workstream A, Sept 23, 2026). The site's validators know these
+# five words and no others (capital/schema.js `BANDS`). "paper" is the House's word: the page says
+# "Practice", and so does every sentence published here.
+BANDS = ("replay", "paper", "bunt", "swing", "star")
+REAL_BANDS = ("bunt", "swing", "star")
+BAND_LABELS = {"replay": "Replay", "paper": "Practice", "bunt": "Bunt", "swing": "Swing", "star": "Star"}
+RUNG_BANDS = ("replay", "paper", "bunt", "swing")  # before the allocator: rung 0..3
+MAX_BOARD_MOVES = 50
+MULTIPLE_PLACES = 6  # wealth multiples and E, as unsigned decimal strings: "1.034512"
+_VENUE = re.compile(r"^[a-z0-9-]{1,24}$")
+_DESK_ID = re.compile(r"^[a-z0-9-]{1,40}$")
+_MAX_MULTIPLE = Decimal("999999999")
+
+
+def rung_band(rung: Any) -> str | None:
+    """The band a rung implies when the allocator names none: 0 replay, 1 paper, 2 bunt, 3 swing."""
+    if isinstance(rung, bool):
+        return None
+    try:
+        rung = int(rung)
+    except (TypeError, ValueError):
+        return None
+    return RUNG_BANDS[rung] if 0 <= rung < len(RUNG_BANDS) else None
+
+
+def site_instant(value: Any) -> str | None:
+    """Any ISO-8601 stamp (or an aware datetime) in the site's exact form: UTC, milliseconds, Z."""
+    from ltcm.broker import instant
+
+    if isinstance(value, datetime):
+        parsed = value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    else:
+        parsed = instant(value)
+    if parsed is None:
+        return None
+    return parsed.strftime("%Y-%m-%dT%H:%M:%S") + f".{parsed.microsecond // 1000:03d}Z"
+
+
+def _not_after(at: str, published_at: str) -> bool:
+    """The site refuses a move dated more than a minute after the checkpoint that carries it."""
+    from ltcm.broker import instant
+
+    a, b = instant(at), instant(published_at)
+    return a is not None and b is not None and a <= b + timedelta(seconds=60)
+
+
+def _number(value: Any) -> Decimal | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = Decimal(str(value))
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+    return number if number.is_finite() else None
+
+
+def _count(value: Any) -> int | None:
+    number = _number(value)
+    if number is None or number < 0 or number != number.to_integral_value():
+        return None
+    return min(int(number), 1_000_000_000)
+
+
+def site_multiple(value: Any) -> str | None:
+    """A wealth multiple or E: unsigned, six places ("1.034512"), or None when it is not a number."""
+    number = _number(value)
+    return money(min(number, _MAX_MULTIPLE), MULTIPLE_PLACES) if number is not None and number >= 0 else None
+
+
+def site_stake(value: Any) -> str | None:
+    """Real money in dollars and cents ("10.00"); None when there is none or it is not a number."""
+    number = _number(value)
+    return money(number, 2) if number is not None and number >= 0 else None
+
+
+def site_reason(value: Any) -> str:
+    return clean_text(" ".join(str(value if value is not None else "").split()), 300)
+
+
+def site_evidence(value: Any) -> dict[str, Any] | None:
+    """{W_paper, W_real, E, trades[, real_trades]} in the site's formats, or None if any is missing."""
+    if not isinstance(value, Mapping):
+        return None
+    out: dict[str, Any] = {key: site_multiple(value.get(key)) for key in ("W_paper", "W_real", "E")}
+    trades = _count(value.get("trades"))
+    if None in out.values() or trades is None:
+        return None
+    out["trades"] = trades
+    real = _count(value.get("real_trades"))
+    if real is not None:
+        out["real_trades"] = real
+    return out
+
+
+def site_last_move(value: Any, published_at: str) -> dict[str, Any] | None:
+    """{at, from_band, to_band, reason}, or None when the move names no band the site knows."""
+    if not isinstance(value, Mapping):
+        return None
+    at, start, end = site_instant(value.get("at")), value.get("from_band"), value.get("to_band")
+    if at is None or not _not_after(at, published_at) or end not in BANDS or (start is not None and start not in BANDS):
+        return None
+    return {"at": at, "from_band": start, "to_band": end, "reason": site_reason(value.get("reason"))}
+
+
+def site_board_move(value: Any, published_at: str) -> dict[str, Any] | None:
+    """One move on the board's trail: {id, at, agent, from_band, to_band, reason[, venue][, stake_usd]}."""
+    if not isinstance(value, Mapping):
+        return None
+    agent = str(value.get("agent") or "")
+    move = site_last_move(value, published_at)
+    if move is None or not _DESK_ID.match(agent):
+        return None
+    raw = str(value.get("id") or "") or f"move:{agent}:{move['at']}:{move['to_band']}"
+    out = {"id": event_id(raw), "agent": agent, **move}
+    venue = value.get("venue")
+    if isinstance(venue, str) and _VENUE.match(venue):
+        out["venue"] = venue
+    if "stake_usd" in value:
+        out["stake_usd"] = site_stake(value.get("stake_usd"))
+    return out
+
+
+def site_board(board: Mapping[str, Any], published_at: str) -> dict[str, Any]:
+    """The allocator's summary in the site's shape: per venue, count and capital per band; the last
+    50 moves (oldest first, ids unique); the throttle; whether the allocator is running."""
+    bands: dict[str, dict[str, Any]] = {}
+    raw = board.get("bands")
+    for venue, per in (list(raw.items())[:8] if isinstance(raw, Mapping) else []):
+        if not isinstance(venue, str) or not _VENUE.match(venue) or not isinstance(per, Mapping):
+            continue
+        rows = {}
+        for band, row in per.items():
+            count = _count(row.get("count")) if isinstance(row, Mapping) else None
+            capital = site_stake(row.get("capital_usd")) if isinstance(row, Mapping) else None
+            if band in BANDS and count is not None and capital is not None:
+                rows[band] = {"count": min(count, 100_000), "capital_usd": capital}
+        bands[venue] = rows
+    moves: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    raw_moves = board.get("moves")
+    for value in (list(raw_moves) if isinstance(raw_moves, (list, tuple)) else []):
+        move = site_board_move(value, published_at)
+        if move is not None and move["id"] not in seen:
+            seen.add(move["id"])
+            moves.append(move)
+    out: dict[str, Any] = {"enabled": board.get("enabled") is True, "bands": bands, "moves": moves[-MAX_BOARD_MOVES:]}
+    throttle = board.get("throttle")
+    if isinstance(throttle, Mapping) and isinstance(throttle.get("active"), bool):
+        pnl, envelope = _number(throttle.get("floor_pnl_usd")), site_stake(throttle.get("envelope_usd"))
+        if pnl is not None and envelope is not None:
+            out["throttle"] = {"active": throttle["active"], "floor_pnl_usd": money(pnl, 2, signed=True), "envelope_usd": envelope}
+    return out
+
+
+def ledger_board_move(entry: Entry, agent: Any) -> dict[str, Any] | None:
+    """A promote or demote verdict on the ledger as a move on the board's trail (the allocator's
+    rows carry `band_from` and `band_to`; older rows only their rungs)."""
+    p = entry.payload
+    start = p.get("band_from") if p.get("band_from") in BANDS else rung_band(p.get("from_rung"))
+    end = p.get("band_to") if p.get("band_to") in BANDS else rung_band(p.get("to_rung"))
+    if start is None or end is None or start == end or not _DESK_ID.match(str(agent.id)):
+        return None
+    move = {"id": event_id(entry.id), "at": entry.at, "agent": agent.id, "venue": "kalshi" if agent.venue == "kalshi" else "alpaca",
+            "from_band": start, "to_band": end, "reason": site_reason(p.get("reason"))}
+    if p.get("stake_usd") is not None:
+        move["stake_usd"] = site_stake(p.get("stake_usd"))
+    return move
 
 
 # --------------------------------------------------------------------------------- events
@@ -230,8 +431,13 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     if kind == "eval.verdict" and p.get("decision") in ("promote", "demote", "die"):
         if p["decision"] == "die":
             return f"The evidence ended {agent}: {p.get('reason')}."
+        banded = band_news(agent, p)
+        if banded:
+            return banded
         verb = "climbs" if p["decision"] == "promote" else "drops"
         return f"{agent} {verb} from rung {p.get('from_rung')} to rung {p.get('to_rung')}: {p.get('reason')}."
+    if kind == "eval.verdict" and p.get("decision") == "size":
+        return stake_news(agent, p)
     if kind == "audit.verdict":
         return f"The auditor {'approved' if p.get('approve') else 'vetoed'} {agent} for real money. {p.get('summary') or p.get('error') or ''}".strip()
     if kind == "merton.pass":
@@ -250,6 +456,33 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     if kind == "ops.recommendation":
         return f"Capital recommendation: {p.get('summary')}"
     return None
+
+
+def _because(p: Mapping[str, Any]) -> str:
+    reason = " ".join(str(p.get("reason") or "").split()).rstrip(". ")
+    return reason or "the allocator's evidence"
+
+
+def band_news(agent: str, p: Mapping[str, Any]) -> str | None:
+    """An allocator move (`band_from`, `band_to` on the verdict) in the site's band template:
+    "mullins-7 climbs from Practice to Bunt with a $10.00 real stake: E 1.041 after 6 trades." """
+    start, end = p.get("band_from"), p.get("band_to")
+    if start not in BANDS or end not in BANDS or start == end:
+        return None
+    verb = "climbs" if BANDS.index(end) > BANDS.index(start) else "drops"
+    stake = site_stake(p.get("stake_usd")) if end in REAL_BANDS else None
+    staked = f" with a ${stake} real stake" if stake and Decimal(stake) > 0 else ""
+    return f"{agent} {verb} from {BAND_LABELS[start]} to {BAND_LABELS[end]}{staked}: {_because(p)}."
+
+
+def stake_news(agent: str, p: Mapping[str, Any]) -> str | None:
+    """A stake change inside a band: "mullins-7's real stake is now $14.20 (Bunt): E 1.42." """
+    stake = site_stake(p.get("stake_usd"))
+    if not stake or Decimal(stake) <= 0:
+        return None
+    band = next((b for b in (p.get("band_to"), p.get("band"), rung_band(p.get("rung"))) if b in REAL_BANDS), None)
+    label = f" ({BAND_LABELS[band]})" if band else ""
+    return f"{agent}'s real stake is now ${stake}{label}: {_because(p)}."
 
 
 def _short(value: Any) -> str:
@@ -403,8 +636,9 @@ class Publisher:
 
     # ---------------------------------------------------------------- checkpoint
     def checkpoint(self, house: Any) -> dict[str, Any]:
-        # The accounts are read first: the site refuses a checkpoint whose venue readings are
-        # stamped later than the checkpoint itself (found on the first live publish).
+        # The board and the accounts are read first: the site refuses a checkpoint whose venue
+        # readings (found on the first live publish) or band moves are stamped later than itself.
+        board = self.allocator_board(house)
         account = self.account(house)
         at = now_iso(self.clock)
         ledger = house.ledger
@@ -419,13 +653,20 @@ class Publisher:
             if entry.at[:10] == at[:10]:
                 spend_today[bucket] += amount
         living, dead = list(house.registry.living()), list(house.registry.dead())
-        displayed = self.displayed(house, living, dead)
+        rungs = {agent.id: self._rung(house, agent) for agent in living + dead}
+        bands = {agent.id: self._band(board, agent.id, rungs[agent.id]) for agent in living + dead}
+        order = self.ranked(house, living, dead, bands=bands)
+        displayed = set(order)
+        living_rows, ledger_moves = [], []
         # The roster is bounded for the site, but the experiment includes every agent ever born.
         # Removing an old loser from the display must never remove its loss or research cost.
         for agent in living + dead:
-            row, generation = self._desk(house, agent, at)
+            row, generation = self._desk(house, agent, at, board=board, rung=rungs[agent.id])
             if agent.id in displayed:
                 desks.append(row)
+            if agent.alive:
+                living_rows.append(row)
+            ledger_moves.extend(generation.pop("moves", []))
             g = curve_rows.setdefault(agent.generation, {"desks": 0, "decisions": 0, "cost": ZERO, "pnl": ZERO, "capital": ZERO})
             g["desks"] += 1
             g["decisions"] += generation["decisions"]
@@ -437,7 +678,7 @@ class Publisher:
             g = curve_rows[generation]
             excess = ((g["pnl"] - g["cost"]) / g["capital"] * 100) if g["capital"] > 0 else ZERO
             curve.append({
-                "generation": int(generation), "desks": min(g["desks"], 100), "decisions": g["decisions"], "cost_usd": money(g["cost"], 4),
+                "generation": int(generation), "desks": min(g["desks"], MAX_DESKS), "decisions": g["decisions"], "cost_usd": money(g["cost"], 4),
                 "pnl_usd": money(g["pnl"], 4, signed=True), "cost_adjusted_excess_pct": money(excess, 4, signed=True), "brier": None,
                 "pnl_per_inference_usd": money(g["pnl"] / g["cost"], 4, signed=True) if g["cost"] > 0 else "0",
             })
@@ -498,25 +739,150 @@ class Publisher:
             },
             "lab": {"experiments": [], "curve": curve, "calibration": {"n": 0, "brier": None}},
         }
+        body["board"] = self._board_block(board, at, living_rows, ledger_moves)
+        return self.fit(body, order)
+
+    # ----------------------------------------------------------------- the capital board
+    @staticmethod
+    def allocator_board(house: Any) -> Mapping[str, Any] | None:
+        """`house.allocator.board()`, or None when there is no allocator, it fails, or it has not
+        drawn a board yet: the board is what the page draws, and it never costs the floor its
+        checkpoint. The allocator holds an empty placeholder (no agents, no bands, no moves) until
+        its first rebalance, which is every House restart until the first mark pass and forever
+        while the constitution switches it off; publishing that would empty the page's lanes and
+        its trail, so the roster's bands and the ledger's moves stand in for it instead."""
+        allocator = getattr(house, "allocator", None)
+        if allocator is None:
+            return None
+        try:
+            board = allocator.board()
+        except Exception:  # noqa: BLE001 - a broken board falls back to the rungs, never to no checkpoint
+            return None
+        if not isinstance(board, Mapping):
+            return None
+        agents = board.get("agents")
+        return board if isinstance(agents, Mapping) and agents else None
+
+    @staticmethod
+    def _rung(house: Any, agent: Any) -> int | None:
+        try:
+            return int(house.evaluator.rung(agent.id))
+        except Exception:  # noqa: BLE001 - a display field, never a reason to skip publishing
+            return None
+
+    @staticmethod
+    def _allocated(board: Mapping[str, Any] | None, agent_id: str) -> Mapping[str, Any] | None:
+        agents = board.get("agents") if board is not None else None
+        row = agents.get(agent_id) if isinstance(agents, Mapping) else None
+        return row if isinstance(row, Mapping) else None
+
+    @classmethod
+    def _band(cls, board: Mapping[str, Any] | None, agent_id: str, rung: int | None) -> str | None:
+        row = cls._allocated(board, agent_id)
+        return row["band"] if row is not None and row.get("band") in BANDS else rung_band(rung)
+
+    @classmethod
+    def band_fields(cls, board: Mapping[str, Any] | None, agent_id: str, rung: int | None, at: str) -> dict[str, Any]:
+        """A desk row's board fields. With the allocator: `band`, `stake_usd` (real bands only, else
+        null), `evidence` and `last_move` (null when there is none). Without it, or for an agent the
+        allocator does not list: the band the rung implies, and nothing else."""
+        fields: dict[str, Any] = {}
+        band = cls._band(board, agent_id, rung)
+        if band is not None:
+            fields["band"] = band
+        row = cls._allocated(board, agent_id)
+        if row is None:
+            return fields
+        try:
+            fields.update({
+                "stake_usd": site_stake(row.get("stake_usd")) if band in REAL_BANDS else None,
+                "evidence": site_evidence(row.get("evidence")),
+                "last_move": site_last_move(row.get("last_move"), at),
+            })
+        except Exception:  # noqa: BLE001 - odd allocator data costs the row its evidence, not the checkpoint
+            fields = {"band": band} if band is not None else {}
+        return fields
+
+    @staticmethod
+    def _board_block(board: Mapping[str, Any] | None, at: str, living_rows: list[dict[str, Any]], ledger_moves: list[dict[str, Any]]) -> dict[str, Any]:
+        """The checkpoint's `board`: the allocator's own summary, or, without one, the roster's bands
+        (count, and real capital on the real bands) and the ledger's last 50 promotions and demotions."""
+        if board is not None:
+            try:
+                return site_board(board, at)
+            except Exception:  # noqa: BLE001 - fall through to what the roster itself says
+                pass
+        bands: dict[str, dict[str, dict[str, Any]]] = {}
+        for row in living_rows:
+            band = row.get("band")
+            if band not in BANDS:
+                continue
+            entry = bands.setdefault(row["venues"][0], {}).setdefault(band, {"count": 0, "capital": ZERO})
+            entry["count"] += 1
+            if band in REAL_BANDS:
+                entry["capital"] += Decimal(row["capital_usd"])
+        moves = sorted((m for m in ledger_moves if _not_after(m["at"], at)), key=lambda m: (m["at"], m["id"]))[-MAX_BOARD_MOVES:]
+        return {"enabled": False, "moves": moves,
+                "bands": {venue: {band: {"count": e["count"], "capital_usd": money(e["capital"], 2)} for band, e in per.items()} for venue, per in bands.items()}}
+
+    @staticmethod
+    def _seat_rows(body: dict[str, Any], desks: list[dict[str, Any]]) -> None:
+        body["desks"] = desks
+        body["floor"]["live_desks"] = sum(1 for d in desks if d["mode"] == "live" and d["status"] == "active")
+        body["floor"]["shadow_desks"] = sum(1 for d in desks if d["mode"] == "shadow" and d["status"] == "active")
+        body["committee"]["allocations"] = {d["id"]: d["capital_usd"] for d in desks if d["status"] == "active"}
+
+    @classmethod
+    def fit(cls, body: dict[str, Any], order: list[str]) -> dict[str, Any]:
+        """The body inside the site's byte limit: the least important rows (the oldest dead, then the
+        youngest of the lowest band) are left out until it fits. The totals keep every agent."""
+        size = lambda: len(canonical(body).encode("utf-8"))  # noqa: E731
+        excess = size() - MAX_CHECKPOINT_BYTES
+        if excess <= 0:
+            return body
+        rows = {d["id"]: d for d in body["desks"]}
+        ranked = [agent_id for agent_id in order if agent_id in rows] + [d["id"] for d in body["desks"] if d["id"] not in set(order)]
+        dropped: set[str] = set()
+        for agent_id in reversed(ranked):
+            if excess <= 0:
+                break
+            dropped.add(agent_id)
+            excess -= len(canonical(rows[agent_id]).encode("utf-8")) + 2 * len(agent_id) + 24
+        cls._seat_rows(body, [d for d in body["desks"] if d["id"] not in dropped])
+        for agent_id in reversed(ranked):  # the estimate is close; the exact size decides
+            if size() <= MAX_CHECKPOINT_BYTES or not body["desks"]:
+                break
+            if agent_id not in dropped:
+                dropped.add(agent_id)
+                cls._seat_rows(body, [d for d in body["desks"] if d["id"] not in dropped])
         return body
 
     @staticmethod
-    def displayed(house: Any, living: list[Any], dead: list[Any]) -> set[str]:
-        """The agents the site shows, at most `MAX_DESKS`: every agent on real money first, then the
-        rest of the living by rung, then the most recent dead to fill what is left (at most
-        `MAX_DEAD_SHOWN`). The totals still count every agent ever born."""
+    def ranked(house: Any, living: list[Any], dead: list[Any], *, bands: Mapping[str, str | None] | None = None) -> list[str]:
+        """The agents the site shows, most important first, at most `MAX_DESKS`: every agent on real
+        money first (the highest band, or rung, first), then the rest of the living, then the most
+        recent dead to fill what is left (at most `MAX_DEAD_SHOWN`, the newest first). The totals
+        still count every agent ever born."""
         def rank(agent: Any) -> tuple[int, str]:
-            try:
-                rung = int(house.evaluator.rung(agent.id))
-            except Exception:  # noqa: BLE001 - a display order, never a reason to skip publishing
-                rung = 0
-            return (-rung, str(agent.born_at or ""))
+            band = (bands or {}).get(agent.id)
+            if band in BANDS:
+                level = BANDS.index(band)
+            else:
+                try:
+                    level = int(house.evaluator.rung(agent.id))
+                except Exception:  # noqa: BLE001 - a display order, never a reason to skip publishing
+                    level = 0
+            return (-level, str(agent.born_at or ""))
 
         shown = [a.id for a in sorted(living, key=rank)][:MAX_DESKS]
         room = max(0, min(MAX_DEAD_SHOWN, MAX_DESKS - len(shown)))
         if room:
-            shown += [a.id for a in dead[-room:]]
-        return set(shown)
+            shown += [a.id for a in reversed(dead[-room:])]
+        return shown
+
+    @classmethod
+    def displayed(cls, house: Any, living: list[Any], dead: list[Any], *, bands: Mapping[str, str | None] | None = None) -> set[str]:
+        return set(cls.ranked(house, living, dead, bands=bands))
 
     @staticmethod
     def _models_used(house: Any, token_spend: Decimal) -> list[str]:
@@ -537,8 +903,8 @@ class Publisher:
             models.add(str(getattr(frontier, "model", MODEL)))
         return [clean_text(model, 40) for model in sorted(models)[:8]]
 
-    def _desk(self, house: Any, agent: Any, at: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        rung = house.evaluator.rung(agent.id)
+    def _desk(self, house: Any, agent: Any, at: str, *, board: Mapping[str, Any] | None = None, rung: int | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        rung = house.evaluator.rung(agent.id) if rung is None else rung
         book = house.book_of(agent) if agent.alive else next((b for b in house.books.values() if agent.id in b.accounts), None)
         account = book.account(agent.id) if book is not None and agent.id in book.accounts else None
         staked = account.staked if account else ZERO
@@ -588,7 +954,9 @@ class Publisher:
         }
         if agent.alive and next_wake:
             row["next_session_at"] = now_iso(lambda: float(next_wake))
-        return row, {"decisions": intents, "cost": cost, "pnl": pnl, "capital": capital}
+        row.update(self.band_fields(board, agent.id, rung, at))
+        trail = [m for m in (ledger_board_move(entry, agent) for entry in moves[-MAX_BOARD_MOVES:]) if m is not None]
+        return row, {"decisions": intents, "cost": cost, "pnl": pnl, "capital": capital, "moves": trail}
 
 
 def _epoch(iso: str) -> float:
