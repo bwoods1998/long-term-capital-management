@@ -27,11 +27,12 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from ltcm.broker import Instrument, money
 
@@ -53,7 +54,7 @@ from .researcher import Researcher, pass_state, restore_pass
 from .research_jobs import ResearchJobs, ResearchPending
 from .pacer import Pacer
 from .rules import rules_text
-from .sandbox import SandboxError
+from .sandbox import SandboxBusy, SandboxError
 from .venues import family_of, instrument_for, market_hours, min_order_usd, price_increment, snap_limit
 
 #: How many bars of a watched underlier a replay tape carries per symbol, and the sizes it may
@@ -123,6 +124,14 @@ class Settings:
     deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
     holdout_gate: bool = True
     holdout_lineage_budget: int = 3
+    # The tick never waits on a box that background work holds (`House.tick`). A wake whose box is
+    # busy (its research replaying a candidate there) is skipped and retried on the next tick; the
+    # births phase needs the probe box and waits at most `probe_wait_seconds` for it (a probe is
+    # about 20 s and a box's sleep up to about 17 s, measured Sept 22, 2026), then defers to the
+    # next tick. Measured Sept 23, 2026, 05:07Z: a hypothesis replay held the probe box through a
+    # hung Sail call, and the House's first tick waited about twelve minutes for it.
+    box_wait_seconds: float = 2.0
+    probe_wait_seconds: float = 15.0
 
 
 
@@ -254,6 +263,9 @@ class House:
                        "feeds": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
+        # What the tick put off because a box was busy (`_defer`): shown in health.json, told hourly.
+        self._deferred: dict[str, dict[str, Any]] = {}
+        self._deferred_told: dict[str, float] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -387,15 +399,26 @@ class House:
         deflated Sharpe off the paper gate found 33 agents on rung 0 -- whole desks, Alpaca
         megacaps and crypto majors among them -- whose code had had its replay under the old gate."""
         key = _replay_rules_key()
-        if self._state.get("replay_rules") == key:
+        if self._state.get("replay_rules") != key:
+            with self._state_lock:
+                retried = [a.id for a in self.registry.living()
+                           if self.evaluator.rung(a.id) == 0 and self._state["tried"].pop(a.id, None) is not None]
+                self._state["replay_rules"] = key
+                self._state["revive_pending"] = True
+            if retried:
+                self.alert("info", f"the replay rules changed: {len(retried)} agent(s) on rung 0 get one fresh replay under them")
+        if not self._state.get("revive_pending") or self._closing.is_set():
             return
-        with self._state_lock:
-            retried = [a.id for a in self.registry.living()
-                       if self.evaluator.rung(a.id) == 0 and self._state["tried"].pop(a.id, None) is not None]
-            self._state["replay_rules"] = key
-        if retried:
-            self.alert("info", f"the replay rules changed: {len(retried)} agent(s) on rung 0 get one fresh replay under them")
-        self._revive_near_misses()
+        # Each revival probes its code's NEEDS: with the probe box busy it waits for a later tick.
+        with self._probe_turn("revival") as free:
+            if free:
+                try:
+                    self._revive_near_misses()
+                except SandboxError as exc:
+                    self._defer("revival", f"infrastructure: {str(exc)[:200]}")
+                    return
+                with self._state_lock:
+                    self._state.pop("revive_pending", None)
 
     #: How an agent that never left rung 0 may have died without its code being judged unfit.
     REVIVABLE_CAUSES = ("never qualified", "displaced", "stuck", "credits")
@@ -488,6 +511,46 @@ class House:
 
     def alert(self, level: str, text: str) -> None:
         self.ledger.append("ops.alert", {"level": level, "text": str(text)[:1000]})
+
+    # ------------------------------------------------------- a tick that never blocks
+    def _box_patience(self) -> Any:
+        """Within this block, a sandbox call from this thread waits at most `box_wait_seconds` for
+        a box another caller holds, then raises `SandboxBusy` (league/sandbox.py). A sandbox with
+        no locks of its own (the local one, the tests' in-process ones) runs as before."""
+        patience = getattr(self.sandbox, "patience", None)
+        return patience(self.settings.box_wait_seconds) if patience is not None else nullcontext()
+
+    @contextmanager
+    def _probe_turn(self, what: str) -> Iterator[bool]:
+        """The probe box, held for a block of births (their NEEDS probes reenter it), or False
+        after `probe_wait_seconds` with the deferral recorded: never a failure of any strategy."""
+        claim = getattr(self.sandbox, "claim", None)
+        if claim is None:
+            yield True
+            return
+        with claim(PROBE_BOX, wait=self.settings.probe_wait_seconds) as held:
+            if not held:
+                self._defer(what, f"the probe box is in use by background work (waited {self.settings.probe_wait_seconds:g}s)")
+            yield held
+
+    def _defer(self, what: str, reason: str) -> None:
+        """Work the tick put off because a box was busy or Sail did not answer. Kept for health.json
+        and told as an info alert at most every fifteen minutes a kind: it is infrastructure, not a
+        strategy's result, and it is tried again on the next tick."""
+        now = self.clock()
+        with self._state_lock:
+            row = self._deferred.setdefault(what, {"count": 0, "first_at": now_iso(self.clock)})
+            row.update(count=row["count"] + 1, reason=str(reason)[:300], at=now_iso(self.clock), epoch=now)
+            tell = now - self._deferred_told.get(what, float("-inf")) >= 900
+            if tell:
+                self._deferred_told[what] = now
+        if tell:
+            self.alert("info", f"{what} deferred to a later tick: {str(reason)[:300]}")
+
+    def begin_close(self) -> None:
+        """TERM: start no new background work from now on, and let the tick in hand skip its births.
+        The loop ends after the tick in hand, which no longer waits on any box background work holds."""
+        self._closing.set()
 
     def stopped(self) -> bool:
         return (self.root / "STOP").exists()
@@ -678,10 +741,13 @@ class House:
               # it on": that is how the architect's strategies join a desk rather than arriving
               # with a slug of their own.
               params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False,
-              specialty: str | None = None, founder: str | None = None) -> Agent:
+              specialty: str | None = None, founder: str | None = None, described: Any | None = None) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
         # sealed probe box the House keeps for the purpose, never the House's own process.
-        described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
+        # `described`: that probe's run of this same code, made by a caller that must not call Sail
+        # here (a research admission, under the lifecycle lock: `_admit_researched`).
+        if described is None:
+            described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
         info = described.result
         if not info.get("ok"):
             if keep_probe_awake:
@@ -958,6 +1024,13 @@ class House:
             return {"agent": agent.id, "skipped": "no data"}
         try:
             run = self.sandbox.decide(agent.id, agent.code, ctx)
+        except SandboxBusy as exc:
+            # Its research is replaying a candidate in its box (or the box is being put to sleep):
+            # the tick does not wait for that. Due again at once, so it is woken on the next tick.
+            with self._state_lock:
+                self._state["next_wake"][agent.id] = self.clock()
+            self._defer("wakes", f"{agent.id}: {str(exc)[:200]}")
+            return {"agent": agent.id, "skipped": "its box is in use by background work; woken on the next tick"}
         except SandboxError as exc:
             self.alert("warning", f"{agent.id}: its box did not run ({str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "sandbox"}
@@ -1353,7 +1426,8 @@ class House:
 
     def _wake_safely(self, agent: Agent) -> dict[str, Any]:
         try:
-            return self.wake(agent)
+            with self._box_patience():  # a pool thread of the tick: it never waits on background work
+                return self.wake(agent)
         except Exception as exc:  # noqa: BLE001 - one agent's wake must never take the tick down
             self.alert("error", f"{agent.id}: its wake failed ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "error": str(exc)}
@@ -1802,6 +1876,13 @@ class House:
                     self._feeds_waiting[agent.id] = self.clock()
                     self.alert("info", f"{agent.id}: its replay waits for recorded feeds ({str(exc)[:200]})")
                 return {"agent": agent.id, "skipped": "waiting for recorded feeds"}
+            if isinstance(exc, SandboxError):
+                # Sail did not answer (or the box was busy): the House's infrastructure, not the
+                # strategy. Worded so `hypotheses._retire_unrunnable` does not count it against the
+                # line, and it is not a trial; the next wake tries again.
+                self.alert("warning", f"{agent.id}: its replay box did not answer, infrastructure and not a trial "
+                                      f"({type(exc).__name__}: {str(exc)[:200]})")
+                return {"agent": agent.id, "skipped": "replay box unavailable (infrastructure)"}
             self.alert("warning", f"{agent.id}: replay could not run ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "replay unavailable"}
         crash = self._crashed(result)
@@ -1856,7 +1937,14 @@ class House:
 
     def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
         """The researcher's `replay` tool: a counted trial of candidate code, never a promotion."""
-        described = self.sandbox.needs(PROBE_BOX, code)
+        try:
+            described = self.sandbox.needs(PROBE_BOX, code)
+        except SandboxError as exc:
+            # The probe box did not answer: infrastructure, never a trial and never the candidate's
+            # outcome (`hypotheses.evaluate` leaves its card pending for another attempt).
+            return {"counted_as_trial": False, "passed": False, "infrastructure": True, "numbers": {},
+                    "error": f"the House's probe box did not answer (infrastructure, NOT a trial against you): "
+                             f"{type(exc).__name__}: {str(exc)[:200]}"}
         self._charge_box(agent.id, described, note="reading a candidate's NEEDS")
         info = described.result
         if not info.get("ok"):
@@ -1893,7 +1981,8 @@ class House:
                         "numbers": {"passed": ok, "untested": blind, "reasons": [] if ok else ["it did not run on the live view"], "note": note}}
             result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
         except Exception as exc:  # noqa: BLE001
-            return {"counted_as_trial": False, "passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {}}
+            return {"counted_as_trial": False, "passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {},
+                    **({"infrastructure": True} if isinstance(exc, SandboxError) else {})}
         crash = self._crashed(result)
         if crash:
             self.alert("warning", f"{agent.id}: a candidate's replay was not run ({crash[:160]}); it is not counted as a trial")
@@ -2713,7 +2802,7 @@ class House:
 
     # ------------------------------------------------------------------- forks
     def fork(self, parent: Agent, *, code: str | None = None, params: Mapping[str, Any] | None = None, reason: str = "", passed_replay: bool = False,
-             staked_by_house: bool = False) -> Agent | None:
+             staked_by_house: bool = False, described: Any | None = None) -> Agent | None:
         """A rich agent has a child and endows it. With no new code the child is a mechanical
         mutation of the parent's parameters; either way it answers for itself from replay up,
         unless its code already passed replay as its parent's candidate.
@@ -2721,7 +2810,11 @@ class House:
         `staked_by_house`: the child's code is a research candidate that PASSED replay and its
         parent cannot afford the endowment. The House stakes it from the pool instead (at most one
         a parent a day): an agent above rung 0 cannot edit itself, so without this an improvement
-        that research found and replay confirmed would wait weeks for its parent to save up."""
+        that research found and replay confirmed would wait weeks for its parent to save up.
+
+        `described`: the child's NEEDS, read by the caller in the probe box before it took the
+        lifecycle lock (`_admit_researched`). Then nothing here calls Sail: the child's box starts
+        from the clean image, not a checkpoint of its parent's."""
         rules = self.game["economy"]
         if len(self.registry.living()) >= int(rules["max_population"]):
             return None
@@ -2739,14 +2832,16 @@ class House:
         if child_params is None:
             return None
         child = self.spawn(parent.line or parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
-                           endowment=rules["endowment_usd"] if staked_by_house else None)
+                           endowment=rules["endowment_usd"] if staked_by_house else None, described=described)
         if staked_by_house:
             self._state["last_staked"][parent.id] = self.clock()
         else:
             self.economy.transfer(parent.id, child.id, rules["fork_endowment_usd"], "fork endowment")
         forked = False
         try:
-            forked = bool(self.sandbox.fork(parent.id, child.id))
+            forked = described is None and bool(self.sandbox.fork(parent.id, child.id))
+        except SandboxBusy:
+            pass  # the parent's box is in use by its own replay or research: the clean image, no wait
         except SandboxError as exc:
             self.alert("warning", f"{child.id}: could not fork its parent's box, starting from the clean image ({str(exc)[:160]})")
         self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd" if staked_by_house else "fork_endowment_usd"], "box_forked": forked,
@@ -3366,9 +3461,7 @@ class House:
                 with self._lifecycle_lock:
                     candidate = self._commit_research(agent.id, generation, outcome)
                 if candidate:
-                    with self._lifecycle_lock:
-                        row = Admissions(self.ledger).enqueue(agent.id, generation, candidate, session)
-                        self._admit_candidate(row)
+                    self._admit_researched(agent.id, generation, candidate, session)
                 self._trace_adoption(agent.id, session, outcome.candidate)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
             self._note_research_result(agent.id, outcome)
@@ -3399,8 +3492,10 @@ class House:
                 if claimed:
                     self.research_jobs.finish(job['session'], 'retired before resume', cancelled=True)
 
-    def _admit_candidate(self, row, *, displace=False):
-        """Retry a known deferred fork under the lifecycle lock; never retry an unknown write."""
+    def _admission_gate(self, row, *, displace=False):
+        """An admission's checks, under the lifecycle lock and with no Sail call: `(parent, candidate,
+        staked, niche, loser)` when it may go ahead, else None with the row recorded (waiting,
+        cancelled or unconfirmed)."""
         queue = Admissions(self.ledger)
         if row['status'] == 'admitting':
             queue.record(row, 'unconfirmed', 'restart during admission; inspect the retained evidence before retrying')
@@ -3435,12 +3530,25 @@ class House:
             if loser is None:
                 queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')
                 return None
+        return parent, candidate, staked, niche, loser
+
+    def _admit_candidate(self, row, *, displace=False, described=None):
+        """Retry a known deferred fork under the lifecycle lock; never retry an unknown write.
+
+        `described`: the candidate's NEEDS, read in the probe box by a caller that holds the lifecycle
+        lock and must make no Sail call under it (`_admit_researched`, which never displaces)."""
+        gate = self._admission_gate(row, displace=displace)
+        if gate is None:
+            return None
+        parent, candidate, staked, niche, loser = gate
+        queue = Admissions(self.ledger)
+        if loser is not None:
             # Verify the replacement before retiring anyone. Its module executes only in the
             # sealed probe box, exactly as at spawn. A bad file must not displace a resident.
             try:
-                described = self.sandbox.needs(PROBE_BOX, candidate['code'])
-                self._charge_box(parent.id, described, note='validating a deferred candidate admission')
-                info = described.result
+                validated = self.sandbox.needs(PROBE_BOX, candidate['code'])
+                self._charge_box(parent.id, validated, note='validating a deferred candidate admission')
+                info = validated.result
                 if not info.get('ok') or niche_of(info['needs'])[:2] != (parent.venue, parent.horizon):
                     raise ValueError('candidate no longer describes the same venue and horizon')
                 needs = niches_module.constrain(info['needs'], niche) if niche else info['needs']
@@ -3450,22 +3558,78 @@ class House:
             except Exception as exc:
                 queue.record(row, 'deferred', f'candidate validation unavailable: {type(exc).__name__}: {str(exc)[:160]}')
                 return None
-        queue.record(row, 'admitting', 'paper admission write started', displaced=loser.id if loser else None)
-        try:
-            if loser is not None:
-                self.kill(loser, 'displaced', self.postmortem(loser, 'displaced',
-                    'a replay-passing deferred candidate has priority over an untested mutation'))
-            child = self.fork(parent, code=candidate['code'], params=candidate['params'],
-                              reason=candidate['purpose'], passed_replay=True, staked_by_house=staked)
-        except Exception as exc:
-            queue.record(row, 'unconfirmed', f'admission interrupted: {type(exc).__name__}: {str(exc)[:160]}')
-            self.alert('warning', f"{parent.id}: candidate admission is unconfirmed; retained for inspection")
-            return None
+        # The child's birth probes its NEEDS in the probe box, under the lifecycle lock, so it never
+        # waits long for that box: held by background work, the admission is deferred and retried,
+        # before anything is written. Already `described`, the birth needs no box at all.
+        claim = getattr(self.sandbox, 'claim', None) if described is None else None
+        with claim(PROBE_BOX, wait=self.settings.probe_wait_seconds) if claim is not None else nullcontext(True) as free:
+            if not free:
+                queue.record(row, 'deferred', 'the probe box is in use by background work; retried at the next admission pass')
+                return None
+            queue.record(row, 'admitting', 'paper admission write started', displaced=loser.id if loser else None)
+            try:
+                if loser is not None:
+                    self.kill(loser, 'displaced', self.postmortem(loser, 'displaced',
+                        'a replay-passing deferred candidate has priority over an untested mutation'))
+                child = self.fork(parent, code=candidate['code'], params=candidate['params'],
+                                  reason=candidate['purpose'], passed_replay=True, staked_by_house=staked, described=described)
+            except SandboxError as exc:
+                if loser is None:
+                    # Sail did not answer before anything was born (the NEEDS probe comes first): a
+                    # deferral, not an unknown write. With a resident displaced it stays unconfirmed.
+                    queue.record(row, 'deferred', f'infrastructure: {type(exc).__name__}: {str(exc)[:160]}')
+                    return None
+                queue.record(row, 'unconfirmed', f'admission interrupted: {type(exc).__name__}: {str(exc)[:160]}')
+                self.alert('warning', f"{parent.id}: candidate admission is unconfirmed; retained for inspection")
+                return None
+            except Exception as exc:
+                queue.record(row, 'unconfirmed', f'admission interrupted: {type(exc).__name__}: {str(exc)[:160]}')
+                self.alert('warning', f"{parent.id}: candidate admission is unconfirmed; retained for inspection")
+                return None
         if child is None:
             queue.record(row, 'deferred', 'fork returned without admission; capacity or endowment unavailable')
             return None
         queue.record(row, 'admitted', 'a replay-passing child was seated on paper', child=child.id)
         return child
+
+    def _admit_researched(self, agent_id: str, generation: tuple, candidate: Mapping[str, Any], session: str) -> Agent | None:
+        """A research candidate's child, from the research thread, with no Sail call under the
+        lifecycle lock. Every wake of the tick takes that lock, so Sail stalling under it stalls the
+        whole tick, and TERM with it (review of PR 159: this path held it through the child's NEEDS
+        probe and the parent's box fork, a checkpoint and a restore at the client's ten- and
+        fifteen-minute timeouts). So: the queue row and its checks first (an admission that must
+        wait buys no probe); then the NEEDS probe, holding nothing but the probe box; then, under
+        the lock again, the birth from that probe's result into a box from the clean image. The row
+        is read back before the birth, so a candidate the tick's admission pass seated meanwhile is
+        never born twice. A busy probe box or a Sail failure leaves it deferred for that pass:
+        infrastructure, never the candidate's result."""
+        queue = Admissions(self.ledger)
+        with self._lifecycle_lock:
+            row = queue.enqueue(agent_id, generation, candidate, session)
+            if self._admission_gate(row) is None:
+                return None
+        described, why = None, ''
+        claim = getattr(self.sandbox, 'claim', None)
+        try:
+            with claim(PROBE_BOX, wait=600) if claim is not None else nullcontext(True) as free:
+                if free:
+                    described = self.sandbox.needs(PROBE_BOX, candidate['code'])
+                else:
+                    why = 'the probe box is in use by background work; retried at the next admission pass'
+        except Exception as exc:  # noqa: BLE001 - nothing is written yet: the admission pass retries it
+            why = f"{'infrastructure' if isinstance(exc, SandboxError) else 'NEEDS probe failed'}: {type(exc).__name__}: {str(exc)[:160]}"
+        with self._lifecycle_lock, self._box_patience():
+            row = queue.enqueue(agent_id, generation, candidate, session)  # as it stands now
+            if described is None:
+                if row['status'] in ('queued', 'deferred'):
+                    queue.record(row, 'deferred', why)
+                return None
+            child = self._admit_candidate(row, described=described)
+            if child is None and row.get('status') != 'unconfirmed' and self._generation(agent_id) is not None:
+                # The probe seated nobody (the seat went meanwhile, or the tick's pass seated it):
+                # its seconds are the parent's, as a validation probe's are.
+                self._charge_box(agent_id, described, note="reading a candidate's NEEDS for an admission that did not seat it")
+            return child
 
     def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
         """Apply a candidate under the lifecycle lock, or return it for a separate child."""
@@ -3682,8 +3846,20 @@ class House:
                 # that is the calendar, not the agent.
                 self.kill(agent, "stuck", f"{self.idle_run(agent)['barren']} wakes in a row with a live market in front of it and nothing done, "
                                           f"and too few credits left to research its way out")
-        if not refill:
+        if not refill or self._closing.is_set():
             return  # births buy sandbox work; culling above remains available after spending stops
+        # Every birth reads its strategy's NEEDS in the probe box. The tick holds that box for the
+        # whole phase (each probe reenters it), or, when background work has it, births wait for
+        # the next tick with the reason recorded. A Sail call that fails is deferred the same way.
+        with self._probe_turn("births") as free:
+            if free:
+                try:
+                    self._births(rules)
+                except SandboxError as exc:
+                    self._defer("births", f"infrastructure: {type(exc).__name__}: {str(exc)[:200]}")
+
+    def _births(self, rules: Mapping[str, Any]) -> None:
+        """Forks of rich agents, the founders below the floor, merged strategies, then the refill."""
         for agent in self.registry.living():
             if self.economy.can_fork(agent.id) and self.evaluator.rung(agent.id) >= 1:
                 last = float(self._state.setdefault("last_fork", {}).get(agent.id) or 0)
@@ -3691,7 +3867,12 @@ class House:
                     self._state["last_fork"][agent.id] = self.clock()
                     if self._holdout_spent(agent):
                         continue  # its child could pass no replay: asked again next epoch
-                    if self.fork(agent) is not None:
+                    try:
+                        child = self.fork(agent)
+                    except SandboxError:
+                        self._state["last_fork"][agent.id] = last  # not its fault: asked again next tick
+                        raise
+                    if child is not None:
                         # The first burst payout launched seven children serially, holding one
                         # tick for over seven minutes. Give the next parent its turn on the next
                         # tick; the persisted per-parent cadence survives restart.
@@ -3888,6 +4069,13 @@ class House:
             self.ledger.append("ops.budget", {"what": "holds absorbed", "kind": "sail", **out})
 
     def tick(self) -> dict[str, Any]:
+        """One pass of the floor. It never waits on a box background work holds: a wake whose box
+        is busy is retried on the next tick, and births wait for the probe box at most
+        `probe_wait_seconds` (`_births`). What it put off is in health.json's `deferred`."""
+        with self._box_patience():
+            return self._tick()
+
+    def _tick(self) -> dict[str, Any]:
         if self._burst and not self.campaigns.running():
             self.game = deepcopy(self._base_game)
             self.economy.game, self.economy.rules = self.game, self.game['economy']
@@ -4102,6 +4290,8 @@ class House:
                      "queued_seconds": round(max((job["started_at"] if job["started_at"] is not None else now) - job["queued_at"], 0), 3),
                      "running_seconds": round(max(now - job["started_at"], 0), 3) if job["started_at"] is not None else 0}
                     for key, job in sorted(self._job_status.items())]
+            deferred = {what: {k: row[k] for k in ("count", "reason", "at", "first_at")}
+                        for what, row in sorted(self._deferred.items()) if now - row["epoch"] < 3600}
         health = {
             "at": summary["at"], "living": len(self.registry.living()), "dead": len(self.registry.dead()),
             "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders()),
@@ -4131,6 +4321,7 @@ class House:
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
             "feeds": self.feeds.health() if self.feeds is not None else None,
+            "deferred": deferred,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
