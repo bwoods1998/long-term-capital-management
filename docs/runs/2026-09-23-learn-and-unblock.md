@@ -234,3 +234,37 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   dark (pause mode, wind-down spam, 37% inactive agent-hours); (9) the $500 Alpaca envelope idle;
   (10) the inputs agents ask for do not exist (owner egress steps: EDGAR 8-K index or the Nasdaq
   calendar, TSA, RCP, EIA).
+- 17:14Z — the in-box updater shipped main `c04d76d` (#194's pacing dials) as release
+  `main-417d92cc3e00`; verified on the box: `merton_schedule_hours` toolsmith 48 / architect 24,
+  the lab's LLM line $0.75 an hour, `unproven_multiple` 6. Another merged strategy (#154,
+  index month-start flow) was born by the House.
+- 17:15Z — PR #199: the rules the agents read now say a fresh bunt is a one-loss trial (one lost
+  position over about 15% of the stake, computed from `hysteresis`) until its wins build a buffer.
+  No rule moves; it rides Deploy A.
+- 17:18Z — **the adversarial review of #198 (money)** finished: one major and one minor confirmed
+  and fixed on `w0-money/review` (a `gtc` equity exit over the order cap was sliced into fractional
+  `gtc` orders that Alpaca refuses, so the exit could never complete: now cut on whole shares; the
+  envelope reserved the flat bunt for an unfunded seat while `seat` lends `bunt × W_real`: now it
+  reserves what `seat` will lend). Judged and left as the table's letter: a re-seat lends
+  `bunt × lifetime W_real` (W_real is never reset by the allocator's own definition); a bunt halved
+  by the throttle while W_real < 1 is not refilled when the throttle lifts (losses shrink by free
+  cash only); every real-book check now reads the agent's rung from the ledger (unmeasured cost on
+  the box: watched through the tick time). Pre-existing, noted for a fix: `Book.day_open` is
+  in-memory, so a restart mid-day forgets the day's loss for both daily-loss rules. Verdict: safe
+  with the follow-ups.
+- 17:22Z — **the adversarial review of #197 (shards)** finished: three majors and five minors
+  confirmed and fixed on `w0-shards/review`, each with a regression test that fails on the build
+  (a stake whose shard could not be told counted on shard 0 only, so a small shard could be drained
+  below its own desks' stakes on the first pass after a deploy; a lagging balance re-read let a
+  second move draw shard 0 below its keep; a move with an unknown outcome counted nothing toward
+  the $200 day; guards read once a pass; half-even rounding a third of a cent past the floor; a
+  refusal on a shard at the floor moved nothing; a blocked or failed pass dropped the refusals'
+  requests for an hour; the funder shared the busy ops lane, now its own lane). Unverified from
+  here: the venue's mid-transfer balance semantics (a move now runs under the real book's lock),
+  and `Book.stake` checks the account's total cash, not the shard's (self-heals through the
+  refusal path at the cost of one lost order). Verdict: safe with the follow-ups.
+- 17:19-17:23Z — **the Wave 0 integration branch** `w0/integration` merged #196, #195,
+  `w0-shards/review` (#197 plus fixes), `w0-money/review` (#198 plus fixes), #199 and the run
+  branch (the study): two README table conflicts, no code conflicts. Money digest `1d63a56e`
+  (full `52c6c7e5`), pinned. **PR #200** opened at 17:24Z for Deploy A; the full suites run
+  locally on the final tree (recorded below).
