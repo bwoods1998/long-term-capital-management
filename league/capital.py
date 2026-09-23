@@ -56,14 +56,17 @@ def kelly_stake(growth: list[float], present_stake: Decimal, venue_cash: Decimal
 
 
 def scaled_limits(staked: Decimal) -> tuple[Decimal, Decimal]:
-    """(max position, max order) for a rung-3 account lent `staked`: half the stake a position,
-    and never more than can be closed in ONE order under the gateway's cap even after it has
-    appreciated by a quarter (four fifths of the order cap). Never below the micro rung's."""
+    """(max position, max order) for a rung-3 account lent `staked`: half the stake a position, and
+    an order of at most the gateway's cap. Never below the micro rung's.
+
+    Until Sept 23, 2026 the position was also held to four fifths of the order cap, so that it
+    could be closed in ONE order even after appreciating by a quarter: a swing could never be
+    larger than $60. The book now sends a sell over the cap in slices of at most the cap
+    (`Book._start_exit_plan`), so the position follows the stake and only each ORDER is capped."""
     micro = CONSTITUTION["rungs"]["2"]
     cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
-    ceiling = (cap * Decimal("0.8")).quantize(CENT)
     half = (staked / 2).quantize(CENT)
-    return max(Decimal(micro["max_position_usd"]), min(half, ceiling)), max(Decimal(micro["max_order_usd"]), min(cap, half, ceiling))
+    return max(Decimal(micro["max_position_usd"]), half), min(cap, max(Decimal(micro["max_order_usd"]), half))
 
 
 def _sizing_record(house, agent, book):

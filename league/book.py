@@ -22,6 +22,15 @@ Limit orders are never pooled: each is one venue order owned by one agent, so it
 apportioning. An intent that would cross one of the House's own resting orders is refused, as a
 venue refuses a post-only order that would cross: the agent re-prices or waits.
 
+Sliced exits (Sept 23, 2026). A sell -- an agent's exit, a wind-down, the horizon rule, a stop --
+worth more than the order cap is sent as SLICES, each its own venue order of at most the cap,
+each with a distinct, deterministic client order id. The slices' fills are attributed to the one
+intent, per slice, and the book reconciles after each. The plan behind them is durable
+(`book.exit_plan`): a slice the venue or the book refuses, or one that fills only in part, leaves
+the rest to the next pass (`poll`), which sizes the next slice off what is still held, and a
+restart resumes the plan without sending any slice twice. Until then a position could only be as
+large as one order could close. Entries are unchanged: each is one order of at most the cap.
+
 Kalshi legs: an agent holds YES or NO contracts of a market as separate long holdings, never a
 short. For crossing checks both legs are read in YES price space, because a NO bid at q is a YES
 offer at 1 - q and would trade against a resting YES bid at or above it.
@@ -30,11 +39,12 @@ offer at 1 - q and would trade against a resting YES bid at or above it.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal
 from types import SimpleNamespace
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -67,6 +77,15 @@ SETTLEMENT_GRACE_SECONDS = 300
 
 #: What the adapters' open statuses look like to the book.
 OPEN_STATUSES = ("new", "accepted", "partially_filled", "unknown")
+#: How long a sliced exit keeps sending what is left of it. An exit the venue will not take for an
+#: hour (a closed market, a kill switch, a book with no bid) ends; the agent, the wind-down or the
+#: horizon rule asks again on a later wake, with a fresh intent, and the plan does not outlive the
+#: agent's wish by a trading session.
+EXIT_PLAN_TTL_SECONDS = 3600
+#: What the gateway counts an Alpaca market order at: the venue's own touch plus ten per cent
+#: (`gateway/lib/router.mjs`, "a market order may fill through the touch"). A slice sized on this
+#: price fits the gateway's per-order cap on its own pricing, not only on the book's.
+GATEWAY_MARKET_MARKUP = Decimal("1.10")
 
 
 class BookError(RuntimeError):
@@ -259,6 +278,8 @@ class Working:
     fees_seen: Decimal = ZERO  # venue-reported fees attributed so far
     reference_price: Decimal | None = None  # reserve an unfilled market buy at its ask, not its liquidation bid
     allocation: dict[str, Any] | None = None  # durable targets for an incremental venue fill being attributed
+    slice_of: str | None = None  # the exit plan this order is one slice of (`ExitPlan.plan_id`)
+    slice_index: int | None = None  # which slice: 0, 1, 2 ... in the order they were sent
 
     @property
     def open(self) -> bool:
@@ -270,6 +291,23 @@ class Working:
     @property
     def remaining(self) -> Decimal:
         return self.quantity - self.filled
+
+
+@dataclass
+class ExitPlan:
+    """One sell too large for one order, and what the book still owes it.
+
+    The slices are the book's orders whose `slice_of` is `plan_id`; what is left to send is the
+    plan's quantity less what they filled and what is still working. Nothing else is state: a
+    restart folds the plan row and the slices' order rows and knows exactly where it stood."""
+
+    plan_id: str
+    intent: Intent  # the agent's one intent: its id is on every slice's shares and fills
+    quantity: Decimal  # what the plan sells: the intent's quantity, less any part crossed inside the House
+    cap_usd: Decimal
+    created_at: str
+    max_orders: int  # a bound on venue orders, so a market that keeps half-filling cannot loop
+    ttl_seconds: int
 
 
 @dataclass(frozen=True)
@@ -430,6 +468,13 @@ class Book:
         #: Every instrument the book has ever traded, by position key: a crumb the venue still
         #: shows after its holder sold out must still be valued, or it cannot be called dust.
         self._traded: dict[str, Instrument] = {}
+        #: Sliced exits still selling (closed plans leave), and each plan's slice orders by id.
+        self.exit_plans: dict[str, ExitPlan] = {}
+        self._plan_orders: dict[str, list[str]] = {}
+        #: Whether this process has read the venue yet. A plan resumed from the ledger sends nothing
+        #: until then: the startup poll books what filled during a restart, and only a reading of
+        #: the venue says what is really still held.
+        self._reconciled_here = False
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -439,7 +484,8 @@ class Book:
     def _fold(self) -> None:
         """Rebuild state from the ledger. Every mutation below appends first and applies the
         appended row through `_apply`, so the live state and a rebuilt one are the same state."""
-        kinds = ("book.stake", "book.fill", "book.fill_correction", "book.settle", "book.order", "book.baseline", "book.cross_plan", "agent.intent")
+        kinds = ("book.stake", "book.fill", "book.fill_correction", "book.settle", "book.order", "book.baseline", "book.cross_plan",
+                 "book.exit_plan", "agent.intent")
         for entry in self.ledger.iter(kinds=kinds):
             if entry.payload.get("book") == self.name:
                 self._apply(entry.kind, entry.agent, entry.payload, entry.at)
@@ -532,6 +578,8 @@ class Book:
                 del account.holdings[instrument.key]
         elif kind == "book.order":
             self._apply_order(p)
+        elif kind == "book.exit_plan":
+            self._apply_exit_plan(p)
         elif kind == "book.cross_plan":
             if p.get("complete"):
                 plan = self._cross_plans.get(p["plan_id"])
@@ -612,12 +660,34 @@ class Book:
                 liquidity=str(p.get("liquidity") or "taker"),
                 reference_price=None if p.get("reference_price") is None else money(p["reference_price"]),
             )
+            part = p.get("slice") or {}
+            if part.get("plan"):
+                working.slice_of, working.slice_index = str(part["plan"]), int(part["index"])
+                self._plan_orders.setdefault(working.slice_of, []).append(order_id)
         working.status = p["status"]
         working.rested = bool(p.get("rested", working.rested))
         if "allocation" in p:
             working.allocation = dict(p["allocation"])
         if p.get("broker_order_id"):
             working.broker_order_id = p["broker_order_id"]
+
+    def _apply_exit_plan(self, p: Mapping[str, Any]) -> None:
+        plan_id = str(p["plan_id"])
+        if p.get("closed"):
+            self.exit_plans.pop(plan_id, None)
+            return
+        if plan_id in self.exit_plans:
+            return
+        row = p["intent"]
+        intent = Intent(
+            id=str(row["id"]), agent=str(row["agent"]), instrument=Instrument.from_dict(row["instrument"]), side=str(row["side"]),
+            quantity=money(row["quantity"]), order_type=str(row["order_type"]),
+            limit_price=None if row.get("limit_price") is None else money(row["limit_price"]), post_only=bool(row.get("post_only")),
+            time_in_force=str(row["time_in_force"]), reason=str(row.get("reason") or ""), created_at=str(row["created_at"]),
+            expires_at=row.get("expires_at"),
+        )
+        self.exit_plans[plan_id] = ExitPlan(plan_id, intent, money(p["quantity"]), money(p["cap_usd"]), str(p["created_at"]),
+                                            int(p["max_orders"]), int(p["ttl_seconds"]))
 
     # ------------------------------------------------------------------ stakes
     def stake(self, agent: str, usd: Any, *, note: str = "") -> None:
@@ -1025,10 +1095,14 @@ class Book:
                     if quote is None or quote.bid is None or quote.ask is None or quote.bid <= 0:
                         outcomes.append(self._refuse(intent, ["no two-sided quote to price a market order against"]))
                         continue
+                    if intent.side == "sell":
+                        self._supersede(intent)
                     market_groups.setdefault(intent.instrument.key, []).append((intent, quote))
                     pending.append((intent, quote))
                 else:
-                    outcomes.append(self._route([intent], [intent.quantity], now))
+                    if intent.side == "sell":
+                        self._supersede(intent)
+                    outcomes.append(self._send(intent, intent.quantity, now, quote))
             for group in market_groups.values():
                 outcomes.extend(self._net(group, now))
         return outcomes
@@ -1075,12 +1149,20 @@ class Book:
         touch = {"buy": quote.ask, "sell": quote.bid}
         for intents in (buys, sells):
             rest = [i for i in intents if residual[i.id] > 0]
-            pooled = sum((residual[i.id] for i in rest), ZERO) * (touch[intents[0].side] if intents else ZERO) * instrument.multiplier
+            # A sell is counted as the gateway would count it (`_cap_price`), so a pool of exits is
+            # never one order over the cap on the gateway's own pricing either.
+            price = (touch["buy"] if intents is buys else self._cap_price(instrument, "market", None, quote)) or ZERO
+            pooled = sum((residual[i.id] for i in rest), ZERO) * price * instrument.multiplier
             # The gateway refuses any order over the cap, and each intent was checked against it
-            # alone: a pool that would be larger is sent as its parts, one venue order each.
+            # alone: a pool that would be larger is sent as its parts, one venue order each. A
+            # single sell larger than the cap is sent in slices (`_start_exit_plan`).
             batches = [rest] if pooled <= cap else [[i] for i in rest]
             for batch in batches:
                 if not batch:
+                    continue
+                if len(batch) == 1 and batch[0].side == "sell":
+                    result = self._send(batch[0], residual[batch[0].id], now, quote, reference_price=touch["sell"])
+                    outcomes.append(result)
                     continue
                 result = self._route(batch, [residual[i.id] for i in batch], now, reference_price=touch[batch[0].side])
                 for intent in batch:
@@ -1242,11 +1324,17 @@ class Book:
             payload['venue_accounting_version'] = 2
         return payload
 
-    def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None) -> Outcome:
-        """Send one venue order for these intents' quantities, then attribute what filled at once."""
+    def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None,
+               slice_of: tuple[str, int] | None = None) -> Outcome:
+        """Send one venue order for these intents' quantities, then attribute what filled at once.
+
+        `slice_of` is (plan id, index) for one slice of a sliced exit: its client order id is
+        derived from the plan and the index, so each slice is a distinct order and the same slice
+        can never be sent twice, whatever its size came to."""
         first = intents[0]
         total = sum(quantities, ZERO)
-        nonce = hashlib.sha256("|".join(sorted(i.id for i in intents)).encode()).hexdigest()[:24]
+        identity = "|".join(sorted(i.id for i in intents)) if slice_of is None else f"{slice_of[0]}#{slice_of[1]}"
+        nonce = hashlib.sha256(identity.encode()).hexdigest()[:24]
         order_intent = self._order_intent(first, quantity=total, nonce=nonce)
         order_id = "ord-" + order_intent.id[3:]
         shares = [Share(i.id, i.agent, q, i.reason) for i, q in zip(intents, quantities)]
@@ -1265,6 +1353,8 @@ class Book:
             "real_money": self.real_money,
             "reference_price": text(first.limit_price or reference_price),
         }
+        if slice_of is not None:
+            base["slice"] = {"plan": slice_of[0], "index": int(slice_of[1])}
         # The order is on the ledger before it is on the wire: a crash between the two leaves an
         # `unknown` order the next poll resolves by its client id, never an order nobody recorded.
         self._order_row(base, "new", None, suffix="new")
@@ -1327,7 +1417,7 @@ class Book:
             raise
 
     def _base_of(self, working: Working) -> dict[str, Any]:
-        return {
+        base = {
             "book": self.name,
             "order_id": working.order_id,
             "instrument": working.instrument.to_dict(),
@@ -1342,6 +1432,9 @@ class Book:
             "reference_price": text(working.reference_price),
             "real_money": self.real_money,
         }
+        if working.slice_of is not None:
+            base["slice"] = {"plan": working.slice_of, "index": int(working.slice_index or 0)}
+        return base
 
     def _attribute(self, working: Working, order: Order, now: str) -> None:
         """Give each intent behind an order its part of what the venue has filled since last time."""
@@ -1422,6 +1515,193 @@ class Book:
         for entry in self.ledger.append_many(rows) if rows else []:
             self._apply(entry.kind, entry.agent, entry.payload, entry.at)
 
+    # ------------------------------------------------------------ sliced exits
+    def _cap_price(self, instrument: Instrument, order_type: str, limit_price: Decimal | None, quote: Quote | None) -> Decimal | None:
+        """The price an order is counted at against the order cap: the dearest of its own limit and
+        both sides of the quote, and for an Alpaca market order the gateway's own ten per cent over
+        the touch (`GATEWAY_MARKET_MARKUP`). Kalshi's gateway counts an exit on the leg it trades,
+        at most the leg's ask. None when there is nothing to count it at."""
+        prices = [p for p in (limit_price, getattr(quote, "bid", None), getattr(quote, "ask", None)) if p is not None and p > 0]
+        if not prices:
+            return None
+        price = max(prices)
+        if self.fees.family == "alpaca" and order_type == "market":
+            price *= GATEWAY_MARKET_MARKUP
+        return price
+
+    def _over_cap(self, intent: Intent, quantity: Decimal, quote: Quote | None) -> bool:
+        price = self._cap_price(intent.instrument, intent.order_type, intent.limit_price, quote)
+        return price is not None and quantity * price * intent.instrument.multiplier > money(self.rules["max_order_usd"])
+
+    def _send(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None, *, reference_price: Decimal | None = None) -> Outcome:
+        """Route one intent's order; a sell worth more than the order cap is sent in slices."""
+        if intent.side == "sell" and self._over_cap(intent, quantity, quote):
+            return self._start_exit_plan(intent, quantity, now, quote)
+        return self._route([intent], [quantity], now, reference_price=reference_price)
+
+    def _slice_quantity(self, intent: Intent, available: Decimal, quote: Quote | None, cap: Decimal) -> Decimal:
+        """The next slice: `available` cut into equal parts of at most the cap, on the instrument's
+        quantity grid, so the last part is never a crumb. Where the venue has a minimum order ($10
+        for Alpaca crypto, `venues.min_order_usd`) and equal parts would fall under it, parts are
+        merged: one order a little over the cap -- an exit, which the gateway lets through -- rather
+        than an order the venue refuses. A single unit worth more than the cap (a whole share of a
+        limit order, an option contract) cannot be cut, and goes as one unit."""
+        from .venues import min_order_usd  # the venue's own rule, kept with the venue's others
+
+        instrument = intent.instrument
+        step = step_of(instrument, intent.order_type)
+        price = self._cap_price(instrument, intent.order_type, intent.limit_price, quote)
+        if price is None:
+            return available
+        value = available * price * instrument.multiplier
+        if value <= cap:
+            return available
+        pieces = (value / cap).to_integral_value(rounding=ROUND_CEILING)
+        minimum = min_order_usd(instrument)
+        sale = intent.limit_price or (quote.bid if quote is not None else None)
+        if minimum is not None and sale:
+            worth = available * sale * instrument.multiplier
+            if worth / pieces < minimum:
+                pieces = max(ONE, (worth / minimum).to_integral_value(rounding=ROUND_FLOOR))
+        size = (available / pieces / step).to_integral_value(rounding=ROUND_DOWN) * step
+        return min(available, max(size, step))
+
+    def _plan_slices(self, plan_id: str) -> list[Working]:
+        return [self.orders[order_id] for order_id in self._plan_orders.get(plan_id, ()) if order_id in self.orders]
+
+    def _start_exit_plan(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None) -> Outcome:
+        """Record the plan for a sell too large for one order, then send what this pass can."""
+        cap = money(self.rules["max_order_usd"])
+        price = self._cap_price(intent.instrument, intent.order_type, intent.limit_price, quote) or ZERO
+        expected = max(1, int((quantity * price * intent.instrument.multiplier / cap).to_integral_value(rounding=ROUND_CEILING)))
+        plan_id = f"exit-plan:{self.name}:{intent.id}"
+        payload = {
+            "book": self.name, "plan_id": plan_id, "intent": {**intent.to_dict(), "expires_at": intent.expires_at},
+            "quantity": text(quantity), "cap_usd": text(cap), "slices_expected": expected,
+            "max_orders": max(8, 3 * expected + 2), "ttl_seconds": EXIT_PLAN_TTL_SECONDS, "created_at": now,
+            "real_money": self.real_money,
+        }
+        entry = self.ledger.append("book.exit_plan", payload, agent=intent.agent, id=plan_id)
+        self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+        plan = self.exit_plans.get(plan_id)
+        sent = self._advance_plan(plan, now, quote=quote, checked=True) if plan is not None else []
+        slices = self._plan_slices(plan_id)
+        filled = sum((w.filled for w in slices), ZERO)
+        if filled >= quantity:
+            status = "filled"
+        elif filled > 0:
+            status = "partial"
+        elif any(w.open for w in slices):
+            status = "resting" if intent.order_type == "limit" else "sent"
+        elif slices and slices[-1].status in ("rejected", "unknown"):
+            status = slices[-1].status
+        else:
+            status = "sent"
+        still = plan_id in self.exit_plans
+        detail = (f"a sell worth more than the ${cap} order cap, sent in slices of at most the cap: {len(sent)} order(s) now, "
+                  f"{text(filled)} of {text(quantity)} filled" + ("; the rest follows on the next passes" if still and filled < quantity else ""))
+        return Outcome(intent.id, intent.agent, status, detail, sent[0] if sent else None, filled)
+
+    def _advance_plans(self, now: str) -> None:
+        """Send the next slices of every unfinished exit (`poll` calls this after booking fills)."""
+        for plan in list(self.exit_plans.values()):
+            try:
+                self._advance_plan(plan, now)
+            except Exception as exc:  # noqa: BLE001 - one plan's failure must not stop the poll or the settlements after it
+                try:
+                    self._refuse_slice(plan, len(self._plan_orders.get(plan.plan_id, ())),
+                                       [f"the book could not send this slice: {type(exc).__name__}: {str(exc)[:200]}"])
+                except Exception:  # noqa: BLE001 - the plan is retried next pass either way
+                    pass
+
+    def _advance_plan(self, plan: ExitPlan, now: str, *, quote: Quote | None = None, checked: bool = False) -> list[str]:
+        """Send slices of `plan` until one does not finish at once, and return their order ids.
+
+        Each slice sizes off what is still held and not already offered, and off what the plan
+        still owes (its quantity less what its slices filled and what is still working). A slice
+        that fills in full is followed at once by the next; one still working (a resting limit,
+        an Alpaca market order the venue fills a moment later) is too, since it already holds its
+        own units; one refused, rejected or only partly filled ends this pass and leaves the rest
+        to the next. `checked` is for the pass inside `submit`, where the whole intent has just
+        passed `check`; on every later pass each slice is checked again, as a new order would be."""
+        sent: list[str] = []
+        intent = plan.intent
+        key = intent.instrument.key
+        market = intent.order_type == "market"
+        for _ in range(plan.max_orders):
+            if plan.plan_id not in self.exit_plans:
+                break
+            slices = self._plan_slices(plan.plan_id)
+            filled = sum((w.filled for w in slices), ZERO)
+            working = sum((w.remaining for w in slices if w.open), ZERO)
+            holding = self._account(intent.agent).holdings.get(key)
+            held = holding.quantity if holding is not None else ZERO
+            remaining = plan.quantity - filled - working
+            if remaining <= 0 or held <= 0:
+                if working <= 0:
+                    self._close_plan(plan, "sold" if remaining <= 0 else "nothing of it is held any more")
+                break
+            if any(w.status in ("new", "unknown") for w in slices):
+                break  # the venue has not said what became of a slice: the poll finds out before anything more is sent
+            if len(slices) >= plan.max_orders:
+                self._close_plan(plan, f"{len(slices)} orders sent, the most one exit may send")
+                break
+            if _epoch_seconds(now) - _epoch_seconds(plan.created_at) > plan.ttl_seconds:
+                self._close_plan(plan, f"not finished within {plan.ttl_seconds // 60} minutes")
+                break
+            offered = sum((share.quantity - share.filled for w in self.orders.values() if w.open and w.side == "sell" and w.instrument.key == key
+                           for share in w.shares if share.agent == intent.agent), ZERO)
+            available = min(remaining, held - offered)
+            if available <= 0:
+                break
+            index = len(slices)
+            fresh = quote if (checked and not sent and quote is not None) else self._quote(intent.instrument)
+            if market and (fresh is None or fresh.bid is None or fresh.ask is None or fresh.bid <= 0):
+                self._refuse_slice(plan, index, ["no two-sided quote to price a market order against"])
+                break
+            size = self._slice_quantity(intent, available, fresh, plan.cap_usd)
+            part = dataclasses.replace(intent, quantity=size)
+            if not checked:
+                reasons = self.check(part, fresh, now)
+                if reasons:
+                    self._refuse_slice(plan, index, reasons)
+                    break
+            outcome = self._route([part], [size], now, reference_price=fresh.bid if (market and fresh is not None) else None,
+                                  slice_of=(plan.plan_id, index))
+            if outcome.order_id:
+                sent.append(outcome.order_id)
+            order = self.orders.get(outcome.order_id or "")
+            if order is None or not (order.open or order.filled >= order.quantity):
+                break
+        return sent
+
+    def _refuse_slice(self, plan: ExitPlan, index: int, reasons: Sequence[str]) -> None:
+        """On the record once per slice, however many passes find the same wall."""
+        entry_id = f"refused:{plan.plan_id}:{index}"
+        if self.ledger.get(entry_id) is not None:
+            return
+        self.ledger.append(
+            "book.refused",
+            {"book": self.name, "intent_id": plan.intent.id, "slice_of": plan.plan_id, "slice_index": index,
+             "reasons": list(reasons), "instrument": plan.intent.instrument.to_dict()},
+            agent=plan.intent.agent, id=entry_id,
+        )
+
+    def _close_plan(self, plan: ExitPlan, reason: str) -> None:
+        slices = self._plan_slices(plan.plan_id)
+        payload = {"book": self.name, "plan_id": plan.plan_id, "closed": reason,
+                   "filled": text(sum((w.filled for w in slices), ZERO)), "orders": len(slices)}
+        entry = self.ledger.append("book.exit_plan", payload, agent=plan.intent.agent, id=f"{plan.plan_id}:closed")
+        self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+
+    def _supersede(self, intent: Intent) -> None:
+        """An agent's newer sell of the same instrument is its wish now: an older exit still
+        slicing stops (its working slices stay working and keep their units), so two plans never
+        compete for one holding."""
+        for plan in list(self.exit_plans.values()):
+            if plan.intent.agent == intent.agent and plan.intent.instrument.key == intent.instrument.key and plan.intent.id != intent.id:
+                self._close_plan(plan, f"superseded by a newer sell ({intent.id})")
+
     # -------------------------------------------------------------------- poll
     def poll(self) -> int:
         """Ask the venue about every open order and attribute new fills. Returns orders checked."""
@@ -1443,6 +1723,10 @@ class Book:
                     continue
                 checked += 1
                 self._attribute(working, order, now)
+            if self._reconciled_here:
+                # Every fill the venue reported is booked first: the next slice of an exit sizes
+                # off what is still held after them, never off what was held a pass ago.
+                self._advance_plans(now)
         return checked
 
     def cancel(self, agent: str, order_id: str) -> Outcome:
@@ -1459,6 +1743,11 @@ class Book:
                 return Outcome("", agent, "rejected", str(exc), order_id)
             self.ledger.append("book.cancel", {"book": self.name, "order_id": order_id}, agent=agent, id=f"cancel:{order_id}")
             self._attribute(working, order, now)
+            plan = self.exit_plans.get(working.slice_of or "")
+            if plan is not None:
+                # Cancelling a slice withdraws the exit: the rest of it is not sent behind the
+                # canceller's back. Whoever cancelled it (the agent, the horizon rule) asks again.
+                self._close_plan(plan, f"a slice ({order_id}) was cancelled")
             return Outcome("", agent, working.status, "", order_id, working.filled)
 
     def cancel_all(self, agent: str) -> int:
@@ -1704,6 +1993,7 @@ class Book:
         with self._lock:
             self.open_baseline()
             result = self._reconcile()
+            self._reconciled_here = True
             if result.ok:
                 self._unreconciled = 0
                 return result
