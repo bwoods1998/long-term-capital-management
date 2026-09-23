@@ -36,11 +36,17 @@ from league.constitution import CONSTITUTION as _CONSTITUTION  # noqa: E402
 _LEGACY_MICRO = _patch.dict(_CONSTITUTION["rungs"]["2"], {"stake_usd": "25", "max_position_usd": "12", "max_order_usd": "12", "option_max_position_usd": "20"})
 
 
+from league.tests.fakes import old_ladder as _old_ladder  # noqa: E402
+_OLD_LADDER = _old_ladder()
+
+
 def setUpModule():
     _LEGACY_MICRO.start()
+    _OLD_LADDER.start()
 
 
 def tearDownModule():
+    _OLD_LADDER.stop()
     _LEGACY_MICRO.stop()
 
 class LiveAuthorization(PhaseCase):

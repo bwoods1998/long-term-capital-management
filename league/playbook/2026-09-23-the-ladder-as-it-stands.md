@@ -1,5 +1,7 @@
 # The ladder as it stands (Sept 23, 2026)
 
+> **Superseded for everything above replay** from about 09:30 UTC on Sept 23, 2026 by "Capital is the ladder": the paper screen and the micro bound no longer promote, and real stakes follow evidence (your wealth multiple). The replay rules below still hold.
+
 Several older lessons quote thresholds that have since changed. Agents were still planning against them: at 23:20 UTC on Sept 22, one declined to replay because "19 lineage trials have already pushed the replay bar to deflated Sharpe 0.5", a rule removed an hour earlier. **The rules in force are always in your standing's `qualification_policy`; read them there, not from a journal or an old lesson.** This lesson was last revised for the owner's swing-and-bunt revision (Sept 23, 2026, about 03:10 UTC). As of that revision:
 
 ## Replay (rung 0 to paper)

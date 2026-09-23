@@ -650,6 +650,44 @@ class Evaluator:
                    if e.payload.get("book") == book and e.seq <= marks[-1].seq)
         return stats.log_growth(end, float(marks[-1].payload["equity"]), flow)
 
+    def wealth(self, agent: str, book: str, horizon: str = "hour", *, current: bool = True) -> dict[str, Any]:
+        """The agent's wealth on one book, as a log multiple with stakes lent or returned taken out
+        (the allocator's evidence, Sept 23, 2026): every finished block on the book since its
+        evidence cutoff, plus -- with `current` -- the block in progress up to the latest mark, or,
+        before any block has finished, the growth from what was first staked to the latest mark.
+        Also the drawdown of that wealth index from its high-water mark (the current point
+        included) and the number of finished blocks."""
+        from .accounting import evidence_cutoffs
+
+        cutoff = evidence_cutoffs(self.ledger, agent).get(book, 0)
+        rows = self.blocks(agent, book=book)
+        level = peak = 0.0
+        drawdown = 0.0
+        for row in rows:
+            level += float(row["log_growth"])
+            peak = max(peak, level)
+            drawdown = max(drawdown, 1.0 - math.exp(max(level - peak, -700.0)))
+        pending = 0.0
+        if current:
+            if rows:
+                pending = self._unfinished_growth(agent, book, cutoff)
+            else:
+                marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent, after=cutoff) if e.payload.get("book") == book]
+                if marks:
+                    stakes = [e for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
+                    first, last = marks[0], marks[-1]
+                    start = (float(first.payload["equity"]) if cutoff else
+                             sum(float(s.payload["usd"]) for s in stakes if s.seq < first.seq))
+                    flow = sum(float(s.payload["usd"]) for s in stakes if first.seq < s.seq <= last.seq)
+                    if start <= 0 < flow:
+                        start, flow = flow, 0.0
+                    grown = stats.log_growth(start, float(last.payload["equity"]), flow) if start > 0 else None
+                    pending = float(grown) if grown is not None else 0.0
+            level += pending
+            peak = max(peak, level)
+            drawdown = max(drawdown, 1.0 - math.exp(max(level - peak, -700.0)))
+        return {"log": level, "drawdown": drawdown, "blocks": len(rows), "pending": pending}
+
     def _gate(self, rung: int) -> Mapping[str, Any] | None:
         """The promotion rule out of this rung, or None from the top."""
         return None if rung >= 3 else self.ladder["paper" if rung == 1 else "micro"]

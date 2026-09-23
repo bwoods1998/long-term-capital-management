@@ -54,6 +54,8 @@ FORBIDDEN: tuple[str, ...] = (
     "league/sandbox.py",
     # The history a strategy is judged on and the seal on its holdout are judges too.
     "league/history.py", "league/deep_replay.py",
+    # The allocator decides who holds real money and how much (Sept 23, 2026): a money judge.
+    "league/allocator.py",
 )
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"
