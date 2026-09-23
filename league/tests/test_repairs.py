@@ -571,6 +571,30 @@ class EngineerLoop(Base):
         engineer.step()
         self.assertEqual(self.worklist.get(key).state, "verified")
 
+    def test_a_corrected_child_that_fails_its_replay_closes_the_job_with_the_reasons(self):
+        """Sept 23, 2026: the child is replayed before any seat (House.enroll -> Foundry.takes_strategy);
+        the engineer reads the refusal instead of waiting forever for a birth that cannot come."""
+        (self.repo / "league/strategies/old.py").write_text(GOOD)
+        key = self.job(key="audit_veto:parent", kind="audit_veto", agents=("parent",), severity="blocker")
+        answer = {"summary": "s", "role": "architect", "slug": "fixed", "title": "Corrected child", "body": "b", "needs_core": None,
+                  "files": [{"path": "league/strategies/parent_fixed.py", "content": GOOD},
+                            {"path": "league/strategies/parent_fixed.json", "content": json.dumps({"name": "parent-fixed", "family": "other", "why": "fix"})}]}
+        forge = FakeGitHub()
+        engineer = self.engineer(FakeFrontier(answer), forge)
+        engineer.step()
+        self.deploy(forge.proposed[0]["files"])
+        self.merton.follow()
+        engineer.step()
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).state, "observing")
+        self.clock.advance(7200)
+        self.ledger.append("trace.record", {"task": "hypothesis.evaluate", "id": "c1", "outcome": "failed", "strategy": "parent-fixed",
+                                            "detail": "0 closed trades, 20 needed"})
+        engineer.step()
+        job = self.worklist.get(key)
+        self.assertEqual(job.state, "dormant")
+        self.assertIn("failed replay before any seat: failed: 0 closed trades", job.note)
+
     def test_a_merged_fix_whose_files_never_run_is_not_verified(self):
         key = self.job()
         engineer = self.engineer(FakeFrontier(self.tool_answer()), FakeGitHub())

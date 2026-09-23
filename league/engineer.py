@@ -587,6 +587,12 @@ class Engineer:
                 return None
             child = self._child_born(job)
             if child is False:
+                refused = self._child_refused(job)
+                if refused:
+                    # Sept 23, 2026: the corrected child is replayed before any seat (House.enroll ->
+                    # Foundry.takes_strategy); one that fails is never born, and its job is closed
+                    # with the replay's reasons rather than bought again.
+                    return self._dormant(job, f"the corrected child failed replay before any seat: {refused[:400]}")
                 return None  # a corrected strategy is only a fix once it is alive and judged on its own
             self.worklist.transition(job.key, "verified", attempt=job.attempt, pr=job.pr, commit=job.commit,
                                      note=f"no recurrence for {window / 3600:.2f} h after the fix was running ({job.last_status.get('release')})"
@@ -658,6 +664,24 @@ class Engineer:
             if entry.payload.get("founder") in names:
                 return entry.agent
         return False
+
+    def _child_refused(self, job: Job) -> str | None:
+        """The replay verdict that refused this job's corrected child before any seat (the foundry's
+        `hypothesis.evaluate` trace naming the strategy), or None while it is pending or was born."""
+        names = set()
+        for path in (job.carry.get("digests") or {}):
+            if path.startswith("league/strategies/") and path.endswith(".json"):
+                try:
+                    names.add(json.loads((self.repo / path).read_text(encoding="utf-8")).get("name"))
+                except (OSError, ValueError):
+                    continue
+        if not names:
+            return None
+        for entry in self.ledger.read(kinds="trace.record", limit=2000, newest=True):
+            p = entry.payload
+            if p.get("task") == "hypothesis.evaluate" and p.get("strategy") in names and p.get("outcome") not in (None, "passed"):
+                return f"{p.get('outcome')}: {str(p.get('detail') or '')[:300]}"
+        return None
 
     # ----------------------------------------------------------------------- evidence
     def _packet(self, job: Job) -> dict[str, Any]:

@@ -764,6 +764,66 @@ class Gates(FoundryCase):
             restarted.close(wait=None)
 
 
+class RepairAdmission(FoundryCase):
+    """Sept 23, 2026: a merged corrected child is replayed before it takes any seat. Until then
+    `House.enroll` seated it at once (displacing the defective parent or the weakest resident) and
+    retired every agent on the old code; 16 were born, 7 died on rung 0, 0 forward blocks."""
+
+    def merged(self, name, code, **extra):
+        import league.strategies as strategies
+
+        row = {"name": name, "family": "fam", "code": code, "why": "a corrected child",
+               "repair": {"key": "strategy_defect:parent:abcdef123456", "parent": "parent"}, **extra}
+        strategies.all_strategies.return_value = [row]
+        return row
+
+    def test_a_corrected_child_is_born_only_after_its_replay_passes_and_keeps_its_name(self):
+        row = self.merged("majors-fixed", PASSER)
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.house.settings.enroll_displaces = True
+        self.assertEqual(self.house.enroll(), [], "not born on merge: replayed first")
+        card = self.foundry.strategy_cards()["majors-fixed"]
+        self.assertEqual((card["author"], card["niche"], card["family"], card["repair"]["parent"]), ("engineer", self.DESK, "fam", "parent"))
+        self.assertTrue(self.foundry.takes_strategy(row), "the foundry owns this file version's admission")
+        self.assertEqual(self.house.enroll(), [])
+        self.assertEqual(len(self.foundry.strategy_cards()), 1, "one card per file version")
+        self.foundry.evaluate_all([card["id"]])
+        self.assertEqual(self.foundry.evaluations()[card["id"]]["outcome"], "passed")
+        self.assertEqual(self.foundry.evaluations()[card["id"]]["strategy"], "majors-fixed")
+        self.assertIn(card["id"], {c["id"] for c in self.foundry.inventory()})
+        self.seated()
+        self.clock.advance(601)
+        child = self.house._refill(self.rules)
+        self.assertIsNotNone(child)
+        self.assertEqual((child.founder, child.family, child.specialty), ("majors-fixed", "fam", self.DESK))
+        self.assertEqual(self.house.evaluator.rung(child.id), 1, "seated on paper by its own replay pass")
+        route = self.house.ledger.get(f"birth-route:{child.id}").payload
+        self.assertEqual((route["route"], route["evidence"]["strategy"], route["evidence"]["replay_passed"]), ("repair", "majors-fixed", True))
+        self.assertIn("Merton, as engineer", self.house.ledger.last("agent.born", agent=child.id).payload["reason"])
+        self.assertEqual(self.foundry.born()[card["id"]].id, child.id)
+        self.assertEqual(self.foundry.inventory(), [])
+        self.assertEqual(self.house.enroll(), [], "born once: its founder is the strategy's name")
+
+    def test_a_corrected_child_that_fails_replay_never_takes_a_seat(self):
+        self.merged("majors-idle", IDLE)
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.assertEqual(self.house.enroll(), [])
+        card = self.foundry.strategy_cards()["majors-idle"]
+        self.foundry.evaluate_all([card["id"]])
+        outcome = self.foundry.evaluations()[card["id"]]
+        self.assertEqual((outcome["outcome"], outcome["strategy"]), ("failed", "majors-idle"))
+        self.seated()
+        self.clock.advance(601)
+        self.assertIsNone(self.house._refill(self.rules))
+        self.assertEqual(self.house.enroll(), [])
+        self.assertEqual([a.founder for a in self.house.registry.agents.values() if a.founder == "majors-idle"], [])
+
+    def test_a_row_the_foundry_cannot_place_keeps_the_old_path(self):
+        row = self.merged("majors-odd", "NEEDS = dict(venue='alpaca')\nPARAMS = {}\n\ndef decide(ctx):\n    return {}\n")
+        self.assertFalse(self.foundry.takes_strategy(row), "no literal NEEDS: the House's own probe judges it")
+        self.assertFalse(self.foundry.takes_strategy({**row, "repair": None}), "an architect's design is not a repair")
+
+
 class Labels(FoundryCase):
     def test_founders_and_earner_forks_keep_their_exceptions_explicit(self):
         founder = self.house.found(["crypto-reversion"])[0]

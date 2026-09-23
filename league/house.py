@@ -655,6 +655,11 @@ class House:
         rules = self.game["economy"]
         rows = [row for row in strategies.all_strategies()
                 if row["name"] not in known and refused.get(row["name"]) != code_sha(row["code"])]
+        foundry = getattr(self, "hypotheses", None)
+        if foundry is not None and foundry.enabled():
+            # Sept 23, 2026: a corrected child is replayed before it takes any seat (league/hypotheses.py
+            # `takes_strategy`); the engineer's 16 children had 0 forward blocks and 7 died on rung 0.
+            rows = [row for row in rows if not (isinstance(row.get("repair"), dict) and foundry.takes_strategy(row))]
         rows.sort(key=lambda row: not isinstance(row.get("repair"), dict))  # corrected children first
         for row in rows:
             if len(born) >= max(1, int(self.settings.enroll_per_tick)):

@@ -393,8 +393,82 @@ class Foundry:
         return self._folded("evaluations", build)
 
     def born(self) -> dict[str, Agent]:
-        """Card id -> the agent born from it (its `founder` is `card:<id>`)."""
-        return {a.founder[5:]: a for a in self.house.registry.agents.values() if (a.founder or "").startswith("card:")}
+        """Card id -> the agent born from it (its `founder` is `card:<id>`, or the strategy's own name
+        for a merged corrected child admitted through `takes_strategy`)."""
+        by_strategy = {name: card["id"] for name, card in self.strategy_cards().items()}
+        out = {}
+        for a in self.house.registry.agents.values():
+            founder = str(a.founder or "")
+            if founder.startswith("card:"):
+                out[founder[5:]] = a
+            elif founder in by_strategy:
+                out[by_strategy[founder]] = a
+        return out
+
+    def strategy_cards(self) -> dict[str, dict[str, Any]]:
+        """Strategy name -> the latest card written for a merged strategy file (`takes_strategy`)."""
+        out: dict[str, dict[str, Any]] = {}
+        for card in sorted(self.cards().values(), key=lambda c: c["_seq"]):
+            if card.get("strategy"):
+                out[str(card["strategy"])] = card
+        return out
+
+    def takes_strategy(self, row: Mapping[str, Any]) -> bool:
+        """Admit a merged corrected child (a strategy row with a `repair`) the way a card is admitted:
+        replayed under its own line BEFORE any seat, born only on a pass (`_admit`), with the
+        strategy's own name as its founder so `House.enroll` (which counts founders) and the
+        engineer's `_child_born` see it exactly as before.
+
+        Why (measured Sept 23, 2026): `House.enroll` gave the engineer's corrected children a seat
+        at once, displacing the defective parent or the weakest resident, and `_retire_superseded`
+        then killed every agent on the old code -- before the child had passed replay. 16 were born,
+        9 passed, 7 died on rung 0 with 0 forward blocks; $0.70 a child. Now the seat is conditional
+        on the replay pass, and a child that fails never takes one.
+
+        Returns True when the foundry owns this strategy's admission (the card exists for this file
+        version: pending, judged or born), False when it cannot take it (no literal NEEDS, no desk
+        matches, the desk has no replay) so `enroll` keeps its own path."""
+        from . import niches as niches_module
+        from .safety import CodeRefused, check_code
+
+        name, code = str(row.get("name") or ""), str(row.get("code") or "")
+        if not name or not code.strip() or not isinstance(row.get("repair"), Mapping):
+            return False
+        sha = hashlib.sha256(code.encode("utf-8")).hexdigest()
+        existing = self.strategy_cards().get(name)
+        if existing is not None:
+            return existing.get("code_sha256") == sha  # a new file version is a new admission
+        declared = static_needs(code)
+        if declared is None:
+            return False
+        try:
+            home = niches_module.match(declared, self.house.niches)
+        except Exception:  # noqa: BLE001 - an odd literal is the House's probe to judge
+            return False
+        if home is None or home.dormant or not home.replay:
+            return False
+        repair = dict(row["repair"])
+        mechanism = f"{name} ({sha[:12]}): {str(row.get('why') or '')[:1500]}"
+        ident = card_id(mechanism, home.id)
+        if ident in self.cards():
+            return False
+        desk = home.desk or home.id.split("-", 1)[-1]
+        line = f"{desk}-r{ident[:6]}"[:34]
+        payload = {
+            "id": ident, "mechanism": mechanism[:2000], "data": [], "edge_after_costs": "", "horizon": "",
+            "rejection": "the House's replay gate, before any seat", "niche": home.id, "venue": home.venue,
+            "author": "engineer", "lineage": [line], "parent_card": None, "created_for": f"repair:{name}",
+            "name": name[:20], "line_id": line, "family": str(row.get("family") or name)[:40], "created_epoch": self._now(),
+            "model": None, "prompt_version": PROMPT_VERSION, "transfer": None,
+            "strategy": name, "repair": {k: repair.get(k) for k in ("key", "parent") if repair.get(k) is not None},
+            "code_sha256": sha, "_code": code,
+        }
+        self.house.ledger.append("hypothesis.card", payload, id=f"hypothesis.card:{ident}")
+        try:
+            check_code(code)
+        except (CodeRefused, SyntaxError) as exc:
+            self._outcome(payload, "invalid", f"the strategy check refused it: {str(exc)[:200]}")
+        return True
 
     def calls(self) -> list[dict[str, Any]]:
         return self._folded("calls", lambda: [dict(e.payload, _at=e.at) for e in self.house.ledger.iter(kinds="merton.pass")
@@ -1363,6 +1437,7 @@ class Foundry:
                                                   "model": card.get("model"), "inputs_sha256": card.get("code_sha256"),
                                                   "outcome": outcome, "cost_usd": "0", "useful": outcome == "passed",
                                                   "detail": str(detail)[:600], "niche": card.get("niche"), "line_id": card.get("line_id"),
+                                                  **({"strategy": card["strategy"]} if card.get("strategy") else {}),
                                                   **extra}, id=key)
 
     def evaluate_all(self, idents: Sequence[str]) -> None:
@@ -1497,11 +1572,16 @@ class Foundry:
                     continue  # this desk is full of agents that have earned their seats
             code = self._code(card)
             desk = rank.get(niche.id, (0.0, None))[1]
-            why = (f"hypothesis card {card['id']} (Merton, foundry {card.get('created_for')}): {str(card.get('mechanism'))[:220]} "
-                   f"-- passed replay before birth ({evaluation.get('detail')}); desk evidence {desk.why if desk else 'unscored'}")
+            strategy = card.get("strategy")
+            if strategy:
+                why = (f"Merton, as engineer: the corrected child {strategy} (repair {(card.get('repair') or {}).get('key')}) "
+                       f"passed replay before birth ({evaluation.get('detail')}); {str(card.get('mechanism'))[:300]}")
+            else:
+                why = (f"hypothesis card {card['id']} (Merton, foundry {card.get('created_for')}): {str(card.get('mechanism'))[:220]} "
+                       f"-- passed replay before birth ({evaluation.get('detail')}); desk evidence {desk.why if desk else 'unscored'}")
             try:
                 child = house.spawn(card["line_id"], card["family"], code, reason=why[:1500], params=evaluation.get("params") or {},
-                                    endowment=rules["endowment_usd"], specialty=niche.id, founder=f"card:{card['id']}")
+                                    endowment=rules["endowment_usd"], specialty=niche.id, founder=str(strategy) if strategy else f"card:{card['id']}")
             except ValueError as exc:
                 self._outcome_admission(card, "refused_at_birth", str(exc))
                 continue
@@ -1515,10 +1595,12 @@ class Foundry:
             if displaced is not None and displaced.alive:
                 house.kill(displaced, "displaced", house.postmortem(displaced, "displaced",
                            "a replay-passing hypothesis card takes the seat of the weakest eligible agent"))
-            self.record_birth(child, "hypothesis", f"a replay-passing hypothesis card for {niche.id}", {
+            self.record_birth(child, "repair" if strategy else "hypothesis",
+                              f"a merged corrected child ({strategy}) that passed replay before any seat" if strategy
+                              else f"a replay-passing hypothesis card for {niche.id}", {
                 "card": card["id"], "desk_score": desk.score if desk else None, "desk_evidence": desk.why if desk else None,
                 "replay_passed": True, "seated_on_paper": seated, "displaced": displaced.id if displaced else None,
-                "allocation": self._allocation_of(card)})
+                "allocation": self._allocation_of(card), **({"strategy": strategy, "repair": card.get("repair")} if strategy else {})})
             return child
         return None
 
