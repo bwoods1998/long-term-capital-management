@@ -509,6 +509,28 @@ class Allocator:
         target = self.seat_stake(agent)
         return limits_for(max(staked, target) if staked > 0 else target, agent.venue)
 
+    def context(self, ev: Evidence, band: str) -> dict[str, Any]:
+        """The allocation an audit judges capacity against: the stake and limits the move would take,
+        the venue's envelope now, and the grant behind it. Replaces the legacy tuition in the packet."""
+        agent = self.house.registry.get(ev.agent)
+        stake = self.target_stake(agent, band, ev) if agent is not None else _params()["bunt_usd"].get(ev.venue, _d("10"))
+        position, order = limits_for(stake, ev.venue)
+        grant = self.grant()
+        policy = (grant or {}).get("policy") or {}
+        seated = sum(1 for a in self.house.registry.living() if a.venue == ev.venue and self.house.evaluator.rung(a.id) >= 2)
+        return {
+            "allocator": "capital is the ladder (league/allocator.py): stakes follow evidence inside the grant's per-venue envelope",
+            "band_to": band, "stake_usd": str(stake), "max_position_usd": str(position), "max_order_usd": str(order),
+            "venue": ev.venue, "venue_capital_usd": str(self.capital(ev.venue)), "venue_headroom_usd": str(self.headroom(ev.venue)),
+            "venue_at_risk_usd": str(self.at_risk(ev.venue)), "seated_on_real_money_at_venue": seated,
+            "fits": bool(self.headroom(ev.venue) >= stake),
+            "tuition": {"max_loss_usd": str(self.grant_capital(ev.venue)), "max_agents": int(policy.get("max_agents") or 0),
+                        "note": "the owner's live grant for this venue; the legacy $50 / 4-agent tuition does not apply under the allocator"},
+            "live_grant": {k: policy.get(k) for k in ("max_agents", "stake_usd", "venue_capital_usd", "max_loss_usd")} if policy else None,
+            "demotion": {"hysteresis": rules().get("hysteresis"), "real_drawdown_demote": rules().get("real_drawdown_demote"),
+                         "reentry_cooldown_hours": rules().get("reentry_cooldown_hours")},
+        }
+
     # ------------------------------------------------------------- the pass
     def rebalance(self) -> dict[str, Any]:
         """One pass: evidence for every living agent on rung 1+, band moves, stakes, the performance
@@ -634,7 +656,7 @@ class Allocator:
         if defect is not None:
             # An agent with a known defect is audited before any real dollar (the existing path:
             # approval commits the promotion, a veto keeps it on paper through the cooldown).
-            verdict = _verdict(agent.id, 1, why, ev)
+            verdict = _verdict(agent.id, 1, why, ev, self)
             generation = house._generation(agent.id)
             if generation is None:
                 return
@@ -707,7 +729,7 @@ class Allocator:
         """Bunt -> swing. The first entry into the swing band is audited (size is at stake); an agent
         with an approved audit on record goes straight up."""
         house = self.house
-        verdict = _verdict(agent.id, 2, why, ev)
+        verdict = _verdict(agent.id, 2, why, ev, self)
         guard = getattr(house, "campaigns", None)
         if guard and not guard.allows_live(3):
             house._promotion_status(agent, verdict, "campaign", "the live grant has not released the swing band")
@@ -882,12 +904,19 @@ class Allocator:
             return dict(self._board)
 
 
-def _verdict(agent_id: str, rung: int, why: str, ev: Evidence):
+def _verdict(agent_id: str, rung: int, why: str, ev: Evidence, allocator: "Allocator | None" = None):
     """The verdict the House's promotion and audit machinery take. `book` is the record the auditor
     reads: the paper record for a bunt audited first (a known defect), the REAL record for the first
-    swing, where size is at stake (Sept 23, 2026 review: without it the packet was empty)."""
+    swing, where size is at stake (Sept 23, 2026 review: without it the packet was empty).
+
+    `allocation_context` is what the auditor judges capacity against. Without it the auditor read
+    the legacy tuition (4 agents, $50, a $60 stake) and vetoed the floor's two best paper agents on
+    Sept 23 for capacity it could not see (09:32 and 10:06Z)."""
     from .evaluator import Verdict
 
     book = PAPER_BOOK[ev.venue] if rung <= 1 else REAL_BOOK[ev.venue]
-    return Verdict(agent_id, rung, "eligible", why, {"via": "allocator", "book": book, "evidence": ev.row(), "E": ev.e,
-                                                      "band_to": "bunt" if rung <= 1 else "swing"})
+    band = "bunt" if rung <= 1 else "swing"
+    numbers: dict[str, Any] = {"via": "allocator", "book": book, "evidence": ev.row(), "E": ev.e, "band_to": band}
+    if allocator is not None:
+        numbers["allocation_context"] = allocator.context(ev, band)
+    return Verdict(agent_id, rung, "eligible", why, numbers)

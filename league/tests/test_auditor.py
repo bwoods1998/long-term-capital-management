@@ -123,6 +123,23 @@ class AuditorCase(unittest.TestCase):
         frontier = Frontier(GATEWAY, lambda: SECRET, opener=self.opener)
         return Auditor(frontier, self.ledger, self.economy, self.evaluator, live_agents=live_agents, lineage=lineage)
 
+    def test_an_allocator_audit_is_judged_against_the_allocators_envelope(self):
+        """Sept 23, 2026: the allocator's audits carried no allocation, so the auditor judged a $10 bunt
+        against the legacy $50 / four-agent tuition and a $60 stake and vetoed on capacity it could not see."""
+        from league import auditor as auditor_module
+
+        context = {"allocator": "capital is the ladder", "band_to": "bunt", "stake_usd": "10", "max_position_usd": "5.00",
+                   "max_order_usd": "5.00", "venue_capital_usd": "517.75", "venue_headroom_usd": "340.00", "fits": True,
+                   "tuition": {"max_loss_usd": "517.75", "max_agents": 101}}
+        verdict = Verdict(self.agent.id, 1, "eligible", "bunt", {"book": "kalshi-shadow", "allocation_context": context})
+        packet = self.auditor().packet(self.agent, verdict)
+        self.assertIn("bunt", packet["promotion_context"]["purpose"])
+        self.assertEqual(packet["promotion_context"]["tuition"]["max_loss_usd"], "517.75")
+        self.assertEqual(packet["micro_real_limits"], {"stake_usd": "10", "max_position_usd": "5.00", "max_order_usd": "5.00"})
+        legacy = self.auditor().packet(self.agent, self.verdict)
+        self.assertEqual(legacy["promotion_context"]["purpose"], "bounded micro-real experiment")
+        self.assertIn("allocation_context names the allocator", auditor_module.SYSTEM)
+
     def verdict_rows(self, agent=None):
         return [e.payload for e in self.ledger.iter(kinds="audit.verdict", agent=agent)]
 
