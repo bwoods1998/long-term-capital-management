@@ -20,13 +20,13 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | 0.4 | Compute aligned to funded balances (OpenAI, Sail, Jev) | done: PR #157, gateway `c6c507ad`, House top-up |
 | 0.5 | `scripts/floor_watch.py` | done (in PR #163) |
 | 0.6 | Builders B, C, D, E spawned in their own worktrees | done 07:05Z |
-| A | The allocator: evidence as wealth, bands, stakes, death, performance fee | ⟨⟩ |
+| A | The allocator: evidence as wealth, bands, stakes, death, performance fee | live: PR #163, release `20260923T082402Z-7c69b3eb57f0` |
 | B | The capital board (publisher + site) | ⟨⟩ |
 | C | Exit splitting and stake-scaled positions | ⟨⟩ |
 | D | The Alpha Lab (box, batch evaluator, evolution, graduation, royalties, tools) | ⟨⟩ |
 | E | Profit-indexed compute and envelope; a tick that never blocks | ⟨⟩ |
 | F | Open desks (stretch) | ⟨⟩ |
-| Deploy 1 | A+B+C, ratified at promotion, 20-minute watch | ⟨⟩ |
+| Deploy 1 | A (B's publisher follows through the updater; C in Deploy 2), ratified at promotion | done 08:27:54Z, ratified 08:28:13Z |
 | Deploy 2 | D+E | ⟨⟩ |
 | Watch | ≥ 90 minutes, every 15 minutes through `scripts/floor_watch.py` | ⟨⟩ |
 | Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md, rules, playbook | ⟨⟩ |
@@ -104,4 +104,24 @@ Execution record for the owner's goal of Sept 23, 2026: execute
       statuses now.
   14. **Positions are capped at $60 until exit slicing (C) lands** (`EXITS_SLICED`), so one $75
       order can always close one.
+
+
+- 08:12Z — #163 merged (`a653291`) after CI passed on the review fixes (including `test_ladder`,
+  which times out locally under this machine's load).
+- 08:23:50Z — **Deploy 1** (A only; B was still in its review-fix phase and its publisher is not a
+  protected file, so the updater can ship it).
+  - Release `20260923T082402Z-7c69b3eb57f0` promoted at 08:27:54Z.
+  - Grant `earned-live-20260921` ratified at 08:28:13Z (19 s later) on money digest `44e8d48d`
+    (constitution `9fa83727`): the same capital, max agents 16 → 101, stake line $10.
+  - First full tick 08:29:14Z (76.6 s). The first allocator pass came at 08:30:03Z:
+    - The three legacy $60 Kalshi stakes shrank toward $10 by free cash only (−$3.89, −$3.26,
+      −$2.60); their positions are held.
+    - **haghani-37 is on real money at Alpaca.** The old screen had promoted it at 08:06:22Z,
+      before the deploy, and the allocator made it a $25 bunt, returning $31.21 of free cash. Its
+      first real Alpaca order, a resting XRP limit buy of $28.79 placed at 08:15:54Z under the old
+      micro limits, is accepted and unfilled.
+    - Envelope in use: Kalshi $175.54 of $517.75, Alpaca $28.79 of $500. Throttle off; floor real
+      P&L −$2.64.
+  - The site kept publishing: the 08:31Z checkpoint had 100 desks (the #156 roster bound is in
+    this release).
 
