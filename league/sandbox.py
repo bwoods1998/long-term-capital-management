@@ -703,8 +703,9 @@ class SailSandbox:
         box or of Sail raises `SandboxError`; it is never a candidate's result. The batch answers
         within `budget_seconds` (by default the timeout less half a minute): candidates it did not
         reach come back `not evaluated: batch budget`, and any the box could not start a process
-        for come back `not evaluated: ...` with `infrastructure: true` (`replay.not_evaluated`). `keep_awake` leaves the box running for the
-        next batch (its own auto-sleep is the backstop; `rest` puts it to sleep).
+        for come back `not evaluated: ...` with `infrastructure: true` (`replay.not_evaluated`).
+        `keep_awake` leaves the box running for the next batch (its own auto-sleep is the backstop;
+        `rest` puts it to sleep).
 
         The box is held like any other (`_turn`): within this thread's `patience` a batch box that
         another caller holds raises `SandboxBusy` (nothing ran), and every Sail call carries the
