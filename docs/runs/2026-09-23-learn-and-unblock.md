@@ -360,3 +360,50 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   #202 after its conflict resolution. Deploy B goes as soon as the branch is green rather than
   at the plan's 21:00Z: the lab's tape-key fix and the seat market earn more hours of evidence,
   and Deploy A's stock-session verification is unaffected by a restart.
+- **17:51-21:31Z — the session stopped on a usage limit** (the Claude session's limit, not the
+  floor's). Two agents were cut off mid-task (the adversarial review of #203 and the W2-options
+  builder); both were resumed at 21:35Z. The floor ran on Deploy A throughout, and the watch loop
+  kept its 15-minute record. The plan's Deploy B window (20:37-21:22Z) and the study refresh at
+  20:37Z slipped by about an hour; Deploy B goes as soon as its CI is green.
+- **What Deploy A did while the session was stopped** (read on the box at 21:32Z and from a
+  21:36Z snapshot, `docs/research/queries/2026-09-23/R-1.py`):
+  - **U5 verified:** mullins-2, swept to $10.09 before the deploy, was lent $24.75 toward a
+    $34.84 target at 17:36:21Z; it made three more weather maker fills and at 21:31Z holds $29.86
+    of a $35.64 target (W_real 1.188, E 1.208, 10 real trades: 0.04 below the 1.25 swing line).
+  - **U1 verified with a live instance:** the lab's first graduate huang-l23cdb7 was promoted to a
+    $30 bunt at 18:49Z (the first lab-born agent on real money), won +$6.64 (19:15Z), lost
+    −$7.32 (19:45Z, 20% of the day's opening equity) and **entered again at 20:21:56Z with no
+    daily-loss refusal** (the only real refusal was a limit 6 cents through the ask). The
+    allocator's hysteresis then demoted it at 20:25:51Z (E 0.7350 < 0.8585); its open position
+    settled at −$7.84 and the account closed. Net −$8.52: the one-loss trial again, at $30
+    positions of 24-26% of the stake, above the 15% the rules now advise.
+  - **U2 verified:** the funder moved $30 in the rolling day (one move) and meriwether-h7d7702, a
+    sports bunt promoted at 20:07Z, filled 25 KXMLBTOTAL at $0.34 on shard 3 at 20:39:57Z. At
+    21:32Z shard 3 held $14.07, under the $20 floor, after that fill: the next hourly pass must
+    top it up (checked at the next watch).
+  - **C2 verified:** the OpenAI House line fell under $20 at about 20:50Z (alerts "$19.68 left" and
+    "$16.44 left"); the tier is "earned"; the lab stays open (`closed_since` null), its Luna calls
+    are skipped on the record (15 by 21:31Z) and it keeps evaluating (75 candidates in 21Z's first
+    half hour).
+  - **Band moves:** three promotions to real money (huang-l23cdb7 18:49Z, meriwether-h7d7702
+    20:07Z, hilibrand-h6ca596-3 21:02Z, each a $30 Kalshi bunt), one demotion. Kalshi bunts 7,
+    $191.91 of the $517.75 envelope committed. Alpaca: none.
+  - **Real P&L since Deploy A:** Kalshi 9 fills ($59.59), 5 settlements, −$7.35 realized; the
+    floor's real P&L since the grant −$8.43; the throttle off.
+  - **Practice since 16:28Z turned positive:** kalshi-shadow +$99.76 (sports +$74.01 on 18
+    settlements, strikes +$26.75, 15-minute crypto −$4.45), alpaca-paper +$12.05.
+  - **The stock session after Deploy A** (17:34-20:00Z): ETF desk 336 wakes, 38 intents, 18 fills;
+    megacaps 216 wakes, 19 intents; after the close 20 ETF market orders were refused ("outside
+    regular hours", the agents' own late orders). **No agent sent an equity limit order, so A7's
+    fractional limit path has no live instance:** it is verified by tests only, and the Sept 24
+    open (13:30Z) is its next window.
+  - **The lab:** 673 candidates evaluated since 16:28Z (156, 183, 128, 67, 123 an hour: the restart
+    at Deploy A emptied the tape cache), 124 Luna children evaluated in all by 21:36Z; graduations
+    6 born, 28 passed and waiting, 27 rationed, 13 failed the House replay. Throughput does not
+    bind: seats do (28 waiting), so S4 (tapes on the lab box) is not built this run.
+  - **Invariants firing as designed:** the quiet-desk warning named kalshi-attention, alpaca-options,
+    kalshi-prices and alpaca-crypto-majors; the waiting-graduate warning named four graduates at
+    6 hours. The frozen-bunt warning never fired.
+  - **New defect seen:** the daily backup of the House box failed three times ("sailbox api 503:
+    prepare checkpoint"). Sail's API refused the checkpoint; the next check is whether a later
+    attempt succeeds.
