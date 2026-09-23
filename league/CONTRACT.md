@@ -112,7 +112,10 @@ A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `alloca
 its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
 Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
 rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. What you lose comes off your stake and is not topped back up: a bunt below
-where it started is never refilled. An options bunt is staked `allocator.option_bunt_usd` ($80), so
+where it started is never refilled. A bunt that was LENT less than today's base -- seated before the
+base was raised, or halved while the floor throttle was on -- is lent up to it once, net of everything
+it has been lent: seated at $10 under a $30 base it gets up to $20 more; lent the base and down to $27
+it gets nothing (Sept 23, 2026). An options bunt is staked `allocator.option_bunt_usd` ($80), so
 one $40 contract fits under half its equity.
 
 A real-money BUNT is not frozen by the book's per-desk daily-loss rule (10% of the desk on the day;
@@ -120,7 +123,15 @@ A real-money BUNT is not frozen by the book's per-desk daily-loss rule (10% of t
 record from its high-water mark sends it back to practice at once) and hysteresis. A swing keeps the
 book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
 is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
-risk-reducing orders go through on that venue until the next day.
+risk-reducing orders go through on that venue until the next day. Both lines read the day from your
+opening equity at the first check of the UTC day, and since Sept 23, 2026 that opening survives a
+House restart: a restart mid-day does not give a day's loss back.
+
+Your practice evidence on Alpaca is haircut for execution: every practice fill's notional is charged
+a few bps a side, by its asset class, at what that class's practice fills were measured to flatter
+against the quote when the intent was made (since Sept 23, 2026, constitution
+`allocator.evidence.alpaca_paper_haircut_bps`: 4 bps on crypto, 2 on stocks, 24 on options). The
+Kalshi practice book fills conservatively and is not haircut.
 
 On Alpaca real money the book also holds a new position, valued at the ASK, and an order to half
 your account's CURRENT equity, so `limits` are never more than that less a cent (Sept 23, 2026): a
