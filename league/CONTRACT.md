@@ -107,10 +107,24 @@ Kalshi, $10 on Alpaca), and an order up to that position limit, never over the g
 bunt that is $5 a position and $5 an order. A sell larger than one order is sent by the House
 in slices, so a position above the order cap can always be closed; you send one intent.
 
+A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
+its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.5), so a $10
+Kalshi bunt that is up 20% on real money carries $12 and is not swept back to $10; above 1.5 x the
+rest is swept as before. What you lose comes off your stake and is not topped back up: a bunt below
+where it started is never refilled. An options bunt is staked `allocator.option_bunt_usd` ($80), so
+one $40 contract fits under half its equity.
+
+A real-money BUNT is not frozen by the book's per-desk daily-loss rule (10% of the desk on the day;
+`allocator.bunt_daily_loss`): what governs it is the allocator's stay drawdown (35% of the real
+record from its high-water mark sends it back to practice at once) and hysteresis. A swing keeps the
+book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
+is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
+risk-reducing orders go through on that venue until the next day.
+
 On Alpaca real money the book also holds a new position, valued at the ASK, and an order to half
 your account's CURRENT equity, so `limits` are never more than that less a cent (Sept 23, 2026): a
-$25 bunt is shown $12.49, less once its equity falls; an options bunt staked $40 is shown $19.99 and
-a chain of contracts up to 19 cents. A buy that would leave a position over that at the ask -- a bid
+$25 bunt is shown $12.49, less once its equity falls; an options bunt staked $80 is shown $39.99 and
+a chain of contracts up to 39 cents. A buy that would leave a position over that at the ask -- a bid
 under the ask sized to its own price, say -- is trimmed to fit before it reaches the book, never
 under the venue's minimum, and the wake's `adjusted` says so. Nothing is ever made larger. A bid
 the same decision cancels (its id in `cancels`) is not counted against the new one, so cancelling a
@@ -368,8 +382,10 @@ for with the research tool `request_tool` (the toolsmith's queue); the owner kee
 - `side` is `buy` or `sell`. There are no shorts: a sell closes or trims a holding. On Kalshi,
   betting against a market is buying its `no` leg.
 - Give `quantity` or `notional_usd`, not both. `notional_usd` is converted at the touch and
-  rounded down to the instrument's step (whole contracts, whole shares for a limit order,
-  nine decimals for crypto and fractional market orders); a `quantity` is rounded down to it too.
+  rounded down to the instrument's step (whole contracts; nine decimals for crypto and for shares,
+  market or limit); a `quantity` is rounded down to it too. A fractional share order is a `day`
+  order (since Sept 23, 2026 a limit order may be fractional too: the venue takes it as a one-day
+  order, and any other time in force on one is refused).
   A buy is at least `venue_rules[symbol]["min_order_usd"]` where one is stated ($10 for crypto).
 - `type` is `market` or `limit` (a limit needs `limit_price`). `post_only` rests or is refused.
 - A resting entry is yours to manage, and only a wake that completes can manage it. If none of your
