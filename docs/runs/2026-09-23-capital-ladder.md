@@ -361,3 +361,21 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
     shards of the owner's own account). The League has no shard code at all (nothing under
     `league/` mentions a shard). Shard 2's $39.14 is what the first run left there, and shard 3
     was never in the first run's list (`ltcm/config.json` `kalshi_shards.shards`).
+- 13:48:57Z — the updater's release `main-1615d78c07bd` (main `23ccab4`: #179, plus Merton's #180,
+  #181 and #182, new strategy children and a lesson) passed its canary and its 10-minute watch.
+  The in-box updater shipped it, as it ships every unprotected main commit.
+- **13:50:00Z — shard 3 funded, one time.** I moved $30 of collateral from shard 0 to shard 3
+  inside the Kalshi account, through the gateway's one allowed funds move
+  (`KalshiBroker.transfer_between_shards`, transfer `d2d4de3f-502b-42e2-ad11-f2daea67d218`). It
+  ran after the release's watch had passed, so a reconcile blip could not roll a release back.
+  - Before: shard 0 $331.51, shard 2 $39.14, shard 3 $0.
+  - After: shard 0 $301.51, shard 2 $39.14, shard 3 $30.00.
+  - The account total is unchanged ($370.6533) and the envelope is unchanged. It is not a
+    deposit and not a transfer between venues, the two moves the plan forbids.
+
+  $30 covers the one sports bunt ($10 stake, $5 position cap). **The durable fix is left
+  unbuilt:** the House should keep collateral on every shard it trades, as the first run's
+  service did (shards 0, 2 and 3, hourly, floor/top-up/keep). That is money-path code, and it
+  deserves the adversarial review this build gave the allocator, not a deploy in the last 40
+  minutes. Until it lands, shard 3 runs down as sports bunts trade, and shard 2 ($39.14) is
+  similarly unreplenished for the crypto and commodities bunts.
