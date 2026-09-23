@@ -529,3 +529,14 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   touched `league/watchdog.py` or its test; the swap is an atomic `os.replace` of a symlink, the
   test passed on 3.14 in the same run and on every earlier run: a timing flake on the runner. The
   failed job was re-run (result below).
+- 22:43Z — **main's CI green on `731db82`** (Deploy C): the re-run of the 3.11 job passed, so the
+  watchdog test was a timing flake (1 of 2 attempts); gateway, 3.11 and 3.14 all pass on the
+  deployed commit. Deploy C's watchdog watch had passed at 22:34Z (`PROMOTED`).
+- 22:35Z — **the final watch** began: an events feed polled from the box every 5 minutes (real
+  fills and settlements, band moves, audits, error alerts, deaths other than displacement, frozen
+  books) beside the 15-minute `floor_watch` log.
+  - 22:36:33Z — huang-hd8ff7c-3 audited (approved: "the supplied accounting and execution record
+    support the allocator's bounded $30 bunt") and promoted to a $30 Kalshi bunt (E 1.0140 on 4
+    closed trades).
+  - 22:40:13Z — meriwether-h2d625d, lent up to $30 at 22:30Z, filled 16 KXMLBTOTAL at $0.54 ($8.64)
+    on shard 3.
