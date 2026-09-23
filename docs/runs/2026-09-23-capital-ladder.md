@@ -343,3 +343,20 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
 - 13:15:37Z — PR #179 (this record, the `floor_watch` fixes, README Deploys 4-6, operations)
   merged as `8e5c22a`, after CI passed on 3.11 and 3.14. Main also carries Merton's #180
   (a Haghani-40 child strategy) and #181, which the in-box updater will ship as usual.
+- 13:30:05Z — **a real-money blocker at Kalshi: exchange shards.** The new sports bunt
+  meriwether-h2d625d placed its first real order: buy 5 NO on KXMLBTOTAL-26SEP231840STLPIT-8
+  at $0.54 ($2.70). Kalshi rejected it with HTTP 404 `insufficient_shard_balance` ("Exchange user
+  not found ... Exchange Sharding"), as it had its 12:58:27Z order.
+  - **Cause.** Kalshi now runs markets on several exchange shards. Crypto and commodities are
+    on shard 2, and since August 24, 2026 new baseball and tennis events are on shard 3 (basketball
+    since September 10). An order fails unless its shard holds collateral.
+  - **Cash per shard,** read through the gateway at 13:39Z (`GET /portfolio/balance`
+    `balance_breakdown`, read-only): shard 0 $331.51, shard 1 $0, shard 2 $39.14, shard 3 $0.
+  - **Events per shard:** KXMLBTOTAL, KXMLBGAME, KXWNBAGAME and KXATPMATCH open events are
+    all on shard 3; KXNFLGAME is on shard 0. Every accepted real Kalshi order in the ledger is on
+    a funded shard: weather, WTI, gold and the 15-minute crypto series.
+  - **Why the League never funds shard 3.** The first run's service (`ltcm/service.py`
+    `_fund_kalshi_shards`) topped up shards 0 and 2 hourly, and the gateway allows exactly
+    this one funds move (`POST /portfolio/intra_exchange_instance_transfer`, money between
+    shards of the owner's own account). The League House never ported it, and shard 3 was
+    never in its list.
