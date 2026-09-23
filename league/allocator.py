@@ -73,10 +73,10 @@ PAPER_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
 EVENT_BOOKS = ("kalshi-shadow", "kalshi")
 MAX_MOVES = 50
-#: Whether `Book` slices a reducing order larger than the gateway's order cap (Workstream C). Until
-#: it does, no position may exceed what one order can close after it has gained a quarter (four
-#: fifths of the cap), exactly as `capital.scaled_limits` held rung 3.
-EXITS_SLICED = False
+#: Whether `Book` slices a reducing order larger than the gateway's order cap. Since Workstream C
+#: (PR #164, Sept 23, 2026) it does, so a position follows its stake past one order's size; before,
+#: no position could exceed four fifths of the cap, exactly as `capital.scaled_limits` held rung 3.
+EXITS_SLICED = True
 
 
 def rules(constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -325,6 +325,12 @@ def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) 
     within the gateway's per-order cap."""
     p = _params()
     cap = order_cap if order_cap is not None else _d(CONSTITUTION["order_caps"]["max_order_usd"])
+    if order_cap is None and venue == "alpaca":
+        # The gateway counts an Alpaca market order at the touch plus ten per cent
+        # (`book.GATEWAY_MARKET_MARKUP`): an entry over $68.18 at the ask is over its $75 cap.
+        from .book import GATEWAY_MARKET_MARKUP
+
+        cap = (cap / GATEWAY_MARKET_MARKUP).quantize(CENT, rounding=ROUND_DOWN)
     # A fifth above the venue's minimum: a minimum-sized order must still fit after its fee and a
     # price-grid step (Alpaca takes no crypto order under $10; a $15 bunt must be able to place one).
     minimum = (_d((rules().get("venue_minimum_usd") or {}).get(venue, "1")) * _d("1.2")).quantize(CENT)

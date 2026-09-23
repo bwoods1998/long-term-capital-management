@@ -78,6 +78,7 @@ KINDS: dict[str, bool] = {
     "book.fill_correction": True,  # receipt-backed money correction; never a new trade or position
     "book.cross": True,  # two agents' opposite intents netted inside the House
     "book.cross_plan": False,  # recoverable internal cross: exact agent and House fills, then completion
+    "book.exit_plan": False,  # a sell over the order cap, sent in slices: the plan, then its close
     "book.settle": True,  # a Kalshi market resolved
     "book.mark": True,  # one agent's equity on one book
     "book.reconciled": True,
