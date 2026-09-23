@@ -176,7 +176,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `shards` (Sept 23, 2026, `league/shards.py`): the Kalshi shard funder's last check, the cash
     per exchange shard (`balances`), the shards the desks are offered or hold positions on
     (`wanted`), series or tickers whose shard no listing has named (`unmapped`), the rolling
-    day's `moved_24h_usd` against `day_cap_usd`, shards backing off after a failed move, and
+    day's `moved_24h_usd` against `day_cap_usd` (a move whose outcome is unknown counts),
+    `unattributed_usd` (real stakes whose shard no listing has named: kept on every donor),
+    `pending` (shards a blocked pass still owes a refusal; it tries again in five minutes), shards
+    backing off after a failed move or a top-up on a refusal's word, and
     `blocked` (why nothing may move: the kill switch, no active grant, a pause, a frozen real
     book). Every move is an `ops.alert` whose payload carries `shard_move` (transfer id, amount,
     source and destination shards, balances before and after); a refusal with
