@@ -89,7 +89,13 @@ behaviour before it.
     The ceiling is still the hold.
   - A refused call (HTTP 4xx) releases its hold: nothing was billed.
   - Calls with no answer (5xx, timeouts) keep their worst case, as the gateway does.
-- **Funding:** ⟨the top-up, after deploy⟩.
+- **Funding.** This was the owner's decision, delegated in item 2. At 01:38Z a House top-up of
+  $100 OpenAI was recorded (`topup-20260923-align-gateway-month`). It aligns the House's line with
+  the gateway's September frontier month, which had $106.71 left of $374 at 23:50Z. No provider
+  limit was raised, and the gateway month still refuses at its line.
+  - The House's line then read $106.35 for OpenAI and $103.38 for Sail. Before: $6.35 and $45.30.
+  - Sail was not topped up. Its account held about $116 and was burning about $35 a day by the
+    gateway's reading, so the owner will need to add Sail credit within about three days.
 
 ### 3. The foundry aims at fast markets; research spends less
 - **The foundry (GPT-6 Sol)** gets more room: $40 a window and a call every 10 minutes.
@@ -164,7 +170,26 @@ behaviour before it.
 
 ## Verification
 
-⟨filled as it lands⟩
+- **Tests.**
+  - Local, on the merged branch: league 1,961 and ltcm 1,788 tests OK, and `league.ci --no-tests`
+    passed.
+  - GitHub Checks on the PR head `5817a86`: gateway, tests (3.11) and tests (3.14) all passed.
+  - PR #139 merged as `7c7f107`.
+- **Checkpoint.** Two attempts before the deploy failed on Sail's side ("prepare checkpoint warm
+  snapshot ... deadline exceeded"), as the first attempt did on Sept 22. The House was unaffected.
+  The deploy went ahead with the watchdog's previous release and the Sept 22 checkpoint
+  `sbcp_9dc7fd6b…` as the fallbacks.
+- **The owner's deploy.** Release `20260923T012717Z-1231bda1a6d6` (main `7c7f107`) was staged at
+  01:27:23Z and passed the canary. It was promoted at 01:28:56Z (previous `main-c489400cdc9a`),
+  and its 10-minute watch ended promoted at 01:39Z.
+- **The live grant.**
+  - Unratified, the grant read inactive. The floor stopped buying work from about 01:29Z ("the
+    campaign's Sail allowance is closed"), and exits and reconciliation went on.
+  - `python3 scripts/live_trading.py --ratify earned-live-20260921` re-pinned it to money digest
+    `3d01ae90…` for the same capital: Alpaca $500, Kalshi $517.75, $1,017.75, 16 agents.
+  - The floor reopened at 01:37:54Z. It had been stopped about nine minutes, because the ratify
+    waited for the promotion to be confirmed.
+  - The frontier tier returned to "all" at 01:38:18Z ($102.64).
 
 ## The 30-minute watch
 
