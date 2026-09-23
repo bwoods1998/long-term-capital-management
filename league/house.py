@@ -383,6 +383,72 @@ class House:
             self._state["replay_rules"] = key
         if retried:
             self.alert("info", f"the replay rules changed: {len(retried)} agent(s) on rung 0 get one fresh replay under them")
+        self._revive_near_misses()
+
+    #: How an agent that never left rung 0 may have died without its code being judged unfit.
+    REVIVABLE_CAUSES = ("never qualified", "displaced", "stuck", "credits")
+
+    def _revive_near_misses(self, *, within_seconds: float = 2 * 86400, limit: int = 12) -> list[str]:
+        """When the replay gate loosens its out-of-sample floor, bring back, once, the code of agents
+        that died on rung 0 in the last two days after a replay whose ONLY failure was out-of-sample
+        growth the new floor admits: a newcomer on the same line, with the same parameters, where the
+        league and its desk have seats (never more than half the league's free seats). It is on rung 0
+        and replayed like any newcomer, so today's tape decides, not the old verdict; its lineage is
+        kept, holdout budget and all.
+
+        Swing and bunt, Sept 23, 2026: 38 of 148 replays from 21:00Z Sept 22 to 03:20Z failed by less
+        than the new floor allows. Most were hourly Alpaca crypto -- the only strategies that trade the
+        Alpaca account around the clock, where one agent of thirty was a crypto agent -- and their
+        agents had died on rung 0 before the rules moved."""
+        floor = float(CONSTITUTION["ladder"]["replay"].get("min_oos_growth", 0.0))
+        if floor >= 0:
+            return []
+        rules = self.game["economy"]
+        living = self.registry.living()
+        budget = min(limit, (int(rules["max_population"]) - len(living)) // 2)
+        if budget <= 0:
+            return []
+        now = self.clock()
+        recent = [a for a in reversed(self.registry.dead())  # the most recent deaths first
+                  if a.cause in self.REVIVABLE_CAUSES and a.died_at and now - _epoch(a.died_at) <= within_seconds]
+        if not recent:
+            return []
+        wanted = {a.id for a in recent}
+        last_trial: dict[str, Mapping[str, Any]] = {}
+        for entry in self.ledger.iter(kinds="eval.trial"):
+            if entry.agent in wanted:
+                last_trial[entry.agent] = entry.payload
+        running = {a.code_sha256 for a in living}
+        revived: list[str] = []
+        for agent in recent:
+            if len(revived) >= budget:
+                break
+            trial = last_trial.get(agent.id) or {}
+            reasons, oos = list(trial.get("reasons") or []), trial.get("oos_mean_log_growth")
+            if self.evaluator.max_rung(agent.id) > 0 or not reasons or oos is None \
+                    or not all(str(r).startswith("out-of-sample growth is not above") for r in reasons):
+                continue
+            # Exactly zero is a program that sat the out-of-sample stretch out, which the floor does not admit.
+            if not floor < float(oos) < 0 or agent.code_sha256 in running:
+                continue
+            niche = self.niches.get(agent.specialty or "")
+            if niche is None or niche.dormant or self.members(niche.id) >= niche.max_members:
+                continue
+            running.add(agent.code_sha256)
+            try:
+                child = self.spawn(agent.line or agent.name, agent.family, agent.code, parent=agent.id, params=agent.params,
+                                   endowment=rules["endowment_usd"], specialty=niche.id,
+                                   reason=(f"revived under the loosened replay gate: {agent.id} died on rung 0 ({agent.cause}) after a "
+                                           f"replay that failed only on out-of-sample growth ({float(oos):+.4%} a block), which the "
+                                           f"floor of {floor:+.3%} a block now admits; it is replayed afresh on today's tape"))
+            except ValueError as exc:
+                self.alert("info", f"{agent.id}: not revived under the loosened replay gate ({str(exc)[:160]})")
+                continue
+            revived.append(child.id)
+        if revived:
+            self.alert("info", f"the replay gate loosened: {len(revived)} strateg{'y' if len(revived) == 1 else 'ies'} that died on "
+                               f"rung 0 by less than the new out-of-sample floor were born again ({', '.join(revived)})")
+        return revived
 
     def _save_state(self) -> None:
         # The write under the lock too: the audit job saves from its own thread (it persists the

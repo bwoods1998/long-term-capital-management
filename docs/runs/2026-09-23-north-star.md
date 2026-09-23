@@ -87,6 +87,13 @@ The constitution was revised in both directions:
     haghani and rosenfeld lines and the scholes and rosenfeld cards.
   - **Paper screen:** 3 hourly blocks (was 4) or 1 finished day (was 2), and a trailing drawdown
     under 25% (was 15%).
+  - **One second chance** (`House._revive_near_misses`). When the floor loosens, the code of agents
+    that died on rung 0 in the last two days comes back once as a newcomer on its line, if its
+    replay failed only on out-of-sample growth that is now admitted. It gets a fresh replay on
+    today's tape. At most 12 come back, and never more than half the league's free seats.
+    Measured at 03:35Z: 1 of the Alpaca account's 30 agents traded crypto (rosenfeld-34, on
+    replay). The other 29 trade ETFs, megacaps and options, so the paper account sleeps outside
+    market hours.
 - **Swings (earned, and sized by evidence).**
   - **Rung 3 promotion:** it spends its own error budget, `promotion_alpha` 0.20, while death keeps
     0.05.
