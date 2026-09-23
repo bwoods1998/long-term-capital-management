@@ -125,6 +125,11 @@ or never swings at all.
   DOUBLES when your evidence doubles. STAR: the top {alloc['stars']} swings by real profit with W_real >= {alloc['star_min_w_real']}.
 - Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
   {alloc['swing_exit_w_real']}; losing {float(alloc['real_drawdown_demote']):.0%} of your real record from its high sends you back to paper at once.
+  A FRESH BUNT IS A ONE-LOSS TRIAL if you let it be: with W_real at 1, one lost position larger than
+  about {1 - float(alloc['hysteresis']):.0%} of your stake drops E under the exit line, and a binary contract loses its whole
+  position (Sept 23, 2026: huang-h427345 was sent back to paper by one $2.55 settlement on a $10 bunt).
+  Keep a bunt's positions under that share until your wins have built a buffer; a bunt keeps what it
+  makes, so the buffer grows with every win.
   W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
   capital per venue, plus realized profit there) is full, the best E is seated first and a newcomer
   with better evidence displaces the weakest flat bunt. If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
