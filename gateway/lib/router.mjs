@@ -41,6 +41,7 @@ import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenueP
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
+import * as equity from './equity.mjs';
 import * as typesafe from './typesafe.mjs';
 import * as github from './github.mjs';
 
@@ -77,6 +78,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
 
   if (path === '/v1/health') {
     if (request.method !== 'GET' && request.method !== 'HEAD') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    // The health read reports the stored equity reading and never refreshes it: the House reads its
+    // kill switch here on the order path and treats a slow answer as the switch engaged, and a
+    // refresh reads both venues one after the other. The frontier path refreshes it (ten minutes).
     return json(await gate.status());
   }
   if (path === '/v1/kill' || path === '/v1/unkill') {
@@ -353,6 +357,7 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
   const admitted = frontier.admit(parsed, env);
   if (admitted.error) return fail(admitted.error, admitted.status);
   const bytes = new TextEncoder().encode(body.text).length;
+  await equity.refresh(env, gate, { fetcher, now });  // profit-indexed cap: the accounts read at most every ten minutes
   const hold = await gate.frontierReserve({ micro: String(frontier.worstCase(admitted.price, bytes, admitted.maxOutput)), at: now() });
   if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
   const agent = request.headers.get(frontier.AGENT_HEADER);

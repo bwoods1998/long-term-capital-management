@@ -52,10 +52,16 @@ FORBIDDEN: tuple[str, ...] = (
     # automatic release that changes any file here (league/updater.py), so this is also the list of
     # what only the owner's deploy may change.
     "league/sandbox.py",
+    # The Alpha Lab's seals: the search never sees the last third of a tape nor the holdout, and one
+    # lineage's many lines share one holdout budget (league/lab.py).
+    "league/lab.py",
     # The history a strategy is judged on and the seal on its holdout are judges too.
     "league/history.py", "league/deep_replay.py",
     # The allocator decides who holds real money and how much (Sept 23, 2026): a money judge.
     "league/allocator.py",
+    # The lab's batch evaluator: the numbers a lab candidate is judged by, and the door that keeps
+    # the holdout out of the lab box.
+    "league/labbox.py",
 )
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"

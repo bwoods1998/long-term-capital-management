@@ -121,6 +121,17 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
                     inbox=Path(house.root) / "repairs-inbox")
 
 
+def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
+    """The Alpha Lab's box key when `config.json` `lab` names its box by id (`box_id`, the box
+    `scripts/lab_box.py create` made, which `LabBox.from_config` binds under this same key) and is
+    not switched off; "" otherwise, and always on a canary. A box's name alone (`box`) is not
+    enough: nothing could be bound, and the sandbox would make an agent-sized box instead."""
+    lab = dict(config.get("lab") or {})
+    if canary or lab.get("enabled") is False or not lab.get("box_id"):
+        return ""
+    return str(lab.get("box_key") or "lab")
+
+
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
@@ -204,6 +215,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Deep replay over the history store and the sealed holdout (league/deep_replay.py): on by
         # default, inert until `python -m league.history ingest` has fetched a strategy's inputs.
         deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
+        # The Alpha Lab's own box (league/lab.py, league/labbox.py): its key, when config.json names one; none on a canary.
+        lab_box=lab_box_key(config, canary=canary),
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
@@ -255,6 +268,25 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         task_router = TaskRouter(house.ledger, clock=house.clock, config=load_routes().get('routing'))
         house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier, task_router=task_router)
         house.researcher.routes = task_router
+    if house.lab is not None:
+        # The lab box config.json names, bound into the House's sandbox (league/labbox.py). A release
+        # without that module, or a lab block switched off, runs without the lab.
+        try:
+            from .labbox import LabBox
+
+            # Bound under the key the House was built with (`lab_box_key`), checking tapes against
+            # the House's own sealed window.
+            box = LabBox.from_config(sandbox, config, clock=house.clock, holdout=house.holdout_window)
+        except ImportError as exc:
+            house.alert("warning", f"the Alpha Lab is off: {type(exc).__name__}: {str(exc)[:160]}")
+            box = None
+        if box is not None:
+            house.lab.use_box(box)
+        else:
+            house.lab.close()
+            house.lab = None
+            if house.researcher is not None:
+                house.researcher.lab = None
     if not canary and house.researcher is not None and config.get("research_traces", True):
         # Private research transcripts with their cost and outcome, for eventual fine-tuning.
         from .traces import TraceStore

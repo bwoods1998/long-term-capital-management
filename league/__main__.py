@@ -119,7 +119,16 @@ def main(argv=None) -> int:
             return 0 if all(b["ok"] for b in books.values()) else 1
         else:
             stopping = {"now": False}
-            signal.signal(signal.SIGTERM, lambda *_: stopping.update(now=True))
+
+            def terminate(*_: object) -> None:
+                # The loop ends after the tick in hand; from now on no background work starts and the
+                # tick skips its births. The tick waits on no box background work holds (House.tick),
+                # and the boxes are put to sleep within a bounded time (SailSandbox.sleep_all), so a
+                # background job hung in a Sail call cannot hold the exit a restart is waiting for.
+                stopping.update(now=True)
+                house.begin_close()
+
+            signal.signal(signal.SIGTERM, terminate)
             if not house.registry.living():
                 house.found()
             while not stopping["now"] and not stop_file.exists():

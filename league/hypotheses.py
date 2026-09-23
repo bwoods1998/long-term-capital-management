@@ -1290,10 +1290,24 @@ class Foundry:
                                                   **extra}, id=key)
 
     def evaluate_all(self, idents: Sequence[str]) -> None:
-        for ident in idents:
+        idents = list(idents)
+        for index, ident in enumerate(idents):
             if self.house._closing.is_set():
                 return
-            self.evaluate(ident)
+            result = self.evaluate(ident)
+            if result is not None and result.get("infrastructure"):
+                # Sail is not answering: the cards not yet tried stay pending, and this dispatch is
+                # not counted as one of their attempts (only the card that met the outage is).
+                self._uncount(idents[index + 1:])
+                return
+
+    def _uncount(self, idents: Sequence[str]) -> None:
+        with self.house._state_lock:
+            attempts = self._state().setdefault("attempts", {})
+            for ident in idents:
+                row = attempts.get(ident)
+                if row:
+                    row[0] = max(int(row[0]) - 1, 0)
 
     def evaluate(self, ident: str) -> dict[str, Any] | None:
         """Replay one card through the House's candidate replay. Passed, failed (a counted trial),
@@ -1334,6 +1348,12 @@ class Foundry:
                 self._outcome(card, "invalid", f"its NEEDS name {where}; a card must trade its own desk's markets")
                 return None
         result = house._candidate_replay(agent, code)
+        if result.get("infrastructure"):
+            # The House's box or Sail did not answer: not this card's outcome and not a trial. It
+            # stays pending; `max_evaluation_attempts` such tries make it `blocked_infra`.
+            house.alert("warning", f"hypothesis card {ident}: its replay did not run, infrastructure "
+                                   f"({str(result.get('error') or '')[:200]}); it stays pending")
+            return result
         if not result.get("passed"):
             try:
                 house.sandbox.retire(agent.id)  # its replay box: only a passer's child will use it
@@ -1525,6 +1545,8 @@ class Foundry:
             parent = p.get("parent")
             if str(p.get("founder") or "").startswith("card:"):
                 route, why, evidence = "hypothesis", "a hypothesis card's child (its admission row was not written)", {"card": p["founder"][5:]}
+            elif str(p.get("founder") or "").startswith("lab:"):  # league/lab.py writes its own; this only backs it up
+                route, why, evidence = "lab", "an Alpha Lab graduate (its birth row was not written)", {"lineage": p["founder"][4:]}
             elif parent is None and p.get("founder") in founder_keys:
                 route, why, evidence = "founder", "a founding seed: starts on paper without a replay pass (deliberate exception); its replay still runs and counts", \
                     {"exception": "founder_paper_start", "replay_passed": False}
