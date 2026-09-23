@@ -12,7 +12,9 @@ Hosts, endpoints and the fields relied on (probed live Sept 18, 2026):
         /api/v2/public/get_index_price?index_name=btc_usd          result.index_price
         /api/v2/public/get_volatility_index_data?currency=BTC&resolution=3600
             &start_timestamp=<ms>&end_timestamp=<ms>               result.data[]: [t_ms, o, h, l, c]
-            (DVOL exists for BTC and ETH only; other currencies answer an empty data list)
+            (DVOL exists for BTC and ETH only; other currencies answer an empty data list.
+            result.continuation, when not null, is the end_timestamp of the next, older page:
+            documented, not yet seen on a probe; league/feeds.py asks for 720 hours a page)
         /api/v2/public/get_book_summary_by_currency?currency=BTC&kind=future
             result[]: instrument_name, mark_price, mid_price, open_interest,
                       estimated_delivery_price (the index for that expiry), creation_timestamp
@@ -21,6 +23,9 @@ Hosts, endpoints and the fields relied on (probed live Sept 18, 2026):
             fundingRate, nextFundingRate (may be ""), fundingTime, nextFundingTime, premium
             (an 8-hour rate as a decimal fraction)
         /api/v5/public/funding-rate-history?instId=..&limit=30    fundingRate, fundingTime
+            (&after=<fundingTime ms> pages back to older settlements, at most 100 a page; OKX's
+            docs also list realizedRate, the rate actually charged, and about three months of
+            history -- both UNVERIFIED on a probe)
         /api/v5/public/open-interest?instType=SWAP&instId=..      oi, oiCcy, oiUsd
         /api/v5/market/ticker?instId=..                           last, bidPx, askPx
     https://api.hyperliquid.xyz
@@ -178,6 +183,32 @@ class Derivatives:
         out.sort(key=lambda row: row["t"])
         return out
 
+    def dvol_candles(self, currency: str, start_ms: int, end_ms: int) -> "tuple[list[dict[str, Any]], int | None]":
+        """Hourly DVOL candles OPENING in [start_ms, end_ms], oldest first: `[{t_ms, open, high, low,
+        close}]`, and Deribit's `continuation` -- None when the answer holds the whole range, else
+        the end_timestamp that pages further back (Deribit pages from the newest end). A candle
+        opening at `t_ms` is complete only at `t_ms` + 1 hour; which of them are final is the
+        caller's to judge. Unlike `dvol_now`, a venue that fails raises (DataError/TransportError):
+        the feed recorder must tell a failed poll from an empty one."""
+        what = f"deribit dvol history {currency}"
+        result = self._deribit(
+            "/api/v2/public/get_volatility_index_data",
+            {"currency": str(currency).upper(), "resolution": 3600, "start_timestamp": int(start_ms), "end_timestamp": int(end_ms)},
+            what,
+        )
+        require(isinstance(result, Mapping) and isinstance(result.get("data"), list), f"{what}: no data list")
+        out = []
+        for candle in result["data"]:
+            if not isinstance(candle, (list, tuple)) or len(candle) < 5:
+                continue
+            values = [_float(v) for v in candle[:5]]
+            if any(v is None for v in values) or values[0] <= 0:
+                continue
+            out.append({"t_ms": int(values[0]), "open": values[1], "high": values[2], "low": values[3], "close": values[4]})
+        out.sort(key=lambda row: row["t_ms"])
+        more = _float(result.get("continuation"))
+        return out, (int(more) if more else None)
+
     def dvol_now(self, currency: str = "BTC") -> "float | None":
         """The latest DVOL close, or None when the index has no data (or the host is down)."""
         try:
@@ -226,6 +257,29 @@ class Derivatives:
         except (DataError, TransportError):
             return []
         return [r for r in (_float(row.get("fundingRate")) if isinstance(row, Mapping) else None for row in rows) if r is not None]
+
+    def okx_funding_settled(self, symbol: str = "BTC", *, after_ms: "int | None" = None, limit: int = 100) -> list[dict[str, Any]]:
+        """One page of OKX's settled funding for `<symbol>-USDT-SWAP`, newest first as OKX sends it:
+        `[{time_ms, rate, funding_rate, realized_rate}]`. `time_ms` is the settlement (`fundingTime`),
+        and `rate` is OKX's `realizedRate` (what was actually charged) when it sends one, else its
+        `fundingRate`. `after_ms` pages back: only settlements before it. At most 100 a page.
+        Unlike `okx_funding_history`, a venue that fails raises (DataError/TransportError); an
+        instrument OKX does not list answers `okx code 51001`."""
+        inst = f"{str(symbol).upper()}-USDT-SWAP"
+        params: dict[str, Any] = {"instId": inst, "limit": max(1, min(int(limit), 100))}
+        if after_ms is not None:
+            params["after"] = int(after_ms)
+        rows = self._okx("/api/v5/public/funding-rate-history", params, f"okx funding history {inst}")
+        out = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            at, funding, realized = _float(row.get("fundingTime")), _float(row.get("fundingRate")), _float(row.get("realizedRate"))
+            rate = realized if realized is not None else funding
+            if at is None or at <= 0 or rate is None:
+                continue
+            out.append({"time_ms": int(at), "rate": rate, "funding_rate": funding, "realized_rate": realized})
+        return out
 
     def hyperliquid_all(self) -> dict[str, dict[str, Any]]:
         """Every Hyperliquid perp's funding, OI and marks keyed by coin. Empty when unreachable."""

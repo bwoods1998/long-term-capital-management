@@ -149,9 +149,10 @@ def constrain(needs: Mapping[str, Any], niche: Niche) -> dict[str, Any]:
     out["observe"] = {key: rows for key, rows in kept.items() if rows}
     if not out["observe"]:
         out.pop("observe")
-    # The live feeds the House records (`league/feeds.py`) are not held to the specialty either: a
-    # crypto strike reads perp funding, a game market its scoreboard. Known feeds and keys only,
-    # six each, one spelling; what the House does not record is dropped rather than left to fail.
+    # The feeds the House records (`league/feeds.py`: sports, perps, vol, funding) are not held to the
+    # specialty either: a crypto strike reads implied vol and perp funding, a game market its
+    # scoreboard. Known feeds and keys only, six each, one spelling; what the House does not record
+    # is dropped rather than left to fail.
     from .feeds import requested
 
     feeds = requested(out.get("feeds"))
