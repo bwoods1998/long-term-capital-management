@@ -63,7 +63,7 @@ gateway's `GET /v1/health`.
 
 ## What shipped
 
-Everything is on branch `night/dynamism-ii` (PR ⟨#⟩). Each change has a switch; "off" restores the
+Everything is on branch `night/dynamism-ii` (PR #139). Each change has a switch; "off" restores the
 behaviour before it.
 
 ### 1. Merged repairs reach the floor
