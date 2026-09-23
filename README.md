@@ -389,6 +389,18 @@ its strategy names, the House re-surveys the venue daily so a new season joins b
 category, and an agent whose series have gone dark is shown the busiest live ones. The floor is paid
 per specialty so the population cannot collapse onto whichever one got lucky last week.
 
+**Open desks** (Sept 23, 2026). Each venue also has one desk whose universe is the whole venue:
+`kalshi-open` (Greenwich: any Kalshi series but the multivariate combos) and `alpaca-open` (London:
+any US stock, ETF or coin against the dollar, never an option), eight seats each and no founders. A
+program with no desk of its own (the architect's, the foundry's, a lab graduate's) is born there only
+when no single desk holds most of what its NEEDS name (`niches.match`, `niches.spanning`): it spans
+desks, or trades markets no desk lists. It is still shown only what it names, twelve at most; one
+naming nothing it may trade is shown a capped discovery list (Kalshi: the daily survey's busiest
+series, those no desk covers first; Alpaca: the other Alpaca desks' symbols). Measured Sept 23: one
+pass over Kalshi's markets resolving within 48 hours is 21 pages, 20,662 markets, about 15 MB and
+22 s (372 series trading, 124 of them on a fixed desk's list), so it is the daily survey's work
+and never a wake's. The allocator stakes an open-desk agent exactly like any other.
+
 **Founders start on paper.** The 28 founders (the fourteen seed programs, pointed at the specialties)
 are seated on rung 1 at birth. The first dry run showed honest replays failing most of
 them (crypto reversion below zero after fees; Kalshi favourites at a deflated Sharpe of 0.85 against
@@ -582,7 +594,7 @@ The `league/` modules:
 | `seeds/` | The fourteen founding programs. |
 | `pacer.py` | The legacy fourteen-day expedition pacer, kept for compatibility and fixtures; production is paced by the funded campaign (`campaigns.py`). |
 | `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
-| `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season. |
+| `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season; the two open desks (`open: true`) and `match`/`spanning`, which seat a program on one desk or, when it spans desks, on its venue's open desk. |
 | `strategies/`, `tools/`, `playbook/` | What Merton adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop. |
 | `budget.py` | The Sail account's monthly line and reserve. |

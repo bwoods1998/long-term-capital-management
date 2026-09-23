@@ -1025,8 +1025,9 @@ class House:
         if family_of(agent.venue) == "kalshi":
             return len(ctx.get("markets") or [])
         niche = self.niche_of(agent)
-        if (niche.asset_class if niche else "") in ("equity", "option") and not market_open_at(ctx["now"]):
-            return 0
+        if niche is not None and niche.keeps_hours(agent.needs) and not market_open_at(ctx["now"]):
+            # A shut session offers only coins (an open desk may mix both; every other desk is one or the other).
+            return sum(1 for symbol, quote in (ctx.get("quotes") or {}).items() if quote and niche.open and "/" in str(symbol))
         return sum(1 for quote in (ctx.get("quotes") or {}).values() if quote)
 
     def _note_wake(self, agent: Agent, *, acted: bool, offered: int) -> dict[str, int]:
@@ -2347,8 +2348,11 @@ class House:
         every = float(self.settings.niche_survey_hours)
         if every <= 0 or self.kalshi_data is None or not hasattr(getattr(self.kalshi_data, "market_data", None), "markets"):
             return False
-        if not self._state.get("niche_live"):
-            return self.clock() - float(self._state.get("last_niche_try") or 0) >= 1800  # never surveyed yet: every half hour until one works
+        live = self._state.get("niche_live") or {}
+        # Never surveyed yet, or a Kalshi desk has been added since (the open desk's discovery list
+        # comes from the survey): every half hour until one works, not at tomorrow's turn.
+        if not live or any(n.venue == "kalshi" and not n.dormant and n.id not in live for n in self.niches.values()):
+            return self.clock() - float(self._state.get("last_niche_try") or 0) >= 1800
         return self.clock() - float(self._state.get("last_niche_survey") or 0) >= every * 3600
 
     def _series_category(self, series: str) -> str | None:
@@ -2964,7 +2968,7 @@ class House:
                             continue
                         agent_grace = 0
             niche = self.niche_of(agent)
-            if standing.rung == 1 and niche is not None and niche.asset_class in ("equity", "option"):
+            if standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs):
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
                 # its equity agents were displaced before their first market session. Start
                 # their paper-seat grace at an actual offered opportunity (or a legacy fill),
