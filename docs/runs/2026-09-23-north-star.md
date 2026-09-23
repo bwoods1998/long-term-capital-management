@@ -12,7 +12,23 @@ gaps are the ones the Dynamism II watch measured.
 ## What each gap got
 
 ### 1. No edge on the 24/7 markets → new information that replay can test now
-⟨crypto data⟩
+- **Two histories that replay can use at once** (`league/feeds.py`, `ltcm/data/derivs.py`). Both
+  are backfilled over the replay window, each value stamped at the moment it became final, and both
+  are on the box's allowlist already.
+  - `vol`: Deribit's DVOL, the implied-volatility index for BTC and ETH, one row per completed
+    hourly candle stamped at its close.
+  - `funding`: OKX's settled perpetual funding per coin, stamped at settlement, with `avg_24h`,
+    `avg_7d` and `zscore_30d` computed from rows at or before their own.
+- **Why:** measured Sept 22-23, every Alpaca crypto strategy failed replay on out-of-sample growth
+  once fees were paid, and almost nothing passed on the Kalshi crypto desks. The live feeds
+  (sports, perps) cannot be replayed until 20 blocks are recorded.
+- **What it enables:** a Kalshi crypto binary can now be priced from spot and implied vol, and a
+  strategy that declares `NEEDS["feeds"] = {"vol": [...], "funding": [...]}` is replayed as soon
+  as the backfill is in. The contract, the foundry's `REPLAY_VIEW` and the research capabilities
+  say so.
+- **The rest of the gap:**
+  - the transfer route and the rotating fast route (3 below);
+  - the out-of-sample floor and the one-time revival of near-miss crypto strategies (7 below).
 
 ### 2. The foundry was seat-bound → seats follow evidence
 - Population 96 (was 64). The turbo bound and `game.json`'s bound were widened to 128.
