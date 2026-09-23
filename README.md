@@ -422,15 +422,22 @@ Since Sept 22, 2026 two more workers use the same route and guards:
   rejection test. Replay admits a card before it gets a seat. It writes on GPT-6 Sol at high
   effort. Since Sept 23, 2026 it may call every 10 minutes within $40 a 24-hour window (it was
   every 15 minutes and $20).
-  - Up to half its calls go to the hourly, around-the-clock desks in `fast_desks`: both Alpaca
-    crypto desks, both Kalshi crypto desks, index ETFs and megacaps. Their low replay pass rates
-    had kept them off the evidence route.
-  - Up to a fifth go to the least-explored desk, and the rest to the desk the evidence favours.
+  - Up to 30% of its calls port a proven mechanism (`transfer_share`, from Sept 23, 2026): a
+    family with an earned forward record, real money first, goes to the best-scored desk of its
+    venue where it has never been tried, and Merton is asked to adapt that mechanism there. It
+    sees the mechanism in words, never the other agent's code.
+  - Up to half go to the hourly, around-the-clock desks in `fast_desks`: both Alpaca crypto
+    desks, both Kalshi crypto desks, index ETFs and megacaps. Their low replay pass rates had
+    kept them off the evidence route. Since Sept 23, 2026 the route rotates to the fast desk with
+    the fewest recent cards; before, every such call went to the index-ETF desk.
+  - Up to a fifth go to the least-explored desk, and the rest to the desk the evidence favours
+    (routes are offered in that order; with these dials about 27%, 45%, 18% and 9% of calls).
   - Up to 8 cards may wait for replay before the next call (`max_pending_cards`). Only its own
     call in flight holds it up, not another Merton role.
   - Its packet carries horizon guidance (prefer hourly, which reaches the paper screen soonest),
-    forward results by family on the desk, and the Kalshi maker fee: a quarter of the taker
-    formula on the series that charge makers.
+    forward results by family on the desk, the league's edge map (`winning_mechanisms`: the
+    best forward records on every desk and what died on the forward evidence), and the Kalshi
+    maker fee: a quarter of the taker formula on the series that charge makers.
 - **The repair engineer** (`league/engineer.py`) takes the top job of the repair queue
   (`league/worklist.py`) and patches it by pull request. When CI refuses a patch, it revises
   against CI's own failure text, at most three times and within a per-job ceiling. A strategy
