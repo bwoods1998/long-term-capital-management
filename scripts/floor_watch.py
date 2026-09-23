@@ -97,8 +97,11 @@ for a, at, k, p in q(('book.fill', 'book.settle')):
             realized[b] += float(p['realized'])
     else:
         realized[b] += float(p.get('pnl') or 0)
-out['fills'] = {b: {'fills': fills[b], 'notional': round(notional[b], 2), 'realized': round(realized[b], 2), 'agents': len(who[b])}
-                for b in sorted(set(fills) | set(realized))}
+summary = {b: {'fills': fills[b], 'notional': round(notional[b], 2), 'realized': round(realized[b], 2), 'agents': len(who[b])}
+           for b in sorted(set(fills) | set(realized))}
+# Only the real accounts are real money; the practice books (alpaca-paper, kalshi-shadow) fill too.
+out['fills'] = {b: v for b, v in summary.items() if b in ('kalshi', 'alpaca')}
+out['practice_fills'] = {b: v for b, v in summary.items() if b not in ('kalshi', 'alpaca')}
 refused = collections.Counter()
 for a, at, k, p in q(('book.refused',)):
     p = json.loads(p); refused[('; '.join(p.get('reasons') or []))[:80]] += 1
@@ -188,6 +191,7 @@ def render(box: dict, site: dict, gateway: dict) -> str:
              f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
     lines += ["  " + row for row in box["move_rows"]]
     lines.append(f"## real money {json.dumps(box['fills'])}  performance fees ${box['performance_fees']}")
+    lines.append(f"## practice {json.dumps(box.get('practice_fills') or {})}")
     lines.append("## top evidence")
     lines += [f"  {r['E']:.4f} {r['agent']} {r['venue']} {r['band']} Wp={r['W_paper']} Wr={r['W_real']} trades={r['trades']}/{r['real_trades']} stake={r['stake']}"
               for r in box["top_evidence"]]
