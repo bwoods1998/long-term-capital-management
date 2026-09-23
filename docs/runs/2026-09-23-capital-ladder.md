@@ -568,3 +568,75 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   - **What does not change.** Only the site changes. The House's data already carries the band,
     stake, evidence and last move.
 
+
+## After the deadline (14:31Z onward)
+
+**A correction to the report.** The report says haghani-37's LTC position is still open. It was
+drafted at 14:05Z, and at 14:19:26Z haghani-37 sold its 0.1919 LTC at $60.07 for −$0.51. That was
+the first closed real Alpaca trade. At the deadline the real Alpaca account held cash only.
+
+**The floor.**
+- **Kalshi:**
+  - **Sports fills.** meriwether-h2d625d, the sports bunt, filled on shard 3 again: 5 KXMLBTOTAL
+    AZ–COL at $0.54 (14:32:12Z) and 5 MIL–PHI at $0.54 (15:02:29Z).
+  - **huang-h427345.** Its first real trade was 4 KXBTC15M at $0.62 (14:48:47Z), which settled
+    at a loss of about $2.55. At 14:57:45Z **the allocator's first demotion** sent it back to
+    practice: E 0.7157, under the 0.8585 exit line. The one-hour re-entry cooldown then applied.
+- **Alpaca:**
+  - **haghani-37.** At 15:02:48Z the evaluator's drift check (a CUSUM of block growth against
+    the record that earned the rung) moved it from rung 2 to 1: "its growth has decayed from the
+    record that earned this rung". The allocator kept this check deliberately, beside its own
+    lines, and for swings #163 made drift re-seat only. With it, Alpaca has no real-money agent
+    until one earns a bunt.
+  - **Lab stock programs.** For the first time, lab programs for Alpaca stock desks passed both
+    the House replay and the sealed holdout: `alpaca-megacaps` (14:33Z), `alpaca-index-etfs`
+    (15:00Z), and `alpaca-crypto-majors` (15:04Z and 15:27Z). Each waits for a seat.
+
+**The owner's stocks-and-options request, answered.**
+- **The investigation** is saved as
+  [a proposal](../proposals/2026-09-23-alpaca-stocks-and-level-3-options.md). In short:
+  - Level 3 is not used at all. The House only buys single calls and puts, as design decision 28
+    set it (assignment risk on a cash account).
+  - No stock or option agent has earned real money: the best are E 0.9987 and 0.9973.
+  - Four House defects would have stopped them once they did.
+  - The gateway under-priced multi-leg orders.
+- **Shipped:**
+  - **#187 (gateway).** Multi-leg, symbol-less, stop and adjusted-option Alpaca orders are refused
+    before pricing. Six tests fail on main and pass on the branch. Deployed at 15:06Z as gateway
+    version `3e79ad85`, tagged `3cca040`. The House's own orders (market or limit; plain, crypto
+    and OCC symbols; qty) price exactly as before.
+  - **#189.** Real-money limits shown to agents are the ones the book enforces; buys are trimmed
+    to fit, never enlarged. The options chain is filtered at what a bunt can hold. Stock and
+    options desks wake just after the open. `ctx.now` is stamped after market data.
+  - **#190.** Stock and options agents that are trading keep their seats until they close 5
+    trades or have had 3 sessions. Grace counts in session hours. No agent is removed while
+    holding a position overnight. A rewrite of a never-traded agent no longer restarts its
+    clock. mcentee-34 gets DST-correct session hours. Every agent sees its distance to the bunt
+    line.
+  - None changes a money rule: the grant stays on `44e8d48d`.
+  - **Deploy 7 (15:29Z).** #187 changed a protected path (`gateway/`), so the in-box updater
+    refused the range, and main `da846db` (#187, #189, #190) went out as an owner deploy. Release
+    `20260923T152910Z-9a5970c56aca` passed its canary, was promoted at 15:30:50Z, and passed all
+    20 watch checks by 15:40:50Z. The running `house.py` carries `_fit_real_entry`,
+    `_trading_pending` and `bunt_line`. The grant stayed active on `44e8d48d`, with no
+    re-ratification needed.
+- **Next:** B1, level-3 debit verticals on practice. Real multi-leg orders only after a week on
+  practice and a re-ratified grant, per the proposal.
+
+**The capital page (the owner's second request).**
+- **personal-site #5,** deployed at about 15:25Z as version `0752a7b8`, tagged `c2ee806`. The ladder
+  is three floors:
+  - Level 3 "Increased capital"
+  - Level 2 "Live trading"
+  - Level 1 "Practice"
+- **Drawing:** one dot per agent (green up, red down, grey flat, hollow untraded). Real-money
+  agents are gold coins sized by stake. A gold arc fills toward the next level.
+- **Beneath the floors:** a Retired strip, the latest climb (replayed once), and the latest
+  moves.
+- **Build:** three concepts were judged, then built, reviewed visually and for code (3 majors
+  and 8 minors fixed), then checked by screenshot on the live site at 390 px.
+
+**My own slip.** At 15:06Z a local `ln -sfn` meant for a scratch check replaced the `.data`
+symlink in `~/Work/ltcm-deploy` with a link to itself. For about a minute the local box tools
+could not read `box.json`. Nothing on the box, the gateway or the site was touched. I restored it
+to `~/Work/long-term-capital-management/.data`, the target every other worktree uses.
