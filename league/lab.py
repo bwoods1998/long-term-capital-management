@@ -728,6 +728,8 @@ class Lab:
             raise TimeoutError("the step's tape budget is spent")
         self._tapes_built += 1
         house = self.house
+        with house._tape_lock:
+            cached = set(house._tapes)
         try:
             wanted = house._feeds_wanted(needs)
             if wanted:
@@ -750,10 +752,15 @@ class Lab:
             self._tape_errors[key] = (self._now(), message)
             raise LabError(message) from None
         cut = search_tape(tape, float(self.settings["search_fraction"]))
+        if tape_id not in cached:
+            # A tape only the lab asked for is not kept in the House's own cache (which keeps one
+            # tape a key for a day, and a House box has a few GB): the lab keeps its search copy.
+            with house._tape_lock:
+                house._tapes.pop(tape_id, None)
         steps = cut["steps"]
         ident = "lab:" + hashlib.sha256(f"{tape_id}|{steps[0].get('t')}|{steps[-1].get('t')}|{len(steps)}".encode()).hexdigest()[:24]
         self._tapes.pop(key, None)
-        if len(self._tapes) >= 8:
+        if len(self._tapes) >= 6:
             self._tapes.pop(next(iter(self._tapes)))
         self._tapes[key] = (self._now(), ident, cut)
         return ident, cut

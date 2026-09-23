@@ -189,6 +189,16 @@ class Archive(LabCase):
         summary = json.loads(winner["summary"])
         self.assertEqual(len(summary["folds"]), 3)
 
+    def test_the_house_keeps_no_tape_only_the_lab_asked_for(self):
+        self.house.tape_for(static_literal(KNOB, "NEEDS"))  # an agent's replay built this one
+        known = set(self.house._tapes)
+        self.queue(KNOB)
+        self.queue(IDLE)  # this one's tape only the lab wants
+        while self.lab.evaluate_batch():
+            pass
+        self.assertEqual(set(self.house._tapes), known)
+        self.assertEqual(len(self.lab._tapes), 2)
+
     def test_a_tape_in_the_holdout_is_never_sent_to_the_box(self):
         ident = self.queue(KNOB)
         sealed = {"venue": "alpaca", "horizon": "hour", "steps": [{"t": "2026-01-05T00:00:00Z", "bars": {}},
