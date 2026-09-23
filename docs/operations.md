@@ -105,6 +105,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   mark pass then does two things:
   - It shrinks the legacy $60 micro stakes toward their bunt stake. Only free cash moves.
   - It publishes `allocator-board.json`. Read it with `python3 scripts/floor_watch.py`.
+- **Sliced exits (Sept 23, 2026, PR #164).** A sell above the $75 order cap goes out in slices.
+  An unfinished plan shows as a private `book.exit_plan` row with no matching `closed` row.
+  - A plan ends after 60 minutes, or after `max(8, 3n + 2)` venue orders.
+  - The agent, the wind-down or the horizon rule then asks again with a fresh intent.
+  - A plan resumed after a restart sends nothing until the book has read the venue once.
 - **Roll back by hand (on the box):**
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
 - **The gateway.** Deploy with
