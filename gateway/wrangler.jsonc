@@ -57,6 +57,13 @@
     // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
     // Sept 21 22:15 UTC: the owner added $200 of OpenAI credit -> $374.
     "FRONTIER_MONTH_USD": "374",
+    // Sept 23: compute follows profit (lib/equity.mjs). The month's cap is FRONTIER_MONTH_USD plus
+    // this share of the real accounts' equity above the baseline, read here with the venue keys;
+    // exactly FRONTIER_MONTH_USD when that equity cannot be read. The baseline is the live grant's
+    // capital (Kalshi $517.75 + Alpaca $500). FRONTIER_MONTH_MAX_USD, when set, holds the raise to
+    // what the OpenAI account is funded for.
+    "COMPUTE_PROFIT_SHARE": "0.3",
+    "EQUITY_BASELINE_USD": "1017.75",
     // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
     "TYPESAFE_PILOT_USD": "20",

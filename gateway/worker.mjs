@@ -43,6 +43,8 @@ export class Gate extends DurableObject {
   }
 
   status() { return this.gate.status(); }
+  equity() { return this.gate.equity(); }
+  recordEquity(reading) { return this.ctx.storage.transactionSync(() => this.gate.recordEquity(reading)); }
   setKill(on) { return this.gate.setKill(on === true); }
   noticesToday(at) { return this.gate.noticesToday(at); }
   noticeDelivered(id, at) { return this.gate.noticeDelivered(id, at); }

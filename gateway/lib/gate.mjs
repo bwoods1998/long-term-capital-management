@@ -8,6 +8,7 @@
 
 import { caps, venueOrderCap } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
+import * as equity from './equity.mjs';
 import { dayCap as pullDayCap } from './github.mjs';
 import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
@@ -144,8 +145,28 @@ export function createGate({ store, env = {}, now = Date.now }) {
         : { month, spent: 0n, calls: 0, agents: {} };
     },
 
+    /** The last reading of the real accounts (`equity.readEquity`), or null. */
+    equity: () => read(store, equity.EQUITY_KEY, null),
+
+    recordEquity(reading) {
+      const row = reading && typeof reading === 'object' ? reading : { ok: false, at: now(), error: 'no reading' };
+      const clean = row.ok === true && /^\d+$/.test(String(row.kalshi_micro)) && /^\d+$/.test(String(row.alpaca_micro))
+        ? { ok: true, at: Number(row.at), kalshi_micro: String(row.kalshi_micro), alpaca_micro: String(row.alpaca_micro) }
+        : { ok: false, at: Number(row.at) || now(), error: String(row.error || 'unreadable').slice(0, 200) };
+      write(store, equity.EQUITY_KEY, clean);
+      return clean;
+    },
+
+    /**
+     * The month's cap: FRONTIER_MONTH_USD raised by a share of verified profit on the real accounts
+     * (`equity.effectiveCap`), and exactly FRONTIER_MONTH_USD whenever that profit is not known.
+     */
+    frontierCap(at = now()) {
+      return equity.effectiveCap(env, this.equity(), at);
+    },
+
     frontierReserve({ micro, at = now() }) {
-      const cap = monthCapMicro(env);
+      const cap = this.frontierCap(at).capMicro;
       const amount = BigInt(micro);
       if (cap <= 0n) return { ok: false, status: 403, error: 'No frontier budget is configured.' };
       if (amount <= 0n) return { ok: false, status: 400, error: 'A call must have a positive worst-case cost.' };
@@ -324,8 +345,11 @@ export function createGate({ store, env = {}, now = Date.now }) {
         caps_exhausted: row.orders >= limits.maxDayOrders || row.notional >= limits.maxDayMicro,
         frontier: (() => {
           const month = this.frontierMonth(at);
+          const { capMicro, parts } = this.frontierCap(at);
           return {
-            month: month.month, spent_usd: formatUsd(month.spent), cap_usd: formatUsd(monthCapMicro(env)), calls: month.calls,
+            // `cap_usd` is the cap in force (the House mirrors it); `profit_index` says how it was reached.
+            month: month.month, spent_usd: formatUsd(month.spent), cap_usd: formatUsd(capMicro), calls: month.calls,
+            base_cap_usd: formatUsd(monthCapMicro(env)), profit_index: parts,
             by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
           };
         })(),
