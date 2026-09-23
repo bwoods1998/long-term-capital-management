@@ -818,6 +818,23 @@ class Lab:
         rows = self._q("SELECT * FROM candidates WHERE status='queued' ORDER BY priority, created LIMIT ?", (size * 16,))
         if not rows:
             return None
+        # Every other batch serves the largest group ready (below). Its tape must get built too: the
+        # step builds at most `max_tapes_per_step` new tapes, and in queue order they all went to seeds
+        # (one row a tape), so after a restart emptied the cache the children's tapes were never built
+        # and no child was evaluated (Sept 23, 12:08-12:21Z: 104 evaluated, all seeds or submissions,
+        # 500 children queued). On those turns the rows are visited largest group first.
+        self._batch_turn = getattr(self, "_batch_turn", 0) + 1
+        largest_turn = int(rows[0]["priority"]) != 0 and self._batch_turn % 2 == 0
+        if largest_turn:
+            def needs_key(row: sqlite3.Row) -> str:
+                try:
+                    return json.dumps(json.loads(row["needs"]), sort_keys=True)
+                except (TypeError, ValueError):
+                    return str(row["needs"])
+            sizes: dict[str, int] = {}
+            for row in rows:
+                sizes[needs_key(row)] = sizes.get(needs_key(row), 0) + 1
+            rows = sorted(rows, key=lambda row: -sizes[needs_key(row)])
         groups: dict[str, list[sqlite3.Row]] = {}  # in the order of each tape's first ready row
         tapes: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -845,9 +862,8 @@ class Lab:
         # hour, 543 queued, children of the archive's elites waiting 32 to a tape). So an agent's
         # submission is always served first, and otherwise batches alternate: queue order, then the
         # largest group ready now. Seeds still get every other batch; children run 32 at a time.
-        self._batch_turn = getattr(self, "_batch_turn", 0) + 1
         first = next(iter(groups))
-        if int(groups[first][0]["priority"]) == 0 or self._batch_turn % 2 == 1:
+        if not largest_turn:
             tape_id = first
         else:
             tape_id = max(groups, key=lambda key: len(groups[key]))

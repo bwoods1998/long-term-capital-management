@@ -779,6 +779,32 @@ class Researchers(LabCase):
         self.assertEqual(sizes.count(1), 3, sizes)
         self.assertEqual(self.lab.queued(), 0)
 
+    def test_after_a_restart_the_childrens_tape_is_built_on_the_largest_group_turn(self):
+        """Sept 23, 12:08-12:21Z: a restart emptied the tape cache, each step's tape budget went to
+        seeds in queue order, and no child of the archive was ever evaluated."""
+        self.house.game["lab"]["param_children"] = 12
+        self.house.game["lab"]["max_tapes_per_step"] = 1
+        self.queue(KNOB)
+        self.lab.evaluate_batch()
+        self.luna.programs = []
+        self.lab.breed()
+        children = self.lab.queued()
+        variants = []
+        for symbol in ("BTC/USD", "ETH/USD"):
+            for frame in ("5Min", "15Min", "1Hour", "1Day"):
+                if (symbol, frame) != ("BTC/USD", "5Min"):  # the elite's own tape
+                    variants.append(KNOB.replace('"symbols": ["BTC/USD"]', f'"symbols": ["{symbol}"]').replace('"timeframe": "5Min"', f'"timeframe": "{frame}"'))
+        for n, code in enumerate(variants[:6]):  # six seeds, a tape each, ahead of the children by priority
+            self.lab.admit(code, niche=self.niche, origin="seed", author="house", lineage=f"seed:{n}", parents=[], idea=f"seed {n}")
+        self.lab._tapes.clear()  # a restart
+        sizes = []
+        for _ in range(4):
+            self.lab._tapes_built = 0  # a new step: one tape
+            out = self.lab.evaluate_batch()
+            sizes.append(out["candidates"] if out else 0)
+        # Queue order alone built the seeds' tapes, one a step, for as long as seeds waited: 1, 1, 1, 1.
+        self.assertIn(children, sizes, sizes)  # the children's tape was built and they ran together
+
     def test_submissions_are_capped(self):
         agent = self.seated("sawtooth", KNOB)
         self.lab.seed(force=True)  # its own program queued as a seed is not a submission
