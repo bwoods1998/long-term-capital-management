@@ -38,7 +38,9 @@ its `lab_submit`) is judged against every trial on that line, as the agent's own
    grew from, whose descendant it is born) and, when that tape is the history store's development
    window, sent to the sealed holdout through `House._holdout` -- the one door, with its per-version
    and per-lineage rationing keyed by that path's root, plus a per-lab-lineage budget here so that
-   many lines of one lineage cannot probe it. A survivor is born
+   many lines of one lineage cannot probe it. While a line living on that root is judged by the
+   seal, the lab never spends the root's last `holdout_reserve` evaluations: they are what lets
+   the living line fork and grow. A survivor is born
    with `founder="lab:<lineage>"` and seated on paper exactly as a replay-passing foundry card is,
    at most `max_births_per_hour`, under the league's population and desk caps.
 6. Royalties: 10% of the performance fee a graduate earns on realized real profit is paid to the
@@ -99,6 +101,9 @@ DEFAULTS: dict[str, Any] = {
     "step_seconds": 240,
     "max_births_per_hour": 6,
     "max_graduations_per_step": 1,
+    # Sealed-holdout evaluations of a lineage root that the lab never spends while a line living on
+    # that root is judged by the seal: its forks and new versions keep them (`Lab._holdout_refusal`).
+    "holdout_reserve": 1,
     "submit_max": 8,
     "royalty_share": "0.10",
     "min_overlap": 8,
@@ -1353,19 +1358,53 @@ class Lab:
         seal = HoldoutSeal(house.ledger, budget=house.settings.holdout_lineage_budget, window=house.holdout_window)
         return max(self._lineage_holdouts(row["lineage"]), seal.used(path[-1]))
 
+    def _holdout_refusal(self, row: Mapping[str, Any], path: Sequence[str]) -> str | None:
+        """Why this graduate may not open the sealed holdout; None when it may. Two rations.
+
+        The lineage's: many lines of one lab lineage must not be a way to probe the sealed window, so
+        its budget is the House's per-line budget, counted over all of its lines and the root of the
+        selection path it grew from (`_holdouts_used`).
+
+        The living line's reserve. That root's ration is the one the House reads before forking any
+        agent descending from it (`House._holdout_spent`) and the one its replays of that agent's
+        new versions spend: once it is gone the line can grow no more, for good. The review of
+        Deploy 3 (Sept 23, 2026) measured 5 of 14 roots on the live ledger at 3 of 3; a lab that
+        seeds every living agent and graduates its mutants every few minutes would spend a
+        promising line's remaining evaluations within hours. So while a line living on the root is
+        judged by the seal (`House._seal_applies`), the lab leaves it its last `holdout_reserve`
+        evaluations. The reserve comes out of the lab's share: the root's ration is never enlarged."""
+        from .deep_replay import HoldoutSeal
+
+        house = self.house
+        budget = int(house.settings.holdout_lineage_budget)
+        if self._holdouts_used(row, path) >= budget:
+            return f"the lab lineage {row['lineage']} has spent its {budget} sealed-holdout evaluations"
+        reserve = max(0, int(self.settings["holdout_reserve"]))
+        if not reserve or not path:
+            return None
+        root = path[-1]
+        registry = house.registry
+        living = [a.id for a in registry.living() if (registry.lineage(a.id) or [a.id])[-1] == root and house._seal_applies(a)]
+        if not living:
+            return None
+        seal = HoldoutSeal(house.ledger, budget=budget, window=house.holdout_window)
+        used = seal.used(root)
+        if used + reserve >= budget:
+            return (f"the line {root} has spent {used} of its {budget} sealed-holdout evaluations and {living[0]} lives on it: "
+                    f"its last {budget - used} stay with the living line's own forks")
+        return None
+
     def _graduate_one(self, row: Mapping[str, Any]) -> dict[str, Any]:
         house = self.house
         line, family = self._names(row)
         if house.registry.get(line) is not None:
             return self._record(row, "refused", f"the line {line} already exists", line=line, family=family)
         path = self._selection_path(row, line, family)
-        if self._deep(row) and house.settings.holdout_gate and self._holdouts_used(row, path) >= int(house.settings.holdout_lineage_budget):
-            # Many lines of one lineage must not be a way to probe the sealed window: the lineage's
-            # budget is the House's per-line budget, counted over all of its lines and the line it
-            # grew from. Refused before the replay, which would be a trial spent on nothing.
-            return self._record(row, "holdout_rationed",
-                                f"the lab lineage {row['lineage']} has spent its {house.settings.holdout_lineage_budget} sealed-holdout evaluations",
-                                line=line, family=family)
+        if self._deep(row) and house.settings.holdout_gate:
+            # Refused before the replay, which would be a trial spent on nothing.
+            refusal = self._holdout_refusal(row, path)
+            if refusal:
+                return self._record(row, "holdout_rationed", refusal, line=line, family=family)
         agent = self._virtual(row, line, family)
         result = house._candidate_replay(agent, row["code"], lineage=path)
         if not result.get("counted_as_trial") or not result.get("passed"):
@@ -1378,6 +1417,14 @@ class Lab:
             return self._record(row, state, reasons or str(result.get("error") or "the House's replay did not pass"), line=line, family=family)
         needs, params = result.get("needs") or json.loads(row["needs"]), result.get("params") or {}
         if "walk_forward" in result and house.settings.holdout_gate:
+            # Asked again: the House's own forks may have opened the seal during the replay.
+            refusal = self._holdout_refusal(row, path)
+            if refusal:
+                try:
+                    house.sandbox.retire(line)
+                except Exception:  # noqa: BLE001
+                    pass
+                return self._record(row, "holdout_rationed", refusal, line=line, family=family)
             holdout = house._holdout(agent, row["code"], needs, params, lineage=path)
             if not (holdout.get("evaluated") and holdout.get("passed")):
                 try:

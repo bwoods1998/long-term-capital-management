@@ -476,6 +476,136 @@ class Graduation(LabCase):
         replay.assert_not_called()  # no trial spent on a program that could never reach the holdout
         self.assertEqual(out[0]["state"], "holdout_rationed")
 
+    # The review of Deploy 3 (Sept 23, 2026): a graduate grown from a living agent's line spends the
+    # sealed-holdout ration keyed by that line's root -- the very ration `House._holdout_spent` reads
+    # before forking the agent. Unguarded, the lab could spend all of it and freeze the line for good.
+    def opened(self, root, n, tag="h"):
+        for i in range(n):
+            self.house.ledger.append("holdout.access", {"agent": root, "lineage": root, "version": f"{tag}{i}", "state": "opened",
+                                                        "window": ["a", "b"]}, agent=root, id=f"holdout:{tag}{i}:opened")
+
+    def spent(self, root):
+        return sum(1 for e in self.house.ledger.iter(kinds="holdout.access")
+                   if e.payload.get("lineage") == root and e.payload.get("state") == "opened")
+
+    def passing_replay(self):
+        return {"counted_as_trial": True, "passed": True, "numbers": {}, "needs": static_literal(KNOB, "NEEDS"),
+                "params": {"notional": 50.0}, "walk_forward": []}
+
+    def seal(self, holdout_calls):
+        """A stand-in for `House._holdout` that spends the ration as the seal does: an opened row
+        under the selection path's root, then a failing evaluation."""
+        def run(agent, code, needs, params, *, lineage=None):
+            holdout_calls.append(list(lineage))
+            self.house.ledger.append("holdout.access", {"agent": agent.id, "lineage": lineage[-1], "version": f"lab{len(holdout_calls)}",
+                                                        "state": "opened", "window": ["a", "b"]},
+                                     agent=agent.id, id=f"holdout:lab{len(holdout_calls)}:opened")
+            return {"evaluated": True, "passed": False}
+        return run
+
+    def test_the_lab_never_spends_a_living_lines_last_holdout_evaluation(self):
+        self.house.game["lab"]["max_graduations_per_step"] = 5
+        agent = self.seated("sawtooth", KNOB)
+        budget = self.house.settings.holdout_lineage_budget
+        self.assertEqual(budget, 3)
+        self.opened(agent.id, budget - 2)  # the line's own forks have spent one of three
+        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}, {"code": SPARSE, "idea": "a sparser variant"}])
+        self.lab.evaluate_batch()
+        calls = []
+        with patch.object(self.lab, "_deep", return_value=True), \
+                patch.object(self.house, "_candidate_replay", return_value=self.passing_replay()) as replay, \
+                patch.object(self.house, "_holdout", side_effect=self.seal(calls)):
+            out = self.lab.graduate()
+        self.assertEqual(sorted(o["state"] for o in out), ["holdout_failed", "holdout_rationed"])
+        self.assertEqual(replay.call_count, 1)  # the second was refused before a trial was spent on it
+        self.assertEqual([c[-1] for c in calls], [agent.id])  # the lab spent the root's ration once
+        self.assertEqual(self.spent(agent.id), budget - 1)
+        rationed = next(o for o in out if o["state"] == "holdout_rationed")
+        self.assertIn("sawtooth", rationed["detail"])
+        self.assertIn("stay with the living line", rationed["detail"])
+        # The living line keeps its last evaluation: the House still forks it.
+        self.assertTrue(self.house._seal_applies(agent))
+        self.assertFalse(self.house._holdout_spent(agent))
+
+    def test_a_line_at_its_reserve_is_refused_before_any_trial(self):
+        agent = self.seated("sawtooth", KNOB)
+        self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
+        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.evaluate_batch()
+        with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay, \
+                patch.object(self.house, "_holdout") as holdout:
+            out = self.lab.graduate()
+        replay.assert_not_called()
+        holdout.assert_not_called()
+        self.assertEqual(out[0]["state"], "holdout_rationed")
+        self.assertFalse(self.house._holdout_spent(agent))
+
+    def test_the_reserve_is_asked_again_after_the_replay(self):
+        """The House's own fork of the line may open the seal while the lab's replay runs."""
+        agent = self.seated("sawtooth", KNOB)
+        self.opened(agent.id, self.house.settings.holdout_lineage_budget - 2)
+        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.evaluate_batch()
+
+        def replay_while_the_house_forks(*args, **kwargs):
+            self.opened(agent.id, 1, tag="fork")
+            return self.passing_replay()
+
+        with patch.object(self.lab, "_deep", return_value=True), \
+                patch.object(self.house, "_candidate_replay", side_effect=replay_while_the_house_forks), \
+                patch.object(self.house, "_holdout") as holdout:
+            out = self.lab.graduate()
+        holdout.assert_not_called()
+        self.assertEqual(out[0]["state"], "holdout_rationed")
+        self.assertEqual(self.spent(agent.id), self.house.settings.holdout_lineage_budget - 1)
+        self.assertFalse(self.house._holdout_spent(agent))
+
+    def test_a_dead_line_or_one_the_seal_does_not_judge_keeps_no_reserve(self):
+        agent = self.seated("sawtooth", KNOB)
+        self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
+        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}, {"code": SPARSE, "idea": "a sparser variant"}])
+        self.lab.evaluate_batch()
+        # A line whose forks are never replayed on the history store needs no reserve ...
+        calls = []
+        with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_seal_applies", return_value=False), \
+                patch.object(self.house, "_candidate_replay", return_value=self.passing_replay()), \
+                patch.object(self.house, "_holdout", side_effect=self.seal(calls)):
+            out = self.lab.graduate()  # one graduation a step
+        self.assertEqual(out[0]["state"], "holdout_failed")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.spent(agent.id), self.house.settings.holdout_lineage_budget)  # the lineage's ration, never more
+        # ... and neither does a dead one; but the lineage's own budget still holds.
+        self.house.kill(agent, "credits", "a test death")
+        with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay:
+            out = self.lab.graduate()
+        replay.assert_not_called()
+        self.assertEqual(out[0]["state"], "holdout_rationed")
+        self.assertIn("has spent its", out[0]["detail"])
+
+    def test_a_dead_line_lets_the_lab_spend_its_last_evaluation(self):
+        agent = self.seated("sawtooth", KNOB)
+        self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
+        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.evaluate_batch()
+        self.house.kill(agent, "credits", "a test death")
+        calls = []
+        with patch.object(self.lab, "_deep", return_value=True), \
+                patch.object(self.house, "_candidate_replay", return_value=self.passing_replay()) as replay, \
+                patch.object(self.house, "_holdout", side_effect=self.seal(calls)):
+            out = self.lab.graduate()
+        replay.assert_called_once()
+        self.assertEqual([c[-1] for c in calls], [agent.id])
+        self.assertEqual(out[0]["state"], "holdout_failed")
+
+    def test_the_house_forks_a_line_only_while_the_seal_judges_it_and_its_ration_lasts(self):
+        agent = self.seated("sawtooth", KNOB)
+        self.assertTrue(self.house._seal_applies(agent))
+        self.opened(agent.id, self.house.settings.holdout_lineage_budget)
+        self.assertTrue(self.house._holdout_spent(agent))
+        with patch.object(self.house.settings, "deep_replay", False):
+            self.assertFalse(self.house._seal_applies(agent))
+            self.assertFalse(self.house._holdout_spent(agent))
+
     def test_a_birth_interrupted_after_spawn_is_finished_not_repeated(self):
         """Review, Sept 23: a crash (or a deploy's shutdown) between `spawn` and the born row left the
         graduation 'passed', and the next step spawned and endowed the program a second time."""

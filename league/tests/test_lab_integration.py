@@ -310,10 +310,11 @@ class LabOnItsBox(LabCase):
         tree = ast.parse(Path(lab_module.__file__).read_text(encoding="utf-8"))
         called = {ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
         doors = {name for name in called if "holdout" in name.lower() or "seal" in name.lower() or "history" in name.lower()}
-        # Its own ledger counts (`seal.used`, `_holdouts_used`, `_lineage_holdouts`), its tape check,
-        # and the House's one door. Nothing reads the history store or evaluates a seal itself.
+        # Its own ledger counts (`seal.used`, `_holdouts_used`, `_lineage_holdouts`, `_holdout_refusal`
+        # with the House's `_seal_applies`, a predicate on an agent's NEEDS), its tape check, and the
+        # House's one door. Nothing reads the history store or evaluates a seal itself.
         self.assertEqual(doors, {"house._holdout", "HoldoutSeal", "seal.used", "self._holdouts_used", "self._lineage_holdouts",
-                                 "holdout.get", "SealedTape"})
+                                 "self._holdout_refusal", "house._seal_applies", "holdout.get", "SealedTape"})
         self.assertNotIn(".evaluate(", "".join(n for n in called if "seal" in n.lower()))
 
 

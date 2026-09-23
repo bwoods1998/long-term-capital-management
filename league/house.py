@@ -3904,15 +3904,22 @@ class House:
         self.enroll()
         self._refill(rules)
 
+    def _seal_applies(self, agent: Agent) -> bool:
+        """Is this agent's line judged by the sealed holdout: are its forks and new versions replayed
+        on the history store's development window (an Alpaca strategy, not an option, reading no
+        live-only feed)? Then its lineage's holdout ration is what lets it grow (`_holdout_spent`),
+        and the Alpha Lab leaves that ration a reserve (league/lab.py)."""
+        needs = agent.needs or {}
+        venue, _, _ = niche_of(needs)
+        return venue == "alpaca" and bool(self.settings.deep_replay) and str(needs.get("asset_class") or "") != "option" \
+            and not self._feeds_wanted(needs)
+
     def _holdout_spent(self, agent: Agent) -> bool:
         """Would a plain mutation of this agent be refused the sealed holdout? It shares the parent's
         lineage, and a lineage that has spent `holdout_lineage_budget` evaluations passes no further
         development replay: the child dies `redundant` minutes after its birth. Measured Sept 23,
         2026, 03:58-04:25Z: the revived crypto lines forked eight such children in half an hour."""
-        needs = agent.needs or {}
-        venue, _, _ = niche_of(needs)
-        if venue != "alpaca" or not self.settings.deep_replay or str(needs.get("asset_class") or "") == "option" \
-                or self._feeds_wanted(needs):
+        if not self._seal_applies(agent):
             return False
         from . import deep_replay
 
