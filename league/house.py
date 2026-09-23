@@ -241,6 +241,11 @@ class House:
                 market_open=market_hours, kill_switch=kill_switch,
                 resolves_at=self._resolves_at if family_of(name) == "kalshi" else None,
                 event_capital_budget=(lambda venue=family_of(name): self._event_capital_budget(venue)) if family_of(name) == 'kalshi' else None,
+                # The constitution's daily-loss keys (Sept 23, 2026, `allocator.bunt_daily_loss` and
+                # `allocator.real_halt`) need two facts from the allocator, which is built after the
+                # books, so a real book reads them lazily.
+                band_of=(lambda agent_id: self.allocator.band_of(agent_id)) if real else None,
+                halt_basis_usd=(lambda venue=family_of(name): self.allocator.halt_basis_usd(venue)) if real else None,
             )
         self._state_path = self.root / "house.json"
         self._state = self._load_state()

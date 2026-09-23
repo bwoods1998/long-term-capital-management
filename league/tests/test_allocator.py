@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from league import allocator
+from league import allocator, seeds
 from league.allocator import Evidence, limits_for, swing_stake, target_band
 from league.constitution import CONSTITUTION, money_digest
 from league.economy import Economy, load_game
@@ -58,6 +58,12 @@ class Rules(unittest.TestCase):
         for venue, usd in r["bunt_usd"].items():
             self.assertGreaterEqual(D(usd), D(r["venue_minimum_usd"][venue]))
             self.assertLessEqual(D(usd), D("60"))
+        # The learn-and-unblock run's rows (Sept 23, 2026 ~16:00 UTC), inside its table's bounds.
+        self.assertIn(r["bunt_daily_loss"], ("book", "stay_drawdown"))
+        self.assertIn(r["real_halt"]["basis"], ("staked", "venue_grant_capital"))
+        self.assertTrue(D("0.01") <= D(r["real_halt"]["pct"]) <= D("0.08"))
+        self.assertIn(r["bunt_growth"], ("flat", "w_real"))
+        self.assertTrue(D("40") <= D(r["option_bunt_usd"]) <= D("80"))
 
     def test_bunt_needs_evidence_and_trades_or_settlements_on_an_event_book(self):
         p = P()
@@ -710,3 +716,70 @@ class LifecycleRegressions(HouseCaseReal):
             with self.evidence_of({a.id: {**table[a.id], "cooling": True}}):
                 self.tick()
             self.assertEqual(house.evaluator.rung(a.id), 2)  # the cooldown keeps it a bunt
+
+
+class BuntGrowth(HouseCaseReal):
+    """U5 (Sept 23, 2026): a bunt keeps what it makes. Its target is `bunt_usd x clamp(W_real, 1,
+    swing_at)`, so profit inside the envelope's headroom is not swept, and a bunt whose W_real is below
+    1 is never topped back up. Losses still shrink by free cash only; the throttle, the stay drawdown
+    and hysteresis are unchanged (`Mechanics` covers them)."""
+
+    def bunted(self):
+        a = self.agent()
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+        book = self.house.books["alpaca"]
+        self.assertEqual((self.house.evaluator.rung(a.id), book.account(a.id).staked), (2, D("25")))
+        return a, book
+
+    def sized(self, a, book, w_real, equity):
+        """One sizing pass with the agent's real equity read as `equity`: the row the allocator wrote, or None."""
+        real = book.equity
+        with patch.object(book, "equity", side_effect=lambda agent: D(equity) if agent == a.id else real(agent)):
+            return self.house.allocator._size(a, ev(agent=a.id, venue="alpaca", rung=2, w_real=w_real, e=w_real, real_trades=3), "bunt", P())
+
+    def test_a_winning_bunt_keeps_its_profit_up_to_the_swing_line(self):
+        a, book = self.bunted()
+        self.assertIsNone(self.sized(a, book, 1.2, "30"))  # target $30: the $5 made is not swept
+        self.assertEqual(book.account(a.id).staked, D("25"))
+        with patch.dict(CONSTITUTION["allocator"], {"bunt_growth": "flat"}):  # the old rule, by the key
+            row = self.sized(a, book, 1.2, "30")
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("25", "-5.00"))
+        self.assertEqual(book.account(a.id).staked, D("20"))
+        row = self.sized(a, book, 1.2, "20")  # under its target after that sweep: the winner is lent back to it
+        self.assertEqual((row["stake_usd"], row["moved_usd"]), ("30.00", "10.00"))
+        self.assertEqual(book.account(a.id).staked, D("30"))
+        row = self.sized(a, book, 1.8, "45")  # above `swing_at` the target caps at 25 x 1.5 and the rest is swept
+        self.assertEqual((row["stake_usd"], row["moved_usd"]), ("37.50", "-7.50"))
+        self.assertEqual(book.account(a.id).staked, D("22.50"))
+
+    def test_a_losing_bunt_is_not_refilled(self):
+        a, book = self.bunted()
+        self.assertIsNone(self.sized(a, book, 0.9, "22.50"))  # 11% under its $25: the flat rule would have topped it up
+        self.assertEqual(book.account(a.id).staked, D("25"))
+        self.assertEqual([e for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "size"], [])
+
+    def test_the_seat_the_limits_the_audit_packet_and_the_board_show_the_same_target(self):
+        a, book = self.bunted()
+        alloc = self.house.allocator
+        evidence = ev(agent=a.id, venue="alpaca", rung=2, w_real=1.2, e=1.2, real_trades=3)
+        alloc._evidence = {a.id: evidence}
+        self.assertEqual(alloc.seat_stake(a), D("30.00"))
+        self.assertEqual(alloc.limits(a, D("25")), limits_for(D("30"), "alpaca"))
+        self.assertEqual(D(alloc.context(evidence, "bunt")["stake_usd"]), D("30"))
+        with self.evidence_of({a.id: dict(e=1.2, w_paper=1.0, w_real=1.2, paper_trades=6, real_trades=3)}):
+            alloc.rebalance()
+        self.assertEqual(alloc.board()["agents"][a.id]["target_usd"], "30.00")
+        self.assertEqual(alloc.target_stake(a, "bunt"), D("25"))  # no evidence in hand: the stake at seating
+
+    def test_an_options_bunt_is_staked_eighty_dollars_with_a_forty_dollar_contract_limit(self):
+        """A2a (Sept 23, 2026): at $40 the book's 50% rules held a contract to $20; at $80 one $40 contract fits."""
+        agent = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
+        alloc = self.house.allocator
+        self.assertEqual(alloc.target_stake(agent, "bunt"), D("80"))
+        self.assertEqual(limits_for(D("80"), "alpaca"), (D("40.00"), D("40.00")))
+        limits = self.house._limits(2, agent)
+        self.assertEqual((limits.max_position_usd, limits.max_order_usd, limits.asset_classes), (D("40.00"), D("40.00"), ("option",)))
+        with patch.dict(CONSTITUTION["allocator"], {"option_bunt_usd": "40"}):
+            self.assertEqual(alloc.target_stake(agent, "bunt"), D("40"))
+        self.assertEqual(alloc.target_stake(self.agent(), "bunt"), D("25"))  # a stock bunt is unchanged
