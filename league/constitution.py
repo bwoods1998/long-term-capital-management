@@ -228,10 +228,29 @@ CONSTITUTION: dict[str, Any] = {
         # `position_share`), and Alpaca takes no crypto order under $10 -- so a $15 bunt could never
         # trade crypto (measured in `test_allocator`, Sept 23: "order notional 10.80 exceeds 50% of
         # desk equity"). $25 leaves a $10 order room for its fee and a price step.
-        "bunt_usd": {"kalshi": "10", "alpaca": "25"},
+        # Kalshi 30, not 10 (the learn-and-unblock run, Sept 23, 2026 ~17:00 UTC, from the agent
+        # study's evidence, inside the table's $10-$30): a $10 bunt was a one-loss trial. With
+        # `position_share` 0.5 it may hold a $5 position, and any lost position over 15.4% of the
+        # stake ($1.54) drops E below the hysteresis line 0.8585 (bunt_at 1.01 x 0.85) and sends the
+        # agent back to paper: huang-h427345 was demoted after one -$2.55 settlement (14:57Z), and
+        # mullins-2, 10 of 10 winning real settlements (+$4.89 as a maker on weather favourites), had
+        # been swept from $60 to $5.11 of equity, where its next miss is -57%. The allocator swept
+        # $144.19 of bunt equity to cash in 13 moves that day. At $30 a typical Kalshi position
+        # ($2.70, meriwether's sports bet) is a -9% loss and a bunt survives several. The grant's
+        # seats follow the smallest bunt (`live_trading.policy`: floor($1,017.75 / $25) = 40).
+        "bunt_usd": {"kalshi": "30", "alpaca": "25"},
         "venue_minimum_usd": {"kalshi": "1", "alpaca": "10"},
-        "swing_at": 1.5, "swing_min_real_trades": 8, "swing_min_w_real": 1.0, "swing_exit_w_real": 0.9,
-        "kappa": 1.0, "e_cap": 20, "max_share_of_venue": 0.6, "position_share": 0.5,
+        # 1.25, not 1.5 (same revision, inside the table's 1.25-1.5): at their historic rates the only
+        # two earners needed 2.8 days (mullins-2, +0.0147 log W_real a settlement, 17 more wins) and
+        # 5.6 days (mullins-6) to reach E 1.5, and nobody else had a rate. The first swing is still
+        # audited on the real record and the swing stake is sized by E, so a thin E buys a small
+        # swing. `swing_min_real_trades` stays 8.
+        "swing_at": 1.25, "swing_min_real_trades": 8, "swing_min_w_real": 1.0, "swing_exit_w_real": 0.9,
+        # kappa 2, not 1 (same revision, inside the table's 1-2): the swing stake is `bunt_usd x
+        # E^kappa`, capped at `max_share_of_venue` of the venue, so winners compound exponentially in
+        # the evidence, the owner's direction. No swing existed on Sept 23, so it has no effect until
+        # one is earned.
+        "kappa": 2.0, "e_cap": 20, "max_share_of_venue": 0.6, "position_share": 0.5,
         "stars": 3, "star_min_w_real": 1.25,
         # An agent back on paper from real money waits this long before it may bunt again, so a
         # record near a line cannot flap between books (and pay a sweep and a fresh stake) at every
@@ -322,4 +341,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'c0e56c7966129caea78734679fc5d554133c372729927090c1bb68db3ad584fd'
+PINNED_DIGEST = '52c6c7e547fbaee0cbb701521bd860b604c7e62686c88b23911cc2e475195292'

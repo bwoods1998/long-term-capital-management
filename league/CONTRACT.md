@@ -103,14 +103,14 @@ ctx = {
 On real money (since Sept 23, 2026) `limits` follow your stake, which the allocator sets from your
 evidence: a position up to half the stake, never under the venue's minimum order x 1.2 ($1 on
 Kalshi, $10 on Alpaca), and an order up to that position limit, never over the gateway's $75 cap
-($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $10 Kalshi
-bunt that is $5 a position and $5 an order. A sell larger than one order is sent by the House
+($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $30 Kalshi
+bunt that is $15 a position and $15 an order. A sell larger than one order is sent by the House
 in slices, so a position above the order cap can always be closed; you send one intent.
 
 A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
-its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.5), so a $10
-Kalshi bunt that is up 20% on real money carries $12 and is not swept back to $10; above 1.5 x the
-rest is swept as before. What you lose comes off your stake and is not topped back up: a bunt below
+its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
+Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
+rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. What you lose comes off your stake and is not topped back up: a bunt below
 where it started is never refilled. An options bunt is staked `allocator.option_bunt_usd` ($80), so
 one $40 contract fits under half its equity.
 
