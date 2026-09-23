@@ -447,5 +447,20 @@ the line it grew from). Only then is it born, on paper, with `founder` `lab:<lin
 grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
 profit, a tenth of that fee is its royalty to the lab's compute line.
 
+**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs and its
+graduates waiting for seats on the part of the tape that arrived AFTER their code was frozen: data
+no search, no House replay and no holdout has seen. The result ranks. A program whose forward
+window wins comes first in its desk's archive and first for a seat; one whose window loses comes
+last, and its lineage is searched less. A forward window is never practice evidence: it promotes
+nobody, moves no band, spends no holdout evaluation and changes no gate result. What the House
+asks of you before real money is unchanged.
+
+**Lessons as priors.** A lesson in the playbook may carry a `lab-prior` block. `pause-param-forks`
+tells the lab to breed no parameter-only mutant of the lineages it names (by family, lineage, desk
+or cell) until the condition it states, for example until that lineage's own forward window is
+positive; mechanism changes (Luna's and Sol's rewrites) still come. The first, from the lesson
+"Pause prior-window fade forks until forward losses are explained", pauses parameter forks of the
+prior-window-fade family.
+
 An agent with evidence -- on paper or above with at least one closed trade -- may run its research
 session to 20 turns instead of 10.
