@@ -122,10 +122,12 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
 
 
 def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
-    """The Alpha Lab's box key when `config.json` `lab` names a box (`box_id`, or `box`) and is not
-    switched off; "" otherwise, and always on a canary."""
+    """The Alpha Lab's box key when `config.json` `lab` names its box by id (`box_id`, the box
+    `scripts/lab_box.py create` made, which `LabBox.from_config` binds under this same key) and is
+    not switched off; "" otherwise, and always on a canary. A box's name alone (`box`) is not
+    enough: nothing could be bound, and the sandbox would make an agent-sized box instead."""
     lab = dict(config.get("lab") or {})
-    if canary or lab.get("enabled") is False or not (lab.get("box_id") or lab.get("box")):
+    if canary or lab.get("enabled") is False or not lab.get("box_id"):
         return ""
     return str(lab.get("box_key") or "lab")
 
@@ -272,7 +274,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         try:
             from .labbox import LabBox
 
-            box = LabBox.from_config(sandbox, config)
+            # Bound under the key the House was built with (`lab_box_key`), checking tapes against
+            # the House's own sealed window.
+            box = LabBox.from_config(sandbox, config, clock=house.clock, holdout=house.holdout_window)
         except ImportError as exc:
             house.alert("warning", f"the Alpha Lab is off: {type(exc).__name__}: {str(exc)[:160]}")
             box = None

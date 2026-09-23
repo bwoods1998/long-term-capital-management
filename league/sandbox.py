@@ -64,6 +64,12 @@ class SandboxBusy(SandboxError):
     strategy; the caller defers its work to a later tick."""
 
 
+class BoundBoxGone(SandboxError):
+    """A box made elsewhere and bound here (`SailSandbox.bind`: the lab's) is terminated or failed.
+    It is not replaced from the agents' image: the owner makes a new one. Infrastructure, never a
+    strategy's result, and worth an error alert rather than a quiet retry."""
+
+
 class TapeMissing(SandboxError):
     """The box does not hold the tape this digest names: call again with the tape itself."""
 
@@ -469,6 +475,11 @@ class SailSandbox:
     def box_of(self, agent: str) -> str | None:
         return self._state["boxes"].get(agent)
 
+    def bound(self, box_key: str) -> str | None:
+        """The box bound under `box_key` (`bind`), or None: a box this sandbox would make itself."""
+        box = self._state["boxes"].get(box_key)
+        return box if box is not None and self._state.get("bound", {}).get(box_key) == box else None
+
     def bind(self, box_key: str, box_id: str) -> None:
         """Adopt a box made elsewhere under `box_key`: the lab box, which `scripts/lab_box.py` creates
         larger than an agent's. Its seal is not taken on trust: this state has not recorded it, so
@@ -515,6 +526,13 @@ class SailSandbox:
             if status in ("sleeping", "paused", "asleep"):
                 self.client.resume(box, timeout=self.RESUME_TIMEOUT)
             elif status in ("terminated", "terminating", "failed", "create_failed"):
+                if self._state.setdefault("bound", {}).get(agent) == box:
+                    # The lab's box was made elsewhere, larger than an agent's (`scripts/lab_box.py`).
+                    # A box from the agents' image in its place would be the wrong size, forgotten by
+                    # the next `bind` at restart and never terminated: one leaked box a restart. It
+                    # stays bound and fails loudly until the owner makes a new one.
+                    raise BoundBoxGone(f"{agent}: its bound box {box} is {status}; it is not replaced from the agents' image "
+                                       f"(make a new one with scripts/lab_box.py create and set its id in config.json)")
                 with self._lock:
                     self._state["boxes"].pop(agent, None)
                     self._state["kit"].pop(box, None)
@@ -684,12 +702,14 @@ class SailSandbox:
         in order, each exactly what a single replay of it returns, plus its `id`. A failure of the
         box or of Sail raises `SandboxError`; it is never a candidate's result. The batch answers
         within `budget_seconds` (by default the timeout less half a minute): candidates it did not
-        reach come back `not evaluated: batch budget`. `keep_awake` leaves the box running for the
+        reach come back `not evaluated: batch budget`, and any the box could not start a process
+        for come back `not evaluated: ...` with `infrastructure: true` (`replay.not_evaluated`). `keep_awake` leaves the box running for the
         next batch (its own auto-sleep is the backstop; `rest` puts it to sleep).
 
         The box is held like any other (`_turn`): within this thread's `patience` a batch box that
         another caller holds raises `SandboxBusy` (nothing ran), and every Sail call carries the
-        tighter timeouts (`_upload`, `DOWNLOAD_TIMEOUT`)."""
+        tighter timeouts (`_upload`, `DOWNLOAD_TIMEOUT`). A bound box that Sail reports gone raises
+        `BoundBoxGone`: it is never silently replaced by a box from the agents' image."""
         digest = _digest_of(tape_digest)
         packed = None if tape is None else _checked_tape(tape, digest, holdout)
         with self._turn(box_key):

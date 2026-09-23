@@ -1242,6 +1242,15 @@ def digest(trades: list) -> dict:
 # ------------------------------------------------------------------------------------- the batch
 #: The error a candidate the batch's time budget did not reach (or did not let finish) comes back with.
 NOT_EVALUATED = "not evaluated: batch budget"
+#: The error of a candidate whose process the box could not start (`os.fork` refused: out of processes
+#: or memory). The box's failure, never the candidate's: it comes back not evaluated and marked
+#: `infrastructure`, to be sent again, as a budget cut-off is.
+NOT_STARTED = "not evaluated: the box could not start its process"
+
+
+def not_evaluated(result: Any) -> bool:
+    """Did the batch leave this candidate unjudged (its budget, or the box failing to start it)?"""
+    return isinstance(result, dict) and str(result.get("error") or "").startswith("not evaluated")
 #: A candidate's own wall-clock limit in a batch. A single replay has only the box's limit, and a
 #: strategy that swallows its decide deadline inside an endless loop would hold the whole batch.
 CANDIDATE_SECONDS = 300.0
@@ -1298,8 +1307,12 @@ def run_batch(candidates: list[dict], tape: dict, *, stake: float = 200.0, limit
     candidate that crashes its process, outlives `candidate_seconds` or outgrows `memory_mb` comes
     back `{"ok": False, "error": ...}`; it never takes the batch down. Once `budget_seconds` (from
     the call) is spent, no candidate starts and any still running is stopped: those come back
-    `{"ok": False, "error": "not evaluated: batch budget"}`. Where `os.fork` does not exist the
-    candidates run one after another in this process, without that isolation."""
+    `{"ok": False, "error": "not evaluated: batch budget"}`. A candidate the box cannot start at all
+    (`os.fork` refused with nothing running: the box is out of processes or memory) is the box's
+    failure, not its own: it comes back `{"ok": False, "error": "not evaluated: the box could not
+    start its process (...)", "infrastructure": True}` (`not_evaluated` is true of both), to be sent
+    again. Where `os.fork` does not exist the candidates run one after another in this process,
+    without that isolation."""
     started = clock()
     candidates = list(candidates or [])
     options = {"stake": stake, "limits": limits, "oos_fraction": oos_fraction, "max_decide_seconds": max_decide_seconds}
@@ -1318,7 +1331,10 @@ def run_batch(candidates: list[dict], tape: dict, *, stake: float = 200.0, limit
     deadline = None if budget_seconds is None else started + max(0.0, float(budget_seconds))
     limit = CANDIDATE_SECONDS if candidate_seconds is None else max(0.001, float(candidate_seconds))
 
-    def finish(index: int, text: str | None, error: str | None = None) -> None:
+    def finish(index: int, text: str | None, error: str | None = None, *, infrastructure: bool = False) -> None:
+        if infrastructure:
+            results[index] = {"ok": False, "error": error or NOT_STARTED, "infrastructure": True, "id": candidates[index]["id"]}
+            return
         if text is not None:
             try:
                 value = json.loads(text)
@@ -1346,7 +1362,11 @@ def run_batch(candidates: list[dict], tape: dict, *, stake: float = 200.0, limit
 
 def _forked(candidates: list[dict], todo: list[int], tape: Any, prepared: "_Prepared | None", options: dict, finish: Any, *,
             workers: int, deadline: float | None, limit: float, memory_mb: int | None, clock: Any) -> None:
-    """Run `todo` in forked children, `workers` at a time; `finish(index, text, error)` gets each answer."""
+    """Run `todo` in forked children, `workers` at a time; `finish(index, text, error)` gets each answer
+    (`finish(index, None, error, infrastructure=True)` one the box itself could not run)."""
+
+    def results_infra(index: int, error: str) -> None:
+        finish(index, None, error, infrastructure=True)
     import gc
     import selectors
     import warnings
@@ -1396,8 +1416,12 @@ def _forked(candidates: list[dict], todo: list[int], tape: Any, prepared: "_Prep
                 except OSError as exc:
                     if running:
                         break  # the box is out of processes or memory for now: wait for one to finish
+                    # Nothing runs and none can start: the box is out of processes or memory. That is
+                    # the box's failure, not any waiting candidate's, so none of them is answered as
+                    # if it had run (review of PR 167): each comes back not evaluated, marked
+                    # infrastructure, and is sent again.
                     for waiting in queue:
-                        finish(waiting, None, f"the candidate's process could not start: {type(exc).__name__}: {_short(exc, 120)}")
+                        results_infra(waiting, f"{NOT_STARTED} ({type(exc).__name__}: {_short(exc, 120)})")
                     queue.clear()
                     return
                 queue.pop(0)
@@ -1464,15 +1488,24 @@ def load_tape(path: str, digest: str | None = None) -> tuple[Any, str | None]:
     """(tape, None), or (None, why) when the file is missing or is not the tape `digest` names.
     A tape is kept gzipped, as the canonical JSON its digest is the SHA-256 of."""
     import gzip
+    import zlib
 
     try:
         with gzip.open(path, "rb") as handle:
             raw = handle.read()
     except (OSError, EOFError):
         return None, "tape missing"
+    except zlib.error:
+        # A corrupt deflate stream is not an OSError: before this it failed the whole batch as the
+        # box's error, the tape stayed recorded as held, and every later batch over it failed the
+        # same way. Reported missing, it is sent again (review of PR 167).
+        return None, "tape unreadable (corrupt gzip); send it again"
     if digest and hashlib.sha256(raw).hexdigest() != digest:
         return None, "tape does not match its digest"
-    return json.loads(raw), None
+    try:
+        return json.loads(raw), None
+    except ValueError:
+        return None, "tape unreadable (not JSON); send it again"
 
 
 def _main_batch(spec: dict) -> dict:
@@ -1490,7 +1523,7 @@ def _main_batch(spec: dict) -> dict:
     if "budget_seconds" in options:  # the budget runs from the start of the program, loading included
         options["budget_seconds"] = max(0.0, float(options["budget_seconds"]) - loaded)
     results = run_batch(spec.get("candidates") or [], tape, **options)
-    body = {"results": results, "evaluated": sum(1 for r in results if r.get("error") != NOT_EVALUATED),
+    body = {"results": results, "evaluated": sum(1 for r in results if not not_evaluated(r)),
             "seconds": round(time.monotonic() - started, 3), "load_seconds": round(loaded, 3), "workers": int(options.get("workers") or _workers())}
     if not spec.get("result_path"):
         return {"ok": True, **body}

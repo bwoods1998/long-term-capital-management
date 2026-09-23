@@ -501,16 +501,29 @@ class Lab:
 
     @property
     def box(self) -> Any:
-        """The lab box's batch evaluator (`league/labbox.py`): the one the service bound to the box
-        `config.json` names (`use_box`), else one over the House's sandbox under `box_key`."""
+        """The lab box's batch evaluator (`league/labbox.py`). On the floor it is the one the service
+        built with `LabBox.from_config`, bound to the box `config.json` names (`use_box`). Without
+        one, a sandbox that makes real boxes must already hold a box bound under `box_key`: the lab
+        never has the sandbox make itself an agent-sized box from the agents' image instead of the
+        lab box (a `SandboxError`, which `evaluate_batch` reports as the box's failure). A local
+        sandbox (tests, a developer's machine) runs the batch in a subprocess under `box_key`."""
         if self._box is None:
             from .labbox import LabBox
+            from .sandbox import SandboxError
 
-            self._box = LabBox(self.house.sandbox, box_key=self.box_key, clock=self.house.clock)
+            sandbox = self.house.sandbox
+            bound = getattr(sandbox, "bound", None)
+            if getattr(sandbox, "secure", False) and (bound is None or bound(self.box_key) is None):
+                raise SandboxError(f"no lab box is bound under {self.box_key!r}: the service binds league/config.json's "
+                                   f"lab.box_id (LabBox.from_config) and hands it to the lab")
+            self._box = LabBox(sandbox, box_key=self.box_key, clock=self.house.clock, holdout=self.house.holdout_window)
         return self._box
 
     def use_box(self, box: Any) -> None:
+        """The evaluator the service built for the configured lab box (`LabBox.from_config`); its
+        box key is the lab's from now on, so the two can never name different boxes."""
         self._box = box
+        self.box_key = str(getattr(box, "box_key", None) or self.box_key)
 
     def _client(self, which: str) -> Any:
         """Luna (mutations) or Sol (leaps): the same metered gateway client every other pass uses,
@@ -823,6 +836,13 @@ class Lab:
                     self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?",
                             (f"the lab box refused the tape: {str(exc)[:260]}", self._now(), r["id"]))
                 return {"candidates": 0, "ok": 0, "eligible": 0, "gate": 0, "archived": 0, "refused": len(chosen)}
+            if type(exc).__name__ == "BoundBoxGone":
+                # The configured lab box is terminated. The sandbox does not replace it from the agents'
+                # image (a small box, leaked at every restart); the owner makes a new one. Loud, and
+                # asked again hourly rather than every step.
+                self._box_down_until = self._now() + 3600
+                self.house.alert("error", f"the Alpha Lab is stopped: its box is gone ({str(exc)[:300]})")
+                return None
             # Infrastructure, never the candidates' fault: they stay queued, and the box is left alone
             # for five minutes rather than asked again every tick.
             self._box_down_until = self._now() + 300
@@ -832,10 +852,14 @@ class Lab:
         by_id = {str(r.get("id")): r for r in results or [] if isinstance(r, Mapping)}
         counts = {"candidates": 0, "ok": 0, "eligible": 0, "gate": 0, "archived": 0}
         live = self._live_series(tape.get("horizon") or chosen[0]["horizon"])
+        infrastructure = 0
         for row in chosen:
             result = by_id.get(row["id"])
-            if result is None or "not evaluated" in str(result.get("error") or ""):
-                continue  # the batch's budget did not reach it: it stays queued
+            if result is None or str(result.get("error") or "").startswith("not evaluated"):
+                # The batch's budget did not reach it, or the box could not start its process: it
+                # stays queued, and neither is a result against it.
+                infrastructure += bool(result is not None and result.get("infrastructure"))
+                continue
             counts["candidates"] += 1
             scored = score(result, tape)
             corr = self._correlation(result, live)
@@ -858,6 +882,12 @@ class Lab:
                 (f"batch:{self._now():.6f}:{tape_id[-8:]}:{self._rng.random():.6f}", self._now(), tape_id, chosen[0]["niche"],
                  counts["candidates"], counts["ok"], counts["eligible"], counts["gate"], counts["archived"], round(seconds, 3),
                  format(box_usd.quantize(Decimal("0.000001")), "f")))
+        if infrastructure:
+            # The box could not start processes for some candidates (out of processes or memory):
+            # its failure, not theirs. They wait queued, and the box is left alone for a while.
+            self._box_down_until = self._now() + 300
+            self.house.alert("warning", f"the lab box could not start {infrastructure} of {len(chosen)} candidates' processes "
+                                        f"(infrastructure; they stay queued)")
         return counts if counts["candidates"] else None
 
     def box_down(self) -> bool:
@@ -1372,7 +1402,21 @@ class Lab:
     def _birth(self, ident: str) -> dict[str, Any]:
         """Born on paper exactly as a replay-passing foundry card is: `spawn` with the House's
         endowment on the desk, seated on rung 1 with its code marked as tried, displacing the
-        desk's (or the league's) weakest eligible agent when full. Waits when nobody may be displaced."""
+        desk's (or the league's) weakest eligible agent when full. Waits when nobody may be displaced.
+
+        No Sail call is made under the House's lifecycle lock, which every wake of the tick takes
+        (E3's rule for background work; the review of PR 160 found this birth holding it through the
+        child's NEEDS probe in the probe box and the displaced agent's `retire`). So: the seat is
+        checked first under the lock (a birth that must wait buys no probe); then the NEEDS are read
+        holding only the probe box, claimed for at most `probe_wait_seconds` (busy, or Sail failing,
+        the birth waits for the next step as `waiting_probe`); then, under the lock again, the seat
+        is checked once more and the child is spawned from that probe, seated and routed; and the
+        displaced agent is killed after the lock is let go, so its box is retired outside it."""
+        from contextlib import nullcontext
+
+        from .house import PROBE_BOX
+        from .sandbox import SandboxError
+
         house = self.house
         row = self._q("SELECT * FROM candidates WHERE id=?", (ident,))[0]
         grad = self._q("SELECT * FROM graduations WHERE candidate=?", (ident,))[0]
@@ -1380,36 +1424,76 @@ class Lab:
         niche = house.niches.get(row["niche"])
         rules = house.game["economy"]
         with house._lifecycle_lock:
-            earlier = self._born_already(row["lineage"], row["code_sha256"])
-            if earlier is not None:
-                return self._finish_birth(row, earlier, line=line, family=family, niche=niche, rules=rules, resumed=True)
-            living = house.registry.living()
-            displaced = None
-            if niche is None or niche.dormant:
-                return self._record(row, "refused", "its desk is closed", line=line, family=family)
-            if sum(1 for a in living if a.specialty == niche.id) >= niche.max_members:
-                displaced = house._weakest(rules, specialty=niche.id)
-                if displaced is None:
-                    return self._record(row, "waiting_seat", "its desk is full of agents that have earned their seats",
-                                        line=line, family=family, table_state="passed")
-            elif len(living) >= int(rules["max_population"]):
-                displaced = house._weakest(rules)
-                if displaced is None:
-                    return self._record(row, "waiting_seat", "the league is full of agents that have earned their seats",
-                                        line=line, family=family, table_state="passed")
-            params = json.loads(grad["params"] or "{}")
-            passed = house.ledger.get(f"lab.graduate:{ident}:passed")
-            sealed = passed is not None and "holdout" in str(passed.payload.get("detail") or "")
-            why = (f"an Alpha Lab graduate ({row['origin']}, by {row['author']}, lineage {row['lineage']}): {str(row['idea'] or '')[:220]} "
-                   f"-- fittest in its cell ({row['cell']}) at {float(row['fitness'] or 0):+.6f} a block out of sample on the lab's "
-                   f"search tape, then passed the House's replay{' and the sealed holdout' if sealed else ''}")
+            child = self._born_already(row["lineage"], row["code_sha256"])
+            if child is not None:
+                displaced = self._finish_birth(row, child, niche=niche, rules=rules, resumed=True)
+            else:
+                _, refusal = self._seat_for(row, niche, rules, line=line, family=family)
+                if refusal is not None:
+                    return refusal
+        if child is None:
+            claim = getattr(house.sandbox, "claim", None)
+            described = None
             try:
-                child = house.spawn(line, family, row["code"], parent=self._parent(row["lineage"]), reason=why[:1500], params=params,
-                                    endowment=rules["endowment_usd"], specialty=niche.id, founder=f"lab:{row['lineage']}"[:120])
-            except ValueError as exc:
-                return self._record(row, "refused_at_birth", str(exc), line=line, family=family)
-            return self._finish_birth(row, child, line=line, family=family, niche=niche, rules=rules, displaced=displaced,
-                                      sealed=sealed)
+                with (claim(PROBE_BOX, wait=float(house.settings.probe_wait_seconds)) if claim is not None else nullcontext(True)) as free:
+                    if free:
+                        described = house.sandbox.needs(PROBE_BOX, row["code"])
+            except SandboxError as exc:
+                return self._record(row, "waiting_probe", f"infrastructure, tried again next step: {type(exc).__name__}: {str(exc)[:200]}",
+                                    line=line, family=family, table_state="passed")
+            if described is None:
+                return self._record(row, "waiting_probe", "the House's probe box is in use by other work; tried again next step",
+                                    line=line, family=family, table_state="passed")
+            with house._lifecycle_lock:
+                child = self._born_already(row["lineage"], row["code_sha256"])
+                if child is not None:  # finished meanwhile: a birth is never made twice
+                    displaced = self._finish_birth(row, child, niche=niche, rules=rules, resumed=True)
+                else:
+                    displaced, refusal = self._seat_for(row, niche, rules, line=line, family=family)
+                    if refusal is not None:
+                        return refusal
+                    params = json.loads(grad["params"] or "{}")
+                    passed = house.ledger.get(f"lab.graduate:{ident}:passed")
+                    sealed = passed is not None and "holdout" in str(passed.payload.get("detail") or "")
+                    why = (f"an Alpha Lab graduate ({row['origin']}, by {row['author']}, lineage {row['lineage']}): {str(row['idea'] or '')[:220]} "
+                           f"-- fittest in its cell ({row['cell']}) at {float(row['fitness'] or 0):+.6f} a block out of sample on the lab's "
+                           f"search tape, then passed the House's replay{' and the sealed holdout' if sealed else ''}")
+                    try:
+                        child = house.spawn(line, family, row["code"], parent=self._parent(row["lineage"]), reason=why[:1500], params=params,
+                                            endowment=rules["endowment_usd"], specialty=niche.id, founder=f"lab:{row['lineage']}"[:120],
+                                            described=described)
+                    except ValueError as exc:
+                        return self._record(row, "refused_at_birth", str(exc), line=line, family=family)
+                    displaced = self._finish_birth(row, child, niche=niche, rules=rules, displaced=displaced, sealed=sealed)
+        if displaced is not None and displaced.alive and displaced.id != child.id:
+            # `kill` takes the lifecycle lock for its own writes and retires the box after it lets go.
+            house.kill(displaced, "displaced", house.postmortem(displaced, "displaced",
+                       "an Alpha Lab graduate that passed the House's replay takes the seat of the weakest eligible agent"))
+        seated = child.id == line and child.code_sha256 == row["code_sha256"]
+        return self._record(row, "born", f"born as {child.id}" + ("" if seated else " (not seated: its probe read other NEEDS)"),
+                            line=line, family=family, agent=child.id)
+
+    def _seat_for(self, row: Mapping[str, Any], niche: Any, rules: Mapping[str, Any], *, line: str,
+                  family: str) -> tuple[Any, dict[str, Any] | None]:
+        """(the agent a birth now would displace or None, None), or (None, the outcome recorded) when
+        the desk is closed or full of agents that have earned their seats. No Sail call."""
+        house = self.house
+        living = house.registry.living()
+        if niche is None or niche.dormant:
+            return None, self._record(row, "refused", "its desk is closed", line=line, family=family)
+        if sum(1 for a in living if a.specialty == niche.id) >= niche.max_members:
+            displaced = house._weakest(rules, specialty=niche.id)
+            if displaced is None:
+                return None, self._record(row, "waiting_seat", "its desk is full of agents that have earned their seats",
+                                          line=line, family=family, table_state="passed")
+            return displaced, None
+        if len(living) >= int(rules["max_population"]):
+            displaced = house._weakest(rules)
+            if displaced is None:
+                return None, self._record(row, "waiting_seat", "the league is full of agents that have earned their seats",
+                                          line=line, family=family, table_state="passed")
+            return displaced, None
+        return None, None
 
     def _born_already(self, lineage: str, code_sha256: str) -> Any:
         """The agent an earlier `_birth` of this candidate spawned, if any (living or not). The
@@ -1426,14 +1510,17 @@ class Lab:
                 return agent
         return None
 
-    def _finish_birth(self, row: Mapping[str, Any], child: Any, *, line: str, family: str, niche: Any, rules: Mapping[str, Any],
-                      displaced: Any = None, sealed: bool | None = None, resumed: bool = False) -> dict[str, Any]:
-        """Seat a newborn graduate, write its route row, free the seat it takes, record it born. Each
-        step is idempotent, so a birth resumed after a crash (`_born_already`) finishes exactly once:
-        it is seated only if it is not on a rung yet, endowed only if it never was, and displaces
-        someone only while its desk or the league is still over its cap because of it."""
+    def _finish_birth(self, row: Mapping[str, Any], child: Any, *, niche: Any, rules: Mapping[str, Any],
+                      displaced: Any = None, sealed: bool | None = None, resumed: bool = False) -> Any:
+        """Seat a newborn graduate and write its route row, under the lifecycle lock and with no
+        Sail call; return the agent whose seat it takes (the caller kills it after letting the lock
+        go, then records the birth). Each step is idempotent, so a birth resumed after a crash
+        (`_born_already`) finishes exactly once: it is seated only if it is not on a rung yet,
+        endowed only if it never was, and displaces someone only while its desk or the league is
+        still over its cap because of it."""
         house = self.house
         ident = row["id"]
+        line = self._q("SELECT line FROM graduations WHERE candidate=?", (ident,))[0]["line"]
         if sealed is None:
             passed = house.ledger.get(f"lab.graduate:{ident}:passed")
             sealed = passed is not None and "holdout" in str(passed.payload.get("detail") or "")
@@ -1460,11 +1547,7 @@ class Lab:
             house.ledger.append("route.decision", {"task": f"birth:{child.id}", "route": "lab", "model": None,
                                                    "reason": f"an Alpha Lab graduate for {row['niche']}", "evidence": evidence},
                                 id=f"birth-route:{child.id}")
-        if displaced is not None and displaced.alive and displaced.id != child.id:
-            house.kill(displaced, "displaced", house.postmortem(displaced, "displaced",
-                       "an Alpha Lab graduate that passed the House's replay takes the seat of the weakest eligible agent"))
-        return self._record(row, "born", f"born as {child.id}" + ("" if seated else " (not seated: its probe read other NEEDS)"),
-                            line=line, family=family, agent=child.id)
+        return displaced
 
     # ------------------------------------------------------------- royalties
     def royalties(self) -> int:

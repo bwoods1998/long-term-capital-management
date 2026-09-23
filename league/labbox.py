@@ -18,7 +18,10 @@ Only development data enters it: a tape any of whose data falls in, or spans, th
 
 A failure of the box or of Sail raises `sandbox.SandboxError`: an infrastructure failure, never a
 candidate's result. Candidates the batch's time budget did not reach come back
-`{"ok": False, "error": "not evaluated: batch budget", "id": ...}`; send them again.
+`{"ok": False, "error": "not evaluated: batch budget", "id": ...}`, and candidates the box could not
+start a process for come back `{"ok": False, "error": "not evaluated: the box could not start its
+process (...)", "infrastructure": True, "id": ...}` (`replay.not_evaluated` is true of both); send
+them again. Neither is a result against the candidate.
 """
 
 from __future__ import annotations
@@ -27,10 +30,10 @@ import threading
 import time
 from typing import Any, Mapping, Sequence
 
-from .replay import NOT_EVALUATED
+from .replay import NOT_EVALUATED, not_evaluated
 from .sandbox import SandboxError, TapeMissing, TapeRefused, holdout_problem, tape_digest
 
-__all__ = ["LabBox", "NOT_EVALUATED", "SandboxError", "TapeMissing", "TapeRefused", "DEFAULT_BOX_KEY"]
+__all__ = ["LabBox", "NOT_EVALUATED", "not_evaluated", "SandboxError", "TapeMissing", "TapeRefused", "DEFAULT_BOX_KEY"]
 
 DEFAULT_BOX_KEY = "lab"
 #: Candidates sent in one batch at most: a batch's spec carries every candidate's code (40 KB at
