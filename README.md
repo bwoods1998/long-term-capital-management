@@ -19,7 +19,8 @@ It retains the original $500 foundation plus $325 burst accounting and resumes o
 OpenAI/Sail allowance; the owner's recorded top-ups (`scripts/campaign_topup.py`) have raised the
 burst's caps since. Deployment alone cannot activate it; inspect `live_trading.active`. It pins
 the money rules, so each owner revision of one is followed by re-ratifying the grant for the same
-capital: twice on Sept 21, at 20:26Z on Sept 22, and at the Sept 23 revision's deploy.
+capital: twice on Sept 21, at 20:26Z on Sept 22, and three times on Sept 23 (Dynamism II at
+01:37Z, swing-and-bunt at 03:52:49Z and the allocator at 08:28:13Z).
 The [September 21 live watch](docs/runs/2026-09-21-live-hour.md) records current provider funding,
 paid SIP/OPRA readiness, the public agent ladder, and the first earned live execution and
 settlement: a $5.6733 loss including fees. Its receipt exposed a Kalshi price/fee parsing defect;
@@ -158,6 +159,9 @@ reach.
 - **Where programs come from.** The seeds are the living agents' programs, the foundry's cards and
   the founders. The children are bounded parameter mutants of the elites and Luna's mutations and
   crossovers. After every ten Luna calls, Sol makes a leap for the desk whose grid is emptiest.
+  The lab breeds, up to 48 parameter children at a time, whenever fewer than a batch of queued programs
+  have their tape built. Each seed needs a tape of its own, and a lab that bred only when its queue
+  was short had 191 seeds waiting and gave the elites no children (Sept 23, #173).
 - **The search sees two thirds.** Fitness is measured on the first two thirds of the tape the House
   replays that program on. The last third is never shown to the search. The lab box never receives
   a tape that reaches into the sealed holdout.
@@ -213,8 +217,9 @@ any US stock, ETF or coin against the dollar, never an option), eight seats each
 program with no desk of its own (the architect's, the foundry's, a lab graduate's) is born there only
 when no single desk holds most of what its NEEDS name (`niches.match`, `niches.spanning`): it spans
 desks, or trades markets no desk lists. It is still shown only what it names, twelve at most; one
-naming nothing it may trade is shown a capped discovery list (Kalshi: the daily survey's busiest
-series, those no desk covers first; Alpaca: the other Alpaca desks' symbols). Measured Sept 23: one
+naming nothing it may trade is shown the first twelve of a discovery list of 24
+(`niches.OPEN_DISCOVERY`; Kalshi: the daily survey's busiest series, those no desk covers first;
+Alpaca: the other Alpaca desks' symbols, coins first). Measured Sept 23: one
 pass over Kalshi's markets resolving within 48 hours is 21 pages, 20,662 markets, about 15 MB and
 22 s (372 series trading, 124 of them on a fixed desk's list), so it is the daily survey's work
 and never a wake's. The allocator stakes an open-desk agent exactly like any other.
@@ -542,6 +547,7 @@ from at all. Each of those is now closed:
 | a lesson is corrected | the ledger kept the first text, and agents planned against a replay rule that had already been removed (hawkins-15, Sept 22) | a lesson whose text changes is loaded again, and a new lesson states the rules in force (Sept 23, 2026) |
 | background work holds a box the tick needs, and a Sail call hangs | a hypothesis replay held the probe box through a Sail call that hung for about seven minutes, the House's first tick waited about twelve for it, and the hung tick held up the exit on TERM, so the watchdog rolled the release back (05:07Z, Sept 23) | the tick waits at most 2 s for an agent's box and 15 s for the probe box, then skips that wake or defers its births to the next tick, with the reason in `health.json` `deferred`; Sail calls give up within minutes, and TERM no longer waits on a hung box (Sept 23, 2026; [below](#the-tick-never-blocks)) |
 | a replay box does not answer | it read as a replay that could not run, enough of which retire a family as `blocked_infra`, and the rest of the foundry's batch was charged an attempt | infrastructure: not a trial, never counted toward retiring the family, and a hypothesis card stays pending (Sept 23, 2026) |
+| a resting Kalshi limit order fills with no fee | the book labelled every limit order not marked post-only as a taker's, so a resting order that paid the maker's fee ($0 on most series) read as a taker execution with no fee, and the frontier auditor vetoed the best paper agent on the floor for "unexplained zero-fee taker executions" (huang-h6d3302, 09:32Z Sept 23) | a Kalshi limit order filled with no fee is booked as the maker's fill; the money was the venue's number either way (Sept 23, 2026, #174). A veto already given stands with its cooldown |
 
 What still needs the owner: a **real-money** book that freezes on a position (deliberately -- there
 the freeze is the point), the `real_money` switch itself, the gateway's keys and its kill switch,
@@ -574,6 +580,11 @@ tick never waits on a box that background work holds.
   hung box, and boxes are put to sleep side by side for at most 60 s.
 - **What was put off** is in `health.json` `deferred`, by kind (`wakes`, `births`, `revival`), with
   an info alert at most every fifteen minutes a kind.
+- **One standings table a tick** (#173, later on Sept 23). After Deploy 3 ticks grew from 70 s to
+  191 s, and a profile of the production House found about 80% of the tick's thread ranking agents:
+  displacement, the refill and the foundry each built the standings of all 96 living agents afresh,
+  with several ledger scans an agent. The tick now builds the table once and reuses it while the
+  living roster is unchanged; a birth or a death rebuilds it.
 
 ## The constitution
 
@@ -714,7 +725,7 @@ The `league/` modules:
 | `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
 | `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season; the two open desks (`open: true`) and `match`/`spanning`, which seat a program on one desk or, when it spans desks, on its venue's open desk. |
 | `strategies/`, `tools/`, `playbook/` | What Merton adds by pull request: strategies, helper modules, lessons. |
-| `house.py` | The House: one `tick()` is the whole loop, which since Sept 23, 2026 never waits on a box that background work holds. |
+| `house.py` | The House: one `tick()` is the whole loop, which since Sept 23, 2026 never waits on a box that background work holds and builds the standings table once. |
 | `budget.py` | The Sail account's monthly line and reserve. |
 | `campaigns.py` | The owner-funded campaign and its burst: a hold reserved before every paid call and settled from its response, the Sail balance meter, stale Sail holds absorbed into that meter (Sept 23, 2026), the owner's top-ups, the gateway's profit-indexed raise mirrored onto the House's OpenAI line (Sept 23, 2026), and the live grant with its ratification. |
 | `frontier.py` | The client for the gateway's metered frontier route. A verified call settles its hold at the gateway's metered cost (Sept 23, 2026), and a refused one at $0. `FrontierMonth.profit_bonus` reads what profit added to the gateway's month. |
@@ -852,6 +863,12 @@ dynamism revisions followed that evening:
 - **Deploy 3 (#170, #171).** The tick that never blocks, profit-indexed compute, the Alpha Lab and
   the open desks. Release `20260923T104142Z-5d86b468fbde` was promoted at 10:43:05Z, and the
   gateway's profit-indexed month went out as version `3eef1b8a`.
+- **After Deploy 3 (#173, #174).** A profile of the live House found the tick ranking every agent
+  several times, and the lab starved of children behind seeds waiting for their tapes (#173: one
+  standings table a tick, and breeding while fewer than a batch have built tapes). An audit veto of
+  the best paper agent turned out to rest on a mislabelled Kalshi maker fill (#174). Both change
+  judges (`book.py`, `lab.py`), so they reach the box with an owner deploy; the execution record
+  has it.
 
 Known limits:
 
