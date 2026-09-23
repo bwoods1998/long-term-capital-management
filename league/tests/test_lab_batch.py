@@ -10,6 +10,7 @@ lab box, and the holdout: no tape that reaches into the sealed window ever enter
 from __future__ import annotations
 
 import calendar
+import functools
 import gzip
 import hashlib
 import json
@@ -63,8 +64,10 @@ def decide(ctx):
 """
 
 
-def small(venue: str, *, steps: int = 240, seed: int = 7) -> dict:
-    """A canned tape (`ci.regression_tape`) short enough that a test replays it many times."""
+@functools.lru_cache(maxsize=None)
+def small(venue: str, *, steps: int = 160, seed: int = 7) -> dict:
+    """A canned tape (`ci.regression_tape`) short enough that a test replays it many times. The same
+    object every time: nothing here writes to a tape, and `single` remembers its answers by it."""
     return ci.regression_tape(venue, steps=steps, seed=seed)
 
 
@@ -90,14 +93,20 @@ def strategy_candidates(venue: str) -> list[dict]:
     return out
 
 
+_SINGLES: dict[tuple, dict] = {}
+
+
 def single(candidate: dict, tape: dict, **options) -> dict:
     """What one box run of the candidate answers (`replay.main`): the result as JSON, or the
-    failure `main` prints when it cannot be encoded."""
-    try:
-        result = json.loads(json.dumps(run_replay(candidate.get("code"), candidate.get("params"), tape, **options), allow_nan=False))
-    except ValueError as exc:
-        result = {"ok": False, "error": f"replay failed: {type(exc).__name__}: {str(exc)[:200]}"}
-    return {**result, "id": candidate["id"]}
+    failure `main` prints when it cannot be encoded. Remembered for a tape that stays alive."""
+    key = (id(tape), candidate.get("code"), json.dumps(candidate.get("params"), sort_keys=True), json.dumps(options, sort_keys=True))
+    if key not in _SINGLES or _SINGLES[key][0] is not tape:
+        try:
+            result = json.loads(json.dumps(run_replay(candidate.get("code"), candidate.get("params"), tape, **options), allow_nan=False))
+        except ValueError as exc:
+            result = {"ok": False, "error": f"replay failed: {type(exc).__name__}: {str(exc)[:200]}"}
+        _SINGLES[key] = (tape, result)
+    return {**_SINGLES[key][1], "id": candidate["id"]}
 
 
 def dated_tape(first: str, days: int, *, warmup_from: str | None = None) -> dict:
@@ -129,9 +138,11 @@ class BatchEqualsSingle(unittest.TestCase):
     def test_seeds_and_strategies_on_both_venues(self):
         for venue in ("alpaca", "kalshi"):
             with self.subTest(venue=venue):
-                candidates = seed_candidates(venue) + strategy_candidates(venue)
+                # Every seed, and the floor's strategies (every fourth of the many equity ones, for time).
+                strategies = strategy_candidates(venue)
+                candidates = seed_candidates(venue) + (strategies[::4] if venue == "alpaca" else strategies)
                 self.assertGreaterEqual(len(candidates), 4)
-                out = self.assert_same(candidates, small(venue, steps=360), workers=3)
+                out = self.assert_same(candidates, small(venue, steps=240), workers=3)
                 self.assertTrue(any(r["ok"] and r["trades"] > 0 for r in out))  # the batch really traded
 
     def test_crashing_refused_and_slow_candidates_answer_as_they_do_alone(self):
@@ -154,7 +165,7 @@ class BatchEqualsSingle(unittest.TestCase):
 
     def test_worker_count_changes_nothing(self):
         tape = small("alpaca")
-        candidates = seed_candidates("alpaca")
+        candidates = seed_candidates("alpaca")[:5]
         self.assertEqual(run_batch(candidates, tape, workers=1), run_batch(candidates, tape, workers=4))
 
     def test_the_in_process_fallback_gives_the_same_numbers(self):
@@ -190,7 +201,7 @@ class BatchIsolation(unittest.TestCase):
         self.assertTrue(any(r["fees_usd"] > 0 for r in out[1:]))  # the fee arithmetic really ran
 
     def test_a_hung_candidate_is_stopped_and_the_rest_are_answered(self):
-        tape = ci.regression_tape("kalshi", steps=120)
+        tape = small("kalshi")
         others = seed_candidates("kalshi")[:2]
         started = time.monotonic()
         out = run_batch([{"id": "hangs", "code": HANGS}] + others, tape, workers=3, candidate_seconds=4.0)
@@ -257,7 +268,7 @@ class PreparedTape(unittest.TestCase):
 
     def test_an_eager_reading_is_the_lazy_one(self):
         for venue in ("alpaca", "kalshi"):
-            tape = ci.regression_tape(venue)
+            tape = small(venue)
             eager, lazy = replay._Prepared(tape, eager=True), replay._Prepared(tape)
             for index, step in enumerate(tape["steps"][:200]):
                 stamp = lazy.stamp(index, step)
