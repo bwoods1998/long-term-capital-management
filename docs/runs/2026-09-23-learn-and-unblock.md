@@ -616,3 +616,13 @@ haghani-56, E 1.0083 on 8 trades at 22:32Z).
 4. The owner's decisions: the one-loss trial (hysteresis grace or a 15% event-book position share),
    Sail auto-recharge and an OpenAI top-up, the four data hosts, a second Alpaca practice account
    for level-3, and CI's job timeout (`.github/workflows/checks.yml`).
+- 23:30Z — #216 green on all three jobs (the 3.14 re-run passed in 5m53s) and merged as `76e446d`.
+  The in-box updater had just shipped Merton's #214 and #215 (two college-football favourite-maker
+  strategies) as `main-d09603e5f13d` (23:30Z), without #216, and held the deploy lock through its
+  watch; the owner deploy retried each minute and started at 23:39Z.
+- **23:40:41Z — the Sail-floor dials promoted:** release `20260923T233921Z-493b4a2ff9ab` (main
+  `76e446d`), watch passed at 23:51:03Z; verified on the box: `research_minutes` 120, `research_workers`
+  6, the grant active on `c2b0e09c`, no book frozen, 112 living. Sail commitments read $2.07 for
+  23:21-23:36Z and $4.00 for 23:36-23:51Z, the second quarter hour inflated by two restarts
+  resuming queued research: whether the burn falls toward $1-2 an hour is the resume's first check.
+  The watch loop and the events feed were stopped for the pause.
