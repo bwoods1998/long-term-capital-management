@@ -152,12 +152,14 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     and background jobs running over ten minutes;
   - bands per venue from `allocator-board.json`, band moves, births and deaths, the envelope and
     the throttle;
-  - venue fills, notional, realized P&L and agents per book (practice and real), and performance
-    fees;
+  - venue fills, notional, realized P&L and agents per book: the real accounts (`kalshi`,
+    `alpaca`) on the "real money" line with the performance fees, and the practice books on their
+    own line;
   - the top evidence (E, W_paper, W_real, trades, stake);
   - the lab's `lab.sqlite` table counts and its `lab.*` ledger rows;
-  - costs (OpenAI settled in the hour and pending holds, Sail, Jev), refusals, alerts, and the
-    site checkpoint's age and whether it carries the board.
+  - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
+    `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
+    checkpoint's age and whether it carries the board.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled).

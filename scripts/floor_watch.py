@@ -97,8 +97,11 @@ for a, at, k, p in q(('book.fill', 'book.settle')):
             realized[b] += float(p['realized'])
     else:
         realized[b] += float(p.get('pnl') or 0)
-out['fills'] = {b: {'fills': fills[b], 'notional': round(notional[b], 2), 'realized': round(realized[b], 2), 'agents': len(who[b])}
-                for b in sorted(set(fills) | set(realized))}
+summary = {b: {'fills': fills[b], 'notional': round(notional[b], 2), 'realized': round(realized[b], 2), 'agents': len(who[b])}
+           for b in sorted(set(fills) | set(realized))}
+# Only the real accounts are real money; the practice books (alpaca-paper, kalshi-shadow) fill too.
+out['fills'] = {b: v for b, v in summary.items() if b in ('kalshi', 'alpaca')}
+out['practice_fills'] = {b: v for b, v in summary.items() if b not in ('kalshi', 'alpaca')}
 refused = collections.Counter()
 for a, at, k, p in q(('book.refused',)):
     p = json.loads(p); refused[('; '.join(p.get('reasons') or []))[:80]] += 1
@@ -171,7 +174,7 @@ def gateway_read() -> dict:
             "os.chdir('/workspace/current');from league.service import load_config,load_env,secret;load_env();cfg=load_config();"
             "req=urllib.request.Request(cfg['gateway_url'].rstrip('/')+'/v1/health',headers={'Authorization':'Bearer '+secret('GATEWAY_TOKEN'),'User-Agent':'ltcm-floor/1.0'});"
             "h=json.load(urllib.request.urlopen(req,timeout=20));f=h.get('frontier') or {};t=h.get('typesafe') or {};s=h.get('sail') or {};"
-            "print(json.dumps({'frontier':{k:f.get(k) for k in ('month','spent_usd','cap_usd','effective_cap_usd','profit_share_usd')},"
+            "print(json.dumps({'frontier':{k:f.get(k) for k in ('month','spent_usd','cap_usd','base_cap_usd','profit_index')},"
             "'jev':{k:t.get(k) for k in ('spent_usd','cap_usd')},'sail':{k:s.get(k) for k in ('balance_usd','burn_usd_per_day','runway_days')}}))")
     run = client().exec(require_box(read_state()), ["/workspace/.venv/bin/python", "-c", code], timeout=120, on_output=None)
     lines = (run.stdout or "").strip().splitlines()
@@ -188,6 +191,7 @@ def render(box: dict, site: dict, gateway: dict) -> str:
              f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
     lines += ["  " + row for row in box["move_rows"]]
     lines.append(f"## real money {json.dumps(box['fills'])}  performance fees ${box['performance_fees']}")
+    lines.append(f"## practice {json.dumps(box.get('practice_fills') or {})}")
     lines.append("## top evidence")
     lines += [f"  {r['E']:.4f} {r['agent']} {r['venue']} {r['band']} Wp={r['W_paper']} Wr={r['W_real']} trades={r['trades']}/{r['real_trades']} stake={r['stake']}"
               for r in box["top_evidence"]]
