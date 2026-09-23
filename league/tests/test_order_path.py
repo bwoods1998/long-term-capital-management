@@ -455,3 +455,27 @@ class HeldSlices(SliceCase):
         self.book.poll()
         self.assertNotIn(plan_id, self.book.exit_plans)  # not finished within the hour after the open
         self.assertTrue(self.book.reconcile().ok)
+
+
+import unittest
+
+
+class ReviewFollowUps(unittest.TestCase):
+    """The #203 review's follow-ups (Sept 23, 2026): the reconcile alert level for an order whose
+    outcome is still unknown, checked on the House's rule text."""
+
+    def test_an_unknown_outcome_alone_is_a_warning_and_a_cash_or_position_problem_stays_an_error(self):
+        import inspect
+        from league import house as house_module
+        source = inspect.getsource(house_module.House)
+        self.assertIn('pending_only = (not result.position_diffs and "outcome is unknown" in result.detail', source)
+        self.assertIn('and "cash differs" not in result.detail)', source)
+        self.assertIn("minor = minor or pending_only", source)
+
+    def test_the_wake_stamps_are_written_under_the_state_lock(self):
+        import inspect
+        from league import house as house_module
+        source = inspect.getsource(house_module.House.wake)
+        lock = source.index("with self._state_lock:")
+        self.assertLess(lock, source.index('self._state.setdefault("desk_woke", {})'))
+        self.assertLess(lock, source.index('self._state["next_wake"][agent.id] = next_wake'))

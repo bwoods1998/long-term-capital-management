@@ -1188,9 +1188,15 @@ class House:
             if generation is None:
                 return {"agent": agent.id, "skipped": "retired"}
             agent = deepcopy(self.registry.get(agent.id))
-            self._state["next_wake"][agent.id] = self._next_wake(agent, self.clock())
-            if agent.specialty:
-                self._state.setdefault("desk_woke", {})[agent.specialty] = self.clock()  # the desk's turn was served (`_every_desk_first`)
+            next_wake = self._next_wake(agent, self.clock())
+            # Under the state lock (the #203 review, Sept 23, 2026): `_save_state` serializes the
+            # state under it from the audit thread, and a key added here while it iterates would
+            # raise "dictionary changed size during iteration" (the desk stamps are new keys on the
+            # first round after a deploy).
+            with self._state_lock:
+                self._state["next_wake"][agent.id] = next_wake
+                if agent.specialty:
+                    self._state.setdefault("desk_woke", {})[agent.specialty] = self.clock()  # the desk's turn was served (`_every_desk_first`)
             rung = self.evaluator.rung(agent.id)
             if self._state["tried"].get(agent.id) != agent.code_sha256 and not self.paused():
                 self._background(f"replay:{agent.id}", self._replay_own, agent)
@@ -4688,6 +4694,13 @@ class House:
                     # good release back. Real money, or any position difference, stays an error.
                     minor = (not book.real_money and not result.position_diffs
                              and abs(Decimal(result.cash_diff)) <= Decimal("1.00"))
+                    # Only an order whose outcome the venue has not yet told (the book asks a second
+                    # time 60 s later before it calls an order never-arrived, #203): the book stays
+                    # frozen for entries until it is known, which is the protection; an error here
+                    # would roll a good release back inside a deploy's watch (the #203 review).
+                    pending_only = (not result.position_diffs and "outcome is unknown" in result.detail
+                                    and "cash differs" not in result.detail)
+                    minor = minor or pending_only
                     self.alert("warning" if minor else "error", f"{name} does not reconcile: {result.detail}")
             except Exception as exc:  # noqa: BLE001
                 self.alert("warning", f"{name}: could not mark or reconcile ({type(exc).__name__}: {str(exc)[:200]})")
