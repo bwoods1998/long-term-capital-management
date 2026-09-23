@@ -320,3 +320,8 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
     cap. The caps are $75 at Kalshi, and $68.18 at Alpaca (the $75 cap over the gateway's 1.10
     ask markup). Slicing starts to matter for stakes above about $136 at Alpaca and $150 at
     Kalshi, which only a swing can reach. No agent has swung: none has 8 real trades yet.
+- 13:06:37Z — **E1 read on the live gateway.** `floor_watch` had asked for field names the gateway
+  never sends, so it showed `null`; it now reads `base_cap_usd` and `profit_index`. Equity is
+  $1,016.00 (Kalshi $516.10, Alpaca $499.90) against the $1,017.75 baseline, with `read_ok` true.
+  Profit is $0, so the bonus is $0 ("no profit above the baseline"), and the cap is the funded
+  $408 with $351.54 spent this month.
