@@ -276,7 +276,7 @@ class House:
         #: the constitution's `allocator.enabled`, bands and stakes follow evidence at every mark pass.
         self.allocator = allocator_module.Allocator(self, self.root)
         #: Collateral on every Kalshi exchange shard the desks trade (`league/shards.py`, Sept 23, 2026):
-        #: an hourly pass on the ops lane, and one at once after an `insufficient_shard_balance` refusal.
+        #: an hourly pass on its own lane, and one at once after an `insufficient_shard_balance` refusal.
         self.shards: Any = shards_module.ShardFunder(self, self.root) if REAL_BOOK["kalshi"] in self.books else None
         # Slow work runs on daemon threads: a flex-window model call can take a quarter of an hour,
         # and a House that is told to stop must stop. (The provider settles an orphaned call later.)
@@ -289,7 +289,10 @@ class House:
                        "audit": threading.Semaphore(1),
                        # The live feeds too (`league/feeds.py`): a scoreboard polled behind a Merton pass
                        # or the backup is minutes of a live game the record never sees.
-                       "feeds": threading.Semaphore(1)}
+                       "feeds": threading.Semaphore(1),
+                       # And the Kalshi shard funder (`league/shards.py`): a pass a refusal asked for
+                       # must not wait behind Merton, the backup or a repair; one at a time.
+                       "shards": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
         self._standings_memo: dict[str, Any] | None = None  # one standings table a tick (`standings`)
@@ -1966,7 +1969,8 @@ class House:
             return False
 
         lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay")
-                           else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:") else "ops"]
+                           else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:")
+                           else "shards" if key.startswith("shards:") else "ops"]
         with self._state_lock:
             self._job_status[key] = {"queued_at": self.clock(), "started_at": None}
 
@@ -4718,7 +4722,7 @@ class House:
         if self.lab is not None:
             self.lab.tick(open_for_business=open_for_business)  # schedules one bounded step off the tick (league/lab.py)
         if self.shards is not None:
-            # Cheap on the tick (a cursor scan of new order rows); the venue calls run on the ops lane.
+            # Cheap on the tick (a cursor scan of new order rows); the venue calls run on the shards lane.
             self.shards.tick()
         if open_for_business and self.economy.payout_due():
             self.learn()

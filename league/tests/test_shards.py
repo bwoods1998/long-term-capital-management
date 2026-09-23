@@ -399,6 +399,186 @@ class Schedule(FunderCase):
         self.assertFalse(again.due())
 
 
+class ReviewRegressions(FunderCase):
+    """The adversarial review of Sept 23, 2026 (PR #197): each reproduced on the first build."""
+
+    def refuse(self, agent, ticker):
+        return self.house.ledger.append("book.order", {
+            "book": "kalshi", "order_id": f"o-{ticker}-{agent}-{self.clock()}", "status": "rejected",
+            "reason": "kalshi order: HTTP 404 insufficient_shard_balance Exchange user not found",
+            "instrument": Instrument("event", ticker, "kalshi", market_id=ticker).to_dict(),
+            "shares": [{"intent_id": "i-1", "agent": agent, "quantity": "5", "reason": "test"}], "real_money": True})
+
+    def test_a_stake_whose_shard_cannot_be_told_is_kept_on_every_donor(self):
+        # Three crypto bunts ($30 of stakes) trade on shard 2 ($36.60); their listing is down this
+        # pass, so their series is unmapped. Shard 0 can spare $2. Counted on shard 0 alone (as first
+        # built), shard 2 was drained to its $20 floor below its own desks' stakes.
+        self.broker.balances[0] = D("62")
+        self.broker.balances[2] = D("34")
+        self.house.listings["KXBTC15M"] = RuntimeError("HTTP 429")
+        for i in range(3):
+            self.house.desk(f"crypto-{i}", "KXBTC15M")
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.house.books["kalshi"].stakes = {f"crypto-{i}": D("10") for i in range(3)}
+        report = self.funder.run()
+        self.assertEqual(self.broker.transfers, [])  # $34 - $30 kept is under the $5 minimum
+        self.assertEqual(self.funder.health()["unattributed_usd"], "30.00")
+        self.assertIn("cannot be told to a shard", report["short"][0]["why"])
+        # With $36.60 it spares $6.60 and is left with exactly its desks' $30, never below it.
+        self.broker.balances[2] = D("36.60")
+        self.clock.advance(3600)
+        self.funder.run()
+        self.assertEqual(self.broker.transfers, [(D("6.60"), 2, 3)])
+        self.assertEqual(self.broker.balances[2], D("30"))
+        # Once the listing names the shard, the stakes are attributed there and nothing is unattributed.
+        self.house.listings["KXBTC15M"] = [market("KXBTC15M-26SEP231700-1", 2)]
+        self.clock.advance(3600)
+        self.funder.run()
+        self.assertEqual(self.funder.health()["unattributed_usd"], "0.00")
+        self.assertEqual(self.broker.balances[2], D("30"))  # keeps max($20, $30 attributed)
+
+    def test_a_lagging_balance_read_after_a_move_never_makes_the_donor_look_richer(self):
+        # A cross-shard move runs in three steps: a read right after may still show the balances
+        # before it. Two shards short, shard 0 at $92 keeping $60: the second move must not go.
+        self.broker.balances = {0: D("92")}
+        self.house.listings["KXEXOTIC"] = [market("KXEXOTIC-26SEP23-X", 1)]
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.house.desk("exotic-1", "KXEXOTIC")
+        snapshots = []
+        real_transfer, real_read = self.broker.transfer_between_shards, self.broker.shard_balances
+
+        def transfer(usd, source, destination):
+            snapshots.append(dict(self.broker.balances))  # what a read one step behind still shows
+            return real_transfer(usd, source, destination)
+
+        self.broker.transfer_between_shards = transfer
+        self.broker.shard_balances = lambda: dict(snapshots[-1]) if snapshots else real_read()
+        self.funder.run()
+        self.assertEqual(self.broker.transfers, [(D("30"), 0, 1)])
+        self.assertEqual(self.broker.balances[0], D("62"))
+        self.assertEqual(self.house.moves()[0]["after"], {"0": "92.00"})  # the venue's word, as read
+
+    def test_the_guards_are_read_again_before_every_move(self):
+        self.house.listings["KXEXOTIC"] = [market("KXEXOTIC-26SEP23-X", 1)]
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.house.desk("exotic-1", "KXEXOTIC")
+        real = self.broker.transfer_between_shards
+
+        def transfer(usd, source, destination):
+            self.house.killed = True  # engaged while the first move is on the wire
+            return real(usd, source, destination)
+
+        self.broker.transfer_between_shards = transfer
+        report = self.funder.run()
+        self.assertEqual(len(self.broker.transfers), 1)
+        self.assertEqual([s["why"] for s in report["short"]], ["the kill switch is engaged"])
+        self.assertEqual(report["blocked"], "the kill switch is engaged")
+
+    def test_a_four_decimal_balance_is_rounded_down_never_past_the_keep(self):
+        self.broker.balances[0] = D("62")
+        self.broker.balances[2] = D("39.1466")  # the venue reports four decimals ($370.6533 on Sept 23, 2026)
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.funder.run()
+        self.assertEqual(self.broker.transfers, [(D("19.14"), 2, 3)])
+        self.assertGreaterEqual(self.broker.balances[2], shards.FLOOR_USD)
+
+    def test_a_refusal_on_a_shard_above_the_floor_still_tops_it_up_once_an_hour(self):
+        self.broker.balances[3] = D("22.77")
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.funder.run()  # learns sports -> 3; $22.77 is above the floor: nothing moves
+        self.assertEqual(self.broker.transfers, [])
+        self.refuse("sports-1", "KXMLBTOTAL-26SEP231840STLPIT-8")  # the venue: the shard cannot carry the order
+        self.assertTrue(self.funder.tick())
+        self.assertEqual(self.broker.transfers, [(D("30"), 0, 3)])
+        self.clock.advance(60)
+        self.refuse("sports-1", "KXMLBTOTAL-26SEP231840STLPIT-8")
+        self.funder.tick()  # not again within the hour on the venue's word alone
+        self.assertEqual(len(self.broker.transfers), 1)
+        self.clock.advance(shards.BACKOFF_SECONDS)
+        self.refuse("sports-1", "KXMLBTOTAL-26SEP231840STLPIT-8")
+        self.funder.tick()
+        self.assertEqual(len(self.broker.transfers), 2)
+
+    def test_a_blocked_pass_keeps_the_refusals_shards_and_tries_again_in_five_minutes(self):
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.house.books["kalshi"].frozen = "awaiting startup reconciliation"
+        self.funder.request(3)
+        self.assertTrue(self.funder.tick())
+        self.assertEqual(self.broker.transfers, [])
+        self.assertEqual(self.funder.health()["pending"], [3])
+        self.house.books["kalshi"].frozen = None
+        self.clock.advance(60)
+        self.assertFalse(self.funder.tick())  # not every tick: each pass reads the venue
+        self.clock.advance(shards.BLOCKED_RETRY_SECONDS)
+        self.assertTrue(self.funder.tick())
+        self.assertEqual(self.broker.transfers, [(D("30"), 0, 3)])
+        self.assertEqual(self.funder.health()["pending"], [])
+        self.assertFalse(self.funder.due())
+
+    def test_a_failed_pass_tries_again_in_five_minutes(self):
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.house.books["kalshi"].broker.shard_balances = lambda: (_ for _ in ()).throw(RuntimeError("gateway 502"))
+        self.assertTrue(self.funder.tick())
+        self.clock.advance(shards.BLOCKED_RETRY_SECONDS + 1)
+        self.assertTrue(self.funder.tick())
+
+    def test_a_move_whose_outcome_is_unknown_counts_against_the_day(self):
+        # The gateway timed out after the venue executed the transfer: the day's $200 must count it.
+        self.broker.balances[0] = D("2000")
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        real = self.broker.transfer_between_shards
+
+        def executes_then_times_out(usd, source, destination):
+            real(usd, source, destination)
+            raise RuntimeError("gateway 504")
+
+        with unittest.mock.patch.object(shards, "TOP_UP_USD", D("100")):
+            self.broker.transfer_between_shards = executes_then_times_out
+            self.funder.run()
+            self.broker.transfer_between_shards = real
+            for _ in range(3):
+                self.clock.advance(3601)
+                self.broker.balances[3] = D("0")
+                self.funder.run()
+        self.assertEqual(sum(t[0] for t in self.broker.transfers), shards.MAX_DAY_USD)
+        first = self.house.moves()[0]
+        self.assertEqual((first["ok"], first["outcome"], first["counted"]), (False, "unknown", True))
+        self.assertIn("counts against the day", self.house.alerts("warning")[0].payload["text"])
+
+    def test_a_definite_rejection_counts_nothing(self):
+        from ltcm.broker import RejectedOrder
+
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.broker.fail_next = RejectedOrder("kalshi shard transfer: HTTP 400 bad amount")
+        self.funder.run()
+        move = self.house.moves()[0]
+        self.assertEqual((move["ok"], move["outcome"], move["counted"]), (False, "rejected", False))
+        self.assertEqual(self.funder.moved_in_day(), D("0"))
+
+    def test_a_move_is_made_under_the_real_books_lock(self):
+        # The mark pass reconciles the venue's cash under the book's lock: a transfer between its
+        # steps would read as a mismatch and freeze the real book (an error alert, a rollback
+        # inside a deploy watch). Held: the transfer and its re-read; not the pass's first read.
+        class RecordingLock:
+            depth = 0
+
+            def __enter__(self):
+                self.depth += 1
+
+            def __exit__(self, *args):
+                self.depth -= 1
+
+        lock = self.house.books["kalshi"]._lock = RecordingLock()
+        held = []
+        real_transfer, real_read = self.broker.transfer_between_shards, self.broker.shard_balances
+        self.broker.transfer_between_shards = lambda *a: (held.append(("transfer", lock.depth)), real_transfer(*a))[1]
+        self.broker.shard_balances = lambda: (held.append(("read", lock.depth)), real_read())[1]
+        self.house.desk("sports-1", "KXMLBTOTAL")
+        self.funder.run()
+        self.assertEqual(held, [("read", 0), ("transfer", 1), ("read", 1)])
+        self.assertEqual(lock.depth, 0)
+
+
 class TheHouseHook(unittest.TestCase):
     """The House builds the funder with its real Kalshi book, ticks it, and shows it in health."""
 
@@ -449,6 +629,38 @@ class TheHouseHook(unittest.TestCase):
         self.assertEqual(health["blocked"], "no live grant is active")  # a test House holds no grant: read, never moved
         self.assertEqual(broker.shards.transfers, [])
         self.assertTrue((Path(self.dir.name) / "house" / "shards.json").exists())
+
+    def test_the_funding_pass_has_its_own_lane_and_never_waits_behind_the_ops_lane(self):
+        import threading
+
+        from league.economy import load_game
+        from league.house import House, Settings
+        from league.tests.fakes import FakeBroker
+        from league.tests.test_ladder import InProcessSandbox
+
+        class KalshiWithShards(FakeBroker):
+            def __init__(self):
+                super().__init__("kalshi", cash="400", family="kalshi")
+                self.shards = FakeShardBroker({0: "372.81", 2: "36.60"})
+
+            def shard_balances(self):
+                return self.shards.shard_balances()
+
+            def transfer_between_shards(self, usd, source, destination):
+                return self.shards.transfer_between_shards(usd, source, destination)
+
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        house = House(Path(self.dir.name) / "house", brokers={"kalshi": KalshiWithShards()}, sandbox=InProcessSandbox(), clock=Clock(),
+                      settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game)
+        self.addCleanup(lambda: house.close(wait=None))
+        ops = house._lanes["ops"] = threading.Semaphore(0)  # Merton, the backup and a repair hold every ops slot
+        self.addCleanup(lambda: [ops.release() for _ in range(50)])  # runs before close: let the queued ops jobs end
+        house.tick()
+        house.wait(10)
+        states = [(e.payload.get("key"), e.payload.get("state")) for e in house.ledger.read(kinds="ops.job", limit=100)]
+        self.assertIn((shards.JOB, "finished"), states)
 
     def test_a_house_without_a_real_kalshi_book_has_no_funder(self):
         from league.economy import load_game
