@@ -35,7 +35,7 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | 0.5 | First-hour decision 3: Deploy A's money set fixed by T+0:45 | done 16:42Z (U1 + U5 + A2a) |
 | 0.6 | Study snapshot taken (read-only sqlite backups) | done 16:28Z |
 | 0.7 | Study (L), Wave 0 and cleanup (H) launched together | done 16:38Z |
-| L | The agent study, `docs/research/2026-09-23-agent-study.md` | analysts done 17:05Z; synthesis in progress |
+| L | The agent study, `docs/research/2026-09-23-agent-study.md` | version 1 committed 17:13Z (`a8af31e`); refresh at 20:37Z and 23:52Z |
 | U1 | Daily-loss rules as constitution keys (real bunts: stay drawdown; real halt per venue) | PR #198, in review |
 | U2 | Durable Kalshi shard funding | PR #197 (CI green), in review |
 | U5 | Winners compound (`bunt_usd × clamp(W_real, 1, swing_at)`) | PR #198, in review |
@@ -221,3 +221,16 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 - 17:00Z watch — OpenAI settled $3.69 in the hour (the House line $32.76), before the pacing
   release; Sail $95.27; no real fill in the hour; meriwether-42 replay → practice; one merged
   strategy (#161, sports runline) born.
+- 17:12Z — the Wave 0 integration branch (`w0/integration`: #196 + #195 + #197, no conflicts) passed
+  the full suites locally: league 94 modules / 2,369 tests, ltcm 1,790, `league.ci` content checks.
+  #198 joins it after its review.
+- 17:13Z — **the study, version 1, is on the run branch** (`docs/research/2026-09-23-agent-study.md`,
+  `a8af31e`, with its 46 queries and outputs under `docs/research/queries/2026-09-23/`). It is
+  published to main with Deploy A. Its ranked blockers: (1) a Kalshi bunt is a one-loss trial;
+  (2) winners swept to a flat bunt; (3) the seat market held by 2-minute House mutations; (4)
+  replay anti-predicts the forward record and dead families are re-bred; (5) the loss engine
+  (foundry Kalshi crypto cards, hour-horizon taker bets, long premium); (6) compute on the clock
+  and the month ending tonight; (7) the lab never evaluates its LLM children; (8) the floor goes
+  dark (pause mode, wind-down spam, 37% inactive agent-hours); (9) the $500 Alpaca envelope idle;
+  (10) the inputs agents ask for do not exist (owner egress steps: EDGAR 8-K index or the Nasdaq
+  calendar, TSA, RCP, EIA).
