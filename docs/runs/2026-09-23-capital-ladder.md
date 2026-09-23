@@ -235,4 +235,19 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   identified blocker". The allocator then promoted it paper → bunt (E 1.0257, W_paper 1.052,
   4 settlements; a $10 stake at Kalshi).
 - 12:11:51Z — its first real trade: bought 2 KXDOGE15M-26SEP230815 at $0.76.
+- 12:21Z — watch:
+  - The new bunt's first real trade (2 KXDOGE15M at $0.76) settled at a $1.52 loss, 15% of its $10
+    stake. The book's existing per-desk rule ("desk daily loss 13.2% reached limit 10%; only
+    risk-reducing orders allowed") now holds it out of new entries for the day. Its E (about
+    0.87) is still above the allocator's 0.8585 exit line.
+  - This is a real interaction: a 10% daily-loss rule on a $10 stake freezes a bunt after one
+    small loss, before the allocator's own demotion lines can act. It is left unchanged. Loosening
+    a real-money risk rule is the owner's call (see "Decisions for the owner").
+  - Lab: after the 12:08Z restart only seeds and submissions were evaluated (104 in all; 0 of the
+    500 children).
+- 12:32:29Z — **Deploy 6** (#178): on the largest-group turn the lab builds the biggest waiting
+  groups' tapes first. After a restart the step's tape budget had gone, in queue order, to seeds
+  that each need their own tape, so the children's tapes were never built. Release
+  `20260923T123231Z-4c6c96522a1c`, promoted at 12:34:00Z. CI was green on both 3.11 and 3.14, which
+  supports reading the earlier 3.11 hangs on #176 as runner flakiness.
 
