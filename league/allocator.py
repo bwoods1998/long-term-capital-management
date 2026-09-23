@@ -439,14 +439,17 @@ class Allocator:
             if seated:
                 total += max(account.cash, ZERO) + held
                 if not account.funded or (account.swept and not account.holdings):
-                    total += self.target_stake(agent, "bunt")  # its stake is owed and will be lent
+                    # Its stake is owed and will be lent: exactly what `House.seat` lends (`seat_stake`:
+                    # a bunt's base x W_real on a re-seat, a swing's stake on rung 3), not the flat base
+                    # (review of #198, Sept 23, 2026: a $30 re-seat was reserved $25).
+                    total += self.seat_stake(agent)
             else:
                 buying = any(w.side == "buy" for w in book.open_orders(agent_id))
                 total += held + (max(account.cash, ZERO) if buying else ZERO)
         for agent in house.registry.living():
             # Seated on the real rung without an account on the book yet (its stake failed): reserved.
             if agent.venue == venue and agent.id not in seen and agent.id != exclude and house.evaluator.rung(agent.id) >= 2:
-                total += self.target_stake(agent, "bunt")
+                total += self.seat_stake(agent)
         return total
 
     def headroom(self, venue: str, *, exclude: str | None = None) -> Decimal:

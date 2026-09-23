@@ -779,6 +779,22 @@ class BuntGrowth(HouseCaseReal):
         self.assertEqual(alloc.board()["agents"][a.id]["target_usd"], "30.00")
         self.assertEqual(alloc.target_stake(a, "bunt"), D("25"))  # no evidence in hand: the stake at seating
 
+    def test_the_envelope_reserves_for_an_unfunded_seat_what_seat_will_lend(self):
+        """Review of #198 (Sept 23, 2026): `at_risk` reserved the flat base for a seat not yet funded while
+        `House.seat` lends `seat_stake` (base x W_real on a re-seat, a swing's stake on rung 3): $5 of a
+        $30 re-seat was not reserved. The reservation is what the seat will lend."""
+        a, book = self.bunted()
+        alloc, house = self.house.allocator, self.house
+        alloc._move_down(a, ev(agent=a.id, venue="alpaca", rung=2, e=0.5, w_real=1.2, real_trades=3), "paper", "test", {"moves": []})
+        self.assertTrue(book.account(a.id).swept)
+        alloc._evidence = {a.id: ev(agent=a.id, venue="alpaca", rung=2, e=1.1, w_real=1.2, real_trades=3)}
+        house.evaluator.promote(a.id, 2, "test: seated, its stake not yet lent")
+        others = alloc.at_risk("alpaca", exclude=a.id)
+        self.assertEqual(alloc.seat_stake(a), D("30.00"))
+        self.assertEqual(alloc.at_risk("alpaca") - others, D("30.00"))
+        alloc._evidence = {a.id: ev(agent=a.id, venue="alpaca", rung=2, e=1.1, w_real=0.8, real_trades=3)}
+        self.assertEqual(alloc.at_risk("alpaca") - others, alloc.seat_stake(a))  # the base: a loser's re-seat is unchanged
+
     def test_an_options_bunt_is_staked_eighty_dollars_with_a_forty_dollar_contract_limit(self):
         """A2a (Sept 23, 2026): at $40 the book's 50% rules held a contract to $20; at $80 one $40 contract fits."""
         agent = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
