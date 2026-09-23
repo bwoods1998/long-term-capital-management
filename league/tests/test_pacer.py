@@ -416,6 +416,7 @@ class IdleHands(HouseCase):
         super().setUp()
         self.house.researcher = object()
         self.house.settings.research = True
+        self.house.game["research"]["pace"] = {}  # idleness under test, not the record-based pace (test_house)
         self.agent = self.seated("idler", IDLER)
         self.house.economy.grant(self.agent.id, D("5"), "a purse to research from")
 

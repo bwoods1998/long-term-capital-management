@@ -2649,12 +2649,13 @@ class House:
         spend its time on, and every wake it sits out is a wake it did not learn from."""
         rules = self.game.get("research") or {}
         base = float(rules.get("min_hours_between", 6))
-        if agent is not None and self.idle_reason(agent):
+        idle = agent is not None and bool(self.idle_reason(agent))
+        if idle:
             base = min(base, float(rules.get("idle", {}).get("min_hours_between", 1)))
         base = min(base, max(1.0, base / 2)) if self.behind_the_clock("sail") else base
-        return base * self.research_pace(agent) if agent is not None else base
+        return base * self.research_pace(agent, idle=idle) if agent is not None else base
 
-    def research_pace(self, agent: Agent) -> float:
+    def research_pace(self, agent: Agent, *, idle: bool = False) -> float:
         """The share of the usual research interval this agent waits, from its own record.
 
         Winners run: an agent whose earned record is profitable researches at `winner_share` of the
@@ -2676,7 +2677,7 @@ class House:
             return float(pace.get("winner_share", 1.0))
         if row.get("rung", 0) >= 1 and seen >= int(pace.get("loser_min_observations", 5)) and growth < 0:
             return float(pace.get("loser_multiple", 1.0))
-        if seen == 0:
+        if seen == 0 and not idle:  # an idle agent's research is pulled forward, not put off
             return float(pace.get("unproven_multiple", 1.0))
         return 1.0
 

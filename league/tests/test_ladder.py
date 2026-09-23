@@ -151,7 +151,9 @@ class LadderTest(unittest.TestCase):
         self.clock.advance(73 * 3600)
         self.assertTrue(house._audit_due(agent))
         house.economy.charge(agent.id, house.economy.balance(agent.id) - D("0.10"), "test")
-        self.assertFalse(house._audit_due(agent))
+        self.assertTrue(house._audit_due(agent))  # the House pays for the audit (Sept 23, 2026)...
+        house.game["audit"]["house_pays"] = False
+        self.assertFalse(house._audit_due(agent))  # ...and an agent that pays must be able to
 
     def test_an_audit_that_never_ran_does_not_cost_the_agent_a_day(self):
         """A gate that fails shut is right. A gate that fails shut AND fines the agent a day at the

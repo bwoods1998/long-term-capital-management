@@ -123,6 +123,8 @@ class LivePath(unittest.TestCase):
 
     def test_attribution_is_checked_again_after_the_paid_audit(self):
         from league.evaluator import Verdict
+        from league.tests.test_audit_background import audit_before
+        audit_before(self)  # the audit-before path: the gates are read again after the paid audit
         f = self.fixture(ladder_cases.LadderTest)
         h = f.house
         self.funding(f)
@@ -184,6 +186,8 @@ class LivePath(unittest.TestCase):
         self.assertEqual(guard.live_pilot()['policy']['max_loss_usd'], '200')
 
     def test_expiry_while_audit_runs_cannot_admit_an_agent(self):
+        from league.tests.test_audit_background import audit_before
+        audit_before(self)  # the audit-before path: the window is read again after the audit
         f = self.fixture(); h = f.house
         guard = self.funding(f)
         agent = h.spawn('waiting', 'test', LADDER, reason='test', endowment='2.5')
