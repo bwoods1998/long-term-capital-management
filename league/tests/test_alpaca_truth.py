@@ -286,19 +286,22 @@ class TruthfulLimits(RealAlpaca):
         self.assertLessEqual(fitted[0] * ask, self.half_equity_less_a_cent(agent))
         self.assertGreaterEqual(fitted[0] * limit, D("10"))
 
-    def test_an_options_bunt_is_shown_twenty_dollars_and_only_contracts_the_book_takes(self):
+    def test_an_options_bunt_is_shown_forty_dollars_and_only_contracts_the_book_takes(self):
+        """A2a (Sept 23, 2026): staked `allocator.option_bunt_usd` $80, so one $40 contract fits under half its
+        equity (at $40 it was shown $19.99 and a chain of contracts up to 19 cents). The chain is filtered a
+        cent under the line (`_real_limits`), so it shows contracts up to 39 cents while the book takes $40."""
         self.real.option_chain = chain_of_f(self.clock)
         agent = self.bunt("options-breakout", seeds.load("options-breakout"), specialty="alpaca-options")
-        self.assertEqual(self.book.account(agent.id).staked, D("40"))
-        self.assertEqual(self.book.limits[agent.id].max_order_usd, D("40"))  # the seat's cap is unchanged
+        self.assertEqual(self.book.account(agent.id).staked, D("80"))
+        self.assertEqual(self.book.limits[agent.id].max_order_usd, D("40"))  # the seat's cap: half the stake
 
         ctx = self.house.snapshot(agent, self.book)
-        self.assertEqual(ctx["limits"], {"max_position_usd": 19.99, "max_order_usd": 19.99})
-        self.assertEqual([row["occ"] for row in ctx["chain"]], ["F261009C00013000"])  # only the $19 contract
+        self.assertEqual(ctx["limits"], {"max_position_usd": 39.99, "max_order_usd": 39.99})
+        self.assertEqual([row["occ"] for row in ctx["chain"]], ["F261009C00013000", "F261009C00013500"])  # the $19 and $25 contracts
 
         now = now_iso(self.clock)
-        for occ, bid, ask, takes in (("F261009C00013000", "0.17", "0.19", True), ("F261009C00013500", "0.23", "0.25", False),
-                                     ("F261009C00012500", "0.38", "0.40", False)):
+        for occ, bid, ask, takes in (("F261009C00013000", "0.17", "0.19", True), ("F261009C00013500", "0.23", "0.25", True),
+                                     ("F261009C00012500", "0.38", "0.40", True)):
             contract = instrument_for("alpaca", {"occ": occ})
             self.real.set_quote(contract, bid, ask)
             one = Intent.new(agent=agent.id, instrument=contract, side="buy", quantity="1", order_type="limit", limit_price=ask,

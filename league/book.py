@@ -61,6 +61,7 @@ from ltcm.broker import (
 )
 from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_at_risk, event_cluster, gross_exposure
 
+from .constitution import CONSTITUTION
 from .fees import QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
 
@@ -101,11 +102,12 @@ def text(value: Decimal | None) -> str | None:
 
 
 def step_of(instrument: Instrument, order_type: str = "market") -> Decimal:
-    """The smallest quantity increment the venue takes for this instrument."""
+    """The smallest quantity increment the venue takes for this instrument. An equity order is
+    fractional whether market or limit (Sept 23, 2026, A7: a limit order was held to whole shares,
+    so a $25 stock bunt could rest no bid at all; Alpaca takes a fractional limit order as a `day`
+    order, which `default_tif` gives and `Book.check` requires)."""
     if instrument.asset_class in ("event", "option", "future"):
         return ONE
-    if instrument.asset_class == "equity" and order_type == "limit":
-        return ONE  # fractional shares are for market orders; a limit order is whole shares
     return QTY_PLACES
 
 
@@ -213,10 +215,20 @@ class Intent:
 
 
 def default_tif(instrument: Instrument, order_type: str) -> str:
-    """Crypto and event orders have no trading day; a fractional equity market order must be `day`."""
+    """Crypto and event orders have no trading day; a fractional equity order, market or limit, must
+    be `day` (the venue's rule), and so every equity and option order is one."""
     if instrument.asset_class in ("crypto", "event"):
         return "gtc"
     return "day"
+
+
+def fractional_tif_reason(instrument: Instrument, quantity: Decimal, time_in_force: str) -> str | None:
+    """Why a fractional share order with this time in force cannot be sent: Alpaca takes a
+    fractional equity order, market or limit, as a `day` order only. The book, the practice
+    simulator and the adapter all refuse it before the venue would."""
+    if instrument.asset_class == "equity" and quantity != quantity.to_integral_value() and str(time_in_force) != "day":
+        return f"a fractional share order must be a day order, not {time_in_force} (the venue takes no other)"
+    return None
 
 
 @dataclass
@@ -422,6 +434,8 @@ class Book:
         sleep: Any = time.sleep,
         kill_switch: Any = None,
         event_capital_budget: Any = None,
+        band_of: Any = None,
+        halt_basis_usd: Any = None,
     ):
         self.name = name
         self.broker = broker
@@ -435,6 +449,14 @@ class Book:
         self.sleep = sleep
         self.kill_switch = kill_switch  # callable() -> bool
         self.event_capital_budget = event_capital_budget  # callable() -> explicit venue dollars, or None
+        #: The two facts the constitution's daily-loss keys (`allocator.bunt_daily_loss`,
+        #: `allocator.real_halt`; the owner's revision of Sept 23, 2026 ~16:00 UTC) need from the
+        #: House, read only on a real-money book: the agent's band under the allocator ("bunt",
+        #: "swing", or None when it has none) and this venue's grant capital in dollars (None when no
+        #: grant names it). Absent -- every practice book, the tests, the allocator switched off --
+        #: the book's own rules stand exactly as before.
+        self.band_of = band_of  # callable(agent) -> str | None
+        self.halt_basis_usd = halt_basis_usd  # callable() -> Decimal | None
         self.engine = RiskEngine()
         self.limits: dict[str, Limits] = {}
         self.accounts: dict[str, Account] = {}
@@ -852,6 +874,67 @@ class Book:
                     'remaining_by_market_usd': remaining}
 
     # -------------------------------------------------------------------- risk
+    def _desk_daily_loss(self, agent: str) -> tuple[Decimal, str | None]:
+        """(the per-desk daily-loss line `rule_daily_loss` holds this agent to, why it is not the
+        book's rule or None). A REAL-money BUNT under the allocator is held to the allocator's stay
+        drawdown and hysteresis instead of the book's `max_daily_loss_pct` (constitution
+        `allocator.bunt_daily_loss: "stay_drawdown"`, Sept 23, 2026: huang-h51fdd3-2, a $10 Kalshi
+        bunt down $1.52 on its first real trade, was frozen for the day at 12:21 UTC before the
+        allocator's own lines could act). The rule list in `ltcm/risk.py` is not forked: the line is
+        set where it cannot bind (a whole loss, which `rule_daily_loss` never reaches while the desk
+        has equity). Swings keep the book's rule, and so does every practice book."""
+        pct = money(self.rules["max_daily_loss_pct"])
+        if not self.real_money or self.band_of is None:
+            return pct, None
+        if str((CONSTITUTION.get("allocator") or {}).get("bunt_daily_loss") or "book") != "stay_drawdown":
+            return pct, None
+        try:
+            band = self.band_of(agent)
+        except Exception:  # noqa: BLE001 - a band the House cannot read keeps the book's rule
+            return pct, None
+        if band != "bunt":
+            return pct, None
+        return ONE, "stay_drawdown"
+
+    def halt_basis(self) -> Decimal | None:
+        """The dollars the real book's daily-loss halt is a share of when the constitution puts it on
+        the venue's grant capital (`allocator.real_halt` `basis: "venue_grant_capital"`, Sept 23,
+        2026: on the staked accounts' sum, one $25 bunt made it a $2.00 halt) and the House can say
+        what that capital is. None keeps the book's own basis, the staked accounts' equity at the
+        start of the day: every practice book, and a real book with no grant naming its venue."""
+        if not self.real_money or self.halt_basis_usd is None:
+            return None
+        rule = (CONSTITUTION.get("allocator") or {}).get("real_halt") or {}
+        if str(rule.get("basis") or "staked") != "venue_grant_capital":
+            return None
+        try:
+            basis = self.halt_basis_usd()
+        except Exception:  # noqa: BLE001 - a grant the House cannot read keeps the book's basis
+            return None
+        if basis is None or money(basis) <= 0:
+            return None
+        return money(basis)
+
+    def _halt_pct(self, basis: Decimal | None) -> Decimal:
+        if basis is None:
+            return money(self.rules["floor_max_daily_loss_pct"])
+        rule = (CONSTITUTION.get("allocator") or {}).get("real_halt") or {}
+        return money(rule.get("pct") or self.rules["floor_max_daily_loss_pct"])
+
+    def risk_lines(self, agent: str) -> dict[str, Any]:
+        """The daily-loss lines this book holds `agent` to now, for whatever publishes or reports the
+        limits (health, an agent's standing): the per-desk rule, or "stay_drawdown" when the
+        allocator's lines govern a real bunt instead, and the halt with its basis."""
+        pct, why = self._desk_daily_loss(agent)
+        basis = self.halt_basis()
+        return {
+            "desk_daily_loss_pct": None if why else float(pct),
+            "desk_daily_loss_rule": why or "book",
+            "halt_pct": float(self._halt_pct(basis)),
+            "halt_basis": "staked_accounts" if basis is None else "venue_grant_capital",
+            "halt_basis_usd": None if basis is None else float(basis),
+        }
+
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules
         return SimpleNamespace(
@@ -869,7 +952,7 @@ class Book:
                 max_position_pct=money(r["max_position_pct"]),
                 max_gross_pct=money(r["max_gross_pct"]),
                 max_order_notional_pct=money(r["max_order_notional_pct"]),
-                max_daily_loss_pct=money(r["max_daily_loss_pct"]),
+                max_daily_loss_pct=self._desk_daily_loss(agent)[0],
                 max_orders_per_day=int(limits.max_orders_per_day),
                 max_limit_deviation_pct=money(r["max_limit_deviation_pct"]),
             ),
@@ -924,6 +1007,9 @@ class Book:
         step = step_of(intent.instrument, intent.order_type)
         if (intent.quantity / step) % 1 != 0:
             reasons.append(f"quantity {intent.quantity} is not a multiple of {step}")
+        fractional_tif = fractional_tif_reason(intent.instrument, intent.quantity, intent.time_in_force)
+        if fractional_tif:
+            reasons.append(fractional_tif)
         positions = {
             key: Position(h.instrument, h.quantity, h.average_cost, self.marks.get(key))
             for key, h in account.holdings.items()
@@ -931,6 +1017,17 @@ class Book:
         capabilities = set(self.broker.capabilities()) - {"short"}  # the live account cannot short
         equity = self.equity(intent.agent)
         floor_equity = self.total_equity()
+        floor_daily_pnl = sum((self._day_pnl(a, now) for a in list(self.accounts)), ZERO)
+        event_floor_capital = self.event_floor_capital()
+        halt_basis = self.halt_basis()
+        if halt_basis is not None:
+            # `rule_floor_loss` divides the day's loss by the floor's equity at the start of the day
+            # (floor_equity - floor_daily_pnl): with the venue's grant capital as that start the halt
+            # is `real_halt.pct` of the grant. The event concentration caps keep reading the staked
+            # accounts' equity where no explicit event capital replaces it.
+            if event_floor_capital is None and floor_equity > 0:
+                event_floor_capital = floor_equity
+            floor_equity = halt_basis + floor_daily_pnl
         reservations = self._reservations(pending)
         if not reducing and any(side == "buy" and price <= 0 for _, _, side, _, price, _ in reservations):
             reasons.append("an outstanding buy cannot be priced; new entries wait until its commitment is known")
@@ -961,8 +1058,8 @@ class Book:
             desk_daily_pnl=self._day_pnl(intent.agent, now),
             desk_orders_today=self.orders_today.get((intent.agent, now[:10]), 0),
             floor_equity=floor_equity,
-            floor_daily_pnl=sum((self._day_pnl(a, now) for a in list(self.accounts)), ZERO),
-            floor_max_daily_loss_pct=money(self.rules["floor_max_daily_loss_pct"]),
+            floor_daily_pnl=floor_daily_pnl,
+            floor_max_daily_loss_pct=self._halt_pct(halt_basis),
             kill_switch=bool(self.kill_switch and self.kill_switch()),
             market_open=self.market_open(intent.instrument, now) if self.market_open else None,
             adv_usd=None,
@@ -975,10 +1072,13 @@ class Book:
             max_event_market_floor_pct=money(self.rules["max_event_market_floor_pct"]),
             max_event_cluster_floor_pct=money(self.rules["max_event_cluster_floor_pct"]),
             floor_event_exposure=floor_event_exposure,
-            event_floor_capital=self.event_floor_capital(),
+            event_floor_capital=event_floor_capital,
         )
         decision = self.engine.check(order_intent, ctx)
-        reasons.extend(decision.reasons)
+        for reason in decision.reasons:
+            if halt_basis is not None and reason.startswith("floor daily loss"):
+                reason += f" of the {self.broker.venue} grant capital ${halt_basis:.2f} (constitution allocator.real_halt)"
+            reasons.append(reason)
         # The league's own rules.
         reference = decision.reference_price
         notional = decision.notional
@@ -1578,12 +1678,19 @@ class Book:
         quantity grid, so the last part is never a crumb. Where the venue has a minimum order ($10
         for Alpaca crypto, `venues.min_order_usd`) and equal parts would fall under it, parts are
         merged: one order a little over the cap -- an exit, which the gateway lets through -- rather
-        than an order the venue refuses. A single unit worth more than the cap (a whole share of a
-        limit order, an option contract) cannot be cut, and goes as one unit."""
+        than an order the venue refuses. A single unit worth more than the cap (a whole share of an
+        equity order that is not a `day` order, an option contract) cannot be cut, and goes as one
+        unit: an exit, which the gateway lets through its cap."""
         from .venues import min_order_usd  # the venue's own rule, kept with the venue's others
 
         instrument = intent.instrument
         step = step_of(instrument, intent.order_type)
+        if instrument.asset_class == "equity" and str(intent.time_in_force) != "day":
+            # A fractional share order is a `day` order only (`fractional_tif_reason`): a gtc exit is
+            # cut on whole shares, never into fractional slices the venue, the adapter and this book's
+            # own `check` on the next pass would all refuse (review of A7, Sept 23, 2026: a 2-share gtc
+            # limit exit at $95 went out as three 0.67-share gtc slices).
+            step = ONE
         price = self._cap_price(instrument, intent.order_type, intent.limit_price, quote)
         if price is None:
             return available

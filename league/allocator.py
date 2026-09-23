@@ -271,6 +271,10 @@ def _params() -> dict[str, Any]:
         "throttle": dict(r.get("throttle") or {"halve_below": -0.30, "restore_above": -0.15}),
         "bunt_usd": {k: _d(v) for k, v in (r.get("bunt_usd") or {"kalshi": "10", "alpaca": "15"}).items()},
         "profit_indexed_envelope": bool(r.get("profit_indexed_envelope", True)),
+        # The learn-and-unblock run (Sept 23, 2026 ~16:00 UTC): a bunt keeps what it makes, and an
+        # options bunt is staked one affordable contract. See the constitution for the evidence.
+        "bunt_growth": str(r.get("bunt_growth") or "flat"),
+        "option_bunt_usd": _d(r.get("option_bunt_usd") or CONSTITUTION["rungs"]["2"]["option_max_position_usd"]),
     }
 
 
@@ -309,6 +313,20 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
         return "bunt", (f"E {ev.e:.4f} or W_real {ev.w_real:.4f} fell below the swing band's floor "
                         f"({p['swing_at'] * p['hysteresis']:.4f} / {p['swing_exit_w_real']:g})")
     return "swing", "holds the swing band"
+
+
+def bunt_stake(ev: Evidence | None, base: Decimal, p: Mapping[str, Any]) -> Decimal:
+    """A bunt's target stake. Under `bunt_growth: "w_real"` it is `base x clamp(W_real, 1, swing_at)`:
+    a bunt keeps what it makes, up to the swing line, and what it loses comes off its stake (`_size`
+    never tops a bunt with W_real under 1 back up). Without evidence in hand -- the stake at seating,
+    an unfunded seat counted at risk -- or under `"flat"`, it is `base` (Sept 23, 2026: the flat rule
+    had swept mullins-2, the floor's best real record at W_real 1.158, down to a $5.11 stake)."""
+    if ev is None or p["bunt_growth"] != "w_real":
+        return base
+    scale = min(max(float(ev.w_real), 1.0), float(p["swing_at"]))
+    if scale <= 1.0:
+        return base
+    return (base * _d(round(scale, 6))).quantize(CENT, rounding=ROUND_DOWN)
 
 
 def swing_stake(ev: Evidence, venue_capital: Decimal, p: Mapping[str, Any]) -> Decimal:
@@ -421,14 +439,17 @@ class Allocator:
             if seated:
                 total += max(account.cash, ZERO) + held
                 if not account.funded or (account.swept and not account.holdings):
-                    total += self.target_stake(agent, "bunt")  # its stake is owed and will be lent
+                    # Its stake is owed and will be lent: exactly what `House.seat` lends (`seat_stake`:
+                    # a bunt's base x W_real on a re-seat, a swing's stake on rung 3), not the flat base
+                    # (review of #198, Sept 23, 2026: a $30 re-seat was reserved $25).
+                    total += self.seat_stake(agent)
             else:
                 buying = any(w.side == "buy" for w in book.open_orders(agent_id))
                 total += held + (max(account.cash, ZERO) if buying else ZERO)
         for agent in house.registry.living():
             # Seated on the real rung without an account on the book yet (its stake failed): reserved.
             if agent.venue == venue and agent.id not in seen and agent.id != exclude and house.evaluator.rung(agent.id) >= 2:
-                total += self.target_stake(agent, "bunt")
+                total += self.seat_stake(agent)
         return total
 
     def headroom(self, venue: str, *, exclude: str | None = None) -> Decimal:
@@ -483,13 +504,16 @@ class Allocator:
         base = p["bunt_usd"].get(agent.venue, _d("10"))
         niche = self.house.niche_of(agent)
         if niche is not None and niche.asset_class == "option":
-            # One option contract cannot be cut smaller: an options bunt is one contract's premium.
-            base = max(base, _d(CONSTITUTION["rungs"]["2"]["option_max_position_usd"]))
+            # One option contract cannot be cut smaller: an options bunt is one contract's premium,
+            # and since Sept 23, 2026 (A2a) `option_bunt_usd`, $80: the book holds a position and an
+            # order to half the account's equity, so at $40 the $40 contract the bunt was staked for
+            # could never be bought and the chain was filtered at contracts the book refused.
+            base = max(base, p["option_bunt_usd"])
             p = {**p, "bunt_usd": {**p["bunt_usd"], agent.venue: base}}
         if band in ("swing", "star") and ev is not None:
             stake = swing_stake(ev, self.capital(agent.venue), p)
         else:
-            stake = base
+            stake = bunt_stake(ev, base, p)
         if self.state.get("throttle"):
             # Halved, but never under the smallest stake that can still trade: a position is at most
             # `position_share` of the stake and must hold the venue's minimum order (x1.2), or the
@@ -508,6 +532,31 @@ class Allocator:
     def limits(self, agent: Any, staked: Decimal) -> tuple[Decimal, Decimal]:
         target = self.seat_stake(agent)
         return limits_for(max(staked, target) if staked > 0 else target, agent.venue)
+
+    # ---------------------------------------------------- facts for the books
+    def band_of(self, agent_id: str) -> str | None:
+        """The band an agent stands in, for the real book's daily-loss rule (constitution
+        `allocator.bunt_daily_loss`): "bunt" on rung 2, "swing" on rung 3 (a star is a swing), None
+        below real money or while the allocator is off, when the book's own rule stands. The rung is
+        read, not the board: a promotion, a demotion by drift or a veto moves the rung at once and
+        the board only at the next pass."""
+        if not enabled():
+            return None
+        rung = self.house.evaluator.rung(agent_id)
+        return band_of_rung(rung) if rung >= 2 else None
+
+    def halt_basis_usd(self, venue: str) -> Decimal | None:
+        """The venue's grant capital, the real book's daily-loss halt basis under the constitution's
+        `allocator.real_halt` ($517.75 Kalshi, $500 Alpaca on Sept 23, 2026: 8% is $41.42 and $40.00,
+        per venue). None while the allocator is off or no grant names the venue, when the book keeps
+        its own basis. The grant's capital, not the profit-indexed envelope: a halt line that grows
+        with the day's winners is not a halt."""
+        if not enabled():
+            return None
+        caps = ((self.grant() or {}).get("policy") or {}).get("venue_capital_usd") or {}
+        if venue not in caps:
+            return None
+        return _d(caps[venue])
 
     def context(self, ev: Evidence, band: str) -> dict[str, Any]:
         """The allocation an audit judges capacity against: the stake and limits the move would take,
@@ -641,7 +690,7 @@ class Allocator:
     def _bunt(self, agent: Any, ev: Evidence, why: str, p: Mapping[str, Any], summary: dict[str, Any], displaced_at: set[str]) -> None:
         house = self.house
         venue = agent.venue
-        stake = self.target_stake(agent, "bunt")
+        stake = self.target_stake(agent, "bunt", ev)  # what `seat` will lend: the same target
         source = house.book_of(agent)
         if source is not None and not source.evidence_integrity(agent.id)["ok"]:
             house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "accounting_integrity",
@@ -775,6 +824,12 @@ class Allocator:
         if abs(delta) < max(equity, Decimal(1)) * _d(p["min_stake_change"]):
             return None
         if delta > 0:
+            if band == "bunt" and p["bunt_growth"] == "w_real" and ev.w_real < 1.0:
+                # A losing bunt is not refilled (Sept 23, 2026): its stake shrinks by what it lost,
+                # and the stay drawdown, hysteresis and death decide the rest. Under the flat rule a
+                # $10 bunt down to $9 was topped back up to $10 at every pass the loss cleared
+                # `min_stake_change`. The stake at seating is `House.seat`'s, not this.
+                return None
             room = self.headroom(agent.venue)
             delta = min(delta, max(room, ZERO)).quantize(CENT, rounding=ROUND_DOWN)
             if delta <= 0 or delta < max(equity, Decimal(1)) * _d(p["min_stake_change"]):
@@ -837,14 +892,16 @@ class Allocator:
             rung = house.evaluator.rung(agent.id)
             ev = evid.get(agent.id)
             band = band_of_rung(rung)
-            stake = None
+            stake = target = None
             if rung >= 2:
                 book = house.book_of(agent)
                 if book is not None and agent.id in book.accounts:
                     stake = max(book.account(agent.id).staked, ZERO)
+                if ev is not None:  # the target the stake follows: the same number `seat_stake`, `limits` and `context` use
+                    target = str(self.target_stake(agent, "swing" if rung >= 3 else "bunt", ev))
             if rung >= 3 and ev is not None and ev.w_real >= p["star_min_w_real"]:
                 swings.append((ev.real_pnl, agent.id))
-            agents[agent.id] = {"band": band, "stake_usd": stake, "evidence": ev.row() if ev else None,
+            agents[agent.id] = {"band": band, "stake_usd": stake, "target_usd": target, "evidence": ev.row() if ev else None,
                                 "venue": agent.venue, "last_move": None}
         for _, agent_id in sorted(swings, reverse=True)[:p["stars"]]:
             agents[agent_id]["band"] = "star"

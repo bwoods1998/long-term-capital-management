@@ -372,6 +372,11 @@ class AlpacaBroker:
         }
         if intent.limit_price is not None:
             body["limit_price"] = text(intent.limit_price)
+        if intent.instrument.asset_class == "equity" and money(intent.quantity) % 1 != 0 and intent.time_in_force != "day":
+            # Alpaca takes a fractional share order, market or limit, as a `day` order only (Sept 23,
+            # 2026, A7: fractional one-day limit orders for the stock bunts). The quantity is sent as
+            # given, never rounded: `qty` above is the intent's own text.
+            raise RejectedOrder(f"alpaca: a fractional share order must be a day order, not {intent.time_in_force}")
         if intent.instrument.asset_class == "option":
             # Long premium only: an option is opened by buying it and closed by selling it. The
             # venue enforces the intent (a sell_to_close with nothing to close is rejected), and

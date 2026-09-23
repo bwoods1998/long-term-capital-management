@@ -228,10 +228,29 @@ CONSTITUTION: dict[str, Any] = {
         # `position_share`), and Alpaca takes no crypto order under $10 -- so a $15 bunt could never
         # trade crypto (measured in `test_allocator`, Sept 23: "order notional 10.80 exceeds 50% of
         # desk equity"). $25 leaves a $10 order room for its fee and a price step.
-        "bunt_usd": {"kalshi": "10", "alpaca": "25"},
+        # Kalshi 30, not 10 (the learn-and-unblock run, Sept 23, 2026 ~17:00 UTC, from the agent
+        # study's evidence, inside the table's $10-$30): a $10 bunt was a one-loss trial. With
+        # `position_share` 0.5 it may hold a $5 position, and any lost position over 15.4% of the
+        # stake ($1.54) drops E below the hysteresis line 0.8585 (bunt_at 1.01 x 0.85) and sends the
+        # agent back to paper: huang-h427345 was demoted after one -$2.55 settlement (14:57Z), and
+        # mullins-2, 10 of 10 winning real settlements (+$4.89 as a maker on weather favourites), had
+        # been swept from $60 to $5.11 of equity, where its next miss is -57%. The allocator swept
+        # $144.19 of bunt equity to cash in 13 moves that day. At $30 a typical Kalshi position
+        # ($2.70, meriwether's sports bet) is a -9% loss and a bunt survives several. The grant's
+        # seats follow the smallest bunt (`live_trading.policy`: floor($1,017.75 / $25) = 40).
+        "bunt_usd": {"kalshi": "30", "alpaca": "25"},
         "venue_minimum_usd": {"kalshi": "1", "alpaca": "10"},
-        "swing_at": 1.5, "swing_min_real_trades": 8, "swing_min_w_real": 1.0, "swing_exit_w_real": 0.9,
-        "kappa": 1.0, "e_cap": 20, "max_share_of_venue": 0.6, "position_share": 0.5,
+        # 1.25, not 1.5 (same revision, inside the table's 1.25-1.5): at their historic rates the only
+        # two earners needed 2.8 days (mullins-2, +0.0147 log W_real a settlement, 17 more wins) and
+        # 5.6 days (mullins-6) to reach E 1.5, and nobody else had a rate. The first swing is still
+        # audited on the real record and the swing stake is sized by E, so a thin E buys a small
+        # swing. `swing_min_real_trades` stays 8.
+        "swing_at": 1.25, "swing_min_real_trades": 8, "swing_min_w_real": 1.0, "swing_exit_w_real": 0.9,
+        # kappa 2, not 1 (same revision, inside the table's 1-2): the swing stake is `bunt_usd x
+        # E^kappa`, capped at `max_share_of_venue` of the venue, so winners compound exponentially in
+        # the evidence, the owner's direction. No swing existed on Sept 23, so it has no effect until
+        # one is earned.
+        "kappa": 2.0, "e_cap": 20, "max_share_of_venue": 0.6, "position_share": 0.5,
         "stars": 3, "star_min_w_real": 1.25,
         # An agent back on paper from real money waits this long before it may bunt again, so a
         # record near a line cannot flap between books (and pay a sweep and a fresh stake) at every
@@ -242,6 +261,44 @@ CONSTITUTION: dict[str, Any] = {
         "min_stake_change": 0.10,
         "performance_fee_share": 0.2,
         "profit_indexed_envelope": True,
+        # Owner revision, Sept 23, 2026 ~16:00 UTC, the learn-and-unblock run (docs/goals/
+        # LTCM_LEARN_AND_UNBLOCK.md, "Money-rule bounds for this run"): "make this 10 hour run about
+        # learning as much as possible about our agents and whats blocking exponentially profitable
+        # 24:7 recursively self improving trading agent swarm and unblocking those things ... being
+        # bold and ambitious and not afraid to take risks both in our approach and the agents (im fine
+        # with volatility and lose on my portfolio to achieve the north star goal)". The four keys
+        # below carry that table's rows; `league/book.py` and `target_stake` read them.
+        #
+        # `bunt_daily_loss`: a REAL-money bunt is governed by the allocator's stay drawdown
+        # (`real_drawdown_demote`, unchanged) and hysteresis, not by the book's per-desk daily-loss
+        # rule (`book.DEFAULT_RULES` max_daily_loss_pct 0.10, unchanged for swings and for every
+        # practice book). Measured 12:21 UTC Sept 23: huang-h51fdd3-2, a $10 Kalshi bunt, lost $1.52
+        # on its first real trade (15% of its stake) and the book froze it for the day ("desk daily
+        # loss 13.2% reached limit 10%; only risk-reducing orders allowed") before the allocator's own
+        # demotion lines could act. `"book"` restores the book's rule for bunts.
+        "bunt_daily_loss": "stay_drawdown",
+        # `real_halt`: the real book's daily-loss halt (`book.DEFAULT_RULES` floor_max_daily_loss_pct
+        # 0.08) was measured on the sum of the staked accounts: with one $25 bunt staked, a $2.00 halt,
+        # tighter than the per-agent line. Now `pct` of THAT venue's grant capital, per venue ($517.75
+        # Kalshi -> $41.42, $500 Alpaca -> $40.00), never the combined envelope applied to one venue,
+        # never the staked sum on a real book. Practice books keep the staked-sum basis; `basis:
+        # "staked"` restores it on real books.
+        "real_halt": {"basis": "venue_grant_capital", "pct": "0.08"},
+        # `bunt_growth`: a bunt keeps what it makes. Its target stake is `bunt_usd x clamp(W_real, 1,
+        # swing_at)` instead of the flat `bunt_usd` (`"flat"` restores that): profit stays in the
+        # stake up to the swing line, above it the rest is swept as before, and a bunt whose W_real
+        # is below 1 is never topped back up (its stake shrinks by what it lost; the stay drawdown,
+        # hysteresis and death decide the rest). Measured 16:21 UTC Sept 23: mullins-2 and mullins-6,
+        # the floor's only real earners, had been swept from $60 toward $10 by the flat rule --
+        # mullins-2 held a $5.11 stake at E 1.178 (W_real 1.158), mullins-6 $36.70 at E 1.055.
+        "bunt_growth": "w_real",
+        # `option_bunt_usd`: an options bunt is staked this much (proposal A2a; the table allows up
+        # to $80). At the old max(bunt_usd, rungs.2.option_max_position_usd) = $40 the book's
+        # 50%-of-equity position and order rules held a contract to $20, so the chain was filtered at
+        # contracts the book refused (docs/proposals/2026-09-23-alpaca-stocks-and-level-3-options.md,
+        # blocker 6). At $80 one $40 contract fits under half the stake, inside the $500 Alpaca
+        # envelope and under the $75 order cap.
+        "option_bunt_usd": "80",
     },
 }
 
@@ -284,4 +341,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '9fa83727aabd720e7d937eb5ed4aaab19f4a0454af818d8a6f8e4abe83eb4416'
+PINNED_DIGEST = '52c6c7e547fbaee0cbb701521bd860b604c7e62686c88b23911cc2e475195292'
