@@ -257,7 +257,12 @@ status is exposed in health and agent research context; qualification is distinc
    is full, a newcomer displaces the worst agent that has had a fair chance, which is never one on
    real money, never a profitable one, and never one that has traded while an idle one remains.
    Paper equity and option agents begin their grace period at their first offered trading
-   opportunity, so a weekend birth does not exhaust the grace before the market opens.
+   opportunity, so a weekend birth does not exhaust the grace before the market opens. Since
+   Sept 23, 2026 that grace is counted in regular-session time (`house.session_time`); one that is
+   trading, hourly or daily, keeps its seat until it has closed the allocator's `bunt_min_trades`
+   or had `displace_trading_after_sessions` (game.json, 3) sessions; one holding a stock or
+   contract while the market is shut is not removed before the open; and a rewrite of one that
+   has never traded does not restart its clock.
    Since Sept 23, 2026 every birth of this step (forks, founders, merged strategies, the refill)
    holds the probe box for the whole step, where each birth reads its NEEDS. When background work
    has that box, the step waits at most `probe_wait_seconds` (15 s) and the births are deferred to

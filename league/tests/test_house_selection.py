@@ -4,15 +4,25 @@ from league.tests.test_house import BUYER, HouseCase
 
 class SelectionOpportunity(HouseCase):
     def test_paper_equity_grace_starts_with_its_first_tradable_wake(self):
+        """And is counted in regular-session time (Sept 23, 2026): the market is shut from the
+        close to the next open, and a weekend wake offers nothing either."""
+        from league.tests.test_stock_desk_seats import ts
+
+        self.clock.now = ts("2026-09-18T22:00:00Z")  # a Friday evening
         agent = self.seated("stocks", BUYER.replace('"BTC/USD"', '"SPY"'))
         rules = self.house.game["economy"]
         grace = float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"])
-        self.clock.advance(3 * 86400)
+        self.clock.advance(86400)  # Saturday: every wake is shut
         self.house.ledger.append("agent.woke", {"ok": True, "offered": 0, "shut": 30}, agent=agent.id)
         self.assertIsNone(self.house._weakest(rules))
+        self.clock.now = ts("2026-09-21T13:30:00Z")  # Monday's open
         self.house.ledger.append("agent.woke", {"ok": True, "offered": 1}, agent=agent.id)
         self.assertIsNone(self.house._weakest(rules))
-        self.clock.advance(grace + 1)
+        self.clock.advance(grace + 1)  # twelve wall-clock hours: 6.5 of them were a session
+        self.assertIsNone(self.house._weakest(rules))
+        self.clock.now = ts("2026-09-22T13:30:00Z") + grace - 6.5 * 3600 - 1
+        self.assertIsNone(self.house._weakest(rules))
+        self.clock.advance(2)  # twelve session hours: 6.5 on Monday, 5.5 on Tuesday
         self.assertEqual(self.house._weakest(rules).id, agent.id)
 
     def test_crypto_tournament_keeps_its_existing_grace(self):
@@ -45,19 +55,26 @@ class SelectionOpportunity(HouseCase):
                                   params=agent.params, reason="duplicate receipt")
         self.assertEqual(self.house._weakest(rules).id, agent.id)
 
-    def test_old_equity_opportunity_does_not_age_a_replacement_strategy(self):
+    def test_old_equity_opportunity_does_not_age_a_replacement_strategy_of_a_trader(self):
+        """A trader's new program has not had the old one's opportunity. (An agent that never traded
+        keeps its old clock through a rewrite: test_stock_desk_seats, Sept 23, 2026.)"""
+        from league.tests.test_stock_desk_seats import ts
+
+        self.clock.now = ts("2026-09-21T13:30:00Z")
         agent = self.seated("stocks", BUYER.replace('"BTC/USD"', '"SPY"'))
         rules = self.house.game["economy"]
-        grace = float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"])
         self.house.ledger.append("agent.woke", {"ok": True, "offered": 1}, agent=agent.id)
-        self.clock.advance(grace + 1)
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "symbol": "SPY", "side": "buy",
+                                               "quantity": "0.05", "price": "500"}, agent=agent.id)
+        self.clock.now = ts("2026-09-23T13:30:00Z")
         self.house.registry.adopt(agent.id, code=agent.code + "\n# new program\n", needs=agent.needs,
                                   params=agent.params, reason="empty-record replacement")
-        self.clock.advance(grace + 1)
+        self.clock.now = ts("2026-09-25T20:00:00Z")
         self.assertIsNone(self.house._weakest(rules))
+        self.clock.now = ts("2026-09-28T13:30:00Z")
         self.house.ledger.append("agent.woke", {"ok": True, "offered": 1}, agent=agent.id)
         self.assertIsNone(self.house._weakest(rules))
-        self.clock.advance(grace + 1)
+        self.clock.now = ts("2026-09-29T19:00:01Z")  # twelve session hours after its first open-market wake
         self.assertEqual(self.house._weakest(rules).id, agent.id)
 
 
