@@ -1,5 +1,5 @@
 {
-  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
+  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py. Sept 23, 2026 (the seat market follows evidence): economy.losing_family_min_blocks (6) is the pooled active forward blocks after which a family with a negative record is not bred again by a House mutation, parameter fork or revival (analyst B: 44 births followed evidence deaths in two families, every family with two forward-tested passes negative); economy.seat_waiters_warning (8) is the number of newcomers waiting for seats past which, after an hour, the House warns.",
   "economy": {
     "epoch_seconds": 21600,
     "daily_pool_usd": "0.50",
@@ -25,7 +25,9 @@
     "displace_after_epochs": 2,
     "displace_trading_after_sessions": 3,
     "line_exhausted_trials": 15,
-    "explore_every": 5
+    "explore_every": 5,
+    "losing_family_min_blocks": 6,
+    "seat_waiters_warning": 8
   },
   "bounds": {
     "daily_pool_usd": [
