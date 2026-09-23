@@ -82,6 +82,32 @@ QUIET_DESK_SECONDS = 3600.0
 QUIET_DESK_WAKES = 3
 #: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
 REAL_BOOKS = ("kalshi", "alpaca")
+#: A reconcile that fails is read once more after this many seconds and a fresh poll, before it is
+#: called a mismatch (`reconcile_with_second_look`).
+SECOND_LOOK_SECONDS = 3.0
+
+
+def reconcile_with_second_look(book: Any) -> Any:
+    """`book.reconcile()`, and when it fails, one more look after a short wait and a fresh poll.
+
+    A fill in flight is not a mismatch. Measured Sept 23, 2026 at 21:48:57Z: haghani-37's marketable
+    LINK/USD limit sell on the practice account filled seconds after the mark pass's poll, the venue's
+    positions and cash already showed it while its orders endpoint did not, and the reconcile read
+    "cash differs by 40.0116; positions differ: LINK -3.262934654". The fill was booked one poll
+    later, but the error alert inside the deploy's watch rolled Deploy B back. A mismatch that is
+    still there on the second look is real and stands (the book stays frozen, the alert is raised).
+    """
+    result = book.reconcile()
+    if result.ok or not book.open_orders():
+        return result  # with no order working, nothing can be in flight: the mismatch stands as read
+    # The second look re-reads the same pass: it must not count twice toward a practice book's
+    # adoption of the venue (`Book.reconcile`, ADOPT_AFTER consecutive failed readings).
+    counted = getattr(book, "_unreconciled", None)
+    if isinstance(counted, int) and counted > 0:
+        book._unreconciled = counted - 1
+    book.sleep(SECOND_LOOK_SECONDS)
+    book.poll()
+    return book.reconcile()
 CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
 #: An agent's resting entries are cancelled once none of its wakes has completed on their book for
 #: this many of its own wake intervals, and never sooner than `STALE_FLOOR_SECONDS` (see
@@ -5176,7 +5202,7 @@ class House:
             try:
                 book.poll()
                 book.mark()
-                result = book.reconcile()
+                result = reconcile_with_second_look(book)
                 summary["reconciled"][name] = result.ok
                 if not result.ok:
                     # A few cents short on a PAPER book, with every position agreeing, is the venue's
