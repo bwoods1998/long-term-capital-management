@@ -202,6 +202,7 @@ class FakeSail:
         self.failing: dict[str, BaseException] = {}  # method name -> what it raises (until removed)
         self.answer = self.honest  # how `exec` answers: (box, argv, spec) -> (stdout, stderr, code)
         self.execs: list[dict] = []
+        self.timeouts: list[tuple] = []  # (call, path, timeout) the sandbox asked for
         self._n = 0
 
     # -- scripting
@@ -246,13 +247,14 @@ class FakeSail:
         self._call("get", box)
         return {"sailbox_id": box, "status": self._box(box)["status"]}
 
-    def resume(self, box):
+    def resume(self, box, *, timeout=None):
         self._call("resume", box)
         self._box(box)["status"] = "running"
         return {}
 
-    def upload(self, box, path, content, *, mode=0o600):
+    def upload(self, box, path, content, *, mode=0o600, timeout=None):
         self._call("upload", box, path, mode)
+        self.timeouts.append(("upload", path, timeout))
         state = self._box(box)
         if state["status"] != "running":
             raise Boom(f"409: {box} is {state['status']}")
