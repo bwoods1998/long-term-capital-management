@@ -1,12 +1,15 @@
 """The Alpaca adapter: request shapes, string-typed money, status mapping, UnknownOutcome."""
 
+import time
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
 from ltcm.broker import Instrument, OrderIntent, RejectedOrder, UnknownOutcome, VenueUnavailable
 from ltcm.data import TransportError
 from ltcm.adapters import AlpacaCredentials, GatewaySigner, PURPOSE_HEADER, VenueClient
 from ltcm.adapters.alpaca import (
+    ASSET_RETRY_SECONDS,
     DATA_BASE,
     LIVE_BASE,
     PAPER_BASE,
@@ -343,6 +346,90 @@ class SubmitTests(unittest.TestCase):
         with self.assertRaises(RejectedOrder) as caught:
             client.submit(intent())
         self.assertIn("insufficient buying power", str(caught.exception))
+
+    def test_a_403_or_401_to_the_order_post_is_a_rejection_with_the_venues_message(self):
+        # Measured Sept 20-22, 2026: both of these came back as HTTP 403, and were booked `unknown`.
+        for status, body, said in (
+            (403, b'{"code": 40310000, "message": "cost basis must be >= minimal amount of order 10"}', "minimal amount of order 10"),
+            (403, b'{"code": 40310000, "message": "insufficient balance for AVAX (requested: 2, available: 1.5)"}', "insufficient balance for AVAX"),
+            (401, b'{"message": "unauthorized."}', "unauthorized."),
+        ):
+            with self.subTest(status=status, said=said):
+                client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): (status, {}, body)})
+                with self.assertRaises(RejectedOrder) as caught:
+                    client.submit(intent(instrument=BTC, quantity="0.0001"))
+                self.assertNotIsInstance(caught.exception, VenueUnavailable)
+                self.assertIn(f"HTTP {status}", str(caught.exception))
+                self.assertIn(said, str(caught.exception))
+                self.assertEqual([call["method"] for call in transport.calls], ["POST"])  # no retry, no lookup
+
+    def test_the_gateways_own_403_on_an_order_is_a_rejection_too(self):
+        gateway = "https://gateway.test"
+        refusal = (403, {}, b'{"error": "The order would exceed the per-order cap.", "cap": "order"}')
+        transport = FakeTransport({("POST", gateway + "/v1/alpaca/v2/orders"): refusal})
+        client = VenueClient(transport, gateway_url=gateway, gateway=GatewaySigner("x" * 40), venue="alpaca")
+        adapter = AlpacaBroker(AlpacaCredentials("placeholder", "placeholder", paper=False), client=client)
+        with self.assertRaises(RejectedOrder) as caught:
+            adapter.submit(intent())
+        self.assertIn("per-order cap", str(caught.exception))
+
+    def test_a_403_on_a_read_is_still_venue_unavailable(self):
+        client, _ = broker({PAPER_BASE + "/v2/orders:by_client_order_id*": (403, {}, b'{"message": "forbidden"}')})
+        with self.assertRaises(VenueUnavailable):
+            client.get_order("ord-" + "a" * 32)
+
+
+class AssetTests(unittest.TestCase):
+    #: The shape of Alpaca's asset record for a crypto pair (docs.alpaca.markets, "Get an asset").
+    RECORD = {
+        "id": "276e2673-764b-4ab6-a611-caf665ca6340", "class": "crypto", "exchange": "CRXL", "symbol": "BTC/USD",
+        "name": "Bitcoin", "status": "active", "tradable": True, "fractionable": True,
+        "min_order_size": "0.0001", "min_trade_increment": "0.000000001", "price_increment": "1",
+    }
+
+    def test_a_pairs_record_is_read_once_and_its_increments_are_decimals(self):
+        client, transport = broker({PAPER_BASE + "/v2/assets/BTC%2FUSD": self.RECORD})
+        facts = client.asset("BTC-USD")
+        self.assertEqual(facts, {"price_increment": Decimal("1"), "min_order_size": Decimal("0.0001"),
+                                 "min_trade_increment": Decimal("0.000000001")})
+        self.assertEqual(client.asset("btc/usd"), facts)  # one pair, however it is spelled
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(transport.last["path"], "/v2/assets/BTC%2FUSD")
+
+    def test_the_older_spelling_is_asked_when_the_pair_is_not_answered(self):
+        client, transport = broker({PAPER_BASE + "/v2/assets/BTC%2FUSD": (404, {}, b'{"message": "asset not found"}'),
+                                    PAPER_BASE + "/v2/assets/BTCUSD": self.RECORD})
+        self.assertEqual(client.asset("BTC/USD")["price_increment"], Decimal("1"))
+        self.assertEqual([call["path"] for call in transport.calls], ["/v2/assets/BTC%2FUSD", "/v2/assets/BTCUSD"])
+
+    def test_a_record_for_another_symbol_is_not_this_pairs(self):
+        missing = (404, {}, b'{"message": "asset not found"}')
+        client, _ = broker({PAPER_BASE + "/v2/assets/ETH%2FUSD": self.RECORD, PAPER_BASE + "/v2/assets/ETHUSD": missing})
+        self.assertIsNone(client.asset("ETH/USD"))
+
+    def test_an_unreadable_record_is_unknown_and_asked_again_only_after_a_while(self):
+        missing = (404, {}, b'{"message": "asset not found"}')
+        client, transport = broker({PAPER_BASE + "/v2/assets/DOGE%2FUSD": missing, PAPER_BASE + "/v2/assets/DOGEUSD": missing})
+        self.assertIsNone(client.asset("DOGE/USD"))
+        self.assertIsNone(client.asset("DOGE/USD"))
+        self.assertEqual(len(transport.calls), 2)  # both spellings once, then nothing until the retry
+        later = time.monotonic() + ASSET_RETRY_SECONDS + 1
+        with patch("ltcm.adapters.alpaca.time.monotonic", return_value=later):
+            self.assertIsNone(client.asset("DOGE/USD"))
+        self.assertEqual(len(transport.calls), 4)
+
+    def test_a_record_that_states_no_increment_says_nothing(self):
+        client, _ = broker({PAPER_BASE + "/v2/assets/SPY": {"symbol": "SPY", "class": "us_equity", "fractionable": True,
+                                                            "price_increment": None}})
+        self.assertEqual(client.asset("SPY"), {})
+
+    def test_the_read_goes_through_the_gateway_like_every_other(self):
+        gateway = "https://gateway.test"
+        transport = FakeTransport({("GET", gateway + "/v1/alpaca-paper/v2/assets/ETH%2FUSD"): dict(self.RECORD, symbol="ETH/USD")})
+        client = VenueClient(transport, gateway_url=gateway, gateway=GatewaySigner("x" * 40), venue="alpaca-paper")
+        adapter = AlpacaBroker(AlpacaCredentials("placeholder", "placeholder", paper=False), client=client, venue="alpaca-paper")
+        self.assertEqual(adapter.asset("ETH/USD")["price_increment"], Decimal("1"))
+        self.assertNotIn("APCA-API-SECRET-KEY", transport.last["headers"])
 
 
 class UnknownOutcomeTests(unittest.TestCase):

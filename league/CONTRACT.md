@@ -103,6 +103,29 @@ Forward snapshots also include `recent_order_outcomes` (up to 12, owned by you o
 A House risk refusal has `status="refused"`, `reason`, and `submitted_to_venue=false`; it is
 not an order sent to the exchange. Inspect it on the next decision and research pass.
 
+Forward snapshots also include `venue_rules`: what the venue asks of an order, keyed by each symbol
+you may trade, and only where it is known. Read it with `.get`: a replay tape has none, and a Kalshi
+or options strategy gets `{}` (a market's or a contract's grid is not known before it is traded).
+
+```python
+"venue_rules": {"BTC/USD": {"min_order_usd": 10.0}, "SPY": {"price_increment": 0.01}}
+# a coin's "price_increment" appears here once the venue's own asset record for it has been read
+```
+
+- `min_order_usd`: Alpaca refuses a crypto order under $10. The House refuses a BUY asked under it
+  before it is sent -- a House refusal in `recent_order_outcomes`, "below the venue minimum", not
+  counted against you as a defect -- and raises by one step a buy asked at or over it that rounding
+  down to the step left a hair under it. Sells are not held to it here.
+- `price_increment`: the venue's price grid. A limit price off it is snapped onto it, a buy DOWN and
+  a sell UP: never more aggressive than you asked. A stock trades in cents at $1 and above and in
+  hundredths of a cent below. A coin's grid is the venue's own asset record, and a coin whose
+  increment the venue has not stated is left as you priced it. A Kalshi market's grid is its own: a
+  cent on most, finer on some (its `price_ranges`), a cent where it publishes none.
+- A `quantity` you give is rounded down to the instrument's step, as `notional_usd` always was.
+
+What the House changed on the way is recorded on the wake (`agent.woke`, `adjusted`). A strategy
+that sizes and prices by these rules is never adjusted or refused by them.
+
 Kalshi snapshots include `event_risk`: `basis`, `capital_usd`, `desk_market_cap_usd`,
 `floor_market_cap_usd`, `floor_cluster_cap_usd`, and `remaining_by_market_usd` keyed by ticker.
 Both YES/NO holdings at cost and outstanding buys consume that headroom. Related markets
@@ -213,8 +236,13 @@ longer than 48 hours. Equities are not bounded. Exits are never refused.
   betting against a market is buying its `no` leg.
 - Give `quantity` or `notional_usd`, not both. `notional_usd` is converted at the touch and
   rounded down to the instrument's step (whole contracts, whole shares for a limit order,
-  nine decimals for crypto and fractional market orders).
+  nine decimals for crypto and fractional market orders); a `quantity` is rounded down to it too.
+  A buy is at least `venue_rules[symbol]["min_order_usd"]` where one is stated ($10 for crypto).
 - `type` is `market` or `limit` (a limit needs `limit_price`). `post_only` rests or is refused.
+- A resting entry is yours to manage, and only a wake that completes can manage it. If none of your
+  wakes completes on its book for three of your wake intervals, and at least 30 minutes, the House
+  cancels your resting buys there (never a sell) and says why on your record (`agent.inactive`,
+  `wakes_failing`).
 - Every intent needs a `reason`: it is published next to the trade.
 - At most 8 intents and 20 cancels per decision. Anything malformed is dropped and reported back.
 
@@ -239,7 +267,8 @@ The simulator (`league/replay.py`) walks a recorded tape step by step. At each s
   to $0.0001. The replay charges what the book charges, so a fee you did not model is not a
   surprise waiting on paper;
 - Kalshi contracts settle at 1 or 0 on the tape's recorded result;
-- the same rung limits and no-shorts, no-leverage rules apply.
+- the same rung limits and no-shorts, no-leverage rules apply, and Alpaca's $10 minimum: a crypto
+  buy asked under $10 is refused and never fills.
 
 **Which history.** An Alpaca strategy is replayed on the House's history store when it holds every
 input the strategy declares: the development window just before a sealed holdout (252 days for a
