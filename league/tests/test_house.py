@@ -468,9 +468,10 @@ class ResearchPace(HouseCase):
         pace = self.house.game["research"]["pace"]
         self.assertAlmostEqual(self.house.research_interval_hours(winner), 0.25 * pace["winner_share"])
         self.assertAlmostEqual(self.house.research_interval_hours(loser), 0.25 * pace["loser_multiple"])
-        # Sept 23, 2026: an agent with no earned record waits `unproven_multiple` intervals.
+        # Sept 23, 2026: an agent with no earned record waits `unproven_multiple` intervals (6 since
+        # the 16:41Z pacing of the September OpenAI line; 3 before).
         self.assertAlmostEqual(self.house.research_interval_hours(fresh), 0.25 * pace["unproven_multiple"])
-        self.assertEqual((pace["winner_share"], pace["loser_multiple"], pace["unproven_multiple"]), (0.1, 8, 3))
+        self.assertEqual((pace["winner_share"], pace["loser_multiple"], pace["unproven_multiple"]), (0.1, 8, 6))
         # An idle agent's research is pulled forward, never put off for having no record.
         self.house.idle_reason = lambda agent: "ten barren wakes" if agent.id == fresh.id else ""
         idle_hours = float(self.house.game["research"]["idle"]["min_hours_between"])
