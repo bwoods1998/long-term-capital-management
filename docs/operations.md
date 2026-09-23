@@ -98,6 +98,13 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   funded burst's settings. Ratifying re-pins the same capital to the new money digest, keeps the
   old policy in `live_ratifications` and restarts the House, which reloads those settings. It never
   enlarges the capital, and a revoked grant cannot be ratified.
+- **The allocator's deploy (Sept 23, 2026).** The `allocator` section is a money rule. Run
+  `floor_box.py deploy` in the background and watch its log. At `promoted`, run
+  `python3 scripts/live_trading.py --ratify earned-live-20260921` at once. Until the ratify
+  finishes, `_live_open` is false and the allocator seats nobody on real money. The first
+  mark pass then does two things:
+  - It shrinks the legacy $60 micro stakes toward their bunt stake. Only free cash moves.
+  - It publishes `allocator-board.json`. Read it with `python3 scripts/floor_watch.py`.
 - **Roll back by hand (on the box):**
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
 - **The gateway.** Deploy with
@@ -235,7 +242,17 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `hypotheses.prefer_horizon` | `hour` | The horizon the foundry's packet tells Merton to prefer where a desk allows it. Empty: the desk's first listed horizon |
 | | `hypotheses.max_pending_cards` | 8 | How many cards may await replay before the next call. 0: any pending card holds the next call, as before Sept 23, 2026 |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
-| `league/constitution.py` | `ladder.paper.settled_day` | 1 finished day once 3 trades have settled | A daily agent on a Kalshi book is screened after one finished active day once three of its trades have settled on paper. Since the swing-and-bunt revision every daily agent's screen is one finished day, so the lane only matters again if `min_active_blocks_day` rises |
+| `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
+| | `allocator.evidence` `paper_weight`, `alpaca_paper_haircut_bps` | 0.5, 10 | E = W_paper^paper_weight × W_real; Alpaca paper fills haircut per side of filled notional |
+| | `allocator` `bunt_at`, `bunt_min_trades`, `bunt_min_settled` | 1.01, 5, 3 | Paper → bunt: E at the line and 5 closed paper trades, or 3 settlements on Kalshi (plan default 1.03; set from the Sept 23 06:45 UTC distribution, bounds 1.0-1.25) |
+| | `allocator.bunt_usd` | Kalshi $10, Alpaca $25 | A bunt's real stake (plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum) |
+| | `allocator` `swing_at`, `swing_min_real_trades`, `swing_min_w_real`, `swing_exit_w_real` | 1.5, 8, 1.0, 0.9 | Bunt → swing (audited the first time); a swing leaves under 1.5 × hysteresis or W_real 0.9 |
+| | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 1, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital; a position is up to half the stake (never under the venue minimum × 1.2) |
+| | `allocator` `stars`, `star_min_w_real` | 3, 1.25 | The site's top lane: the best swings by real P&L |
+| | `allocator` `hysteresis`, `real_drawdown_demote`, `die_below`, `die_min_trades` | 0.85, 0.35, 0.80, 10 | Down as fast as up: band exits, a 35% real drawdown back to paper, paper-wealth death |
+| | `allocator.throttle` `halve_below`, `restore_above` | −0.30, −0.15 | The floor throttle: every real stake halved below −30% of the envelope, restored above −15% |
+| | `allocator` `min_stake_change`, `performance_fee_share`, `profit_indexed_envelope` | 0.10, 0.2, on | Ignore stake moves under 10%; 20% of realized real profit becomes compute credits; a venue's envelope is the grant's capital plus its realized profit |
+| | `ladder.paper.settled_day` | 1 finished day once 3 trades have settled | A daily agent on a Kalshi book is screened after one finished active day once three of its trades have settled on paper. Since the swing-and-bunt revision every daily agent's screen is one finished day, so the lane only matters again if `min_active_blocks_day` rises |
 | | `ladder.paper` `min_active_blocks`, `min_active_blocks_day`, `max_drawdown` | 3, 1, 0.25 | The screen to the micro rung (4, 2 and 0.15 until the owner's swing-and-bunt revision of Sept 23, 2026 ~03:10 UTC) |
 | | `ladder.promotion_alpha`, `ladder.look_every_active_blocks`, `ladder.micro.min_active_blocks` | 0.20, 3, 3 | Promotion to scaled size spends 0.20 across looks every 3 active blocks, from the 3rd; death keeps `alpha` 0.05 (0.05, 5 and 5 before the swing-and-bunt revision) |
 | | `ladder.family` `alpha`, `min_member_active_blocks` | 0.20, 5 | A family's pooled real-money record promotes a member at the promotion budget, members counted after 5 active blocks (0.05 and 10 before) |
