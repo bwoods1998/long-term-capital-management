@@ -226,4 +226,13 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 
 Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop has run since
 09:17Z). The entries below are what changed, what broke and what was fixed.
+- 12:04:29Z — huang-h6d3302 (the agent the zero-fee label veto held) died, displaced by the refill.
+  Its paper wealth had fallen from 1.075 to 0.941 over its last settlements (E 0.970): the auditor's
+  doubt about its short, concentrated record was borne out.
+- **12:10:19Z — the first allocator bunt.** Under the corrected audit policy, huang-h51fdd3-2 was
+  re-audited after the short cooldown for a revised policy digest, and this time the auditor approved:
+  "The supplied accounting and execution evidence supports the allocator's bounded $10 bunt, with no
+  identified blocker". The allocator then promoted it paper → bunt (E 1.0257, W_paper 1.052,
+  4 settlements; a $10 stake at Kalshi).
+- 12:11:51Z — its first real trade: bought 2 KXDOGE15M-26SEP230815 at $0.76.
 
