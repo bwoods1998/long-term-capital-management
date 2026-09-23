@@ -19,6 +19,8 @@ from league.fees import Fees
 from league.ledger import Ledger
 from league.tests.fakes import Clock, FakeBroker, iso
 from league.tests.test_house import HouseCase
+from league.tests.test_paper import ScriptedMarketData
+from league.tests.test_sim import Touches
 
 D = Decimal
 CAP = D("75")
@@ -653,6 +655,90 @@ class KalshiSlices(SliceCase):
 class RealKalshiSlices(KalshiSlices):
     venue = "kalshi"
     real = True
+
+
+class PaperVenueSlices(unittest.TestCase):
+    """The practice venues themselves, not the fake: the Kalshi shadow account (fills in full at the
+    touch, conservatively) and the canary's simulated Alpaca account (accepts first, fills on the
+    next read)."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def intent(self, instrument, side, quantity, n):
+        return Intent.new(agent="a1", instrument=instrument, side=side, quantity=quantity, reason="test",
+                          created_at=iso(self.clock), nonce=str(n))
+
+    def test_the_kalshi_shadow_account_takes_an_exit_in_whole_contract_slices(self):
+        from league.paper import KalshiShadowBroker
+
+        ticker = "KXBTCD-26SEP2317-T80999"
+        data = ScriptedMarketData(self.clock)
+        data.set(ticker, "0.28", "0.30")
+        venue = KalshiShadowBroker(Path(self.dir.name) / "kalshi-shadow.json", data, starting_cash="5000", clock=self.clock)
+        sent = []
+        submit = venue.submit
+        venue.submit = lambda intent: (sent.append(intent), submit(intent))[1]
+        book = Book("kalshi-shadow", venue, self.ledger, fees=Fees("kalshi"), real_money=False, clock=self.clock)
+        self.assertTrue(book.reconcile().ok)
+        book.limits["a1"] = Limits(D("1000"), CAP)
+        book.stake("a1", "1000")
+        for n, leg in enumerate(("yes", "no")):
+            with self.subTest(leg=leg):
+                sent.clear()
+                instrument = Instrument("event", ticker, "kalshi-shadow", market_id=ticker, right=leg)
+                data.set(ticker, "0.28", "0.30") if leg == "yes" else data.set(ticker, "0.70", "0.72")
+                self.assertEqual(book.submit([self.intent(instrument, "buy", "200", 10 + n)])[0].status, "filled")  # $60
+                data.set(ticker, "0.94", "0.95") if leg == "yes" else data.set(ticker, "0.05", "0.06")
+                out = book.submit([self.intent(instrument, "sell", "200", 20 + n)])[0]
+                self.assertEqual(out.status, "filled", out.detail)
+                sells = [i for i in sent if i.side == "sell"]
+                self.assertEqual([i.quantity for i in sells], [D(66), D(67), D(67)])
+                for order in sells:
+                    self.assertLessEqual(order.quantity * D("0.94"), CAP)  # the leg's bid, where a market sell crosses
+                self.assertNotIn(instrument.key, book.account("a1").holdings)
+                self.assertEqual(venue.positions(), [])
+                self.assertTrue(book.reconcile().ok)
+        self.assertTrue(book.evidence_integrity("a1")["ok"])
+
+    def test_the_canarys_simulated_alpaca_account_fills_every_slice_on_the_next_read(self):
+        from league.sim import SimBroker
+
+        btc = Instrument("crypto", "BTC-USD", "alpaca-paper", market_id="BTC/USD")
+        touch = Touches()
+        touch.set(btc, "80000", "80010")
+        venue = SimBroker(Path(self.dir.name) / "sim.json", touch, clock=self.clock)
+        sent = []
+        submit = venue.submit
+        venue.submit = lambda intent: (sent.append(intent), submit(intent))[1]
+        book = Book("alpaca-paper", venue, self.ledger, fees=Fees("alpaca"), real_money=False, clock=self.clock)
+        self.assertTrue(book.reconcile().ok)
+        book.limits["a1"] = Limits(D("1000"), CAP)
+        book.stake("a1", "1000")
+        for n, quantity in enumerate(("0.0009", "0.0009", "0.0007")):
+            book.submit([self.intent(btc, "buy", quantity, n)])
+            book.poll()
+        held = book.account("a1").holdings[btc.key].quantity
+        self.assertTrue(book.reconcile().ok)
+        bid = (D("200") / held).quantize(D("0.01"))
+        touch.set(btc, str(bid), str(bid + 10))
+        out = book.submit([self.intent(btc, "sell", held, 9)])[0]
+        self.assertEqual(out.status, "sent", out.detail)  # accepted: the simulated venue fills on its next read
+        sells = [i for i in sent if i.side == "sell"]
+        self.assertEqual(len(sells), 3)
+        for order in sells:
+            self.assertLessEqual(order.quantity * (bid + 10) * GATEWAY_MARKET_MARKUP, CAP)
+        book.poll()
+        self.assertNotIn(btc.key, book.account("a1").holdings)
+        self.assertEqual(book.exit_plans, {})
+        self.assertTrue(book.reconcile().ok)
+        self.assertTrue(book.evidence_integrity("a1")["ok"])
 
 
 class HouseExitSlices(HouseCase):
