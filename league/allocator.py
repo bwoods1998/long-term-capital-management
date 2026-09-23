@@ -850,8 +850,9 @@ class Allocator:
                 # 4). So it is lent at most the target (here the base, or the throttle's half of it)
                 # less what it has been lent net of every sweep (`account.staked`): lent $10 under a
                 # $30 base it gets up to $20; lent the base and down to $27 it gets nothing. Its equity
-                # never passes the target, its net loan never passes the base, and a loss (this stay's,
-                # or a past stay's still counted in `staked`) is never lent back.
+                # and its net loan on the book never pass the target, and a loss (this stay's, or a
+                # past stay's still counted in `staked`) is lent back only out of real profit the
+                # account had already handed back (a sweep of profit lowers `staked`).
                 delta = min(delta, target - account.staked)
                 if delta <= 0:
                     return None
