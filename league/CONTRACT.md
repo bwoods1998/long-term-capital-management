@@ -101,8 +101,9 @@ ctx = {
 
 On real money (since Sept 23, 2026) `limits` follow your stake, which the allocator sets from your
 evidence: a position up to half the stake, never under the venue's minimum order x 1.2 ($1 on
-Kalshi, $10 on Alpaca), and an order up to the gateway's $75 cap ($68.18 on Alpaca, whose market
-orders the gateway prices at the ask plus 10%). A sell larger than one order is sent by the House
+Kalshi, $10 on Alpaca), and an order up to that position limit, never over the gateway's $75 cap
+($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $10 Kalshi
+bunt that is $5 a position and $5 an order. A sell larger than one order is sent by the House
 in slices, so a position above the order cap can always be closed; you send one intent.
 
 Forward snapshots also include `recent_order_outcomes` (up to 12, owned by you on this book).

@@ -238,10 +238,14 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     hour: `batches`, `evaluated`, `per_hour`, `candidates_per_box_second`, `stages` (programs written
     by origin, ran, eligible, gate, archived, graduations by state), `pass_rates`, `calls`,
     `coverage` (cells by desk), `queued`, `spend` (OpenAI, the Sail estimate, the royalty balance),
-    `born_total` and `refusal`, the reason the lab is not working when it is not. That reason is one
-    of: disabled, the House closing, stopped or paused, a release being staged, the Sail allowance
-    closed or the Sail meter stopped, a lab box that failed a batch in the last five minutes, or an
-    OpenAI tier below `all`.
+    `born_total` and `refusal`. A row is written only at the end of a lab step, and a step runs
+    only while the lab is open, so `refusal` is the last reason a Luna or Sol call was refused
+    inside a step (no model client, an OpenAI tier below `all`, the House's OpenAI allowance
+    closed, or the lab's hourly line too small for the call's hold), or null. When the lab is
+    stopped (disabled, the House closing, stopped or paused, a release being staged, the Sail
+    allowance closed or the Sail meter stopped, a lab box that failed a batch in the last five
+    minutes, or an OpenAI tier below `all`), no step runs and no `lab.stats` row is written: the
+    rows stop.
   - **`lab.graduate` rows**, one per candidate and outcome, carry the program's lineage, origin,
     author, parents, idea, fitness and cell. **`lab.royalty` rows** record each royalty charged to
     a graduate that earned a performance fee.

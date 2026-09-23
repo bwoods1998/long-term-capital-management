@@ -736,7 +736,7 @@ The `league/` modules:
 | `consult_recovery.py` | Tool requests, missing-data claims and code fixes left in past Merton consults and research summaries, turned into repair reports (backfill, then incremental). |
 | `merton.py` | Merton's five pull-request roles. |
 | `ci.py` | The judge of every change: path guard, content checks, the suite. |
-| `capital.py` | Rung 3 sizing and the standing capital recommendation for the owner; stands down while the allocator is enabled. |
+| `capital.py` | Rung 3 sizing and the standing capital recommendation for the owner. Its sizing (`resize`, `top_up_micro`) stands down while the allocator is enabled; the recommendation is still written each epoch. |
 | `allocator.py` | Capital is the ladder (Sept 23, 2026): evidence, bands, stakes, the envelope, the throttle, paper-wealth death and the performance fee, at every mark pass. A money judge. |
 | `lab.py`, `labbox.py` | The Alpha Lab (Sept 23, 2026): the MAP-Elites archive, breeding, graduation and royalties; and its batch evaluator on the lab's own sealed box. |
 | `publish.py` | The public tape, and since Sept 23, 2026 each agent's band, stake and evidence and the capital board. |
@@ -856,8 +856,10 @@ dynamism revisions followed that evening:
 **The Sept 23 north-star build** ([plan](docs/goals/LTCM_NORTH_STAR_BUILD.md),
 [execution record](docs/runs/2026-09-23-capital-ladder.md); T0 06:30:58Z, deadline 14:30:58Z):
 - **Deploy 1, the allocator (#163).** Release `20260923T082402Z-7c69b3eb57f0` was promoted at
-  08:27:54Z, and the grant was re-ratified 19 s later on money digest `44e8d48d…`. The first
-  allocator pass staked haghani-37 as a $25 bunt, the first agent on the Alpaca real account.
+  08:27:54Z, and the grant was re-ratified 19 s later on money digest `44e8d48d…`. haghani-37,
+  the first agent on the Alpaca real account, had been promoted there by the old screen at
+  08:06:22Z, before the deploy; the first allocator pass (08:30:03Z) made it a $25 bunt and
+  returned $31.21 of free cash.
 - **Deploy 2, the capital board and sliced exits (#162, #164, #168).** Promoted at 09:09:29Z. No
   money rule changed, so the grant stayed active.
 - **Deploy 3 (#170, #171).** The tick that never blocks, profit-indexed compute, the Alpha Lab and
