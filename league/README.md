@@ -185,6 +185,15 @@ status is exposed in health and agent research context; qualification is distinc
    promotion returns to paper. On rungs 2 and 3 a drift alarm demotes, and the House winds the account down and re-seats the agent on the book of its new rung.
    Retry unfinished exits for dead agents and abandoned books, preserve working sells, record
    their final evidence (including later settlements), and sweep closed accounts' free cash.
+   Since Sept 23, 2026 a wind-down's sale of a stock or an option waits for the regular session
+   (`wind_down_held` in `house.json`, told once as an info alert): outside it the book refused the
+   market sell on every mark pass (576 "market orders outside regular hours" and 116 "an option
+   order must be a limit order" refusals in a day, all from the House liquidating dead agents), and
+   `_release_wind_downs` places it in the first tick after the bell. A coin's or a Kalshi position's
+   wind-down is not held. After the allocator, `_floor_invariants` reads the ledger's rows since its
+   saved cursor (never the whole ledger; every five minutes) and raises an ops warning once per
+   condition: a desk offered markets for an hour with no intent from any of its agents (once a desk
+   an hour), and a real-money bunt frozen by a daily-loss rule (once an agent a day).
    **Since Sept 23, 2026, while `allocator.enabled`, capital is the ladder.** After the books are
    marked, `Allocator.rebalance` runs (`allocator.py`). The screen and the micro bound above no
    longer promote: an `eligible` verdict is held, and `micro_demotion`, `capital.resize` and

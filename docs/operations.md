@@ -320,6 +320,18 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 - **A dead agent's exits are refused as "has no seat on the book."** This is fixed by #106:
   wind-downs are seated first. A death during a venue outage is recorded, and its exits are retried
   by the mark pass (#107).
+- **A dead stock or options agent still holds its position overnight.** That is by design since
+  Sept 23, 2026: a wind-down's sale of a stock or an option is held for the regular session (before,
+  the book refused the market sell as "market orders outside regular hours" on every mark pass, 576
+  times in a day). One info alert names what is held (`wind_down_held` in `house.json`), and the
+  House sells it in the first tick after the bell, an option at the bid. Coins and Kalshi positions
+  wind down at once.
+- **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
+  every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
+  `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`
+  (once a desk an hour: its rules are not firing on what it is shown, a research pass is the answer)
+  and `<agent>: a real-money bunt on <book> was frozen by a daily-loss rule` (once an agent a day:
+  the book's daily rule is meant not to apply to a rung-2 bunt; if this fires, it is applying).
 - **"does not reconcile" on a paper book, by cents.** This is a warning, not an error (#108): it is
   the venue's end-of-day fee activity. An error means real money, or positions that disagree; read
   the `book.reconciled` rows.
