@@ -1089,6 +1089,94 @@ class DailyLossRulesTest(BookCase):
         self.assertEqual(self.book.risk_lines("a2")["halt_basis"], "staked_accounts")
 
 
+class DayOpenAcrossRestartTest(BookCase):
+    """The #198 review (Sept 23, 2026, pre-existing): `Book.day_open` lived in memory only, so a House
+    restart mid-day forgot every account's start-of-day equity, and both the per-desk daily-loss rule
+    and the real book's halt started again from the restart's equity. The opening is persisted per
+    book beside the ledger and restored at construction, with the day's stakes replayed from the
+    ledger exactly as they adjusted it live."""
+
+    venue = "kalshi"
+    family = "kalshi"
+    real = True
+    cash = "500"
+    LOST = ("KXBTCD-26SEP2017-T80999", "KXHIGHNY-26SEP20-B80")  # two clusters: no concentration cap refuses
+
+    def setUp(self):
+        super().setUp()
+        self.basis: list = [D("200")]  # the halt: 8% of $200 = $16 of the day's loss
+        self.book = self.restarted()
+        for ticker in (*self.LOST, "KXBTCD-26SEP2019-T80999"):
+            self.broker.set_quote(event(ticker=ticker), "0.50", "0.52")
+        self.seat("a1", usd="200", position="100", order="75")
+
+    def restarted(self):
+        """A House restart: a new Book folded from the same ledger, reconciled to the venue."""
+        book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=True, clock=self.clock,
+                    band_of=lambda agent: None, halt_basis_usd=lambda: self.basis[0], event_capital_budget=lambda: D("517.75"))
+        book.reconcile()
+        if getattr(self, "book", None) is not None:
+            book.limits.update(self.book.limits)
+            book.marks.update(self.book.marks)  # the marks come back with the first mark pass
+        return book
+
+    def lose(self, ticker, quantity, mark):
+        out = self.book.submit([self.intent("a1", event(ticker=ticker), "buy", quantity)])[0]
+        self.assertEqual(out.status, "filled", out.detail)
+        self.book.marks[event(ticker=ticker).key] = D(mark)
+
+    def halted(self):
+        instrument = event(ticker="KXBTCD-26SEP2019-T80999")
+        reasons = self.book.check(self.intent("a1", instrument, "buy", "1"), self.broker.quote(instrument), iso(self.clock))
+        return [r for r in reasons if r.startswith("floor daily loss")]
+
+    def day(self):
+        return self.book._day_pnl("a1", iso(self.clock))
+
+    def test_a_loss_before_a_restart_still_counts_after_it(self):
+        self.lose(self.LOST[0], "40", "0.22")  # about -$12.70: 6% of the $200 basis
+        before = self.day()
+        self.assertTrue(D("-16") < before < D("-11"), before)
+        self.assertEqual(self.halted(), [])
+        self.clock.advance(600)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), before)  # not zero: the restart does not forget the morning
+        self.lose(self.LOST[1], "20", "0.22")  # about 3% more after the restart: 9% in all
+        self.assertLess(self.day(), D("-16"))
+        self.assertEqual(len(self.halted()), 1)  # refused at the 8% line, not given 8% more
+
+    def test_a_new_utc_day_resets_the_opening(self):
+        self.lose(self.LOST[0], "40", "0.22")
+        self.assertLess(self.day(), D("-11"))
+        self.clock.advance(86_400)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), D(0))  # a new day opens at the equity it finds
+        self.assertEqual(self.halted(), [])
+
+    def test_a_stake_during_the_day_adjusts_the_opening_before_and_after_a_restart(self):
+        self.lose(self.LOST[0], "40", "0.22")
+        before = self.day()
+        self.book.stake("a1", "50", note="capital lent is not the day's profit")
+        self.assertEqual(self.day(), before)
+        self.book.stake("a1", "-30", note="nor is capital taken back its loss")
+        self.assertEqual(self.day(), before)
+        self.clock.advance(600)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), before)  # each stake adjusts the opening once: never twice, never forgotten
+        self.book.stake("a1", "10", note="after the restart too")
+        self.assertEqual(self.day(), before)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), before)
+
+    def test_an_unreadable_file_is_the_old_behaviour_not_a_crash(self):
+        self.lose(self.LOST[0], "40", "0.22")
+        path = self.book._day_open_path()
+        self.assertTrue(path is not None and path.exists())
+        path.write_text("{not json")
+        self.book = self.restarted()
+        self.assertEqual(self.day(), D(0))  # forgotten, as before this fix, and said nowhere worse
+
+
 class PracticeDailyLossTest(BookCase):
     def test_a_practice_book_keeps_both_rules_whatever_the_house_says(self):
         self.book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=False, clock=self.clock,
