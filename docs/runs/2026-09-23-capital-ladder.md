@@ -191,4 +191,24 @@ Execution record for the owner's goal of Sept 23, 2026: execute
     The money was right and the label was wrong. **PR #174** fixes the label (with a test that
     fails without the fix). The veto's cooldown (about 22 h) stands: it was a real audit and is
     not overridden.
+- 11:16:06Z — **Deploy 4** (#173 standings once a tick + lab breeding; #174 maker label), release
+  `20260923T111607Z-5b863ec3725f`, promoted at 11:17:36Z. Ticks went from 109-191 s to 50-90 s
+  (sampled 11:22-11:32Z).
+- 11:26:20Z — **the first real Alpaca fill of the build**: haghani-37 (a $25 bunt) bought 0.1923 LTC
+  at $62.39 ($12.00), inside its $12.50 position cap. Kalshi real fills since Deploy 1: 2 ($17.78).
+- 11:35-11:50Z — two more findings:
+  - **Lab batches were still one candidate**, because seeds with a tape each sat ahead of the
+    children by priority: 60 evaluated in an hour, 543 queued. Fix: batches alternate between
+    queue order and the largest ready group.
+  - **The audits the allocator asked for were judged against the wrong rules.** Its verdicts
+    carried no `allocation_context`, so the auditor read the legacy $50 / 4-agent tuition and a
+    $60 stake and vetoed both top paper agents on capacity. (huang-h51fdd3-2 at 10:06Z:
+    "promotion_context limits tuition to four agents and $50 aggregate loss ...
+    allocation_context is null".) Fix: `Allocator.context` sends the stake, limits, envelope,
+    headroom and grant; the auditor's purpose, limits and prompt describe a bunt or first swing;
+    and the allocator rules join the audit policy digest, so the stale vetoes get the short
+    reconsideration cooldown the digest exists for. Both fixes are in PR #176.
+- No band moves happened between Deploy 1 and 11:50Z. The two paper agents over the bunt line
+  (huang-h6d3302 E 1.037, huang-h51fdd3-2 E 1.026) were both held by those vetoes; every other paper
+  agent was below E 1.01.
 
