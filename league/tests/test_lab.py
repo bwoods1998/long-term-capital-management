@@ -439,6 +439,35 @@ class Royalties(LabCase):
         self.assertGreater(self.lab.lineage_weights()["agent:mullins-2"], 1.0)  # royalties buy the lineage more search
 
 
+class Search(LabCase):
+    def test_a_lineage_whose_graduates_lose_is_searched_less(self):
+        winner = self.house.spawn("winner", "lab-a", KNOB, reason="a lab graduate", founder="lab:founder:a")
+        loser = self.house.spawn("loser", "lab-b", SMALLER, reason="a lab graduate", founder="lab:founder:b")
+        for agent, lineage in ((winner, "founder:a"), (loser, "founder:b")):
+            self.lab._x("INSERT INTO graduations(candidate, niche, lineage, line, family, state, agent, at, detail) VALUES(?,?,?,?,?,?,?,?,?)",
+                        (agent.id, DESK, lineage, agent.id, agent.family, "born", agent.id, self.clock(), ""))
+        self.house.kill(loser, "paper death", "lost")
+        standings = {winner.id: {"earned_growth": 0.01, "earned_observations": 6}}
+        with patch.object(self.house, "standing_of", side_effect=lambda a: standings.get(a, {})):
+            weights = self.lab.lineage_weights()
+        self.assertEqual(weights["founder:a"], 2.0)
+        self.assertEqual(weights["founder:b"], 0.5)
+
+    def test_stats_report_throughput_and_pass_rates(self):
+        self.queue(KNOB)
+        self.queue(LOSER)
+        self.lab.evaluate_batch()
+        stats = self.lab.publish(force=True)
+        self.assertEqual(stats["evaluated"], 2)
+        self.assertEqual(stats["stages"]["eligible"], 2)
+        self.assertEqual(stats["stages"]["gate"], 1)
+        self.assertEqual(stats["pass_rates"]["gate"], 0.5)
+        self.assertEqual(stats["coverage"]["by_desk"], {DESK: 1})
+        row = self.house.ledger.last("lab.stats")
+        self.assertFalse(row.public)
+        self.assertEqual(row.payload["evaluated"], 2)
+
+
 class Researchers(LabCase):
     def researcher(self):
         return Researcher(ledger=self.house.ledger, provider=None, commons=self.house.commons, economy=self.house.economy,
