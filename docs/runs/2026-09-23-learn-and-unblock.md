@@ -454,3 +454,30 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   `league/verticals.py`, a pure module imported by nothing in the House (the spread, its maximum
   loss, the caps, Alpaca's multi-leg order shape, and one spread counted as one trade from per-leg
   fills), with 33 tests including a guard that nothing imports it.
+- **21:49:20Z — Deploy B was rolled back by the watchdog** (reading 6 of its watch): one error
+  alert, `alpaca-paper does not reconcile: cash differs by 40.0116; positions differ:
+  crypto:LINKUSD:alpaca-paper -3.262934654`. **Cause (read from the ledger):** at 21:48:50Z
+  haghani-37 placed a marketable limit sell of 3.262934654 LINK at $12.28 on the practice account;
+  it filled within seconds, after the mark pass's poll, and Alpaca's positions and cash showed the
+  sale before its orders endpoint did. The fill was booked at 21:49:01Z (venue time 21:48:58Z), and
+  after the rollback the practice book reconciled with nothing frozen. Nothing in Deploy B's code
+  caused it: the race is pre-existing (a marketable order filling between a mark pass's poll and its
+  reconcile), and it hit inside a watch. Who noticed: the watchdog did, as designed; no alert or
+  role had noticed the race before.
+- 21:53Z — **PR #212, the fix:** `reconcile_with_second_look` in `league/house.py` (unprotected). A
+  failing reconcile with an order working on that book is read again after 3 s and a fresh poll;
+  a mismatch that stays is real and stands; with no order working the first reading stands; and
+  the second look does not count twice toward a practice book's adoption of the venue (the first
+  version did, and `test_house`'s "more than cents is an error" test caught it). Deploy B is
+  redeployed with it once CI is green: the same release content plus the fix, still the run's
+  second owner deploy in substance.
+- 22:01Z — PR #212 green on both Pythons; merged as `cb955cb`; **Deploy B redeployed** (the same
+  Wave 1 content plus the second look). **22:03:12Z promoted:** release
+  `20260923T220154Z-b460e9de858e`. No money rule changed, no ratify.
+- 22:08Z — **Deploy B verified on the box:** 104 living (the population rises toward 112 as the
+  seat market seats waiters: 3 lab graduates born in five minutes, among them leahy-l9acfcb, plus a
+  card and two House births); the seat market shows 34 graduates and 5 cards waiting, 11 desks
+  reserved; the lab evaluated 7 Luna children in its first minutes (#204: the LLM children reach
+  batches at last) and its first forward windows ran (3 rows, 2 ranked, both positive); the
+  research gate runs on triggers (library notes, lessons, a fill, a block, heartbeats; clock runs
+  only for winners and idle agents); no book frozen, no error alert, tick 35 s.
