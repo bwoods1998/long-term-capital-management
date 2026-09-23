@@ -38,7 +38,7 @@ from ltcm.broker import Instrument, money
 from . import seeds as seeds_module
 from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
-from . import capital, niches as niches_module
+from . import capital, feeds as feeds_module, niches as niches_module
 from . import parameters
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
@@ -186,6 +186,9 @@ class House:
         self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.options_history: Any = None  # set by the service: listed-option history (`league/options_history.py`)
+        self.feeds: Any = None  # set by the service: live sports scoreboards and perp funding, recorded (`league/feeds.py`)
+        self._feeds_waiting: dict[str, float] = {}  # agent -> when it was last said its replay waits for recorded feeds
+        self._feed_requests_at = 0.0  # when the tool requests the feeds answer were last looked at
         self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
         self.hypotheses: Any = None  # set by the service: the hypothesis foundry (league/hypotheses.py)
         self.backup: Any = None  # set by the service on the House box: a daily checkpoint of the box, kept by Sail
@@ -234,7 +237,10 @@ class House:
                        "research": threading.Semaphore(max(1, self.settings.research_workers)),
                        "ops": threading.Semaphore(max(1, self.settings.ops_workers)),
                        # Audits wait behind no Merton pass and no backup: one at a time, their own lane.
-                       "audit": threading.Semaphore(1)}
+                       "audit": threading.Semaphore(1),
+                       # The live feeds too (`league/feeds.py`): a scoreboard polled behind a Merton pass
+                       # or the backup is minutes of a live game the record never sees.
+                       "feeds": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
         self.researcher = None
@@ -673,16 +679,20 @@ class House:
                 self.alert("warning", f"{agent.id} could not be staked on {book.name}: {exc}")
 
     # ------------------------------------------------------------------- data
-    def _cached(self, key: str, ttl: float, build: Callable[[], Any]) -> Any:
+    def _cached(self, key: str, ttl: float, build: Callable[[], Any], *, record: bool = True) -> Any:
+        """`build()`, shared for `ttl` seconds, and kept in the market recordings. `record=False` for
+        what is already stored with its receive time elsewhere (the feed store): recorded twice, a
+        scoreboard every half minute would crowd market snapshots out of the recorder's 256 MB."""
         hit = self._data_cache.get(key)
         if hit and self.clock() - hit[0] < ttl:
             return hit[1]
         started = self.clock()
         value = build()
-        try:
-            self.recorder.record(key, value, started=started)
-        except Exception as exc:  # recording failure must not prevent position management
-            self.alert("warning", f"market recording failed ({type(exc).__name__})")
+        if record:
+            try:
+                self.recorder.record(key, value, started=started)
+            except Exception as exc:  # recording failure must not prevent position management
+                self.alert("warning", f"market recording failed ({type(exc).__name__})")
         self._data_cache[key] = (self.clock(), value)
         return value
 
@@ -737,6 +747,16 @@ class House:
         watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
         if watched:
             ctx["observed"] = self._observed(watched, needs)
+        wanted = self._feeds_wanted(needs)
+        if wanted and self.feeds is not None:
+            # The recorded live feeds (`league/feeds.py`): each declared key's latest row received by
+            # now, the rows a replay tape carries. A key with nothing recorded is absent -- unavailable,
+            # never zero -- and a store that cannot be read costs the block, not the wake.
+            try:
+                ctx["feeds"] = self._cached("feeds:" + json.dumps(wanted, sort_keys=True), 30,
+                                            lambda: self.feeds.latest(wanted, self.clock()), record=False)
+            except Exception as exc:  # noqa: BLE001
+                self.alert("warning", f"{agent.id}: the feeds could not be read this wake ({type(exc).__name__}: {str(exc)[:160]})")
         if agent.venue == "alpaca":
             symbols = [str(s) for s in (needs.get("symbols") or [])][:12]
             bars = dict(needs.get("bars") or {})
@@ -1012,6 +1032,14 @@ class House:
         except Exception as exc:  # noqa: BLE001 - a bad store file must never take the tick down
             self.alert("warning", f"history coverage could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
 
+    def _fulfil_feed_requests(self) -> None:
+        """Answer the tool requests that plainly ask for a feed the House now records (`FeedRecorder.
+        fulfil_requests`): the `tool.fulfilled` row is what wakes the research of the line that asked
+        (the research gate counts it), and what tells consult recovery the data has arrived."""
+        done = self.feeds.fulfil_requests(self.commons)
+        if done:
+            self.alert("info", f"the live feeds answered {len(done)} open tool request(s)")
+
     def deploying(self) -> bool:
         """Is a release on its way in? True from the moment one is staged until the grace is up."""
         since = float(self._state.get("deploying_at") or 0)
@@ -1087,18 +1115,15 @@ class House:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
-        if venue == "alpaca" and self.settings.deep_replay and not option:  # the history store holds no option chains
+        wanted = self._feeds_wanted(needs)
+        # The history store holds no option chains, and no recorded live feed reaches back into its
+        # development window: a strategy that reads either is replayed on the live tape.
+        if venue == "alpaca" and self.settings.deep_replay and not option and not wanted:
             deep = self._deep_tape(needs)
             if deep is not None:
                 return deep
-        end = self.clock()
-        if venue == "kalshi":
-            # The first dry run's agents asked for this themselves: one day of hourly markets is 17
-            # active blocks and a week of daily ones is 7, against the 30 the replay gate needs.
-            days = self.settings.kalshi_replay_days * (7 if horizon == "day" else 1)
-        else:
-            days = self.settings.replay_days * (6 if horizon == "day" else 1)
-        start_iso, end_iso = now_iso(lambda: end - days * 86400), now_iso(lambda: end)
+        start, end = self._live_window(needs)
+        start_iso, end_iso = now_iso(lambda: start), now_iso(lambda: end)
         watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
         if option and self.options_history is not None:
             from .options_history import adapter_from
@@ -1155,11 +1180,77 @@ class House:
                     tape["observed_bars"] = bars
                     tape["observed_timeframe"] = observed_timeframe
                 return tape
+        if wanted and self.feeds is not None and not option:
+            # The recorded live feeds ride on the tape (`league/feeds.py`), each row stamped with when
+            # the House received it, over the window this tape was asked for. The key says whether
+            # they spanned the replay gate then: a tape built before they did is not reused for a day
+            # once they do.
+            ready = not self._feeds_shortfall(needs, wanted, self.feeds.coverage(wanted, start, end))
+            key += ":feeds:" + json.dumps(wanted, sort_keys=True, separators=(",", ":")) + (":ready" if ready else ":short")
+            plain = build
+
+            def build(plain=plain, wanted=wanted, start=start, end=end):
+                tape = plain()
+                tape["feeds"] = self.feeds.series(wanted, start, end, float(tape.get("step_seconds") or 300))
+                tape["feeds_coverage"] = self.feeds.coverage(wanted, start, end)
+                return tape
         with self._tape_lock:  # one build at a time: two agents of one family want the same tape
             hit = self._tapes.get(key)
             if hit is None or end - hit[0] > 86400:
                 self._tapes[key] = (end, build())
             return key, self._tapes[key][1]
+
+    def _live_window(self, needs: Mapping[str, Any]) -> tuple[float, float]:
+        """(start, end) of the recent live tape a strategy with these NEEDS is replayed over."""
+        venue, horizon, _ = niche_of(needs)
+        end = self.clock()
+        if venue == "kalshi":
+            # The first dry run's agents asked for this themselves: one day of hourly markets is 17
+            # active blocks and a week of daily ones is 7, against the 30 the replay gate needs.
+            days = self.settings.kalshi_replay_days * (7 if horizon == "day" else 1)
+        else:
+            days = self.settings.replay_days * (6 if horizon == "day" else 1)
+        return end - days * 86400, end
+
+    @staticmethod
+    def _feeds_wanted(needs: Mapping[str, Any]) -> dict[str, list[str]]:
+        """The recorded live feeds these NEEDS declare, held to what the House records (`feeds.requested`)."""
+        return feeds_module.requested(needs.get("feeds")) if isinstance(needs.get("feeds"), Mapping) else {}
+
+    def _feeds_shortfall(self, needs: Mapping[str, Any], wanted: Mapping[str, Sequence[str]], coverage: Mapping[str, Any]) -> str:
+        """Why the recorded feeds cannot carry a replay of these NEEDS; '' when they can. They are
+        recorded live and never backfilled, so every declared key must cover the replay gate's
+        `min_blocks` blocks of the strategy's horizon inside the window (20 on Sept 22, 2026: twenty
+        hours of recording for an hourly strategy, twenty days for a daily one) before a replay can
+        judge a strategy that reads them."""
+        horizon = "day" if str(needs.get("horizon") or "") == "day" else "hour"
+        block = 86400.0 if horizon == "day" else 3600.0
+        need = int(CONSTITUTION["ladder"]["replay"]["min_blocks"])
+        rows = [(feed, key, ((coverage or {}).get(feed) or {}).get(key) or {}) for feed, keys in wanted.items() for key in keys]
+        missing = [f"{feed} {key}" for feed, key, row in rows if not row.get("first_ok")]
+        if missing:
+            polled = {feed: (self.feeds.keys(feed) if self.feeds is not None else []) for feed in feeds_module.FEEDS}
+            return ("unsupported input: feeds not recorded: " + ", ".join(missing) + "; the House records "
+                    + "; ".join(f"{feed} {', '.join(keys) or 'nothing'}" for feed, keys in polled.items()))
+        blocks = {f"{feed} {key}": float(row.get("covered_seconds") or 0.0) / block for feed, key, row in rows}
+        have = min(blocks.values(), default=0.0)
+        if have >= need:
+            return ""
+        since = max(str(row["first_ok"]) for _, _, row in rows)
+        return (f"{feeds_module.WAITING} {since}; a replay needs {need} {horizon} blocks of them and has {have:.1f} ("
+                + ", ".join(f"{name}: {value:.1f}" for name, value in blocks.items())
+                + "). A live wake is handed ctx['feeds'] now; the replay waits for recorded history.")
+
+    def _require_feeds(self, needs: Mapping[str, Any], wanted: Mapping[str, Sequence[str]], coverage: Mapping[str, Any]) -> None:
+        """Raise "unsupported input" -- unavailable data, which is not a trial -- unless the recorded
+        feeds these NEEDS declare can carry their replay."""
+        if self.feeds is None:
+            raise ValueError("unsupported input: this House records no live feeds, so NEEDS['feeds'] cannot be replayed")
+        if str(needs.get("asset_class") or "") == "option":
+            raise ValueError("unsupported input: the options replay tape carries no live feeds")
+        short = self._feeds_shortfall(needs, wanted, coverage)
+        if short:
+            raise ValueError(short)
 
     def _history_store(self) -> Any:
         """The history store (`league.history`), read-only, or None before anything was ingested."""
@@ -1259,7 +1350,15 @@ class House:
         parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
+        wanted = self._feeds_wanted(needs)
+        if wanted:
+            # Live-only data is judged before any tape is built: until the declared feeds have been
+            # recorded long enough, a strategy that reads them would be tested on nothing.
+            start, end = self._live_window(needs)
+            self._require_feeds(needs, wanted, self.feeds.coverage(wanted, start, end) if self.feeds is not None else {})
         tape_id, tape = self.tape_for(needs)
+        if wanted:
+            self._require_feeds(needs, wanted, tape.get("feeds_coverage") or {})  # what this very tape carries
         observed = needs.get("observe") or {}
         missing = [s for s in observed.get('symbols') or [] if not (tape.get('observed_bars') or {}).get(s)]
         if needs.get("venue") == "kalshi" and missing:
@@ -1303,7 +1402,7 @@ class House:
             return False
 
         lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay")
-                           else "audit" if key.startswith("audit:") else "ops"]
+                           else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:") else "ops"]
         with self._state_lock:
             self._job_status[key] = {"queued_at": self.clock(), "started_at": None}
 
@@ -1381,6 +1480,14 @@ class House:
         try:
             result, tape_id = self._run_replay(agent, agent.code, agent.needs, agent.params)
         except Exception as exc:  # noqa: BLE001 - no tape or no box: try again next wake
+            if str(exc).startswith(feeds_module.WAITING):
+                # Recorded feeds that do not span the replay gate yet are a wait, not a defect: said once
+                # a day an agent, and never as "replay could not run", which the foundry counts against
+                # the line as missing data (`hypotheses._retire_unrunnable`: five such hours retire it).
+                if self.clock() - self._feeds_waiting.get(agent.id, float("-inf")) >= 86400:
+                    self._feeds_waiting[agent.id] = self.clock()
+                    self.alert("info", f"{agent.id}: its replay waits for recorded feeds ({str(exc)[:200]})")
+                return {"agent": agent.id, "skipped": "waiting for recorded feeds"}
             self.alert("warning", f"{agent.id}: replay could not run ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "replay unavailable"}
         crash = self._crashed(result)
@@ -2731,6 +2838,17 @@ class House:
             observed = agent.needs.get('observe') or {}
             result['semantic_research'] = self.semantic_lab.evidence(agent.id,
                 series=[*(agent.needs.get('series') or []), *(observed.get('series') or [])])
+        if self.feeds is not None:
+            # The live feeds (league/feeds.py): what is recorded, since when, and what replay needs. A
+            # feed that has recorded something is no longer "not supplied".
+            try:
+                described = self.feeds.describe()
+            except Exception as exc:  # noqa: BLE001 - an unreadable store announces nothing
+                described = {'error': f'{type(exc).__name__}: {str(exc)[:160]}'}
+            result['observations']['feeds'] = described
+            shipped = {'sports': 'live sports score feed', 'perps': 'perpetual funding/open-interest feed'}
+            gone = {text for feed, text in shipped.items() if (described.get(feed) or {}).get('recording_since')}
+            result['observations']['not_supplied'] = [x for x in result['observations'].get('not_supplied') or [] if x not in gone]
         return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -2752,14 +2870,26 @@ class House:
             query, tape = self.tape_for(effective)
             requested = (effective.get('observe') or {}).get('symbols') or []
             missing = [s for s in requested if not (tape.get('observed_bars') or {}).get(s)] if agent.venue == 'kalshi' else []
+            wanted = self._feeds_wanted(effective)
             history = None
             if agent.venue == 'alpaca':
                 # Which history judges this: the store's development window, or the live tape
                 # because the store has not fetched these inputs yet (not a fact about the market).
                 history = ({'tape': 'development window before the sealed holdout', **dict(tape.get('source') or {})}
                            if query.startswith('deep:') else {'tape': 'live recent tape',
-                                                             'why': 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
+                                                             'why': 'recorded live feeds reach back only to when recording began' if wanted
+                                                             else 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
+            feeds = None
+            if wanted:
+                # What the declared feeds hold over this tape's window, and whether a replay may use them yet.
+                short = self._feeds_shortfall(effective, wanted, tape.get('feeds_coverage') or {}) if self.feeds is not None else \
+                    'unsupported input: this House records no live feeds'
+                feeds = {'requested': wanted, 'coverage': tape.get('feeds_coverage'), 'replay_ready': not short,
+                         **({'blocked_by': short} if short else {}),
+                         'note': 'Rows are recorded live with their receive time and replayed point in time; nothing before recording '
+                                 'began exists. A live wake is handed ctx["feeds"] whether or not a replay may use them yet.'}
             return {'query': query, **tape_coverage(tape), 'effective_needs': effective, **({'history': history} if history else {}),
+                    **({'feeds': feeds} if feeds else {}),
                     'proposed_inputs': needs is not None,
                     'required_observed_symbols': list(requested), 'missing_observed_symbols': missing,
                     'observed_inputs_available': not missing,
@@ -3396,6 +3526,14 @@ class House:
                     and self.clock() - float(self._state.get("options_history_tried") or 0) >= 3600
                     and self._background("ops:options-history", self._refresh_options_history)):
                 self._state["options_history_tried"] = self.clock()
+        if self.feeds is not None:
+            # Public, keyless data that costs nothing: recorded while the House is paused too, on the
+            # feeds lane (`_background`), and the tool requests it answers are closed hourly once it has.
+            if self.feeds.due():
+                self._background("feeds:record", self.feeds.run)
+            if (self.feeds.shipped() and self.clock() - self._feed_requests_at >= 3600
+                    and self._background("feeds:requests", self._fulfil_feed_requests)):
+                self._feed_requests_at = self.clock()
         living_before = {a.id for a in self.registry.living()}
         for name, book in self.books.items():
             try:
@@ -3599,6 +3737,7 @@ class House:
             "stopped_because": summary.get("stopped_because"),
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
+            "feeds": self.feeds.health() if self.feeds is not None else None,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
@@ -3609,6 +3748,8 @@ class House:
         self.wait(wait)
         self._save_state()
         self.recorder.close()
+        if self.feeds is not None:
+            self.feeds.close()
         self.research_jobs.close()
         self.ledger.close()
         if self.campaigns:

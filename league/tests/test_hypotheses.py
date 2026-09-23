@@ -162,6 +162,12 @@ class Cards(FoundryCase):
         shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
         self.assertEqual([row["symbol"] for row in shown["series"]], ["BTC/USD"])
         self.assertEqual(shown["limitations"], ["no depth"])
+        # The live feeds' hourly rows and the options store's rows are coverage of other stores:
+        # newer, they must not hide the history ingestion's (league/feeds.py writes one a feed an hour).
+        self.house.ledger.append("data.coverage", {"asset": "feed", "feed": "perps", "status": "current", "keys": {}})
+        self.house.ledger.append("data.coverage", {"asset": "option", "underlying": "SPY", "status": "complete", "bars": 10})
+        shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
+        self.assertEqual(([row["symbol"] for row in shown["series"]], shown["source"]), (["BTC/USD"], "alpaca-history"))
 
     def test_replays_that_fail_to_fetch_data_are_infrastructure_not_invalid_code(self):
         from league.hypotheses import classify_error

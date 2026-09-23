@@ -121,6 +121,13 @@ LEAGUE_HOSTS = (
     "github.com",                    # merged code, pulled without credentials
     "codeload.github.com",
     "api.github.com",                # the check runs on the exact commit the updater deploys (league/updater.py)
+    # The live feeds the House records for its strategies (league/feeds.py): ESPN's scoreboards, and
+    # perpetual funding, open interest and DVOL. On FLOOR_HOSTS since the arena of Sept 18, 2026.
+    "site.api.espn.com",
+    "www.okx.com",
+    "www.deribit.com",
+    "api.hyperliquid.xyz",
+    "futures.kraken.com",
 )
 
 

@@ -842,7 +842,10 @@ class Foundry:
     def _coverage(self, niche: Any) -> dict[str, Any] | None:
         """What the newest `data.coverage` row (the history ingestion) says it holds for this desk's
         universe: counts and date ranges only, never the data."""
-        rows = self.house.ledger.read(kinds="data.coverage", limit=3, newest=True)
+        # The history ingestion's rows only: the options store's carry `asset: "option"`, and the live
+        # feeds write one `asset: "feed"` row a feed every hour (league/feeds.py), which would otherwise
+        # always be the newest and hide the store this summarises.
+        rows = [row for row in self.house.ledger.read(kinds="data.coverage", limit=500, newest=True) if "asset" not in row.payload]
         if not rows:
             return None
         latest = rows[-1].payload

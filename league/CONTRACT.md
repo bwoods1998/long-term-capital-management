@@ -168,6 +168,68 @@ a zero: a replay of a strategy that asks for features of a symbol the House has 
 refused as unsupported input (not a trial), and the House's daily options job backfills the
 symbols living strategies ask for.
 
+### Live feeds: sports scoreboards and perpetual funding (`NEEDS["feeds"]`)
+
+```python
+NEEDS["feeds"] = {"sports": ["nfl", "mlb"], "perps": ["BTC", "ETH"]}   # either or both, at most six keys each
+```
+
+adds `ctx["feeds"]`, on any venue and whatever your specialty (you may not trade any of it):
+
+```python
+ctx["feeds"] = {
+  "sports": {"nfl": {"t": "2026-09-22T17:01:02.345Z", "league": "nfl", "espn": "football/nfl",
+                     "events": [{"id": "401872933", "name": "Carolina Panthers at Atlanta Falcons", "short_name": "CAR @ ATL",
+                                 "start": "2026-09-20T17:00:00Z", "status": "in", "detail": "Q2 7:12", "completed": False,
+                                 "period": 2, "clock": "7:12",
+                                 "home": {"team": "Atlanta Falcons", "abbrev": "ATL", "location": "Atlanta", "nickname": "Falcons",
+                                          "id": "1", "score": 10, "winner": None, "record": "0-1"},
+                                 "away": {...},
+                                 "odds": {"details": "CAR -2.5", "spread": 2.5, "over_under": 43.5,
+                                          "home_ml": 130, "away_ml": -155, "provider": "Draft Kings"}}]}},
+  "perps": {"BTC": {"t": "...", "symbol": "BTC",
+                    "okx": {"instrument": "BTC-USDT-SWAP", "rate": 4.07e-05, "next_rate": None, "time": "...", "next_time": "...",
+                            "premium": -0.00042, "interval_hours": 8, "open_interest_usd": 2232794658.58, "last": 77619.9},
+                    "hyperliquid": {"rate": 1.14e-05, "open_interest": 35483.6, "mark": 77623.0, "oracle": 77656.6,
+                                    "premium": -0.00042, "interval_hours": 1},
+                    "kraken": {"symbol": "PF_XBTUSD", "rate": 1.33e-05, "next_rate": 2.44e-05, "rate_abs": 1.035,
+                               "open_interest": 2166.65, "mark": 77595.1, "index": 77585.88, "interval_hours": 1},
+                    "dvol": 34.37, "funding_z": 1.2, "funding_history_n": 30}},
+}
+```
+
+- **sports**: ESPN's current scoreboard of each league whose Kalshi series the sports desks trade:
+  `nfl`, `ncaaf`, `mlb`, `wnba`, `nba`, `nhl`, `mls`, `epl`, `laliga`, `seriea`, `bundesliga`,
+  `ligue1`, `championship`, `ligamx`, `eredivisie`, `ligaportugal`, `scottishprem` (a Kalshi series
+  such as `KXNFLGAME` names its league too). Polled every 60 seconds while a game of the league is
+  live or starts within 90 minutes, every 15 minutes otherwise. `status` is `pre`, `in` or `post`;
+  the spread is signed from the home side and moneylines are American odds. Esports, cricket,
+  tennis, UFC and the smaller football leagues have no scoreboard here. Line-ups, injuries and
+  player props are not supplied.
+- **perps**: for the coins the crypto desks trade, every 5 minutes: OKX's 8-hour funding rate and
+  open interest in dollars, Hyperliquid's and Kraken's 1-hour funding and open interest (Kraken's
+  rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
+  OKX's rate against its last 30 settlements. Rates are per interval: annualize as
+  `rate * 8760 / interval_hours`. A venue that did not answer is `None` in the row.
+
+`t` is when the House RECEIVED the row. Content that has not changed since the last poll is not
+stored again, so `t` is when that content was first received; judge a game by its own `status`,
+`start` and `clock`. A key with nothing recorded is **absent**: that means unavailable, never
+zero. Names the House does not record are dropped from your NEEDS. Your code must also work when
+`ctx["feeds"]` is absent, as it is on a House without the recorder.
+
+**Replay.** These feeds are recorded live and never backfilled (ESPN is never asked for a past
+date: its old boards carry final scores). A replay tape carries the recorded rows point in time:
+each step sees the row received last at or before it, never a later one, at most one row a step
+(a long window is sampled more coarsely, never ahead). Before recording began there is nothing:
+early steps see no `ctx["feeds"]` rows at all. So a strategy that declares feeds is replayed only
+once every declared key has been recorded for the replay gate's `min_blocks` blocks of its horizon
+(twenty hours for an hourly strategy, twenty days for a daily one); until then its replay is
+refused as unsupported input, which is not a trial, while live wakes are handed the feeds at once.
+`replay_coverage` reports each key's coverage and whether a replay may use it yet, and
+`runtime_status` says what is recorded and since when. An Alpaca strategy that declares feeds is
+replayed on the recent live tape, never on the development window of the history store.
+
 ## What you may watch but not trade
 
 `NEEDS["observe"] = {"symbols": ["BTC/USD"], "series": ["KXBTCD"]}` (up to six of each) asks the
