@@ -360,3 +360,124 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   #202 after its conflict resolution. Deploy B goes as soon as the branch is green rather than
   at the plan's 21:00Z: the lab's tape-key fix and the seat market earn more hours of evidence,
   and Deploy A's stock-session verification is unaffected by a restart.
+- **17:51-21:31Z — the session stopped on a usage limit** (the Claude session's limit, not the
+  floor's). Two agents were cut off mid-task (the adversarial review of #203 and the W2-options
+  builder); both were resumed at 21:35Z. The floor ran on Deploy A throughout, and the watch loop
+  kept its 15-minute record. The plan's Deploy B window (20:37-21:22Z) and the study refresh at
+  20:37Z slipped by about an hour; Deploy B goes as soon as its CI is green.
+- **What Deploy A did while the session was stopped** (read on the box at 21:32Z and from a
+  21:36Z snapshot, `docs/research/queries/2026-09-23/R-1.py`):
+  - **U5 verified:** mullins-2, swept to $10.09 before the deploy, was lent $24.75 toward a
+    $34.84 target at 17:36:21Z; it made three more weather maker fills and at 21:31Z holds $29.86
+    of a $35.64 target (W_real 1.188, E 1.208, 10 real trades: 0.04 below the 1.25 swing line).
+  - **U1 verified with a live instance:** the lab's first graduate huang-l23cdb7 was promoted to a
+    $30 bunt at 18:49Z (the first lab-born agent on real money), won +$6.64 (19:15Z), lost
+    −$7.32 (19:45Z, 20% of the day's opening equity) and **entered again at 20:21:56Z with no
+    daily-loss refusal** (the only real refusal was a limit 6 cents through the ask). The
+    allocator's hysteresis then demoted it at 20:25:51Z (E 0.7350 < 0.8585); its open position
+    settled at −$7.84 and the account closed. Net −$8.52: the one-loss trial again, at $30
+    positions of 24-26% of the stake, above the 15% the rules now advise.
+  - **U2 verified:** the funder moved $30 in the rolling day (one move) and meriwether-h7d7702, a
+    sports bunt promoted at 20:07Z, filled 25 KXMLBTOTAL at $0.34 on shard 3 at 20:39:57Z. At
+    21:32Z shard 3 held $14.07, under the $20 floor, after that fill: the next hourly pass must
+    top it up (checked at the next watch).
+  - **C2 verified:** the OpenAI House line fell under $20 at about 20:50Z (alerts "$19.68 left" and
+    "$16.44 left"); the tier is "earned"; the lab stays open (`closed_since` null), its Luna calls
+    are skipped on the record (15 by 21:31Z) and it keeps evaluating (75 candidates in 21Z's first
+    half hour).
+  - **Band moves:** three promotions to real money (huang-l23cdb7 18:49Z, meriwether-h7d7702
+    20:07Z, hilibrand-h6ca596-3 21:02Z, each a $30 Kalshi bunt), one demotion. Kalshi bunts 7,
+    $191.91 of the $517.75 envelope committed. Alpaca: none.
+  - **Real P&L since Deploy A:** Kalshi 9 fills ($59.59), 5 settlements, −$7.35 realized; the
+    floor's real P&L since the grant −$8.43; the throttle off.
+  - **Practice since 16:28Z turned positive:** kalshi-shadow +$99.76 (sports +$74.01 on 18
+    settlements, strikes +$26.75, 15-minute crypto −$4.45), alpaca-paper +$12.05.
+  - **The stock session after Deploy A** (17:34-20:00Z): ETF desk 336 wakes, 38 intents, 18 fills;
+    megacaps 216 wakes, 19 intents; after the close 20 ETF market orders were refused ("outside
+    regular hours", the agents' own late orders). **No agent sent an equity limit order, so A7's
+    fractional limit path has no live instance:** it is verified by tests only, and the Sept 24
+    open (13:30Z) is its next window.
+  - **The lab:** 673 candidates evaluated since 16:28Z (156, 183, 128, 67, 123 an hour: the restart
+    at Deploy A emptied the tape cache), 124 Luna children evaluated in all by 21:36Z; graduations
+    6 born, 28 passed and waiting, 27 rationed, 13 failed the House replay. Throughput does not
+    bind: seats do (28 waiting), so S4 (tapes on the lab box) is not built this run.
+  - **Invariants firing as designed:** the quiet-desk warning named kalshi-attention, alpaca-options,
+    kalshi-prices and alpaca-crypto-majors; the waiting-graduate warning named four graduates at
+    6 hours. The frozen-bunt warning never fired.
+  - **New defect seen:** the daily backup of the House box failed three times ("sailbox api 503:
+    prepare checkpoint"). Sail's API refused the checkpoint; the next check is whether a later
+    attempt succeeds.
+- 21:36Z — **the refresh snapshot** (`ledger.sqlite` to 21:36:30Z, `lab.sqlite`), taken with
+  sqlite's backup API and downloaded; the box's temporary copies were removed. The study's refresh
+  section 3a is written from it (`queries/2026-09-23/R-1.py`). The Sail-side backup errors
+  resolved themselves: the House retried, and the 21:28Z attempt finished at 21:32Z with no alert.
+- 21:36Z — **Wave 2 launched, trimmed to what the Done list needs** (the usage-limit gap cost 3.7
+  hours): W2-money (the run's second and last digest change: A8, the practice haircut per asset
+  class from measured fills; a bunt lent less than today's base is lent up to it, never refilling
+  losses, because meriwether-h2d625d sat at $10 against a $30 target at W_real 0.9978; the day's
+  opening equity survives a restart). W2-house (the wake skip and the agents' pause and size-down
+  tools) is not built in this run: its brief is kept for the next build.
+- 21:45Z — **the adversarial review of #203 (order path)** finished on `w1-bugs/review`
+  (`ca05a98`): one major confirmed and fixed (a buy closed as never-arrived freed its reserved cash
+  while the book still asked the venue, so a second buy could pass and a revived fill leave the
+  agent 96% invested against the 50% cap: the buy's cash now stays reserved for the recheck
+  window, and a dead agent's sweep takes free cash only). Two of its follow-ups were applied at
+  once on `w1-bugs/followups` (`5a02e8e`), because both bear on Deploy C itself: the wake stamps
+  are written under the state lock (a new key added while `_save_state` serializes could raise
+  "dictionary changed size during iteration"), and a real book whose only problem is an order
+  whose outcome is still unknown raises a warning, not an error (an error inside a deploy's
+  watch rolls a good release back). Left as recorded follow-ups: re-reading settlements after a
+  revived fill on a settled market (rare; pre-PR it froze too), re-snapping a re-priced post-only
+  order to a coarser price band (the venue rejects it as before), and a docstring.
+- 21:44Z — PR #209 (Wave 1: #201 seats, #204 lab, #202 research and foundry, the lab one-liner,
+  Merton's #205-#207, the run branch) green on 3.11 (9m13s) and 3.14 (7m35s) and locally (league
+  98 modules / 2,442 tests, ltcm 1,791); merged as `563a030` and deployed at once.
+- **21:46:00Z — Deploy B promoted:** release `20260923T214445Z-f5650ac1d870` (was
+  `main-24bda8977420`). No money rule changed (digest `1d63a56e`), so no ratify.
+- 21:47-21:49Z — **Deploy B verified on the box** (first ticks): health fresh, no book frozen,
+  the grant active on `1d63a56e`; the seat market is live (`seats`: 32 graduates waiting, 10
+  desks reserved for them); the research gate records its triggers (`abstain_lock`, `backoff`,
+  `lesson`, `repair.status`, `book.settle`: #202 live); the lab marked itself closed while the
+  House started (21:46:04Z) and its forward windows have not run yet (checked again below).
+- **U2's first move, read in full** (the ledger's `shard_move` row): at 20:40:17Z the hourly pass
+  found shard 3 at $14.07 (under the $20 floor after meriwether-h7d7702's sports fill at 20:39:57Z)
+  and moved $30 from shard 0 (transfer `3e9591d4`). The source was debited at once
+  ($347.54 → $317.54) but **the destination was credited about an hour later**: shard 3 still read
+  $14.07 at 21:32Z and $44.07 by 21:40Z. The account total is unchanged ($361.61 across the two
+  shards before and after). The review's conservative re-read (#197 review fix 2) is what kept the
+  funder from moving a second $30 while the credit was in flight. A venue fact worth keeping: a
+  Kalshi cross-shard move can take about an hour to land.
+- 21:39-21:46Z — **workstream O done:** draft PR #210 (`w2-options/design`, CI green, not for
+  deploy): `docs/design/2026-09-24-level-3-debit-verticals.md` (every claim cited to the code;
+  owner steps first: a second Alpaca practice account with its keys in the gateway, and the three
+  unknowns settled only with a practice order; about 2,200 lines and 5-6 build days) and
+  `league/verticals.py`, a pure module imported by nothing in the House (the spread, its maximum
+  loss, the caps, Alpaca's multi-leg order shape, and one spread counted as one trade from per-leg
+  fills), with 33 tests including a guard that nothing imports it.
+- **21:49:20Z — Deploy B was rolled back by the watchdog** (reading 6 of its watch): one error
+  alert, `alpaca-paper does not reconcile: cash differs by 40.0116; positions differ:
+  crypto:LINKUSD:alpaca-paper -3.262934654`. **Cause (read from the ledger):** at 21:48:50Z
+  haghani-37 placed a marketable limit sell of 3.262934654 LINK at $12.28 on the practice account;
+  it filled within seconds, after the mark pass's poll, and Alpaca's positions and cash showed the
+  sale before its orders endpoint did. The fill was booked at 21:49:01Z (venue time 21:48:58Z), and
+  after the rollback the practice book reconciled with nothing frozen. Nothing in Deploy B's code
+  caused it: the race is pre-existing (a marketable order filling between a mark pass's poll and its
+  reconcile), and it hit inside a watch. Who noticed: the watchdog did, as designed; no alert or
+  role had noticed the race before.
+- 21:53Z — **PR #212, the fix:** `reconcile_with_second_look` in `league/house.py` (unprotected). A
+  failing reconcile with an order working on that book is read again after 3 s and a fresh poll;
+  a mismatch that stays is real and stands; with no order working the first reading stands; and
+  the second look does not count twice toward a practice book's adoption of the venue (the first
+  version did, and `test_house`'s "more than cents is an error" test caught it). Deploy B is
+  redeployed with it once CI is green: the same release content plus the fix, still the run's
+  second owner deploy in substance.
+- 22:01Z — PR #212 green on both Pythons; merged as `cb955cb`; **Deploy B redeployed** (the same
+  Wave 1 content plus the second look). **22:03:12Z promoted:** release
+  `20260923T220154Z-b460e9de858e`. No money rule changed, no ratify.
+- 22:08Z — **Deploy B verified on the box:** 104 living (the population rises toward 112 as the
+  seat market seats waiters: 3 lab graduates born in five minutes, among them leahy-l9acfcb, plus a
+  card and two House births); the seat market shows 34 graduates and 5 cards waiting, 11 desks
+  reserved; the lab evaluated 7 Luna children in its first minutes (#204: the LLM children reach
+  batches at last) and its first forward windows ran (3 rows, 2 ranked, both positive); the
+  research gate runs on triggers (library notes, lessons, a fill, a block, heartbeats; clock runs
+  only for winners and idle agents); no book frozen, no error alert, tick 35 s.

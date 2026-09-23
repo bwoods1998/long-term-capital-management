@@ -1,0 +1,26 @@
+== funnel since 16:28Z
+ births {'architect/repair': 4, 'house': 11, 'card': 1, 'lab': 5}  deaths {'displaced': 19, 'evidence': 1, 'stuck': 1}
+ promotions {(0, 1): 5, (1, 2): 3}  demotions {(2, 1): 1}
+ to real money: [('18:49:05', 'huang-l23cdb7'), ('20:07:05', 'meriwether-h7d7702'), ('21:02:43', 'hilibrand-h6ca596-3')]
+== real money since Deploy A
+  {'kalshi fills': 9, 'kalshi settles': 5} {'kalshi': 59.59} realized {'kalshi': -7.35}
+== practice since 16:28Z (agents only; realized + settlements)
+  kalshi-shadow kalshi-crypto-15m            -4.45 (21)
+  alpaca-paper  alpaca-crypto-alts           -1.28 (17)
+  alpaca-paper  alpaca-crypto-majors         -0.17 (2)
+  alpaca-paper  alpaca-index-etfs            -0.05 (6)
+  alpaca-paper  alpaca-megacaps               0.55 (19)
+  kalshi-shadow kalshi-prices                 3.45 (8)
+  alpaca-paper  alpaca-options               13.00 (2)
+  kalshi-shadow kalshi-crypto-strikes        26.75 (7)
+  kalshi-shadow kalshi-sports                74.01 (18)
+  totals {'kalshi-shadow': 99.76, 'alpaca-paper': 12.05}
+== stock and options desks since Deploy A (practice)
+  {('alpaca-index-etfs', 'agent.intent'): 38, ('alpaca-index-etfs', 'agent.woke'): 336, ('alpaca-index-etfs', 'book.fill'): 18, ('alpaca-index-etfs', 'book.refused'): 20, ('alpaca-megacaps', 'agent.intent'): 19, ('alpaca-megacaps', 'agent.woke'): 216, ('alpaca-megacaps', 'book.fill'): 21, ('alpaca-options', 'agent.intent'): 4, ('alpaca-options', 'agent.woke'): 70, ('alpaca-options', 'book.fill'): 4}
+  equity limit orders since A: {}
+== lab
+  evaluated since 16:28Z 673  evaluated by origin (lifetime) {'agent': 47, 'luna': 124, 'param': 1768, 'seed': 311, 'sol': 6}
+  graduations by state {'born': 6, 'holdout_rationed': 27, 'passed': 28, 'replay_failed': 13}
+  evaluated per UTC hour {'16': 156, '17': 183, '18': 128, '19': 67, '20': 123, '21': 75}
+== research gate triggers since 16:28Z
+  {('skip', None): 715, ('run', None): 681, ('sample', None): 113}

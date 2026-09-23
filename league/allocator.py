@@ -17,7 +17,8 @@ death.
 - `W_paper`: the agent's wealth multiple on its paper book, stakes lent or returned taken out, the
   block in progress included (`Evaluator.wealth`). Alpaca's paper fills looked optimistic on Sept
   22 (haghani +7.4% on paper against negative replays), so a conservative execution haircut of
-  `evidence.alpaca_paper_haircut_bps` per side of filled notional is taken off `alpaca-paper`.
+  `evidence.alpaca_paper_haircut_bps` per side of filled notional is taken off `alpaca-paper`, at
+  the rate of each fill's asset class (A8, Sept 23, 2026: each class's own measured optimism).
   The Kalshi shadow book already fills conservatively and is not haircut.
 - `W_real`: the same on its real book since its first real dollar. A real record is never reset by
   a promotion or a sweep.
@@ -120,13 +121,25 @@ class Evidence:
                 "real_drawdown": round(self.real_drawdown, 4)}
 
 
-def _paper_haircut(house: Any, agent: str, book_name: str, bps: float) -> float:
+def _haircut_rate(bps: Any, asset_class: Any) -> float:
+    """The haircut in bps a side for one fill: a plain number charges every class (the form before A8,
+    kept for rollback); a table charges the fill's asset class, and a class the table does not name
+    pays the table's largest rate, never nothing (evidence honesty: an unmeasured class is not
+    assumed to fill at the quote)."""
+    if isinstance(bps, Mapping):
+        rates = [float(v) for v in bps.values()]
+        return float(bps[asset_class]) if asset_class in bps else max(rates, default=0.0)
+    return float(bps or 0)
+
+
+def _paper_haircut(house: Any, agent: str, book_name: str, bps: Any) -> float:
     """The execution haircut on a paper record, in log wealth: `bps` of every filled notional (each
     side) since the evidence cutoff, each over the stake of the stay it was traded in (a sweep ends a
     stay; the next stake begins one), so each stay pays for its own trading and an evidence cutoff
     never zeroes it (Sept 23, 2026 review: the old base, every dollar lent since the cutoff, was 0
-    after a repair and diluted across re-seats)."""
-    if bps <= 0:
+    after a repair and diluted across re-seats). `bps` is a number for every class or, since A8
+    (Sept 23, 2026), a table by the fill's instrument's asset class (`_haircut_rate`)."""
+    if (max((float(v) for v in bps.values()), default=0.0) if isinstance(bps, Mapping) else float(bps or 0)) <= 0:
         return 0.0
     from .accounting import evidence_cutoffs
 
@@ -145,12 +158,13 @@ def _paper_haircut(house: Any, agent: str, book_name: str, bps: float) -> float:
             continue
         if entry.seq <= cutoff or p.get("source") not in ("venue", "cross"):
             continue
+        instrument = p.get("instrument") or {}
         try:
-            multiplier = float((p.get("instrument") or {}).get("multiplier") or 1)
+            multiplier = float(instrument.get("multiplier") or 1)
             notional = abs(float(p["quantity"]) * float(p["price"]) * multiplier)
         except (KeyError, TypeError, ValueError):
             continue
-        total += notional * bps / 10_000.0 / max(base, 1.0)
+        total += notional * _haircut_rate(bps, instrument.get("asset_class")) / 10_000.0 / max(base, 1.0)
     return min(total, 5.0)
 
 
@@ -231,7 +245,7 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     stay = real_stay_start(house, agent.id) if rung >= 2 else None
     paper = ev.wealth(agent.id, paper_name, agent.horizon, current=True)
     real = ev.wealth(agent.id, real_name, agent.horizon, current=True, drawdown_since=stay if stay is not None else None)
-    haircut = _paper_haircut(house, agent.id, paper_name, float(weights.get("alpaca_paper_haircut_bps", 0))) \
+    haircut = _paper_haircut(house, agent.id, paper_name, weights.get("alpaca_paper_haircut_bps", 0)) \
         if paper_name == "alpaca-paper" else 0.0
     w_paper = math.exp(max(min(paper["log"] - haircut, 50.0), -50.0))
     w_real = math.exp(max(min(real["log"], 50.0), -50.0))
@@ -829,7 +843,19 @@ class Allocator:
                 # and the stay drawdown, hysteresis and death decide the rest. Under the flat rule a
                 # $10 bunt down to $9 was topped back up to $10 at every pass the loss cleared
                 # `min_stake_change`. The stake at seating is `House.seat`'s, not this.
-                return None
+                # But a bunt lent LESS than today's base is lent up to it (Sept 23, 2026 ~21:30 UTC):
+                # when Deploy A raised the Kalshi base $10 -> $30, every bunt seated at $10 with W_real a
+                # hair under 1 stayed at $10 (meriwether-h2d625d: W_real 0.9978, stake $10, target $30),
+                # and a bunt halved by the throttle stayed halved when it lifted (the #198 review, item
+                # 4). So it is lent at most the target (here the base, or the throttle's half of it)
+                # less what it has been lent net of every sweep (`account.staked`): lent $10 under a
+                # $30 base it gets up to $20; lent the base and down to $27 it gets nothing. Its equity
+                # and its net loan on the book never pass the target, and a loss (this stay's, or a
+                # past stay's still counted in `staked`) is lent back only out of real profit the
+                # account had already handed back (a sweep of profit lowers `staked`).
+                delta = min(delta, target - account.staked)
+                if delta <= 0:
+                    return None
             room = self.headroom(agent.venue)
             delta = min(delta, max(room, ZERO)).quantize(CENT, rounding=ROUND_DOWN)
             if delta <= 0 or delta < max(equity, Decimal(1)) * _d(p["min_stake_change"]):

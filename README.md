@@ -92,7 +92,8 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
 
 - **Evidence is wealth.** `W_paper` is an agent's wealth multiple on its paper book since it was
   seated: stakes lent or returned are excluded, the block in progress counts, and Alpaca paper fills
-  are haircut 10 bps a side. `W_real` is the same on its real book since its first real dollar and
+  are haircut a side by asset class, at each class's measured paper optimism (4 bps crypto, 2
+  stocks, 24 options since Sept 23, 2026; 10 on every class before). `W_real` is the same on its real book since its first real dollar and
   is never reset. The evidence is `E = W_paper^0.5 × W_real`. The paper purse is traded under
   conservative fills with fees, so W is an anytime-valid e-value against "no edge after fees": an
   edgeless strategy reaches W ≥ 1/α with probability at most α, however it sizes (Ville).
@@ -901,6 +902,16 @@ dynamism revisions followed that evening:
   Alpha Lab keeps running below the "all" OpenAI tier, and four invariants raise ops alerts (a
   quiet desk, a bunt frozen by a daily-loss rule, a lab closed 30 minutes, a graduate waiting 6
   hours). The first allocator pass re-staked mullins-2 from $10.09 toward $34.84.
+- **Deploy B (#209: #201, #202, #204), 21:46Z.** Release `20260923T214445Z-f5650ac1d870`, no money
+  rule changed (digest `1d63a56e`). The seat market: waiting lab graduates, replay-passed cards and
+  merged strategies take every freed seat first and no House mutation is staked while any waits;
+  newcomers with forward evidence may displace never-traded residents inside the grace; a desk
+  keeps a seat for a trading member; no re-breeding of a family that is losing forward;
+  population 112 and desk caps that follow the graduates. The lab evaluates its LLM children,
+  re-scores its elites hourly on data that arrived after their code froze (forward windows rank,
+  never promote) and reads the teacher's lessons as priors. Research runs on evidence (a fill,
+  settlement, refusal, block, verdict or lesson) rather than the clock, the foundry follows
+  forward yield, failed consults are refunded, and repair children are replayed before a seat.
 
 Known limits:
 
