@@ -174,6 +174,28 @@ class ReplayRulesChange(HouseCase):
         self.near_miss("replaced", cause="superseded")        # its code was corrected
         self.assertEqual(self.revive(), [])
 
+    def test_code_a_merged_repair_corrects_is_not_brought_back(self):
+        from unittest.mock import patch
+        self.near_miss("haghani")
+        with patch.object(type(self.house), "_known_defect", return_value="the merged repair haghani_fix corrects its code"):
+            self.assertEqual(self.revive(), [])
+
+    def test_a_line_whose_holdout_is_spent_forks_no_child_that_could_only_die(self):
+        """A plain mutation shares its parent's lineage; once the lineage's sealed holdout is spent,
+        its child passes no replay (it dies `redundant`), so the parent does not fork one."""
+        agent = self.seated("crypto")
+        self.house.settings.deep_replay = True
+        self.assertFalse(self.house._holdout_spent(agent))
+        root = self.house.registry.lineage(agent.id)[-1]
+        for n in range(self.house.settings.holdout_lineage_budget):
+            self.house.ledger.append("holdout.access", {"agent": agent.id, "lineage": root, "version": f"v{n}", "state": "opened"}, agent=agent.id)
+        self.assertTrue(self.house._holdout_spent(agent))
+        forks = []
+        self.house.fork = lambda parent: forks.append(parent.id)
+        self.house.economy.can_fork = lambda _agent_id: True
+        self.house.keep_population(refill=True, clock=False)
+        self.assertEqual(forks, [])
+
     def test_a_new_house_has_no_old_verdict_to_revisit(self):
         from league.house import _replay_rules_key
         self.assertEqual(self.house._state["replay_rules"], _replay_rules_key())

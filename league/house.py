@@ -433,6 +433,10 @@ class House:
             # Exactly zero is a program that sat the out-of-sample stretch out, which the floor does not admit.
             if not floor < float(oos) < 0 or same(agent) in running:
                 continue
+            # Code a merged repair corrects is not brought back: it would be retired as superseded
+            # within the hour (haghani-40 to -42, Sept 23, 2026 04:23Z).
+            if self._known_defect(agent):
+                continue
             niche = self.niches.get(agent.specialty or "")
             if niche is None or niche.dormant or self.members(niche.id) >= niche.max_members:
                 continue
@@ -3635,6 +3639,8 @@ class House:
                 last = float(self._state.setdefault("last_fork", {}).get(agent.id) or 0)
                 if self.clock() - last >= float(rules["epoch_seconds"]):
                     self._state["last_fork"][agent.id] = self.clock()
+                    if self._holdout_spent(agent):
+                        continue  # its child could pass no replay: asked again next epoch
                     if self.fork(agent) is not None:
                         # The first burst payout launched seven children serially, holding one
                         # tick for over seven minutes. Give the next parent its turn on the next
@@ -3644,6 +3650,22 @@ class House:
             self.found()
         self.enroll()
         self._refill(rules)
+
+    def _holdout_spent(self, agent: Agent) -> bool:
+        """Would a plain mutation of this agent be refused the sealed holdout? It shares the parent's
+        lineage, and a lineage that has spent `holdout_lineage_budget` evaluations passes no further
+        development replay: the child dies `redundant` minutes after its birth. Measured Sept 23,
+        2026, 03:58-04:25Z: the revived crypto lines forked eight such children in half an hour."""
+        needs = agent.needs or {}
+        venue, _, _ = niche_of(needs)
+        if venue != "alpaca" or not self.settings.deep_replay or str(needs.get("asset_class") or "") == "option" \
+                or self._feeds_wanted(needs):
+            return False
+        from . import deep_replay
+
+        lineage = self.registry.lineage(agent.id)
+        seal = deep_replay.HoldoutSeal(self.ledger, budget=self.settings.holdout_lineage_budget, window=self.holdout_window)
+        return seal.used(lineage[-1] if lineage else agent.id) >= seal.budget
 
     def _refill(self, rules: Mapping[str, Any]) -> Agent | None:
         """Keep a seat filled. A death that leaves an empty seat is only useful if something new
