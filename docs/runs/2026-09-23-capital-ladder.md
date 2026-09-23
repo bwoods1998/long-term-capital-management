@@ -325,3 +325,21 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   $1,016.00 (Kalshi $516.10, Alpaca $499.90) against the $1,017.75 baseline, with `read_ok` true.
   Profit is $0, so the bonus is $0 ("no profit above the baseline"), and the cap is the funded
   $408 with $351.54 spent this month.
+- 13:10:18Z — a third lab candidate passed the House replay, for `kalshi-sports`. It is waiting for
+  a seat: that desk is full.
+- 13:11Z — **the House's teacher disagreed with the lab.** Merton (teacher) merged #181, a playbook
+  lesson: pause parameter-only forks of the ETH prior-window fade until its forward losses are
+  explained. The evidence behind it:
+  - huang-h6d3302 passed replay, then logged −0.0603 total forward log growth;
+  - huang-h6d3302-2 has −0.0498 over 9 blocks;
+  - huang-h609d6f has −0.0589 over 11 blocks.
+
+  The lab's first graduate, huang-l23cdb7, is such a fork: a parameter child from that lineage's
+  archive cell. The lab's gate (the House replay on its own line, plus the sealed holdout) does
+  not consult a lineage's forward record. The plan leaves that to practice, where the
+  allocator's evidence takes over and death comes at W_paper < 0.8 after 10 trades. Nothing was
+  changed: the graduate trades practice money only, and whether its fork holds up is exactly
+  what practice will show. It is recorded as a design question for the lab (see the report).
+- 13:15:37Z — PR #179 (this record, the `floor_watch` fixes, README Deploys 4-6, operations)
+  merged as `8e5c22a`, after CI passed on 3.11 and 3.14. Main also carries Merton's #180
+  (a Haghani-40 child strategy) and #181, which the in-box updater will ship as usual.
