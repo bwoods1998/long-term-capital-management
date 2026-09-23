@@ -1,0 +1,39 @@
+board at 2026-09-23T16:25:19.759Z throttle False envelope {'alpaca': {'capital_usd': '500.00', 'committed_usd': '0.50501961'}, 'kalshi': {'capital_usd': '517.75', 'committed_usd': '98.64430000'}}
+bands: Counter({'paper': 89, 'bunt': 5})
+
+=== top 12 by E (band, stake, W_paper, W_real, E, trades, real_trades)
+   mullins-2 ['bunt', '5.11', 1.0345, 1.157835, 1.177639, 11, 10]
+   mullins-6 ['bunt', '36.70', 1.0285, 1.038333, 1.053026, 11, 2]
+   meriwether-h2d625d ['bunt', '10', 1.026864, 0.995325, 1.008606, 7, 0]
+   mullins-13 ['paper', None, 1.0125, 1.0, 1.006231, 4, 0]
+   hawkins-22 ['paper', None, 1.01145, 1.0, 1.005709, 0, 0]
+   hawkins-23 ['paper', None, 1.01145, 1.0, 1.005709, 0, 0]
+   hawkins-24 ['paper', None, 1.01145, 1.0, 1.005709, 0, 0]
+   haghani-56 ['paper', None, 1.011185, 1.0, 1.005577, 4, 0]
+   meriwether-36 ['paper', None, 1.010466, 1.0, 1.005219, 6, 0]
+   hufschmid-32 ['paper', None, 1.005, 1.0, 1.002497, 2, 0]
+   huang-hd8ff7c ['paper', None, 1.00468, 1.0, 1.002337, 1, 0]
+   mullins-17 ['paper', None, 1.00425, 1.0, 1.002123, 0, 0]
+=== bottom 10 by E
+   krasker-6 ['paper', None, 0.934495, 1.0, 0.966693, 3, 0]
+   krasker-10 ['paper', None, 0.934346, 1.0, 0.966616, 1, 0]
+   meriwether-39 ['paper', None, 0.922432, 1.0, 0.960433, 6, 0]
+   huang-h6d3302-2 ['paper', None, 0.919688, 1.0, 0.959004, 6, 0]
+   hufschmid-30 ['paper', None, 0.9085, 1.0, 0.953153, 2, 0]
+   huang-h4ee182 ['paper', None, 0.892, 1.0, 0.944458, 1, 0]
+   meriwether-hadd32b ['paper', None, 0.831171, 1.0, 0.911686, 7, 0]
+   huang-h51fdd3-2 ['bunt', '11.52', 1.052, 0.848, 0.869769, 4, 1]
+   hilibrand-h6ca596 ['paper', None, 0.69815, 1.0, 0.835554, 3, 0]
+   huang-h427345 ['paper', None, 0.983923, 0.7454, 0.739384, 10, 1]
+=== agents with real trades
+   mullins-2 ['bunt', '5.11', 1.0345, 1.157835, 1.177639, 11, 10]
+   mullins-6 ['bunt', '36.70', 1.0285, 1.038333, 1.053026, 11, 2]
+   haghani-37 ['paper', None, 0.985459, 0.979799, 0.972649, 5, 1]
+   huang-h51fdd3-2 ['bunt', '11.52', 1.052, 0.848, 0.869769, 4, 1]
+   huang-h427345 ['paper', None, 0.983923, 0.7454, 0.739384, 10, 1]
+=== never traded: 40 of 94
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-bwoods1998-Work/d98458ca-7959-468b-aee6-0082aa607bc1/scratchpad/study/queries/C-6.py", line 22, in <module>
+    print('\nvenue fill sample:',r[0],r[1],r[2][:900])
+                                 ~^^^
+TypeError: 'NoneType' object is not subscriptable

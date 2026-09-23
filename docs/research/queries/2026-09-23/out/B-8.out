@@ -1,0 +1,88 @@
+=== venue fills since 2026-09-21 : book | asset | liquidity | n | notional | fees | fee bps of notional | median adverse bps vs reference | mean | n with ref
+alpaca | crypto | taker | 2 | $24 | $0.03 | 12.8 bps | +0.0 | +0.0 | 2
+alpaca-paper | crypto | taker | 320 | $10586 | $13.20 | 12.5 bps | +0.0 | -3.0 | 320
+alpaca-paper | equity | taker | 82 | $1976 | $0.00 | 0.0 bps | -0.2 | -0.2 | 82
+alpaca-paper | option | taker | 42 | $883 | $0.00 | 0.0 bps | -0.0 | -29.2 | 42
+kalshi | event | maker | 27 | $185 | $0.00 | 0.0 bps | +0.0 | +0.0 | 27
+kalshi | event | taker | 11 | $48 | $1.11 | 230.1 bps | -158.7 | -978.8 | 11
+kalshi-shadow | event | maker | 257 | $2581 | $0.08 | 0.3 bps | +0.0 | +0.0 | 257
+kalshi-shadow | event | taker | 178 | $1864 | $33.96 | 182.1 bps | +0.0 | -18.3 | 178
+
+=== real fills per asset class (haircut table needs 30+): Counter({('kalshi', 'event'): 38, ('alpaca', 'crypto'): 2})
+
+=== market-order slippage vs the touch, by book x asset x side (venue fills, taker, order_type market):
+  ('alpaca', 'crypto', 'sell'): n 1, median -0.0 bps, mean +0.0 bps, p90 -0.0
+  ('alpaca-paper', 'crypto', 'buy'): n 11, median -2.2 bps, mean -3.0 bps, p90 +4.4
+  ('alpaca-paper', 'crypto', 'sell'): n 50, median -3.2 bps, mean -5.1 bps, p90 +8.1
+  ('alpaca-paper', 'equity', 'buy'): n 43, median -0.2 bps, mean -0.1 bps, p90 +0.3
+  ('alpaca-paper', 'equity', 'sell'): n 39, median -0.3 bps, mean -0.3 bps, p90 +0.8
+  ('kalshi', 'event', 'buy'): n 8, median -356.3 bps, mean -1345.9 bps, p90 +0.0
+  ('kalshi-shadow', 'event', 'buy'): n 73, median +0.0 bps, mean +22.5 bps, p90 +0.0
+
+=== limit orders: fill price vs limit (should be 0 or better):
+  ('alpaca', 'crypto'): n 1, median +0.0 bps, mean +0.0, min +0.0, max +0.0
+  ('alpaca-paper', 'crypto'): n 305, median +0.0 bps, mean -2.3, min -246.8, max +0.0
+  ('alpaca-paper', 'option'): n 42, median -0.0 bps, mean -29.2, min -1000.0, max +0.0
+  ('kalshi', 'event'): n 30, median +0.0 bps, mean +0.0, min +0.0, max +0.0
+  ('kalshi-shadow', 'event'): n 493, median +0.0 bps, mean -9.9, min -1063.8, max +0.0
+
+=== order outcomes per book (unique order ids, last status), since 2026-09-21
+  ('alpaca', 'limit', 'taker'): total 5 | cancelled 4 (80%), filled 1 (20%)
+  ('alpaca', 'market', 'taker'): total 1 | filled 1 (100%)
+  ('alpaca-paper', 'limit', 'taker'): total 683 | cancelled 302 (44%), filled 292 (43%), rejected 79 (12%), accepted 10 (1%)
+  ('alpaca-paper', 'market', 'taker'): total 186 | filled 138 (74%), rejected 47 (25%), accepted 1 (1%)
+  ('kalshi', 'limit', 'maker'): total 50 | filled 22 (44%), cancelled 20 (40%), rejected 8 (16%)
+  ('kalshi', 'limit', 'taker'): total 5 | filled 3 (60%), rejected 2 (40%)
+  ('kalshi', 'market', 'taker'): total 13 | filled 7 (54%), cancelled 6 (46%)
+  ('kalshi-shadow', 'limit', 'maker'): total 963 | cancelled 442 (46%), filled 251 (26%), expired 153 (16%), rejected 85 (9%), accepted 32 (3%)
+  ('kalshi-shadow', 'limit', 'taker'): total 120 | filled 109 (91%), cancelled 10 (8%), expired 1 (1%)
+  ('kalshi-shadow', 'market', 'taker'): total 65 | filled 65 (100%)
+
+=== maker (post-only limit) orders: filled share, shadow vs real:
+  kalshi-shadow: 963 maker orders; filled 251 (26%), cancelled/expired 595 (62%), rejected 85, still resting 32
+  kalshi: 50 maker orders; filled 22 (44%), cancelled/expired 20 (40%), rejected 8, still resting 0
+
+=== rejected orders: reasons (last reason) per book:
+  kalshi-shadow: 85 rejected
+     83 x 
+     1 x 0.9299999999999999 is not on KXMLBSPREAD-26SEP212145MINSF-SF7's price grid
+     1 x 0.9299999999999999 is not on KXMLBHR-26SEP221840MILPHI-PHIBHARPER3-1's price grid
+  alpaca-paper: 126 rejected
+     123 x the venue has no such order
+     3 x alpaca submit: HTTP 403 order qty must be >= minimal qty of order 0.000000002
+  kalshi: 10 rejected
+     8 x kalshi submit: HTTP 400 {"error": {"code": "invalid_order", "details": "post only cross", 
+     2 x kalshi submit: HTTP 404 {"error": {"code": "insufficient_shard_balance", "details": "Excha
+
+=== book.refused per book (reasons), since 2026-09-21
+  kalshi-shadow: 86 refusals of 1242 intents (7%)
+     10 x this market is expected to resolve in 171 hours; entries must resolve within 48
+     8 x this market is expected to resolve in 172 hours; entries must resolve within 48
+     8 x the House already holds or bids the no leg of this market; one account cannot hold both
+     6 x this market is expected to resolve in 175 hours; entries must resolve within 48
+     6 x desk daily loss 13.8% reached limit 10%; only risk-reducing orders allowed
+     6 x this market is expected to resolve in 177 hours; entries must resolve within 48
+     5 x this market is expected to resolve in 174 hours; entries must resolve within 48
+     4 x this market is expected to resolve in 178 hours; entries must resolve within 48
+  kalshi: 9 refusals of 77 intents (12%)
+     2 x this market is expected to resolve in 51 hours; entries must resolve within 48
+     2 x this market is expected to resolve in 50 hours; entries must resolve within 48
+     1 x KXXRP15M-26SEP211115-15 would put 9.00 at risk on one market, cap 7.50 (30% of desk equity)
+     1 x crypto:2026-09-21T15 would put 9.00 at risk across the live desks, cap 6.25 (25% of the live floor o
+     1 x KXDOGE15M-26SEP211200-00 would put 8.84 at risk on one market, cap 7.50 (30% of desk equity)
+     1 x crypto:2026-09-21T16 would put 8.84 at risk across the live desks, cap 6.25 (25% of the live floor o
+     1 x KXXRP15M-26SEP211645-45 would put 8.00 at risk on one market, cap 7.89 (30% of desk equity)
+     1 x KXXRP15M-26SEP211700-00 would put 8.47 at risk on one market, cap 7.89 (30% of desk equity)
+  alpaca-paper: 1430 refusals of 2261 intents (63%)
+     588 x market orders outside regular hours are not permitted
+     422 x haghani-2 has no seat on the alpaca-paper book
+     134 x krasker-4 has no seat on the alpaca-paper book
+     125 x an option order must be a limit order
+     66 x a market order here could trade against the House's own resting order
+     18 x krasker-3 has no seat on the alpaca-paper book
+     18 x krasker-2 has no seat on the alpaca-paper book
+     15 x krasker has no seat on the alpaca-paper book
+  alpaca: 10 refusals of 16 intents (62%)
+     6 x position would be 50% of desk equity, cap 50%
+     4 x position would be 51% of desk equity, cap 50%
+     3 x order notional 12.50 exceeds 50% of desk equity

@@ -1,0 +1,706 @@
+
+====================================================================================================
+WINDOW since 09-22 13:30Z: 358 closed trades/settlements
+fees paid on fills by book (both legs): {'alpaca-paper': 10.28, 'kalshi-shadow': 25.55, 'kalshi': 0.2, 'alpaca': 0.03}
+
+### by book: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+kalshi-shadow | -361.25 | 150 | -2.408 | -26.92 | 24 | 1925
+alpaca-paper | -101.28 | 152 | -0.666 | -15.41 | 20 | 4988
+alpaca | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+kalshi | +0.93 | 11 | +0.085 | +0.00 | 0 | 90
+
+### by book x desk: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'kalshi-crypto-strikes') | -153.82 | 12 | -12.818 | +0.00 | 0 | 265
+('kalshi-shadow', 'kalshi-crypto-15m') | -108.54 | 48 | -2.261 | +0.00 | 0 | 528
+('kalshi-shadow', 'kalshi-sports') | -59.03 | 50 | -1.181 | -12.02 | 14 | 659
+('alpaca-paper', 'alpaca-options') | -44.00 | 9 | -4.889 | -20.00 | 7 | 275
+('alpaca-paper', 'alpaca-crypto-alts') | -50.36 | 106 | -0.475 | +5.06 | 5 | 3610
+('kalshi-shadow', 'kalshi-prices') | -13.70 | 16 | -0.856 | -16.90 | 7 | 221
+('kalshi-shadow', 'kalshi-sports-props') | -26.58 | 6 | -4.430 | +0.00 | 0 | 57
+('alpaca-paper', 'alpaca-crypto-majors') | -6.22 | 6 | -1.037 | +0.00 | 0 | 253
+('kalshi', 'kalshi-crypto-15m') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('alpaca-paper', 'alpaca-index-etfs') | -1.21 | 11 | -0.110 | -0.47 | 8 | 389
+('alpaca', 'alpaca-crypto-alts') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'alpaca-megacaps') | +0.51 | 20 | +0.025 | +0.00 | 0 | 461
+('kalshi-shadow', 'kalshi-weather') | +0.42 | 18 | +0.023 | +2.00 | 3 | 197
+('kalshi', 'kalshi-weather') | +5.00 | 9 | +0.556 | +0.00 | 0 | 86
+
+### by book x family: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'crypto-strikes-downside-insurance-s') | -93.45 | 9 | -10.383 | +0.00 | 0 | 204
+('alpaca-paper', 'options-pullback') | -44.00 | 9 | -4.889 | -21.00 | 6 | 254
+('kalshi-shadow', 'crypto-strikes-vol-shock-upside') | -60.37 | 3 | -20.123 | +0.00 | 0 | 60
+('alpaca-paper', 'crypto-alts-reversion') | -39.44 | 101 | -0.391 | +0.31 | 3 | 3323
+('kalshi-shadow', 'sports-favorites') | -21.71 | 27 | -0.804 | -12.02 | 14 | 394
+('kalshi-shadow', 'prices-favorites') | -13.70 | 16 | -0.856 | -16.90 | 7 | 221
+('kalshi-shadow', 'sports-runline-leverage-tax') | -29.12 | 7 | -4.160 | +0.00 | 0 | 89
+('kalshi-shadow', 'crypto-15m-doge-flat-spot-no') | -27.88 | 10 | -2.788 | +0.00 | 0 | 58
+('kalshi-shadow', 'crypto-15m-eth-prior-window-fad') | -27.77 | 21 | -1.323 | +0.00 | 0 | 164
+('kalshi-shadow', 'sports-props-favorites') | -26.58 | 6 | -4.430 | +0.00 | 0 | 57
+('kalshi-shadow', 'crypto-15m-sol-beta-catchup') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'sports-central-under-demand') | -15.39 | 9 | -1.710 | +0.00 | 0 | 103
+('kalshi-shadow', 'crypto-15m-prior-window-fade') | -11.43 | 2 | -5.716 | +0.00 | 0 | 23
+('kalshi-shadow', 'crypto-15m-lab-335592') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'crypto-alts-funded-spot-hedge') | -10.24 | 4 | -2.560 | +0.00 | 0 | 188
+('kalshi-shadow', 'crypto-15m-prior-window-reset') | -9.67 | 10 | -0.967 | +0.00 | 0 | 223
+('alpaca-paper', 'crypto-majors-absorbed-buy-program') | -2.85 | 2 | -1.427 | +0.00 | 0 | 98
+('alpaca-paper', 'crypto-majors-funding-short-relief') | -2.78 | 2 | -1.392 | +0.00 | 0 | 131
+('kalshi', 'crypto-15m-prior-window-reset') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('kalshi', 'crypto-15m-doge-flat-spot-no') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('alpaca-paper', 'equity-trend') | -1.09 | 9 | -0.121 | -0.18 | 4 | 275
+('alpaca-paper', 'crypto-alts-alt-basket-catchup') | -0.68 | 1 | -0.677 | +0.00 | 0 | 19
+('alpaca-paper', 'crypto-reversion') | -0.58 | 2 | -0.292 | +0.00 | 0 | 23
+('alpaca', 'crypto-alts-reversion') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'equity-overnight') | +0.00 | 0 | +nan | -0.29 | 4 | 80
+('alpaca-paper', 'index-etfs-real-asset-rotation') | -0.08 | 1 | -0.075 | +0.00 | 0 | 20
+('alpaca-paper', 'megacaps-semiconductor-catchu') | -0.05 | 3 | -0.018 | +0.00 | 0 | 165
+('alpaca-paper', 'index-etfs-duration-to-assets') | -0.04 | 1 | -0.045 | +0.00 | 0 | 15
+('alpaca-paper', 'megacaps-expanding-range-chas') | +0.02 | 13 | +0.002 | +0.00 | 0 | 195
+('alpaca-paper', 'megacaps-chip-demand-relay') | +0.18 | 2 | +0.092 | +0.00 | 0 | 50
+('alpaca-paper', 'megacaps-quiet-vwap-reclaim') | +0.36 | 2 | +0.178 | +0.00 | 0 | 50
+('kalshi-shadow', 'crypto-15m-spot-impulse-lag') | +0.94 | 1 | +0.936 | +0.00 | 0 | 11
+('alpaca-paper', 'options-breakout') | +0.00 | 0 | +nan | +1.00 | 1 | 21
+('kalshi-shadow', 'weather-favorites') | +0.42 | 18 | +0.023 | +2.00 | 3 | 197
+('alpaca-paper', 'crypto-alts-trend') | +0.00 | 0 | +nan | +4.74 | 2 | 79
+('kalshi', 'weather-favorites') | +5.00 | 9 | +0.556 | +0.00 | 0 | 86
+('kalshi-shadow', 'sports-central-run-under') | +7.19 | 7 | +1.027 | +0.00 | 0 | 73
+
+### by book x horizon: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hour') | -262.36 | 60 | -4.373 | +0.00 | 0 | 792
+('kalshi-shadow', 'day') | -98.89 | 90 | -1.099 | -26.92 | 24 | 1133
+('alpaca-paper', 'day') | -45.09 | 18 | -2.505 | -20.18 | 11 | 550
+('alpaca-paper', 'hour') | -56.19 | 134 | -0.419 | +4.77 | 9 | 4438
+('kalshi', 'hour') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('alpaca', 'hour') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'day') | +5.00 | 9 | +0.556 | +0.00 | 0 | 86
+
+### by book x asset class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'event') | -361.25 | 150 | -2.408 | -26.92 | 24 | 1925
+('alpaca-paper', 'option') | -44.00 | 9 | -4.889 | -20.00 | 7 | 275
+('alpaca-paper', 'crypto') | -56.58 | 112 | -0.505 | +5.06 | 5 | 3863
+('alpaca-paper', 'equity') | -0.70 | 31 | -0.023 | -0.47 | 8 | 850
+('alpaca', 'crypto') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'event') | +0.93 | 11 | +0.085 | +0.00 | 0 | 90
+
+### by book x order type: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'settle') | -361.25 | 150 | -2.408 | -26.92 | 24 | 1925
+('alpaca-paper', 'limit') | -44.77 | 78 | -0.574 | -17.45 | 9 | 2752
+('alpaca-paper', 'market') | -56.62 | 73 | -0.776 | +2.04 | 11 | 2220
+('alpaca', 'market') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', '?') | +0.10 | 1 | +0.105 | +0.00 | 0 | 15
+('kalshi', 'settle') | +0.93 | 11 | +0.085 | +0.00 | 0 | 90
+
+### by book x liquidity (exit fill): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', None) | -361.25 | 150 | -2.408 | -26.92 | 24 | 1925
+('alpaca-paper', 'taker') | -101.28 | 152 | -0.666 | -15.41 | 20 | 4988
+('alpaca', 'taker') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', None) | +0.93 | 11 | +0.085 | +0.00 | 0 | 90
+
+### by book x founder class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'foundry') | -272.96 | 67 | -4.074 | +0.00 | 0 | 953
+('kalshi-shadow', 'house') | -68.71 | 77 | -0.892 | -26.92 | 24 | 917
+('alpaca-paper', 'house') | -31.36 | 77 | -0.407 | -15.12 | 16 | 2732
+('alpaca-paper', 'architect') | -29.91 | 41 | -0.729 | -0.29 | 4 | 1395
+('alpaca-paper', 'repair') | -24.00 | 5 | -4.800 | +0.00 | 0 | 58
+('alpaca-paper', 'foundry') | -16.01 | 29 | -0.552 | +0.00 | 0 | 803
+('kalshi-shadow', 'lab') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('kalshi-shadow', 'repair') | -8.47 | 3 | -2.824 | +0.00 | 0 | 28
+('kalshi', 'foundry') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('alpaca', 'house') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'house') | +3.48 | 10 | +0.348 | +0.00 | 0 | 88
+
+### by practice/real x entry UTC hour: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('practice', '15') | -89.53 | 24 | -3.731 | -19.94 | 2 | 361
+('practice', '06') | -73.53 | 19 | -3.870 | -9.10 | 1 | 460
+('practice', '14') | -76.01 | 35 | -2.172 | +0.00 | 0 | 842
+('practice', '07') | -62.25 | 26 | -2.394 | -9.90 | 1 | 783
+('practice', '11') | -48.37 | 12 | -4.031 | +0.00 | 0 | 295
+('practice', '10') | -45.43 | 12 | -3.785 | +0.00 | 0 | 247
+('practice', '08') | -39.80 | 35 | -1.137 | +1.79 | 6 | 1040
+('practice', '19') | -14.72 | 14 | -1.051 | -17.17 | 15 | 606
+('practice', '02') | -32.75 | 12 | -2.729 | +1.78 | 2 | 167
+('practice', '12') | -30.13 | 11 | -2.739 | +0.00 | 0 | 191
+('practice', '21') | -23.45 | 11 | -2.132 | +0.00 | 0 | 145
+('practice', '05') | -22.23 | 8 | -2.779 | +0.62 | 2 | 290
+('practice', '01') | -20.82 | 2 | -10.410 | +0.00 | 0 | 21
+('practice', '04') | -15.33 | 9 | -1.703 | +3.63 | 4 | 128
+('practice', '23') | -5.31 | 10 | -0.531 | +0.00 | 0 | 199
+('practice', '17') | -5.21 | 9 | -0.579 | +1.18 | 3 | 113
+('practice', '00') | -3.12 | 3 | -1.041 | +0.00 | 0 | 64
+('real', '14') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('practice', '22') | -3.51 | 11 | -0.319 | +1.03 | 1 | 184
+('real', '12') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('real', '11') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('practice', '18') | +0.40 | 1 | +0.400 | +0.00 | 0 | 10
+('practice', '03') | +0.49 | 1 | +0.492 | +0.00 | 0 | 10
+('real', '15') | +0.50 | 1 | +0.500 | +0.00 | 0 | 10
+('real', '02') | +0.70 | 2 | +0.350 | +0.00 | 0 | 19
+('real', '00') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('real', '03') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('real', '05') | +0.90 | 2 | +0.450 | +0.00 | 0 | 19
+('real', '20') | +1.50 | 2 | +0.750 | +0.00 | 0 | 20
+('practice', '13') | +8.44 | 8 | +1.055 | +0.00 | 0 | 153
+('practice', '20') | +24.37 | 6 | +4.062 | +1.13 | 1 | 133
+('practice', '16') | +32.34 | 14 | +2.310 | -2.13 | 4 | 272
+('practice', '09') | +82.92 | 9 | +9.214 | +4.74 | 2 | 197
+
+### by book x agent (worst 25): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hilibrand-hc4567e') | -93.45 | 9 | -10.383 | +0.00 | 0 | 204
+('kalshi-shadow', 'hilibrand-h6ca596') | -60.37 | 3 | -20.123 | +0.00 | 0 | 60
+('kalshi-shadow', 'huang-h51fdd3') | -38.28 | 6 | -6.381 | +0.00 | 0 | 38
+('kalshi-shadow', 'meriwether-hadd32b') | -29.12 | 7 | -4.160 | +0.00 | 0 | 89
+('kalshi-shadow', 'huang-h4ee182') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'hufschmid-30') | -18.30 | 2 | -9.150 | +0.00 | 0 | 18
+('kalshi-shadow', 'huang-h6d3302-2') | -16.06 | 6 | -2.677 | +0.00 | 0 | 24
+('kalshi-shadow', 'meriwether-39') | -15.51 | 6 | -2.586 | +0.00 | 0 | 58
+('kalshi-shadow', 'meriwether-17') | +3.77 | 4 | +0.942 | -19.19 | 3 | 67
+('alpaca-paper', 'krasker-10') | -15.00 | 1 | -15.000 | +0.00 | 0 | 27
+('alpaca-paper', 'krasker-4') | +0.00 | 0 | +nan | -12.00 | 1 | 44
+('alpaca-paper', 'krasker-8') | -12.00 | 2 | -6.000 | +0.00 | 0 | 22
+('alpaca-paper', 'krasker-6') | -12.00 | 3 | -4.000 | +0.00 | 0 | 36
+('kalshi-shadow', 'huang-h6d3302') | -11.71 | 15 | -0.781 | +0.00 | 0 | 140
+('kalshi-shadow', 'huang-h609d6f') | -11.43 | 2 | -5.716 | +0.00 | 0 | 23
+('kalshi-shadow', 'huang-l23cdb7') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'haghani-h426990') | -10.24 | 4 | -2.560 | +0.00 | 0 | 188
+('alpaca-paper', 'krasker-3') | +0.00 | 0 | +nan | -10.00 | 2 | 23
+('kalshi-shadow', 'meriwether-h42bdbb-2') | -9.95 | 3 | -3.317 | +0.00 | 0 | 34
+('kalshi-shadow', 'hufschmid-28') | -9.68 | 1 | -9.680 | +0.00 | 0 | 10
+('kalshi-shadow', 'huang-h427345') | -9.67 | 10 | -0.967 | +0.00 | 0 | 223
+('kalshi-shadow', 'meriwether-32') | -9.30 | 1 | -9.300 | +0.00 | 0 | 9
+('kalshi-shadow', 'hawkins-8') | +0.00 | 0 | +nan | -8.90 | 3 | 29
+('kalshi-shadow', 'meriwether-37') | -8.47 | 3 | -2.824 | +0.00 | 0 | 28
+('kalshi-shadow', 'hawkins-15') | -8.30 | 5 | -1.660 | +0.00 | 0 | 48
+
+### best 12 agents by P&L
+('kalshi-shadow', 'huang-h51fdd3-2') | +10.40 | 4 | house +0.00
+('kalshi-shadow', 'meriwether-h2d625d') | +7.19 | 7 | house +0.00
+('alpaca-paper', 'haghani-2') | +0.00 | 0 | house +4.74
+('alpaca-paper', 'haghani') | +4.51 | 15 | house +0.00
+('alpaca-paper', 'krasker-2') | +0.00 | 0 | house +4.00
+('kalshi', 'mullins-2') | +4.00 | 7 | house +0.00
+('kalshi-shadow', 'mullins-6') | +2.50 | 5 | house +0.00
+('kalshi-shadow', 'mullins-13') | +2.50 | 4 | house +0.00
+('kalshi-shadow', 'meriwether-27') | +1.03 | 1 | house +1.42
+('kalshi-shadow', 'meriwether-34') | +1.03 | 1 | house +1.42
+('kalshi-shadow', 'meriwether-35') | +2.45 | 4 | house +0.00
+('kalshi-shadow', 'hawkins-19') | +2.30 | 5 | house +0.00
+
+====================================================================================================
+WINDOW last 24h (09-22 16:28Z..): 346 closed trades/settlements
+fees paid on fills by book (both legs): {'alpaca-paper': 9.97, 'kalshi-shadow': 25.2, 'kalshi': 0.2, 'alpaca': 0.03}
+
+### by book: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+kalshi-shadow | -364.67 | 144 | -2.532 | -28.32 | 22 | 1852
+alpaca-paper | -102.75 | 149 | -0.690 | -15.41 | 20 | 4866
+alpaca | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+kalshi | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x desk: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'kalshi-crypto-strikes') | -153.82 | 12 | -12.818 | +0.00 | 0 | 265
+('kalshi-shadow', 'kalshi-crypto-15m') | -108.54 | 48 | -2.261 | +0.00 | 0 | 528
+('kalshi-shadow', 'kalshi-sports') | -59.03 | 50 | -1.181 | -12.02 | 14 | 659
+('alpaca-paper', 'alpaca-options') | -44.00 | 9 | -4.889 | -20.00 | 7 | 275
+('alpaca-paper', 'alpaca-crypto-alts') | -51.83 | 103 | -0.503 | +5.06 | 5 | 3488
+('kalshi-shadow', 'kalshi-prices') | -13.70 | 16 | -0.856 | -16.90 | 7 | 221
+('kalshi-shadow', 'kalshi-sports-props') | -26.58 | 6 | -4.430 | +0.00 | 0 | 57
+('alpaca-paper', 'alpaca-crypto-majors') | -6.22 | 6 | -1.037 | +0.00 | 0 | 253
+('kalshi', 'kalshi-crypto-15m') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('kalshi-shadow', 'kalshi-weather') | -3.00 | 12 | -0.250 | +0.60 | 1 | 123
+('alpaca-paper', 'alpaca-index-etfs') | -1.21 | 11 | -0.110 | -0.47 | 8 | 389
+('alpaca', 'alpaca-crypto-alts') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'alpaca-megacaps') | +0.51 | 20 | +0.025 | +0.00 | 0 | 461
+('kalshi', 'kalshi-weather') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x family: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'crypto-strikes-downside-insurance-s') | -93.45 | 9 | -10.383 | +0.00 | 0 | 204
+('alpaca-paper', 'options-pullback') | -44.00 | 9 | -4.889 | -21.00 | 6 | 254
+('kalshi-shadow', 'crypto-strikes-vol-shock-upside') | -60.37 | 3 | -20.123 | +0.00 | 0 | 60
+('alpaca-paper', 'crypto-alts-reversion') | -40.91 | 98 | -0.417 | +0.31 | 3 | 3201
+('kalshi-shadow', 'sports-favorites') | -21.71 | 27 | -0.804 | -12.02 | 14 | 394
+('kalshi-shadow', 'prices-favorites') | -13.70 | 16 | -0.856 | -16.90 | 7 | 221
+('kalshi-shadow', 'sports-runline-leverage-tax') | -29.12 | 7 | -4.160 | +0.00 | 0 | 89
+('kalshi-shadow', 'crypto-15m-doge-flat-spot-no') | -27.88 | 10 | -2.788 | +0.00 | 0 | 58
+('kalshi-shadow', 'crypto-15m-eth-prior-window-fad') | -27.77 | 21 | -1.323 | +0.00 | 0 | 164
+('kalshi-shadow', 'sports-props-favorites') | -26.58 | 6 | -4.430 | +0.00 | 0 | 57
+('kalshi-shadow', 'crypto-15m-sol-beta-catchup') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'sports-central-under-demand') | -15.39 | 9 | -1.710 | +0.00 | 0 | 103
+('kalshi-shadow', 'crypto-15m-prior-window-fade') | -11.43 | 2 | -5.716 | +0.00 | 0 | 23
+('kalshi-shadow', 'crypto-15m-lab-335592') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'crypto-alts-funded-spot-hedge') | -10.24 | 4 | -2.560 | +0.00 | 0 | 188
+('kalshi-shadow', 'crypto-15m-prior-window-reset') | -9.67 | 10 | -0.967 | +0.00 | 0 | 223
+('alpaca-paper', 'crypto-majors-absorbed-buy-program') | -2.85 | 2 | -1.427 | +0.00 | 0 | 98
+('alpaca-paper', 'crypto-majors-funding-short-relief') | -2.78 | 2 | -1.392 | +0.00 | 0 | 131
+('kalshi', 'crypto-15m-prior-window-reset') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('kalshi-shadow', 'weather-favorites') | -3.00 | 12 | -0.250 | +0.60 | 1 | 123
+('kalshi', 'crypto-15m-doge-flat-spot-no') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('alpaca-paper', 'equity-trend') | -1.09 | 9 | -0.121 | -0.18 | 4 | 275
+('alpaca-paper', 'crypto-alts-alt-basket-catchup') | -0.68 | 1 | -0.677 | +0.00 | 0 | 19
+('alpaca-paper', 'crypto-reversion') | -0.58 | 2 | -0.292 | +0.00 | 0 | 23
+('alpaca', 'crypto-alts-reversion') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'equity-overnight') | +0.00 | 0 | +nan | -0.29 | 4 | 80
+('alpaca-paper', 'index-etfs-real-asset-rotation') | -0.08 | 1 | -0.075 | +0.00 | 0 | 20
+('alpaca-paper', 'megacaps-semiconductor-catchu') | -0.05 | 3 | -0.018 | +0.00 | 0 | 165
+('alpaca-paper', 'index-etfs-duration-to-assets') | -0.04 | 1 | -0.045 | +0.00 | 0 | 15
+('alpaca-paper', 'megacaps-expanding-range-chas') | +0.02 | 13 | +0.002 | +0.00 | 0 | 195
+('alpaca-paper', 'megacaps-chip-demand-relay') | +0.18 | 2 | +0.092 | +0.00 | 0 | 50
+('alpaca-paper', 'megacaps-quiet-vwap-reclaim') | +0.36 | 2 | +0.178 | +0.00 | 0 | 50
+('kalshi-shadow', 'crypto-15m-spot-impulse-lag') | +0.94 | 1 | +0.936 | +0.00 | 0 | 11
+('alpaca-paper', 'options-breakout') | +0.00 | 0 | +nan | +1.00 | 1 | 21
+('kalshi', 'weather-favorites') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+('alpaca-paper', 'crypto-alts-trend') | +0.00 | 0 | +nan | +4.74 | 2 | 79
+('kalshi-shadow', 'sports-central-run-under') | +7.19 | 7 | +1.027 | +0.00 | 0 | 73
+
+### by book x horizon: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hour') | -262.36 | 60 | -4.373 | +0.00 | 0 | 792
+('kalshi-shadow', 'day') | -102.31 | 84 | -1.218 | -28.32 | 22 | 1060
+('alpaca-paper', 'day') | -45.09 | 18 | -2.505 | -20.18 | 11 | 550
+('alpaca-paper', 'hour') | -57.66 | 131 | -0.440 | +4.77 | 9 | 4316
+('kalshi', 'hour') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('alpaca', 'hour') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'day') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x asset class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'event') | -364.67 | 144 | -2.532 | -28.32 | 22 | 1852
+('alpaca-paper', 'option') | -44.00 | 9 | -4.889 | -20.00 | 7 | 275
+('alpaca-paper', 'crypto') | -58.05 | 109 | -0.533 | +5.06 | 5 | 3741
+('alpaca-paper', 'equity') | -0.70 | 31 | -0.023 | -0.47 | 8 | 850
+('alpaca', 'crypto') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'event') | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x order type: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'settle') | -364.67 | 144 | -2.532 | -28.32 | 22 | 1852
+('alpaca-paper', 'limit') | -46.24 | 75 | -0.616 | -17.45 | 9 | 2630
+('alpaca-paper', 'market') | -56.62 | 73 | -0.776 | +2.04 | 11 | 2220
+('alpaca', 'market') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', '?') | +0.10 | 1 | +0.105 | +0.00 | 0 | 15
+('kalshi', 'settle') | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x liquidity (exit fill): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', None) | -364.67 | 144 | -2.532 | -28.32 | 22 | 1852
+('alpaca-paper', 'taker') | -102.75 | 149 | -0.690 | -15.41 | 20 | 4866
+('alpaca', 'taker') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', None) | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x founder class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'foundry') | -272.96 | 67 | -4.074 | +0.00 | 0 | 953
+('kalshi-shadow', 'house') | -72.13 | 71 | -1.016 | -28.32 | 22 | 843
+('alpaca-paper', 'house') | -32.83 | 74 | -0.444 | -15.12 | 16 | 2610
+('alpaca-paper', 'architect') | -29.91 | 41 | -0.729 | -0.29 | 4 | 1395
+('alpaca-paper', 'repair') | -24.00 | 5 | -4.800 | +0.00 | 0 | 58
+('alpaca-paper', 'foundry') | -16.01 | 29 | -0.552 | +0.00 | 0 | 803
+('kalshi-shadow', 'lab') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('kalshi-shadow', 'repair') | -8.47 | 3 | -2.824 | +0.00 | 0 | 28
+('kalshi', 'foundry') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('alpaca', 'house') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'house') | +3.08 | 9 | +0.342 | +0.00 | 0 | 78
+
+### by practice/real x entry UTC hour: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('practice', '15') | -89.83 | 23 | -3.906 | -19.94 | 2 | 352
+('practice', '06') | -73.65 | 17 | -4.332 | -9.10 | 1 | 412
+('practice', '14') | -76.01 | 35 | -2.172 | +0.00 | 0 | 842
+('practice', '07') | -62.65 | 25 | -2.506 | -9.90 | 1 | 773
+('practice', '11') | -48.37 | 12 | -4.031 | +0.00 | 0 | 295
+('practice', '10') | -45.43 | 12 | -3.785 | +0.00 | 0 | 247
+('practice', '08') | -41.67 | 34 | -1.225 | +1.79 | 6 | 998
+('practice', '19') | -14.72 | 14 | -1.051 | -17.47 | 14 | 596
+('practice', '02') | -32.55 | 11 | -2.959 | +1.78 | 2 | 127
+('practice', '12') | -30.13 | 11 | -2.739 | +0.00 | 0 | 191
+('practice', '21') | -23.45 | 11 | -2.132 | +0.00 | 0 | 145
+('practice', '05') | -22.23 | 8 | -2.779 | +0.62 | 2 | 290
+('practice', '01') | -20.82 | 2 | -10.410 | +0.00 | 0 | 21
+('practice', '04') | -15.33 | 9 | -1.703 | +2.53 | 3 | 118
+('practice', '23') | -5.31 | 10 | -0.531 | +0.00 | 0 | 199
+('practice', '17') | -6.11 | 8 | -0.764 | +1.18 | 3 | 105
+('practice', '00') | -3.12 | 3 | -1.041 | +0.00 | 0 | 64
+('real', '14') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('practice', '22') | -3.51 | 11 | -0.319 | +1.03 | 1 | 184
+('real', '12') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('real', '11') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('real', '02') | +0.30 | 1 | +0.300 | +0.00 | 0 | 10
+('practice', '18') | +0.40 | 1 | +0.400 | +0.00 | 0 | 10
+('practice', '03') | +0.49 | 1 | +0.492 | +0.00 | 0 | 10
+('real', '15') | +0.50 | 1 | +0.500 | +0.00 | 0 | 10
+('real', '00') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('real', '03') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('real', '05') | +0.90 | 2 | +0.450 | +0.00 | 0 | 19
+('real', '20') | +1.50 | 2 | +0.750 | +0.00 | 0 | 20
+('practice', '13') | +8.44 | 8 | +1.055 | +0.00 | 0 | 153
+('practice', '20') | +24.37 | 6 | +4.062 | +1.13 | 1 | 133
+('practice', '16') | +30.84 | 12 | +2.570 | -2.13 | 4 | 254
+('practice', '09') | +82.92 | 9 | +9.214 | +4.74 | 2 | 197
+
+### by book x agent (worst 25): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hilibrand-hc4567e') | -93.45 | 9 | -10.383 | +0.00 | 0 | 204
+('kalshi-shadow', 'hilibrand-h6ca596') | -60.37 | 3 | -20.123 | +0.00 | 0 | 60
+('kalshi-shadow', 'huang-h51fdd3') | -38.28 | 6 | -6.381 | +0.00 | 0 | 38
+('kalshi-shadow', 'meriwether-hadd32b') | -29.12 | 7 | -4.160 | +0.00 | 0 | 89
+('kalshi-shadow', 'huang-h4ee182') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'hufschmid-30') | -18.30 | 2 | -9.150 | +0.00 | 0 | 18
+('kalshi-shadow', 'huang-h6d3302-2') | -16.06 | 6 | -2.677 | +0.00 | 0 | 24
+('kalshi-shadow', 'meriwether-39') | -15.51 | 6 | -2.586 | +0.00 | 0 | 58
+('kalshi-shadow', 'meriwether-17') | +3.77 | 4 | +0.942 | -19.19 | 3 | 67
+('alpaca-paper', 'krasker-10') | -15.00 | 1 | -15.000 | +0.00 | 0 | 27
+('alpaca-paper', 'krasker-4') | +0.00 | 0 | +nan | -12.00 | 1 | 44
+('alpaca-paper', 'krasker-8') | -12.00 | 2 | -6.000 | +0.00 | 0 | 22
+('alpaca-paper', 'krasker-6') | -12.00 | 3 | -4.000 | +0.00 | 0 | 36
+('kalshi-shadow', 'huang-h6d3302') | -11.71 | 15 | -0.781 | +0.00 | 0 | 140
+('kalshi-shadow', 'huang-h609d6f') | -11.43 | 2 | -5.716 | +0.00 | 0 | 23
+('kalshi-shadow', 'huang-l23cdb7') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'haghani-h426990') | -10.24 | 4 | -2.560 | +0.00 | 0 | 188
+('alpaca-paper', 'krasker-3') | +0.00 | 0 | +nan | -10.00 | 2 | 23
+('kalshi-shadow', 'meriwether-h42bdbb-2') | -9.95 | 3 | -3.317 | +0.00 | 0 | 34
+('kalshi-shadow', 'hufschmid-28') | -9.68 | 1 | -9.680 | +0.00 | 0 | 10
+('kalshi-shadow', 'huang-h427345') | -9.67 | 10 | -0.967 | +0.00 | 0 | 223
+('kalshi-shadow', 'meriwether-32') | -9.30 | 1 | -9.300 | +0.00 | 0 | 9
+('kalshi-shadow', 'hawkins-8') | +0.00 | 0 | +nan | -8.90 | 3 | 29
+('kalshi-shadow', 'meriwether-37') | -8.47 | 3 | -2.824 | +0.00 | 0 | 28
+('kalshi-shadow', 'hawkins-15') | -8.30 | 5 | -1.660 | +0.00 | 0 | 48
+
+### best 12 agents by P&L
+('kalshi-shadow', 'huang-h51fdd3-2') | +10.40 | 4 | house +0.00
+('kalshi-shadow', 'meriwether-h2d625d') | +7.19 | 7 | house +0.00
+('alpaca-paper', 'haghani-2') | +0.00 | 0 | house +4.74
+('alpaca-paper', 'krasker-2') | +0.00 | 0 | house +4.00
+('kalshi', 'mullins-2') | +3.60 | 6 | house +0.00
+('alpaca-paper', 'haghani') | +3.04 | 12 | house +0.00
+('kalshi-shadow', 'mullins-13') | +2.50 | 4 | house +0.00
+('kalshi-shadow', 'meriwether-27') | +1.03 | 1 | house +1.42
+('kalshi-shadow', 'meriwether-34') | +1.03 | 1 | house +1.42
+('kalshi-shadow', 'meriwether-35') | +2.45 | 4 | house +0.00
+('kalshi-shadow', 'hawkins-19') | +2.30 | 5 | house +0.00
+('kalshi-shadow', 'meriwether') | +0.00 | 0 | house +2.17
+
+====================================================================================================
+WINDOW since allocator (09-23 08:28Z): 194 closed trades/settlements
+fees paid on fills by book (both legs): {'alpaca-paper': 6.71, 'kalshi-shadow': 10.65, 'kalshi': 0.2, 'alpaca': 0.03}
+
+### by book: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+alpaca-paper | -109.10 | 120 | -0.909 | -3.47 | 9 | 3505
+kalshi-shadow | -108.59 | 52 | -2.088 | +1.35 | 2 | 672
+alpaca | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+kalshi | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x desk: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'kalshi-crypto-strikes') | -59.45 | 8 | -7.431 | +0.00 | 0 | 170
+('alpaca-paper', 'alpaca-crypto-alts') | -59.18 | 75 | -0.789 | +0.00 | 0 | 2261
+('kalshi-shadow', 'kalshi-crypto-15m') | -49.24 | 29 | -1.698 | +0.00 | 0 | 340
+('alpaca-paper', 'alpaca-options') | -43.00 | 8 | -5.375 | -3.00 | 1 | 141
+('alpaca-paper', 'alpaca-crypto-majors') | -6.22 | 6 | -1.037 | +0.00 | 0 | 253
+('kalshi', 'kalshi-crypto-15m') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('kalshi-shadow', 'kalshi-weather') | -3.00 | 12 | -0.250 | +0.60 | 1 | 123
+('alpaca-paper', 'alpaca-index-etfs') | -1.21 | 11 | -0.110 | -0.47 | 8 | 389
+('alpaca', 'alpaca-crypto-alts') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'alpaca-megacaps') | +0.51 | 20 | +0.025 | +0.00 | 0 | 461
+('kalshi-shadow', 'kalshi-sports') | +3.10 | 3 | +1.033 | +0.75 | 1 | 38
+('kalshi', 'kalshi-weather') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x family: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'crypto-strikes-downside-insurance-s') | -59.45 | 8 | -7.431 | +0.00 | 0 | 170
+('alpaca-paper', 'crypto-alts-reversion') | -48.26 | 70 | -0.689 | +0.00 | 0 | 2053
+('alpaca-paper', 'options-pullback') | -43.00 | 8 | -5.375 | -3.00 | 1 | 141
+('kalshi-shadow', 'crypto-15m-sol-beta-catchup') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'crypto-15m-eth-prior-window-fad') | -13.48 | 11 | -1.226 | +0.00 | 0 | 77
+('kalshi-shadow', 'crypto-15m-prior-window-fade') | -11.96 | 1 | -11.960 | +0.00 | 0 | 12
+('kalshi-shadow', 'crypto-15m-lab-335592') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'crypto-alts-funded-spot-hedge') | -10.24 | 4 | -2.560 | +0.00 | 0 | 188
+('alpaca-paper', 'crypto-majors-absorbed-buy-program') | -2.85 | 2 | -1.427 | +0.00 | 0 | 98
+('alpaca-paper', 'crypto-majors-funding-short-relief') | -2.78 | 2 | -1.392 | +0.00 | 0 | 131
+('kalshi', 'crypto-15m-prior-window-reset') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('kalshi-shadow', 'weather-favorites') | -3.00 | 12 | -0.250 | +0.60 | 1 | 123
+('kalshi', 'crypto-15m-doge-flat-spot-no') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('alpaca-paper', 'equity-trend') | -1.09 | 9 | -0.121 | -0.18 | 4 | 275
+('alpaca-paper', 'crypto-alts-alt-basket-catchup') | -0.68 | 1 | -0.677 | +0.00 | 0 | 19
+('alpaca-paper', 'crypto-reversion') | -0.58 | 2 | -0.292 | +0.00 | 0 | 23
+('alpaca', 'crypto-alts-reversion') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'equity-overnight') | +0.00 | 0 | +nan | -0.29 | 4 | 80
+('alpaca-paper', 'index-etfs-real-asset-rotation') | -0.08 | 1 | -0.075 | +0.00 | 0 | 20
+('alpaca-paper', 'megacaps-semiconductor-catchu') | -0.05 | 3 | -0.018 | +0.00 | 0 | 165
+('alpaca-paper', 'index-etfs-duration-to-assets') | -0.04 | 1 | -0.045 | +0.00 | 0 | 15
+('alpaca-paper', 'megacaps-expanding-range-chas') | +0.02 | 13 | +0.002 | +0.00 | 0 | 195
+('alpaca-paper', 'megacaps-chip-demand-relay') | +0.18 | 2 | +0.092 | +0.00 | 0 | 50
+('alpaca-paper', 'megacaps-quiet-vwap-reclaim') | +0.36 | 2 | +0.178 | +0.00 | 0 | 50
+('kalshi-shadow', 'sports-favorites') | +3.10 | 3 | +1.033 | +0.75 | 1 | 38
+('kalshi-shadow', 'crypto-15m-prior-window-reset') | +3.95 | 8 | +0.494 | +0.00 | 0 | 177
+('kalshi', 'weather-favorites') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+('kalshi-shadow', 'crypto-15m-doge-flat-spot-no') | +4.96 | 5 | +0.992 | +0.00 | 0 | 25
+
+### by book x horizon: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hour') | -108.69 | 37 | -2.938 | +0.00 | 0 | 511
+('alpaca-paper', 'hour') | -65.01 | 103 | -0.631 | -0.29 | 4 | 3089
+('alpaca-paper', 'day') | -44.09 | 17 | -2.593 | -3.18 | 5 | 416
+('kalshi', 'hour') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('alpaca', 'hour') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi-shadow', 'day') | +0.10 | 15 | +0.007 | +1.35 | 2 | 162
+('kalshi', 'day') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x asset class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'event') | -108.59 | 52 | -2.088 | +1.35 | 2 | 672
+('alpaca-paper', 'crypto') | -65.40 | 81 | -0.807 | +0.00 | 0 | 2514
+('alpaca-paper', 'option') | -43.00 | 8 | -5.375 | -3.00 | 1 | 141
+('alpaca-paper', 'equity') | -0.70 | 31 | -0.023 | -0.47 | 8 | 850
+('alpaca', 'crypto') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'event') | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x order type: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'settle') | -108.59 | 52 | -2.088 | +1.35 | 2 | 672
+('alpaca-paper', 'market') | -56.36 | 72 | -0.783 | -0.47 | 8 | 2090
+('alpaca-paper', 'limit') | -52.84 | 47 | -1.124 | -3.00 | 1 | 1400
+('alpaca', 'market') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', '?') | +0.10 | 1 | +0.105 | +0.00 | 0 | 15
+('kalshi', 'settle') | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x liquidity (exit fill): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('alpaca-paper', 'taker') | -109.10 | 120 | -0.909 | -3.47 | 9 | 3505
+('kalshi-shadow', None) | -108.59 | 52 | -2.088 | +1.35 | 2 | 672
+('alpaca', 'taker') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', None) | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x founder class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'foundry') | -100.32 | 27 | -3.716 | +0.00 | 0 | 456
+('alpaca-paper', 'house') | -36.95 | 53 | -0.697 | -3.18 | 5 | 1500
+('alpaca-paper', 'architect') | -32.13 | 33 | -0.974 | -0.29 | 4 | 1144
+('alpaca-paper', 'repair') | -24.00 | 5 | -4.800 | +0.00 | 0 | 58
+('alpaca-paper', 'foundry') | -16.01 | 29 | -0.552 | +0.00 | 0 | 803
+('kalshi-shadow', 'lab') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('kalshi', 'foundry') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('alpaca', 'house') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'house') | +3.08 | 9 | +0.342 | +0.00 | 0 | 78
+('kalshi-shadow', 'house') | +2.84 | 22 | +0.129 | +1.35 | 2 | 189
+
+### by practice/real x entry UTC hour: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('practice', '15') | -91.13 | 19 | -4.796 | +0.00 | 0 | 298
+('practice', '14') | -76.01 | 35 | -2.172 | +0.00 | 0 | 842
+('practice', '11') | -48.37 | 12 | -4.031 | +0.00 | 0 | 295
+('practice', '10') | -45.43 | 12 | -3.785 | +0.00 | 0 | 247
+('practice', '12') | -30.13 | 11 | -2.739 | +0.00 | 0 | 191
+('practice', '08') | -24.19 | 24 | -1.008 | +0.00 | 0 | 821
+('practice', '07') | -14.72 | 11 | -1.338 | +0.00 | 0 | 417
+('practice', '19') | -10.99 | 10 | -1.099 | -0.47 | 8 | 364
+('real', '14') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('practice', '06') | -2.21 | 1 | -2.210 | +0.00 | 0 | 73
+('real', '12') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('practice', '05') | -0.86 | 3 | -0.286 | +0.00 | 0 | 93
+('real', '11') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('practice', '04') | -0.36 | 1 | -0.361 | +0.00 | 0 | 15
+('real', '02') | +0.30 | 1 | +0.300 | +0.00 | 0 | 10
+('real', '15') | +0.50 | 1 | +0.500 | +0.00 | 0 | 10
+('real', '00') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('real', '03') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('practice', '02') | +0.00 | 0 | +nan | +0.75 | 1 | 9
+('practice', '22') | +0.80 | 2 | +0.400 | +0.00 | 0 | 19
+('real', '05') | +0.90 | 2 | +0.450 | +0.00 | 0 | 19
+('practice', '23') | +1.10 | 2 | +0.550 | +0.00 | 0 | 19
+('practice', '17') | +0.60 | 1 | +0.600 | +0.60 | 1 | 19
+('real', '20') | +1.50 | 2 | +0.750 | +0.00 | 0 | 20
+('practice', '21') | +3.80 | 4 | +0.950 | +0.00 | 0 | 37
+('practice', '13') | +8.44 | 8 | +1.055 | +0.00 | 0 | 153
+('practice', '16') | +29.04 | 7 | +4.148 | -3.00 | 1 | 146
+('practice', '09') | +82.92 | 9 | +9.214 | +0.00 | 0 | 118
+
+### by book x agent (worst 25): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hilibrand-hc4567e') | -59.45 | 8 | -7.431 | +0.00 | 0 | 170
+('kalshi-shadow', 'huang-h4ee182') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'huang-h6d3302-2') | -15.36 | 4 | -3.841 | +0.00 | 0 | 15
+('alpaca-paper', 'krasker-10') | -15.00 | 1 | -15.000 | +0.00 | 0 | 27
+('kalshi-shadow', 'huang-h51fdd3') | -13.14 | 2 | -6.571 | +0.00 | 0 | 13
+('alpaca-paper', 'krasker-8') | -12.00 | 2 | -6.000 | +0.00 | 0 | 22
+('alpaca-paper', 'krasker-6') | -12.00 | 3 | -4.000 | +0.00 | 0 | 36
+('kalshi-shadow', 'huang-h609d6f') | -11.96 | 1 | -11.960 | +0.00 | 0 | 12
+('kalshi-shadow', 'huang-l23cdb7') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'haghani-h426990') | -10.24 | 4 | -2.560 | +0.00 | 0 | 188
+('alpaca-paper', 'haghani-51') | -8.82 | 7 | -1.260 | +0.00 | 0 | 271
+('alpaca-paper', 'haghani-52') | -8.69 | 10 | -0.869 | +0.00 | 0 | 294
+('kalshi-shadow', 'mullins-14') | -8.20 | 3 | -2.733 | +0.00 | 0 | 29
+('alpaca-paper', 'haghani-53') | -6.96 | 7 | -0.994 | +0.00 | 0 | 272
+('alpaca-paper', 'haghani-44') | -6.83 | 7 | -0.976 | +0.00 | 0 | 272
+('alpaca-paper', 'haghani-55') | -6.39 | 4 | -1.597 | +0.00 | 0 | 153
+('alpaca-paper', 'krasker-14') | -5.00 | 1 | -5.000 | +0.00 | 0 | 9
+('alpaca-paper', 'haghani-54') | -4.95 | 6 | -0.825 | +0.00 | 0 | 235
+('alpaca-paper', 'haghani-46') | -4.31 | 15 | -0.287 | +0.00 | 0 | 296
+('alpaca-paper', 'krasker-9') | +0.00 | 0 | +nan | -3.00 | 1 | 29
+('alpaca-paper', 'rosenfeld-h19e436') | -2.85 | 2 | -1.427 | +0.00 | 0 | 98
+('alpaca-paper', 'rosenfeld-he2ab61') | -2.78 | 2 | -1.392 | +0.00 | 0 | 131
+('kalshi', 'huang-h427345') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('alpaca-paper', 'haghani-37') | -2.01 | 1 | -2.013 | +0.00 | 0 | 37
+('kalshi', 'huang-h51fdd3-2') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+
+### best 12 agents by P&L
+('kalshi-shadow', 'huang-h51fdd3-2') | +18.10 | 3 | house +0.00
+('kalshi-shadow', 'huang-h427345') | +3.95 | 8 | house +0.00
+('kalshi', 'mullins-2') | +3.60 | 6 | house +0.00
+('kalshi-shadow', 'meriwether-39') | +3.10 | 3 | house +0.00
+('kalshi-shadow', 'mullins-13') | +2.50 | 4 | house +0.00
+('kalshi-shadow', 'huang-h6d3302') | +1.88 | 7 | house +0.00
+('kalshi-shadow', 'mullins-6') | +1.80 | 3 | house +0.00
+('alpaca-paper', 'haghani-56') | +1.72 | 5 | house +0.00
+('alpaca-paper', 'krasker-7') | +1.00 | 1 | house +0.00
+('kalshi', 'mullins-6') | +1.00 | 2 | house +0.00
+('kalshi-shadow', 'meriwether-17') | +0.00 | 0 | house +0.75
+('kalshi-shadow', 'mullins-11') | +0.00 | 0 | house +0.60
+
+====================================================================================================
+WINDOW today 06:30-16:00Z: 202 closed trades/settlements
+fees paid on fills by book (both legs): {'kalshi-shadow': 11.64, 'alpaca-paper': 7.16, 'kalshi': 0.2, 'alpaca': 0.03}
+
+### by book: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+kalshi-shadow | -214.59 | 63 | -3.406 | +1.35 | 2 | 792
+alpaca-paper | -90.28 | 116 | -0.778 | -3.77 | 10 | 3463
+alpaca | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+kalshi | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x desk: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'kalshi-crypto-strikes') | -113.68 | 10 | -11.368 | +0.00 | 0 | 225
+('kalshi-shadow', 'kalshi-crypto-15m') | -101.01 | 38 | -2.658 | +0.00 | 0 | 406
+('alpaca-paper', 'alpaca-crypto-alts') | -48.54 | 80 | -0.607 | -0.31 | 1 | 2430
+('alpaca-paper', 'alpaca-options') | -35.00 | 7 | -5.000 | -3.00 | 1 | 130
+('alpaca-paper', 'alpaca-crypto-majors') | -6.22 | 6 | -1.037 | +0.00 | 0 | 253
+('kalshi', 'kalshi-crypto-15m') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('kalshi-shadow', 'kalshi-weather') | -3.00 | 12 | -0.250 | +0.60 | 1 | 123
+('alpaca-paper', 'alpaca-index-etfs') | -1.21 | 11 | -0.110 | -0.47 | 8 | 389
+('alpaca', 'alpaca-crypto-alts') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'alpaca-megacaps') | +0.69 | 12 | +0.058 | +0.00 | 0 | 261
+('kalshi-shadow', 'kalshi-sports') | +3.10 | 3 | +1.033 | +0.75 | 1 | 38
+('kalshi', 'kalshi-weather') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x family: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'crypto-strikes-vol-shock-upside') | -60.37 | 3 | -20.123 | +0.00 | 0 | 60
+('kalshi-shadow', 'crypto-strikes-downside-insurance-s') | -53.31 | 7 | -7.616 | +0.00 | 0 | 164
+('alpaca-paper', 'crypto-alts-reversion') | -41.54 | 76 | -0.547 | -0.31 | 1 | 2276
+('alpaca-paper', 'options-pullback') | -35.00 | 7 | -5.000 | -3.00 | 1 | 130
+('kalshi-shadow', 'crypto-15m-eth-prior-window-fad') | -29.85 | 18 | -1.659 | +0.00 | 0 | 134
+('kalshi-shadow', 'crypto-15m-prior-window-reset') | -25.21 | 7 | -3.601 | +0.00 | 0 | 156
+('kalshi-shadow', 'crypto-15m-sol-beta-catchup') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'crypto-15m-prior-window-fade') | -11.43 | 2 | -5.716 | +0.00 | 0 | 23
+('kalshi-shadow', 'crypto-15m-lab-335592') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('alpaca-paper', 'crypto-alts-funded-spot-hedge') | -6.32 | 3 | -2.108 | +0.00 | 0 | 134
+('alpaca-paper', 'crypto-majors-absorbed-buy-program') | -2.85 | 2 | -1.427 | +0.00 | 0 | 98
+('alpaca-paper', 'crypto-majors-funding-short-relief') | -2.78 | 2 | -1.392 | +0.00 | 0 | 131
+('kalshi-shadow', 'crypto-15m-doge-flat-spot-no') | -2.74 | 6 | -0.457 | +0.00 | 0 | 33
+('kalshi', 'crypto-15m-prior-window-reset') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('kalshi-shadow', 'weather-favorites') | -3.00 | 12 | -0.250 | +0.60 | 1 | 123
+('kalshi', 'crypto-15m-doge-flat-spot-no') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('alpaca-paper', 'equity-trend') | -1.09 | 9 | -0.121 | -0.18 | 4 | 275
+('alpaca-paper', 'crypto-alts-alt-basket-catchup') | -0.68 | 1 | -0.677 | +0.00 | 0 | 19
+('alpaca-paper', 'crypto-reversion') | -0.58 | 2 | -0.292 | +0.00 | 0 | 23
+('alpaca', 'crypto-alts-reversion') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('alpaca-paper', 'equity-overnight') | +0.00 | 0 | +nan | -0.29 | 4 | 80
+('alpaca-paper', 'index-etfs-real-asset-rotation') | -0.08 | 1 | -0.075 | +0.00 | 0 | 20
+('alpaca-paper', 'index-etfs-duration-to-assets') | -0.04 | 1 | -0.045 | +0.00 | 0 | 15
+('alpaca-paper', 'megacaps-expanding-range-chas') | +0.15 | 9 | +0.016 | +0.00 | 0 | 135
+('alpaca-paper', 'megacaps-chip-demand-relay') | +0.22 | 1 | +0.224 | +0.00 | 0 | 25
+('alpaca-paper', 'megacaps-semiconductor-catchu') | +0.32 | 2 | +0.161 | +0.00 | 0 | 100
+('kalshi-shadow', 'crypto-15m-spot-impulse-lag') | +0.94 | 1 | +0.936 | +0.00 | 0 | 11
+('kalshi-shadow', 'sports-favorites') | +3.10 | 3 | +1.033 | +0.75 | 1 | 38
+('kalshi', 'weather-favorites') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x horizon: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hour') | -214.69 | 48 | -4.473 | +0.00 | 0 | 631
+('alpaca-paper', 'hour') | -54.19 | 100 | -0.542 | -0.60 | 5 | 3058
+('alpaca-paper', 'day') | -36.09 | 16 | -2.255 | -3.18 | 5 | 405
+('kalshi', 'hour') | -4.07 | 2 | -2.033 | +0.00 | 0 | 4
+('alpaca', 'hour') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi-shadow', 'day') | +0.10 | 15 | +0.007 | +1.35 | 2 | 162
+('kalshi', 'day') | +4.60 | 8 | +0.575 | +0.00 | 0 | 76
+
+### by book x asset class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'event') | -214.59 | 63 | -3.406 | +1.35 | 2 | 792
+('alpaca-paper', 'crypto') | -54.76 | 86 | -0.637 | -0.31 | 1 | 2683
+('alpaca-paper', 'option') | -35.00 | 7 | -5.000 | -3.00 | 1 | 130
+('alpaca-paper', 'equity') | -0.52 | 23 | -0.022 | -0.47 | 8 | 650
+('alpaca', 'crypto') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'event') | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x order type: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'settle') | -214.59 | 63 | -3.406 | +1.35 | 2 | 792
+('alpaca-paper', 'market') | -52.29 | 63 | -0.830 | -0.77 | 9 | 1866
+('alpaca-paper', 'limit') | -37.98 | 53 | -0.717 | -3.00 | 1 | 1596
+('alpaca', 'market') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'settle') | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x liquidity (exit fill): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', None) | -214.59 | 63 | -3.406 | +1.35 | 2 | 792
+('alpaca-paper', 'taker') | -90.28 | 116 | -0.778 | -3.77 | 10 | 3463
+('alpaca', 'taker') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', None) | +0.53 | 10 | +0.053 | +0.00 | 0 | 80
+
+### by book x founder class: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'foundry') | -197.92 | 35 | -5.655 | +0.00 | 0 | 560
+('alpaca-paper', 'house') | -34.78 | 55 | -0.632 | -3.48 | 6 | 1593
+('alpaca-paper', 'architect') | -27.21 | 36 | -0.756 | -0.29 | 4 | 1209
+('alpaca-paper', 'repair') | -16.00 | 4 | -4.000 | +0.00 | 0 | 47
+('alpaca-paper', 'foundry') | -12.29 | 21 | -0.585 | +0.00 | 0 | 614
+('kalshi-shadow', 'lab') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('kalshi-shadow', 'house') | -5.56 | 25 | -0.222 | +1.35 | 2 | 205
+('kalshi', 'foundry') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('alpaca', 'house') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('kalshi', 'house') | +3.08 | 9 | +0.342 | +0.00 | 0 | 78
+
+### by practice/real x entry UTC hour: key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('practice', '14') | -75.99 | 32 | -2.375 | +0.00 | 0 | 727
+('practice', '06') | -68.24 | 7 | -9.749 | +0.00 | 0 | 158
+('practice', '11') | -48.37 | 12 | -4.031 | +0.00 | 0 | 295
+('practice', '10') | -45.43 | 12 | -3.785 | +0.00 | 0 | 247
+('practice', '15') | -42.28 | 14 | -3.020 | +0.00 | 0 | 202
+('practice', '08') | -40.15 | 27 | -1.487 | -0.31 | 1 | 838
+('practice', '07') | -39.48 | 21 | -1.880 | +0.00 | 0 | 669
+('practice', '12') | -30.13 | 11 | -2.739 | +0.00 | 0 | 191
+('practice', '19') | -10.99 | 10 | -1.099 | -0.47 | 8 | 364
+('practice', '16') | +0.00 | 2 | +0.000 | -3.00 | 1 | 65
+('real', '14') | -2.55 | 1 | -2.546 | +0.00 | 0 | 3
+('real', '12') | -1.52 | 1 | -1.520 | +0.00 | 0 | 2
+('practice', '05') | -0.86 | 3 | -0.286 | +0.00 | 0 | 93
+('practice', '04') | -0.62 | 2 | -0.308 | +0.00 | 0 | 30
+('real', '11') | -0.51 | 1 | -0.505 | +0.00 | 0 | 12
+('real', '02') | +0.30 | 1 | +0.300 | +0.00 | 0 | 10
+('real', '15') | +0.50 | 1 | +0.500 | +0.00 | 0 | 10
+('real', '00') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('real', '03') | +0.70 | 1 | +0.700 | +0.00 | 0 | 9
+('practice', '02') | +0.00 | 0 | +nan | +0.75 | 1 | 9
+('practice', '22') | +0.80 | 2 | +0.400 | +0.00 | 0 | 19
+('real', '05') | +0.90 | 2 | +0.450 | +0.00 | 0 | 19
+('practice', '23') | +1.10 | 2 | +0.550 | +0.00 | 0 | 19
+('practice', '17') | +0.60 | 1 | +0.600 | +0.60 | 1 | 19
+('real', '20') | +1.50 | 2 | +0.750 | +0.00 | 0 | 20
+('practice', '21') | +3.80 | 4 | +0.950 | +0.00 | 0 | 37
+('practice', '13') | +8.44 | 8 | +1.055 | +0.00 | 0 | 153
+('practice', '09') | +82.92 | 9 | +9.214 | +0.00 | 0 | 118
+
+### by book x agent (worst 25): key | agent P&L $ | n | per trade $ | House-exit P&L $ | n_house | notional $
+('kalshi-shadow', 'hilibrand-h6ca596') | -60.37 | 3 | -20.123 | +0.00 | 0 | 60
+('kalshi-shadow', 'hilibrand-hc4567e') | -53.31 | 7 | -7.616 | +0.00 | 0 | 164
+('kalshi-shadow', 'huang-h427345') | -25.21 | 7 | -3.601 | +0.00 | 0 | 156
+('kalshi-shadow', 'huang-h4ee182') | -21.60 | 1 | -21.600 | +0.00 | 0 | 22
+('kalshi-shadow', 'huang-h6d3302-2') | -16.06 | 6 | -2.677 | +0.00 | 0 | 24
+('alpaca-paper', 'krasker-10') | -15.00 | 1 | -15.000 | +0.00 | 0 | 27
+('kalshi-shadow', 'huang-h6d3302') | -13.79 | 12 | -1.149 | +0.00 | 0 | 110
+('kalshi-shadow', 'huang-h51fdd3') | -13.14 | 2 | -6.571 | +0.00 | 0 | 13
+('alpaca-paper', 'krasker-6') | -12.00 | 3 | -4.000 | +0.00 | 0 | 36
+('kalshi-shadow', 'huang-h609d6f') | -11.43 | 2 | -5.716 | +0.00 | 0 | 23
+('kalshi-shadow', 'huang-l23cdb7') | -11.11 | 3 | -3.704 | +0.00 | 0 | 27
+('kalshi-shadow', 'mullins-14') | -8.20 | 3 | -2.733 | +0.00 | 0 | 29
+('alpaca-paper', 'haghani-51') | -6.64 | 7 | -0.948 | +0.00 | 0 | 272
+('alpaca-paper', 'haghani-53') | -6.48 | 8 | -0.810 | +0.00 | 0 | 313
+('alpaca-paper', 'haghani-52') | -6.41 | 12 | -0.534 | +0.00 | 0 | 318
+('alpaca-paper', 'haghani-55') | -6.39 | 4 | -1.597 | +0.00 | 0 | 153
+('alpaca-paper', 'haghani-44') | -6.38 | 8 | -0.797 | +0.00 | 0 | 313
+('alpaca-paper', 'haghani-h426990') | -6.32 | 3 | -2.108 | +0.00 | 0 | 134
+('alpaca-paper', 'krasker-14') | -5.00 | 1 | -5.000 | +0.00 | 0 | 9
+('alpaca-paper', 'haghani-54') | -4.49 | 7 | -0.642 | +0.00 | 0 | 275
+('alpaca-paper', 'krasker-8') | -4.00 | 1 | -4.000 | +0.00 | 0 | 11
+('alpaca-paper', 'haghani-46') | -3.64 | 14 | -0.260 | +0.00 | 0 | 277
+('alpaca-paper', 'krasker-9') | +0.00 | 0 | +nan | -3.00 | 1 | 29
+('alpaca-paper', 'rosenfeld-h19e436') | -2.85 | 2 | -1.427 | +0.00 | 0 | 98
+('alpaca-paper', 'rosenfeld-he2ab61') | -2.78 | 2 | -1.392 | +0.00 | 0 | 131
+
+### best 12 agents by P&L
+('kalshi-shadow', 'huang-h51fdd3-2') | +10.40 | 4 | house +0.00
+('kalshi', 'mullins-2') | +3.60 | 6 | house +0.00
+('kalshi-shadow', 'meriwether-39') | +3.10 | 3 | house +0.00
+('kalshi-shadow', 'mullins-13') | +2.50 | 4 | house +0.00
+('kalshi-shadow', 'mullins-6') | +1.80 | 3 | house +0.00
+('alpaca-paper', 'haghani-56') | +1.72 | 5 | house +0.00
+('alpaca-paper', 'krasker-7') | +1.00 | 1 | house +0.00
+('kalshi', 'mullins-6') | +1.00 | 2 | house +0.00
+('kalshi-shadow', 'huang-hd8ff7c') | +0.94 | 1 | house +0.00
+('kalshi-shadow', 'meriwether-17') | +0.00 | 0 | house +0.75
+('kalshi-shadow', 'mullins-11') | +0.00 | 0 | house +0.60
+('kalshi-shadow', 'mullins-12') | +0.60 | 1 | house +0.00

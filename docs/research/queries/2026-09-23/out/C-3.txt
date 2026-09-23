@@ -1,0 +1,100 @@
+===== yesterday session window (plan baseline) 2026-09-22T13:30 -> 2026-09-23T14:00
+('alpaca-index-etfs', 'practice') agents= 14 intenders= 5 {'wakes': 1082, 'ok': 1082, 'offered_wakes': 132, 'shut_flag': 697, 'intents_in_wake': 23, 'dropped': 0, 'intents': 607, 'orders': 155, 'orders_new': 31, 'orders_accepted': 93, 'orders_filled': 31, 'fills': 31, 'fill_qty_usd': 650.9900000000001, 'refused': 576, 'R:market orders outside regular hours are not permitted': 576}
+('alpaca-megacaps', 'practice') agents= 8 intenders= 3 {'wakes': 496, 'ok': 496, 'shut_flag': 493, 'intents_in_wake': 5, 'dropped': 0, 'offered_wakes': 25, 'intents': 5, 'orders': 10, 'orders_new': 2, 'orders_accepted': 6, 'orders_filled': 2, 'fills': 2, 'fill_qty_usd': 50.0, 'refused': 3, 'R:market orders outside regular hours are not permitted': 3, 'R:the quote is 14515s old': 1}
+('alpaca-options', 'practice') agents= 13 intenders= 8 {'wakes': 316, 'ok': 316, 'offered_wakes': 49, 'intents_in_wake': 16, 'dropped': 0, 'shut_flag': 190, 'intents': 225, 'orders': 93, 'orders_new': 19, 'orders_accepted': 56, 'orders_filled': 18, 'fills': 18, 'fill_qty_usd': 334.0, 'refused': 206, 'R:krasker-4 has no seat on the alpaca-paper book': 35, 'R:krasker has no seat on the alpaca-paper book': 15, 'R:asset class equity not in mandate': 1, 'R:sell exceeds position and shorting is not permitted (you hol': 1, 'R:limit price deviates 99.53% from reference': 1, 'R:an exit must reduce an existing position without reversing i': 1, 'R:an option order must be a limit order': 116, 'R:krasker-3 has no seat on the alpaca-paper book': 18, 'R:krasker-2 has no seat on the alpaca-paper book': 18, 'R:the alpaca-paper book is frozen until it reconciles: cash di': 1, 'R:limit price deviates 12.50% from reference': 1, 'R:limit price deviates 16.67% from reference': 1}
+dropped: []
+errors: []
+===== today 13:30Z to snapshot 2026-09-23T13:30 -> 2026-09-23T16:29
+('alpaca-index-etfs', 'practice') agents= 12 intenders= 8 {'wakes': 218, 'ok': 218, 'offered_wakes': 218, 'shut_flag': 70, 'intents_in_wake': 14, 'dropped': 0, 'intents': 22, 'orders': 110, 'orders_new': 22, 'orders_accepted': 66, 'orders_filled': 22, 'fills': 22, 'fill_qty_usd': 499.33}
+('alpaca-megacaps', 'practice') agents= 8 intenders= 6 {'wakes': 161, 'ok': 161, 'shut_flag': 56, 'intents_in_wake': 43, 'dropped': 0, 'offered_wakes': 160, 'intents': 43, 'orders': 208, 'orders_new': 42, 'orders_accepted': 125, 'orders_filled': 41, 'fills': 43, 'fill_qty_usd': 1030.5900000000001}
+('alpaca-options', 'practice') agents= 8 intenders= 6 {'wakes': 71, 'ok': 71, 'shut_flag': 43, 'intents_in_wake': 16, 'dropped': 0, 'offered_wakes': 70, 'intents': 16, 'orders': 90, 'orders_accepted': 53, 'orders_filled': 21, 'orders_new': 16, 'fills': 21, 'fill_qty_usd': 480.0}
+dropped: []
+errors: []
+===== today after #189/#190 (15:30Z) to snapshot 2026-09-23T15:30 -> 2026-09-23T16:29
+('alpaca-index-etfs', 'practice') agents= 12 intenders= 2 {'wakes': 69, 'ok': 69, 'offered_wakes': 69, 'intents_in_wake': 2, 'dropped': 0, 'shut_flag': 8, 'intents': 2, 'orders': 10, 'orders_new': 2, 'orders_accepted': 6, 'orders_filled': 2, 'fills': 2, 'fill_qty_usd': 34.879999999999995}
+('alpaca-megacaps', 'practice') agents= 8 intenders= 5 {'wakes': 52, 'ok': 52, 'offered_wakes': 52, 'intents_in_wake': 21, 'dropped': 0, 'shut_flag': 2, 'intents': 21, 'orders': 100, 'orders_accepted': 60, 'orders_filled': 20, 'orders_new': 20, 'fills': 22, 'fill_qty_usd': 449.86}
+('alpaca-options', 'practice') agents= 8 intenders= 4 {'wakes': 23, 'ok': 23, 'offered_wakes': 23, 'intents_in_wake': 6, 'dropped': 0, 'shut_flag': 7, 'intents': 6, 'orders': 34, 'orders_new': 6, 'orders_accepted': 20, 'orders_filled': 8, 'fills': 8, 'fill_qty_usd': 192.0}
+dropped: []
+errors: []
+=== today intents on stock/option desks
+13:30:13 scholes-22 alpaca-paper sell SPY equity market None 0.023249806 the House is closing this account
+13:30:13 scholes-22 alpaca-paper sell QQQ equity market None 0.024100257 the House is closing this account
+13:30:13 scholes-22 alpaca-paper sell IWM equity market None 0.062619586 the House is closing this account
+13:30:13 scholes-22 alpaca-paper sell DIA equity market None 0.034720882 the House is closing this account
+13:30:20 scholes-23 alpaca-paper sell SPY equity market None 0.025823111 the House is closing this account
+13:30:20 scholes-23 alpaca-paper sell QQQ equity market None 0.026752273 the House is closing this account
+13:30:21 scholes-23 alpaca-paper sell IWM equity market None 0.069487874 the House is closing this account
+13:30:21 scholes-23 alpaca-paper sell DIA equity market None 0.038560163 the House is closing this account
+13:38:41 scholes-20 alpaca-paper sell DIA equity market None 0.069441765 Closing the overnight relative-strength exposure at the next regular-s
+13:38:41 scholes-20 alpaca-paper sell QQQ equity market None 0.048193416 Closing the overnight relative-strength exposure at the next regular-s
+13:38:41 scholes-21 alpaca-paper sell SPY equity market None 0.023229703 Exit the overnight ETF position at the next regular-session open.
+13:38:41 scholes-21 alpaca-paper sell QQQ equity market None 0.024072216 Exit the overnight ETF position at the next regular-session open.
+13:38:41 scholes-21 alpaca-paper sell IWM equity market None 0.062530396 Exit the overnight ETF position at the next regular-session open.
+13:38:41 scholes-21 alpaca-paper sell DIA equity market None 0.034685422 Exit the overnight ETF position at the next regular-session open.
+13:48:59 mcentee-31 alpaca-paper buy META equity market None 0.033102060 Buy a top-ranked five-session winner only while price is above a risin
+13:48:59 mcentee-31 alpaca-paper buy NVDA equity market None 0.109634697 Buy a top-ranked five-session winner only while price is above a risin
+14:01:42 krasker-14 alpaca-paper buy RIVN option limit 0.14 1 Broader pullback signal with bounded premium, expiry, spread, and disp
+14:01:42 krasker-14 alpaca-paper buy SNAP option limit 0.12 1 Broader pullback signal with bounded premium, expiry, spread, and disp
+14:01:43 krasker-6 alpaca-paper buy RIVN option limit 0.14 1 Pullback signal passes realized-volatility, IV-premium, spread, expiry
+14:03:09 krasker-10 alpaca-paper buy INTC option limit 0.42 1 Trend-continuation maker entry at mid on a tight-spread, cheap-vol con
+14:03:09 krasker-10 alpaca-paper buy BAC option limit 0.37 1 Trend-continuation maker entry at mid on a tight-spread, cheap-vol con
+14:04:58 scholes-25 alpaca-paper buy IWM equity market None 0.264028726 Test same-day mean reversion by buying the weakest ETF after a negativ
+14:32:10 krasker-6 alpaca-paper sell T option limit 0.09 1 Exit at target, stop, or near expiry using the current option bid.
+14:32:11 krasker-16 alpaca-paper buy VALE option limit 0.44 1 Buy one affordable, liquid moderate-delta option after a countertrend 
+14:35:37 krasker-10 alpaca-paper sell INTC option limit 0.27 1 Exit at target, stop, or near expiry at the current bid.
+14:35:38 scholes-hb39be6 alpaca-paper buy DIA equity market None 0.038686964 Buy the strongest spread-qualified ETF after positive 30-minute same-s
+14:35:38 mcentee-h6bd08d alpaca-paper buy AVGO equity market None 0.098275958 Buy a same-session reversal: the latest close bounced at least 0.04% w
+14:35:38 mcentee-h6bd08d-2 alpaca-paper buy TSLA equity market None 0.171277997 Broad megacap rally, single flat laggard: buy the laggard for catch-up
+14:35:38 scholes-17 alpaca-paper sell SPY equity market None 0.025834786 Exit prior-session reversal holdings at the next regular-session open.
+14:35:38 scholes-17 alpaca-paper sell IWM equity market None 0.069587001 Exit prior-session reversal holdings at the next regular-session open.
+14:35:38 scholes-17 alpaca-paper sell QQQ equity market None 0.026782725 Exit prior-session reversal holdings at the next regular-session open.
+14:39:49 mcentee-h4054c4 alpaca-paper buy NFLX equity market None 0.207813798 Buy a top-three megacap with positive five-bar momentum, above its 12-
+14:39:49 mcentee-hfadaea alpaca-paper buy AMD equity market None 0.081846456 Buy a 5-minute intraday pullback only after the close reclaims the pri
+14:39:49 scholes-h0c9b88 alpaca-paper buy DIA equity market None 0.029048375 Buy the strongest positive index ETF by late-morning session return fo
+14:39:49 mcentee-hddb4ae alpaca-paper buy META equity market None 0.033447500 Test short-horizon cross-sectional relative strength: buy the stronges
+14:50:52 mcentee-h4054c4 alpaca-paper sell NFLX equity market None 0.207813798 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+14:50:52 mcentee-h4054c4 alpaca-paper buy PLTR equity market None 0.078744291 Buy a top-three megacap with positive five-bar momentum, above its 12-
+14:56:20 mcentee-h4054c4 alpaca-paper buy META equity market None 0.020006935 Buy a top-three megacap with positive five-bar momentum, above its 12-
+14:58:56 mcentee-h6bd08d-2 alpaca-paper sell TSLA equity market None 0.171277997 Close laggard-catch-up test or enforce intraday risk limit
+14:58:57 mcentee-h6bd08d-2 alpaca-paper buy NFLX equity market None 0.903907662 Broad megacap rally, single flat laggard: buy the laggard for catch-up
+15:02:28 mcentee-h4054c4 alpaca-paper sell META equity market None 0.020006935 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:02:28 krasker-6 alpaca-paper buy SNAP option limit 0.14 1 Pullback signal passes realized-volatility, IV-premium, spread, expiry
+15:07:43 krasker-10 alpaca-paper buy T option limit 0.34 1 Trend-continuation maker entry at mid on a tight-spread, cheap-vol con
+15:07:44 mcentee-h4054c4 alpaca-paper sell PLTR equity market None 0.078744291 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:07:44 mcentee-h4054c4 alpaca-paper buy AAPL equity market None 0.044393145 Buy a top-three megacap with positive five-bar momentum, above its 12-
+15:14:24 mcentee-h4054c4 alpaca-paper sell AAPL equity market None 0.044393145 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:14:25 mcentee-h4054c4 alpaca-paper buy AMD equity market None 0.024358557 Buy a top-three megacap with positive five-bar momentum, above its 12-
+15:19:53 mcentee-h4054c4 alpaca-paper buy META equity market None 0.019925611 Buy a top-three megacap with positive five-bar momentum, above its 12-
+15:22:22 mcentee-hddb4ae alpaca-paper sell META equity market None 0.0334475 Relative-strength test exit: 45-minute time stop, 0.4% target, 0.6% ad
+15:22:23 mcentee-h6bd08d alpaca-paper sell AVGO equity market None 0.098275958 Pullback-bounce exit: 0.4% stop, 0.6% target, 45-minute time stop, or 
+15:27:49 mcentee-h4054c4 alpaca-paper sell AMD equity market None 0.024358557 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:29:01 mcentee-hddb4ae alpaca-paper buy META equity market None 0.033097677 Test short-horizon cross-sectional relative strength: buy the stronges
+15:34:39 krasker-14 alpaca-paper sell RIVN option limit 0.09 1 Exit at target, stop, or near expiry using the current bid.
+15:34:40 krasker-6 alpaca-paper sell RIVN option limit 0.09 1 Exit at target, stop, or near expiry using the current option bid.
+15:35:33 mcentee-h4054c4 alpaca-paper sell META equity market None 0.019925611 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:35:33 mcentee-h4054c4 alpaca-paper buy MSFT equity market None 0.030061927 Buy a top-three megacap with positive five-bar momentum, above its 12-
+15:38:09 mcentee-h6bd08d alpaca-paper buy NVDA equity market None 0.155286392 Buy a same-session reversal: the latest close bounced at least 0.04% w
+15:38:09 scholes-hb39be6 alpaca-paper sell DIA equity market None 0.038686964 Exit the timed intraday momentum position after one hour or before the
+15:41:56 mcentee-h4054c4 alpaca-paper sell MSFT equity market None 0.030061927 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:41:56 mcentee-h4054c4 alpaca-paper buy META equity market None 0.019859658 Buy a top-three megacap with positive five-bar momentum, above its 12-
+15:41:57 scholes-h0c9b88 alpaca-paper sell DIA equity market None 0.029048375 Close the intraday momentum position after its one-hour holding window
+15:48:00 mcentee-h4054c4 alpaca-paper buy TSLA equity market None 0.039421813 Buy a top-three megacap with positive five-bar momentum, above its 12-
+15:54:13 mcentee-h4054c4 alpaca-paper sell META equity market None 0.019859658 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+15:54:13 mcentee-h4054c4 alpaca-paper sell TSLA equity market None 0.039421813 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+16:00:23 mcentee-h4054c4 alpaca-paper buy AMD equity market None 0.024374786 Buy a top-three megacap with positive five-bar momentum, above its 12-
+16:00:23 mcentee-h4054c4 alpaca-paper buy MSFT equity market None 0.030054097 Buy a top-three megacap with positive five-bar momentum, above its 12-
+16:05:04 mcentee-h6bd08d-2 alpaca-paper sell NFLX equity market None 0.903907662 Close laggard-catch-up test or enforce intraday risk limit
+16:05:04 krasker-14 alpaca-paper buy RIVN option limit 0.1 1 Broader pullback signal with bounded premium, expiry, spread, and disp
+16:07:18 krasker-6 alpaca-paper buy RIVN option limit 0.1 1 Pullback signal passes realized-volatility, IV-premium, spread, expiry
+16:07:19 mcentee-h4054c4 alpaca-paper sell AMD equity market None 0.024374786 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+16:07:19 mcentee-h4054c4 alpaca-paper sell MSFT equity market None 0.030054097 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+16:07:19 krasker-13 alpaca-paper buy SNAP option limit 0.74 1 Pullback entry only in a high-delta contract whose ask is at least 80%
+16:13:17 mcentee-h4054c4 alpaca-paper buy AMD equity market None 0.024368450 Buy a top-three megacap with positive five-bar momentum, above its 12-
+16:13:17 mcentee-h4054c4 alpaca-paper buy JPM equity market None 0.044373446 Buy a top-three megacap with positive five-bar momentum, above its 12-
+16:13:17 mcentee-hfadaea alpaca-paper sell AMD equity market None 0.081846456 Exit dip-reclaim at 0.55% stop, 0.9% target, 90-minute timeout, or ses
+16:16:02 mcentee-hddb4ae alpaca-paper sell META equity market None 0.033097677 Relative-strength test exit: 45-minute time stop, 0.4% target, 0.6% ad
+16:17:53 krasker-11 alpaca-paper buy SOFI option limit 0.35 1 One-contract defined-debit call/put aligned with the latest 15-minute 
+16:19:28 mcentee-h4054c4 alpaca-paper sell JPM equity market None 0.044373446 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+16:21:38 mcentee-hddb4ae alpaca-paper buy NFLX equity market None 0.349259569 Test short-horizon cross-sectional relative strength: buy the stronges
+16:24:49 mcentee-h4054c4 alpaca-paper sell AMD equity market None 0.02436845 Exit on 45-minute time stop, loss of short trend, loss of relative-str
+16:28:28 mcentee-h6bd08d alpaca-paper sell NVDA equity market None 0.155286392 Pullback-bounce exit: 0.4% stop, 0.6% target, 45-minute time stop, or 

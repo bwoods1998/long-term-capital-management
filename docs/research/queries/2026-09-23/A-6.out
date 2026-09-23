@@ -1,0 +1,111 @@
+
+## forward by founder class: agents / with>=1 active block / active blocks / sum log-growth / n positive / n negative / mean W_paper (latest board) / n W_paper>1 / n with real band
+  house-mutation         n= 327 act= 47 blocks=  146 sumLG=-1.1009 pos= 21 neg= 23 meanW=0.9878 W>1=  9/39 real=3
+  seed                   n=  28 act= 14 blocks=  235 sumLG=-0.1179 pos=  9 neg=  5 meanW=1.0345 W>1=  1/1 real=1
+  foundry                n=  27 act= 23 blocks=   88 sumLG=-1.9399 pos=  7 neg= 16 meanW=0.9464 W>1=  4/27 real=1
+  agent-fork             n=  17 act=  7 blocks=   16 sumLG=-0.1789 pos=  5 neg=  2 meanW=0.9881 W>1=  4/13 real=0
+  repair                 n=  16 act=  0 blocks=    0 sumLG=+0.0000 pos=  0 neg=  0 meanW=0.9965 W>1=  3/9 real=0
+  architect              n=  14 act=  6 blocks=   55 sumLG=-0.1347 pos=  1 neg=  5 meanW=0.9795 W>1=  1/7 real=0
+  house-revival          n=  11 act=  5 blocks=   29 sumLG=-0.0420 pos=  1 neg=  4 meanW=0.9955 W>1=  0/6 real=0
+  lab                    n=   1 act=  1 blocks=    3 sumLG=-0.0572 pos=  0 neg=  1 meanW=0.9476 W>1=  0/1 real=0
+
+## forward by desk: agents / with>=1 active block / active blocks / sum log-growth / n positive / n negative / mean W_paper (latest board) / n W_paper>1 / n with real band
+  alpaca-crypto-alts     n=  61 act= 18 blocks=  228 sumLG=-0.2393 pos=  5 neg= 13 meanW=0.9795 W>1=  1/16 real=0
+  alpaca-crypto-majors   n=  49 act=  6 blocks=   41 sumLG=-0.0358 pos=  1 neg=  5 meanW=0.9952 W>1=  0/8 real=0
+  kalshi-sports          n=  47 act= 18 blocks=   23 sumLG=-0.0239 pos= 14 neg=  4 meanW=0.9735 W>1=  3/13 real=1
+  alpaca-megacaps        n=  45 act=  6 blocks=   11 sumLG=+0.0014 pos=  4 neg=  2 meanW=0.9993 W>1=  2/8 real=0
+  kalshi-crypto-strikes  n=  40 act=  4 blocks=   69 sumLG=-1.0937 pos=  0 neg=  4 meanW=0.7553 W>1=  0/3 real=0
+  kalshi-crypto-15m      n=  37 act= 15 blocks=  125 sumLG=-2.0500 pos=  2 neg= 13 meanW=0.9436 W>1=  2/9 real=1
+  kalshi-sports-props    n=  34 act=  0 blocks=    0 sumLG=+0.0000 pos=  0 neg=  0 meanW=0.9778 W>1=  2/6 real=0
+  kalshi-attention       n=  34 act=  1 blocks=    2 sumLG=+0.0055 pos=  1 neg=  0 meanW=1.0000 W>1=  0/2 real=0
+  alpaca-index-etfs      n=  32 act=  7 blocks=   27 sumLG=-0.0025 pos=  2 neg=  5 meanW=0.9992 W>1=  0/12 real=0
+  kalshi-prices          n=  25 act=  7 blocks=   11 sumLG=-0.0350 pos=  4 neg=  1 meanW=0.9975 W>1=  5/8 real=1
+  kalshi-weather         n=  19 act= 13 blocks=   23 sumLG=+0.0771 pos=  9 neg=  4 meanW=1.0024 W>1=  7/10 real=2
+  alpaca-options         n=  18 act=  8 blocks=   12 sumLG=-0.1752 pos=  2 neg=  5 meanW=0.9747 W>1=  0/8 real=0
+
+## forward by class x alive: agents / with>=1 active block / active blocks / sum log-growth / n positive / n negative / mean W_paper (latest board) / n W_paper>1 / n with real band
+  ('house-mutation', 'dead') n= 292 act= 32 blocks=  105 sumLG=-0.8518 pos= 14 neg= 15 meanW=0.9941 W>1=  1/4 real=0
+  ('house-mutation', 'alive') n=  35 act= 15 blocks=   41 sumLG=-0.2491 pos=  7 neg=  8 meanW=0.9870 W>1=  8/35 real=3
+  ('seed', 'dead')       n=  27 act= 13 blocks=  229 sumLG=-0.2751 pos=  8 neg=  5 meanW=nan W>1=  0/0 real=0
+  ('foundry', 'alive')   n=  24 act= 20 blocks=   67 sumLG=-1.1012 pos=  7 neg= 13 meanW=0.9682 W>1=  4/24 real=1
+  ('agent-fork', 'alive') n=  12 act=  3 blocks=    3 sumLG=+0.0089 pos=  3 neg=  0 meanW=0.9871 W>1=  4/12 real=0
+  ('repair', 'alive')    n=   9 act=  0 blocks=    0 sumLG=+0.0000 pos=  0 neg=  0 meanW=0.9965 W>1=  3/9 real=0
+  ('architect', 'alive') n=   9 act=  5 blocks=   36 sumLG=-0.1333 pos=  1 neg=  4 meanW=0.9795 W>1=  1/7 real=0
+  ('repair', 'dead')     n=   7 act=  0 blocks=    0 sumLG=+0.0000 pos=  0 neg=  0 meanW=nan W>1=  0/0 real=0
+  ('house-revival', 'dead') n=   6 act=  2 blocks=    6 sumLG=-0.0000 pos=  1 neg=  1 meanW=0.9980 W>1=  0/1 real=0
+  ('agent-fork', 'dead') n=   5 act=  4 blocks=   13 sumLG=-0.1878 pos=  2 neg=  2 meanW=1.0000 W>1=  0/1 real=0
+  ('architect', 'dead')  n=   5 act=  1 blocks=   19 sumLG=-0.0015 pos=  0 neg=  1 meanW=nan W>1=  0/0 real=0
+  ('house-revival', 'alive') n=   5 act=  3 blocks=   23 sumLG=-0.0419 pos=  0 neg=  3 meanW=0.9950 W>1=  0/5 real=0
+  ('foundry', 'dead')    n=   3 act=  3 blocks=   21 sumLG=-0.8387 pos=  0 neg=  3 meanW=0.7726 W>1=  0/3 real=0
+  ('seed', 'alive')      n=   1 act=  1 blocks=    6 sumLG=+0.1572 pos=  1 neg=  0 meanW=1.0345 W>1=  1/1 real=1
+  ('lab', 'alive')       n=   1 act=  1 blocks=    3 sumLG=-0.0572 pos=  0 neg=  1 meanW=0.9476 W>1=  0/1 real=0
+
+## living agents with W_paper>1.0 on the latest board (name, class, desk, band, W_paper, W_real, E, trades, real_trades, seated h)
+  huang-h51fdd3-2          house-mutation kalshi-crypto-15m      bunt   W=1.0520 Wr=0.848 E=0.8698 tr=4 rt=1 seated_h=12.3
+  mullins-2                seed           kalshi-weather         bunt   W=1.0345 Wr=1.157835 E=1.1776 tr=11 rt=10 seated_h=91.2
+  mullins-6                house-mutation kalshi-weather         bunt   W=1.0285 Wr=1.038333 E=1.0530 tr=11 rt=2 seated_h=61.2
+  meriwether-h2d625d       foundry        kalshi-sports          bunt   W=1.0269 Wr=0.995325 E=1.0086 tr=7 rt=0 seated_h=19.5
+  mullins-13               agent-fork     kalshi-weather         paper  W=1.0125 Wr=1.0 E=1.0062 tr=4 rt=0 seated_h=24.6
+  hawkins-22               repair         kalshi-prices          paper  W=1.0114 Wr=1.0 E=1.0057 tr=0 rt=0 seated_h=14.8
+  hawkins-23               repair         kalshi-prices          paper  W=1.0114 Wr=1.0 E=1.0057 tr=0 rt=0 seated_h=14.8
+  hawkins-24               repair         kalshi-prices          paper  W=1.0114 Wr=1.0 E=1.0057 tr=0 rt=0 seated_h=14.8
+  haghani-56               architect      alpaca-crypto-alts     paper  W=1.0112 Wr=1.0 E=1.0056 tr=4 rt=0 seated_h=2.4
+  meriwether-36            house-mutation kalshi-sports          paper  W=1.0105 Wr=1.0 E=1.0052 tr=6 rt=0 seated_h=38.2
+  hawkins-19               house-mutation kalshi-prices          bunt   W=1.0060 Wr=0.992 E=0.9950 tr=5 rt=0 seated_h=34.7
+  hufschmid-32             agent-fork     kalshi-sports-props    paper  W=1.0050 Wr=1.0 E=1.0025 tr=2 rt=0 seated_h=16.3
+  huang-hd8ff7c            foundry        kalshi-crypto-15m      paper  W=1.0047 Wr=1.0 E=1.0023 tr=1 rt=0 seated_h=14.3
+  mullins-17               house-mutation kalshi-weather         paper  W=1.0043 Wr=1.0 E=1.0021 tr=0 rt=0 seated_h=12.0
+  mullins-12               house-mutation kalshi-weather         paper  W=1.0035 Wr=1.0 E=1.0017 tr=1 rt=0 seated_h=24.7
+  hufschmid-31             house-mutation kalshi-sports-props    paper  W=1.0020 Wr=1.0 E=1.0010 tr=1 rt=0 seated_h=18.0
+  mullins-18               agent-fork     kalshi-weather         paper  W=1.0015 Wr=1.0 E=1.0008 tr=1 rt=0 seated_h=12.0
+  mcentee-hfadaea          foundry        alpaca-megacaps        paper  W=1.0013 Wr=1.0 E=1.0006 tr=1 rt=0 seated_h=10.5
+  hawkins-20               agent-fork     kalshi-prices          paper  W=1.0005 Wr=1.0 E=1.0003 tr=0 rt=0 seated_h=17.5
+  mullins-16               house-mutation kalshi-weather         paper  W=1.0005 Wr=1.0 E=1.0003 tr=0 rt=0 seated_h=12.1
+  mcentee-hddb4ae          foundry        alpaca-megacaps        paper  W=1.0003 Wr=1.0 E=1.0002 tr=2 rt=0 seated_h=10.4
+  krasker-5                agent-fork     alpaca-options         paper  W=1.0000 Wr=1.0 E=1.0000 tr=0 rt=0 seated_h=44.9
+  mcentee-30               house-mutation alpaca-megacaps        paper  W=1.0000 Wr=1.0 E=1.0000 tr=0 rt=0 seated_h=18.0
+  meriwether-38            house-mutation kalshi-sports          paper  W=1.0000 Wr=1.0 E=1.0000 tr=0 rt=0 seated_h=22.6
+  krasker-12               repair         alpaca-options         paper  W=1.0000 Wr=1.0 E=1.0000 tr=0 rt=0 seated_h=12.2
+  living on board: 94  W>1: 21  W<1: 54  W==1: 19
+  bands: Counter({'paper': 89, 'bunt': 5})
+
+## foundry-born agents: name, desk, alive, rung, fills, active blocks, sumLG, W_paper
+  meriwether-h42bdbb     foundry       kalshi-sports          alive=True  r1 fills= 12 act=  1 LG=+0.0043 W=0.971036 tr=6
+  meriwether-h2d625d     foundry       kalshi-sports          alive=True  r2 fills= 31 act=  1 LG=+0.0028 W=1.026864 tr=7
+  meriwether-hadd32b     foundry       kalshi-sports          alive=True  r1 fills= 22 act=  1 LG=+0.0072 W=0.831171 tr=7
+  scholes-hb39be6        foundry       alpaca-index-etfs      alive=True  r1 fills=  2 act=  2 LG=-0.0004 W=0.999424 tr=1
+  scholes-h7dd043        foundry       alpaca-index-etfs      alive=True  r1 fills=  0 act=  0 LG=+0.0000 W=1.0 tr=0
+  huang-hd8ff7c          foundry       kalshi-crypto-15m      alive=True  r1 fills=  1 act=  1 LG=+0.0047 W=1.00468 tr=1
+  huang-h609d6f          foundry       kalshi-crypto-15m      alive=True  r1 fills=  2 act=  3 LG=-0.0589 W=0.94284 tr=2
+  huang-h6d3302          foundry       kalshi-crypto-15m      alive=False r1 fills= 15 act=  8 LG=-0.0603 W=0.941441 tr=15
+  huang-h51fdd3          foundry       kalshi-crypto-15m      alive=False r1 fills=  6 act=  6 LG=-0.2125 W=0.808577 tr=6
+  huang-h427345          foundry       kalshi-crypto-15m      alive=True  r2 fills= 12 act=  9 LG=-0.4983 W=0.983923 tr=10
+  huang-h4ee182          foundry       kalshi-crypto-15m      alive=True  r1 fills=  1 act=  2 LG=-0.1143 W=0.892 tr=1
+  mcentee-h6bd08d        foundry       alpaca-megacaps        alive=True  r1 fills=  3 act=  2 LG=-0.0001 W=0.999208 tr=1
+  rosenfeld-35           house-revival alpaca-crypto-majors   alive=True  r1 fills=  6 act=  4 LG=-0.0037 W=0.996119 tr=2
+  rosenfeld-36           house-revival alpaca-crypto-majors   alive=True  r1 fills=  0 act=  0 LG=+0.0000 W=1.0 tr=0
+  rosenfeld-37           house-revival alpaca-crypto-majors   alive=True  r1 fills=  0 act=  0 LG=+0.0000 W=1.0 tr=0
+  haghani-37             house-revival alpaca-crypto-alts     alive=True  r2 fills= 12 act= 15 LG=-0.0342 W=0.985459 tr=5
+  haghani-38             house-revival alpaca-crypto-alts     alive=False r1 fills=  1 act=  1 LG=+0.0018 W=None tr=None
+  haghani-39             house-revival alpaca-crypto-alts     alive=True  r1 fills= 22 act=  4 LG=-0.0041 W=0.993324 tr=7
+  haghani-40             house-revival alpaca-crypto-alts     alive=False r1 fills=  0 act=  0 LG=+0.0000 W=None tr=None
+  haghani-41             house-revival alpaca-crypto-alts     alive=False r1 fills=  0 act=  0 LG=+0.0000 W=None tr=None
+  haghani-42             house-revival alpaca-crypto-alts     alive=False r1 fills=  0 act=  0 LG=+0.0000 W=None tr=None
+  haghani-43             house-revival alpaca-crypto-alts     alive=False r1 fills=  2 act=  5 LG=-0.0018 W=0.998043 tr=1
+  rosenfeld-38           house-revival alpaca-crypto-majors   alive=False r0 fills=  0 act=  0 LG=+0.0000 W=None tr=None
+  leahy-h6b99df          foundry       kalshi-attention       alive=True  r1 fills=  0 act=  0 LG=+0.0000 W=1.0 tr=0
+  rosenfeld-he2ab61      foundry       alpaca-crypto-majors   alive=True  r1 fills=  4 act= 10 LG=-0.0140 W=0.984774 tr=2
+  rosenfeld-h76403a      foundry       alpaca-crypto-majors   alive=True  r1 fills=  1 act=  2 LG=-0.0004 W=0.999624 tr=0
+  rosenfeld-h19e436      foundry       alpaca-crypto-majors   alive=True  r1 fills=  6 act= 10 LG=-0.0161 W=0.983135 tr=2
+  hilibrand-h6ca596      foundry       kalshi-crypto-strikes  alive=True  r1 fills=  3 act=  2 LG=-0.3593 W=0.69815 tr=3
+  haghani-h426990        foundry       alpaca-crypto-alts     alive=True  r1 fills=  9 act=  8 LG=-0.0525 W=0.944682 tr=3
+  haghani-hb85bb8        foundry       alpaca-crypto-alts     alive=True  r1 fills=  4 act=  3 LG=-0.0058 W=0.994824 tr=1
+  mcentee-hfadaea        foundry       alpaca-megacaps        alive=True  r1 fills=  3 act=  2 LG=+0.0009 W=1.001274 tr=1
+  mcentee-hddb4ae        foundry       alpaca-megacaps        alive=True  r1 fills=  5 act=  2 LG=+0.0010 W=1.000333 tr=2
+  mcentee-h4054c4        foundry       alpaca-megacaps        alive=True  r1 fills= 26 act=  2 LG=+0.0007 W=0.998163 tr=13
+  hilibrand-hc4567e      foundry       kalshi-crypto-strikes  alive=False r1 fills=  9 act=  7 LG=-0.5659 W=0.56785 tr=7
+  rosenfeld-h769260      foundry       alpaca-crypto-majors   alive=True  r1 fills=  0 act=  0 LG=+0.0000 W=1.0 tr=0
+  rosenfeld-hf9e14d      foundry       alpaca-crypto-majors   alive=True  r1 fills=  1 act=  2 LG=-0.0024 W=0.997558 tr=0
+  scholes-h0c9b88        foundry       alpaca-index-etfs      alive=True  r1 fills=  2 act=  2 LG=-0.0002 W=0.999626 tr=1
+  huang-l23cdb7          lab           kalshi-crypto-15m      alive=True  r1 fills=  4 act=  3 LG=-0.0572 W=0.947647 tr=3
+  meriwether-h7d7702     foundry       kalshi-sports          alive=True  r1 fills=  7 act=  0 LG=+0.0000 W=0.982781 tr=0
