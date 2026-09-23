@@ -767,19 +767,35 @@ class Book:
         """
         out = []
         for working in self.orders.values():
-            if not working.open:
-                continue
-            price = working.limit_price or working.reference_price
-            if price is None:
-                quote = self._quote(working.instrument)  # an order recorded by an older release
-                price = (quote.reference(working.side) if quote is not None else None) or self.marks.get(working.instrument.key) or ZERO
-            for share in working.shares:
-                if share.quantity > share.filled:
-                    out.append((share.agent, working.instrument, working.side, share.quantity - share.filled, price, working.order_type))
+            if working.open:
+                self._reserve(out, working)
+        # A BUY closed as never arrived still binds its cash while the book keeps asking the venue
+        # about it (`_recheck_never_arrived`): the verdict alone freed the cash, a second buy of the
+        # same size passed `check`, and when the venue had the first order after all its revived
+        # fill left the agent 96% invested against the 50% cap, on the venue's pooled cash (found
+        # in review, Sept 23, 2026). A sell reserves nothing here: the venue refuses a sale of units
+        # already offered, and an exit must not wait a quarter of an hour to be tried again.
+        if self._never_arrived:
+            now = _epoch_seconds(now_iso(self.clock))
+            for order_id, since in self._never_arrived.items():
+                working = self.orders.get(order_id)
+                if (working is not None and working.side == "buy" and since
+                        and now - _epoch_seconds(since) <= NEVER_ARRIVED_RECHECK_SECONDS):
+                    self._reserve(out, working)
         for intent, quote in pending:
             price = intent.limit_price or quote.reference(intent.side) or ZERO
             out.append((intent.agent, intent.instrument, intent.side, intent.quantity, price, intent.order_type))
         return out
+
+    def _reserve(self, out: list[tuple[str, Instrument, str, Decimal, Decimal, str]], working: Working) -> None:
+        """Append what is still unfilled of `working`, share by share, at the price it was committed at."""
+        price = working.limit_price or working.reference_price
+        if price is None:
+            quote = self._quote(working.instrument)  # an order recorded by an older release
+            price = (quote.reference(working.side) if quote is not None else None) or self.marks.get(working.instrument.key) or ZERO
+        for share in working.shares:
+            if share.quantity > share.filled:
+                out.append((share.agent, working.instrument, working.side, share.quantity - share.filled, price, working.order_type))
 
     def _reserved_cash(self, agent: str, pending: Sequence[tuple[Intent, Quote]] = ()) -> Decimal:
         total = ZERO

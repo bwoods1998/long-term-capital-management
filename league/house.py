@@ -3093,8 +3093,12 @@ class House:
     def _sweep(self, agent_id: str, book: Book) -> None:
         """Return a finished account's free cash to the House's side of the book."""
         account = book.account(agent_id)
-        if not account.holdings and not book.open_orders(agent_id) and account.cash > 0 and not account.swept:
-            book.stake(agent_id, -account.cash, note="account closed")  # all of it: what is left of the stake, and any profit
+        # Free cash only: what a buy closed as never arrived still binds while the book keeps asking
+        # the venue about it (`Book._reservations`) is swept on a later pass, once that window closes;
+        # `stake` refuses to take reserved cash, and this runs unguarded in the mark pass.
+        free = account.cash - book._reserved_cash(agent_id)
+        if not account.holdings and not book.open_orders(agent_id) and free > 0 and not account.swept:
+            book.stake(agent_id, -free, note="account closed")  # all of it: what is left of the stake, and any profit
 
     def _observe_wind_down(self, agent: Agent, book: Book) -> None:
         """Keep the evidence until an abandoned account's final trades and sweep are observed.

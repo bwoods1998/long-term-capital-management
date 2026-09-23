@@ -24,9 +24,9 @@ from unittest.mock import patch
 from ltcm.broker import Instrument, RejectedOrder, UnknownOutcome
 
 from league import seeds
-from league.book import EXIT_PLAN_TTL_SECONDS, NEVER_ARRIVED, Book, Limits
+from league.book import EXIT_PLAN_TTL_SECONDS, NEVER_ARRIVED, NEVER_ARRIVED_RECHECK_SECONDS, Book, Intent, Limits
 from league.fees import Fees
-from league.tests.fakes import FakeBroker
+from league.tests.fakes import FakeBroker, iso
 from league.tests.test_book import BTC, BookCase
 from league.tests.test_exit_slices import SliceCase
 from league.tests.test_house import HouseCase
@@ -286,6 +286,105 @@ class NeverArrived(BookCase):
         again.poll()
         self.assertEqual(again.account("a1").holdings[BTC.key].quantity, D("0.00049875"))
         self.assertTrue(again.reconcile().ok)
+
+    def lost_buy(self, quantity="0.0006"):
+        """A limit buy the venue took and rests, whose answer was lost, closed as never arrived
+        after two looks: ~$48 of the stake at 79990."""
+        original_submit = self.broker.submit
+
+        def accepted_but_the_answer_was_lost(intent):
+            original_submit(intent)  # the venue has it, resting
+            raise UnknownOutcome("the answer was lost")
+
+        with patch.object(self.broker, "submit", side_effect=accepted_but_the_answer_was_lost), \
+                patch.object(self.broker, "get_order", side_effect=RejectedOrder("no order")):
+            (first,) = self.book.submit([self.intent("a1", BTC, "buy", quantity, order_type="limit", limit_price="79990")])
+            self.assertEqual(first.status, "unknown")
+            self.book.poll()
+            self.clock.advance(61)
+            self.book.poll()
+        self.assertEqual(self.book.ledger.last("book.order").payload["reason"], NEVER_ARRIVED)
+        return next(o for o in self.broker.orders.values() if o.limit_price == D("79990"))
+
+    def test_a_buy_closed_as_never_arrived_keeps_its_cash_reserved_while_the_book_still_asks(self):
+        """Found in review (Sept 23, 2026): the verdict freed the buy's cash on the spot, a second buy
+        of the same size passed `check`, and when the venue had the first order after all the revival
+        left the agent 96% invested against the 50% cap, paid from the venue's pooled cash."""
+        self.seat("a1", usd="100")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.assertTrue(self.book.reconcile().ok)
+        resting = self.lost_buy()
+        self.assertEqual(self.book.open_orders(), [])
+        self.assertGreater(self.book._reserved_cash("a1"), D("47"))  # the verdict did not free the ~$48
+        (second,) = self.book.submit([self.intent("a1", BTC, "buy", "0.0006")])
+        self.assertEqual(second.status, "refused", second.detail)
+        self.assertIn("working buys", second.detail)  # the never-arrived buy still counts against the cap
+        self.broker.fill_resting(resting.id, "0.0006")  # the venue had it, and fills it
+        self.clock.advance(61)
+        self.book.poll()  # the recheck finds it and books the fill
+        account = self.book.account("a1")
+        self.assertEqual(account.holdings[BTC.key].quantity, D("0.0005985"))
+        self.assertEqual(self.book._reserved_cash("a1"), D("0"))  # found: nothing left to reserve
+        held = account.holdings[BTC.key].quantity * self.book.marks[BTC.key]
+        self.assertLessEqual(held, self.book.equity("a1") * D("0.5"))  # within the cap, as the book judged it
+        self.assertGreater(account.cash, D("50"))
+        self.assertTrue(self.book.reconcile().ok)
+        self.assertTrue(self.book.evidence_integrity("a1")["ok"])
+
+    def test_the_reservation_lapses_with_the_recheck_window(self):
+        self.seat("a1", usd="100")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.assertTrue(self.book.reconcile().ok)
+        self.lost_buy()
+        self.assertGreater(self.book._reserved_cash("a1"), D("47"))
+        self.clock.advance(NEVER_ARRIVED_RECHECK_SECONDS + 1)
+        self.assertEqual(self.book._reserved_cash("a1"), D("0"))  # the book has stopped asking: the venue never had it
+        with patch.object(self.broker, "get_order", side_effect=RejectedOrder("no order")):
+            self.book.poll()
+        self.broker.clock_iso = iso(self.clock)  # a fresh quote, a quarter of an hour on
+        (buy,) = self.book.submit([self.intent("a1", BTC, "buy", "0.0006")])
+        self.assertEqual(buy.status, "filled", buy.detail)
+
+
+class SweepWithReservedCash(HouseCase):
+    def test_a_dead_agents_sweep_takes_the_free_cash_and_leaves_what_a_never_arrived_buy_binds(self):
+        """`_sweep` runs unguarded in the mark pass: it must never ask the book for cash a
+        never-arrived buy still reserves (`Book.stake` refuses that), and it must still sweep the
+        rest once the book has stopped asking the venue."""
+        agent = self.seated()
+        self.house.seat(agent)
+        book = self.house.books["alpaca-paper"]
+        staked = book.account(agent.id).cash
+        self.assertGreater(staked, D("0"))
+        self.broker.set_quote(self.btc, "80000", "80010")
+        original_submit = self.broker.submit
+
+        def accepted_but_the_answer_was_lost(intent):
+            original_submit(intent)
+            raise UnknownOutcome("the answer was lost")
+
+        quantity = ((staked * D("0.3")) / D("80000")).quantize(D("0.000000001"))  # under the $75 order cap
+        with patch.object(self.broker, "submit", side_effect=accepted_but_the_answer_was_lost), \
+                patch.object(self.broker, "get_order", side_effect=RejectedOrder("no order")):
+            (out,) = book.submit([Intent.new(agent=agent.id, instrument=self.btc, side="buy", quantity=quantity, order_type="limit",
+                                             limit_price="79990", reason="test", created_at=iso(self.clock), nonce="lost")])
+            self.assertEqual(out.status, "unknown", out.detail)
+            book.poll()
+            self.clock.advance(61)
+            book.poll()
+        self.assertEqual(book.ledger.last("book.order").payload["reason"], NEVER_ARRIVED)
+        reserved = book._reserved_cash(agent.id)
+        self.assertGreater(reserved, D("0"))
+        self.house.registry.died(agent.id, "credits", "a test death")
+        self.house._sweep(agent.id, book)  # no BookError: the free cash goes, the reserved cash stays
+        self.assertEqual(book.account(agent.id).cash, reserved)
+        self.assertFalse(book.account(agent.id).swept)
+        self.clock.advance(NEVER_ARRIVED_RECHECK_SECONDS + 1)
+        with patch.object(self.broker, "get_order", side_effect=RejectedOrder("no order")):
+            book.poll()
+        self.house._sweep(agent.id, book)
+        self.assertEqual(book.account(agent.id).cash, D("0"))
+        self.assertTrue(book.account(agent.id).swept)
 
 
 class VenueReason(BookCase):
