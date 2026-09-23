@@ -2,17 +2,29 @@
 
 ## Current league
 
-- [Live hour, September 21 UTC](2026-09-21-live-hour.md): owner activation confirmed, continued research funding, weekday market access and paper-account investigation.
+Every record of the league rebuilt on September 19 and 20, 2026, newest first. Each record is
+dated and kept as history once it is finished; the [project README](../../README.md) and
+[operations](../operations.md) carry the state as it now stands.
+
+- [Dynamism II, September 23](2026-09-23-dynamism-ii.md): a 15-minute watch found no promotion from paper to real money in 24 hours and fifteen merged repairs never born; what shipped: repairs seated, the audit after promotion, the settled lane, a budget that follows the owner's real spend, and the foundry on fast markets.
+- [Overnight rebuild, September 22](2026-09-22-overnight-rebuild.md): the eight-hour rebuild of the learning loop (hypothesis foundry, repair engineer, research gate, deep Alpaca replay with a sealed holdout, attested self-deploys), its before and after measurements, the dynamism revision (#123) and the state at the 21:10Z deadline.
+- [Model routing, prompt caching and economics, September 22](2026-09-22-model-routing-experiment.md): Luna's prompt cache (nothing read in 15,044 calls, then 97% of a follow-on turn), batch inference, the balanced and Flash tier experiment, task-aware routing, research traces, `scripts/economics.py` and a tick-latency diagnosis.
+- [Critical fixes, September 22](2026-09-22-critical-fixes.md): the 03:55Z review: the Sail meter's monthly line, the audit reserve reading the wrong meter, empty consultations, Merton-written code beside the House's secrets, the gateway under-counting Kalshi NO buys, and the expiring agent image.
+- [The eight-hour watch, September 21](2026-09-21-eight-hour-watch.md): the owner's mandate to change the game where it slowed self-improvement: the replay and paper-death revisions, the fast lane and learning surge on the money rules (the grant ratified for the same capital), the turbo layer, and Jev as a research instrument.
+- [Live hour, September 21 UTC](2026-09-21-live-hour.md): owner activation confirmed, continued research funding, weekday market access, paper-account investigation, and the first live execution and settlement (a $5.6733 loss) with the receipt defect it exposed.
 - [Persistent earned live trading, September 21 UTC](2026-09-21-persistent-live-trading.md): replaces the timed pilot with owner-activated ladder access and existing venue cash; budgets and losses are retained.
 - [Game gate audit, September 21 UTC](2026-09-21-game-gate-audit.md): reachable evidence gates, aggressive resource rewards, replacement and bounded live learning.
 - [Evening watch, September 20 Pacific](2026-09-20-evening-watch.md): two-hour observations and the eight-hour accelerated run.
-
 - [Foundation progress, September 20](2026-09-20-foundation-progress.md): deployed campaign,
   research recovery, model grants, replay proof and Jev integration.
 - [Model comparison, September 20](2026-09-20-model-routing.md): what the paid coding pilots measured.
-- [Overnight rebuild](2026-09-20-overnight-build.md) and [initial watch](2026-09-20-the-watch.md):
-  the earlier league baseline and repairs.
+- [The watch, September 20](2026-09-20-the-watch.md): twenty hours of watching the new floor, the
+  faults where it reported health while doing less or nothing, and their repairs.
+- [Overnight build, September 19 to 20](2026-09-20-overnight-build.md): the build of the league,
+  every decision and its reason, the step log and what was verified live.
 - [Jev probe data](data/2026-09-20-typesafe-probe.json): frozen sanitized cases and measured responses.
+- [Game gate controls](data/2026-09-21-game-gate-controls.json): the reproducible 96-agent
+  synthetic controls behind the gate audit.
 
 The live league's read-only progress command is `python -m league.phase1 --root /workspace/state`
 on the House. Its [phase documentation](../phase-one.md) explains the counts and cost treatment.

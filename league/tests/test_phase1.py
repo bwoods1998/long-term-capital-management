@@ -154,7 +154,10 @@ class CampaignTests(PhaseCase):
             model.ask(system='s', user='u', agent='test')
         self.assertEqual(len(opener.calls), 1)
 
-    def test_supported_openai_models_reserve_and_settle_their_own_ceiling(self):
+    def test_supported_openai_models_reserve_their_ceiling_and_settle_at_the_gateways_cost(self):
+        # Until Sept 23, 2026 a verified call settled at max(the gateway's cost, every token at the
+        # ceiling); the gateway now prices cache and long-context premiums itself, and its metered
+        # cost is the settlement. The ceiling still sizes the hold.
         guard = self.budget()
         for model, rate_in, rate_out in [('gpt-5.6-luna', '.50', '1.80'),
                                          ('gpt-5.6-terra', '5', '18'), ('gpt-5.6-sol', '10', '30')]:
@@ -165,7 +168,8 @@ class CampaignTests(PhaseCase):
                 Frontier('https://example.test', lambda: 'token', model=model, opener=opener,
                          spend_guard=guard).ask(system='s', user='u', agent='test')
                 bound = (1000 * Decimal(rate_in) + 2000 * Decimal(rate_out)) / 1000000
-                self.assertEqual(before - guard.remaining('openai'), bound)
+                self.assertEqual(before - guard.remaining('openai'), Decimal('0.001'))
+                self.assertLess(Decimal('0.001'), bound)
         self.assertEqual(guard.report()['pending_calls'], 0)
         opener = FakeOpener()
         with self.assertRaisesRegex(FrontierError, 'no verified price'):

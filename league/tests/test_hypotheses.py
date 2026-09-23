@@ -162,6 +162,12 @@ class Cards(FoundryCase):
         shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
         self.assertEqual([row["symbol"] for row in shown["series"]], ["BTC/USD"])
         self.assertEqual(shown["limitations"], ["no depth"])
+        # The live feeds' hourly rows and the options store's rows are coverage of other stores:
+        # newer, they must not hide the history ingestion's (league/feeds.py writes one a feed an hour).
+        self.house.ledger.append("data.coverage", {"asset": "feed", "feed": "perps", "status": "current", "keys": {}})
+        self.house.ledger.append("data.coverage", {"asset": "option", "underlying": "SPY", "status": "complete", "bars": 10})
+        shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
+        self.assertEqual(([row["symbol"] for row in shown["series"]], shown["source"]), (["BTC/USD"], "alpaca-history"))
 
     def test_replays_that_fail_to_fetch_data_are_infrastructure_not_invalid_code(self):
         from league.hypotheses import classify_error
@@ -223,6 +229,63 @@ class Allocation(FoundryCase):
         self.seated()  # too young to be displaced: the league is full and nobody may leave
         self.assertFalse(self.foundry.due())
         self.assertIn("no seat", self.foundry.refusal)
+
+
+class FastEvidence(FoundryCase):
+    """Sept 23, 2026: half the foundry's calls go to hourly, around-the-clock desks, cards may queue
+    for replay, other Merton roles no longer hold it up, and its packet says why hourly is faster."""
+
+    def settings(self, **kw):
+        self.house.game["hypotheses"] = {**self.house.game.get("hypotheses", {}), **kw}
+        self.foundry = Foundry(self.house, self.frontier)
+        self.house.hypotheses = self.foundry
+
+    def test_the_fast_share_sends_calls_to_fast_desks_the_evidence_route_would_never_pick(self):
+        etf_code = PASSER.replace('"symbols": ["BTC/USD"]', '"symbols": ["SPY"]').replace("sawtooth", "etf")
+        etfs = [self.house.spawn("scholes", "etf-family", etf_code, reason="test") for _ in range(4)]
+        crypto = self.house.spawn("rosenfeld", "crypto-family", PASSER, reason="test")
+        for n, agent in enumerate(etfs * 3):
+            self.trial(agent.id, "etf-family", passed=n % 3 == 0)
+        for _ in range(20):
+            self.trial(crypto.id, "crypto-family", passed=False)
+        self.settings(fast_desks=[self.DESK], fast_share=0.5, exploration_share=0)
+        routes = []
+        for _ in range(10):
+            desk, route, reason = self.foundry.allocate(fresh=True)
+            routes.append((desk.niche, route))
+            self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0",
+                                                     "allocation": {"desk": desk.niche, "route": route}})
+        self.assertEqual(sum(1 for _, r in routes if r == "fast"), 5)
+        self.assertEqual({d for d, r in routes if r == "fast"}, {self.DESK})
+        self.assertEqual({d for d, r in routes if r == "evidence"}, {"alpaca-index-etfs"})
+
+    def test_cards_may_queue_for_replay_and_another_role_does_not_hold_the_foundry(self):
+        import threading
+
+        self.settings(max_pending_cards=8)
+        self.assertTrue(self.foundry.due(), self.foundry.refusal)
+        busy = threading.Event()
+        worker = threading.Thread(target=busy.wait, args=(5,))
+        worker.start()
+        self.addCleanup(lambda: (busy.set(), worker.join(5)))
+        self.house._jobs["merton:teacher"] = worker
+        self.house._jobs["replay:hypothesis:pending"] = worker
+        self.assertTrue(self.foundry.due(), self.foundry.refusal)
+        self.house._jobs["merton:foundry"] = worker
+        self.assertFalse(self.foundry.due())
+        self.assertIn("foundry call is still running", self.foundry.refusal)
+
+    def test_the_packet_says_why_hourly_is_faster_and_what_made_money_forward(self):
+        self.settings(prefer_horizon="hour")
+        winner = self.seated("rosenfeld", code=PASSER)
+        self.earn(winner)
+        packet = self.foundry.packet(self.DESK)
+        self.assertEqual(packet["horizon_guidance"]["prefer"], "hour")
+        self.assertIn("4 active hourly blocks", packet["horizon_guidance"]["paper_screen"]["hour"])
+        rows = packet["forward_on_this_desk"]
+        self.assertEqual((rows[0]["members"], rows[0]["on_paper"], rows[0]["earning"]), (1, 1, 1))
+        self.assertIn("quarter of the taker", packet["fees"]["kalshi_maker"])
+        self.assertEqual(packet["fees"]["alpaca_crypto"]["round_trip"]["taker_taker"], 0.005)
 
 
 class Retirement(FoundryCase):
@@ -315,7 +378,8 @@ class Gates(FoundryCase):
         self.assertFalse(self.foundry.due())
         self.assertIn("allowance", self.foundry.refusal)
         self.house.pacer.may_spend = lambda kind: True
-        self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock() - 7200, "cost_usd": "20.00"})
+        self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock() - 7200,
+                                                 "cost_usd": str(self.foundry.settings["budget_usd"])})
         self.assertFalse(self.foundry.due())
         self.assertIn("budget", self.foundry.refusal)
         self.clock.advance(25 * 3600)  # outside the budget window

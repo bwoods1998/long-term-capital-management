@@ -17,6 +17,8 @@ Endpoints used, each verified against the reference:
                                                 https://docs.alpaca.markets/reference/stocklatestquotesingle-1
     GET    https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD
                                                 https://docs.alpaca.markets/reference/cryptolatestquotes-1
+    GET    /v2/assets/{symbol}                  https://docs.alpaca.markets/reference/get-v2-assets-symbol_or_asset_id
+                                                (not yet read on the live venue: see `asset`)
 
 Two parsing traps this code encodes. Every numeric field on the **trading** API is a JSON string
 (`"cash": "12345.67"`), while every numeric field on the **market data** API is a JSON number, so
@@ -27,6 +29,8 @@ beside a `symbol` key) while the crypto wrapper is `quotes`, a map keyed by symb
 from __future__ import annotations
 
 import re
+import threading
+import time
 import urllib.parse
 from decimal import Decimal
 from typing import Any
@@ -62,6 +66,12 @@ DATA_BASE = "https://data.alpaca.markets"
 
 VENUE = "alpaca"
 DEFAULT_FEED = "iex"
+
+#: The facts of an asset record `asset` reads, when the venue states them.
+ASSET_FACTS = ("price_increment", "min_order_size", "min_trade_increment")
+#: How long an asset record that could not be read is left before it is asked for again. One that
+#: was read is kept for the life of the process: a pair's increments do not move intraday.
+ASSET_RETRY_SECONDS = 600.0
 
 #: Alpaca's seventeen order states collapsed onto the eight this runtime knows.
 STATUS_MAP: dict[str, str] = {
@@ -161,6 +171,9 @@ class AlpacaBroker:
         self.base = (base_url or (PAPER_BASE if credentials.paper else LIVE_BASE)).rstrip("/")
         self.data = data_url.rstrip("/")
         self.client = client or VenueClient(transport, timeout=timeout)
+        #: symbol -> (monotonic time read, its facts or None when the read failed); see `asset`.
+        self._assets: dict[str, tuple[float, "dict[str, Decimal] | None"]] = {}
+        self._assets_lock = threading.Lock()
 
     # ------------------------------------------------------------------- http
     def _call(
@@ -174,7 +187,10 @@ class AlpacaBroker:
         base: "str | None" = None,
         what: str,
         ok: tuple[int, ...] = (200, 201, 204),
+        refused: tuple[int, ...] = (),
     ) -> Any:
+        """One request. A status in `refused` is the venue refusing THIS request -- `RejectedOrder`
+        with its message -- where `require_ok` would read it as the venue being unreachable."""
         url = (base or self.base) + path
         if params:
             pairs = [(k, v) for k, v in params.items() if v is not None and v != ""]
@@ -183,6 +199,9 @@ class AlpacaBroker:
         status, payload = self.client.request(
             method, url, headers={**self.credentials.headers(), **(headers or {})}, body=body, what=what
         )
+        if status in refused:
+            detail = message_of(payload)
+            raise RejectedOrder(f"{what}: HTTP {status}{(' ' + detail) if detail else ''}")
         return require_ok(status, payload, what=what, ok=ok)
 
     def capabilities(self) -> set[str]:
@@ -282,12 +301,62 @@ class AlpacaBroker:
             delayed=(self.option_feed != "opra") if instrument.asset_class == "option" else self.feed not in ("iex", "sip"),
         )
 
+    # ----------------------------------------------------------------- assets
+    def asset(self, symbol: str) -> "dict[str, Decimal] | None":
+        """`GET /v2/assets/{symbol}`: the venue's own `price_increment`, `min_order_size` and
+        `min_trade_increment` for a crypto pair, each only when the record states it (an equity's
+        states none), or None when the record cannot be read. `BTC-USD` and `BTC/USD` are one pair.
+
+        Optional by design: a caller that finds nothing here must not guess. The House snaps a
+        crypto limit price to `price_increment` only when this says what it is (Sept 22, 2026: the
+        frontier auditor vetoed a crypto agent whose prices were rounded to a cent). Not yet read
+        through the gateway on the live venue; the gateway allows the path (`gateway/lib/caps.mjs`).
+        A pair is asked for as `BTC%2FUSD` and then, if that is not answered, in the venue's older
+        spelling `BTCUSD`; a record that names another symbol is not this pair's. A record read is
+        kept for the life of the process; a failed read is asked again after `ASSET_RETRY_SECONDS`."""
+        name = str(symbol or "").strip().upper()
+        if "-" in name and "/" not in name:
+            name = name.replace("-", "/")
+        if not name:
+            return None
+        now = time.monotonic()
+        with self._assets_lock:
+            hit = self._assets.get(name)
+        if hit is not None and (hit[1] is not None or now - hit[0] < ASSET_RETRY_SECONDS):
+            return None if hit[1] is None else dict(hit[1])
+        facts: "dict[str, Decimal] | None" = None
+        for spelling in [name] + ([name.replace("/", "")] if "/" in name else []):
+            try:
+                row = self._call("GET", f"/v2/assets/{urllib.parse.quote(spelling, safe='')}", what=f"alpaca asset {name}", ok=(200,))
+            except Exception:  # noqa: BLE001 - an unreadable record is an unknown increment, never a guessed one
+                continue
+            if not isinstance(row, dict) or str(row.get("symbol") or name).upper().replace("/", "") != name.replace("/", ""):
+                continue
+            facts = {}
+            for key in ASSET_FACTS:
+                value = dec(row.get(key))
+                if value is not None and value > 0:
+                    facts[key] = value
+            break
+        with self._assets_lock:
+            self._assets[name] = (now, facts)
+        return None if facts is None else dict(facts)
+
     # ----------------------------------------------------------------- orders
     def submit(self, intent: OrderIntent) -> Order:
         """`POST /v2/orders` with `client_order_id` = the intent id.
 
         `qty` and `notional` are mutually exclusive and this adapter always sends `qty`, so a
         desk's quantity is never reinterpreted as dollars.
+
+        A 401 or 403 answer to the POST is a refusal of this order (`RejectedOrder`, with the
+        message), not an unreachable venue: no order exists. Measured Sept 20-22, 2026 on the paper
+        book: 55 orders refused "cost basis must be >= minimal amount of order 10" and 63
+        "insufficient balance for AVAX", both HTTP 403. Read as `VenueUnavailable`, each was booked
+        `unknown` and a poll later "rejected: the venue has no such order" -- 118 rows that hid the
+        venue's own reason. The gateway answers its own refusals (a spent cap, a path it does not
+        sign, a bad token) with 401 or 403 too, before anything is forwarded. A 401 or 403 on a READ
+        still means the venue cannot be reached with these credentials (`require_ok`).
         """
         if getattr(intent, "expires_at", None) is not None:
             # Alpaca has no good-till-date order. Sent as plain gtc, the order would outlive the
@@ -314,7 +383,8 @@ class AlpacaBroker:
             body["position_intent"] = "buy_to_open" if intent.side == "buy" else "sell_to_close"
             body["time_in_force"] = "day"  # the only one Alpaca takes for options
         try:
-            payload = self._call("POST", "/v2/orders", body=body, headers={PURPOSE_HEADER: intent.purpose}, what="alpaca submit")
+            payload = self._call("POST", "/v2/orders", body=body, headers={PURPOSE_HEADER: intent.purpose}, what="alpaca submit",
+                                 refused=(401, 403))
         except TransportError as exc:
             return confirm_or_unknown(
                 lambda: self.order_by_client_id(intent.id),

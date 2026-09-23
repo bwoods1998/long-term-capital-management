@@ -3,19 +3,22 @@
 **An experimental trading league on Kalshi and Alpaca: agents compete for compute and improve
 strategy programs, with an autonomous API chief architect as the next engineering milestone.**
 
-Cheap open models on [Sail](https://sailresearch.com) research and write trading strategies. A
+Cheap models (open models on [Sail](https://sailresearch.com), and OpenAI's Luna) research and write trading strategies. A
 strategy climbs a ladder from mechanical replay, to paper trading, to a few real dollars, to real
 size, and only evidence moves it up. Agents earn their share of the compute budget by what they
-prove, die when they run out, and fork when they thrive. A frontier model audits every candidate
-before it touches money and writes new strategy code, tools and fixes as pull requests that must
-pass the tests. Venue keys, order caps, OpenAI/Jev limits and the kill switch live in a Cloudflare
+prove, die when they run out, and fork when they thrive. A frontier model audits every agent that
+reaches real money (since Sept 23, 2026 on the micro rung, where a veto sends it back to paper) and
+writes new strategy code, tools and fixes as pull requests that must pass the tests. Venue keys, order caps, OpenAI/Jev limits and the kill switch live in a Cloudflare
 gateway that agent code cannot change. The House still holds Sail credentials and enforces its
 campaign budget; moving that authority outside the mutable House is part of the architect handoff.
 
 **Current authorization:** [persistent earned live trading](docs/runs/2026-09-21-persistent-live-trading.md)
 was activated by the owner on September 21 at 14:10 UTC, using existing venue balances with no live deadline.
 It retains the original $500 foundation plus $325 burst accounting and resumes only unused
-OpenAI/Sail allowance. Deployment alone cannot activate it; inspect `live_trading.active`.
+OpenAI/Sail allowance; the owner's recorded top-ups (`scripts/campaign_topup.py`) have raised the
+burst's caps since. Deployment alone cannot activate it; inspect `live_trading.active`. It pins
+the money rules, so each owner revision of one is followed by re-ratifying the grant for the same
+capital: twice on Sept 21, at 20:26Z on Sept 22, and at the Sept 23 revision's deploy.
 The [September 21 live watch](docs/runs/2026-09-21-live-hour.md) records current provider funding,
 paid SIP/OPRA readiness, the public agent ladder, and the first earned live execution and
 settlement: a $5.6733 loss including fees. Its receipt exposed a Kalshi price/fee parsing defect;
@@ -40,6 +43,14 @@ Read the [foundation run](docs/runs/2026-09-20-foundation-progress.md),
 - **Deeper evaluation.** Alpaca strategies replay on years of SIP history, with a sealed holdout
   and fills informed by recorded quotes. The options desk has a replay of its own.
 
+**The September 23 revision (Dynamism II)** aims the loop at movement up and down the ladder.
+Merged repairs are now born even in a full league, and the defective code they correct is
+retired. The audit follows promotion to the micro rung instead of standing before it, and the
+House pays for it. A daily Kalshi agent with three settled trades is screened after one day. The
+budget follows the owner's real spend, and the foundry spends more of it on hourly,
+around-the-clock desks. The [execution record](docs/runs/2026-09-23-dynamism-ii.md) has what the
+watch measured and what shipped.
+
 Watch it at [blakewoods.us/capital](https://blakewoods.us/capital/). The design is in
 [the game](docs/proposals/2026-09-19-the-game.md) and
 [the architecture](docs/design/2026-09-19-architecture.md).
@@ -54,25 +65,27 @@ The name is a joke and a warning. No affiliation with the 1998 fund, its partner
 
 **The unit of selection is a strategy program, not a chat persona.** A strategy is one Python file
 with a `decide(ctx)` function ([the contract](league/CONTRACT.md)). An agent is that file, a cheap
-Sail model that researches on its behalf, a small memory, and an account of compute credits. The
+model that researches on its behalf, a small memory, and an account of compute credits. The
 first run's chat desks lost money; its code strategies were the only part that learned, so the
 rebuild selects on code.
 
 **The ladder.** Every agent climbs the same four rungs, and only evidence moves it. The thresholds
-are versioned in [`league/constitution.py`](league/constitution.py). The owner-requested
-September 20 revision removes the 30-block micro wait and adds a completed-exposure route;
-see the [gate audit and live-learning window](docs/runs/2026-09-21-game-gate-audit.md).
+are versioned in [`league/constitution.py`](league/constitution.py), with every owner revision
+dated beside the value it changed. The September 20 revision removed the 30-block micro wait and
+added a completed-exposure route (see the [gate audit](docs/runs/2026-09-21-game-gate-audit.md)).
+Those of September 21 and 22 shortened the paper screen and the replay gate. September 23 put the
+audit after promotion and added the settled lane.
 What is measured is after-cost log growth in hour/day blocks or completed portfolio exposures.
 
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
-| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 10 closed trades, 20 blocks and 8 positive-growth tail blocks (reused development data, not independent forward evidence). The seat it wins costs nothing but compute, and paper is the real out-of-sample test, so there is no multiple-testing penalty here: the gates that spend money (the screen, the audit, the scaled rung's bound) come later. Owner revision of Sept 22, 2026: the deflated Sharpe against the agent's own line (0.5) had deadlocked whole desks, since each failed trial raised the bar for the next; it was 0.75 and 30 blocks before Sept 21. When these rules change, every rung-0 agent gets one fresh replay under them |
-| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 15 active hourly blocks (5 daily), **or 10 completed portfolio exposures**, with at least 10 closed trades, growth above zero and a drawdown under 15% over the last 30 blocks; then Merton's audit; only once the owner has turned real money on; and only while the micro rung's **tuition** has room (below). The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
-| 2. Micro-real | the real Kalshi and Alpaca accounts | $60 stake, $30 a position, $30 an order ($25 / $10 / $10 before the Sept 21 learning surge); down 20% since promotion returns it to paper | **5 active blocks or 10 completed portfolio exposures**, at least 10 closed trades of real fills, and a one-sided lower confidence bound on mean growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
-| 3. Scaled | the real accounts | half of Kelly on the lower bound of its growth (a quarter before the Sept 21 learning surge): never under the $60 micro stake, never over 40% of the venue's cash, a position up to half the stake and never above $60 (so one order under the $75 cap can always close it), $75 an order | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
+| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 10 closed trades and 20 blocks, and positive mean growth over at least 8 out-of-sample tail blocks (reused development data, not independent forward evidence). An Alpaca program whose inputs are in the history store replays on deep history and must pass the sealed holdout too, which is rationed to three evaluations a lineage. The seat it wins costs nothing but compute, and paper is the real out-of-sample test, so there is no multiple-testing penalty here: the gates that spend money (the screen, the audit, the scaled rung's bound) come later. Owner revision of Sept 22, 2026: the deflated Sharpe against the agent's own line (0.5) had deadlocked whole desks, since each failed trial raised the bar for the next; it was 0.75 and 30 blocks before Sept 21, and 20 closed trades before Sept 22. When these rules change, every rung-0 agent gets one fresh replay under them |
+| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 4 active hourly blocks (2 daily, or 1 on Kalshi once 3 of its trades have settled on this rung), **or 10 completed portfolio exposures**, with at least 3 closed trades, growth above zero (the block in progress counted) and a drawdown under 15% over the last 30 blocks; only while real money is on, the owner's grant allows it, the capital envelope has room for its stake (below) and no audit veto's cooldown is running. **Then the micro stake at once, and Merton's audit after it** (owner revision of Sept 23, 2026): a veto sends the agent back to paper. An agent with a known defect (a red pre-audit, or a merged corrected child of its code) is still audited first. The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
+| 2. Micro-real | the real Kalshi and Alpaca accounts | $60 stake, $30 a position, $30 an order, one option contract up to $40 ($25 / $10 / $10 / $20 before the Sept 21 learning surge); down 20% since promotion, or vetoed by the audit that follows promotion, returns it to paper | **5 active blocks or 10 completed portfolio exposures**, at least 3 closed trades of real fills, and a one-sided lower confidence bound on mean growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
+| 3. Scaled | the real accounts | half of Kelly on the lower bound of its growth (a quarter before the Sept 21 learning surge): never under the $60 micro stake, never over 40% of the venue's cash; a position and an order up to half the stake, never under the micro rung's $30 and never above $60 (four fifths of the gateway's $75 cap, so one order can close a position that has gained a quarter) | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
 
-These are rung ceilings. Event concentration can be tighter: a new $25 live agent has a
-$7.50 single-market cap. The shared cap uses the existing funded venue authorization,
+These are rung ceilings. Event concentration can be tighter: a new live agent's $60 stake gives
+it an $18 single-market cap on Kalshi (30% of its own equity). The shared cap uses the existing funded venue authorization,
 including unallocated reserve and deducting losses; it does not mistake the first agent's
 stake for the whole authorized account. Strategies and research see effective sizing limits,
 remaining per-market capacity and recent refusals. A fresh refusal can prompt research before
@@ -98,11 +111,15 @@ that earned rung 2 are exactly what it is there to catch); promotion is not tenu
 first run's one measured edge (favourites, about 0.09 standard deviations a trade) had a 0% chance
 of clearing a confidence bound within a month, and an excellent crypto edge 11% within a week: a
 small edge needs about a thousand trades to prove by ANY honest test, and the strict test was
-guarding a $25 stake. So the loss of the micro rung is capped in dollars instead of statistics. The
+guarding a $25 stake ($60 since the Sept 21 learning surge). So the loss of the micro rung is capped in dollars instead of statistics. The
 constitution's **tuition**: at most 4 agents hold real money on rung 2 at once; a new one is seated
 only while the net loss of every real-money account that has not earned rung 3, plus what the seated
-agents could still lose, reserving each **full $25 stake**, fits under **$50**. A drawdown stop cannot guarantee an exit price.
-The rung is CLOSED when no further agent can ever be seated -- at $50, or when the reserve for one
+agents could still lose, reserving each **full $60 stake**, fits under **$50**. **While the owner's
+live grant is active, its envelope replaces those two numbers** (`House.tuition`): 16 agents (the
+allocation divided by the micro stake), a $1,017.75 loss line, and a line for each venue at its
+allocation, $500 on Alpaca and $517.75 on Kalshi. Under the grant every real-money account
+counts, scaled ones included. A drawdown stop cannot guarantee an exit price.
+The rung is CLOSED when no further agent can ever be seated -- at the loss line, or when the reserve for one
 more no longer fits and nobody is seated to change that -- and then everyone on it goes back to
 paper and only the owner reopens it. Those two were once different numbers, and between $42.50 and
 $50 with nobody seated the gate sealed itself: nothing could be promoted, and the alert that asks
@@ -112,12 +129,13 @@ headroom. The strict
 test stays where the money is, between micro-real and scaled. Promotion and death spend separate
 alpha series there (a look that can only kill spends none of promotion's).
 
-**Death on paper** (owner revision of Sept 21, 2026). A paper seat is free and scarce, so a clear loser
-gives it up without waiting for a statistical bound: down 10% or more after 10 active blocks, or not
-above where it started after 30. Death on real money is unchanged. The owner's live-trading grant now
+**Death on paper** (owner revisions of Sept 21 and 22, 2026). A paper seat is free and scarce, so a clear loser
+gives it up without waiting for a statistical bound: down 10% or more after 6 active blocks, or not
+above where it started after 20 (10 and 30 before Sept 22). Death on real money is unchanged. The owner's live-trading grant now
 pins only the rules that govern real money (`constitution.money_digest`), so the risk-free rungs can be
-tuned without silently revoking it, and any change to a money rule still does; the grant recorded before
-this revision is honoured only while its money rules are unchanged (`LEGACY_GRANT_DIGESTS`).
+tuned without silently revoking it. A change to a money rule still leaves the grant inactive until the
+owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). The grant recorded before
+the Sept 21 revision is honoured only while its money rules are unchanged (`LEGACY_GRANT_DIGESTS`).
 
 **The horizon rule.** Fast results are what a record is built from. The House refuses a Kalshi entry
 expected to pay more than 12 hours out (hourly strategies) or 48 (daily), and closes a crypto
@@ -132,11 +150,14 @@ anything but long premium: an option order must be one leg, a limit order, in wh
 can lose is what was paid. (A short leg can be assigned into a hundred shares this account cannot
 carry, with nobody awake to see it.) The gateway also prices a contract at 100 shares: before this
 an option order would have been capped at a hundredth of what it spends. One contract cannot be cut
-smaller, so the micro rung allows an option position of one contract up to $20. No entry in a
+smaller, so the micro rung allows an option position of one contract up to $40 ($20 before the
+Sept 21 learning surge). No entry in a
 contract that expires today; the House sells anything still held at 14:30 New York on its last
 day. Option quotes are fifteen minutes old (the live feed needs the OPRA agreement signed on the
-account), which is why every option order is a limit order. There is no replay (no recorded
-chains): paper is this specialty's replay. Not yet measured, because the market was closed: a
+account), which is why every option order is a limit order. At the build there was no replay (no
+recorded chains) and paper was this specialty's replay. Since Sept 22, 2026 an options program is
+replayed on the options history store (`league/options_replay.py`) once that store covers every
+underlying it trades; paper stays the replay for the rest. Not measured at the build, because the market was closed: a
 filled option order, Alpaca's end-of-day regulatory fees (the book now books any FEE activity
 that explains a cash shortfall), and whether Alpaca holds cash behind a resting option bid (the
 book accepts either). An unexplained difference freezes entries, never exits -- on a real-money book until the owner
@@ -147,25 +168,33 @@ House takes the venue's word and carries the difference on its own row, creditin
 [phase-one policy](docs/phase-one.md). The initial allowance is $500 over 48 hours, including
 external engineering and infrastructure reserves; $50 is available to automated foundation
 model work and up to $45 to Sail after its operating reserve. Jev's $20 allowance is backed
-inside that existing model allocation. Calls reserve money before transmission; unresolved
-bills retain their holds. Restarts, deposits and calendar changes do not renew the phase.
+inside that existing model allocation. Calls reserve money before transmission. Since Sept 23,
+2026 a verified frontier call settles at the gateway's metered cost, a refused one (HTTP 4xx) at
+$0, and a Sail hold older than an hour with no response is absorbed into the account meter, which
+already counts its charge. Every other unresolved bill keeps its hold. Restarts, deposits and calendar changes do not renew the phase.
 The legacy fourteen-day pacer remains for compatibility and fixtures. Current campaigns have
 no catch-up spending or underspend acceleration. The gateway's monthly cap is an additional
 ceiling. Credit rewards allocate research access within these limits; creating credits cannot
 create vendor budget.
 
-The [September 20 evening experiment](docs/runs/2026-09-20-evening-watch.md) adds one immutable
+The [September 20 evening experiment](docs/runs/2026-09-20-evening-watch.md) added one immutable
 eight-hour research allowance: $250 OpenAI and $75 Sail, ending at 4:01 AM Pacific September 21.
-It retains the foundation policy and Jev backing. New sessions compare 75% Luna with 25% Sail,
-research runs every fifteen minutes, and a shared Jev lab tests fixed and architect-proposed
-classification features against a numerical baseline. Faster cycles and stronger resource
+It retains the foundation policy and Jev backing. While the owner's live grant is active this
+funded burst has no end (`league/overnight.py`), and the owner's recorded top-ups raise its caps
+without resetting what was spent. Its pace is the owner's acceleration layer,
+[`league/turbo.json`](league/turbo.json). As of Sept 23, 2026 that is research every 15 minutes
+with 16 workers, 12 replay workers, three quarters of new sessions on Luna, a population of 64
+and a newcomer every two minutes. The shared Jev lab that ran beside it has been off since
+Sept 22 (`semantic_lab`). Faster cycles and stronger resource
 rewards are experimental; independent forward evidence still decides whether they help.
 
 **Which model does which work, and what it costs.** `league/routing.py` routes deterministic
 work to code, cheap semantic questions to Jev, routine research to the strongest economical model
 by measured evidence (Luna, on the Sept 22 experiment: a spawn-valid strategy for about $0.011
-against $0.12-0.22 on DeepSeek-V4-Pro) and hard synthesis, repairs and audits to Astra, and records
-each decision as `route.decision`. Luna's research requests put the shared rules, contract and
+against $0.12-0.22 on DeepSeek-V4-Pro; GPT-6 Luna from #129, Sept 22) and hard
+synthesis, repairs and audits to Astra, and records each decision as `route.decision`. The
+foundry's hypothesis cards are written on GPT-6 Sol, about a fifth of Astra's price, because
+replay judges a card before it costs a seat. Luna's research requests put the shared rules, contract and
 tools first and append each turn as its own message, so OpenAI's prompt cache pays: a follow-on
 turn read 97% from cache and cost 81% less, where the old single-packet layout had read nothing in
 15,044 calls. Each finished pass leaves a private transcript and a `trace.record` pointer for
@@ -200,12 +229,15 @@ twelve grants and $0.25 reserved each, inside the existing model allowance. This
 new researcher obtain help before it has a trading record. Births and restarts cannot renew the
 grant, and its proposed strategy must still pass normal evaluation. For ordinary consultations, PROFIT
 buys more of him than rank does -- profitable, every 3 hours on paper, 1 on real money, half an
-hour scaled; losing, 8, 3 and 1. So the loop closes: trade well, earn a much larger share of the
+hour scaled; losing, 8, 3 and 1. While the funded burst is in force a profitable agent may hire him
+every half hour on paper and every quarter hour on real money, and a losing one keeps the base
+wait. So the loop closes: trade well, earn a much larger share of the
 day's pool, buy the best mind in the firm oftener, trade better. The rules text tells every agent
 this in as many words.
 
 The [persistent owner activation](docs/runs/2026-09-21-persistent-live-trading.md#account-owner-command)
-replaces the timed $200 pilot. Agents begin with $25 and earn larger stakes under the existing
+replaces the timed $200 pilot. Agents begin with the $60 micro stake ($25 before the Sept 21
+learning surge) and earn larger stakes under the existing
 performance and sizing rules, within the owner's fixed allocation of current venue cash.
 Scaled agents, prior losses and abandoned positions remain counted. The authorization has no
 calendar expiry; deploying code or funding research does not activate it.
@@ -217,23 +249,32 @@ rather than tomorrow. A quarter of each pool is a floor split evenly across the 
 paid only to agents that have reached paper AND are working; the other **three quarters is won**,
 in proportion to mean growth **per hour**, squared, x the square root of earned observations x the rung's
 weight (replay 0, paper 0.2, real money 1.5, scaled 3.0) -- so a desk twice as profitable earns
-four times the share. Tonight's burst uses a one-hour payout, an exponent of three (8× the
-performance share for twice the matched growth), and a 15% niche floor. A qualifying completed
+four times the share. While the funded burst is in force (it is while the owner's live grant is
+active) the payout is hourly, the exponent is three (8× the performance share for twice the
+matched growth) and the niche floor is 15%. A qualifying completed
 exposure record can earn research resources before an hourly block. Promotion preserves earned
 evidence: paper evidence keeps paper weight until real results mature, and loses that fallback
 when real losses appear. Scaled agents keep the real record that qualified them. Measured on the first steep payout: two agents took 78% of the
 pool and eighteen of thirty-five earned nothing at all. Before anyone is profitable the won share
 goes to the least-bad TRADER, ranked by how far above the worst it is; an agent with no active
 block earns none of it. Agents pay for what they use: model
-tokens at Sail's prices, sandbox seconds ($0.04 an hour), web searches ($0.01) and their own audit
-(at cost: $0.23 for the one measured). Credits cannot be created by an agent; every grant is a
+tokens at the provider's price, sandbox seconds ($0.04 an hour) and web searches ($0.01). Since
+Sept 23, 2026 the House pays for promotion audits (`game.json` `audit.house_pays`). Before, the
+agent paid at cost ($0.23 for the first one measured), and one that could not cover the $0.60
+credit floor waited on paper. Credits cannot be created by an agent; every grant is a
 House row on the ledger. These dials live in [`league/game.json`](league/game.json), inside bounds
 the same file lists.
 
 **Death.** Credits at zero; a 30% drawdown; an upper confidence bound on growth below zero after 20
-active blocks or 10 completed exposures; on rung 0, twelve epochs without passing replay; **stuck and broke** -- thirty wakes
+active blocks or 10 completed exposures; on paper, the fast deaths above; on rung 0, 72 hours
+(twelve six-hour epochs) without passing replay; **stuck and broke** -- thirty wakes
 in a row with a live market in front of it and nothing done, and too little left to research its
-way out; or **displaced**, when the league is full and a newcomer takes its seat. Idleness is not
+way out; **displaced**, when the league is full and a newcomer or a merged strategy takes its seat.
+Two causes were added on Sept 23, 2026, and neither touches an agent on real money:
+**superseded**, when a corrected child of its code has been born from a merged repair; and
+**redundant**, when the sealed holdout would not evaluate its passing development replay (that
+version, or its lineage's ration, already spent) while the same program already holds a seat on
+paper. Idleness is not
 safety: the niche floor is paid only to an agent that has traded within the epoch or has an order
 resting, so one that does neither earns nothing and spends down what it has. A market that is SHUT
 does not count against it, though -- an equity desk must not be starved to death over a weekend for
@@ -244,25 +285,33 @@ research reads.
 **The last seat is a tournament.** A ceiling with nothing dying under it is a floor that has
 stopped searching: thirty-three agents were born in twelve hours and not one died, four births from
 a league that could never try anything again. So when the population is full, a newcomer takes the
-place of the worst agent that has had a fair chance -- never one on real money, never a profitable
-one however small its record, never one younger than two epochs. Never having traded is the weakest
+place of the worst agent that has had a fair chance -- never one on real money, and never a
+profitable one however small its record. A fair chance is twelve hours on its seat, counted for an
+equity or option agent from its first trading opportunity; a daily paper agent that trades keeps
+its seat until the days its screen needs have closed (at most a day beyond them). During the
+funded burst a replay agent has had its chance after two finished research passes or failed
+replays (a failed replay counts since Sept 23, 2026). A merged strategy takes the last seat the
+same way (Sept 23, 2026), from an agent still running the code it corrects when there is one. Never having traded is the weakest
 thing an agent can be, ahead of any amount of losing: an agent that trades and loses is being judged
 by the evaluator and will be killed on its own evidence, while an agent that trades nothing is
 judged by nobody and costs a box and a seat for as long as it is left alone.
 
 **Forks.** An agent with $4.00 of credits or more may fork, and must endow the child with $1.50 of
-its own ($1.00 is what the House stakes when it cannot). An agent above rung 0 never edits itself, because its record belongs to its code: an
+its own ($1.00 is what the House stakes when it cannot; during the funded burst the threshold is
+$2.00 and the House stakes $8). An agent above rung 0 never edits itself, because its record belongs to its code: an
 improvement is a child, a mutation of its parameters or new code its researcher wrote, and the child
 answers for itself from replay up — unless it has NO record at all (no holding, no working order, no active
 block, no closed trade), in which case code that passes replay simply becomes its own, with no fork to pay for:
 there is nothing for new code to inherit unfairly and no position to leave it holding. **And if its own rules
 have not fired for ten wakes with a live market in front of them, a file that merely TRADES on the tape becomes
-its own, failed verdict and all.** A candidate is adopted only when its replay passes, and passing needs twenty
-closed trades -- so a looser rule that fires twice on a thin tape can never clear the bar, and the replay cannot
+its own, failed verdict and all.** A candidate is adopted only when its replay passes, and passing needs ten
+closed trades (twenty before Sept 22, 2026) -- so a looser rule that fires twice on a thin tape can never clear the bar, and the replay cannot
 tell a better strategy from a worse one, only fail both. Six agents of the sports desk sat frozen for nine hours
 that way, each shown up to two hundred live markets, paying for research they could never act on. The trial is
-still counted and still deflates the lineage; paper is then the test, which is what paper is for. The population
-is kept between 12 and 36; the House fills an empty seat within the hour, on the desk with the most room -- and
+still counted in the lineage's record; paper is then the test, which is what paper is for. The population
+is kept between 12 and 36 in the base game (64, with a newcomer every two minutes, while the funded
+burst is in force). The House fills an empty seat within the hour, from replay-passing candidates
+and hypothesis cards first, because births follow evidence rather than open seats -- and
 the wait is measured from the last newcomer or from when the floor FIRST ran, never from this process's start,
 which moves on every deploy: anchored there, a floor that redeploys every half hour never reached the hour and
 the league could not grow at all.
@@ -299,7 +348,7 @@ has no reason to gamble.
 | **Gateway** ([`gateway/`](gateway/README.md)) | a Cloudflare Worker, outside Sail | the Kalshi and Alpaca keys, the OpenAI/TypeSafe keys, the GitHub token, order caps, inference allowances and kill switch | sign orders, meter spending, open a pull request inside a role's paths | be changed by anything on Sail; merge a pull request (there is no merge route) |
 | **House** ([`league/`](league/README.md)) | one trusted Sailbox | three tokens (gateway, Sail, site publishing), the ledger | net and send orders through the gateway, score, pay, promote, retire, publish | hold a venue key; run agent-written code in its own process; decide a trade |
 | **Agents** | one sealed Sailbox each, asleep between wakes | nothing: no credential, and an egress allowlist of one host that never resolves | run `decide` or a replay on data the House uploads, and print one line of plain data back | reach the House, a venue, the gateway or the network; write the ledger |
-| **Merton** (the frontier model, `gpt-6-astra`) | behind the gateway's metered route | nothing | veto a candidate before real money; propose changes by pull request | pick a trade; touch the ledger; merge; change its own judges |
+| **Merton** (the frontier model, `gpt-6-astra`; the foundry writes on `gpt-6-sol`) | behind the gateway's metered route | nothing | veto a promotion to real money (since Sept 23, 2026 the audit usually follows the promotion, and a veto demotes); propose changes by pull request | pick a trade; touch the ledger; merge; change its own judges |
 
 The House drives each agent's box from outside, over Sail's exec API: resume, upload, run, read one
 token-marked line of stdout, sleep. Research (the cheap model, web search, the shared library) runs
@@ -329,10 +378,17 @@ from at all. Each of those is now closed:
 | a strategy or shared defect is found | an explanation in a log | a repair job, which the engineer patches by pull request; CI and the updater carry it to the box, and it is verified when the problem stops recurring |
 | the House restarts while dead agents still hold positions | every exit was refused as "has no seat on the book", 45 times in an hour | a wind-down seats the account before it exits (#106); a death during a venue outage is recorded, and its exits are retried (#107) |
 | a paper book is a few cents short for one pass (the venue's fee activity) | an error, which inside a deploy's watch rolls a good release back | a warning. Real money, or any position difference, is still an error (#108) |
+| a merged strategy or repair needs a seat in a full league | it waited for an empty seat the refill never left: fifteen merged repairs (#100–#138) and the architect's megacap strategy (#135) were never born, and the defective parents kept trading and being audited (Sept 22) | it takes a seat anyway, repairs first: from an agent still running the code it corrects, else from the weakest resident that has had its chance. Once a corrected child is born, the agents off real money still running that code are retired (`superseded`). A strategy that cannot be born is tried once per file version (Sept 23, 2026) |
+| a Sail request is never confirmed (a restart or a timeout mid-request) | its hold stayed for good, though the balance meter already counted any real charge: on Sept 22, 329 such holds ($60.59) made the campaign read $54.76 left while the account held $116 | every ten minutes, holds older than an hour with no response are absorbed into the meter, with their evidence in `cost_reconciliations` and an `ops.budget` row. Nothing is absorbed while the meter is unhealthy or behind what has been settled (Sept 23, 2026) |
+| a frontier call comes back | it was booked at the higher of the gateway's metered cost and every token at the long-context ceiling: the House had settled $393.08 since Sept 21 while the gateway's whole September read $267.29, and it went to audit-only mode at 23:31Z Sept 22 | a verified call settles at the gateway's metered cost and a refused one (4xx) at $0; a call with no answer keeps its worst case, as the gateway does (Sept 23, 2026) |
+| an agent clears the paper screen | it waited for an audit before money, and paid for it: hawkins waited at "cannot cover its audit and operating credit floor", and 11 audits in the league's life had approved 2 (Sept 22) | it takes the micro stake at once and is audited there; a veto sends it back to paper. The House pays, and an agent with a known defect is still audited first (Sept 23, 2026) |
+| a lesson is corrected | the ledger kept the first text, and agents planned against a replay rule that had already been removed (hawkins-15, Sept 22) | a lesson whose text changes is loaded again, and a new lesson states the rules in force (Sept 23, 2026) |
 
 What still needs the owner: a **real-money** book that freezes on a position (deliberately -- there
 the freeze is the point), the `real_money` switch itself, the gateway's keys and its kill switch,
-and raising `tuition.max_loss_usd` when the micro rung closes.
+any change to a money rule (the owner's deploy, then re-ratifying the live grant for the same
+capital), and the micro rung's loss line when it closes. Without a grant that line is
+`tuition.max_loss_usd`; the grant's envelope is fixed, and a ratification never enlarges it.
 
 ## The constitution
 
@@ -342,11 +398,12 @@ What no model and no code path on Sail may change, and where each item is enforc
 |---|---|---|
 | Order caps | $75 an order, $4,000 and 2,000 orders a day | in the gateway, before anything is signed (`gateway/wrangler.jsonc`); `league/book.py` refuses first so it can say why |
 | Kill switch | engaged or released | in the gateway; the House's token can engage it, only the owner's separate token releases it. The paper venue passes it, because no money is behind it |
-| Jev allowance | $20 and 500,000 calls until September 21, 4:01 AM Pacific | external Durable Object; backed by retained campaign earmarks, with no calendar reset |
-| OpenAI budget | $300 a month; tighter immutable campaign windows also apply | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
-| Sail budget | $100 a month, $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
-| The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest, and the House writes the digest to the ledger every time it starts |
-| The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, `gateway/`, `.github/` | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
+| Jev allowance | $20 and 500,000 calls for the pilot's whole life. The pilot was to end on September 21 at 4:01 AM Pacific; since the owner resumed the game its unused allowance continues with no end date (`TYPESAFE_PERSISTENT`) | external Durable Object; backed by retained campaign earmarks, with no calendar reset or refill |
+| OpenAI budget | $374 for the month (`FRONTIER_MONTH_USD`, raised from $174 on Sept 21, 2026, when the owner added $200 of credit); the House's campaign allowance is a further line | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
+| Sail budget | $100 a month plus the owner's recorded top-ups that month (September's line was $200 on Sept 22), $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
+| The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`0f9a8f7e…` from Sept 23, 2026), and the House writes the digest to the ledger every time it starts |
+| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, 16 agents, no expiry | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`3d01ae90…` from Sept 23, 2026): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
+| The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, the campaign, live-trading and experiment-record files, the agent-box seal (`sandbox.py`), the history a strategy is judged on (`history.py`, `deep_replay.py`), `gateway/`, `.github/` (`ci.FORBIDDEN` has the full list) | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
 | Real money | `"real_money": true` in `league/config.json` -- the owner threw that switch on Sept 20 | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 
 ## Merton's six jobs
@@ -361,23 +418,37 @@ second segment either way. Every pass is recorded with its cost.
 
 Since Sept 22, 2026 two more workers use the same route and guards:
 - **The hypothesis foundry** (`league/hypotheses.py`) writes 3–4 falsifiable strategy cards for
-  the desk the evidence favours. Each card gives a mechanism, the data it needs, its edge after
-  costs, a horizon and a rejection test. Replay admits a card before it gets a seat.
+  a desk. Each card gives a mechanism, the data it needs, its edge after costs, a horizon and a
+  rejection test. Replay admits a card before it gets a seat. It writes on GPT-6 Sol at high
+  effort. Since Sept 23, 2026 it may call every 10 minutes within $40 a 24-hour window (it was
+  every 15 minutes and $20).
+  - Up to half its calls go to the hourly, around-the-clock desks in `fast_desks`: both Alpaca
+    crypto desks, both Kalshi crypto desks, index ETFs and megacaps. Their low replay pass rates
+    had kept them off the evidence route.
+  - Up to a fifth go to the least-explored desk, and the rest to the desk the evidence favours.
+  - Up to 8 cards may wait for replay before the next call (`max_pending_cards`). Only its own
+    call in flight holds it up, not another Merton role.
+  - Its packet carries horizon guidance (prefer hourly, which reaches the paper screen soonest),
+    forward results by family on the desk, and the Kalshi maker fee: a quarter of the taker
+    formula on the series that charge makers.
 - **The repair engineer** (`league/engineer.py`) takes the top job of the repair queue
   (`league/worklist.py`) and patches it by pull request. When CI refuses a patch, it revises
-  against CI's own failure text, at most three times and within a per-job ceiling.
+  against CI's own failure text, at most three times and within a per-job ceiling. A strategy
+  defect becomes a corrected child. Until Sept 23, 2026 those children were never born into a full
+  league; now `House.enroll()` seats them, and retires the agents off real money still running
+  the code they correct.
 
 Both are paced by their own caps as well as the day's frontier allowance. Core House code stays out
 of their reach until the external spending broker described in the handoff exists.
 
 | Job | When | What it does | May touch |
 |---|---|---|---|
-| Auditor | when a paper record clears the test; normally a 24-hour retry cooldown, but the accelerated game permits reconsideration after five fresh complete exposures or five fresh active blocks; half an hour after a provider error | reads the agent's whole evidence packet and hunts for look-ahead, fee errors, thin data, a record carried by one fill, duplicated exposure. A fresh audit still must approve promotion. The agent pays. Vetoes are scored afterwards as if taken | nothing |
-| Architect | every 3 hours | reads the league table, the graveyard and the replay trials; writes at most two new strategies, born on rung 0. He aims at the desks where the EVIDENCE is worst, not at empty ones: each specialty reports how many of its members have looked at a live market and placed nothing, how many trade and lose, and the best growth anyone there has managed. An occupied desk full of agents that cannot trade is the emptiest thing on the floor, and twice he declined a pass with "every specialty is occupied" while twenty-six agents had never placed an order | `league/strategies/` |
+| Auditor | when a paper record clears the screen, real money is on and the capital envelope has room. Since Sept 23, 2026 (`ladder.paper.audit` = "after") the agent is promoted first and audited on the micro rung, where a veto demotes it; an agent with a known defect (a red pre-audit, or a merged corrected child of its code) is audited before promotion. After a veto, a 24-hour cooldown bars another promotion, but the accelerated game permits reconsideration after five fresh completed exposures or five fresh active blocks; an audit that could not run is owed again after half an hour | reads the agent's whole evidence packet and hunts for look-ahead, fee errors, thin data, a record carried by one fill, duplicated exposure. The House pays (`game.json` `audit.house_pays`, Sept 23, 2026; the agent paid before). Vetoes are scored afterwards as if taken | nothing |
+| Architect | every 3 hours (2 during the funded burst) | reads the league table, the graveyard and the replay trials; writes at most two new strategies, born on rung 0. He aims at the desks where the EVIDENCE is worst, not at empty ones: each specialty reports how many of its members have looked at a live market and placed nothing, how many trade and lose, and the best growth anyone there has managed. An occupied desk full of agents that cannot trade is the emptiest thing on the floor, and twice he declined a pass with "every specialty is occupied" while twenty-six agents had never placed an order | `league/strategies/` |
 | Toolsmith | every 3 hours, when agents have filed requests | builds pure-Python helpers agents may import, with tests; answers every request. The queue is ordered by how many different agents have asked for the same tool by name -- the best evidence the floor produces about what is missing -- then newest first. Unresolved and blocked engineering requests remain visible; an explanation without an implemented capability does not resolve them | `league/tools/`, `league/tests/test_tool_*` |
 | Operator | every 4 hours | reads alerts, health and budget. It carries no bound of its own: the permitted range for every dial is read from `league.ci`, the checker that will judge its pull request, because two places holding one number is how the cap got put back where it throttled the floor | the dials in `league/config.json`, inside bounds |
 | Game designer | every 12 hours | judges the economy: diversity, causes of death, where compute goes | `league/game.json`, inside the bounds it lists |
-| Teacher | every 6 hours | distils the graveyard into specific, checkable lessons | `league/playbook/` |
+| Teacher | every 6 hours (hourly during the funded burst) | distils the graveyard into specific, checkable lessons. The House loads each lesson once, and again when its text changes (Sept 23, 2026) | `league/playbook/` |
 
 ## What is public
 
@@ -401,7 +472,8 @@ Strategy source stays private; its hash, parameters, family and results are publ
 validates every byte and refuses a whole batch for one bad event
 ([the contract](league/tests/fixtures/site_contract.md)). A **test tape**
 ([blakewoods.us/capital/?tape=test](https://blakewoods.us/capital/?tape=test), `--tape test`) is the
-same page over separate storage; the production tape stays empty until go-live.
+same page over separate storage; the running House publishes to the production tape (`site_tape`
+is null in `league/config.json`).
 
 ## Repository layout
 
@@ -412,7 +484,7 @@ same page over separate storage; the production tape stays empty until go-live.
 | `gateway/` | The Cloudflare Worker holding venue, OpenAI, TypeSafe and GitHub credentials, external caps and kill switch. |
 | `scripts/` | The owner's tools: `floor_box.py` (the House's Sailbox), `gateway_admin.py` (kill switch and status), and the first run's scripts. |
 | `deploy/` | [How the House runs on its box](deploy/README.md): releases, the canary, the two watchdogs. |
-| `docs/` | [Index](docs/README.md): the design, the build log, the runbook, and the first run's record. |
+| `docs/` | [Index](docs/README.md): the operator's page, the run records, the design, the build log, the runbook, and the first run's record. |
 | `playbooks/` | The first run's desk playbooks, kept as history. The league's lessons are in `league/playbook/`. |
 | `.github/workflows/` | `merton.yml` judges and merges Merton's pull requests; `checks.yml` runs all three suites on every push to `main` and every pull request. |
 
@@ -439,18 +511,21 @@ The `league/` modules:
 | `runner.py` | Runs one `decide` inside the box and prints one token-marked line. |
 | `safety.py` | What a strategy file may contain: the import whitelist and the banned constructs. |
 | `commons.py` | What agents share: web search, the research library, the tool-request queue, the playbook. |
-| `researcher.py` | The research loop a cheap Sail model runs for one agent, at that agent's expense. |
+| `researcher.py` | The research loop a cheap model (a Sail model, or Luna through the gateway) runs for one agent, at that agent's expense. |
 | `rules.py` | The text every agent is told, generated from the constitution and the game file. |
 | `seeds/` | The fourteen founding programs. |
-| `pacer.py` | The expedition's pace: the owner's two budgets turned into a daily allowance that the credit pool, research and Merton follow. |
+| `pacer.py` | The legacy fourteen-day expedition pacer, kept for compatibility and fixtures; production is paced by the funded campaign (`campaigns.py`). |
 | `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
 | `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season. |
 | `strategies/`, `tools/`, `playbook/` | What Merton adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop. |
-| `budget.py` | The Sail budget meter. |
-| `frontier.py` | The client for the gateway's metered frontier route. |
-| `auditor.py` | The veto before real money, and its counterfactual score. |
-| `preaudit.py` | A free, deterministic look at a paper agent's code and first wakes (errors, dropped intents, refusals, barren wakes, cent rounding): a repair report and a promotion-status mark, never a kill. |
+| `budget.py` | The Sail account's monthly line and reserve. |
+| `campaigns.py` | The owner-funded campaign and its burst: a hold reserved before every paid call and settled from its response, the Sail balance meter, stale Sail holds absorbed into that meter (Sept 23, 2026), the owner's top-ups, and the live grant with its ratification. |
+| `frontier.py` | The client for the gateway's metered frontier route. A verified call settles its hold at the gateway's metered cost (Sept 23, 2026), and a refused one at $0. |
+| `auditor.py` | The frontier audit of a screen-passer and its veto (since Sept 23, 2026 usually after promotion, and paid by the House), and the veto's counterfactual score. |
+| `hypotheses.py` | The hypothesis foundry: Merton's falsifiable strategy cards, replayed before any seat. |
+| `worklist.py`, `engineer.py` | The repair queue, and the engineer that patches its top job by pull request. |
+| `preaudit.py` | A free, deterministic look at a paper agent's code and first wakes (errors, dropped intents, refusals, barren wakes, cent rounding): a repair report and a promotion-status mark, never a kill. A red mark means the frontier audit comes before any promotion (Sept 23, 2026). |
 | `consult_recovery.py` | Tool requests, missing-data claims and code fixes left in past Merton consults and research summaries, turned into repair reports (backfill, then incremental). |
 | `merton.py` | Merton's five pull-request roles. |
 | `ci.py` | The judge of every change: path guard, content checks, the suite. |
@@ -514,17 +589,50 @@ exits and reconciliation go on; [docs/operations.md](docs/operations.md) is the 
 
 Built on September 19 and 20, 2026 ([the build log](docs/runs/2026-09-20-overnight-build.md) has
 every decision and its reason), then watched for twenty hours and repaired where it did not work
-([the watch](docs/runs/2026-09-20-the-watch.md)).
+([the watch](docs/runs/2026-09-20-the-watch.md)). The Sept 20 foundation phase, when the campaign
+blocked live capital, is kept in its [run report](docs/runs/2026-09-20-foundation-progress.md).
 
-**At the end of the Sept 22 rebuild (21:10Z):**
-- **Real money:** earned live trading is active (`earned-live-20260921`, ratified at 20:26Z under
-  the owner's dynamism revision, #123), and mullins-2 (weather) is the one live agent.
-- **The league:** 64 agents living on paper and replay. Births follow evidence and hypothesis
-  cards. The repair engineer has merged seven fixes by itself, and the updater deploys attested
-  commits by itself.
-- **Records:** the [execution record](docs/runs/2026-09-22-overnight-rebuild.md) has the before
-  and after measurements and the remaining work. The Sept 20 foundation phase, when the campaign
-  blocked live capital, is kept in its [run report](docs/runs/2026-09-20-foundation-progress.md).
+**The Sept 22 rebuild** ([execution record](docs/runs/2026-09-22-overnight-rebuild.md), deadline
+21:10Z) rebuilt the learning loop around evidence: the hypothesis foundry, the repair engineer,
+the research gate, deep Alpaca replay with a sealed holdout, and attested deploys by the updater.
+The engineer had merged seven fixes by itself by the deadline, and fifteen by 23:30Z. The owner's
+dynamism revisions followed that evening:
+- **#123:** two money rules (3 closed trades; 4 active hourly blocks on the paper screen) and
+  faster deaths on paper. The live grant was re-ratified for the same capital at 20:26Z.
+- **#131:** a daily paper agent that trades keeps its seat until its screen can look.
+- **#132:** paper is the proving ground. The replay gate asks for 10 closed trades and drops the
+  deflated Sharpe, and each Alpaca desk takes eight agents.
+- **#129 and #136:** research and startup grants on GPT-6 Luna, and the foundry on GPT-6 Sol.
+
+**The Sept 23 revision, Dynamism II** ([execution record](docs/runs/2026-09-23-dynamism-ii.md)):
+- **What the watch measured first (Sept 22, 23:23–23:39Z).** 64 agents were living: 23 on replay,
+  40 on paper (37 of them daily) and one live. In 24 hours about 36 agents went from replay to
+  paper and none from paper to real money. Two agents had ever reached the micro rung (huang-6
+  and mullins-2, both on Kalshi). Fifteen merged repairs had never been born, and the House's
+  frontier line had closed at about half the owner's real spend.
+- **Real money.** Before the revision's deploy mullins-2 (weather, Kalshi) was the one live
+  agent. The revision changes two money rules (`ladder.paper.settled_day` and `ladder.paper.audit`; money
+  digest `3d01ae90…`, was `d715ae7a…`), so the live grant `earned-live-20260921` is re-ratified
+  at deploy for the same capital: Alpaca $500, Kalshi $517.75.
+- **What shipped.** Merged repairs are seated and the code they correct is retired. The audit
+  follows promotion, and the House pays for it. The paper screen counts the block in progress
+  and has a settled lane for daily Kalshi agents. Stale Sail holds are absorbed, and frontier
+  calls are booked at the gateway's metered cost. The foundry spends $40 a window with up to half
+  its calls on the fast desks. Research runs every 15 minutes and is paced by each agent's record.
+- **Live data feeds**, built beside this revision (`league/feeds.py`): the House records ESPN
+  scoreboards for the leagues the Kalshi sports desks trade (every minute while a game is live or
+  about to start) and perpetual-futures funding and open interest for the crypto desks' coins
+  (every five minutes). A strategy that declares `NEEDS["feeds"]` reads them live in
+  `ctx["feeds"]`. Its replay reads them point in time once every declared key covers the replay
+  gate's blocks; until then the replay is refused as unsupported input and not counted as a trial.
+  Nothing is backfilled, so the first hourly strategies can qualify about a day after the recorder
+  starts, and daily ones after about three weeks.
+- **Order-path guards in the House**, built beside this revision: a buy asked under Alpaca's $10
+  crypto minimum is refused as a House refusal the strategy can read, one floored just under it is
+  raised a step, limit prices are put on the venue's grid (a coin's only when the venue states its
+  increment), a 401/403 to an order POST is a rejection with the venue's message, and an agent's
+  resting buys are cancelled when its wakes have stopped completing. Strategies read the rules in
+  `ctx["venue_rules"]` ([the contract](league/CONTRACT.md)).
 
 Known limits:
 
@@ -538,6 +646,10 @@ Known limits:
   - CI passed it, and Merton's workflow merged it;
   - the updater attested the exact commit and deployed it through the canary.
 
+  That cycle ended at the box: the House seated a merged strategy only in an empty seat, and by
+  23:30Z that evening fifteen merged repairs had never been born. Since Sept 23, 2026 a corrected
+  child is born even into a full league and judged on its own replay and forward record, and the
+  agents off real money still running the code it corrects are retired (`superseded`).
   A labelled synthetic drill proved the revision path: the first patch was refused by CI, and the
   second was written against CI's failure text and merged (#104, #105). The engineer still cannot
   change core House code, the judges or the money rules. The external spending broker is not built
@@ -564,7 +676,10 @@ Known limits:
     [the handoff's verifier section](docs/design/2026-09-20-chief-architect-handoff.md).
 - **Practice fills are kinder than real ones.** Alpaca's paper account fills market orders at the
   touch with no queue; the Kalshi shadow book fills a resting order only when the market trades
-  through it, but models no depth. Rung 2 exists to measure the difference at $10 a position.
+  through it, but models no depth. Rung 2 exists to measure the difference at $30 a position.
+- **Paper uses a sliver of the paper account.** Each paper agent trades the live account's limits
+  ($200 stake, $100 a position, $75 an order), so measured on Sept 22, 2026, 17 Alpaca paper
+  agents used about 3% of the $99.4k paper account.
 - **Alpaca fills are booked at the taker's fee.** Alpaca reports no fee and accepts every order
   asynchronously, so only the venue knows whether a limit order made or took; reconciliation
   returns a maker's difference to the House row.

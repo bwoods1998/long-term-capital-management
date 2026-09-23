@@ -928,8 +928,15 @@ class ReplaySept22(EvalCase):
         self.assertIn("out-of-sample", flat.reason)
 
     def test_the_revision_leaves_the_money_rules_and_the_live_grant_alone(self):
+        # Pinned to d715ae7a... when written; the Sept 23, 2026 money revision (the settled lane and
+        # audit-after) re-pinned the money rules, so the property is tested rather than the value:
+        # the replay gate is risk-free, and moving it never touches the money digest.
+        import copy
+
         from league.constitution import money_digest
-        self.assertEqual(money_digest(), "d715ae7ab5cb72b86dff350f725293953510b39b78ddec666f7188b09acb1bf1")
+        moved = copy.deepcopy(CONSTITUTION)
+        moved["ladder"]["replay"] = {"min_trades": 20, "min_blocks": 20, "min_deflated_sharpe": 0.5, "min_oos_blocks": 8}
+        self.assertEqual(money_digest(moved), money_digest())
 
 
 class ReplayTrials(EvalCase):
@@ -1578,6 +1585,78 @@ class Sept22Values(EvalCase):
         for g in (0.004, -0.001):
             self.block("a", g)
         self.assertEqual(self.ev.judge("a", "paper", horizon="day").decision, "hold")
+
+
+class Sept23Values(EvalCase):
+    """The owner's Sept 23, 2026 revision, against the REAL constitution: an event-contract agent
+    with three settled trades is screened after one finished day; the screen counts the block in
+    progress; and the screen's own "next look" is the look it really takes."""
+
+    def setUp(self):
+        super().setUp()
+        self.ev = Evaluator(self.ledger)  # the real constitution
+
+    def seated(self, book):
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at(), book=book)
+        self.buy("a", 50.0, at(), book)
+
+    def test_three_settled_trades_on_an_event_book_screen_a_daily_agent_after_one_day(self):
+        self.seated("kalshi-shadow")
+        for pnl in (2.0, -0.5, 1.0):
+            self.settle("a", pnl, at(), book="kalshi-shadow")
+        self.block("a", 0.006, book="kalshi-shadow")
+        verdict = self.ev.judge("a", "kalshi-shadow", horizon="day")
+        self.assertEqual(verdict.decision, "eligible", verdict.reason)
+        self.assertEqual(verdict.numbers["settled_trades"], 3)
+
+    def test_without_three_settlements_the_daily_screen_still_waits_for_two_days_and_says_so(self):
+        self.seated("kalshi-shadow")
+        self.settle("a", 2.0, at(), book="kalshi-shadow")
+        self.sell("a", 1.0, at(), book="kalshi-shadow")
+        self.sell("a", 1.0, at(), book="kalshi-shadow")
+        self.block("a", 0.006, book="kalshi-shadow")
+        verdict = self.ev.judge("a", "kalshi-shadow", horizon="day")
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("the next look is at 2 (or 1 once 3 trades have settled on this rung; 1 so far)", verdict.reason)
+
+    def test_the_settled_lane_is_for_event_contracts_and_daily_agents_only(self):
+        self.seated("alpaca-paper")
+        self.mixed_trades("a", n=4, book="alpaca-paper")
+        self.block("a", 0.006, book="alpaca-paper")
+        self.assertEqual(self.ev.judge("a", "alpaca-paper", horizon="day").decision, "hold")
+        self.assertIsNone(self.ev._settled_lane("a", "kalshi-shadow", 1, "hour", 0))
+        self.assertIsNone(self.ev._settled_lane("a", "kalshi-shadow", 2, "day", 0))
+
+    def test_a_loss_in_the_block_in_progress_holds_a_screen_the_finished_days_would_pass(self):
+        """Regression: hawkins, Sept 22, 2026 -- finished days +1.4%, that morning's settlements -$15.50."""
+        self.seated("kalshi-shadow")
+        for pnl in (2.0, -0.5, 1.0):
+            self.settle("a", pnl, at(), book="kalshi-shadow")
+        self.block("a", 0.004, book="kalshi-shadow")
+        self.block("a", 0.003, book="kalshi-shadow")
+        end = 200.0 * math.exp(0.007)
+        self.ledger.append("book.mark", {"book": "kalshi-shadow", "equity": f"{end - 15.5:.2f}", "cash": "0", "staked": "200",
+                                         "holdings": 1, "real_money": False}, agent="a")
+        verdict = self.ev.judge("a", "kalshi-shadow", horizon="day")
+        self.assertEqual(verdict.decision, "hold")
+        self.assertIn("once the block in progress is counted", verdict.reason)
+        self.assertLess(verdict.numbers["unfinished_log_growth"], -0.07)
+
+    def test_a_gain_in_the_block_in_progress_does_not_hold_it(self):
+        self.seated("kalshi-shadow")
+        for pnl in (2.0, -0.5, 1.0):
+            self.settle("a", pnl, at(), book="kalshi-shadow")
+        self.block("a", 0.004, book="kalshi-shadow")
+        self.ledger.append("book.mark", {"book": "kalshi-shadow", "equity": "205.00", "cash": "0", "staked": "200",
+                                         "holdings": 1, "real_money": False}, agent="a")
+        self.assertEqual(self.ev.judge("a", "kalshi-shadow", horizon="day").decision, "eligible")
+
+    def test_the_screen_says_the_look_it_really_takes(self):
+        self.seated("alpaca-paper")
+        self.block("a", 0.004, book="alpaca-paper")
+        self.assertIn("the next look is at 2", self.ev.judge("a", "alpaca-paper", horizon="day").reason)
+        self.assertIn("the next look is at 4", self.ev.judge("a", "alpaca-paper", horizon="hour").reason)
 
 
 class Family(EvalCase):

@@ -197,6 +197,12 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # equity desks' IV/skew/activity features. Empty until ingested; then refreshed daily.
         from .options_history import OptionsHistory, gateway_get
         house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(paper), ledger=house.ledger, clock=house.clock)
+    if config.get("feeds", True) and not canary:
+        # Live sports scoreboards and perpetual funding / open interest (league/feeds.py): public,
+        # keyless hosts already on the House box's allowlist, recorded with their receive times on a
+        # lane of their own. Agents ask for them in NEEDS["feeds"]; replay uses them once recorded.
+        from .feeds import FeedRecorder
+        house.feeds = FeedRecorder(house, root / "feeds.sqlite")
     # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned
     # about $1/h of Jev's $20 lifetime allowance ($16.04 spent at the gateway by Sept 22, 2026), and
     # the capped evaluation of its own store found no tradable value: its labels predicted whether a

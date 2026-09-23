@@ -66,7 +66,7 @@ from .agents import Agent, niche_of
 from .constitution import CONSTITUTION
 from .ledger import now_iso
 
-PROMPT_VERSION = "foundry-2026-09-22.2"
+PROMPT_VERSION = "foundry-2026-09-23.1"
 ROLE = "foundry"
 TASK_CALL = "hypothesis.foundry"
 TASK_EVALUATE = "hypothesis.evaluate"
@@ -105,6 +105,16 @@ DEFAULTS: dict[str, Any] = {
     "link_min_confidence": 0.8,
     "prior_weight": 10,
     "evidence_days": 14,
+    # Sept 23, 2026 (the owner: "a swarm ... that trades 24/7"): up to `fast_share` of recent calls
+    # go to the best-scored desk among `fast_desks` (hourly evidence, around the clock), whose low
+    # replay pass rates would otherwise never win the evidence route; the horizon Merton is told to
+    # prefer where a desk allows it; and how many cards may await replay before the next call (0:
+    # none, the rule until Sept 23 -- a call's four cards replay one after another, and the foundry
+    # sat idle behind them).
+    "fast_desks": [],
+    "fast_share": 0.0,
+    "prefer_horizon": "",
+    "max_pending_cards": 0,
 }
 
 #: Words that say a candidate's replay could not run because an INPUT was missing, not because the
@@ -150,7 +160,13 @@ Rules.
   inputs (NEEDS.observe) only where `data` says replay supplies them.
 - Read `failed_on_this_desk` and `retired_on_this_desk`. Do not resubmit a failed or retired mechanism
   unless `mechanism` names the specific reason it failed and why yours is different in kind.
-- Model the fees in `fees` explicitly, and state `edge_after_costs` with the arithmetic.
+- Model the fees in `fees` explicitly, and state `edge_after_costs` with the arithmetic. On Alpaca
+  crypto a taker round trip costs 0.50% and a maker round trip 0.30%: rest post_only limits for entry
+  AND exit unless the edge per trade clearly clears the taker cost. Most crypto replays on this league
+  have failed out-of-sample growth by less than the fee.
+- Prefer `horizon_guidance.prefer` where the desk allows it: an hourly program is judged on hourly
+  blocks and can reach the paper screen in hours; a daily one waits days for the same evidence.
+- Read `forward_on_this_desk`: what has actually made money forward here, on paper and real money.
 - It must TRADE on the replay tape: `replay_gate` needs at least min_trades closed trades and
   min_blocks blocks within `replay_window`, positive out-of-sample growth, and a deflated Sharpe at
   least min_deflated_sharpe. A program that never fires cannot pass; one that trades noise after fees
@@ -528,8 +544,11 @@ class Foundry:
 
     def _allocate(self) -> tuple[DeskScore, str, str] | None:
         blocked = self._blocked_desks()
-        # A desk that already has a replay-passing card waiting gets no more cards until it is seated.
+        # A desk that already has a replay-passing card waiting gets no more cards until it is seated,
+        # nor (when cards may queue for replay) one whose last cards are still awaiting replay.
         waiting = {card.get("niche") for card in self.inventory()}
+        if int(self.settings.get("max_pending_cards") or 0) > 0:
+            waiting |= {card.get("niche") for card in self.pending()}
         weakest: dict[str | None, bool] = {}
         desks = [d for d in self.desk_scores() if d.eligible and d.niche not in blocked and d.niche not in waiting
                  and self._seat_available(d, weakest)]
@@ -540,6 +559,13 @@ class Foundry:
         explored = sum(1 for a in window if a.get("route") == "exploration")
         share = float(settings["exploration_share"])
         best = desks[0]
+        fast = [d for d in desks if d.niche in set(settings.get("fast_desks") or [])]
+        fast_share = float(settings.get("fast_share") or 0)
+        fast_calls = sum(1 for a in window if a.get("route") == "fast")
+        if fast and best not in fast and fast_share > 0 and (fast_calls + 1) / (len(window) + 1) <= fast_share + 1e-9:
+            pick = fast[0]
+            return pick, "fast", (f"fast-evidence share: {fast_calls} of the last {len(window)} calls went to hourly, "
+                                  f"around-the-clock desks; {pick.niche} scores best of them ({pick.score:.4f}): {pick.why}")
         if share > 0 and (explored + 1) / (len(window) + 1) <= share + 1e-9:
             others = [d for d in desks if d.niche != best.niche] or desks
             pick = min(others, key=lambda d: (d.cards, d.trials, d.niche))
@@ -639,14 +665,24 @@ class Foundry:
             reason = f"the foundry's ${settings['budget_usd']} window budget is spent"
         elif self._waiting_with_a_seat():
             reason = "a replay-passing card is already waiting for a seat"
-        elif self.pending() or any(k.startswith("replay:hypothesis:") and j.is_alive() for k, j in list(house._jobs.items())):
+        elif self._evaluation_backlog():
             reason = "earlier cards are still being evaluated"
-        elif any(k.startswith("merton:") and k != "merton:follow" and j.is_alive() for k, j in list(house._jobs.items())):
-            reason = "another Merton pass is running"
+        elif (lambda job: job is not None and job.is_alive())(house._jobs.get("merton:foundry")):
+            # Its own call only. Until Sept 23, 2026 any Merton pass (teacher, architect, engineer)
+            # held up the foundry, though each role has its own lane and its own budget.
+            reason = "the last foundry call is still running"
         elif self.allocate() is None:
             reason = "no seat is open on any eligible desk"
         self.refusal = reason
         return not reason
+
+    def _evaluation_backlog(self) -> bool:
+        """Too many cards still awaiting replay for another call. With `max_pending_cards` 0 any
+        pending card (or a running card replay) holds the next call, as before Sept 23, 2026."""
+        limit = int(self.settings.get("max_pending_cards") or 0)
+        if limit <= 0:
+            return bool(self.pending()) or any(k.startswith("replay:hypothesis:") and j.is_alive() for k, j in list(self.house._jobs.items()))
+        return len(self.pending()) >= limit
 
     def tick(self, *, open_for_business: bool) -> None:
         """Called from `House.tick`. Unpaid bookkeeping always; paid work only when open."""
@@ -746,11 +782,16 @@ class Foundry:
                      "observations": (capabilities.get("observations") if isinstance(capabilities, dict) else None),
                      "not_supplied": ((capabilities.get("observations") or {}).get("not_supplied") if isinstance(capabilities, dict) else None),
                      "recorded_coverage": coverage},
-            "fees": {"kalshi_taker": "0.07 x contracts x price x (1 - price), rounded up to the cent per order",
-                     "kalshi_maker": "nothing, except on the series in desk.maker_fee_series, which pay the same formula",
-                     "alpaca_crypto": {"taker": 0.0025, "maker": 0.0015},
+            "fees": {"kalshi_taker": "0.07 x contracts x price x (1 - price) per order: 1.75 cents a contract at 50c, 0.63 cents at 90c",
+                     "kalshi_maker": ("nothing, except on the series in desk.maker_fee_series, which pay a quarter of the taker "
+                                      "rate: 0.0175 x contracts x price x (1 - price)"),
+                     "alpaca_crypto": {"taker": 0.0025, "maker": 0.0015,
+                                       "round_trip": {"maker_maker": 0.0030, "mixed": 0.0040, "taker_taker": 0.0050},
+                                       "note": "the buy-side fee is taken in coins; rest post_only limits to pay the maker rate"},
                      "alpaca_equities_and_options": "no commission; you cross the spread (replay fills market orders at the touch)",
                      "replay_fills": "market orders at the touch; resting limits fill only when a later step trades strictly through them"},
+            "horizon_guidance": self._horizon_guidance(niche),
+            "forward_on_this_desk": self._forward_on_desk(niche_id),
             "replay_gate": dict(CONSTITUTION["ladder"]["replay"]),
             "replay_view": REPLAY_VIEW,
             "replay_window": {"days": replay_days, "step": "Kalshi day tapes step every 30 minutes; hour tapes every 5 minutes; Alpaca at NEEDS.bars.timeframe"},
@@ -764,10 +805,47 @@ class Foundry:
             "recent_postmortems": deaths,
         }
 
+    def _horizon_guidance(self, niche: Any) -> dict[str, Any]:
+        """Which horizon to write for, and why: the ladder's clock is the block."""
+        prefer = str(self.settings.get("prefer_horizon") or "")
+        paper = CONSTITUTION["ladder"]["paper"]
+        return {"prefer": prefer if prefer in niche.horizons else niche.horizons[0], "allowed": list(niche.horizons),
+                "paper_screen": {"hour": f"{paper['min_active_blocks']} active hourly blocks",
+                                 "day": f"{paper['min_active_blocks_day']} finished active days "
+                                        f"(1 once {((paper.get('settled_day') or {}).get('min_settled_trades'))} trades have settled, on Kalshi)"},
+                "why": "evidence arrives one block at a time: an hourly program can clear the paper screen the day it is seated"}
+
+    def _forward_on_desk(self, niche_id: str) -> list[dict[str, Any]]:
+        """Forward results by family on this desk: what has actually made money after replay."""
+        house = self.house
+        rows: dict[str, dict[str, Any]] = {}
+        try:
+            standings = house.standings()
+        except Exception:  # noqa: BLE001 - the packet is still worth sending without it
+            return []
+        for s in standings:
+            agent = house.registry.get(s.agent)
+            if agent is None or agent.specialty != niche_id:
+                continue
+            row = rows.setdefault(agent.family, {"family": agent.family, "members": 0, "on_paper": 0, "on_real_money": 0,
+                                                 "with_a_record": 0, "earning": 0, "best_growth_per_block": None})
+            row["members"] += 1
+            row["on_paper"] += s.rung == 1
+            row["on_real_money"] += s.rung >= 2
+            if s.score_observations > 0:
+                row["with_a_record"] += 1
+                row["earning"] += s.score_growth > 0
+                best = row["best_growth_per_block"]
+                row["best_growth_per_block"] = round(s.score_growth, 6) if best is None else max(best, round(s.score_growth, 6))
+        return sorted(rows.values(), key=lambda r: (-r["earning"], -r["with_a_record"], r["family"]))[:12]
+
     def _coverage(self, niche: Any) -> dict[str, Any] | None:
         """What the newest `data.coverage` row (the history ingestion) says it holds for this desk's
         universe: counts and date ranges only, never the data."""
-        rows = self.house.ledger.read(kinds="data.coverage", limit=3, newest=True)
+        # The history ingestion's rows only: the options store's carry `asset: "option"`, and the live
+        # feeds write one `asset: "feed"` row a feed every hour (league/feeds.py), which would otherwise
+        # always be the newest and hide the store this summarises.
+        rows = [row for row in self.house.ledger.read(kinds="data.coverage", limit=500, newest=True) if "asset" not in row.payload]
         if not rows:
             return None
         latest = rows[-1].payload

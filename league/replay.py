@@ -40,6 +40,7 @@ is statistics, not the money ledger.
 from __future__ import annotations
 
 import argparse
+import bisect
 import builtins
 import contextlib
 import copy
@@ -71,6 +72,11 @@ FEES = {"crypto_taker": CRYPTO_TAKER, "crypto_maker": CRYPTO_MAKER, "kalshi_take
 DEFAULT_LIMITS = {"max_position_usd": 100.0, "max_order_usd": 75.0}
 
 MIN_EVENT_PRICE = 0.15  # the House's firm rule: no opening Kalshi buy under 15 cents
+#: Alpaca refuses a crypto order under $10 (55 paper orders in 48 hours to Sept 22, 2026), and the
+#: House refuses a crypto buy asked under it (`league/venues.py`), so none fills here either. As in
+#: the House it is the dollars ASKED that are held to it: one asked at $10 and floored a hair under
+#: by the step is raised one step there and fills here at the floored size. Sells are not held to it.
+ALPACA_CRYPTO_MIN_ORDER_USD = 10.0
 MAX_INTENTS = 8
 MAX_CANCELS = 20
 MAX_ERRORS = 20
@@ -147,6 +153,41 @@ def _bars_until(bars: Any, now_ts: float | None) -> list[dict[str, Any]]:
         if stamp > now_ts:
             break  # the tape is in order: everything after this is the strategy's future
         out.append(bar)
+    return out
+
+
+def _feed_index(feeds: Any) -> dict[str, dict[str, tuple[list[float], list[dict[str, Any]]]]]:
+    """A tape's recorded live feeds (`league/feeds.py`: {feed: {key: [row, ...]}}, each row stamped
+    `t` with when the House received it) as (stamps, rows) in time order, read once a replay. A row
+    without a readable `t` cannot be placed in time, so it is never shown."""
+    out: dict[str, dict[str, tuple[list[float], list[dict[str, Any]]]]] = {}
+    if not isinstance(feeds, dict):
+        return out
+    for feed, keys in feeds.items():
+        if not isinstance(feed, str) or not isinstance(keys, dict):
+            continue
+        for key, rows in keys.items():
+            if not isinstance(key, str) or not isinstance(rows, list):
+                continue
+            stamped = sorted(((stamp, row) for row in rows if isinstance(row, dict)
+                              for stamp in (_parse_ts(row.get("t")),) if stamp is not None), key=lambda pair: pair[0])
+            out.setdefault(feed, {})[key] = ([stamp for stamp, _ in stamped], [row for _, row in stamped])
+    return out
+
+
+def _feeds_until(index: dict, now_ts: float) -> dict[str, dict[str, Any]]:
+    """The row of each feed key received last at or before this step -- `_bars_until`'s rule, found
+    by bisection because a feed tape has up to a row a step -- copied, so a strategy that edits what
+    it is shown cannot edit a later step's view. A key with nothing received yet is absent."""
+    out: dict[str, dict[str, Any]] = {}
+    for feed, keys in index.items():
+        out[feed] = {}
+        for key, (stamps, rows) in keys.items():
+            found = bisect.bisect_right(stamps, now_ts)
+            if found:
+                out[feed][key] = copy.deepcopy(rows[found - 1])
+        if not out[feed]:
+            del out[feed]
     return out
 
 
@@ -589,6 +630,9 @@ class _Account:
         else:
             if self.venue == "kalshi" and price < MIN_EVENT_PRICE - EPS:
                 return self.refuse("kalshi buys under $0.15 are refused")
+            if (self.venue != "kalshi" and not is_equity(key)
+                    and (amount if has_notional else amount * (price if limit_price is None else limit_price)) < ALPACA_CRYPTO_MIN_ORDER_USD - EPS):
+                return self.refuse("alpaca refuses a crypto buy under $10")
             if notional > self.limits["max_order_usd"] + EPS:
                 return self.refuse("over the order cap")
             held_value = self.positions.get(key, {}).get("quantity", 0.0) * price
@@ -815,6 +859,8 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     if venue == 'kalshi' and watched_symbols and any(not observed_bars.get(s) for s in watched_symbols):
         return failed('unsupported input: required observed bars are missing')
     max_hours = _num(needs.get("max_hours_to_close"))
+    # Recorded live feeds (`league/feeds.py`), shown only to a strategy that declares them.
+    feeds = _feed_index(tape.get("feeds")) if needs.get("feeds") and isinstance(tape.get("feeds"), dict) else None
 
     account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else (),
                        tape.get('settlements') if isinstance(tape.get('settlements'), dict) else None)
@@ -938,6 +984,10 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                             s: [dict(b) for b in _bars_until(observed_bars.get(s) or (), now_ts)[-observed_limit:]]
                             for s in watched_symbols
                         }
+            if feeds is not None:
+                # Each row is stamped with when the House received it: the latest at or before this
+                # step, exactly what a live wake is handed. Nothing received later is ever shown.
+                ctx["feeds"] = _feeds_until(feeds, now_ts)
 
             # (d) decide.
             answer, error = deadline.call(decide, ctx)

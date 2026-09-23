@@ -67,8 +67,10 @@ NOT_PRICE_WORDS = re.compile(r"(qty|quantity|size|shares|units|notional|pct|perc
 PRICE_KEYS = frozenset({"limit_price", "price", "stop_price", "target_price", "entry_price", "exit_price"})
 
 #: Refusals that are the House's doing, not the strategy's: a maintenance pause or a closed live
-#: window refuses every buy of every agent, and must not read as this agent's defect.
-HOUSE_REFUSALS = ("paused for maintenance", "allocation window", "this phase permits exits")
+#: window refuses every buy of every agent, and must not read as this agent's defect. A buy the
+#: House refused under the venue's minimum (`House._intents`, Sept 22, 2026) was never sent, so it
+#: is not one of the intents a wake counts as sent either; the strategy sees it in its own outcomes.
+HOUSE_REFUSALS = ("paused for maintenance", "allocation window", "this phase permits exits", "below the venue minimum")
 
 
 def mark_of(state: Mapping[str, Any], agent: Any) -> dict[str, Any] | None:

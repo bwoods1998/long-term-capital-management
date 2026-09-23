@@ -14,6 +14,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from league.evaluator import Verdict
 from league.house import House, Settings
@@ -30,8 +31,17 @@ def tearDownModule():
     test_tuition.tearDownModule()
 
 
+def audit_before(test):
+    """These tests pin the audit BEFORE promotion, the path an agent with a known defect still
+    takes (and the constitution's rule until Sept 23, 2026); `AuditAfter` below pins the new one."""
+    patch = mock.patch.object(House, "_audit_after", return_value=False)
+    patch.start()
+    test.addCleanup(patch.stop)
+
+
 class BackgroundAudit(unittest.TestCase):
     def setUp(self):
+        audit_before(self)
         self.fixture = test_tuition.TuitionTest()
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)
@@ -134,6 +144,7 @@ class RestartDuringAnAudit(unittest.TestCase):
     """The status and the generation the audit is bound to are on disk before the call is made."""
 
     def setUp(self):
+        audit_before(self)
         self.fixture = test_tuition.TuitionTest()
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)
@@ -195,6 +206,109 @@ class RestartDuringAnAudit(unittest.TestCase):
         house.wait(5)
         self.assertEqual(auditor.seen, [agent.id])
         self.assertEqual(house.evaluator.rung(agent.id), 2)
+
+
+class AuditAfter(unittest.TestCase):
+    """The owner's revision of Sept 23, 2026: a screen-passer takes the micro stake at once and the
+    frontier audit runs on the micro rung; a veto sends it straight back to paper."""
+
+    def setUp(self):
+        self.fixture = test_tuition.TuitionTest()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.tearDown)
+        self.house = self.fixture.house
+        self.assertTrue(self.house._audit_after())  # the real constitution
+
+    def auditor(self, approve=True, error=None):
+        calls = []
+
+        def audit(agent, verdict, charge=True):
+            calls.append((agent.id, charge, verdict.numbers.get("audit_timing")))
+            row = {"approve": approve, "summary": "test", **({"error": error} if error else {})}
+            self.house.ledger.append("audit.verdict", row, agent=agent.id)
+            return row
+
+        self.house.auditor = SimpleNamespace(audit=audit, policy_digest=None)
+        return calls
+
+    def test_a_screen_passer_trades_the_micro_stake_before_its_audit_and_an_approval_keeps_it_there(self):
+        agent = self.fixture.on_micro("fast", rung=1)
+        calls = self.auditor(approve=True)
+        self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+        self.assertEqual(self.house.evaluator.rung(agent.id), 2)  # promoted before the audit returned
+        self.assertIn(agent.id, self.house.books["alpaca"].accounts)
+        self.house.wait(5)
+        self.assertEqual(calls, [(agent.id, False, "after")])  # the House pays, and the auditor is told
+        self.assertEqual(self.house.evaluator.rung(agent.id), 2)
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_confirmed")
+        self.assertNotIn(agent.id, self.house._state.get(House.AUDITS, {}))
+
+    def test_a_veto_sends_it_straight_back_to_paper(self):
+        agent = self.fixture.on_micro("vetoed", rung=1)
+        self.auditor(approve=False)
+        self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+        self.house.wait(5)
+        self.assertEqual(self.house.evaluator.rung(agent.id), 1)
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_veto")
+        demotion = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=agent.id) if e.payload.get("decision") == "demote"]
+        self.assertEqual(len(demotion), 1)
+        self.assertIn("audit after promotion vetoed", demotion[0]["reason"])
+        # ...and the veto's cooldown bars an immediate second promotion.
+        self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+        self.assertEqual(self.house.evaluator.rung(agent.id), 1)
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_cooldown")
+
+    def test_an_audit_that_could_not_run_leaves_it_trading_and_is_owed_after_the_short_cooldown(self):
+        agent = self.fixture.on_micro("unlucky", rung=1)
+        calls = self.auditor(approve=False, error="HTTP 502")
+        self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+        self.house.wait(5)
+        self.assertEqual(self.house.evaluator.rung(agent.id), 2)
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_retry")
+        self.assertIsNotNone(self.house._audit_owed(agent))
+        generation = self.house._generation(agent.id)
+        self.house._settle_after_audit(agent, generation)  # inside the short cooldown: nothing
+        self.house.wait(5)
+        self.assertEqual(len(calls), 1)
+        self.fixture.clock.advance(3600)
+        calls[:] = []
+        self.auditor(approve=True)
+        self.house._settle_after_audit(agent, self.house._generation(agent.id))
+        self.house.wait(5)
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_confirmed")
+        self.assertIsNone(self.house._audit_owed(agent))
+
+    def test_an_owed_audit_waits_out_a_maintenance_pause(self):
+        agent = self.fixture.on_micro("paused", rung=1)
+        calls = self.auditor(approve=False, error="HTTP 502")
+        self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+        self.house.wait(5)
+        self.fixture.clock.advance(3600)
+        (Path(self.house.root) / "PAUSE").write_text("maintenance")
+        self.house._settle_after_audit(agent, self.house._generation(agent.id))
+        self.house.wait(5)
+        self.assertEqual(len(calls), 1)  # nothing bought while paused
+        (Path(self.house.root) / "PAUSE").unlink()
+        self.house._settle_after_audit(agent, self.house._generation(agent.id))
+        self.house.wait(5)
+        self.assertEqual(len(calls), 2)
+
+    def test_an_agent_with_a_known_defect_is_audited_before_any_money(self):
+        agent = self.fixture.on_micro("defective", rung=1)
+        calls = self.auditor(approve=False)
+        with mock.patch.object(House, "_known_defect", return_value="the pre-audit found cent_rounding"):
+            self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+            self.house.wait(5)
+        self.assertEqual(self.house.evaluator.rung(agent.id), 1)
+        self.assertEqual([c[2] for c in calls], [None])
+        self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_veto")
+
+    def test_the_house_pays_so_a_broke_agent_is_still_audited(self):
+        agent = self.fixture.on_micro("broke", rung=1)
+        self.house.economy.charge(agent.id, self.house.economy.balance(agent.id), "test: spent")
+        self.assertIsNone(self.house._audit_wait(agent))
+        with mock.patch.dict(self.house.game["audit"], {"house_pays": False}):
+            self.assertEqual(self.house._audit_wait(agent)["stage"], "audit_credits")
 
 
 if __name__ == "__main__":

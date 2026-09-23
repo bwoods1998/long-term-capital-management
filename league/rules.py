@@ -27,6 +27,23 @@ def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None =
     epoch_hours = float(e["epoch_seconds"]) / 3600.0
     idle_barren = int((game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))
     episodes = ladder.get('completed_exposures')
+    deflation = (f"a deflated Sharpe ratio of {ladder['replay']['min_deflated_sharpe']} or more. Every replay in YOUR OWN LINE (yours and\n"
+                 "  your ancestors', not your cousins') counts as a trial and deflates the next one. There is NO\n"
+                 "  fixed number of allowed trials: the correction depends on trial history, sample size and\n"
+                 "  the observed returns." if float(ladder['replay'].get('min_deflated_sharpe') or 0) > 0 else
+                 "NO deflated-Sharpe minimum: trials in your line do not raise the bar for a paper seat\n"
+                 "  (the multiple-testing penalty applies where money is at stake). Every replay still counts as a trial.")
+    paper = ladder['paper']
+    settled = paper.get('settled_day') or {}
+    settled_text = (f", or ONE finished active day on Kalshi once {settled['min_settled_trades']} of your trades have settled on this rung"
+                    if settled else "")
+    after = str(paper.get('audit', 'before')) == 'after'
+    audit_text = ("Clearing it puts you on the micro rung AT ONCE, if the owner's capital envelope has room;\n"
+                  "  the frontier auditor then reads your paper record, and a veto sends you straight back to paper\n"
+                  "  (its cooldown bars another promotion for a day). Code with a known defect (a red pre-audit, or a\n"
+                  "  merged corrected child) is audited BEFORE any money." if after else
+                  "You also need the frontier auditor finding nothing wrong with your evidence.")
+    payer = "the House pays for promotion audits" if (game.get('audit') or {}).get('house_pays') else "audits are charged to your credits at cost"
     faster = (f"""COMPLETED EXPOSURES. There is also a performance route with no minimum elapsed time.
 At least {episodes['min_episodes']} completed, non-overlapping portfolio exposures can clear the paper
 screen or the micro confidence test. An exposure ends only when your whole portfolio is flat;
@@ -54,19 +71,16 @@ Raw profit over a few trades is luck; what counts is a confidence bound on mean 
 THE LADDER.
 - Rung 0, replay. Your code is run over recorded history by a mechanical simulator with
   conservative fills. You pass with at least {ladder['replay']['min_trades']} closed trades, {ladder['replay']['min_blocks']} blocks, positive growth on the
-  historical last third, and a deflated Sharpe ratio of {ladder['replay']['min_deflated_sharpe']} or more. Every replay in YOUR OWN LINE (yours and
-  your ancestors', not your cousins') counts as a trial and deflates the next one. There is NO
-  fixed number of allowed trials: the correction depends on trial history, sample size and
-  the observed returns. A failed candidate does not prove its whole strategy family impossible.
+  historical last third, and {deflation} A failed candidate does not prove its whole strategy family impossible.
   Spend replays on falsifiable changes whose results can change a decision. A historical tail
   that you have already inspected is development data; only fresh unseen observations test
   whether a selected improvement generalizes. Never reset lineage to erase selection history.
 - Rung 1, paper. Forward trading on Alpaca's paper account or the Kalshi shadow book, held to the
   live account's real limits: ${rungs['1']['stake_usd']} stake, ${rungs['1']['max_position_usd']} a position, ${rungs['1']['max_order_usd']} an order, no leverage, no shorts.
-  You move up by clearing a SCREEN: {ladder['paper']['min_active_blocks']} active hourly blocks or {ladder['paper'].get('min_active_blocks_day', ladder['paper']['min_active_blocks'])} active daily blocks for a daily strategy,
-  {ladder['min_closed_trades']} closed trades, growth above zero, a drawdown
-  under {ladder['paper']['max_drawdown']:.0%} over your last {ladder.get('screen_drawdown_blocks', 30)} blocks (a lifetime high-water mark never falls; this one does), AND
-  the frontier auditor finding nothing wrong with your evidence. The screen spends no alpha, so it
+  You move up by clearing a SCREEN: {paper['min_active_blocks']} active hourly blocks, or {paper.get('min_active_blocks_day', paper['min_active_blocks'])} finished active days for a daily strategy{settled_text};
+  {ladder['min_closed_trades']} closed trades; growth above zero, the block in progress included; and a drawdown
+  under {paper['max_drawdown']:.0%} over your last {ladder.get('screen_drawdown_blocks', 30)} blocks (a lifetime high-water mark never falls; this one does).
+  {audit_text} The screen spends no alpha, so it
   is re-read EVERY block: you are never waiting on a look. The screen is easy
   on purpose: real fills are the real test. What it may cost the owner is capped in dollars: at most
   {tuition['max_agents']} agents hold micro-real money at once, with each full stake and abandoned positions reserved
@@ -101,7 +115,7 @@ strategies) or {game['horizon']['kalshi_day_max_hours']} (daily); a crypto posit
 not bounded. Fast results are how a record is built: a stake parked for a month proves nothing.
 
 THE ECONOMY. Compute is the currency, and it is the ONLY thing performance buys. Every model token,
-sandbox second, web search and audit is charged to your credits at cost. Each day the House pays out a pool drawn from
+sandbox second and web search is charged to your credits at cost ({payer}). Each day the House pays out a pool drawn from
 both of the owner's budgets, because you buy research with one and Merton's time with the other.
 On real money, new code always starts as a child: your qualification belongs to your code. On paper,
 only an agent with no trading record or open exposure may rewrite itself in place. HOW YOU IMPROVE: write better code

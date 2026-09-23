@@ -27,11 +27,13 @@ def burst_policy():
 
 
 # These tests exercise mechanisms (tuition, the timed pilot, audit scoring, concurrency) with the
-# micro rung as it stood before the owner's learning-surge revision of Sept 21, 2026 ($25 / $10 /
-# $10, $20 options). The mechanisms are unchanged; only today's numbers moved.
+# micro rung as it stood before the owner's learning-surge revision of Sept 21, 2026 ($25 stake,
+# $20 options). The mechanisms are unchanged; only today's numbers moved. Its $10 order and
+# position caps are $12 here: Alpaca takes no crypto order under $10 and the House holds a buy to
+# that (Sept 22, 2026), so under a $10 cap the ladder strategy's 90%-of-cap buys could not trade.
 from unittest.mock import patch as _patch  # noqa: E402
 from league.constitution import CONSTITUTION as _CONSTITUTION  # noqa: E402
-_LEGACY_MICRO = _patch.dict(_CONSTITUTION["rungs"]["2"], {"stake_usd": "25", "max_position_usd": "10", "max_order_usd": "10", "option_max_position_usd": "20"})
+_LEGACY_MICRO = _patch.dict(_CONSTITUTION["rungs"]["2"], {"stake_usd": "25", "max_position_usd": "12", "max_order_usd": "12", "option_max_position_usd": "20"})
 
 
 def setUpModule():
@@ -123,6 +125,8 @@ class LivePath(unittest.TestCase):
 
     def test_attribution_is_checked_again_after_the_paid_audit(self):
         from league.evaluator import Verdict
+        from league.tests.test_audit_background import audit_before
+        audit_before(self)  # the audit-before path: the gates are read again after the paid audit
         f = self.fixture(ladder_cases.LadderTest)
         h = f.house
         self.funding(f)
@@ -184,6 +188,8 @@ class LivePath(unittest.TestCase):
         self.assertEqual(guard.live_pilot()['policy']['max_loss_usd'], '200')
 
     def test_expiry_while_audit_runs_cannot_admit_an_agent(self):
+        from league.tests.test_audit_background import audit_before
+        audit_before(self)  # the audit-before path: the window is read again after the audit
         f = self.fixture(); h = f.house
         guard = self.funding(f)
         agent = h.spawn('waiting', 'test', LADDER, reason='test', endowment='2.5')
@@ -205,7 +211,8 @@ class LivePath(unittest.TestCase):
         guard = self.funding(f)
         agent = f.on_micro('micro')
         book = h.books['alpaca']
-        intents, dropped = h._intents(agent, book, [{'symbol': 'BTC/USD', 'side': 'buy', 'notional_usd': '8'}])
+        # $12, not $8: a crypto buy asked under Alpaca's $10 minimum is refused by the House before it can queue.
+        intents, dropped = h._intents(agent, book, [{'symbol': 'BTC/USD', 'side': 'buy', 'notional_usd': '12'}])
         self.assertFalse(dropped)
         self.assertTrue(intents)
         outcome = {'agent': agent.id, '_generation': h._generation(agent.id), 'intents': intents}

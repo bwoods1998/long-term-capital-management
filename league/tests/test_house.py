@@ -90,6 +90,38 @@ class HouseCase(unittest.TestCase):
         return agent
 
 
+class Lessons(HouseCase):
+    """Sept 23, 2026: corrected lessons never reached the ledger (loaded once by title), and an agent
+    declined a replay over a threshold that had been removed an hour before."""
+
+    def test_a_lesson_is_loaded_once_and_again_when_its_text_changes(self):
+        import league.house as house_module
+
+        folder = Path(self.dir.name) / "league"
+        (folder / "playbook").mkdir(parents=True)
+        lesson = folder / "playbook" / "2026-09-23-a-lesson.md"
+        lesson.write_text("# A lesson\n\nThe bar is 20 trades.\n", encoding="utf-8")
+        with patch.object(house_module, "__file__", str(folder / "house.py")):
+            self.assertEqual(self.house.learn(), 1)
+            self.assertEqual(self.house.learn(), 0)
+            lesson.write_text("# A lesson\n\nThe bar is 10 trades.\n", encoding="utf-8")
+            self.assertEqual(self.house.learn(), 1)
+        latest = self.house.commons.playbook_read("lesson")["entries"][-1]
+        self.assertIn("10 trades", latest["text"])
+
+    def test_the_current_rules_lesson_matches_the_constitution(self):
+        from league.constitution import CONSTITUTION
+
+        text = (Path(__file__).resolve().parents[1] / "playbook" / "2026-09-23-the-ladder-as-it-stands.md").read_text(encoding="utf-8")
+        replay, paper = CONSTITUTION["ladder"]["replay"], CONSTITUTION["ladder"]["paper"]
+        self.assertIn(f"**{replay['min_trades']} closed trades**", text)
+        self.assertIn(f"**{paper['min_active_blocks']} active hourly blocks**", text)
+        self.assertIn(f"**{paper['min_active_blocks_day']} finished active days**", text)
+        self.assertEqual(replay["min_deflated_sharpe"], 0.0)
+        self.assertIn("No deflated-Sharpe minimum", text)
+        self.assertEqual(paper["audit"], "after")
+
+
 class HouseTest(HouseCase):
     def test_practice_only_unless_the_owner_turns_real_money_on(self):
         self.assertEqual(sorted(self.house.books), ["alpaca-paper"])
@@ -431,9 +463,16 @@ class ResearchPace(HouseCase):
             for n in range(6):
                 self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": growth, "active": True,
                                                         "book": "alpaca-paper", "block": f"b{n}"}, agent=agent.id)
-        self.assertAlmostEqual(self.house.research_interval_hours(winner), 0.25 * 0.33)
-        self.assertAlmostEqual(self.house.research_interval_hours(loser), 0.25 * 4)
-        self.assertAlmostEqual(self.house.research_interval_hours(fresh), 0.25)
+        pace = self.house.game["research"]["pace"]
+        self.assertAlmostEqual(self.house.research_interval_hours(winner), 0.25 * pace["winner_share"])
+        self.assertAlmostEqual(self.house.research_interval_hours(loser), 0.25 * pace["loser_multiple"])
+        # Sept 23, 2026: an agent with no earned record waits `unproven_multiple` intervals.
+        self.assertAlmostEqual(self.house.research_interval_hours(fresh), 0.25 * pace["unproven_multiple"])
+        self.assertEqual((pace["winner_share"], pace["loser_multiple"], pace["unproven_multiple"]), (0.1, 8, 3))
+        # An idle agent's research is pulled forward, never put off for having no record.
+        self.house.idle_reason = lambda agent: "ten barren wakes" if agent.id == fresh.id else ""
+        idle_hours = float(self.house.game["research"]["idle"]["min_hours_between"])
+        self.assertAlmostEqual(self.house.research_interval_hours(fresh), min(0.25, idle_hours))
 
 
 class DailyEvidence(HouseCase):

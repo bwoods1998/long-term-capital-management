@@ -274,6 +274,9 @@ class CommitConcurrency(Threads, HouseCase):
 
 class AuditConcurrency(Threads, unittest.TestCase):
     def setUp(self):
+        from league.tests.test_audit_background import audit_before
+
+        audit_before(self)  # the audit-before path (an agent with a known defect still takes it)
         self.fixture = test_tuition.TuitionTest()
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)

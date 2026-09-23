@@ -221,7 +221,7 @@ class AlpacaFillTest(unittest.TestCase):
         self.assertEqual(result["maker_fills"], 0)
 
     def test_post_only_that_would_cross_is_refused_and_one_that_would_not_rests(self):
-        result = play({0: [limit("buy", 0.5, 101, post_only=True), limit("buy", 0.1, 99, post_only=True)]},
+        result = play({0: [limit("buy", 0.5, 101, post_only=True), limit("buy", 0.2, 99, post_only=True)]},
                       alpaca_tape([100, 100]))
         self.assertEqual((result["fills"], result["refused"], result["open_orders"]), (0, 1, 1))
         self.assertIn("post_only order would cross the touch", result["refusal_reasons"])
@@ -242,7 +242,7 @@ class AlpacaFillTest(unittest.TestCase):
 
     def test_missing_bar_means_no_fill_no_order_and_the_last_mark(self):
         tape = alpaca_tape([100, None, bar(90, l=80)])
-        result = play({0: [buy(quantity=0.5), limit("buy", 0.1, 95)], 1: [buy(10)]}, tape)
+        result = play({0: [buy(quantity=0.5), limit("buy", 0.2, 95)], 1: [buy(10)]}, tape)
         log = log_of(result)
         self.assertEqual(log[1]["bars"][BTC], [1, t_at(0), 100])  # history kept, nothing invented
         self.assertEqual(log[1]["quotes"], {})
@@ -278,17 +278,35 @@ class RulesTest(unittest.TestCase):
 
     def test_order_cap_and_position_cap(self):
         tape = alpaca_tape([100, 100, 100, 100, 100])
-        plan = {0: [buy(80)], 1: [buy(75)], 2: [buy(30)], 3: [buy(20), limit("buy", 0.05, 90)], 4: [limit("buy", 0.12, 90)]}
+        plan = {0: [buy(80)], 1: [buy(75)], 2: [buy(30)], 3: [buy(20), limit("buy", 0.12, 90)], 4: [limit("buy", 0.12, 90)]}
         result = play(plan, tape, stake=500.0, limits={"max_position_usd": 100.0, "max_order_usd": 75.0})
         self.assertEqual(result["refusal_reasons"], {"over the order cap": 1, "over the position cap": 2})
         self.assertEqual([round(f["quantity"] * f["price"], 6) for f in result["fill_log"]], [75.0, 20.0])
-        # A resting bid counts toward the position: 0.95 held at its 90 + 4.5 working + 10.8 is over 100.
+        # A resting bid counts toward the position: 0.95 held at its 90 + 10.8 working + 10.8 is over 100.
         self.assertEqual(result["open_orders"], 1)
 
     def test_a_sell_is_not_held_to_the_buy_caps(self):
         tape = alpaca_tape([100, 100, 300])
         result = play({0: [buy(quantity=0.5)], 2: [sell(0.5)]}, tape, limits={"max_position_usd": 100.0, "max_order_usd": 75.0})
         self.assertEqual((result["fills"], result["refused"]), (2, 0))  # closing $150 of holdings is allowed
+
+    def test_an_alpaca_crypto_buy_asked_under_ten_dollars_never_fills(self):
+        # Alpaca refuses a crypto order under $10 and the House refuses the buy before it is sent
+        # (Sept 22, 2026). As in the House it is the dollars ASKED that count: $10 floored to the
+        # step fills; a limit sized in units counts at its limit, not at the touch it fills at.
+        tape = alpaca_tape([81000, 81000, 81000, 81000, 81000])
+        plan = {0: [buy(9.99)], 1: [buy(10)], 2: [limit("buy", 0.0001, 81500)], 3: [limit("buy", 0.000123, 82000)]}
+        result = play(plan, tape)
+        self.assertEqual(result["refusal_reasons"], {"alpaca refuses a crypto buy under $10": 2})
+        self.assertEqual([f["t"] for f in result["fill_log"]], [t_at(5), t_at(15)])
+        self.assertAlmostEqual(result["fill_log"][1]["quantity"] * result["fill_log"][1]["price"], 9.963, places=9)
+
+    def test_sells_and_stocks_are_not_held_to_the_crypto_minimum(self):
+        result = play({0: [buy(20)], 1: [sell(0.0001)]}, alpaca_tape([81000, 81000, 81000]))
+        self.assertEqual((result["fills"], result["refused"]), (2, 0))  # an $8.10 exit trims the holding
+        spy = alpaca_tape([650, 650], symbol="SPY")
+        result = play({0: [buy(5, symbol="SPY")]}, spy, code=script(symbols=("SPY",)))
+        self.assertEqual((result["fills"], result["refused"]), (1, 0))
 
     def test_notional_rounds_down_to_the_step(self):
         result = play({0: [buy(20)]}, alpaca_tape([81000, 81000]))

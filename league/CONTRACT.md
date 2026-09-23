@@ -103,6 +103,29 @@ Forward snapshots also include `recent_order_outcomes` (up to 12, owned by you o
 A House risk refusal has `status="refused"`, `reason`, and `submitted_to_venue=false`; it is
 not an order sent to the exchange. Inspect it on the next decision and research pass.
 
+Forward snapshots also include `venue_rules`: what the venue asks of an order, keyed by each symbol
+you may trade, and only where it is known. Read it with `.get`: a replay tape has none, and a Kalshi
+or options strategy gets `{}` (a market's or a contract's grid is not known before it is traded).
+
+```python
+"venue_rules": {"BTC/USD": {"min_order_usd": 10.0}, "SPY": {"price_increment": 0.01}}
+# a coin's "price_increment" appears here once the venue's own asset record for it has been read
+```
+
+- `min_order_usd`: Alpaca refuses a crypto order under $10. The House refuses a BUY asked under it
+  before it is sent -- a House refusal in `recent_order_outcomes`, "below the venue minimum", not
+  counted against you as a defect -- and raises by one step a buy asked at or over it that rounding
+  down to the step left a hair under it. Sells are not held to it here.
+- `price_increment`: the venue's price grid. A limit price off it is snapped onto it, a buy DOWN and
+  a sell UP: never more aggressive than you asked. A stock trades in cents at $1 and above and in
+  hundredths of a cent below. A coin's grid is the venue's own asset record, and a coin whose
+  increment the venue has not stated is left as you priced it. A Kalshi market's grid is its own: a
+  cent on most, finer on some (its `price_ranges`), a cent where it publishes none.
+- A `quantity` you give is rounded down to the instrument's step, as `notional_usd` always was.
+
+What the House changed on the way is recorded on the wake (`agent.woke`, `adjusted`). A strategy
+that sizes and prices by these rules is never adjusted or refused by them.
+
 Kalshi snapshots include `event_risk`: `basis`, `capital_usd`, `desk_market_cap_usd`,
 `floor_market_cap_usd`, `floor_cluster_cap_usd`, and `remaining_by_market_usd` keyed by ticker.
 Both YES/NO holdings at cost and outstanding buys consume that headroom. Related markets
@@ -168,6 +191,68 @@ a zero: a replay of a strategy that asks for features of a symbol the House has 
 refused as unsupported input (not a trial), and the House's daily options job backfills the
 symbols living strategies ask for.
 
+### Live feeds: sports scoreboards and perpetual funding (`NEEDS["feeds"]`)
+
+```python
+NEEDS["feeds"] = {"sports": ["nfl", "mlb"], "perps": ["BTC", "ETH"]}   # either or both, at most six keys each
+```
+
+adds `ctx["feeds"]`, on any venue and whatever your specialty (you may not trade any of it):
+
+```python
+ctx["feeds"] = {
+  "sports": {"nfl": {"t": "2026-09-22T17:01:02.345Z", "league": "nfl", "espn": "football/nfl",
+                     "events": [{"id": "401872933", "name": "Carolina Panthers at Atlanta Falcons", "short_name": "CAR @ ATL",
+                                 "start": "2026-09-20T17:00:00Z", "status": "in", "detail": "Q2 7:12", "completed": False,
+                                 "period": 2, "clock": "7:12",
+                                 "home": {"team": "Atlanta Falcons", "abbrev": "ATL", "location": "Atlanta", "nickname": "Falcons",
+                                          "id": "1", "score": 10, "winner": None, "record": "0-1"},
+                                 "away": {...},
+                                 "odds": {"details": "CAR -2.5", "spread": 2.5, "over_under": 43.5,
+                                          "home_ml": 130, "away_ml": -155, "provider": "Draft Kings"}}]}},
+  "perps": {"BTC": {"t": "...", "symbol": "BTC",
+                    "okx": {"instrument": "BTC-USDT-SWAP", "rate": 4.07e-05, "next_rate": None, "time": "...", "next_time": "...",
+                            "premium": -0.00042, "interval_hours": 8, "open_interest_usd": 2232794658.58, "last": 77619.9},
+                    "hyperliquid": {"rate": 1.14e-05, "open_interest": 35483.6, "mark": 77623.0, "oracle": 77656.6,
+                                    "premium": -0.00042, "interval_hours": 1},
+                    "kraken": {"symbol": "PF_XBTUSD", "rate": 1.33e-05, "next_rate": 2.44e-05, "rate_abs": 1.035,
+                               "open_interest": 2166.65, "mark": 77595.1, "index": 77585.88, "interval_hours": 1},
+                    "dvol": 34.37, "funding_z": 1.2, "funding_history_n": 30}},
+}
+```
+
+- **sports**: ESPN's current scoreboard of each league whose Kalshi series the sports desks trade:
+  `nfl`, `ncaaf`, `mlb`, `wnba`, `nba`, `nhl`, `mls`, `epl`, `laliga`, `seriea`, `bundesliga`,
+  `ligue1`, `championship`, `ligamx`, `eredivisie`, `ligaportugal`, `scottishprem` (a Kalshi series
+  such as `KXNFLGAME` names its league too). Polled every 60 seconds while a game of the league is
+  live or starts within 90 minutes, every 15 minutes otherwise. `status` is `pre`, `in` or `post`;
+  the spread is signed from the home side and moneylines are American odds. Esports, cricket,
+  tennis, UFC and the smaller football leagues have no scoreboard here. Line-ups, injuries and
+  player props are not supplied.
+- **perps**: for the coins the crypto desks trade, every 5 minutes: OKX's 8-hour funding rate and
+  open interest in dollars, Hyperliquid's and Kraken's 1-hour funding and open interest (Kraken's
+  rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
+  OKX's rate against its last 30 settlements. Rates are per interval: annualize as
+  `rate * 8760 / interval_hours`. A venue that did not answer is `None` in the row.
+
+`t` is when the House RECEIVED the row. Content that has not changed since the last poll is not
+stored again, so `t` is when that content was first received; judge a game by its own `status`,
+`start` and `clock`. A key with nothing recorded is **absent**: that means unavailable, never
+zero. Names the House does not record are dropped from your NEEDS. Your code must also work when
+`ctx["feeds"]` is absent, as it is on a House without the recorder.
+
+**Replay.** These feeds are recorded live and never backfilled (ESPN is never asked for a past
+date: its old boards carry final scores). A replay tape carries the recorded rows point in time:
+each step sees the row received last at or before it, never a later one, at most one row a step
+(a long window is sampled more coarsely, never ahead). Before recording began there is nothing:
+early steps see no `ctx["feeds"]` rows at all. So a strategy that declares feeds is replayed only
+once every declared key has been recorded for the replay gate's `min_blocks` blocks of its horizon
+(twenty hours for an hourly strategy, twenty days for a daily one); until then its replay is
+refused as unsupported input, which is not a trial, while live wakes are handed the feeds at once.
+`replay_coverage` reports each key's coverage and whether a replay may use it yet, and
+`runtime_status` says what is recorded and since when. An Alpaca strategy that declares feeds is
+replayed on the recent live tape, never on the development window of the history store.
+
 ## What you may watch but not trade
 
 `NEEDS["observe"] = {"symbols": ["BTC/USD"], "series": ["KXBTCD"]}` (up to six of each) asks the
@@ -213,8 +298,13 @@ longer than 48 hours. Equities are not bounded. Exits are never refused.
   betting against a market is buying its `no` leg.
 - Give `quantity` or `notional_usd`, not both. `notional_usd` is converted at the touch and
   rounded down to the instrument's step (whole contracts, whole shares for a limit order,
-  nine decimals for crypto and fractional market orders).
+  nine decimals for crypto and fractional market orders); a `quantity` is rounded down to it too.
+  A buy is at least `venue_rules[symbol]["min_order_usd"]` where one is stated ($10 for crypto).
 - `type` is `market` or `limit` (a limit needs `limit_price`). `post_only` rests or is refused.
+- A resting entry is yours to manage, and only a wake that completes can manage it. If none of your
+  wakes completes on its book for three of your wake intervals, and at least 30 minutes, the House
+  cancels your resting buys there (never a sell) and says why on your record (`agent.inactive`,
+  `wakes_failing`).
 - Every intent needs a `reason`: it is published next to the trade.
 - At most 8 intents and 20 cancels per decision. Anything malformed is dropped and reported back.
 
@@ -232,13 +322,15 @@ The simulator (`league/replay.py`) walks a recorded tape step by step. At each s
 - a resting limit order fills at its own price, as a maker, only when a later step's range trades
   strictly through it (`low < price` for a buy, `high > price` for a sell). A touch is not a fill:
   the tape knows nothing of the queue ahead of you or the depth behind the touch;
-- fees are close to the venue's: Alpaca crypto 0.25% taker and 0.15% maker, Kalshi
-  `0.07 x contracts x price x (1 - price)` rounded UP to the cent for a taker, and for a maker
-  nothing on most series and that same formula on the few that charge them (your specialty's brief
-  names which). The replay charges what the book charges, so a fee you did not model is not a
+- fees are close to the venue's: Alpaca crypto 0.25% taker and 0.15% maker (a round trip costs
+  0.50% taker/taker and 0.30% maker/maker), Kalshi `0.07 x contracts x price x (1 - price)` for a
+  taker, and for a maker nothing on most series and a quarter of that, `0.0175 x contracts x price
+  x (1 - price)`, on the few that charge them (your specialty's brief names which); each rounded UP
+  to $0.0001. The replay charges what the book charges, so a fee you did not model is not a
   surprise waiting on paper;
 - Kalshi contracts settle at 1 or 0 on the tape's recorded result;
-- the same rung limits and no-shorts, no-leverage rules apply.
+- the same rung limits and no-shorts, no-leverage rules apply, and Alpaca's $10 minimum: a crypto
+  buy asked under $10 is refused and never fills.
 
 **Which history.** An Alpaca strategy is replayed on the House's history store when it holds every
 input the strategy declares: the development window just before a sealed holdout (252 days for a

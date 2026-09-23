@@ -57,6 +57,10 @@ def _per_exposure(rows: Sequence[Mapping[str, Any]]) -> list[float]:
     return [float(r["log_growth"]) / float(r["exposure"]) for r in rows if float(r["exposure"]) >= 0.02]
 
 
+#: Books whose trades end in a settlement (an event contract's outcome), paper and real.
+EVENT_BOOKS = ("kalshi-shadow", "kalshi")
+
+
 def block_key(at: str, horizon: str) -> str:
     """`2026-09-20T13` for an hour block, `2026-09-20` for a day block."""
     return at[:13] if horizon == "hour" else at[:10]
@@ -391,6 +395,11 @@ class Evaluator:
         looks = [e.payload for e in look_entries]
         gate = self._gate(rung)
         blocks_needed = self._gate_blocks(rung, horizon)
+        settled = self._settled_lane(agent, book, rung, horizon, max(entered, cutoff))
+        if settled is not None:
+            numbers["settled_trades"] = settled["settled"]
+            if settled["open"]:
+                blocks_needed = min(blocks_needed, settled["blocks"])
         every = int(self.ladder["look_every_active_blocks"])
         needed = min([death["min_active_blocks"]] + ([blocks_needed] if gate else []))
         # Rationed by the looks that SPENT something, not by every look taken: a screen-only look
@@ -405,10 +414,18 @@ class Evaluator:
         # first look on Sept 20, 2026, was 0.35% of one block away, and would not have been looked
         # at again for five hours. A free check is not rationed.
         statistical_due = not spent_looks or active - last_look_active >= every
-        screen_due = bool(gate) and gate.get("gate", "bound") == "screen" and active >= blocks_needed
+        screening = bool(gate) and gate.get("gate", "bound") == "screen"
+        screen_due = screening and active >= blocks_needed
         if active < needed or (not statistical_due and not screen_due):
-            when = max(needed, last_look_active + every)
-            return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {when}", numbers)
+            # A screen looks as soon as it has its blocks; only a statistical look waits for the
+            # cadence. Until Sept 23, 2026 this said "the next look is at 5" to every paper agent,
+            # and the screen looked at 2 (daily) or 4 (hourly): agents planned against the wrong day.
+            when = blocks_needed if screening else max(needed, last_look_active + every)
+            hint = ""
+            if settled is not None and not settled["open"]:
+                hint = (f" (or {settled['blocks']} once {settled['needed']} trades have settled on this rung; "
+                        f"{settled['settled']} so far)")
+            return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {when}{hint}", numbers)
         alpha = float(self.ladder["alpha"])
         # Once death tests begin, their cadence must still not delay the free paper screen.
         # A check between paid looks reads the screen without spending either test's alpha.
@@ -422,7 +439,13 @@ class Evaluator:
         alpha_death, alpha_promote = stats.spend(alpha * (1 - episode_share), k_death), stats.spend(alpha * (1 - share), k_promote)
         lower, upper = stats.mean_bounds(growth, alpha_promote), stats.mean_bounds(growth, alpha_death)
         if lower is None or upper is None:
-            return Verdict(agent, rung, "hold", "not enough blocks for a bound", numbers)
+            if not (screen_due and growth and not tests_death and not tests_bound):
+                return Verdict(agent, rung, "hold", "not enough blocks for a bound", numbers)
+            # A screen reads growth and drawdown, not a bound: one settled day has no variance to
+            # bound, and it needs none (the settled lane of the Sept 23, 2026 revision).
+            mean = sum(growth) / len(growth)
+            lower = {"mean": mean, "sd": None, "lcb": None}
+            upper = {"mean": mean, "sd": None, "ucb": None}
         returns, risk = self.trade_returns(agent, book, since_seq=entered)
         lopsided = stats.lopsided(returns, float(self.ladder["lopsided_win_rate"]))
         loss_gate = stats.lopsided_growth_lcb(returns, risk, alpha_promote) if lopsided else None
@@ -444,10 +467,23 @@ class Evaluator:
         if gate.get("gate", "bound") == "screen":
             limit = float(gate["max_drawdown"])
             window = int(self.ladder.get("screen_drawdown_blocks", 30))
-            if level > 0 and recent < limit:
+            # The block in progress counts too, settlements and sales included. Measured Sept 22,
+            # 2026: hawkins passed on finished days (+1.4%) while six settlements that morning had
+            # lost $15.50, and the auditor, not the screen, had to say the snapshot was stale.
+            pending = self._unfinished_growth(agent, book, max(entered, cutoff))
+            numbers["unfinished_log_growth"] = pending
+            level_now = level + pending
+            recent_now = stats.max_drawdown((wealth + [math.exp(max(level_now, -700.0))])[-(window + 1):]) if pending < 0 else recent
+            if level > 0 and level_now > 0 and recent_now < limit:
                 return Verdict(agent, rung, "eligible", f"it cleared the screen: {active} active {horizon} blocks, {len(returns)} closed trades, "
-                                                        f"growth above zero and a drawdown under {limit:.0%} over its last {window} blocks", numbers)
-            why = "its growth is not above zero" if level <= 0 else f"its drawdown of {recent:.0%} over its last {window} blocks is not under {limit:.0%}"
+                                                        f"growth above zero (the block in progress included) and a drawdown "
+                                                        f"under {limit:.0%} over its last {window} blocks", numbers)
+            if level <= 0:
+                why = "its growth is not above zero"
+            elif level_now <= 0:
+                why = "its growth is not above zero once the block in progress is counted"
+            else:
+                why = f"its drawdown of {recent_now:.0%} over its last {window} blocks is not under {limit:.0%}"
             return Verdict(agent, rung, "hold", f"it has not cleared the screen: {why}", numbers)
         if lower["sd"] <= 0:
             return Verdict(agent, rung, "hold", "its block growth has no variance yet: nothing to bound", numbers)
@@ -559,6 +595,44 @@ class Evaluator:
             excess += max(0.0, float(spent or 0) - stats.spend(alpha * (1 - share), k))
         return max(0.0, alpha * share - excess)
 
+    def _settled_lane(self, agent: str, book: str, rung: int, horizon: str, since_seq: int) -> dict[str, Any] | None:
+        """The paper screen's settled lane (owner revision, Sept 23, 2026): a daily agent on an
+        event-contract book is judged by OUTCOMES, and once `settled_day.min_settled_trades` of its
+        trades have settled on this rung it may be screened after `settled_day.min_active_blocks`
+        finished day(s) instead of `min_active_blocks_day`. A settlement is the market's verdict,
+        not a mark; a daily agent otherwise waits two calendar days for evidence it already has.
+        None where the lane does not apply (another rung, an hourly agent, a book that does not
+        settle, or a constitution without the lane)."""
+        rule = (self._gate(rung) or {}).get("settled_day") if rung == 1 and horizon == "day" else None
+        if not isinstance(rule, Mapping) or book not in EVENT_BOOKS:
+            return None
+        settled = sum(1 for e in self.ledger.iter(kinds="book.settle", agent=agent, after=since_seq)
+                      if e.payload.get("book") == book)
+        needed = int(rule["min_settled_trades"])
+        return {"blocks": int(rule["min_active_blocks"]), "needed": needed, "settled": settled, "open": settled >= needed}
+
+    def _unfinished_growth(self, agent: str, book: str, since_seq: int) -> float:
+        """The growth of the block in progress so far: the latest mark on this book against the
+        equity the last finished block ended on, stakes in between taken out -- exactly what the
+        block would read if it closed now, settlements and sales included. 0.0 with no finished
+        block or no mark since."""
+        last = None
+        for entry in self.ledger.iter(kinds="eval.block", agent=agent):
+            p = entry.payload
+            if p.get("book") == book and int(p.get("first_mark_seq") or entry.seq) > since_seq:
+                last = (entry, p)
+        if last is None:
+            return 0.0
+        entry, block = last
+        boundary = int(block.get("last_mark_seq") or entry.seq)
+        end = float(block.get("end_equity") or 0.0)
+        marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent, after=boundary) if e.payload.get("book") == book]
+        if end <= 0 or not marks:
+            return 0.0
+        flow = sum(float(e.payload["usd"]) for e in self.ledger.iter(kinds="book.stake", agent=agent, after=boundary)
+                   if e.payload.get("book") == book and e.seq <= marks[-1].seq)
+        return stats.log_growth(end, float(marks[-1].payload["equity"]), flow)
+
     def _gate(self, rung: int) -> Mapping[str, Any] | None:
         """The promotion rule out of this rung, or None from the top."""
         return None if rung >= 3 else self.ladder["paper" if rung == 1 else "micro"]
@@ -657,7 +731,9 @@ class Evaluator:
         return [row for row in rows if row.get("book") == main]
 
     def promote(self, agent: str, to_rung: int, reason: str, numbers: Mapping[str, Any] | None = None) -> Verdict:
-        """Move an agent up one rung. The House calls this for rung 2 only after the audit passes."""
+        """Move an agent up one rung. Under the constitution's `ladder.paper.audit` "after" (Sept 23,
+        2026) the House calls this for rung 2 when the screen and the allocation gates pass, and the
+        frontier audit follows on the micro rung; under "before", only once the audit passes."""
         rung = self.rung(agent)
         if to_rung != rung + 1:
             raise ValueError(f"{agent} is on rung {rung}; it cannot be promoted to {to_rung}")

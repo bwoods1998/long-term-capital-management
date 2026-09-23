@@ -285,6 +285,63 @@ class InTheHouse(HouseCase):
         finally:
             strategies.all_strategies = real
 
+    def test_a_full_league_makes_room_for_a_merged_repair_and_retires_the_code_it_corrects(self):
+        """Sept 23, 2026: fifteen merged repairs had never been born, because a strategy waited for
+        an EMPTY seat and the refill kept every seat full; the defective parents kept trading."""
+        from league import strategies
+        from league.tests.test_house import BUYER
+
+        parent = self.seated("haghani")               # paper, running the defective code
+        clone = self.house.spawn("haghani", "test-family", BUYER, reason="a House mutation of it")  # rung 0, same code
+        self.house.game["economy"]["max_population"] = len(self.house.registry.living())
+        self.house.niches["alpaca-crypto-majors"].max_members = 20
+        fixed = BUYER + "\n# the corrected child\n"
+        rows = [{"name": "haghani_subcent_prices", "family": "test-family", "why": "corrected child", "code": fixed,
+                 "repair": {"key": f"strategy_defect:haghani:{parent.code_sha256[:12]}", "parent": parent.id}}]
+        real = strategies.all_strategies
+        strategies.all_strategies = lambda: rows
+        try:
+            born = self.house.enroll()
+        finally:
+            strategies.all_strategies = real
+        self.assertEqual([a.founder for a in born], ["haghani_subcent_prices"])
+        self.assertEqual(self.house.evaluator.rung(born[0].id), 0)   # it answers to replay like any child
+        causes = {e.agent: e.payload["cause"] for e in self.house.ledger.iter(kinds="agent.died")}
+        self.assertEqual(causes, {clone.id: "displaced", parent.id: "superseded"})
+        self.assertEqual({a.id for a in self.house.registry.living()}, {born[0].id})
+
+    def test_a_merged_repair_never_retires_an_agent_on_real_money(self):
+        from league import strategies
+        from league.tests.test_house import BUYER
+
+        live = self.seated("mullins")
+        self.house.evaluator.promote(live.id, 2, "test")
+        rows = [{"name": "mullins_fix", "family": "test-family", "why": "corrected child", "code": BUYER + "\n# fixed\n",
+                 "repair": {"key": f"strategy_defect:mullins:{live.code_sha256[:12]}", "parent": live.id}}]
+        real = strategies.all_strategies
+        strategies.all_strategies = lambda: rows
+        try:
+            self.house.enroll()
+        finally:
+            strategies.all_strategies = real
+        self.assertIn(live.id, {a.id for a in self.house.registry.living()})
+
+    def test_a_strategy_that_cannot_be_born_is_tried_once_per_version(self):
+        from league import strategies
+
+        rows = [{"name": "nowhere", "family": "test-family", "why": "no specialty", "code": "NEEDS = {'venue': 'alpaca', 'horizon': 'hour'}\n"
+                 "def decide(ctx):\n    return {'intents': []}\n"}]
+        real = strategies.all_strategies
+        strategies.all_strategies = lambda: rows
+        alerts = []
+        self.house.alert = lambda level, text: alerts.append(text)
+        try:
+            self.assertEqual(self.house.enroll(), [])
+            self.assertEqual(self.house.enroll(), [])
+        finally:
+            strategies.all_strategies = real
+        self.assertEqual(len(alerts), 1)
+
     def test_a_full_specialty_has_no_more_children(self):
         parent = self.seated()
         self.house.economy.grant(parent.id, "10", "test")

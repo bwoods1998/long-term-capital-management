@@ -11,11 +11,15 @@ The active spending policy and experiment workflow are documented in
 [Phase one](../docs/phase-one.md). Production uses persistent campaign allowances; the legacy
 fourteen-day pacer remains only for compatibility and isolated fixtures.
 
-The [latest run report](../docs/runs/2026-09-20-foundation-progress.md) records deployed
-acceptance. The [chief architect handoff](../docs/design/2026-09-20-chief-architect-handoff.md)
-describes the external broker/verifier and durable engineering loop still to be built.
-The gateway's [Jev lane](../docs/design/2026-09-20-typesafe-pilot.md) is available for experiments;
-the House does not yet consume its judgments in production research or trading.
+The latest execution record is [Dynamism II](../docs/runs/2026-09-23-dynamism-ii.md) (Sept 23,
+2026), after the [Sept 22 rebuild](../docs/runs/2026-09-22-overnight-rebuild.md);
+[operations](../docs/operations.md) is the operator's page, with the switches. The
+[chief architect handoff](../docs/design/2026-09-20-chief-architect-handoff.md) describes the
+external spending broker and verifier still to be built. Jev, through the gateway's
+[Jev lane](../docs/design/2026-09-20-typesafe-pilot.md), is the House's cheap sensor for the
+research gate, triage, hypothesis links and exposure reports (`sensors.py`,
+[design](../docs/design/2026-09-22-jev-sensor.md)); its answers carry no order, promotion,
+spending or merge authority.
 
 ## Design rules
 
@@ -80,50 +84,54 @@ status is exposed in health and agent research context; qualification is distinc
 | `venues.py` | `gateway_broker(name, ...)`: the first run's Alpaca and Kalshi adapters in gateway mode. `alpaca-paper` is the same adapter signed with the paper keys. `market_hours` for equities. |
 | `constitution.py` | `CONSTITUTION`, `digest()`, `PINNED_DIGEST`. Changing it means changing the pinned digest too, in a commit the owner makes. |
 | `stats.py` | Pure functions: `log_growth`, `mean_bounds` (one-sided t bounds, with its own `t_quantile`), `spend` (alpha per look), `lopsided` and `lopsided_growth_lcb` (the exact Clopper-Pearson loss-rate gate), `deflated_sharpe`, `cusum_decay`, `quarter_kelly`, `max_drawdown`. Degenerate data returns `None`, never raises. |
-| `evaluator.py` | `Evaluator`: `record_trial` (scores a replay and counts it against the candidate and its ancestors), `observe` (turns equity marks into blocks of log growth), `judge` (looks, promotion eligibility, death -- the screen reads a TRAILING drawdown window because a running maximum never falls, and a look that spends no alpha is not rationed), `drift` (a CUSUM on the edge per closed trade against the record of the rung below, on rungs 2 and 3), `promote`/`demote`/`seat`. It reads the ledger and writes `eval.*` rows; the House acts on the verdicts. |
+| `evaluator.py` | `Evaluator`: `record_trial` (scores a replay and counts it against the candidate and its ancestors), `observe` (turns equity marks into blocks of log growth), `judge` (looks, promotion eligibility, death -- the screen reads a TRAILING drawdown window because a running maximum never falls, and a look that spends no alpha is not rationed; since Sept 23, 2026 the screen also counts the block in progress (`_unfinished_growth`), and a daily agent on a Kalshi book with 3 settled trades on its rung is screened after one finished day (`_settled_lane`)), `drift` (a CUSUM on the edge per closed trade against the record of the rung below, on rungs 2 and 3), `promote`/`demote`/`seat`. It reads the ledger and writes `eval.*` rows; the House acts on the verdicts. |
 | `replay.py` | Rung 0: walks a strategy over a tape one step at a time with conservative fills (a resting order fills only when a later step trades strictly through it). Self-contained (standard library plus `safety.py`): it is uploaded into the agent's box as it is. |
 | `options_history.py` | `OptionsHistory`: a resumable SQLite store of listed-option contracts (expired ones included), OPRA trade bars, optional prints and the House's recorded live OPRA quotes, with `data.coverage` rows (`asset: option`). Builds the options desk's replay tape (a contract exists from its first print; quotes are ESTIMATED from prints, since Alpaca has no historical option quotes) and the equity desks' `options_features` (Black-Scholes IV, 25-delta skew, volume and trade counts), stamped with when each became available. `python -m league.options_history ingest ...`; the House refreshes it daily. |
 | `options_replay.py` | The options desk's rung 0, reached from `replay.py` for a tape with `asset_class: option`: point-in-time listing, the 100 multiplier, an assumed $0.05 a contract a fill, limit orders filled only by later bars (at the worse of the shown and a conservative touch when marketable, else only on a print a tick through, or at a recorded OPRA touch), liquidity limits, day orders, the 14:30 expiry offer and a write-off at zero. Uploaded into the box beside `replay.py`. |
+| `feeds.py` | `FeedRecorder`: the live feeds the House records for its strategies -- ESPN scoreboards of the leagues the sports desks trade (every 60 s while a game is on or about to start, else every 15 minutes, never a past date) and perpetual funding and open interest for the crypto desks' coins (every 5 minutes) -- in `feeds.sqlite` with the House's receive time: unchanged content stored once, a failure a failed poll, a `data.coverage` row (`asset: feed`) an hour. `NEEDS["feeds"]` puts the latest rows in `ctx["feeds"]`; a replay shows them point in time and is refused as unsupported input (not a trial) until they span the replay gate's `min_blocks`. |
 | `history.py` | The deep-history store (`<root>/history/history.sqlite`) and `python -m league.history ingest|coverage`: Alpaca bars since 2016 (raw and adjusted), quote probes and trade windows, fetched in resumable chunks through the gateway; unavailable (the venue had nothing) is kept apart from unfetched (a gap in the store). Each finished run becomes a `data.coverage` ledger row. |
 | `deep_replay.py` | Tapes from the history store, built by the same `AlpacaData` code as live ones; the development window before the sealed holdout; `HoldoutSeal` (one evaluation per version, a budget per line, `holdout.access` rows, coarse numbers only). |
 | `tapes.py` | `AlpacaData` and `KalshiData`: recorded tapes for replay and live snapshots of the same shape. A bar is stamped with the moment it closed; a Kalshi row carries only what was on the screen; a capped board is a seeded draw that never looks at volume or results. |
 | `paper.py` | `KalshiShadowBroker`: a simulated Kalshi account over live quotes. Holds no credential and sends nothing. State in `kalshi-shadow.json`. |
 | `sim.py` | `SimBroker`: a simulated Alpaca account that behaves as the paper venue was measured to. A canary House trades on it, never on the shared paper account. |
 | `economy.py` | `Economy`: balances folded from `credit.*` rows; `grant`, `charge` (never refused: the compute is already spent), `transfer`, `shares`/`payout` (a quarter as niche floors, three quarters won on growth SQUARED x root active blocks x the rung's weight; before anyone is profitable the won share goes to the least-bad TRADER, never split evenly), `can_fork`, `box_cost`. `load_game` and `check_bounds` read `game.json`. |
-| `game.json` | The economy's dials (pool, floor share, rung weights, endowments, fork threshold, population bounds, audit cooldown, research cadence) and the bounds the game designer must stay inside. |
+| `game.json` | The economy's dials (pool, floor share, rung weights, endowments, fork threshold, population bounds, the audit's cooldowns and who pays for it, research cadence and pace, the foundry) and the bounds the game designer must stay inside. |
 | `agents.py` | `Registry` and `Agent`: identity, strategy versions, lineage, niche (`venue/horizon/style`) and fate, folded from the ledger. The House adopts code in place on rung 0 or on paper with no record to protect (no holding, working order, active block or closed trade). New code for an agent on real money always starts as a child. |
 | `sandbox.py` | `SailSandbox` (one Sailbox per agent, forked from `agent_image_checkpoint`, sealed with an egress allowlist of `sealed.invalid` before it is recorded, destroyed if it cannot be sealed) and `LocalSandbox`. Both offer `decide`, `needs`, `replay`, `fork`, `retire`, `sleep_all`. |
 | `runner.py` | Runs one `decide` (or reads `NEEDS`) inside the box: 5 second limit, strategy prints discarded, one `DECIDE-RESULT <token>` line, then `os._exit`. |
 | `safety.py` | `check_code`: the import whitelist and the banned constructs (no underscore attributes, no attribute assignment, no `eval`/`exec`/`open`/`getattr`). Ported from the first run's Foundry, where it was hardened against real attempts. Imports nothing from the league. |
 | `commons.py` | `Commons`: web search (Sail's search API, Google News RSS as fallback, $0.01 charged per query), the research library, the tool-request queue (ordered by demand; unresolved and blocked engineering requests remain visible until explicitly resolved), the playbook. All of it is ledger rows. |
-| `researcher.py` | `Researcher`: a cheap Sail model's tool loop for one agent, every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. |
+| `researcher.py` | `Researcher`: a cheap model's tool loop for one agent (a Sail model, or GPT-6 Luna through the gateway for the share of sessions `fast_research.ResearchRouter` sends there), every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. |
 | `rules.py` | `rules_text(game)`: what every agent is told, generated from the constitution and `game.json` so it cannot drift from what is enforced. |
 | `jev.py` | `Sensor`: Jev (TypeSafe jev-1.13.0 through the gateway) as a cheap yes/no sensor. Answers are cached by the caller's key, batched 16 questions a request, capped per UTC day (dollars, calls, calls per purpose) before any call, and an unconfirmed call is counted at the worst case. After a failure a breaker opens and callers decide without it. Labels carry no order, promotion, spending or merge authority. |
 | `sensors.py` | `JevFloor`, the House's one hook for the Jev work below (`config.json` `jev`): `research_due` (from `House._gate`), `tick` (inactivity sweep; triage, links and exposure as background jobs while open for business) and `health` (`health.json` `jev`). |
-| `research_gate.py` | `ResearchGate`: skips a clock-due research pass only when nothing relevant changed. The triggers are fills, settlements, refusals, code or rung, material verdicts, a fulfilled request, credits, a niche note, market availability and a lifted blocker. It backs off repeated empty passes on the v0 dials (`game.json` `research.gate`), waits out known blockers, keeps a 24 h heartbeat, asks Jev only whether an out-of-niche note matters, and samples 10% of skips. `Inactivity` writes `agent.inactive` when a reason changes. `report()` and `python -m league.research_gate LEDGER` print skipped sessions, estimated savings, the sampled miss rate and Jev spend. |
+| `research_gate.py` | `ResearchGate`: skips a clock-due research pass only when nothing relevant changed. The triggers are fills, settlements, refusals, code or rung, material verdicts, a fulfilled request, credits (not the routine epoch payout, since Sept 23, 2026), a niche note, market availability and a lifted blocker. It backs off repeated empty passes on the v0 dials (`game.json` `research.gate`), waits out known blockers, keeps a 24 h heartbeat, asks Jev only whether an out-of-niche note matters, and samples 10% of skips. `Inactivity` writes `agent.inactive` when a reason changes. `report()` and `python -m league.research_gate LEDGER` print skipped sessions, estimated savings, the sampled miss rate and Jev spend. |
 | `triage.py` | `Triage`: tool requests, post-mortems, abstentions and journals/thoughts become deduplicated `repair.reported` rows (`source: triage`) with their evidence and affected agents. Grouping is exact first, with the repair worklist's keys and excerpts so both reporters fold into one job; Jev decides "same missing feed?" (merge only at high confidence), "does this report a bug?" and "same defect?". |
 | `hypothesis_memory.py` | `HypothesisMemory`: stated mechanisms (cards, candidate purposes, docstrings) linked as `hypothesis.link` (rewording / related / distinct; exact or Jev). A link never changes genealogy or trial counts. `failure_history(ref)` returns a mechanism's own failures beside its linked mechanisms'. |
 | `exposure.py` | `Exposure`: open bets grouped across agents by Kalshi event and series and Alpaca underlying, plus Jev-related contracts. Report only (`health.json` `jev.exposure`); the risk layer decides. |
 | `seeds/` | The fourteen founding strategy files (Kalshi, crypto, equity and options) and `all_seeds()`. They are data, not modules: nothing imports them. |
-| `strategies/` | Strategies Merton adds as architect; each `<stem>.py` is described by its own `<stem>.json` (`name`, `family`, `why`, and `repair` for a corrected child), so two proposals never rewrite one shared file. The House enrolls each once, on rung 0. The shared `registry.json` is retired (Sept 22, 2026) and CI refuses a Merton branch that writes it. |
+| `strategies/` | Strategies Merton adds as architect, and the engineer's corrected children; each `<stem>.py` is described by its own `<stem>.json` (`name`, `family`, `why`, and `repair` for a corrected child), so two proposals never rewrite one shared file. The House enrolls each once, on rung 0, corrected children first (`House.enroll`). Since Sept 23, 2026 a full league makes room for them (`Settings.enroll_displaces`): the seat of an agent still running the code a repair corrects, else the weakest eligible resident. Once a corrected child is born, the agents off real money still running that code are retired as `superseded`. The code a repair corrects is the sha in a `strategy_defect:<agent>:<sha12>` key, or its named parent's code; a repair that names neither (a bug report about a desk) retires nothing. A strategy that cannot be born is tried again only when its file changes. The shared `registry.json` is retired (Sept 22, 2026) and CI refuses a Merton branch that writes it. |
 | `tools/` | Pure helper modules Merton adds as toolsmith; uploaded beside the strategy so it may `from tools.<name> import ...`. Empty at the start. |
-| `playbook/` | Lessons Merton adds as teacher, one markdown file each; the House loads them into the ledger's playbook. |
-| `house.py` | `House`: `found`, `spawn`, `seat`, `wake`, `judge`, `kill`, `fork`, `research`, `keep_population`, `tick`. `Settings` are the House's own dials. |
-| `budget.py` | `Budget`: reads Sail's credit balance, counts a month's spend as the sum of its falls, returns `open` or `stopped`, and says on the ledger when that changes. It guards the ACCOUNT only -- the month's line and the reserve -- because it once also latched on the expedition's budget and, since `Pacer.spent` only grows, that latch had no key. |
+| `playbook/` | Lessons Merton adds as teacher, one markdown file each; the House loads each into the ledger's playbook once, and again when its text changes (Sept 23, 2026). |
+| `house.py` | `House`: `found`, `spawn`, `enroll`, `seat`, `wake`, `judge`, `kill`, `fork`, `research`, `keep_population`, `tick`. `Settings` are the House's own dials. |
+| `budget.py` | `Budget`: reads Sail's credit balance, counts a month's spend as the sum of its falls, returns `open` or `stopped`, and says on the ledger when that changes. It guards the ACCOUNT only -- the month's line (the constitution's, plus the owner's recorded top-ups that month) and the reserve -- because it once also latched on the expedition's budget and, since `Pacer.spent` only grows, that latch had no key. |
+| `campaigns.py`, `campaigns.json` | `CampaignBudget`: the owner-funded campaign and its burst. Every paid call reserves a hold before it is sent and settles from its response; unknown costs keep their holds. The Sail balance meter (`meter_required`), the owner's top-ups, and the live grant (`live_trading`, `ratify_live_trading`). `absorb_stale` (Sept 23, 2026) settles at $0 the Sail holds older than the meter's lag that have no response, because the meter already counts their charge; each release is kept in `cost_reconciliations`, and nothing is released while the meter is unhealthy or behind what has been settled. `CampaignPacer` paces the House by it. No role may change either file. |
+| `live_trading.py` | The owner's persistent grant: `policy(venue_capital)` (agents = the allocation divided by the micro stake, the loss line = the allocation, pinned to `money_digest`), and `--enable`, `--disable` and `--ratify` (the same capital under revised money rules), run on the box by `scripts/live_trading.py`. |
 | `grants.py` | Phase-scoped Luna startup grants, claimed durably before the call; one per family/niche, twelve maximum and $0.25 reserved each. |
-| `frontier.py` | `Frontier.ask`: one metered call through the gateway's `/v1/frontier/responses`; the cost comes back in `X-LTCM-Cost-USD`. Priced Astra, Sol, Terra and Luna routes; the default is Astra. |
-| `hypotheses.py` | `Foundry`: the hypothesis foundry that replaced routine House-staked mutation refill (Sept 22, 2026). It asks Merton for 3-4 `hypothesis.card`s for the desk the evidence favours. Each card has a mechanism, data, edge after costs, horizon, rejection evidence and a whole strategy file. A card is replayed through `House._candidate_replay` under the id its child would carry, and only a passer is born, onto paper. A family with 15 counted failures and no pass is retired (`disproven`, or `blocked_data`/`blocked_infra` plus a `repair.reported` row). Every birth gets a `route.decision` saying why it happened. Dials in `game.json` `hypotheses`. |
-| `auditor.py` | `Auditor.audit` (the evidence packet, the veto, charged to the agent) and `score` (what each veto cost or saved, scaled to the micro stake). |
+| `frontier.py` | `Frontier.ask`: one metered call through the gateway's `/v1/frontier/responses`; the cost comes back in `X-LTCM-Cost-USD`. Priced Astra, Sol, Terra and Luna routes, GPT-5.6 and GPT-6; the default is Astra. The campaign hold is the call's worst case at the model's ceiling rates. Since Sept 23, 2026 a verified call settles it at the gateway's metered cost (before, at every token's long-context ceiling when that was higher), a refused one (HTTP 4xx) at $0, and a call with no answer keeps it. `frontier_tier` and `TIER_ROLES` say which work the month's remainder still pays for. |
+| `hypotheses.py` | `Foundry`: the hypothesis foundry that replaced routine House-staked mutation refill (Sept 22, 2026). It asks Merton, on GPT-6 Sol at high effort, for 3-4 `hypothesis.card`s for a desk: up to `fast_share` (0.5) of recent calls to the best-scored hourly, around-the-clock desk in `fast_desks`, up to `exploration_share` to the least-explored desk, the rest to the desk the evidence favours. Each card has a mechanism, data, edge after costs, horizon, rejection evidence and a whole strategy file. The packet adds horizon guidance (`prefer_horizon`), forward results by family on the desk, and the fees, the Kalshi maker fee included. A card is replayed through `House._candidate_replay` under the id its child would carry, and only a passer is born, onto paper. A family with 15 counted failures and no pass is retired (`disproven`, or `blocked_data`/`blocked_infra` plus a `repair.reported` row). Every birth gets a `route.decision` saying why it happened. Dials in `game.json` `hypotheses`. |
+| `auditor.py` | `Auditor.audit` (the evidence packet and the veto; `charge=False` when the House pays, which `game.json` `audit.house_pays` makes the default from Sept 23, 2026, and each verdict records `paid_by`) and `score` (what each veto cost or saved, scaled to the micro stake). The House decides when it runs: after promotion to the micro rung (`ladder.paper.audit` "after"), or before it for an agent with a known defect. |
+| `preaudit.py` | `PreAudit`: a free, deterministic look at a paper agent's code and first wakes (errors, dropped intents, refusals, barren wakes, cent rounding). It files repair reports and a promotion-status mark, never a kill; a red mark makes the frontier audit come before any promotion (`House._known_defect`, Sept 23, 2026). |
 | `merton.py` | `Merton`: the schedule and one pass of each pull-request role, brought round sooner while the day's frontier allowance is unspent; `consult`, where he WRITES the hiring agent a strategy file rather than advising it; `GatewayForge` (production) and `GhForge` (the owner's machine, through `gh`); `evidence_from(house)`, which shows the architect how each desk's members are really faring and the operator the checker's own bounds. |
 | `worklist.py` | The repair worklist: the fold over `repair.reported` / `repair.status` (dedupe by key, original evidence kept, priority = agents x recurrence x severity, states proposed ... verified / rejected / dormant) and `Sources`, the deterministic reporters: audit vetoes, refusal reasons across 3+ agents or wakes, CI-refused Merton PRs, tool requests and the toolsmith's blocked verdicts, research that names a missing input. Jev triage writes `source: triage` rows and is folded the same way. |
-| `engineer.py` | The repair engineer, Merton's sixth job with no more authority than the others: one paid patch a step for the top admitted job, a pull request through the same gateway route and path guard, CI's failure text read back (`GET /v1/github/pr/<n>/failures`) for at most `max_attempts` revisions, then `canary` (the running release holds the files), `observing` and `verified` only if the signal has not recurred. Strategy defects become new child strategies on rung 0; anything outside the role paths is `dormant: needs core authority`. Settings in `engineer.json` (owner-only). `scripts/repair_drill.py --plant` files a labeled synthetic job through the House's `repairs-inbox/` (the House stays the ledger's only writer); a drill asks no model and spends nothing. Each step leaves the queue in `<state>/repairs.json`. |
+| `engineer.py` | The repair engineer, Merton's sixth job with no more authority than the others: one paid patch a step for the top admitted job, a pull request through the same gateway route and path guard, CI's failure text read back (`GET /v1/github/pr/<n>/failures`) for at most `max_attempts` revisions, then `canary` (the running release holds the files), `observing` and `verified` only if the signal has not recurred. Strategy defects become new child strategies on rung 0, which `House.enroll` seats even in a full league (Sept 23, 2026); anything outside the role paths is `dormant: needs core authority`. Settings in `engineer.json` (owner-only). `scripts/repair_drill.py --plant` files a labeled synthetic job through the House's `repairs-inbox/` (the House stays the ledger's only writer); a drill asks no model and spends nothing. Each step leaves the queue in `<state>/repairs.json`. |
 | `ci.py` | `python3 -m league.ci`: the path guard (`ROLE_PATHS`, `FORBIDDEN`, `CONFIG_DIALS`), content checks for strategies, tools, `game.json` and `config.json`, then the suite. Also makes the canned regression tapes. |
 | `capital.py` | `kelly_stake` and `resize` (rung 3), `recommend` (the standing capital recommendation, an `ops.recommendation` row). |
 | `publish.py` | `Publisher`: cleans ledger rows into the site's exact event and checkpoint shapes and posts them. Cursor in `publish.json`. |
 | `service.py` | `build(root, ...)`: the real House from `config.json` and three secrets (`GATEWAY_TOKEN`, `SAIL_API_KEY`, `CAPITAL_PUBLISH_TOKEN`), read from the environment or a 0600 `.env`. `canary=True` builds a House that can hurt nothing. |
 | `__main__.py` | `python3 -m league run | tick | found | status | verify | stop | start`. |
 | `watchdog.py` | `python3 -m league.watchdog deploy | status | rollback | prune`: releases on the box, the canary, promotion, the watch, the rollback. Imports nothing else from the package at import time. |
-| `updater.py` | How merged code reaches the House box with no human step: every half hour it downloads `main` (public, no credential), unpacks the release trees, lets each tree run its OWN content checks on itself (`league.ci --content-only`, a subprocess inside that tree, which is what GitHub already did to the same commit), refuses any change to `real_money`, and hands a changed tree to the watchdog for canary, promotion, watch and rollback. A tree the watchdog really judged is never tried again; one refused only because another deploy held the lock is, because the promotion's own restart makes that race the normal case. |
+| `updater.py` | How merged code reaches the House box with no human step: every half hour it reads `main`'s head and downloads that exact commit (public, no credential). GitHub's API must show the pinned Checks workflow and every required job of it passed on that sha. A change to the judges (the running release's `ci.FORBIDDEN`), to the workflows or to `real_money` is refused as the owner's deploy. The RUNNING release's content checks judge the tree (`league.ci --content-only --root <tree>`, its own process with a scrubbed environment; until Sept 22, 2026 each tree judged itself). Then it hands the tree to the watchdog for canary, promotion, watch and rollback. A tree the watchdog really judged is never tried again; one refused only because another deploy held the lock is, because the promotion's own restart makes that race the normal case. |
 | `CONTRACT.md` | The strategy contract. |
 | `config.json` | Gateway and site URLs, the agent image checkpoint, `real_money`, the operating dials, the performance baseline. |
 
@@ -134,8 +142,13 @@ status is exposed in health and agent research context; qualification is distinc
 1. **Settle and poll.** For every book: advance the simulated venues (`advance()` fills resting
    shadow orders the market has traded through), poll resting orders for fills, apply new Kalshi
    settlements. One venue's outage is an alert and does not stop the others.
-2. **Check the budget.** `open` or `stopped`. When stopped, only agents holding real-money positions
-   or orders are woken, so they can exit; research, Merton, payouts and births wait.
+2. **Check the budget.** `open` or `stopped`: the Sail account's line (`budget.py`), then the
+   campaign, whose Sail meter must have been read and whose allowance must be open; a maintenance
+   pause also closes business. Once the meter has been read, every ten minutes, Sail holds older
+   than an hour with no response are absorbed into it (`CampaignBudget.absorb_stale`, Sept 23,
+   2026) and an `ops.budget` "holds absorbed" row says so. When stopped, only agents holding
+   real-money positions or orders are woken, so they can exit; research, Merton, payouts and
+   births wait.
 3. **Wake each agent that is due** (at most 16 a tick, 6 side by side; its own `wake_minutes`, 5 to
    1,440). If its code has not had its replay, one is started in the background. A rung-0 agent
    stops here. Otherwise the House seats it (limits and stake for its rung), builds its snapshot
@@ -147,15 +160,24 @@ status is exposed in health and agent research context; qualification is distinc
 5. **Every `mark_every_seconds` (300), per book:** poll, mark every account, reconcile to the venue
    (a mismatch is an error alert and freezes new entries). Then judge each living agent on that
    book: close finished blocks of log growth, take a look if one is due, and act on the verdict:
-   `die` kills; `eligible` promotes (from paper only through Merton's audit, and only when real money
-   is on); on rungs 2 and 3 a drift alarm demotes, and the House winds the account down and re-seats the agent on the book of its new rung.
+   `die` kills; `eligible` promotes. From paper that needs real money on, the owner's grant, room
+   in the capital envelope and no audit cooldown running. Since Sept 23, 2026 the agent then takes
+   the micro stake at once and Merton's audit follows on the micro rung, in the background; an
+   agent with a known defect (a red pre-audit, or a merged corrected child of its code) is audited
+   first, as before. On rung 2 the House commits an audit after promotion that finished before a
+   restart, or starts one that is owed, and a veto demotes to paper. A micro agent down 20% since
+   promotion returns to paper. On rungs 2 and 3 a drift alarm demotes, and the House winds the account down and re-seats the agent on the book of its new rung.
    Retry unfinished exits for dead agents and abandoned books, preserve working sells, record
    their final evidence (including later settlements), and sweep closed accounts' free cash.
 6. **Start due research passes** in the background, stuck agents first and then whoever has waited
-   longest (at least three hours apart, halved while the day's Sail is underspent, and within the
-   hour for an agent that cannot act at all; only for an agent with more than twice the minimum
-   credits; and none at all from the moment a release is staged, because the restart would throw
-   the pass away half-read). Eligibility is checked again when a queued worker actually starts.
+   longest. The base interval is three hours, or one for an agent that cannot act at all, and 15
+   minutes for both while the funded burst is in force (`turbo.json`). The legacy pacer also halves
+   it while the day's Sail is underspent; the campaign never does. The agent's own record then
+   scales it (`game.json` `research.pace`): a winner waits 0.1 of it, a loser on paper or above 8
+   times, and an agent with no earned record 3 times, unless it is idle (Sept 23, 2026). The
+   research gate may back off further. Research runs only for an agent with more than twice the
+   minimum credits, and none at all from the moment a release is staged, because the restart would
+   throw the pass away half-read. Eligibility is checked again when a queued worker actually starts.
    A passing candidate is adopted on rung 0 or on paper with no record; otherwise it becomes a
    fork. A failed candidate that at least trades can replace an empty paper strategy after ten
    barren wakes. A later failed replay does not discard an earlier passing candidate. Research
@@ -169,20 +191,29 @@ status is exposed in health and agent research context; qualification is distinc
    paid patch, paced and inside the frontier tier that still pays for code.
    Then the **hypothesis foundry** (`hypotheses.py`). On every tick it labels new
    births, and every ten minutes it retires exhausted families. It makes at most one paid call per
-   `call_minutes`, and only when all of the following hold:
-   - a seat is open;
+   `call_minutes` (10), and only when all of the following hold:
+   - the House is neither paused nor staging a release;
+   - a seat is open on an eligible desk;
    - the frontier tier still pays for code work;
-   - the day's OpenAI allowance and the foundry's own window budget have room;
-   - no replay-passing card is already waiting for a seat.
+   - the day's OpenAI allowance and the foundry's own window budget ($40 per 24 hours) have room;
+   - no replay-passing card is already waiting for a seat;
+   - fewer than `max_pending_cards` (8) of its cards await replay. With 0, any pending card or
+     running card replay holds the call, as before Sept 23, 2026;
+   - its own previous call has finished. Since Sept 23, 2026 other Merton passes no longer hold
+     it up, though a running foundry call still holds the scheduled roles back, because those run
+     one at a time.
 
    The call's cards are replayed one after another in the replay lane.
-8. **Once an epoch:** load new lessons from `playbook/`, resize rung-3 stakes, write the capital
+8. **Once an epoch:** load new and changed lessons from `playbook/`, resize rung-3 stakes, raise a
+   rung-2 stake to the current micro stake where the capital envelope has room, write the capital
    recommendation, pay the pool, score the auditor's vetoes.
 9. **Keep the population:** kill agents at zero credits, rung-0 agents past the replay deadline, and
    agents stuck barren with too little left to research their way out (the culling runs even when
    the Sail meter has stopped the floor; only the refill waits for business); fork agents above the
    fork threshold (rung 1 and up, once an epoch); re-found any seed never born if the population is
-   under its floor; enroll Merton's registered strategies; and fill the last seat. Research
+   under its floor; enroll merged strategies, at most three a tick and corrected children first
+   (since Sept 23, 2026 a full league makes room for each, and a born corrected child retires the
+   agents off real money still running the code it corrects); and fill the last seat. Research
    candidates that passed replay go first. With the foundry on, the next is a replay-passing
    hypothesis card, taken from the desk with the best evidence first. After that comes a mutation of
    a parent that is earning forward and whose family is not retired, capped at a share of the day's

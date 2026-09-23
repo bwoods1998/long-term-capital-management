@@ -16,7 +16,7 @@ A replay pass is an intermediate result, not a completed research outcome. Displ
 
 - For an already-passing candidate, preserve the exact passing code and parameters. Prefer a feasible next forward observation over another score on reused history, unless a concrete correctness or robustness question remains.
 - Check House adoption and current eligibility; a retained proposal is not automatically deployed.
-- Check the actual audit and operating credit requirement. Reserve that amount before optional research. No numerical floor is supplied here, so do not invent one or assume replenishment.
+- Check the actual operating credit requirement and reserve it before optional research. Since Sept 23, 2026 the House pays for the promotion audit, so the audit needs no reserve. No numerical floor is supplied here, so do not invent one or assume replenishment.
 - Document the next eligible entry and expected settlement or holding horizon. Do not manufacture trades when the after-fee edge is absent.
 - Respect explicit holds. Haghani's hold is an audit cooldown, not a request for more replay trials.
 
