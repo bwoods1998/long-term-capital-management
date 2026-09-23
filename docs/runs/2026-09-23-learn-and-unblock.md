@@ -514,3 +514,18 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   and winners' consultations if it runs lower. The House's campaign still carries $101.55 of OpenAI
   holds, some 67-73 hours old (Sept 20-21 calls that never settled): a known defect (Sept 22), left
   for the owner's review because state changes go through House code, not by hand.
+- 22:30-22:34Z — **Deploy C verified on the box:** the base-raise lending works live
+  (meriwether-h2d625d, a bunt seated at $10 before the $30 base and at W_real 0.996, was lent $20.00
+  "toward $30" at 22:30:27Z); the day-open files exist (`day_open.kalshi.json`,
+  `day_open.kalshi-shadow.json`, `day_open.alpaca-paper.json`; the real Alpaca book holds no
+  account, so it has none); U5 keeps growing winners' targets (hilibrand-h6ca596-3 $30.66 at
+  W_real 1.022); the tier is back to "earned" ("$13.69 left" at 22:26:35Z: the "$0.00" at 22:25:05Z
+  was the old House's read during its shutdown); 109 living; no book frozen; no error alert.
+  With the crypto haircut at 4 bps the best Alpaca record, haghani-56, is at E 1.0083 on 8 closed
+  trades (W_paper 1.0167, +0.34% short of the bunt line).
+- 22:30Z — main's CI on `731db82`: 3.14 passed (8 min); 3.11 failed one test,
+  `test_watchdog.ReleasesTest.test_there_is_no_moment_without_a_valid_current` (a reader thread saw
+  `FileNotFoundError` once while 600 promotions swapped the `current` symlink). No PR of this run
+  touched `league/watchdog.py` or its test; the swap is an atomic `os.replace` of a symlink, the
+  test passed on 3.14 in the same run and on every earlier run: a timing flake on the runner. The
+  failed job was re-run (result below).
