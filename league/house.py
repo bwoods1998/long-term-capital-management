@@ -110,6 +110,9 @@ class Settings:
     kalshi_day_step_seconds: int = 1800  # a daily strategy is not judged on five-minute moves
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
+    # The Alpha Lab's box key, when `league/config.json` `lab` names a box (`service.lab_box_key`):
+    # with `game.json` `lab.enabled` too, the lab runs (league/lab.py).
+    lab_box: str = ""
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
     # Historical options replay and options-derived features (`league/options_history.py`). ON:
     # with no ingested history nothing changes (paper stays the options desk's replay), so it is
@@ -123,9 +126,6 @@ class Settings:
     deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
     holdout_gate: bool = True
     holdout_lineage_budget: int = 3
-    # The Alpha Lab's box key, when `league/config.json` `lab` names a box (`service.lab_box_key`):
-    # with `game.json` `lab.enabled` too, the lab runs (league/lab.py).
-    lab_box: str = ""
 
 
 

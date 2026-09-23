@@ -113,6 +113,11 @@ KINDS: dict[str, bool] = {
     "ops.recommendation": True,
     "ops.constitution": True,  # the digest of the constitution the House started under
     "provider.request": False,  # a metered model call: private, the cost is what is public
+    # The Alpha Lab (league/lab.py), Sept 23, 2026. Private: the site validates kinds against a fixed
+    # list, and a graduate's row names the program's lineage and author.
+    "lab.stats": False,  # throughput, pass rates per stage, archive coverage and spend over the last hour
+    "lab.graduate": False,  # one graduation outcome of a lab candidate: replay, holdout, birth; with authorship
+    "lab.royalty": False,  # a lab graduate's performance fee paying the lab's compute line, once per fee
     # The overnight rebuild of Sept 22, 2026. All private: the site validates kinds against a
     # fixed list, and hypotheses, repairs and traces can carry strategy content.
     "hypothesis.card": False,  # a candidate's mechanism, data, expected edge, horizon, rejection test
@@ -127,11 +132,6 @@ KINDS: dict[str, bool] = {
     "data.coverage": False,  # what history was ingested, from where, and what is missing
     "holdout.access": False,  # a sealed-holdout evaluation: who, what, when, how often
     "agent.inactive": False,  # an explicit reason an agent is not trading or researching
-    # The Alpha Lab (league/lab.py), Sept 23, 2026. Private: the site validates kinds against a fixed
-    # list, and a graduate's row names the program's lineage and author.
-    "lab.stats": False,  # throughput, pass rates per stage, archive coverage and spend over the last hour
-    "lab.graduate": False,  # one graduation outcome of a lab candidate: replay, holdout, birth; with authorship
-    "lab.royalty": False,  # a lab graduate's performance fee paying the lab's compute line, once per fee
 }
 
 
