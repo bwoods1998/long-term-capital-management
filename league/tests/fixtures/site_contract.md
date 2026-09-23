@@ -16,7 +16,7 @@ An unknown key anywhere in a checked object is a 400, never ignored.
 | Body | `Content-Type: application/json` (415 otherwise, D:63). No query string on a POST (400), except `reset`. |
 | `POST /api/capital/events` | event batch, <= 512 KiB (S:7). Reply `{stored, replayed}`. Archives every `floor.mark` into the balance history as well. |
 | `POST /api/capital/history` | event batch of `floor.mark` only (D:198). Backfill: not broadcast, not on the tape. |
-| `POST /api/capital/checkpoint` | one checkpoint, <= 256 KiB (S:8). Reply `{published_at, desks}`. |
+| `POST /api/capital/checkpoint` | one checkpoint, <= 512 KiB (S:8; 256 KiB before personal-site #4, Sept 23, 2026). Reply `{published_at, desks}`. |
 | `POST /api/capital/reset?confirm=erase-everything` | wipes events, history, checkpoint, desks of that floor (D:344). |
 | Test tape | the same four (and every GET, and the socket) under `/api/capital/t/<tape>/...`. **`<tape>` is `test` or `canary`, nothing else** (`TAPES`, S:115-116, D:17). Separate storage per tape, same token. View at `/capital/?tape=test` (P:9); the status dot there follows the connection. Any other name is a 404 from the worker and wakes no object. |
 | Idempotency | same event `id` + same `digest` = replayed, no error. Same `id` + different `digest` = **409 and the whole batch is rolled back** (D:135). |
@@ -78,7 +78,7 @@ only when the row is a repeat of the last good read).
 ## 3. Checkpoint
 
 Top level (S:465): **shape**. REQUIRED `schema_version` (= 1), `published_at` instant, `floor`,
-`desks`, `committee`, `budget`. Optional `infra`, `run`, `lab`, `watch`. Whole body <= 256 KiB (S:503).
+`desks`, `committee`, `budget`. Optional `infra`, `run`, `lab`, `watch`, `board`. Whole body <= 512 KiB (S:503; the publisher leaves the least important rows out until it fits, `Publisher.fit`).
 Every instant inside must be <= `published_at` unless noted.
 
 ### floor (S:472-493) shape
@@ -91,7 +91,7 @@ Every instant inside must be <= `published_at` unless noted.
 | `benchmark` | REQUIRED | `null`, or exact `{name: text(60), return_pct: percentValue}` |
 | `live_equity` | optional | money |
 | `live_daily_pnl` | optional | signedMoney |
-| `live_desks`, `shadow_desks` | optional | counter(100) or null |
+| `live_desks`, `shadow_desks` | optional | counter(MAX_DESKS = 160) or null |
 | `account_equity`, `account_cash`, `venues` | optional, **all three or none** (S:485-491) | money, money, `venues` as in section 2, every `as_of` <= `published_at` |
 | `performance` | optional, **only with the account block** (S:486) | below |
 
@@ -105,7 +105,7 @@ The page shows **Total profit** only when all of this holds, else a dash (P:738-
 every `venues` row has no `stale: true`; `account_equity` present. Profit = `account_equity - start_equity - net_flows`.
 The chart = the baseline + archived `floor.mark`s between `start_at` and `published_at` + the checkpoint's own `account_equity`.
 
-### desks: array, <= 100, ids unique (S:494-496). Row (S:311-313, S:344-377) shape
+### desks: array, <= 160 (`MAX_DESKS`; 100 before personal-site #4), ids unique (S:494-496). Row (S:311-313, S:344-377) shape
 
 REQUIRED, all 19:
 
@@ -133,6 +133,31 @@ null (may be in the future) · `live_session` exact `{session_id: text(200), tri
 `budget_factor` money in (0, 10] · `mutation` exact `{model_profile, reasoning_effort, session_shift_minutes, memory_limit, persona_trait, model_changed}` ·
 `calibration` exact `{n, brier, since}` · `strategies` (<= 8, S:332) · `working` (<= 20, S:317).
 
+The capital board's fields (personal-site #4, Sept 23, 2026), each optional:
+
+| Key | Type |
+|---|---|
+| `band` | `replay paper bunt swing star` (`BANDS`). `paper` is the House's word; the page says Practice and never shows "paper". Without the allocator the publisher sends the rung's band (0 replay, 1 paper, 2 bunt, 3 swing) and none of the three below. |
+| `stake_usd` | money or null: the real stake on `bunt swing star`, null otherwise. Published with 2 places. |
+| `evidence` | null, or shape `{W_paper, W_real, E, trades}` + optional `real_trades`: multiples are unsigned decimal strings with <= 6 places (published with exactly 6, `"1.034512"`), trades counters. |
+| `last_move` | null, or exact `{at, from_band, to_band, reason}`: `at` instant <= `published_at` + 60 s, `from_band` a band or null, `to_band` a band, `reason` prose(300). |
+
+### board (optional; personal-site #4) shape
+
+REQUIRED `bands`, `moves`; optional `throttle`, `enabled` boolean.
+`bands`: `{<venueName>: {<band>: exact {count: counter(100000), capital_usd: money}}}`, <= 8 venues.
+`moves`: <= 50, ids unique, oldest first; each shape REQUIRED `id` eventId, `at` instant (<= `published_at`
++ 60 s), `agent` deskId, `from_band` band or null, `to_band` band, `reason` prose(300); optional
+`venue` venueName, `stake_usd` money or null. `throttle`: exact `{active: boolean, floor_pnl_usd:
+signedMoney, envelope_usd: money}`. The page reads the lanes' notes from `bands`, the trail from
+`moves` (deduplicated against the tape by id: the House uses the `eval.verdict` ledger id), and
+says so above the lanes when the throttle is on.
+
+Band moves on the tape are `lab.progress` (component `league`) sentences the page parses:
+`<agent> climbs|drops from <Replay|Practice|Bunt|Swing|Star> to <Band>[ with a $<stake> real stake]: <reason>.`
+and `<agent>'s real stake is now $<stake>[ (<Bunt|Swing|Star>)]: <reason>.` The old
+`<agent> climbs|drops from rung N to rung M: <reason>.` still parses.
+
 ### position row (S:281-297) shape
 
 REQUIRED, all 13: `instrument` · `side` one of `long short yes no` · `quantity`, `entry_price`,
@@ -157,7 +182,7 @@ So a shadow agent's `positions` (with a `thesis`) are worth publishing from its 
 
 `experiments`: array <= 12, may be `[]` (row S:420). `calibration`: exact `{n: counter, brier: money|null}`.
 `curve`: array <= 40, one row per generation. Row (S:429-433) **exact, 8 keys**:
-`generation` counter(10000) · `desks` counter(100) · `decisions` counter · `cost_usd` money ·
+`generation` counter(10000) · `desks` counter(160) · `decisions` counter · `cost_usd` money ·
 `pnl_usd` signedMoney · `cost_adjusted_excess_pct` percentValue · `brier` money or null ·
 `pnl_per_inference_usd` signedMoney. The bar is `cost_adjusted_excess_pct`; a row with
 `decisions == 0` is not drawn. With no `lab`, the page falls back to desks' `pnl_usd / capital_usd` by generation.
@@ -177,7 +202,7 @@ REQUIRED `spent_today_usd` money, `cap_usd` money. Optional `mode` (`open thrott
 
 ### committee (S:498-501) exact
 
-`{last_memo_at: instant <= published_at | null, allocations: {<deskId>: money, ...}}` (<= 100 entries, `{}` allowed).
+`{last_memo_at: instant <= published_at | null, allocations: {<deskId>: money, ...}}` (<= 160 entries, `{}` allowed).
 
 ### infra (S:380-391) shape
 

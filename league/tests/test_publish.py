@@ -1,4 +1,7 @@
 import json
+import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from decimal import Decimal
@@ -6,6 +9,7 @@ from pathlib import Path
 
 from ltcm.broker import Balance
 
+from league import publish
 from league.publish import Publisher, clean, clean_text, event_id, money, to_events
 from league.ledger import now_iso
 from league.pacer import Pacer
@@ -261,8 +265,9 @@ class PublisherTest(HouseCase):
             body = self.publisher(FakeSite()).checkpoint(self.house)
             self.assertEqual(len(body["desks"]), 4)
             self.assertTrue(all(d["status"] == "active" for d in body["desks"]))
-            # the generation curve still counts every agent ever born
-            self.assertEqual(sum(row["desks"] for row in body["lab"]["curve"]), 11)
+            # the generation curve still counts every agent ever born, up to the site's own counter bound
+            # (its MAX_DESKS, simulated at 4 here; `BoardTest` checks the whole count at the real 160)
+            self.assertEqual(sum(row["desks"] for row in body["lab"]["curve"]), min(11, publish.MAX_DESKS))
         finally:
             publish.MAX_DESKS, publish.MAX_DEAD_SHOWN = old_max, old_dead
 
@@ -303,6 +308,245 @@ class PublisherTest(HouseCase):
         self.house.ledger.append("provider.request", {"profile": "flash_flex", "cost_usd": "0.02"})
         self.house.ledger.append("merton.pass", {"role": "architect", "cost_usd": "0.5"})
         self.assertEqual(publisher.checkpoint(self.house)["run"]["models_used"], ["DeepSeek V4 Flash", "gpt-6-astra"])
+
+
+class FakeAllocator:
+    """The allocator's published contract (Workstream A): `board()` and nothing else."""
+
+    def __init__(self, board=None, error=None):
+        self._board, self.error, self.calls = board, error, 0
+
+    def board(self):
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return self._board
+
+
+# The site's copy rule: the House's word for the practice band never reaches the page.
+NEVER_ON_THE_PAGE = "paper"
+
+
+class BoardCase(HouseCase):
+    def publisher(self, site=None):
+        return Publisher("https://blakewoods.us", lambda: "t" * 40, Path(self.dir.name) / "publish.json", tape="test", opener=site or FakeSite(), clock=self.clock)
+
+    def board(self, agent, **overrides):
+        at = now_iso(self.clock)
+        board = {
+            "enabled": True,
+            "agents": {agent.id: {
+                "band": "bunt", "stake_usd": D("10"),
+                "evidence": {"W_paper": 1.08345123456, "W_real": D("1"), "E": D("1.040890"), "trades": 6, "real_trades": 0},
+                "last_move": {"at": at, "from_band": "paper", "to_band": "bunt", "reason": "E crossed 1.03 after 6 trades"},
+            }},
+            "moves": [{"id": "le-move-1", "at": at, "agent": agent.id, "venue": "alpaca", "from_band": "paper", "to_band": "bunt",
+                       "stake_usd": "10.00", "reason": "E crossed 1.03 after 6 trades"}],
+            "bands": {"alpaca": {"bunt": {"count": 1, "capital_usd": D("10")}, "paper": {"count": 40, "capital_usd": D("0")}},
+                      "kalshi": {"swing": {"count": 1, "capital_usd": D("42.5")}}},
+            "throttle": {"active": False, "floor_pnl_usd": D("-12.4"), "envelope_usd": D("1017.75")},
+        }
+        board.update(overrides)
+        return board
+
+
+class BoardTest(BoardCase):
+    def test_the_board_publishes_the_allocators_band_stake_evidence_and_moves(self):
+        agent = self.seated()
+        self.house.allocator = FakeAllocator(self.board(agent))
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        row = body["desks"][0]
+        self.assertEqual(row["band"], "bunt")
+        self.assertEqual(row["stake_usd"], "10.00")
+        self.assertEqual(row["evidence"], {"W_paper": "1.083451", "W_real": "1.000000", "E": "1.040890", "trades": 6, "real_trades": 0})
+        self.assertEqual(row["last_move"], {"at": self.house.allocator._board["agents"][agent.id]["last_move"]["at"], "from_band": "paper", "to_band": "bunt",
+                                            "reason": "E crossed 1.03 after 6 trades"})
+        self.assertEqual(body["board"], {
+            "enabled": True,
+            "bands": {"alpaca": {"bunt": {"count": 1, "capital_usd": "10.00"}, "paper": {"count": 40, "capital_usd": "0.00"}},
+                      "kalshi": {"swing": {"count": 1, "capital_usd": "42.50"}}},
+            "moves": [{"id": "le-move-1", "at": row["last_move"]["at"], "agent": agent.id, "venue": "alpaca", "from_band": "paper", "to_band": "bunt",
+                       "stake_usd": "10.00", "reason": "E crossed 1.03 after 6 trades"}],
+            "throttle": {"active": False, "floor_pnl_usd": "-12.40", "envelope_usd": "1017.75"},
+        })
+        self.assertEqual(self.house.allocator.calls, 1, "one board per checkpoint")
+
+    def test_without_an_allocator_or_when_it_fails_the_band_follows_the_rung_and_nothing_else_is_claimed(self):
+        agent = self.seated()
+        for allocator in (None, FakeAllocator(error=RuntimeError("the allocator is down")), FakeAllocator(board="not a board")):
+            self.house.allocator = allocator
+            site = FakeSite()
+            self.house.publisher = self.publisher(site)
+            self.house.tick()
+            self.assertTrue(site.posts[-1][0].endswith("/checkpoint"), "the checkpoint is published whatever the board did")
+            body = site.posts[-1][2]
+            row = next(d for d in body["desks"] if d["id"] == agent.id)
+            self.assertEqual(row["band"], "paper")
+            for key in ("stake_usd", "evidence", "last_move"):
+                self.assertNotIn(key, row)
+            self.assertEqual(body["board"]["enabled"], False)
+            self.assertEqual(body["board"]["bands"], {"alpaca": {"paper": {"count": 1, "capital_usd": "0.00"}}})
+            self.assertEqual(body["board"]["moves"], [])
+        # The ledger's own promotions and demotions are the trail, as bands, with their venue.
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.house.allocator = None
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["desks"][0]["band"], "bunt")
+        move = body["board"]["moves"][-1]
+        self.assertEqual({k: move[k] for k in ("agent", "venue", "from_band", "to_band", "reason")},
+                         {"agent": agent.id, "venue": "alpaca", "from_band": "paper", "to_band": "bunt", "reason": "fixture evidence"})
+        self.assertEqual(move["id"], event_id(self.house.ledger.last("eval.verdict", agent=agent.id).id), "the trail and the tape share the move's id")
+
+    def test_an_agent_the_allocator_does_not_list_keeps_its_rung_band(self):
+        agent = self.seated()
+        other = self.seated("other")
+        self.house.allocator = FakeAllocator(self.board(agent))
+        self.clock.advance(5)
+        rows = {d["id"]: d for d in self.publisher().checkpoint(self.house)["desks"]}
+        self.assertEqual(rows[other.id]["band"], "paper")
+        self.assertNotIn("evidence", rows[other.id])
+        self.assertEqual(rows[agent.id]["band"], "bunt")
+
+    def test_whatever_the_allocator_returns_the_site_gets_only_what_it_accepts(self):
+        agent = self.seated()
+        at = now_iso(self.clock)
+        later = now_iso(lambda: self.clock() + 3600)
+        good = {"id": "le-ok", "at": at, "agent": agent.id, "from_band": "paper", "to_band": "bunt", "reason": "ok"}
+        board = self.board(agent, agents={agent.id: {
+            "band": "bunt", "stake_usd": "ten dollars",
+            "evidence": {"W_paper": float("nan"), "W_real": 1, "E": 1, "trades": 3},
+            "last_move": {"at": at, "from_band": "paper", "to_band": "dead", "reason": "x"},
+        }}, moves=[
+            {**good, "id": "le-future", "at": later},                       # dated after the checkpoint
+            {**good, "id": "le-dead", "to_band": "dead"},                     # a band the site does not know
+            {**good, "id": "le-name", "agent": "Not An Id"},                  # not an agent id
+            {**good, "id": "le-venue", "venue": "BTC/USD", "stake_usd": -3},  # a venue and a stake the site refuses
+            {**good, "id": "le-iso", "at": "2026-09-09T00:00:00+00:00"},     # Python's isoformat, normalised
+            good, good,                                                        # the same move twice
+            *({**good, "id": f"le-{n}", "reason": "<b>" + "x" * 400} for n in range(80)),
+        ], bands={"alpaca": {"bunt": {"count": "1", "capital_usd": "x"}, "dead": {"count": 1, "capital_usd": 1}}, "BTC/USD": {}},
+            throttle={"active": "yes", "floor_pnl_usd": 1, "envelope_usd": 1}, enabled="yes")
+        self.house.allocator = FakeAllocator(board)
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        row = body["desks"][0]
+        self.assertEqual(row["band"], "bunt")
+        self.assertIsNone(row["stake_usd"])
+        self.assertIsNone(row["evidence"])
+        self.assertIsNone(row["last_move"])
+        out = body["board"]
+        self.assertEqual(out["enabled"], False)
+        self.assertNotIn("throttle", out)
+        self.assertEqual(out["bands"], {"alpaca": {}})
+        self.assertEqual(len(out["moves"]), 50)
+        ids = [m["id"] for m in out["moves"]]
+        self.assertEqual(len(set(ids)), 50)
+        self.assertNotIn("le-future", ids)
+        self.assertNotIn("le-dead", ids)
+        self.assertNotIn("le-name", ids)
+        self.assertEqual(ids[-1], "le-79", "the newest fifty, oldest first")
+        for move in out["moves"]:
+            self.assertLessEqual(len(move["reason"]), 300)
+            self.assertNotIn("<", move["reason"])
+            self.assertRegex(move["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
+        stamp = now_iso(self.clock)
+        venue = publish.site_board_move({**good, "venue": "BTC/USD", "stake_usd": -3}, stamp)
+        self.assertNotIn("venue", venue)
+        self.assertIsNone(venue["stake_usd"])
+        self.assertEqual(publish.site_board_move({**good, "at": "2026-09-09T00:00:00+00:00"}, stamp)["at"], "2026-09-09T00:00:00.000Z")
+        self.assertIsNone(publish.site_board_move({**good, "at": later}, stamp))
+
+    def test_band_moves_and_stake_changes_reach_the_tape_in_the_sites_templates_and_never_say_paper(self):
+        agent = self.seated()
+        rows = [
+            ({"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "bunt", "stake_usd": "10", "via": "allocator",
+              "reason": "E 1.041 after 6 trades."}, f"{agent.id} climbs from Practice to Bunt with a $10.00 real stake: E 1.041 after 6 trades."),
+            ({"decision": "promote", "from_rung": 3, "to_rung": 3, "band_from": "swing", "band_to": "star", "stake_usd": "1240.5", "via": "allocator",
+              "reason": "the top real P&L"}, f"{agent.id} climbs from Swing to Star with a $1240.50 real stake: the top real P&L."),
+            ({"decision": "demote", "from_rung": 3, "to_rung": 1, "band_from": "swing", "band_to": "paper", "stake_usd": None, "via": "allocator",
+              "reason": "it lost 35% of its real stake"}, f"{agent.id} drops from Swing to Practice: it lost 35% of its real stake."),
+            ({"decision": "size", "rung": 2, "band": "bunt", "stake_usd": "14.2", "via": "allocator", "reason": "E 1.42"},
+             f"{agent.id}'s real stake is now $14.20 (Bunt): E 1.42."),
+            ({"decision": "size", "rung": 3, "stake_usd": "61.07", "moved_usd": "6", "reason": "kelly"}, f"{agent.id}'s real stake is now $61.07 (Swing): kelly."),
+            ({"decision": "promote", "from_rung": 1, "to_rung": 2, "reason": "it cleared the screen"}, f"{agent.id} climbs from rung 1 to rung 2: it cleared the screen."),
+            ({"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "bunt", "reason": ""},
+             f"{agent.id} climbs from Practice to Bunt: the allocator's evidence."),
+        ]
+        for payload, message in rows:
+            entry = self.house.ledger.append("eval.verdict", payload, agent=agent.id)
+            events = to_events(entry)
+            self.assertEqual([e["payload"]["message"] for e in events], [message])
+            self.assertEqual(events[0]["id"], event_id(entry.id))
+            self.assertEqual((events[0]["stream"], events[0]["kind"], events[0]["payload"]["component"]), ("lab", "lab.progress", "league"))
+        for payload in ({"decision": "size", "rung": 2, "stake_usd": "0"}, {"decision": "size", "rung": 1, "stake_usd": "x"}, {"decision": "look", "rung": 1}):
+            self.assertEqual(to_events(self.house.ledger.append("eval.verdict", payload, agent=agent.id)), [])
+        for payload, message in rows:
+            if "band_from" in payload or "band" in payload:
+                self.assertNotIn(NEVER_ON_THE_PAGE, message.lower())
+
+    def test_the_roster_and_the_body_stay_inside_the_sites_limits(self):
+        self.assertEqual(publish.MAX_DESKS, 160, "the site accepts 160 rows since personal-site #4")
+        self.assertEqual(publish.MAX_CHECKPOINT_BYTES, 512 * 1024)
+        agents = [self.seated(f"agent-{n}") for n in range(6)]
+        for n in range(3):
+            gone = self.house.registry.born(name=f"gone-{n}", family="test-family", code=BUYER, needs={"venue": "alpaca", "horizon": "hour", "style": "test"})
+            self.house.registry.died(gone.id, "test")
+        self.house.evaluator.promote(agents[2].id, 2, "fixture evidence")
+        full = self.publisher().checkpoint(self.house)
+        self.assertEqual(len(full["desks"]), 9)
+        rows = sorted(len(json.dumps(d, separators=(",", ":"))) for d in full["desks"])
+        old = publish.MAX_CHECKPOINT_BYTES
+        try:
+            # Room for about five rows: the dead go first, then the youngest of the lowest band.
+            publish.MAX_CHECKPOINT_BYTES = len(json.dumps(full, separators=(",", ":"), ensure_ascii=False).encode()) - sum(rows[-4:])
+            body = self.publisher().checkpoint(self.house)
+            size = len(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode())
+            self.assertLessEqual(size, publish.MAX_CHECKPOINT_BYTES)
+            ids = {d["id"] for d in body["desks"]}
+            self.assertIn(agents[2].id, ids, "real money is the last thing left out")
+            self.assertTrue(all(d["status"] == "active" for d in body["desks"]), "the dead are left out first")
+            self.assertEqual(set(body["committee"]["allocations"]), ids)
+            self.assertEqual(body["floor"]["live_desks"] + body["floor"]["shadow_desks"], len(ids))
+            self.assertEqual(sum(g["desks"] for g in body["lab"]["curve"]), 9, "the totals still count every agent")
+            self.assertEqual(body["board"]["bands"], {"alpaca": {"bunt": {"count": 1, "capital_usd": full["board"]["bands"]["alpaca"]["bunt"]["capital_usd"]},
+                                                                  "paper": {"count": 5, "capital_usd": "0.00"}}}, "the board counts every living agent")
+        finally:
+            publish.MAX_CHECKPOINT_BYTES = old
+
+
+SITE = Path(os.environ.get("LTCM_SITE") or Path(__file__).resolve().parents[3] / "personal-site")
+
+
+@unittest.skipUnless(shutil.which("node") and (SITE / "capital" / "schema.js").exists(), "the site's validators are not checked out beside this repository (set LTCM_SITE)")
+class SiteAcceptsTheBoardTest(BoardCase):
+    """The site's own validators (personal-site/capital/schema.js), run on what this publisher posts."""
+
+    def valid(self, body):
+        script = "import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => console.log(m.validCheckpoint(JSON.parse(s)))); })"
+        out = subprocess.run(["node", "-e", script, (SITE / "capital" / "schema.js").as_uri()], input=json.dumps(body), capture_output=True, text=True, timeout=60)
+        return out.stdout.strip()
+
+    def test_the_site_accepts_the_board_with_and_without_the_allocator(self):
+        agent = self.seated()
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.clock.advance(5)
+        self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+        self.house.allocator = FakeAllocator(self.board(agent))
+        self.clock.advance(5)
+        self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+
+    def test_the_page_reads_every_band_move_the_tape_carries(self):
+        agent = self.seated()
+        rows = [{"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "bunt", "stake_usd": "10", "reason": "E 1.041"},
+                {"decision": "promote", "from_rung": 3, "to_rung": 3, "band_from": "swing", "band_to": "star", "stake_usd": "1240.5", "reason": "top P&L"},
+                {"decision": "demote", "from_rung": 3, "to_rung": 1, "band_from": "swing", "band_to": "paper", "reason": "a 35% drawdown"},
+                {"decision": "size", "rung": 2, "band": "bunt", "stake_usd": "14.2", "reason": "E 1.42"}]
+        events = [e for row in rows for e in to_events(self.house.ledger.append("eval.verdict", row, agent=agent.id))]
+        script = ("import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => "
+                  "console.log(JSON.stringify(JSON.parse(s).map(e => { const move = m.ladderMove(e); return move && [move.kind, move.fromBand, move.toBand, move.stake]; })))); })")
+        out = subprocess.run(["node", "-e", script, (SITE / "capital" / "capital.js").as_uri()], input=json.dumps(events), capture_output=True, text=True, timeout=60)
+        self.assertEqual(json.loads(out.stdout), [["up", "paper", "bunt", "10.00"], ["up", "swing", "star", "1240.50"], ["down", "swing", "paper", None], ["size", None, "bunt", "14.20"]])
 
 
 if __name__ == "__main__":

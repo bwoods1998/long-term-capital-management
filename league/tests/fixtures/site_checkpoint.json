@@ -89,7 +89,22 @@
           "time_stop_at": null,
           "exit_orders": []
         }
-      ]
+      ],
+      "band": "bunt",
+      "stake_usd": "10.00",
+      "evidence": {
+        "W_paper": "1.061200",
+        "W_real": "1.030000",
+        "E": "1.061070",
+        "trades": 9,
+        "real_trades": 3
+      },
+      "last_move": {
+        "at": "2026-09-19T05:40:12.000Z",
+        "from_band": "paper",
+        "to_band": "bunt",
+        "reason": "E 1.030 after 9 settled trades"
+      }
     },
     {
       "id": "crypto-reversion",
@@ -147,7 +162,22 @@
           "time_stop_at": "2026-09-19T08:11:02.000Z",
           "exit_orders": []
         }
-      ]
+      ],
+      "band": "bunt",
+      "stake_usd": "15.00",
+      "evidence": {
+        "W_paper": "1.044100",
+        "W_real": "1.001300",
+        "E": "1.023128",
+        "trades": 7,
+        "real_trades": 1
+      },
+      "last_move": {
+        "at": "2026-09-19T06:10:03.000Z",
+        "from_band": "paper",
+        "to_band": "bunt",
+        "reason": "E 1.031 after 7 closed trades"
+      }
     },
     {
       "id": "crypto-reversion-2",
@@ -200,7 +230,17 @@
           "time_stop_at": "2026-09-19T08:18:00.000Z",
           "exit_orders": []
         }
-      ]
+      ],
+      "band": "paper",
+      "stake_usd": null,
+      "evidence": {
+        "W_paper": "0.998000",
+        "W_real": "1.000000",
+        "E": "0.998999",
+        "trades": 3,
+        "real_trades": 0
+      },
+      "last_move": null
     }
   ],
   "committee": {
@@ -266,6 +306,54 @@
     "calibration": {
       "n": 0,
       "brier": null
+    }
+  },
+  "board": {
+    "enabled": true,
+    "bands": {
+      "kalshi": {
+        "bunt": {
+          "count": 1,
+          "capital_usd": "10.00"
+        }
+      },
+      "alpaca": {
+        "bunt": {
+          "count": 1,
+          "capital_usd": "15.00"
+        },
+        "paper": {
+          "count": 1,
+          "capital_usd": "0.00"
+        }
+      }
+    },
+    "moves": [
+      {
+        "id": "le-fixture-move-1",
+        "at": "2026-09-19T05:40:12.000Z",
+        "agent": "favorites-maker",
+        "venue": "kalshi",
+        "from_band": "paper",
+        "to_band": "bunt",
+        "stake_usd": "10.00",
+        "reason": "E 1.030 after 9 settled trades"
+      },
+      {
+        "id": "le-fixture-move-2",
+        "at": "2026-09-19T06:10:03.000Z",
+        "agent": "crypto-reversion",
+        "venue": "alpaca",
+        "from_band": "paper",
+        "to_band": "bunt",
+        "stake_usd": "15.00",
+        "reason": "E 1.031 after 7 closed trades"
+      }
+    ],
+    "throttle": {
+      "active": false,
+      "floor_pnl_usd": "0.32",
+      "envelope_usd": "1017.75"
     }
   }
 }
