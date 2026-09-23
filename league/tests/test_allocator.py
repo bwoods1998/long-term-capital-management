@@ -766,6 +766,44 @@ class BuntGrowth(HouseCaseReal):
         self.assertEqual(book.account(a.id).staked, D("25"))
         self.assertEqual([e for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "size"], [])
 
+    def test_a_bunt_lent_less_than_todays_base_is_lent_up_to_it_once(self):
+        """Deploy A raised the Kalshi base $10 -> $30 and `_size` lent nothing to a bunt under W_real 1, so
+        a bunt seated at $10 before the raise stayed at $10 (meriwether-h2d625d on the 21:31Z board,
+        W_real 0.9978, stake $10, target $30). It is lent up to the base, net of what it was lent."""
+        a, book = self.bunted()
+        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}):  # the base raised under it
+            row = self.sized(a, book, 0.9978, "24.95")
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("40", "15.00"))  # 40 - 25 lent, not 40 - 24.95
+            self.assertEqual(book.account(a.id).staked, D("40"))
+            self.assertIsNone(self.sized(a, book, 0.95, "36.00"))  # lent the base, down $4: not refilled
+
+    def test_a_throttle_halved_bunt_is_restored_to_the_base_less_its_own_losses(self):
+        """The #198 review, item 4: a bunt halved by the throttle stayed halved when it lifted."""
+        a, book = self.bunted()
+        alloc = self.house.allocator
+        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}), \
+                patch.object(type(alloc), "headroom", return_value=D("1000")):  # the test House's $50 envelope aside
+            self.sized(a, book, 0.95, "24")  # lent up to the $60 base
+            self.assertEqual(book.account(a.id).staked, D("60"))
+            alloc.state["throttle"] = True
+            row = self.sized(a, book, 0.95, "59")  # $1 lost; the throttle halves the target to $30
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("30.00", "-29.00"))
+            self.assertEqual(book.account(a.id).staked, D("31"))
+            self.assertIsNone(self.sized(a, book, 0.95, "25"))  # $5 more lost under the throttle: not refilled
+            alloc.state["throttle"] = False
+            row = self.sized(a, book, 0.95, "25")
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("60", "29.00"))  # $54: the base less its $6 of losses
+            self.assertEqual(book.account(a.id).staked, D("60"))
+
+    def test_lending_up_to_the_base_stays_inside_the_envelope(self):
+        a, book = self.bunted()
+        alloc = self.house.allocator
+        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}), \
+                patch.object(type(alloc), "headroom", return_value=D("6.50")):
+            row = self.sized(a, book, 0.99, "25")
+            self.assertEqual(row["moved_usd"], "6.50")  # 15 owed to the base, 6.50 of room
+        self.assertEqual(book.account(a.id).staked, D("31.50"))
+
     def test_the_seat_the_limits_the_audit_packet_and_the_board_show_the_same_target(self):
         a, book = self.bunted()
         alloc = self.house.allocator

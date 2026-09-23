@@ -829,7 +829,18 @@ class Allocator:
                 # and the stay drawdown, hysteresis and death decide the rest. Under the flat rule a
                 # $10 bunt down to $9 was topped back up to $10 at every pass the loss cleared
                 # `min_stake_change`. The stake at seating is `House.seat`'s, not this.
-                return None
+                # But a bunt lent LESS than today's base is lent up to it (Sept 23, 2026 ~21:30 UTC):
+                # when Deploy A raised the Kalshi base $10 -> $30, every bunt seated at $10 with W_real a
+                # hair under 1 stayed at $10 (meriwether-h2d625d: W_real 0.9978, stake $10, target $30),
+                # and a bunt halved by the throttle stayed halved when it lifted (the #198 review, item
+                # 4). So it is lent at most the target (here the base, or the throttle's half of it)
+                # less what it has been lent net of every sweep (`account.staked`): lent $10 under a
+                # $30 base it gets up to $20; lent the base and down to $27 it gets nothing. Its equity
+                # never passes the target, its net loan never passes the base, and a loss (this stay's,
+                # or a past stay's still counted in `staked`) is never lent back.
+                delta = min(delta, target - account.staked)
+                if delta <= 0:
+                    return None
             room = self.headroom(agent.venue)
             delta = min(delta, max(room, ZERO)).quantize(CENT, rounding=ROUND_DOWN)
             if delta <= 0 or delta < max(equity, Decimal(1)) * _d(p["min_stake_change"]):
