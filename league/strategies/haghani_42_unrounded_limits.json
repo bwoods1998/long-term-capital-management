@@ -1,0 +1,9 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani-42-unrounded-limits",
+  "repair": {
+    "key": "strategy_defect:haghani-42:8d50f78b06f1",
+    "parent": "haghani-42"
+  },
+  "why": "Corrected child of haghani-42: remove hard-coded cent rounding from crypto dip-entry and mean-exit limit prices, preserving sub-cent calculations while the House enforces known venue grids. Retains the parent's specialty and effective parameters; starts at rung 0 with no inherited performance record and must qualify independently."
+}
