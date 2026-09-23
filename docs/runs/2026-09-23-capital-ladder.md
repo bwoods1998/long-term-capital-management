@@ -296,3 +296,17 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   - **Graduation, per stage:** 3 elites were put forward. 2 were refused a sealed-holdout run,
     because their lineages had spent their ration. 1 passed the House's replay, and is now
     `waiting_seat`.
+- **12:59:39Z — the first Alpha Lab graduate was born.** 13 minutes after `waiting_seat`, a
+  resident became displaceable: hufschmid-33 (rung 1, `kalshi-sports-props`, generation 3), which
+  had run out its grace. The lab's retry took the seat.
+  - huang-l23cdb7 was born with founder `lab:agent:huang-h6d3302`: the lab's search, seeded
+    from the program of the agent that died at 12:04Z.
+  - Its program is candidate `23cdb791b32a`, a KXETH15M prior-window fade on 5-minute ETH bars.
+  - Seat verdict: "an Alpha Lab graduate: candidate 23cdb791b32a29111d5208fe passed the House's
+    replay before birth, on its own line". Rung 1, a $200 kalshi-shadow practice stake, $8
+    endowment. It woke at 13:00:20Z.
+
+  **This meets D's acceptance line: a graduate born on practice.** Two more events followed:
+  - 12:59:40Z — a third lineage was rationed (agent:mcentee-30, `alpaca-megacaps`).
+  - 13:00:48Z — a second `kalshi-crypto-15m` candidate passed the House replay. It now waits
+    because that desk is full.
