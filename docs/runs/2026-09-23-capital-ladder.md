@@ -316,6 +316,7 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
     names markets no desk lists. Of the 4 births since Deploy 3 (3 House, 1 lab), each fitted one
     desk. The lab's archive cells are per desk, so the lab does not seed open-desk programs itself.
   - **C: sliced exits have not been needed on a venue.** The largest real stake is $56.70
-    (mullins-6), and a bunt's position is capped at half its stake, well under the $68.18 Alpaca
-    order cap (the $75 cap over the gateway's 1.10 ask markup). Slicing matters once a swing
-    stake passes about $136. No agent has swung: none has 8 real trades yet.
+    (mullins-6). A position is capped at half its stake, so no position has come near an order
+    cap. The caps are $75 at Kalshi, and $68.18 at Alpaca (the $75 cap over the gateway's 1.10
+    ask markup). Slicing starts to matter for stakes above about $136 at Alpaca and $150 at
+    Kalshi, which only a swing can reach. No agent has swung: none has 8 real trades yet.
