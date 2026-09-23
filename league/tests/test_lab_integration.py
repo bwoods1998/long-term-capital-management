@@ -9,8 +9,9 @@ and D-evo (the Alpha Lab), Sept 23, 2026: the fixes the reviews and the merge as
 - The service binds the lab box `league/config.json` names and hands that same evaluator to the lab.
 - A lab graduate's birth makes no Sail call under the House's lifecycle lock, and waits (never
   blocks the tick) while the probe box is busy.
-- The lab stops while the House is stopped, deploying or below the "all" frontier tier, and opens
-  the sealed holdout only through `House._holdout`.
+- The lab stops while the House is stopped, deploying or paused (not below the "all" frontier tier:
+  since C2 on Sept 23, 2026 only its Luna and Sol calls do), and opens the sealed holdout only
+  through `House._holdout`.
 """
 
 from __future__ import annotations
@@ -287,17 +288,21 @@ class LabOnItsBox(LabCase):
         self.lab.use_box(box)
         self.assertEqual(self.lab.box_key, "ltcm-lab")
 
-    def test_the_lab_does_not_run_while_stopped_deploying_or_below_the_all_tier(self):
+    def test_the_lab_does_not_run_while_stopped_deploying_or_paused_but_does_below_the_all_tier(self):
         cases = ((patch.object(self.house, "stopped", return_value=True), "stopped"),
                  (patch.object(self.house, "deploying", return_value=True), "release"),
-                 (patch.object(self.house, "paused", return_value={"reason": "test"}), "pause"),
-                 (patch.object(self.house, "frontier_tier", return_value="code"), "tier"))
+                 (patch.object(self.house, "paused", return_value={"reason": "test"}), "pause"))
         for patcher, words in cases:
             with patcher, patch.object(self.lab, "step") as step:
                 self.assertFalse(self.lab.tick(open_for_business=True))
                 self.house.wait()
                 step.assert_not_called()
                 self.assertIn(words, self.lab.refusal)
+        # C2 (Sept 23, 2026): an OpenAI tier below "all" closes Luna and Sol, never the lab's Sail work.
+        with patch.object(self.house, "frontier_tier", return_value="audits"), patch.object(self.lab, "step") as step:
+            self.assertTrue(self.lab.tick(open_for_business=True))
+            self.house.wait()
+            step.assert_called_once()
         # A step that finds the House paused from its start evaluates, breeds and graduates nothing.
         self.queue(KNOB)
         with patch.object(self.house, "paused", return_value={"reason": "test"}):
