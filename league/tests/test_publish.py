@@ -413,6 +413,26 @@ class BoardTest(BoardCase):
                          {"agent": agent.id, "venue": "alpaca", "from_band": "paper", "to_band": "bunt", "reason": "fixture evidence"})
         self.assertEqual(move["id"], event_id(self.house.ledger.last("eval.verdict", agent=agent.id).id), "the trail and the tape share the move's id")
 
+    def test_the_real_allocators_placeholder_is_not_a_board_but_its_first_pass_is(self):
+        # The House's own allocator (league/allocator.py) holds an empty placeholder until its first
+        # rebalance: every restart until the first mark pass, and always while it is switched off.
+        agent = self.seated()
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.assertEqual(self.house.allocator.board()["agents"], {})
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["desks"][0]["band"], "bunt")
+        self.assertEqual(body["board"]["enabled"], False, "no board drawn yet: the roster and the ledger stand in")
+        self.assertEqual(set(body["board"]["bands"]["alpaca"]), {"bunt"})
+        self.assertEqual([(m["agent"], m["from_band"], m["to_band"]) for m in body["board"]["moves"]], [(agent.id, "paper", "bunt")])
+        self.house.allocator.rebalance()
+        self.assertIn(agent.id, self.house.allocator.board()["agents"])
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["board"]["enabled"], True, "the allocator's own board, once it has drawn one")
+        self.assertEqual(body["desks"][0]["band"], self.house.allocator.board()["agents"][agent.id]["band"])
+        self.assertEqual(sum(row["count"] for per in body["board"]["bands"].values() for row in per.values()), 1)
+
     def test_an_agent_the_allocator_does_not_list_keeps_its_rung_band(self):
         agent = self.seated()
         other = self.seated("other")
@@ -579,6 +599,18 @@ class SiteAcceptsTheBoardTest(BoardCase):
         self.house.allocator = FakeAllocator(self.board(agent))
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+
+    def test_the_site_accepts_the_real_allocators_board_before_and_after_its_first_pass(self):
+        agent = self.seated()
+        self.seated("other")
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.clock.advance(5)
+        self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+        self.house.allocator.rebalance()
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertTrue(body["board"]["enabled"])
+        self.assertEqual(self.valid(body), "true")
 
     def test_the_site_accepts_a_move_whose_reason_is_full_of_emoji(self):
         agent = self.seated()

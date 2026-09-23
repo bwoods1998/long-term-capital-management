@@ -745,8 +745,12 @@ class Publisher:
     # ----------------------------------------------------------------- the capital board
     @staticmethod
     def allocator_board(house: Any) -> Mapping[str, Any] | None:
-        """`house.allocator.board()`, or None when there is no allocator or it fails: the board is
-        what the page draws, and it never costs the floor its checkpoint."""
+        """`house.allocator.board()`, or None when there is no allocator, it fails, or it has not
+        drawn a board yet: the board is what the page draws, and it never costs the floor its
+        checkpoint. The allocator holds an empty placeholder (no agents, no bands, no moves) until
+        its first rebalance, which is every House restart until the first mark pass and forever
+        while the constitution switches it off; publishing that would empty the page's lanes and
+        its trail, so the roster's bands and the ledger's moves stand in for it instead."""
         allocator = getattr(house, "allocator", None)
         if allocator is None:
             return None
@@ -754,7 +758,10 @@ class Publisher:
             board = allocator.board()
         except Exception:  # noqa: BLE001 - a broken board falls back to the rungs, never to no checkpoint
             return None
-        return board if isinstance(board, Mapping) else None
+        if not isinstance(board, Mapping):
+            return None
+        agents = board.get("agents")
+        return board if isinstance(agents, Mapping) and agents else None
 
     @staticmethod
     def _rung(house: Any, agent: Any) -> int | None:

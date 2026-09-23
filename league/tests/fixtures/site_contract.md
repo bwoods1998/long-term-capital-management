@@ -36,7 +36,7 @@ An unknown key anywhere in a checked object is a 400, never ignored.
 | `venueName` | `^[a-z0-9-]{1,24}$` (`kalshi`, `alpaca`). | S:111 |
 | `eventId` | `^[A-Za-z0-9:_.-]+$`, 1..200 chars. **No `/`**: never build an id from `BTC/USD`. | S:117 |
 | `digest` | `^[a-f0-9]{64}$` (lowercase). Only the format is checked; it is the idempotency fingerprint. | S:118 |
-| `text(max)` | non-blank string <= max, no `<`, no control char except tab, LF, CR. | S:139, S:93 |
+| `text(max)` | non-blank string <= max, no `<`, no control char except tab, LF, CR. **Every max counts JavaScript `.length` (UTF-16 units)**: an emoji is 2 there and 1 in Python, so the publisher cuts with `publish.js_cut`, never `[:max]`. | S:139, S:93 |
 | `prose(max)` | as `text` but may be `""`. | S:137 |
 
 ## 2. Event batch
