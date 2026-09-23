@@ -523,8 +523,9 @@ class House:
 
     def _running_defect(self, shas: set[str], *, exclude: Sequence[str] = ()) -> list[Agent]:
         """Living agents off real money whose code is one of `shas` (a full sha or a 12-character prefix)."""
+        # The code check first: `rung` reads the ledger, and this runs every tick.
         return [a for a in self.registry.living()
-                if a.id not in exclude and self.evaluator.rung(a.id) <= 1 and any(a.code_sha256.startswith(s) for s in shas)]
+                if a.id not in exclude and any(a.code_sha256.startswith(s) for s in shas) and self.evaluator.rung(a.id) <= 1]
 
     def _defective_resident(self, row: Mapping[str, Any]) -> Agent | None:
         """An agent running the code `row` corrects, replay agents before paper ones."""
@@ -543,7 +544,8 @@ class House:
             child = born.get(row["name"])
             if child is None or not isinstance(row.get("repair"), Mapping):
                 continue
-            for agent in self._running_defect(self._defective_shas(row), exclude=(child.id,)):
+            shas = self._defective_shas(row) - {child.code_sha256}
+            for agent in self._running_defect(shas, exclude=(child.id,)) if shas else ():
                 self.kill(agent, "superseded", f"its code carries the defect that {row['name']} ({child.id}) corrects "
                                                f"(repair {row['repair'].get('key')}); the corrected child is judged on its own evidence")
                 retired += 1
