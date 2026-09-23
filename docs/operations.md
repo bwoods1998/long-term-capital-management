@@ -412,6 +412,39 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 - **Restore.** `floor_box.py fork --from <checkpoint> --i-know` gives you a second box. Never run
   two Houses on one paper account.
 
+## Owner steps the floor is waiting on
+
+What the Sept 23 study (`docs/research/2026-09-23-agent-study.md`) found the agents need and the
+House cannot do for itself. Each is the owner's to take; nothing in the League widens its own
+egress, funds itself or changes a venue account.
+
+- **Data hosts the agents asked for** (177 `tool.request` rows; 744 research sessions skipped for
+  `blocked:missing_data`). Add a host with `python3 scripts/floor_box.py hosts --add <host>` (the
+  box's egress is an exact-host allowlist; wildcards are ignored), then the toolsmith or a builder
+  wires the feed with point-in-time stamps as `league/feeds.py` does:
+  - `www.sec.gov` (EDGAR 8-K index; Item 2.02 acceptance times give as-known earnings announcement
+    times; 16 agents on the megacap and options desks asked) or `api.nasdaq.com` (the earnings
+    calendar);
+  - `www.tsa.gov` (checkpoint passenger volumes) and `www.realclearpolling.com` (polling averages):
+    the underlyings of the `kalshi-attention` desk's series (21 agents asked; the desk had 0
+    intents in 67 wakes over 48 hours);
+  - `api.eia.gov` or `www.eia.gov` (WTI daily spot): the fixings the `kalshi-prices` desk's contracts
+    settle on.
+- **A decision on the one-loss trial** (the study's blocker 1): with W_real at 1, one lost position
+  over about 15% of a fresh bunt's stake drops E under `bunt_at × hysteresis` and sends it back to
+  practice (huang-h427345 on $2.55 at 14:57Z; the lab graduate huang-l23cdb7 on $7.32 and $7.84 at
+  $30 stakes on Sept 23 evening). The fix is outside the run's money table: either the hysteresis
+  exit applies only after `bunt_min_settled` real settlements (the 35% stay drawdown still binds),
+  or `position_share` 0.15 on event books. Either needs the owner's word, a deploy and a ratify.
+- **Compute:** an OpenAI top-up (the September gateway month is funded at $408 and the House line
+  fell under the $20 "earned" reserve at about 20:50Z Sept 23; the month resets Oct 1) and Sail
+  auto-recharge (about 2.6 days of runway at $32 a day on Sept 23). After a top-up, align
+  `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD` (`gateway/wrangler.jsonc`) and the House line
+  (`scripts/campaign_topup.py`) up to the funded balance, never above.
+- **Level-3 options:** a second Alpaca practice account that no House reconciles, with its keys in
+  the gateway, to settle the multi-leg unknowns before any spread trades (the design is
+  `docs/design/2026-09-24-level-3-debit-verticals.md` on its draft branch).
+
 ## Switches
 
 Change them by pull request, and deploy through the canary. "Off" means the House behaves as it did

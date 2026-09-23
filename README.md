@@ -901,6 +901,16 @@ dynamism revisions followed that evening:
   Alpha Lab keeps running below the "all" OpenAI tier, and four invariants raise ops alerts (a
   quiet desk, a bunt frozen by a daily-loss rule, a lab closed 30 minutes, a graduate waiting 6
   hours). The first allocator pass re-staked mullins-2 from $10.09 toward $34.84.
+- **Deploy B (#209: #201, #202, #204), 21:46Z.** Release `20260923T214445Z-f5650ac1d870`, no money
+  rule changed (digest `1d63a56e`). The seat market: waiting lab graduates, replay-passed cards and
+  merged strategies take every freed seat first and no House mutation is staked while any waits;
+  newcomers with forward evidence may displace never-traded residents inside the grace; a desk
+  keeps a seat for a trading member; no re-breeding of a family that is losing forward;
+  population 112 and desk caps that follow the graduates. The lab evaluates its LLM children,
+  re-scores its elites hourly on data that arrived after their code froze (forward windows rank,
+  never promote) and reads the teacher's lessons as priors. Research runs on evidence (a fill,
+  settlement, refusal, block, verdict or lesson) rather than the clock, the foundry follows
+  forward yield, failed consults are refunded, and repair children are replayed before a seat.
 
 Known limits:
 
