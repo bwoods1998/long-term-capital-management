@@ -15,7 +15,8 @@ NEEDS = {
     "bars": {"timeframe": "5Min", "limit": 120},   # alpaca: 1Min 5Min 15Min 1Hour 1Day, limit <= 500
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
-    "wake_minutes": 15,           # how often to be woken: 5 to 1440
+    "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
+                                  # woken a few seconds after the regular open when its next wake would land later)
 }
 PARAMS = {"lookback": 24, "z_entry": 2.0}          # defaults; a mutation changes these first
 
@@ -77,7 +78,7 @@ exact decimals).
 
 ```python
 ctx = {
-  "now": "2026-09-20T13:30:00.000Z",
+  "now": "2026-09-20T13:30:00.000Z",  # read after the bars, quotes and chain were fetched
   "venue": "alpaca",
   "rung": 1,                          # 0 replay, 1 paper, 2 bunt (real money), 3 swing
   "params": {...},                    # PARAMS with this agent's mutations applied
@@ -105,6 +106,13 @@ Kalshi, $10 on Alpaca), and an order up to that position limit, never over the g
 ($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $10 Kalshi
 bunt that is $5 a position and $5 an order. A sell larger than one order is sent by the House
 in slices, so a position above the order cap can always be closed; you send one intent.
+
+On Alpaca real money the book also holds a new position, valued at the ASK, and an order to half
+your account's CURRENT equity, so `limits` are never more than that less a cent (Sept 23, 2026): a
+$25 bunt is shown $12.49, less once its equity falls; an options bunt staked $40 is shown $19.99 and
+a chain of contracts up to 19 cents. A buy that would leave a position over that at the ask -- a bid
+under the ask sized to its own price, say -- is trimmed to fit before it reaches the book, never
+under the venue's minimum, and the wake's `adjusted` says so. Nothing is ever made larger.
 
 Forward snapshots also include `recent_order_outcomes` (up to 12, owned by you on this book).
 A House risk refusal has `status="refused"`, `reason`, and `submitted_to_venue=false`; it is
