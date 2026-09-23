@@ -1,0 +1,9 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_venue_grid_child",
+  "repair": {
+    "key": "strategy_defect:haghani-38:6d1e543aafee",
+    "parent": "haghani-38"
+  },
+  "why": "Corrected child of haghani-38: replace cent-rounded crypto entry and exit prices with side-aware snapping to a stated venue price increment, preserving raw prices when no grid is supplied. Resting-order comparisons use the same targets. Same venue, hourly horizon, symbols and trading logic; born on rung 0 with no inherited record and requiring independent qualification."
+}
