@@ -106,7 +106,8 @@ class Helpers(unittest.TestCase):
         for tape in ({"steps": clean["steps"], "source": {"window": ["2025-03-01", "2025-11-15"]}},
                      {"steps": [{"t": "2025-11-10T00:00:00Z"}, {"t": "2025-11-20T00:00:00Z"}]},
                      {"steps": [{"t": "2026-05-14T00:00:00Z"}, {"t": "2026-06-01T00:00:00Z"}]},
-                     {"steps": live["steps"], "warmup_bars": {"BTC/USD": [{"t": "2026-01-02T00:00:00Z"}]}}):
+                     {"steps": live["steps"], "warmup_bars": {"BTC/USD": [{"t": "2026-01-02T00:00:00Z"}]}},
+                     {"steps": live["steps"], "observed_bars": {"BTC/USD": [{"t": "2026-03-02T00:00:00Z"}]}}):
             with self.assertRaises(SealedTape):
                 check_dev_only(tape, holdout)
 
@@ -198,16 +199,37 @@ class Archive(LabCase):
         self.assertEqual(row["status"], "blocked")
         self.assertIn("holdout", row["error"])
 
-    def test_a_box_failure_leaves_the_candidates_queued(self):
+    def test_a_box_failure_leaves_the_candidates_queued_and_the_box_alone_for_a_while(self):
         ident = self.queue(KNOB)
 
         class Down:
             def evaluate(self, *a, **k):
                 raise OSError("the lab box is asleep")
 
-        self.lab._box = Down()
+        self.lab.use_box(Down())
         self.assertIsNone(self.lab.evaluate_batch())
         self.assertEqual(self.candidate(ident)["status"], "queued")
+        self.assertIn("lab box", self.lab.open())
+        self.clock.advance(301)
+        self.assertEqual(self.lab.open(), "")
+
+    def test_a_tape_the_box_refuses_blocks_its_candidates(self):
+        ident = self.queue(KNOB)
+
+        class TapeRefused(ValueError):
+            pass
+
+        class Sealed:
+            def evaluate(self, *a, **k):
+                raise TapeRefused("unsupported input: the tape reaches into the sealed holdout")
+
+        self.lab.use_box(Sealed())
+        done = self.lab.evaluate_batch()
+        self.assertEqual(done["refused"], 1)
+        row = self.candidate(ident)
+        self.assertEqual(row["status"], "blocked")
+        self.assertIn("refused the tape", row["error"])
+        self.assertEqual(self.lab.open(), "")  # not an outage
 
 
 class Breeding(LabCase):
@@ -461,6 +483,16 @@ class Researchers(LabCase):
 
 
 class Wiring(LabCase):
+    def test_the_lab_box_key_comes_from_config(self):
+        from league.service import lab_box_key
+
+        self.assertEqual(lab_box_key({}), "")
+        self.assertEqual(lab_box_key({"lab": {"box_key": "lab"}}), "")  # no box named: no lab
+        self.assertEqual(lab_box_key({"lab": {"box_id": "sb_x"}}), "lab")
+        self.assertEqual(lab_box_key({"lab": {"box_id": "sb_x", "box_key": "ltcm-lab"}}), "ltcm-lab")
+        self.assertEqual(lab_box_key({"lab": {"box_id": "sb_x", "enabled": False}}), "")
+        self.assertEqual(lab_box_key({"lab": {"box_id": "sb_x"}}, canary=True), "")
+
     def test_the_house_builds_the_lab_only_with_a_lab_box(self):
         self.assertIsNone(self.new_house().lab)  # enabled in game.json, but no box configured
         from pathlib import Path

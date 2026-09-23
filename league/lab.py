@@ -270,11 +270,13 @@ def check_dev_only(tape: Mapping[str, Any], holdout: tuple[str, str]) -> None:
         first, last = str(steps[0].get("t") or ""), str(steps[-1].get("t") or "")
         if first[:10] < end and last[:10] >= start:
             raise SealedTape(f"the tape's steps {first}..{last} reach into the sealed holdout {start}..{end}")
-    for rows in (tape.get("warmup_bars") or {}).values() if isinstance(tape.get("warmup_bars"), Mapping) else ():
-        for bar in rows or []:
-            stamp = str((bar or {}).get("t") or "")[:10] if isinstance(bar, Mapping) else ""
-            if start <= stamp < end:
-                raise SealedTape("the tape's warmup bars reach into the sealed holdout")
+    for name in ("warmup_bars", "observed_bars"):
+        series = tape.get(name) if isinstance(tape.get(name), Mapping) else {}
+        for rows in series.values():
+            for bar in rows or []:
+                stamp = str((bar or {}).get("t") or "")[:10] if isinstance(bar, Mapping) else ""
+                if start <= stamp < end:
+                    raise SealedTape(f"the tape's {name.replace('_', ' ')} reach into the sealed holdout")
 
 
 def search_tape(tape: Mapping[str, Any], fraction: float) -> dict[str, Any]:
@@ -495,11 +497,16 @@ class Lab:
 
     @property
     def box(self) -> Any:
+        """The lab box's batch evaluator (`league/labbox.py`): the one the service bound to the box
+        `config.json` names (`use_box`), else one over the House's sandbox under `box_key`."""
         if self._box is None:
-            from .labbox import LabBox  # the lab box's batch evaluator (league/labbox.py)
+            from .labbox import LabBox
 
             self._box = LabBox(self.house.sandbox, box_key=self.box_key, clock=self.house.clock)
         return self._box
+
+    def use_box(self, box: Any) -> None:
+        self._box = box
 
     def _client(self, which: str) -> Any:
         """Luna (mutations) or Sol (leaps): the same metered gateway client every other pass uses,
@@ -541,6 +548,8 @@ class Lab:
             return "a release is being staged"
         if getattr(house, "campaigns", None) and not house.pacer.may_spend("sail"):
             return "the Sail allowance is closed"
+        if self.box_down():
+            return "the lab box failed a batch in the last five minutes"
         tier = house.frontier_tier()
         if tier != "all":
             return f"the OpenAI tier is {tier!r}"
@@ -578,6 +587,8 @@ class Lab:
                 done = self.evaluate_batch()
                 if not done:
                     break
+                if done.get("refused"):
+                    continue
                 out["batches"] += 1
                 out["evaluated"] += done["candidates"]
                 out["archived"] += done["archived"]
@@ -753,7 +764,9 @@ class Lab:
         nothing could be evaluated."""
         settings = self.settings
         size = int(settings["batch_size"])
-        rows = self._q("SELECT * FROM candidates WHERE status='queued' ORDER BY priority, created LIMIT ?", (size * 4,))
+        # A wide look: rows whose tape is not built yet are passed over (at most `max_tapes_per_step` new
+        # tapes a step), so children on a ready tape are not starved behind seeds on unbuilt ones.
+        rows = self._q("SELECT * FROM candidates WHERE status='queued' ORDER BY priority, created LIMIT ?", (size * 16,))
         if not rows:
             return None
         groups: dict[str, list[sqlite3.Row]] = {}
@@ -783,7 +796,21 @@ class Lab:
         try:
             results = self.box.evaluate(batch, tape_id, tape, stake=float(row1["stake_usd"]), limits=limits,
                                         timeout=float(settings["timeout"]))
-        except Exception as exc:  # noqa: BLE001 - infrastructure, never the candidates' fault: they stay queued
+        except Exception as exc:  # noqa: BLE001 - see below
+            if type(exc).__name__ == "TapeRefused" or "unsupported input" in str(exc):
+                # The box's own seal refused the tape (`labbox.LabBox.check`): unavailable data, never a
+                # result. Its candidates are blocked, and the tape is not built for them again.
+                for key, hit in list(self._tapes.items()):
+                    if hit[1] == tape_id:
+                        self._tapes.pop(key)
+                        self._tape_errors[key] = (self._now(), f"unsupported input: {str(exc)[:200]}")
+                for r in chosen:
+                    self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?",
+                            (f"the lab box refused the tape: {str(exc)[:260]}", self._now(), r["id"]))
+                return {"candidates": 0, "ok": 0, "eligible": 0, "gate": 0, "archived": 0, "refused": len(chosen)}
+            # Infrastructure, never the candidates' fault: they stay queued, and the box is left alone
+            # for five minutes rather than asked again every tick.
+            self._box_down_until = self._now() + 300
             self.house.alert("warning", f"the lab box could not evaluate a batch ({type(exc).__name__}: {str(exc)[:200]})")
             return None
         seconds = time.monotonic() - started
@@ -817,6 +844,9 @@ class Lab:
                  counts["candidates"], counts["ok"], counts["eligible"], counts["gate"], counts["archived"], round(seconds, 3),
                  format(box_usd.quantize(Decimal("0.000001")), "f")))
         return counts if counts["candidates"] else None
+
+    def box_down(self) -> bool:
+        return self._now() < float(getattr(self, "_box_down_until", 0.0))
 
     def _place(self, cell: str, niche: str, ident: str, fitness: float) -> bool:
         """Insert into the archive when the cell is empty or this candidate is fitter (strictly)."""
