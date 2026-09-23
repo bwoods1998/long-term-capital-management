@@ -66,3 +66,42 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   - Dry run on a copy of the live ledger: 96 agents' evidence in 1.0 s.
   - Alpaca bunt $25, not $15: the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum make a $15 bunt untradeable (found by `test_allocator`'s end-to-end test).
   - `bunt_at` 1.01, not 1.03: no paper agent was near 1.03, and 1.03 would have seated nobody for days. Both changes are inside the plan's bounds.
+- 07:25-07:50Z — **Adversarial review of #163** (three lenses: money path, evidence honesty,
+  lifecycle; each finding checked by a skeptic that tried to refute it). Every defect below was
+  reproduced by script, and each now has a regression test. Fixes are on #163:
+  1. **Evidence depended on the rung.** A demoted bunt's unfinished real loss disappeared on paper,
+     so it was re-bunted every other pass (12 flips in 30 minutes). Now both records are read in
+     full at every rung.
+  2. **Real drawdown was lifetime.** A demoted agent re-bunted and flipped forever. The drawdown is
+     now the current real stay's, and any demotion starts a 1-hour re-entry cooldown
+     (`allocator.reentry_cooldown_hours`).
+  3. **A re-seated account's new stay was invisible** (`_unfinished_growth` returned 0 after a
+     zero-equity block) and its losses were refilled. A re-seated account now grows from what was
+     lent.
+  4. **An account marked before it was funded** took the net of stakes and withdrawals as its
+     start, which inflated E or read as ruin. Now it grows from what was lent, and only withdrawals
+     are flows (`observe`, `wealth`, `_unfinished_growth`).
+  5. **The envelope counted a seated account's net loan.** Returned profit counted twice, and a
+     star's stake could drop out of it. It is now grant + realized − what every account can still
+     lose.
+  6. **Unfunded seats counted $0**, so one pass could promote every eligible agent. Pending seats
+     are now reserved, and the allocator checks the venue can fund a stake before promoting. A
+     failed stake sends the agent straight back. `seat()` lends a real stake only with envelope
+     room, and a known-defect bunt committed after its audit checks the allocator's envelope.
+  7. **The swing audit's packet was empty** (no `book` on the verdict). It now reads the real record
+     (the paper record for a known-defect bunt).
+  8. **A drifting swing was liquidated and re-swung in the same tick.** Drift from swing to bunt now
+     only re-seats, and the cooldown blocks the re-swing.
+  9. **Any past approval skipped the swing audit**, even after a veto or new code. Now only the
+     latest real verdict on the current code counts, and a veto's cooldown holds a bunt for every
+     agent.
+  10. **Trade counts vanished once the net stake was ≤ 0**, and settlements before an evidence
+      cutoff counted. `closed_trades` fixes both.
+  11. **The haircut was 0 after a cutoff** and diluted across stays. It is now charged per stay.
+  12. **A throttled Alpaca bunt could not trade** (half of $12.50 is under the $10 minimum). The
+      throttle now stops at the smallest stake that can trade.
+  13. **judge and the allocator alternated `progress` rows** every pass. Only the allocator writes
+      statuses now.
+  14. **Positions are capped at $60 until exit slicing (C) lands** (`EXITS_SLICED`), so one $75
+      order can always close one.
+

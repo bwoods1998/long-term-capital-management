@@ -776,6 +776,10 @@ class House:
             stake = CONSTITUTION["rungs"]["2" if book.real_money else "1"]["stake_usd"]
             if book.real_money and allocator_module.enabled():
                 stake = self.allocator.seat_stake(agent)  # a bunt's stake, or a swing's by its evidence
+                if self.allocator.headroom(agent.venue, exclude=agent.id) < stake:
+                    # The allocator is the only place a real stake is decided: no envelope, no stake.
+                    self.alert("warning", f"{agent.id} was not staked on {book.name}: the {agent.venue} envelope has no room for ${stake}")
+                    return
             try:
                 book.stake(agent.id, stake, note=f"rung {rung} stake")
             except BookError as exc:  # a real book not reconciled yet, or out of real cash: try again next wake
@@ -1919,7 +1923,9 @@ class House:
             self.evaluator.observe(agent.id, book.name, agent.horizon)
             peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
             verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
-            if verdict.decision != 'eligible':
+            if verdict.decision != 'eligible' and not allocator_module.enabled():
+                # Under the allocator its own statuses are the only ones (two writers alternated a
+                # `progress` row every pass for every waiting agent, Sept 23, 2026 review).
                 self._promotion_status(agent, verdict, 'evidence', verdict.reason)
             fall = (CONSTITUTION["ladder"].get("micro_demotion") or {}).get("max_loss")
             allocated = allocator_module.enabled()
@@ -1942,7 +1948,10 @@ class House:
             if verdict.decision not in ("die", "eligible") and rung >= 2:
                 drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
                 if drift.decision == "demote":
-                    self._move_books(agent, book)
+                    if allocated and self.evaluator.rung(agent.id) >= 2:
+                        self.seat(agent)  # a swing drifting to a bunt keeps its book: the stake follows, nothing is sold
+                    else:
+                        self._move_books(agent, book)
                     return drift
         if rung == 2 and verdict.decision != "die" and self.auditor is not None:
             # Audit after promotion: an audit that finished before a restart is committed, and
@@ -2255,7 +2264,12 @@ class House:
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
             authorization = self.campaigns.live_authorization() if self.campaigns else None
-            if rung == 1 and (not self.tuition()["room"] or
+            if rung == 1 and allocator_module.enabled():
+                # A known defect's bunt, committed after its audit: the allocator's envelope decides.
+                if self.allocator.headroom(agent.venue) < self.allocator.target_stake(agent, "bunt"):
+                    self._promotion_status(agent, verdict, 'envelope', 'the envelope has no room for the bunt the audit approved')
+                    return
+            elif rung == 1 and (not self.tuition()["room"] or
                     (authorization and authorization['policy'].get('venue_capital_usd')
                      and not self.tuition(agent.venue)['room'])):
                 self._promotion_status(agent, verdict, 'tuition', 'another admission used the available micro stake')

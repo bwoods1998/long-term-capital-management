@@ -103,7 +103,9 @@ class Rules(unittest.TestCase):
         self.assertEqual(limits_for(D("15"), "alpaca"), (D("12.00"), D("12.00")))  # $10 minimum + a fifth
         self.assertEqual(limits_for(D("25"), "alpaca"), (D("12.50"), D("12.50")))
         self.assertEqual(limits_for(D("100"), "alpaca"), (D("50.00"), D("50.00")))
-        self.assertEqual(limits_for(D("400"), "alpaca"), (D("200.00"), D("75")))  # every order within the gateway's cap
+        with patch.object(allocator, "EXITS_SLICED", True):
+            self.assertEqual(limits_for(D("400"), "alpaca"), (D("200.00"), D("75")))  # every order within the gateway's cap
+        self.assertEqual(limits_for(D("400"), "alpaca"), (D("60.00"), D("60.00")))  # until exits are sliced: one order closes it
         self.assertEqual(limits_for(D("10"), "kalshi"), (D("5.00"), D("5.00")))
 
 
@@ -204,7 +206,11 @@ class HouseCaseReal(unittest.TestCase):
             rung = house.evaluator.rung(agent.id) if rung is None else rung
             if agent.id not in table:
                 return real(house, agent, rung)
-            return ev(agent=agent.id, venue=agent.venue, rung=rung, **table[agent.id])
+            row = dict(table[agent.id])
+            if "cooling" not in row:  # the real cooldown, as `allocator.evidence` computes it
+                left = allocator.left_real_at(house, agent.id)
+                row["cooling"] = rung in (1, 2) and left is not None and house.clock() - left < 3600
+            return ev(agent=agent.id, venue=agent.venue, rung=rung, **row)
         return patch.object(allocator, "evidence", side_effect=fake)
 
 
@@ -329,9 +335,13 @@ class Mechanics(HouseCaseReal):
         self.assertEqual(alloc.target_stake(a, "bunt"), D("25"))
         with patch.object(type(alloc), "floor_pnl", return_value=D("-16")):  # -32% of the $50 line
             self.assertTrue(alloc._throttle())
-            self.assertEqual(alloc.target_stake(a, "bunt"), D("12.50"))  # halved
+            # Halved to $12.50, but never under the smallest stake that can trade Alpaca crypto
+            # ($10 minimum x 1.2 / a half-stake position = $24).
+            self.assertEqual(alloc.target_stake(a, "bunt"), D("24.00"))
             swing = alloc.target_stake(a, "swing", ev(venue="alpaca", e=4.0))
-            self.assertEqual(swing, D("15.00"))  # 30 (0.6 of $50) halved
+            self.assertEqual(swing, D("24.00"))  # 30 (0.6 of $50) halved to 15, floored at 24
+            with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}):
+                self.assertEqual(alloc.target_stake(a, "bunt"), D("30.00"))  # a stake above the floor is halved
         with patch.object(type(alloc), "floor_pnl", return_value=D("-10")):  # -20%: still throttled
             self.assertTrue(alloc._throttle())
         with patch.object(type(alloc), "floor_pnl", return_value=D("-7")):  # -14%: restored
@@ -448,3 +458,251 @@ class GrantAndDigest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRegressions(unittest.TestCase):
+    """The Sept 23, 2026 adversarial review of the allocator, each defect as a test."""
+
+    def setUp(self):
+        from league.evaluator import Evaluator
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
+        self.ev = Evaluator(self.ledger, clock=self.clock)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def mark(self, equity, book="alpaca", agent="a", holdings=0):
+        self.ledger.append("book.mark", {"book": book, "equity": str(equity), "cash": str(equity), "holdings": holdings}, agent=agent)
+
+    def stake(self, usd, book="alpaca", agent="a"):
+        self.ledger.append("book.stake", {"book": book, "usd": str(usd), "note": "t", "real_money": book == "alpaca"}, agent=agent)
+
+    def test_a_withdrawal_inside_the_first_funded_block_is_a_flow_not_a_smaller_start(self):
+        self.mark(0)
+        self.stake(25)
+        self.mark(30)
+        self.stake(-12.5)
+        self.mark(17.5)
+        self.assertAlmostEqual(self.ev.wealth("a", "alpaca")["log"], math.log(1.2), places=6)
+
+    def test_a_loss_then_a_sweep_in_the_first_block_is_that_loss_not_ruin(self):
+        self.mark(0)
+        self.stake(25)
+        self.mark(18)
+        self.stake(-18)
+        self.mark(0)
+        self.assertAlmostEqual(self.ev.wealth("a", "alpaca")["log"], math.log(0.72), places=6)
+
+    def test_a_re_seated_account_shows_its_new_loss_before_its_first_block_ends(self):
+        # Stay 1: staked, flat, swept; its zero-equity block finishes; stay 2 then loses 30%.
+        self.stake(25)
+        self.mark(25)
+        self.clock.advance(3600)
+        self.mark(25)
+        self.stake(-25)
+        self.mark(0)
+        self.clock.advance(3600)
+        self.mark(0)
+        self.ev.observe("a", "alpaca", "hour")
+        self.clock.advance(3600)
+        self.mark(0)
+        self.ev.observe("a", "alpaca", "hour")
+        self.stake(25)
+        self.mark(17.5)
+        w = self.ev.wealth("a", "alpaca")
+        self.assertAlmostEqual(w["log"], math.log(0.7), places=6)
+        self.assertAlmostEqual(w["drawdown"], 0.3, places=6)
+
+    def test_the_demotion_drawdown_is_the_current_stays(self):
+        self.stake(25)
+        self.mark(25)
+        for equity in (45, 40):  # stay 1 peaks at 1.8x and gives some back
+            self.clock.advance(3600)
+            self.mark(equity)
+        self.clock.advance(3600)
+        self.mark(40)
+        self.ev.observe("a", "alpaca", "hour")
+        head = self.ledger.head()[0]
+        self.clock.advance(3600)
+        self.mark(29)  # the new stay begins at 40 and has lost 27.5% of it... from its own start
+        whole = self.ev.wealth("a", "alpaca")
+        stay = self.ev.wealth("a", "alpaca", drawdown_since=head)
+        self.assertGreater(whole["drawdown"], 0.35)
+        self.assertAlmostEqual(stay["drawdown"], 1 - 29 / 40, places=6)
+
+    def test_counts_survive_a_net_stake_at_or_below_zero_and_settlements_respect_the_cutoff(self):
+        house = SimpleNamespace(ledger=self.ledger)
+        self.stake(200, book="alpaca-paper")
+        for _ in range(3):
+            self.ledger.append("book.fill", {"book": "alpaca-paper", "realized": "40", "flat": True, "source": "venue",
+                                             "side": "sell", "quantity": "1", "price": "40"}, agent="a")
+        self.stake(-330, book="alpaca-paper")  # swept with its profit: the net stake is now negative
+        self.assertEqual(allocator.closed_trades(house, "a", "alpaca-paper"), (3, 0))
+        for _ in range(4):
+            self.ledger.append("book.settle", {"book": "kalshi-shadow", "pnl": "1"}, agent="a")
+        self.ledger.append("book.fill_correction", {"book": "kalshi-shadow", "cash_delta": "0", "fees_delta": "0",
+                                                    "realized_delta": "0", "holding_cost_deltas": {}}, agent="a")
+        self.ledger.append("book.settle", {"book": "kalshi-shadow", "pnl": "1"}, agent="a")
+        self.assertEqual(allocator.closed_trades(house, "a", "kalshi-shadow"), (1, 1))  # only after the cutoff
+
+    def test_the_haircut_survives_a_cutoff_and_each_stay_pays_its_own(self):
+        house = SimpleNamespace(ledger=self.ledger)
+        fill = {"book": "alpaca-paper", "source": "venue", "side": "buy", "quantity": "1", "price": "80"}
+        self.stake(200, book="alpaca-paper")
+        self.ledger.append("book.fill", fill, agent="a")
+        self.stake(-200, book="alpaca-paper")
+        self.stake(200, book="alpaca-paper")
+        self.ledger.append("book.fill", fill, agent="a")
+        both = allocator._paper_haircut(house, "a", "alpaca-paper", 10)
+        self.assertAlmostEqual(both, 2 * 80 * 10 / 10_000 / 200, places=12)
+        self.ledger.append("book.fill_correction", {"book": "alpaca-paper", "cash_delta": "0", "fees_delta": "0",
+                                                    "realized_delta": "0", "holding_cost_deltas": {}}, agent="a")
+        self.ledger.append("book.fill", fill, agent="a")
+        self.assertAlmostEqual(allocator._paper_haircut(house, "a", "alpaca-paper", 10), 80 * 10 / 10_000 / 200, places=12)
+
+
+class NoFlapping(HouseCaseReal):
+    def test_a_demoted_bunt_waits_out_the_cooldown_before_it_may_bunt_again(self):
+        house = self.house
+        a = self.agent()
+
+        def fake(h, ag, rung=None):
+            rung = h.evaluator.rung(ag.id) if rung is None else rung
+            left = allocator.left_real_at(h, ag.id)
+            cooling = rung == 1 and left is not None and h.clock() - left < 3600
+            # A record that would flap: good enough for a bunt on paper, a loser on real money.
+            return ev(agent=ag.id, venue=ag.venue, rung=rung, e=1.10 if rung == 1 else 0.70, w_paper=1.21,
+                      w_real=1.0 if rung == 1 else 0.64, paper_trades=6, cooling=cooling)
+
+        rungs = []
+        with patch.object(allocator, "evidence", side_effect=fake):
+            for _ in range(8):  # 40 minutes of mark passes
+                self.tick()
+                rungs.append(house.evaluator.rung(a.id))
+            self.assertEqual(rungs[:2], [2, 1])
+            self.assertTrue(all(r == 1 for r in rungs[1:]), rungs)
+            self.clock.advance(3600)
+            self.tick()
+            self.assertEqual(house.evaluator.rung(a.id), 2)  # after the cooldown it may try again
+
+    def test_real_evidence_persists_on_paper(self):
+        house = self.house
+        a = self.agent()
+        real = house.books["alpaca"]
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(house.evaluator.rung(a.id), 2)
+        for _ in range(4):  # it buys on the real book (the strategy buys when flat, sells when it holds)
+            self.tick()
+            if real.account(a.id).holdings:
+                break
+        self.assertTrue(real.account(a.id).holdings)
+        self.price *= 0.6
+        self.tick()  # marked down: its real evidence falls, it is sent back to paper
+        row = allocator.evidence(house, house.registry.get(a.id))
+        self.assertEqual(house.evaluator.rung(a.id), 1)
+        self.assertLess(row.w_real, 0.9)  # the loss is still in its evidence on paper
+
+
+class Envelope(HouseCaseReal):
+    def test_realized_profit_opens_room_once_and_held_profit_stays_at_risk(self):
+        house, alloc = self.house, self.house.allocator
+        with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "100"}):
+            a = self.agent()
+            with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+                self.tick()
+                for _ in range(8):  # it buys on one wake and sells on the next, into a rising price
+                    self.price *= 1.03
+                    self.tick()
+            book = house.books["alpaca"]
+            account = book.account(a.id)
+            realized = alloc.realized("alpaca")
+            self.assertGreater(realized, 0)
+            held = sum((h.cost for h in account.holdings.values()), D(0))
+            self.assertEqual(alloc.at_risk("alpaca"), max(account.cash, D(0)) + held)
+            self.assertEqual(alloc.headroom("alpaca"), D("100") + realized - alloc.at_risk("alpaca"))
+            # Whatever the allocator returned or kept, what can be lost never exceeds the capital.
+            self.assertLessEqual(alloc.at_risk("alpaca"), alloc.capital("alpaca"))
+
+    def test_a_stake_the_book_cannot_lend_promotes_nobody(self):
+        house = self.house
+        agents = [self.agent(f"s{i}", code=IDLE) for i in range(3)]
+        table = {a.id: dict(e=1.10, w_paper=1.21, paper_trades=6) for a in agents}
+        with patch.object(type(house.allocator), "can_fund", return_value=False), self.evidence_of(table):
+            self.tick()
+        self.assertTrue(all(house.evaluator.rung(a.id) == 1 for a in agents))
+        self.assertEqual(house._state["promotion_status"][agents[0].id]["stage"], "venue_cash")
+
+    def test_a_stake_that_fails_on_the_book_sends_the_agent_straight_back(self):
+        from league.book import Book, BookError
+
+        house = self.house
+        a = self.agent(code=IDLE)
+        real = house.books["alpaca"]
+        original = Book.stake
+
+        def refuse(book, agent, usd, *, note=""):
+            if book is real and float(usd) > 0:
+                raise BookError("the venue's cash moved")
+            return original(book, agent, usd, note=note)
+
+        with patch.object(Book, "stake", refuse), self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(house.evaluator.rung(a.id), 1)
+        self.assertLessEqual(house.allocator.at_risk("alpaca"), house.allocator.capital("alpaca"))
+
+
+class LifecycleRegressions(HouseCaseReal):
+    def test_the_swing_audit_reads_the_real_record_and_a_known_defect_bunt_the_paper_one(self):
+        self.assertEqual(allocator._verdict("a", 2, "why", ev(venue="kalshi")).numbers["book"], "kalshi")
+        self.assertEqual(allocator._verdict("a", 1, "why", ev(venue="alpaca")).numbers["book"], "alpaca-paper")
+
+    def test_a_veto_holds_a_bunt_through_its_cooldown(self):
+        house = self.house
+        a = self.agent(code=IDLE)
+        house.ledger.append("audit.verdict", {"approve": False, "summary": "look-ahead in the entry"}, agent=a.id)
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(house.evaluator.rung(a.id), 1)
+        self.assertEqual(house._state["promotion_status"][a.id]["stage"], "audit_cooldown")
+
+    def test_an_approval_of_older_code_does_not_skip_the_swing_audit(self):
+        house = self.house
+        a = self.agent(code=IDLE)
+        house.ledger.append("audit.verdict", {"approve": True, "summary": "old code"}, agent=a.id)
+        self.assertEqual(allocator.audit_standing(house, a), "approved")
+        house.ledger.append("agent.strategy", {"code_sha256": "new", "generation": 2}, agent=a.id)
+        self.assertEqual(allocator.audit_standing(house, a), "none")
+        house.ledger.append("audit.verdict", {"approve": False, "error": "HTTP 502"}, agent=a.id)
+        self.assertEqual(allocator.audit_standing(house, a), "none")  # an error is not a verdict
+
+    def test_a_drifting_swing_keeps_its_positions_and_is_not_swung_again_at_once(self):
+        house = self.house
+        with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
+            a = self.agent()
+            table = {a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}
+            with self.evidence_of(table):
+                self.tick()
+            table[a.id] = dict(e=3.0, w_paper=1.21, w_real=2.7, paper_trades=6, real_trades=10)
+            with self.evidence_of(table):
+                for _ in range(4):
+                    self.tick()
+                    house.wait(5)
+            self.assertEqual(house.evaluator.rung(a.id), 3)
+            from league.evaluator import Verdict
+
+            def drifted(agent_id, book, horizon="hour"):
+                return house.evaluator.demote(agent_id, "test drift", {})
+            submitted = len(self.real.submitted)
+            with self.evidence_of(table), patch.object(house.evaluator, "drift", side_effect=drifted):
+                self.tick()
+            self.assertEqual(house.evaluator.rung(a.id), 2)
+            forced = [o for o in self.real.submitted[submitted:] if "closing this account" in (o.rationale or "")]
+            self.assertEqual(forced, [])  # no wind-down sale
+            with self.evidence_of({a.id: {**table[a.id], "cooling": True}}):
+                self.tick()
+            self.assertEqual(house.evaluator.rung(a.id), 2)  # the cooldown keeps it a bunt

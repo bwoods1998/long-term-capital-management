@@ -233,7 +233,10 @@ CONSTITUTION: dict[str, Any] = {
         "swing_at": 1.5, "swing_min_real_trades": 8, "swing_min_w_real": 1.0, "swing_exit_w_real": 0.9,
         "kappa": 1.0, "e_cap": 20, "max_share_of_venue": 0.6, "position_share": 0.5,
         "stars": 3, "star_min_w_real": 1.25,
-        "hysteresis": 0.85, "real_drawdown_demote": 0.35,
+        # An agent back on paper from real money waits this long before it may bunt again, so a
+        # record near a line cannot flap between books (and pay a sweep and a fresh stake) at every
+        # mark pass.
+        "hysteresis": 0.85, "real_drawdown_demote": 0.35, "reentry_cooldown_hours": 1.0,
         "die_below": 0.80, "die_min_trades": 10,
         "throttle": {"halve_below": -0.30, "restore_above": -0.15},
         "min_stake_change": 0.10,
@@ -281,4 +284,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'd4dece55cadf7cbabddebebbe804f6bf84e57e01f5af600f44c23a84c8cc2b09'
+PINNED_DIGEST = '9fa83727aabd720e7d937eb5ed4aaab19f4a0454af818d8a6f8e4abe83eb4416'

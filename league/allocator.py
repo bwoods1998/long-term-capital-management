@@ -73,6 +73,10 @@ PAPER_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
 EVENT_BOOKS = ("kalshi-shadow", "kalshi")
 MAX_MOVES = 50
+#: Whether `Book` slices a reducing order larger than the gateway's order cap (Workstream C). Until
+#: it does, no position may exceed what one order can close after it has gained a quarter (four
+#: fifths of the cap), exactly as `capital.scaled_limits` held rung 3.
+EXITS_SLICED = False
 
 
 def rules(constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -107,6 +111,7 @@ class Evidence:
     real_drawdown: float  # of the real wealth index from its high-water mark, 0..1
     haircut_log: float  # the log wealth taken off the paper record by the execution haircut
     real_seen: bool  # the agent has ever had a real account
+    cooling: bool = False  # demoted within `reentry_cooldown_hours`: no move up until it passes
 
     def row(self) -> dict[str, Any]:
         return {"W_paper": round(self.w_paper, 6), "W_real": round(self.w_real, 6), "E": round(self.e, 6),
@@ -117,30 +122,99 @@ class Evidence:
 
 def _paper_haircut(house: Any, agent: str, book_name: str, bps: float) -> float:
     """The execution haircut on a paper record, in log wealth: `bps` of every filled notional (each
-    side), over what the agent was lent on that book. Conservative: the whole stake is the base."""
+    side) since the evidence cutoff, each over the stake of the stay it was traded in (a sweep ends a
+    stay; the next stake begins one), so each stay pays for its own trading and an evidence cutoff
+    never zeroes it (Sept 23, 2026 review: the old base, every dollar lent since the cutoff, was 0
+    after a repair and diluted across re-seats)."""
     if bps <= 0:
         return 0.0
     from .accounting import evidence_cutoffs
 
     cutoff = evidence_cutoffs(house.ledger, agent).get(book_name, 0)
-    notional, lent = 0.0, 0.0
-    for entry in house.ledger.iter(kinds=("book.fill", "book.stake"), agent=agent, after=cutoff):
+    base, closed, total = 0.0, True, 0.0
+    for entry in house.ledger.iter(kinds=("book.fill", "book.stake"), agent=agent):
         p = entry.payload
         if p.get("book") != book_name:
             continue
         if entry.kind == "book.stake":
-            lent += max(float(p.get("usd") or 0), 0.0)  # every dollar ever lent there: a conservative base
+            usd = float(p.get("usd") or 0)
+            if usd > 0:
+                base, closed = (usd, False) if closed else (base + usd, False)
+            elif usd < 0:
+                closed = True  # a sweep: the next stake starts a new stay
             continue
-        if p.get("source") not in ("venue", "cross"):
+        if entry.seq <= cutoff or p.get("source") not in ("venue", "cross"):
             continue
         try:
             multiplier = float((p.get("instrument") or {}).get("multiplier") or 1)
-            notional += abs(float(p["quantity"]) * float(p["price"]) * multiplier)
+            notional = abs(float(p["quantity"]) * float(p["price"]) * multiplier)
         except (KeyError, TypeError, ValueError):
             continue
-    if lent <= 0:
-        return 0.0
-    return min(notional * bps / 10_000.0 / lent, 5.0)
+        total += notional * bps / 10_000.0 / max(base, 1.0)
+    return min(total, 5.0)
+
+
+def closed_trades(house: Any, agent: str, book_name: str) -> tuple[int, int]:
+    """(closed trades, settlements) on one book since its evidence cutoff: every settlement, and every
+    sale that left the position flat, counted as `Evaluator.trade_returns` counts them, but never
+    dropped because the net stake is zero or less after sweeps (Sept 23, 2026 review)."""
+    from .accounting import evidence_cutoffs
+
+    cutoff = evidence_cutoffs(house.ledger, agent).get(book_name, 0)
+    closed = settled = 0
+    for entry in house.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=cutoff):
+        p = entry.payload
+        if p.get("book") != book_name:
+            continue
+        if entry.kind == "book.settle":
+            closed += 1
+            settled += 1
+        elif p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True):
+            closed += 1
+    return closed, settled
+
+
+def real_stay_start(house: Any, agent: str) -> int | None:
+    """The ledger position where the agent's current stay on real money began (its last promotion
+    from paper), or None when it is not on real money."""
+    rows = house.ledger.read(kinds="eval.verdict", agent=agent, limit=10_000, newest=True)
+    for entry in reversed(rows):
+        p = entry.payload
+        if p.get("decision") in ("promote", "demote", "seat") and int(p.get("to_rung") or 0) <= 1:
+            return None
+        if p.get("decision") in ("promote", "seat") and int(p.get("to_rung") or 0) == 2 and int(p.get("from_rung") or 0) <= 1:
+            return entry.seq
+    return None
+
+
+def left_real_at(house: Any, agent: str) -> float | None:
+    """When the agent was last demoted -- by the allocator, drift, an audit veto or the envelope --
+    in epoch seconds, or None. Any demotion starts the re-entry cooldown, so a band that was just
+    taken away is not handed straight back in the same or the next pass (Sept 23, 2026 review)."""
+    from ltcm.broker import instant
+
+    rows = house.ledger.read(kinds="eval.verdict", agent=agent, limit=10_000, newest=True)
+    for entry in reversed(rows):
+        p = entry.payload
+        if p.get("decision") == "demote":
+            parsed = instant(entry.at)
+            return parsed.timestamp() if parsed else None
+    return None
+
+
+def audit_standing(house: Any, agent: Any) -> str:
+    """"approved" when the latest real audit verdict on the agent's CURRENT code approved it,
+    "vetoed" when it refused, "none" when there is none (errors are not verdicts; a verdict from
+    before the agent last adopted code does not speak for the code it runs now)."""
+    adopted = house.ledger.last("agent.strategy", agent=agent.id)
+    since = adopted.seq if adopted is not None else 0
+    latest = None
+    for entry in house.ledger.iter(kinds="audit.verdict", agent=agent.id, after=since):
+        if not entry.payload.get("error"):
+            latest = entry.payload
+    if latest is None:
+        return "none"
+    return "approved" if latest.get("approve") else "vetoed"
 
 
 def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
@@ -150,18 +224,23 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     ev = house.evaluator
     rung = ev.rung(agent.id) if rung is None else rung
     paper_name, real_name = PAPER_BOOK[agent.venue], REAL_BOOK[agent.venue]
-    on_real = rung >= 2
-    paper = ev.wealth(agent.id, paper_name, agent.horizon, current=not on_real)
-    real = ev.wealth(agent.id, real_name, agent.horizon, current=on_real)
+    # Evidence does not depend on the rung the agent stands on: both records are read in full,
+    # blocks in progress included (Sept 23, 2026 review: reading the real record only while on real
+    # money let a demoted bunt's unfinished loss vanish, and it was re-bunted every other pass).
+    # The drawdown that demotes is the current real stay's, from where that stay began.
+    stay = real_stay_start(house, agent.id) if rung >= 2 else None
+    paper = ev.wealth(agent.id, paper_name, agent.horizon, current=True)
+    real = ev.wealth(agent.id, real_name, agent.horizon, current=True, drawdown_since=stay if stay is not None else None)
     haircut = _paper_haircut(house, agent.id, paper_name, float(weights.get("alpaca_paper_haircut_bps", 0))) \
         if paper_name == "alpaca-paper" else 0.0
     w_paper = math.exp(max(min(paper["log"] - haircut, 50.0), -50.0))
     w_real = math.exp(max(min(real["log"], 50.0), -50.0))
     e = (w_paper ** float(weights.get("paper_weight", 0.5))) * w_real
-    paper_returns, _ = ev.trade_returns(agent.id, paper_name)
-    settled = sum(1 for x in house.ledger.iter(kinds="book.settle", agent=agent.id)
-                  if x.payload.get("book") == paper_name) if paper_name in EVENT_BOOKS else 0
-    real_returns, _ = ev.trade_returns(agent.id, real_name)
+    paper_closed, settled = closed_trades(house, agent.id, paper_name)
+    real_closed, _ = closed_trades(house, agent.id, real_name)
+    left = left_real_at(house, agent.id)
+    hours = float(r.get("reentry_cooldown_hours", 1.0))
+    cooling = rung in (1, 2) and left is not None and house.clock() - left < hours * 3600
     real_book = house.books.get(real_name)
     real_pnl, seen = 0.0, False
     if real_book is not None and agent.id in real_book.accounts:
@@ -169,8 +248,9 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
         seen = bool(account.funded)
         real_pnl = float(real_book.equity(agent.id) - account.staked)
     return Evidence(agent=agent.id, venue=agent.venue, rung=rung, w_paper=w_paper, w_real=w_real, e=e,
-                    paper_trades=len(paper_returns), paper_settled=settled, real_trades=len(real_returns),
-                    real_pnl=real_pnl, real_drawdown=real["drawdown"], haircut_log=haircut, real_seen=seen)
+                    paper_trades=paper_closed, paper_settled=settled if paper_name in EVENT_BOOKS else 0, real_trades=real_closed,
+                    real_pnl=real_pnl, real_drawdown=real["drawdown"] if stay is not None else 0.0, haircut_log=haircut,
+                    real_seen=seen, cooling=cooling)
 
 
 # --------------------------------------------------------------------- bands
@@ -211,6 +291,8 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
     if rung <= 0:
         return "replay", "judged by replay"
     if rung == 1:
+        if ev.cooling:
+            return "paper", "back from real money within the re-entry cooldown"
         if bunt_ready(ev, p):
             return "bunt", f"E {ev.e:.4f} is at or above {p['bunt_at']:g} on {ev.paper_trades} closed trades"
         return "paper", "E below the bunt line or too few trades"
@@ -219,7 +301,7 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
     if ev.e < p["bunt_at"] * p["hysteresis"]:
         return "paper", f"E {ev.e:.4f} fell below {p['bunt_at'] * p['hysteresis']:.4f} (the bunt line with hysteresis)"
     if rung == 2:
-        if swing_ready(ev, p):
+        if swing_ready(ev, p) and not ev.cooling:
             return "swing", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, W_real {ev.w_real:.4f}, "
                              f"{ev.real_trades} real closed trades")
         return "bunt", "holds the bunt band"
@@ -247,6 +329,8 @@ def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) 
     # price-grid step (Alpaca takes no crypto order under $10; a $15 bunt must be able to place one).
     minimum = (_d((rules().get("venue_minimum_usd") or {}).get(venue, "1")) * _d("1.2")).quantize(CENT)
     position = max((stake * _d(p["position_share"])).quantize(CENT, rounding=ROUND_DOWN), minimum)
+    if not EXITS_SLICED:
+        position = min(position, (cap * _d("0.8")).quantize(CENT))
     order = max(min(position, cap), minimum)
     return position, order
 
@@ -308,31 +392,59 @@ class Allocator:
             base += max(self.realized(venue), ZERO)
         return base
 
-    def committed(self, venue: str) -> Decimal:
-        """What is at risk or already lost at a venue: every seated real account's stake (its cash
-        can all still be spent; a loss is still inside its stake), plus what any other real account
-        there can still lose (a demoted or dead account holding positions or resting buys), plus
-        realized losses of closed accounts. Profit returned by a closed account is not counted twice:
-        the profit-indexed envelope already adds it."""
+    def at_risk(self, venue: str, *, exclude: str | None = None) -> Decimal:
+        """What the real accounts at a venue can still lose: a seated account's spendable cash and
+        what its holdings cost; a seat promoted but not yet funded, its target stake; any other
+        account, what its holdings cost, and its cash too while it has a resting buy. (Sept 23, 2026
+        review: counting a seated account's net loan left out profit it still held, and a returned
+        profit or an unfunded seat opened room that was not there.)"""
         house = self.house
         book = house.books.get(REAL_BOOK[venue])
         if book is None:
             return ZERO
         total = ZERO
+        seen: set[str] = set()
         for agent_id in book.agents():
+            seen.add(agent_id)
+            if agent_id == exclude:
+                continue
             account = book.account(agent_id)
+            held = sum((h.cost for h in account.holdings.values()), ZERO)
             agent = house.registry.get(agent_id)
             seated = agent is not None and agent.alive and house.evaluator.rung(agent_id) >= 2
             if seated:
-                total += max(account.staked, ZERO) - min(account.cash, ZERO)
+                total += max(account.cash, ZERO) + held
+                if not account.funded or (account.swept and not account.holdings):
+                    total += self.target_stake(agent, "bunt")  # its stake is owed and will be lent
             else:
-                working = book.open_orders(agent_id)
-                safe = min(account.cash, ZERO) if any(w.side == "buy" for w in working) else account.cash
-                total += max(account.staked - safe, ZERO)
+                buying = any(w.side == "buy" for w in book.open_orders(agent_id))
+                total += held + (max(account.cash, ZERO) if buying else ZERO)
+        for agent in house.registry.living():
+            # Seated on the real rung without an account on the book yet (its stake failed): reserved.
+            if agent.venue == venue and agent.id not in seen and agent.id != exclude and house.evaluator.rung(agent.id) >= 2:
+                total += self.target_stake(agent, "bunt")
         return total
 
-    def headroom(self, venue: str) -> Decimal:
-        return self.capital(venue) - self.committed(venue)
+    def headroom(self, venue: str, *, exclude: str | None = None) -> Decimal:
+        """What may still be put at risk at a venue: the grant's capital, plus realized results there
+        (profit only while the envelope is profit-indexed; losses always), less what is at risk."""
+        realized = self.realized(venue)
+        if not _params()["profit_indexed_envelope"]:
+            realized = min(realized, ZERO)
+        return self.grant_capital(venue) + realized - self.at_risk(venue, exclude=exclude)
+
+    def committed(self, venue: str) -> Decimal:
+        """The envelope in use: the profit-indexed capital less the headroom (at risk plus realized losses)."""
+        return self.capital(venue) - self.headroom(venue)
+
+    def can_fund(self, venue: str, stake: Decimal) -> bool:
+        """Whether the real book would accept a new stake of this size now (`Book.stake` refuses one
+        over the venue's cash less what is already lent)."""
+        book = self.house.books.get(REAL_BOOK[venue])
+        if book is None or book.venue_cash is None:
+            return False
+        lent = sum((book.account(a).staked for a in book.agents()), ZERO)
+        return lent + stake <= book.venue_cash
 
     def floor_pnl(self) -> Decimal:
         total = ZERO
@@ -373,7 +485,11 @@ class Allocator:
         else:
             stake = base
         if self.state.get("throttle"):
-            stake = max((stake / 2).quantize(CENT, rounding=ROUND_DOWN), _d((rules().get("venue_minimum_usd") or {}).get(agent.venue, "1")))
+            # Halved, but never under the smallest stake that can still trade: a position is at most
+            # `position_share` of the stake and must hold the venue's minimum order (x1.2), or the
+            # seat would hold capital and never open anything (Sept 23, 2026 review).
+            tradable = (_d((rules().get("venue_minimum_usd") or {}).get(agent.venue, "1")) * _d("1.2") / _d(p["position_share"])).quantize(CENT)
+            stake = max((stake / 2).quantize(CENT, rounding=ROUND_DOWN), min(tradable, stake))
         return stake
 
     def seat_stake(self, agent: Any) -> Decimal:
@@ -503,6 +619,11 @@ class Allocator:
             house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "accounting_integrity",
                                     "the source record contains an unresolved position attribution defect")
             return
+        if house.auditor is not None and audit_standing(house, agent) == "vetoed":
+            wait = house._audit_wait(agent)
+            if wait:
+                house._promotion_status(agent, _verdict(agent.id, 1, why, ev), **wait)
+                return  # a veto's cooldown holds a bunt, whoever the agent is
         defect = house._known_defect(agent) if house.auditor is not None else None
         if defect is not None:
             # An agent with a known defect is audited before any real dollar (the existing path:
@@ -527,9 +648,11 @@ class Allocator:
         if self.headroom(venue) < stake:
             weakest = self._weakest_bunt(venue, ev.e, displaced_at)
             if weakest is None:
+                # The reason stays the same while the wait does (a `progress` row is written only when
+                # it changes); the moving numbers ride along as detail.
                 house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "envelope",
-                                        f"the {venue} envelope (${self.capital(venue):.2f}, ${self.headroom(venue):.2f} free) "
-                                        f"cannot seat another ${stake} bunt and no weaker flat bunt can be displaced")
+                                        f"the {venue} envelope cannot seat another ${stake} bunt and no weaker flat bunt can be displaced",
+                                        capital_usd=str(self.capital(venue)), headroom_usd=str(self.headroom(venue)))
                 return
             other, other_ev = weakest
             displaced_at.add(venue)
@@ -537,10 +660,21 @@ class Allocator:
                                                         "the envelope seats the best evidence first", summary)
             if self.headroom(venue) < stake:
                 return
+        if not self.can_fund(venue, stake):
+            house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "venue_cash",
+                                    f"the {venue} account's free cash cannot take another ${stake} stake now")
+            return
         numbers = self._numbers(ev, "paper", "bunt", stake, why)
         house.evaluator.promote(agent.id, 2, f"bunt: {why}", numbers)
         if source is not None:
             house._move_books(agent, source)  # winds the paper account down; seat() lends the bunt stake
+        real = house.books.get(REAL_BOOK[venue])
+        if real is None or not real.account(agent.id).funded:
+            # The stake did not land: straight back, in the same pass, rather than hold an unfunded seat.
+            house.evaluator.demote(agent.id, "the bunt's stake could not be lent; back to paper", self._numbers(ev, "bunt", "paper", None, why))
+            house.seat(agent)
+            house.alert("warning", f"allocator: {agent.id}'s ${stake} bunt could not be staked on {venue}; it stays on paper")
+            return
         house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "promoted", "the allocator seated it as a bunt")
         summary["moves"].append({"agent": agent.id, "from": "paper", "to": "bunt", "why": why, "stake_usd": str(stake)})
 
@@ -572,7 +706,7 @@ class Allocator:
         if guard and not guard.allows_live(3):
             house._promotion_status(agent, verdict, "campaign", "the live grant has not released the swing band")
             return
-        approved = any(e.payload.get("approve") for e in house.ledger.iter(kinds="audit.verdict", agent=agent.id))
+        approved = audit_standing(house, agent) == "approved"
         if not approved and house.auditor is not None:
             generation = house._generation(agent.id)
             if generation is None:
@@ -743,6 +877,11 @@ class Allocator:
 
 
 def _verdict(agent_id: str, rung: int, why: str, ev: Evidence):
+    """The verdict the House's promotion and audit machinery take. `book` is the record the auditor
+    reads: the paper record for a bunt audited first (a known defect), the REAL record for the first
+    swing, where size is at stake (Sept 23, 2026 review: without it the packet was empty)."""
     from .evaluator import Verdict
 
-    return Verdict(agent_id, rung, "eligible", why, {"via": "allocator", "evidence": ev.row(), "E": ev.e})
+    book = PAPER_BOOK[ev.venue] if rung <= 1 else REAL_BOOK[ev.venue]
+    return Verdict(agent_id, rung, "eligible", why, {"via": "allocator", "book": book, "evidence": ev.row(), "E": ev.e,
+                                                      "band_to": "bunt" if rung <= 1 else "swing"})
