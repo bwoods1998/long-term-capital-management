@@ -397,7 +397,10 @@ class Graduation(LabCase):
         self.assertEqual(out[0]["state"], "waiting_seat")
         self.assertEqual(self.lab._q("SELECT state FROM graduations")[0]["state"], "passed")
         resident = self.house.registry.get("resident")
-        with patch.object(self.house, "_weakest", return_value=resident):
+        with patch.object(self.house, "_weakest", return_value=resident) as weakest:
+            self.assertEqual(self.lab.graduate(), [])  # a waiting passer is asked again at most every ten minutes
+            weakest.assert_not_called()
+            self.clock.advance(601)
             out = self.lab.graduate()
         self.assertEqual(out[0]["state"], "born")
         self.assertFalse(self.house.registry.get("resident").alive)

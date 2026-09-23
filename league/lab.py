@@ -570,6 +570,10 @@ class Lab:
             return "a release is being staged"
         if getattr(house, "campaigns", None) and not house.pacer.may_spend("sail"):
             return "the Sail allowance is closed"
+        budget = getattr(house, "budget", None)
+        if budget is not None and getattr(budget, "mode", "open") == "stopped":
+            # The Sail meter's monthly line or the reserve that keeps the House box alive (Deploy 3 review).
+            return "the Sail meter has stopped the floor"
         if self.box_down():
             return "the lab box failed a batch in the last five minutes"
         tier = house.frontier_tier()
@@ -1227,8 +1231,11 @@ class Lab:
         holdout where it applies, and birth. Passers waiting for a seat go first."""
         settings = self.settings
         out = []
+        # A passer that found its desk or the league full is asked again at most every ten minutes: each
+        # try ranks every living agent under the House's lifecycle lock (Deploy 3 review).
         for row in self._q("SELECT g.candidate, g.lineage, c.code_sha256 FROM graduations g JOIN candidates c ON c.id = g.candidate"
-                           " WHERE g.state='passed' ORDER BY g.at"):
+                           " WHERE g.state='passed' AND (g.detail NOT LIKE '%earned their seats%' OR g.at < ?) ORDER BY g.at",
+                           (self._now() - 600,)):
             # A birth a crash interrupted is finished whatever the cap: its agent already exists.
             if self.births_last_hour() >= int(settings["max_births_per_hour"]) and self._born_already(row["lineage"], row["code_sha256"]) is None:
                 continue
