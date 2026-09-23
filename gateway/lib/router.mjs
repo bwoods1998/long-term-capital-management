@@ -78,7 +78,9 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
 
   if (path === '/v1/health') {
     if (request.method !== 'GET' && request.method !== 'HEAD') return fail('Method not allowed.', 405, { Allow: 'GET' });
-    await equity.refresh(env, gate, { fetcher, now });  // the frontier cap it reports follows profit
+    // The health read reports the stored equity reading and never refreshes it: the House reads its
+    // kill switch here on the order path and treats a slow answer as the switch engaged, and a
+    // refresh reads both venues one after the other. The frontier path refreshes it (ten minutes).
     return json(await gate.status());
   }
   if (path === '/v1/kill' || path === '/v1/unkill') {

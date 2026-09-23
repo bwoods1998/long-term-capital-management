@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { effectiveCap, readEquity, shareMillionths, configured, CACHE_MS, MAX_AGE_MS } from '../lib/equity.mjs';
+import { effectiveCap, readEquity, refresh, shareMillionths, configured, CACHE_MS, MAX_AGE_MS } from '../lib/equity.mjs';
 import { createGate } from '../lib/gate.mjs';
 import { route } from '../lib/router.mjs';
 import { rsaKey, memoryStore, TOKEN } from './helpers.mjs';
@@ -135,7 +135,9 @@ test('half a reading is no reading', async () => {
   assert.match((await readEquity(env({ ALPACA_SECRET_KEY: '' }), { fetcher: venues().fetcher, now: () => NOW })).error, /alpaca/);
 });
 
-test('health reports the cap in force and its parts, reading the accounts at most every ten minutes', async () => {
+test('health reports the cap in force from the stored reading and never reads the venues itself', async () => {
+  // The House reads its kill switch from /v1/health on the order path and treats a slow answer as the
+  // switch engaged, so health must never wait on two venue reads (Deploy 3 review, Sept 23, 2026).
   let clock = NOW;
   const settings = env();
   const gate = createGate({ store: memoryStore(), env: settings, now: () => clock });
@@ -144,7 +146,14 @@ test('health reports the cap in force and its parts, reading the accounts at mos
     settings, { gate, fetcher: tape.fetcher, now: () => clock })).json();
 
   let body = await health();
+  assert.equal(tape.calls.length, 0, 'health reads no venue');
+  assert.equal(body.frontier.cap_usd, '374.00');  // nothing stored yet: the month
+
+  // The frontier path refreshes the reading (at most every ten minutes); health then reports it.
+  await refresh(settings, gate, { fetcher: tape.fetcher, now: () => clock });
   assert.equal(tape.calls.length, 2);
+  body = await health();
+  assert.equal(tape.calls.length, 2, 'still no venue read from health');
   assert.equal(body.frontier.cap_usd, '404.00');
   assert.equal(body.frontier.base_cap_usd, '374.00');
   assert.equal(body.frontier.profit_index.bonus_usd, '30.00');
@@ -152,15 +161,14 @@ test('health reports the cap in force and its parts, reading the accounts at mos
   assert.equal(body.frontier.profit_index.baseline_usd, '1017.75');
 
   clock += CACHE_MS - 1;
-  body = await health();
+  await refresh(settings, gate, { fetcher: tape.fetcher, now: () => clock });
   assert.equal(tape.calls.length, 2, 'cached for ten minutes');
-  assert.equal(body.frontier.cap_usd, '404.00');
 
   // Ten minutes on, the venue does not answer: the cap falls back to the month at once.
   clock += 1;
   const failing = venues({ kalshi: 503 });
-  body = await (await route(new Request('https://gw/v1/health', { headers: { Authorization: `Bearer ${TOKEN}` } }),
-    settings, { gate, fetcher: failing.fetcher, now: () => clock })).json();
+  await refresh(settings, gate, { fetcher: failing.fetcher, now: () => clock });
+  body = await health();
   assert.equal(failing.calls.length, 1);
   assert.equal(body.frontier.cap_usd, '374.00');
   assert.equal(body.frontier.profit_index.read_ok, false);
@@ -169,6 +177,7 @@ test('health reports the cap in force and its parts, reading the accounts at mos
   // Not configured: the accounts are never read, and health is exactly as before.
   const plain = venues();
   const off = { ...settings, COMPUTE_PROFIT_SHARE: '' };
+  await refresh(off, createGate({ store: memoryStore(), env: off, now: () => clock }), { fetcher: plain.fetcher, now: () => clock });
   body = await (await route(new Request('https://gw/v1/health', { headers: { Authorization: `Bearer ${TOKEN}` } }),
     off, { gate: createGate({ store: memoryStore(), env: off, now: () => clock }), fetcher: plain.fetcher, now: () => clock })).json();
   assert.equal(plain.calls.length, 0);
