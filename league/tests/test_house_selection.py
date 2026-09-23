@@ -160,6 +160,13 @@ class ReplayRulesChange(HouseCase):
         self.house._replay_rules_changed()  # the same rules again: nobody new
         self.assertEqual(len([a for a in self.house.registry.living() if a.parent]), 1)
 
+    def test_a_lines_mutations_are_distinct_strategies_and_a_twin_comes_back_once(self):
+        first, second = self.near_miss("haghani"), self.near_miss("haghani")
+        self.house.registry.agents[second.id].params = {"notional": 25.0}
+        twin = self.near_miss("haghani")
+        self.assertEqual(twin.params, first.params)
+        self.assertEqual(sorted(a.parent for a in self.revive()), sorted([twin.id, second.id]))
+
     def test_only_a_pure_out_of_sample_near_miss_of_a_fair_death_comes_back(self):
         self.near_miss("flat", oos=0.0)                       # sat the out-of-sample stretch out
         self.near_miss("deep", oos=-0.0009)                   # below the floor

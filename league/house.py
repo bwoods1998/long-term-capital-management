@@ -418,7 +418,9 @@ class House:
         for entry in self.ledger.iter(kinds="eval.trial"):
             if entry.agent in wanted:
                 last_trial[entry.agent] = entry.payload
-        running = {a.code_sha256 for a in living}
+        # A strategy is its code AND its parameters: a line's mutations share code and differ in params.
+        same = lambda a: (a.code_sha256, json.dumps(a.params or {}, sort_keys=True))  # noqa: E731
+        running = {same(a) for a in living}
         revived: list[str] = []
         for agent in recent:
             if len(revived) >= budget:
@@ -429,12 +431,12 @@ class House:
                     or not all(str(r).startswith("out-of-sample growth is not above") for r in reasons):
                 continue
             # Exactly zero is a program that sat the out-of-sample stretch out, which the floor does not admit.
-            if not floor < float(oos) < 0 or agent.code_sha256 in running:
+            if not floor < float(oos) < 0 or same(agent) in running:
                 continue
             niche = self.niches.get(agent.specialty or "")
             if niche is None or niche.dormant or self.members(niche.id) >= niche.max_members:
                 continue
-            running.add(agent.code_sha256)
+            running.add(same(agent))
             try:
                 child = self.spawn(agent.line or agent.name, agent.family, agent.code, parent=agent.id, params=agent.params,
                                    endowment=rules["endowment_usd"], specialty=niche.id,
