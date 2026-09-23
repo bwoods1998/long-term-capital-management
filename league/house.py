@@ -2981,6 +2981,17 @@ class House:
         month = self.frontier_month
         remaining = month.remaining() if month is not None else None
         campaigns = self.campaigns if month is not None else None
+        # Profit-indexed compute: the House's OpenAI line is raised by exactly what the gateway's
+        # profit indexing added to its month, never more (`CampaignBudget.mirror_gateway_bonus`).
+        bonus = getattr(month, "profit_bonus", None)
+        mirror = getattr(campaigns, "mirror_gateway_bonus", None)
+        if bonus is not None and mirror is not None:
+            try:
+                raised = bonus()
+                if raised is not None:
+                    mirror("openai", raised)
+            except Exception as exc:  # noqa: BLE001 - the configured line stands
+                self.alert("warning", f"the gateway's profit-indexed raise could not be mirrored ({type(exc).__name__}: {str(exc)[:160]})")
         if campaigns is not None:
             now = self.clock()
             cached = getattr(self, "_campaign_openai", None)
