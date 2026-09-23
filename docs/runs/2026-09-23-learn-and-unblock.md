@@ -35,16 +35,16 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | 0.5 | First-hour decision 3: Deploy A's money set fixed by T+0:45 | done 16:42Z (U1 + U5 + A2a) |
 | 0.6 | Study snapshot taken (read-only sqlite backups) | done 16:28Z |
 | 0.7 | Study (L), Wave 0 and cleanup (H) launched together | done 16:38Z |
-| L | The agent study, `docs/research/2026-09-23-agent-study.md` | ⟨pending⟩ |
-| U1 | Daily-loss rules as constitution keys (real bunts: stay drawdown; real halt per venue) | ⟨pending⟩ |
-| U2 | Durable Kalshi shard funding | ⟨pending⟩ |
-| U5 | Winners compound (`bunt_usd × clamp(W_real, 1, swing_at)`) | ⟨pending⟩ |
-| C2 | The lab decoupled from the OpenAI tier | ⟨pending⟩ |
+| L | The agent study, `docs/research/2026-09-23-agent-study.md` | analysts done 17:05Z; synthesis in progress |
+| U1 | Daily-loss rules as constitution keys (real bunts: stay drawdown; real halt per venue) | PR #198, in review |
+| U2 | Durable Kalshi shard funding | PR #197 (CI green), in review |
+| U5 | Winners compound (`bunt_usd × clamp(W_real, 1, swing_at)`) | PR #198, in review |
+| C2 | The lab decoupled from the OpenAI tier | PR #195 (CI green) |
 | C3 | OpenAI pacing | PR #194 (updater); burn re-read hourly |
-| A7 | Fractional one-day stock limits; wind-down sells held to the open | ⟨pending⟩ |
-| V1 | `kalshi-open` maker fees | ⟨pending⟩ |
+| A7 | Fractional one-day stock limits; wind-down sells held to the open | PRs #198 (book) + #196 (House) |
+| V1 | `kalshi-open` maker fees | PR #196 |
 | Deploy A | Wave 0, ratified at promotion if the digest moved | ⟨pending⟩ |
-| Wave 1 / Deploy B | from the study | ⟨pending⟩ |
+| Wave 1 / Deploy B | from the study | builders launched 17:03Z (seats, loop, bugs; lab to follow) |
 | Wave 2 / Deploy C | from the refreshed study | ⟨pending⟩ |
 | O | Level-3 options design and pure pieces on a pushed branch | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
@@ -154,3 +154,70 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   #36-#39, #41, #43, #44, #72, #73, #149). Nothing refused. One deletion proposed for the docs
   pass: `scripts/options_demo.py` (referenced by nothing). Also noted: the plan
   `docs/goals/LTCM_LEARN_AND_UNBLOCK.md` is not linked from `docs/README.md`.
+- 16:52-17:00Z — **the four Wave 0 PRs are open:** #195 (W0-lab: C2 plus the closed-lab and
+  waiting-graduate alerts; CI green 16:59Z), #196 (W0-house: wind-down sells held for the open,
+  `kalshi-open` maker fees for 163 series, the quiet-desk and frozen-bunt invariants; the 3.11 CI
+  job hit the known 10-minute runner hang, 3.14 green), #197 (W0-shards: `league/shards.py`,
+  protected; CI green), #198 (W0-money, 17:00Z).
+- 16:56Z — the adversarial review of #197 launched in its own worktree (branch `w0-shards/review`).
+  Its one open question was settled read-only through the gateway at 16:58Z: Kalshi's `GET /markets`
+  rows carry `exchange_index` (KXMLBTOTAL 3, KXBTC15M 2, KXHIGHNY 0).
+- 16:57Z — PR #194 (pacing) merged as `c04d76d` after CI passed on both Pythons; the updater ships it.
+- 16:58-17:05Z — **the study's three analysts finished** (files in the session scratchpad; the
+  study document follows). The numbers that decided the next hours:
+  - Practice lost $505 since Sept 22 13:30Z (−$19/h), 92% from the agents' own entries (signal),
+    5-8% fees, 0-4% the House's exits; 72% of today's Kalshi loss came from the largest 10% of
+    positions (two foundry BTC-strike agents −$113.68). Real P&L since the grant +$1.65; the only
+    earning mechanism is maker bids on 0.90-0.97 event favourites held to settlement (mullins-2
+    10/10, +$4.89).
+  - **A Kalshi bunt is a one-loss trial:** a lost position over 15.4% of the stake drops E below
+    the hysteresis line 0.8585; huang-h427345 was demoted after one −$2.55 settlement; the
+    allocator swept $144.19 of bunt equity to cash today (mullins-2 $60 → $5.11).
+  - **Replay anti-predicts practice:** 0 of 20 replay passes positive after 6 active blocks; rank
+    correlation −0.68; every family with 2+ forward-tested passes is negative.
+  - 0 of 52 Alpaca agents ever reached the bunt line against 7 of 51 on Kalshi (a Kalshi
+    settlement moves the purse 3x more per trade and pays no haircut). Lowering `bunt_at` /
+    `bunt_min_trades` is not supported: the 5-agent cohort just under the line has a median
+    forward log of −0.0002.
+  - **The funnel:** 441 born, 345 died, 312 (90%) by displacement and 9 by evidence; the House's
+    own parameter mutations are 74% of births and 88% of displacements (median life 3.8 h,
+    staked every 120 s); 20 lab graduates, 6 replay-passed cards and 6 merged strategy PRs wait
+    for seats while about ten residents are displaceable and `enroll()` breaks silently; 21 of 96
+    residents never had a fill (the plan's "61 of 96" was a different count).
+  - **The loop's yield:** the lab evaluates a candidate for $0.0006 and a holdout pass for $0.05
+    but has never evaluated any of its 394 LLM-written children (a priority/batch-order defect);
+    the foundry is the only paid source that reached rung 2 ($0.26 a replay pass) but its Kalshi
+    crypto cards are the practice loss engine; architect designs cost $45.53 for one positive
+    forward record; the engineer's 16 children have 0 forward blocks; consults fail 35% and are
+    still charged.
+  - **Compute:** $6.7/h in all ($4.93/h OpenAI: Luna research $2.50, Merton $2.30, audits $0.05);
+    +$0.013 of real P&L per real agent-hour against $6.7/h of compute (400:1); 90.3% of research
+    sessions abstain and abstentions cost about $82 a day; 41% of sessions fire on the clock.
+  - **Coverage:** 36.8% of living agent-hours were inactive in 48 h (missing data 423 h, a pause
+    358 h, abstained 185 h, provider failures 102 h); 8.4 h of Sept 22 had zero wakes anywhere;
+    the crypto desks had no trading member for 34-35 of 48 h because of rung-0 churn; a real fill
+    landed in 11 of 25 hours. Today's stock session after #189/#190 is healthy: ETF 218 wakes →
+    22 intents → 22 fills, megacaps 161 → 43 → 43, options 71 → 16 → 21, 0 refusals.
+- 17:02Z — **Deploy A's money set widened on that evidence** (one digest change still): the
+  W0-money builder added `bunt_usd.kalshi` $10 → $30 (a typical $2.70 Kalshi position is then a
+  −9% loss, not a demotion), `swing_at` 1.5 → 1.25 (the two earners needed 2.8 and 5.6 days to
+  reach 1.5 at their rates; the first swing is still audited on the real record) and `kappa` 1 → 2
+  (winners compound; no swing exists yet). Alpaca's bunt stays $25 (2 real fills: no evidence).
+  The hysteresis line and `position_share` are outside the table, so the one-loss trial's full fix
+  (a settlements grace before the hysteresis exit, or a 15% position share on event books) is an
+  owner decision, recorded in the study. The grant's `max_agents` becomes 40 at the ratify
+  (floor($1,017.75 / $25)).
+- 17:03Z — **Wave 1 launched early from the study** (Deploy B at about 21:00Z): W1-seats (the seat
+  market: waiting graduates, cards and merged strategies take every freed seat first, no House
+  mutation while they wait, forward-evidenced newcomers displace never-traded residents, desk
+  caps follow evidence, population 112, no re-breeding of losing families), W1-loop (research
+  runs on change not on the clock, abstention has a memory, the foundry follows yield and is
+  exempt from the "earned" tier, consult refunds on error, the engineer only for living trading
+  parents, an hourly yield ledger), W1-bugs (dead agents waking, "the venue has no such order",
+  option market intents fitted to limits, sliced exits after the close). The study synthesis
+  agent was launched at the same time; W1-lab (forward windows, the lab's LLM children, the
+  ration check before the House replay) launches from W0-lab's branch.
+- 17:04Z — the adversarial review of #198 launched (branch `w0-money/review`).
+- 17:00Z watch — OpenAI settled $3.69 in the hour (the House line $32.76), before the pacing
+  release; Sail $95.27; no real fill in the hour; meriwether-42 replay → practice; one merged
+  strategy (#161, sports runline) born.
