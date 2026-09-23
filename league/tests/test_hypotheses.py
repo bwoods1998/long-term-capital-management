@@ -10,7 +10,7 @@ from league.constitution import CONSTITUTION
 from league.economy import load_game
 from league.frontier import Answer
 from league.house import House, Settings
-from league.hypotheses import DEFAULTS, SEED_WHY, Foundry, card_id
+from league.hypotheses import DEFAULTS, FOUNDRY_BRIEF, SEED_WHY, Foundry, card_id
 from league.sandbox import LocalSandbox
 from league.seeds import load as seed_code
 from league.tests.fakes import FakeBroker
@@ -353,6 +353,51 @@ class FastEvidence(FoundryCase):
         self.assertEqual({d for d, r in routes if r == "fast"}, {self.DESK})
         self.assertEqual({d for d, r in routes if r == "evidence"}, {"alpaca-index-etfs"})
         self.assertEqual(sum(1 for _, r in routes if r == "fast"), 5)
+
+    def test_a_desk_whose_foundry_children_lose_forward_gets_no_fast_lane_call(self):
+        """Sept 23, 2026: the foundry's Kalshi crypto cards were the practice loss engine (-$272.96 of
+        -$361 since Sept 22 13:30Z; strikes -10.3% a block). The fast lane follows the forward ledger."""
+        other = "alpaca-crypto-alts"
+        self.settings(fast_desks=[self.DESK, other], fast_share=1.0, exploration_share=0, transfer_share=0,
+                      fast_lane_min_blocks=6, fast_lane_reopen_blocks=3)
+        for desk in (self.DESK, other):
+            self.house.game["economy"]["max_population"] = 64
+        loser = self.house.spawn("majors-h1", "majors-vol-shock", PASSER, reason="a card's child", founder="card:1111", specialty=self.DESK)
+        self.earn(loser, growth=-0.01, n=6)
+        forward = self.foundry.desk_forward()
+        self.assertEqual((forward[self.DESK]["blocks"], forward[self.DESK]["closed"], forward[self.DESK]["measured"]), (6, True, True))
+        self.assertAlmostEqual(forward[self.DESK]["per_block"], -0.01)
+        desk, route, reason = self.foundry.allocate(fresh=True)
+        self.assertEqual((route, desk.niche), ("fast", other))
+        self.assertIn("closed to the fast lane on forward losses: " + self.DESK, reason)
+        # One family with three positive active blocks reopens the desk, even while the pool is negative.
+        winner = self.house.spawn("majors-h2", "majors-carry", PASSER, reason="a card's child", founder="card:2222", specialty=self.DESK)
+        self.earn(winner, growth=0.001, n=3)
+        forward = self.foundry.desk_forward()
+        self.assertEqual((forward[self.DESK]["closed"], forward[self.DESK]["positive_families"]), (False, ["majors-carry"]))
+        self.assertLess(forward[self.DESK]["growth"], 0)
+        # A desk with a positive measured yield outranks an unmeasured one in the fast rotation.
+        for a in (loser, winner):
+            self.earn(a, growth=0.02, n=3)
+        self.assertGreater(self.foundry.desk_forward()[self.DESK]["per_block"], 0)
+        self.foundry._allocation = None
+        desks = {d.niche: d for d in self.foundry.desk_scores(fresh=True)}
+        # The evidence route's best desk is served by that route; the fast pick is the best-yield OTHER fast desk.
+        best = next(d for d in self.foundry.desk_scores() if d.eligible)
+        picked, route, reason = self.foundry.allocate(fresh=True)
+        self.assertEqual(route, "fast")
+        if best.niche != self.DESK:
+            self.assertEqual(picked.niche, self.DESK)
+            self.assertIn("best forward yield", reason)
+
+    def test_the_brief_demands_maker_entries_on_the_fifteen_minute_desk_and_warns_on_binary_size(self):
+        self.assertIn("kalshi-crypto-15m` MAKER ENTRIES ARE REQUIRED", FOUNDRY_BRIEF)
+        self.assertIn("182 bps", FOUNDRY_BRIEF)
+        self.assertIn("15% of the stake is a ONE-LOSS TRIAL", FOUNDRY_BRIEF)
+        game = json.loads((Path(__file__).resolve().parents[1] / "game.json").read_text(encoding="utf-8"))
+        self.assertNotIn("kalshi-crypto-strikes", game["hypotheses"]["fast_desks"], "40 born, 2 replay passes, -10.3% a block")
+        self.assertIn("kalshi-crypto-15m", game["hypotheses"]["fast_desks"])
+        self.assertEqual((game["hypotheses"]["fast_lane_min_blocks"], game["hypotheses"]["fast_lane_reopen_blocks"]), (6, 3))
 
     def test_cards_may_queue_for_replay_and_another_role_does_not_hold_the_foundry(self):
         import threading
