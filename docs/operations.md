@@ -117,13 +117,6 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   mark pass then does two things:
   - It shrinks the legacy $60 micro stakes toward their bunt stake. Only free cash moves.
   - It publishes `allocator-board.json`. Read it with `python3 scripts/floor_watch.py`.
-<<<<<<< HEAD
-- **Sliced exits (Sept 23, 2026, PR #164).** A sell above the $75 order cap goes out in slices.
-  An unfinished plan shows as a private `book.exit_plan` row with no matching `closed` row.
-  - A plan ends after 60 minutes, or after `max(8, 3n + 2)` venue orders.
-  - The agent, the wind-down or the horizon rule then asks again with a fresh intent.
-  - A plan resumed after a restart sends nothing until the book has read the venue once.
-=======
 - **Is it a money rule?** Compare
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
@@ -131,7 +124,6 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   `44e8d48d…`, the grant ratified at 08:28:13Z on Sept 23, 2026 (101 agents, a $10 stake line). That
   day's later deploys (the board and sliced exits; E3, E1, the Alpha Lab and the open desks)
   changed no money rule and needed no ratify.
->>>>>>> origin/main
 - **Roll back by hand (on the box):**
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
 - **The gateway.** Deploy with
