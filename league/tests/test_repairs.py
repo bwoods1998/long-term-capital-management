@@ -283,6 +283,32 @@ class EngineerLoop(Base):
         passes = [e.payload for e in self.ledger.iter(kinds="merton.pass") if e.payload.get("role") == "engineer"]
         self.assertEqual([p["cost_usd"] for p in passes], ["0.50", "0.50"], "every paid call is a row the pacer reads")
 
+    def test_a_strategy_defect_is_bought_only_for_a_living_parent_that_has_traded(self):
+        """Sept 23, 2026: 16 repair children born, 0 forward active blocks, 7 died on rung 0; $0.70 a
+        born child. A dead parent's defect is closed; a living parent waits until it has traded."""
+        dead = self.job(key="strategy_defect:ghost:abcdef123456", kind="strategy_defect", agents=("ghost",))
+        self.ledger.append("agent.born", {"founder": None, "specialty": "kalshi-sports"}, agent="ghost", id="born:ghost")
+        self.ledger.append("agent.died", {"cause": "displaced"}, agent="ghost")
+        waiting = self.job(key="strategy_defect:parent:abcdef123456", kind="strategy_defect", agents=("parent",))
+        frontier = FakeFrontier(self.tool_answer(), self.tool_answer())
+        engineer = self.engineer(frontier, FakeGitHub())
+        engineer.step()
+        self.assertEqual(self.worklist.get(dead).state, "rejected")
+        self.assertIn("dead parent", self.worklist.get(dead).note)
+        self.assertEqual(self.worklist.get(waiting).state, "admitted", "alive but never traded: it waits, for free")
+        self.assertEqual(frontier.asked, [], "nothing was bought")
+        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "dust", "quantity": "1"}, agent="parent")
+        engineer.step()
+        self.assertEqual((self.worklist.get(waiting).state, frontier.asked), ("admitted", []), "the House's dust sweep is not a trade")
+        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "venue", "quantity": "1"}, agent="parent")
+        engineer.step()
+        self.assertEqual(self.worklist.get(waiting).state, "testing")
+        self.assertEqual(len(frontier.asked), 1)
+        # A shared defect (not one agent's strategy) is untouched by the rule.
+        shared = self.job()
+        engineer.step()
+        self.assertEqual(self.worklist.get(shared).state, "testing")
+
     def test_attempts_are_bounded_and_the_costs_are_kept(self):
         key = self.job()
         forge = FakeGitHub(judge=lambda files: "FAIL: still wrong")
