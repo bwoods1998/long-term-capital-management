@@ -34,6 +34,11 @@ from .ledger import HOUSE, Entry, canonical, now_iso, public_view
 ZERO = Decimal(0)
 MAX_BATCH = 100
 MARK_EVERY_SECONDS = 300
+# The site's `MAX_DESKS` (capital/schema.js): a checkpoint with more desk rows is refused whole.
+# Found Sept 23, 2026: population 96 plus the last 8 dead made 104 rows, and every checkpoint from
+# 05:30Z was refused until the roster was bounded here.
+MAX_DESKS = 100
+MAX_DEAD_SHOWN = 8
 ALLOWED_LINK_HOSTS = ("sec.gov", "www.sec.gov", "efts.sec.gov", "blakewoods.us", "github.com", "kalshi.com", "finance.yahoo.com")
 RESEARCH_TOOLS = ("web_search", "library_search", "library_read", "library_write", "replay", "request_tool", "playbook_read")
 
@@ -414,7 +419,7 @@ class Publisher:
             if entry.at[:10] == at[:10]:
                 spend_today[bucket] += amount
         living, dead = list(house.registry.living()), list(house.registry.dead())
-        displayed = {a.id for a in living + dead[-8:]}
+        displayed = self.displayed(house, living, dead)
         # The roster is bounded for the site, but the experiment includes every agent ever born.
         # Removing an old loser from the display must never remove its loss or research cost.
         for agent in living + dead:
@@ -494,6 +499,24 @@ class Publisher:
             "lab": {"experiments": [], "curve": curve, "calibration": {"n": 0, "brier": None}},
         }
         return body
+
+    @staticmethod
+    def displayed(house: Any, living: list[Any], dead: list[Any]) -> set[str]:
+        """The agents the site shows, at most `MAX_DESKS`: every agent on real money first, then the
+        rest of the living by rung, then the most recent dead to fill what is left (at most
+        `MAX_DEAD_SHOWN`). The totals still count every agent ever born."""
+        def rank(agent: Any) -> tuple[int, str]:
+            try:
+                rung = int(house.evaluator.rung(agent.id))
+            except Exception:  # noqa: BLE001 - a display order, never a reason to skip publishing
+                rung = 0
+            return (-rung, str(agent.born_at or ""))
+
+        shown = [a.id for a in sorted(living, key=rank)][:MAX_DESKS]
+        room = max(0, min(MAX_DEAD_SHOWN, MAX_DESKS - len(shown)))
+        if room:
+            shown += [a.id for a in dead[-room:]]
+        return set(shown)
 
     @staticmethod
     def _models_used(house: Any, token_spend: Decimal) -> list[str]:
