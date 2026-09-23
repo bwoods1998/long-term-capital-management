@@ -32,7 +32,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Collection, Iterator, Mapping, Sequence
 
 from ltcm.broker import Instrument, money
 
@@ -862,7 +862,7 @@ class House:
         return min(position, line("max_position_pct")), min(order, line("max_order_notional_pct"))
 
     def _fit_real_entry(self, agent: Agent, book: Book, instrument: Instrument, quantity: Decimal, limit: Decimal | None,
-                        step: Decimal, minimum: Decimal | None) -> tuple[Decimal, str] | None:
+                        step: Decimal, minimum: Decimal | None, cancelling: Collection[str] = ()) -> tuple[Decimal, str] | None:
         """A real-money Alpaca buy trimmed to what the book will take: (quantity, why) when less than
         asked fits, None when the order fits as it is or cannot be made to (the book then refuses it
         and says why). Only ever smaller, never under the venue's minimum, and never for a sell.
@@ -870,7 +870,15 @@ class House:
         The book values the position a buy leaves at the ASK (`ltcm.risk.rule_position_limit`), with
         what the agent holds and bids already, while an order is sized at its own limit price. So a
         bid under the ask sized to its limit to the dollar is over the line at the ask: 7 of
-        haghani-37's 10 real refusals by Sept 23, 2026, all at equity at or above its stake."""
+        haghani-37's 10 real refusals by Sept 23, 2026, all at equity at or above its stake.
+
+        `cancelling` is the order ids the same decision cancels. `wake` sizes before it applies the
+        decision's cancels, and the book judges the new bid after them, so a bid being cancelled is
+        not counted as one the agent still has. Otherwise a strategy that cancels its resting bid and
+        bids again each wake had a room of a sliver under the $10 minimum, its replacement was sent
+        untrimmed, and the book refused it at the ask once the old bid was gone: no order at all. If a
+        cancel does not go through, the old bid stays and the book, still the judge, refuses the new
+        one as it would have."""
         limits = book.limits.get(agent.id)
         if limits is None:
             return None
@@ -885,7 +893,7 @@ class House:
         held = book.account(agent.id).holdings.get(instrument.key)
         committed = held.quantity * unit if held else ZERO
         for working in book.open_orders(agent.id):
-            if working.side == "buy" and working.instrument.key == instrument.key:
+            if working.side == "buy" and working.instrument.key == instrument.key and working.order_id not in cancelling:
                 left = sum((share.quantity - share.filled for share in working.shares if share.agent == agent.id), ZERO)
                 committed += left * (working.limit_price or ask) * instrument.multiplier
         paid = min(ask, limit) if limit is not None and limit > 0 else ask  # the book's order notional
@@ -1172,7 +1180,11 @@ class House:
         result = run.result
         # Sizing may need a venue quote, so do it before the short result commit.
         adjusted: list[str] = []
-        intents, dropped = self._intents(agent, book, result.get("intents") or [], adjusted=adjusted) if result.get("ok") else ([], [])
+        # The decision's cancels are applied below, after sizing, but the book judges its new orders
+        # after them: the real-money trim must not count a bid this decision withdraws (`_fit_real_entry`).
+        cancelling = frozenset(c for c in (result.get("cancels") or ()) if isinstance(c, str)) if result.get("ok") else frozenset()
+        intents, dropped = (self._intents(agent, book, result.get("intents") or [], adjusted=adjusted, cancelling=cancelling)
+                            if result.get("ok") else ([], []))
         offered = self._offered(agent, ctx)
         with self._lifecycle_lock:
             if self._generation(agent.id) != generation:
@@ -1255,7 +1267,7 @@ class House:
         return idle
 
     def _intents(self, agent: Agent, book: Book, rows: list[Mapping[str, Any]], *,
-                 adjusted: list[str] | None = None) -> tuple[list[Intent], list[str]]:
+                 adjusted: list[str] | None = None, cancelling: Collection[str] = ()) -> tuple[list[Intent], list[str]]:
         """What a decision asked for, as sized intents for the book; what cannot be read is dropped.
 
         On the way the order guards (Sept 22, 2026) put each order on the venue's own terms. They
@@ -1274,7 +1286,8 @@ class House:
           minimum is not measured.
         - a real-money Alpaca BUY is trimmed to what the book will take (`_fit_real_entry`): the
           position it leaves valued at the ask, as the book values it, within `_real_limits`. A bid
-          under the ask sized to its own price was otherwise refused as over half the equity.
+          under the ask sized to its own price was otherwise refused as over half the equity. A bid
+          the same decision cancels (`cancelling`) is not counted against the new one.
 
         Each change a guard made is appended to `adjusted` (the wake records it on `agent.woke`)."""
         intents, dropped = [], []
@@ -1335,7 +1348,7 @@ class House:
                             notes.append(f"quantity raised one step to {quantity}: the ${requested:.2f} asked, floored to the step, "
                                          f"was under the venue minimum of ${minimum}")
                 if side == "buy" and not refusal and book.real_money and family_of(book.broker.venue) == "alpaca":
-                    fitted = self._fit_real_entry(agent, book, instrument, quantity, limit, step, minimum)
+                    fitted = self._fit_real_entry(agent, book, instrument, quantity, limit, step, minimum, cancelling)
                     if fitted is not None:
                         notes.append(f"quantity {quantity} trimmed to {fitted[0]}: {fitted[1]}")
                         quantity = fitted[0]

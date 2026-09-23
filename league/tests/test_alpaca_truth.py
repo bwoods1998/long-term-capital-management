@@ -64,6 +64,23 @@ def decide(ctx):
             "thought": "bid"}
 '''
 
+#: Each wake: cancels any resting bid and bids again 1% under the ask, sized to the order limit it
+#: is shown -- a strategy that reprices its bid every wake (review of PR #189, Sept 23, 2026).
+REPRICER = '''
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "test-repricer", "symbols": ["BTC/USD"],
+         "bars": {"timeframe": "5Min", "limit": 10}, "wake_minutes": 5}
+PARAMS = {}
+
+def decide(ctx):
+    if ctx["positions"]:
+        return {"intents": [], "thought": "holding"}
+    ask = ctx["quotes"]["BTC/USD"]["ask"]
+    return {"cancels": [o["order_id"] for o in ctx["open_orders"]],
+            "intents": [{"symbol": "BTC/USD", "side": "buy", "notional_usd": ctx["limits"]["max_order_usd"], "type": "limit",
+                         "limit_price": round(ask * 0.99, 2), "reason": "reprice"}],
+            "thought": "reprice"}
+'''
+
 #: An index-ETF desk strategy (it keeps the session) that only watches.
 ETF_WATCHER = '''
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "test-etf-watcher", "symbols": ["SPY"],
@@ -222,6 +239,52 @@ class TruthfulLimits(RealAlpaca):
         intents, _ = self.house._intents(paper_agent, paper, big, adjusted=adjusted)
         self.assertEqual(adjusted, [])  # practice is judged by its own book as before
         self.assertEqual(self.house.snapshot(paper_agent, paper)["limits"], {"max_position_usd": 100.0, "max_order_usd": 75.0})
+
+    def test_a_bid_cancelled_and_replaced_in_one_decision_is_trimmed_and_not_refused(self):
+        # `wake` sizes a decision's orders before it applies the decision's cancels, and the book
+        # judges them after. Counting the bid being cancelled left a room under the $10 minimum, so
+        # the replacement went untrimmed and was refused at the ask: the agent had no order at all.
+        agent = self.bunt("repricer", REPRICER)
+        ask = self.real.quote(self.btc).ask
+        resting = None
+        for n in range(2):
+            self.house._state["next_wake"][agent.id] = 0
+            outcome = self.house.wake(agent)
+            self.assertEqual(len(outcome["intents"]), 1, (n, outcome))
+            intent = outcome["intents"][0]
+            self.assertLessEqual(intent.quantity * ask, self.half_equity_less_a_cent(agent), n)
+            woke = self.house.ledger.last("agent.woke", agent=agent.id).payload
+            self.assertTrue(any("trimmed" in note for note in woke.get("adjusted") or []), (n, woke))
+            self.assertEqual(woke["cancels"], n)  # the second wake cancelled the first wake's bid
+            sent = self.house._submit_wakes("alpaca", [outcome])
+            self.assertEqual([o.status for o in sent], ["resting"], (n, [o.detail for o in sent]))
+            working = self.book.open_orders(agent.id)
+            self.assertEqual(len(working), 1, n)  # the replacement, and not the bid it replaced
+            self.assertNotEqual(working[0].order_id, resting, n)
+            resting = working[0].order_id
+            self.clock.advance(300)
+        self.assertEqual(list(self.house.ledger.iter(kinds="book.refused", agent=agent.id)), [])
+
+    def test_a_resting_bid_is_counted_against_a_new_one_unless_the_decision_cancels_it(self):
+        agent = self.bunt("bidder", BIDDER)
+        self.house._state["next_wake"][agent.id] = 0
+        sent = self.house._submit_wakes("alpaca", [self.house.wake(agent)])
+        self.assertEqual([o.status for o in sent], ["resting"], [o.detail for o in sent])
+        (working,) = self.book.open_orders(agent.id)
+        limit = working.limit_price
+        asked = (D("12.49") / limit).quantize(D("1e-9"), rounding=ROUND_DOWN)
+        # Kept, the resting bid leaves a room under the $10 minimum: left as asked for the book to judge.
+        self.assertIsNone(self.house._fit_real_entry(agent, self.book, self.btc, asked, limit, D("1e-9"), D("10")))
+        self.assertIsNone(self.house._fit_real_entry(agent, self.book, self.btc, asked, limit, D("1e-9"), D("10"),
+                                                     cancelling={"someone-else"}))
+        # Cancelled by the same decision, it is not counted: the new bid is trimmed to fit at the ask.
+        fitted = self.house._fit_real_entry(agent, self.book, self.btc, asked, limit, D("1e-9"), D("10"),
+                                            cancelling={working.order_id})
+        self.assertIsNotNone(fitted)
+        ask = self.real.quote(self.btc).ask
+        self.assertLess(fitted[0], asked)
+        self.assertLessEqual(fitted[0] * ask, self.half_equity_less_a_cent(agent))
+        self.assertGreaterEqual(fitted[0] * limit, D("10"))
 
     def test_an_options_bunt_is_shown_twenty_dollars_and_only_contracts_the_book_takes(self):
         self.real.option_chain = chain_of_f(self.clock)
