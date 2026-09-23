@@ -169,7 +169,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         probe = api.exec(box, ["sh", "-c", "python3 --version; nproc; ls /agent/tapes 2>/dev/null | wc -l; " + NETWORK_PROBE], timeout=120)
         out["inside"] = probe.stdout.strip().splitlines()
     try:
-        out["spend"] = api.spend(box)
+        out["spend"] = api.spend(sailbox=box)
     except Exception as exc:  # noqa: BLE001 - spend is informative
         out["spend"] = f"unavailable: {type(exc).__name__}"
     print(json.dumps(out, indent=1, default=str))
