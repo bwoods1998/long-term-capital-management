@@ -71,6 +71,8 @@
     "profile": "pro_flex",
     "fast_profile": "pro_asap",
     "max_turns": 10,
+    "evidence_max_turns": 20,
+    "_about_evidence_max_turns": "Sept 23, 2026 (the north-star build, D6): an agent with evidence -- on paper or above with at least one closed trade -- may run its research session to evidence_max_turns instead of max_turns (league/lab.py has_evidence).",
     "max_output_tokens": 32000,
     "min_hours_between": 3,
     "idle": {
@@ -192,5 +194,24 @@
       "2": 1,
       "3": 0.5
     }
+  },
+  "lab": {
+    "_about": "The Alpha Lab (league/lab.py), Sept 23, 2026, the north-star build: a MAP-Elites archive of strategy programs searched in batches on the lab box (league/labbox.py). Seeds are the living agents' programs, the foundry's cards and the founders; children are parameter mutants of the archive's elites and Luna's mutations and crossovers, with a Sol leap every leap_every Luna calls. Fitness is out-of-sample growth after fees on the first search_fraction of the House's own replay tape; the fittest gate-passing program of a cell is replayed by the House on the whole tape (and by the sealed holdout on the history store) and born on paper, at most max_births_per_hour. OpenAI spend is its own line (budget_usd_per_hour, plus royalties: royalty_share of a graduate's performance fee), inside the campaign allowance and only while the frontier tier is 'all'. It runs only where league/config.json names a lab box.",
+    "enabled": true,
+    "budget_usd_per_hour": "1.50",
+    "box_usd_per_hour": "0.20",
+    "batch_size": 32,
+    "param_children": 16,
+    "llm_children": 6,
+    "leap_every": 10,
+    "leap_candidates": 4,
+    "search_fraction": 0.66,
+    "step_seconds": 240,
+    "max_births_per_hour": 6,
+    "max_graduations_per_step": 1,
+    "submit_max": 8,
+    "royalty_share": "0.10",
+    "luna_model": "gpt-6-luna",
+    "sol_model": "gpt-6-sol"
   }
 }

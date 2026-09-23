@@ -66,10 +66,19 @@ TOOLS: list[dict[str, Any]] = [
      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
 ]
 
+#: The Alpha Lab's tools (league/lab.py), offered only on a floor where the lab runs.
+LAB_TOOLS: list[dict[str, Any]] = [
+    {"name": "lab_query", "description": "Read the Alpha Lab's archive for your desk: the fittest program of each cell of its grid (trades per day by correlation with the live book), the desk's leaderboard, and the results of the programs YOU submitted. Free, and not a trial. The lab evaluates thousands of programs a day on the first two thirds of your desk's replay tape; other programs are shown in words and numbers, never code.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "lab_submit", "description": "Queue up to 8 complete strategy files for the Alpha Lab's next batches on your desk's development tape: cheap, many at once, NOT a trial against your line and NOT adopted. Each must pass the strategy check with literal NEEDS and PARAMS on your desk. Results come back in a later pass through lab_query; the fittest program of a cell is replayed by the House (judged against every trial on your line, as your own child would be) and may be born as a new agent that names you as its author. To adopt or fork one yourself you still `replay` it.",
+     "parameters": {"type": "object", "properties": {"candidates": {"type": "array", "items": {"type": "object", "properties": {
+         "code": {"type": "string"}, "idea": {"type": "string"}}, "required": ["code"]}}}, "required": ["candidates"]}},
+]
+
 # These tools buy no inference and write no strategy, credits, orders or shared notes.
 # After a crash, their new receipt describes a refreshed observation, not the lost one.
 REFRESHABLE_TOOLS = frozenset(('runtime_status', 'replay_coverage', 'markets_now',
-                             'library_search', 'library_read', 'playbook_read'))
+                             'library_search', 'library_read', 'playbook_read', 'lab_query'))
 
 #: Where the first user turn stops being the same from pass to pass (`Researcher._state`). A
 #: provider that marks cache breakpoints splits the turn here; the model reads it as a heading.
@@ -158,6 +167,11 @@ class Researcher:
         self.traces = None
         #: league.routing.TaskRouter, set by the service: records the route of each paid tool call.
         self.routes = None
+        #: The Alpha Lab (league/lab.py), set by the House when it runs: `lab_query` and `lab_submit`.
+        self.lab = None
+        #: (agent) -> whether it has evidence (rung >= 1 and a closed trade): such an agent's session may
+        #: run to `evidence_max_turns` (Sept 23, 2026: 10 -> 20). None changes nothing.
+        self.evidence = None
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -307,6 +321,8 @@ class Researcher:
         state = job['checkpoint'] if job else None
         if state is None:
             settings = self.provider.settings_for(agent, self.settings) if hasattr(self.provider, 'settings_for') else dict(self.settings)
+            settings = self._evidence_turns(agent, settings)
+            tools = TOOLS[:-1] + LAB_TOOLS + TOOLS[-1:] if self.lab is not None else TOOLS
             state = {
                 'version': 1, 'stage': 'model', 'turn': 0, 'started': self.clock(),
                 'conversation': [{'role': 'system', 'content': self._system()},
@@ -314,7 +330,7 @@ class Researcher:
                 'nudged': False, 'truncated': 0,
                 'effort': str(settings.get('reasoning_effort', 'low')),
                 'profile': str(settings.get('profile', 'flash_flex')),
-                'settings': settings, 'tools': TOOLS,
+                'settings': settings, 'tools': tools,
                 'out': pass_state(Pass(agent.id)),
             }
         if state.get('version') != 1:
@@ -523,6 +539,20 @@ class Researcher:
                 self.ledger.append('ops.alert', {'level': 'warning', 'text': f'trace capture failed: {type(exc).__name__}: {str(exc)[:160]}'})
         return out
 
+    def _evidence_turns(self, agent: Agent, settings: Mapping[str, Any]) -> dict[str, Any]:
+        """Longer sessions for agents with evidence: `evidence_max_turns` (20) instead of `max_turns`."""
+        settings = dict(settings)
+        if self.evidence is None:
+            return settings
+        try:
+            earned = bool(self.evidence(agent))
+        except Exception:  # noqa: BLE001 - a record that cannot be read buys nothing extra
+            earned = False
+        longer = int(settings.get("evidence_max_turns", 20) or 0)
+        if earned and longer > int(settings.get("max_turns", 6)):
+            settings["max_turns"] = longer
+        return settings
+
     # ------------------------------------------------------------------- tools
     def _charged_today(self, agent_id: str) -> Decimal:
         """What this agent has already been charged since midnight UTC, which the provider counts
@@ -678,7 +708,8 @@ class Researcher:
         return float(rows[-1].payload["at_epoch"]) if rows else None
 
     def _execute(self, agent: Agent, name: str, args: Mapping[str, Any], out: Pass, session: str) -> dict[str, Any]:
-        public = {k: (str(v)[:200] if k != "code" else f"{len(str(v))} characters") for k, v in dict(args or {}).items() if k != "text"}
+        public = {k: (f"{len(v)} programs" if k == "candidates" and isinstance(v, list) else str(v)[:200] if k != "code"
+                      else f"{len(str(v))} characters") for k, v in dict(args or {}).items() if k != "text"}
         self.ledger.append("agent.research", {"tool": name, "arguments": public, "session": session}, agent=agent.id)
         if name == "runtime_status":
             return dict(self.capabilities(agent)) if self.capabilities else {"error": "runtime capabilities unavailable"}
@@ -734,6 +765,15 @@ class Researcher:
             return self.commons.request_tool(agent.id, str(args.get("name") or ""), str(args.get("description") or ""))
         if name == "classify":
             return self._classify(agent, args, out, session)
+        if name in ("lab_query", "lab_submit"):
+            if self.lab is None:
+                return {"error": "the Alpha Lab is not running on this floor"}
+            if name == "lab_query":
+                return self.lab.query(agent)
+            items = args.get("candidates")
+            if not isinstance(items, list):
+                return {"error": "candidates is a list of {code, idea}"}
+            return self.lab.submit(agent, items)
         if name == "finish":
             out.summary = str(args.get("summary") or "")[:1200]
             return {"ok": True}

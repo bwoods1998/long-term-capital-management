@@ -111,6 +111,9 @@ class Settings:
     kalshi_day_step_seconds: int = 1800  # a daily strategy is not judged on five-minute moves
     kalshi_day_markets: int = 500
     specialists: bool = True  # every new agent must sit in a specialty of league/niches.json
+    # The Alpha Lab's box key, when `league/config.json` `lab` names a box (`service.lab_box_key`):
+    # with `game.json` `lab.enabled` too, the lab runs (league/lab.py).
+    lab_box: str = ""
     niche_survey_hours: float = 24.0  # how often the venue is surveyed so the universes follow the season (0: never)
     # Historical options replay and options-derived features (`league/options_history.py`). ON:
     # with no ingested history nothing changes (paper stays the options desk's replay), so it is
@@ -312,6 +315,10 @@ class House:
                     book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
                 self.alert("warning", f"{name}: could not initialize venue accounting ({type(exc).__name__}: {str(exc)[:160]})")
+        # The Alpha Lab (league/lab.py): built only when game.json switches it on and a lab box is
+        # configured; its tools for researchers, and longer sessions for agents with evidence.
+        from .lab import attach as attach_lab
+        attach_lab(self)
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
@@ -1674,10 +1681,12 @@ class House:
         finally:
             store.close()
 
-    def _holdout(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    def _holdout(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
+                 lineage: Sequence[str] | None = None) -> dict[str, Any]:
         """The sealed holdout, once per strategy version, rationed per lineage: the base replay
         and the double-spread one must both pass the replay gate. Pass or fail and coarse
-        numbers come back; the detail stays in the private `holdout.access` row."""
+        numbers come back; the detail stays in the private `holdout.access` row. `lineage`: the
+        selection path of a candidate not in the registry yet (league/lab.py), root last."""
         from . import deep_replay
 
         store = self._history_store()
@@ -1687,7 +1696,7 @@ class House:
         row = CONSTITUTION["rungs"]["1"]
         stake = float(row["stake_usd"])
         limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}
-        lineage = self.registry.lineage(agent.id)
+        lineage = list(lineage) if lineage else self.registry.lineage(agent.id)
 
         def run(window: tuple[str, str]) -> dict[str, Any]:
             out = {}
@@ -1935,8 +1944,9 @@ class House:
             out["holdout"] = holdout
         return out
 
-    def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
-        """The researcher's `replay` tool: a counted trial of candidate code, never a promotion."""
+    def _candidate_replay(self, agent: Agent, code: str, *, lineage: Sequence[str] | None = None) -> dict[str, Any]:
+        """The researcher's `replay` tool: a counted trial of candidate code, never a promotion.
+        `lineage`: the selection path of a candidate not in the registry yet (league/lab.py)."""
         try:
             described = self.sandbox.needs(PROBE_BOX, code)
         except SandboxError as exc:
@@ -1989,7 +1999,8 @@ class House:
             return {"counted_as_trial": False, "passed": False, "error": f"the replay could not be run and is NOT a trial against you: {crash[:160]}. "
                                               "Ask for a smaller question of the tape, or tell the House with `request_tool`.",
                     "numbers": {}, "needs": info["needs"], "params": info.get("params") or {}}
-        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
+        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False,
+                                              lineage=list(lineage) if lineage else self.registry.lineage(agent.id))
         out = {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
                "digest": result.get("digest")}
         if result.get("tape_source") == "history-dev":
@@ -4254,6 +4265,8 @@ class House:
             self._background("engineer", self.engineer.step)
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
+        if self.lab is not None:
+            self.lab.tick(open_for_business=open_for_business)  # schedules one bounded step off the tick (league/lab.py)
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
