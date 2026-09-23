@@ -449,3 +449,17 @@ profit, a tenth of that fee is its royalty to the lab's compute line.
 
 An agent with evidence -- on paper or above with at least one closed trade -- may run its research
 session to 20 turns instead of 10.
+
+Research runs when something changed, not when the clock says so (Sept 23, 2026). A research pass is
+bought only when, since your last one, something happened that you could act on: a fill, a settlement,
+a refusal of your own order, a finished forward block with a position in it, an audit or repair
+verdict about you, a change of your code or rung, a lesson or a note written for your desk, a request
+of yours that was answered, or a blocker that lifted. A positive earned record still buys research on
+the clock (at a tenth of the interval), and an agent whose rules are not meeting the market is woken
+at the idle cadence; nobody waits more than 24 hours. After three passes in a row that changed nothing,
+only your own fill, settlement or refusal wakes you until a pass produces a candidate. Every pass's
+trigger is recorded, so what each kind of evidence bought is measured.
+
+A consultation (`ask_merton`) that fails -- Merton could not be reached, or his answer could not be
+read -- costs you nothing; only an answer is charged to your credits, and a failed consultation that
+was charged before this rule is refunded at your next research pass.
