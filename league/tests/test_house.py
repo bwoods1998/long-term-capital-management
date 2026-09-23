@@ -11,7 +11,7 @@ from league.economy import load_game
 from league.house import House, Settings, mutate
 from league.ledger import now_iso
 from league.sandbox import LocalSandbox
-from league.tests.fakes import Clock, FakeBroker
+from league.tests.fakes import Clock, FakeBroker, old_ladder
 from league.venues import instrument_for
 
 D = Decimal
@@ -492,6 +492,7 @@ class DailyEvidence(HouseCase):
         self.assertAlmostEqual(row["earned_growth"], 0.014 / 48)
 
 
+@old_ladder()
 class FastLane(HouseCase):
     def test_a_live_micro_agent_down_twenty_percent_goes_back_to_paper(self):
         agent = self.seated("live", code=BUYER)

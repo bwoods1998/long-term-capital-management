@@ -38,7 +38,7 @@ from ltcm.broker import Instrument, money
 from . import seeds as seeds_module
 from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
-from . import capital, feeds as feeds_module, niches as niches_module
+from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module
 from . import parameters
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
@@ -237,6 +237,9 @@ class House:
         # Serialize lifecycle commits, not slow model/box/audit calls. A completed result must
         # still belong to the same strategy and rung when its effects reach the floor.
         self._lifecycle_lock = threading.RLock()
+        #: Capital is the ladder (`league/allocator.py`, the owner's direction of Sept 23, 2026): when
+        #: the constitution's `allocator.enabled`, bands and stakes follow evidence at every mark pass.
+        self.allocator = allocator_module.Allocator(self, self.root)
         # Slow work runs on daemon threads: a flex-window model call can take a quarter of an hour,
         # and a House that is told to stop must stop. (The provider settles an orphaned call later.)
         # Three lanes (measured on the first production start, Sept 19, 2026: with one two-slot queue,
@@ -735,14 +738,21 @@ class House:
     def _limits(self, rung: int, agent: Agent | None = None, staked: Decimal | None = None) -> Limits:
         row = CONSTITUTION["rungs"][str(min(max(rung, 1), 2))]
         position, order = Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"])
-        if rung >= 3 and staked is not None:
+        allocated = rung >= 2 and agent is not None and allocator_module.enabled()
+        if allocated:
+            # Bands of capital: a real position is `position_share` of the allocator's stake, never
+            # under the venue's minimum order, every order within the gateway's cap.
+            position, order = self.allocator.limits(agent, staked if staked is not None else Decimal(0))
+        elif rung >= 3 and staked is not None:
             position, order = capital.scaled_limits(staked)  # rung 3's limits follow its stake
         niche = self.niche_of(agent)
         classes = Limits.__dataclass_fields__["asset_classes"].default
         if niche is not None and niche.asset_class == "option":
             classes = ("option",)
-            if rung == 2:  # one contract cannot be cut smaller: the micro rung's option cap
+            if rung == 2 and not allocated:  # one contract cannot be cut smaller: the micro rung's option cap
                 position = order = Decimal(row["option_max_position_usd"])
+            elif allocated:
+                position = order = max(position, Decimal(row["option_max_position_usd"]))
         return Limits(position, order, asset_classes=classes, max_hours_to_resolve=self.horizon_hours(agent))
 
     def horizon_hours(self, agent: Agent | None) -> float | None:
@@ -764,6 +774,12 @@ class House:
         # demotion after a loss leaves `staked` above zero and cash at zero: it is staked afresh).
         if not account.funded or (account.swept and not account.holdings):
             stake = CONSTITUTION["rungs"]["2" if book.real_money else "1"]["stake_usd"]
+            if book.real_money and allocator_module.enabled():
+                stake = self.allocator.seat_stake(agent)  # a bunt's stake, or a swing's by its evidence
+                if self.allocator.headroom(agent.venue, exclude=agent.id) < stake:
+                    # The allocator is the only place a real stake is decided: no envelope, no stake.
+                    self.alert("warning", f"{agent.id} was not staked on {book.name}: the {agent.venue} envelope has no room for ${stake}")
+                    return
             try:
                 book.stake(agent.id, stake, note=f"rung {rung} stake")
             except BookError as exc:  # a real book not reconciled yet, or out of real cash: try again next wake
@@ -1907,10 +1923,18 @@ class House:
             self.evaluator.observe(agent.id, book.name, agent.horizon)
             peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
             verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
-            if verdict.decision != 'eligible':
+            if verdict.decision != 'eligible' and not allocator_module.enabled():
+                # Under the allocator its own statuses are the only ones (two writers alternated a
+                # `progress` row every pass for every waiting agent, Sept 23, 2026 review).
                 self._promotion_status(agent, verdict, 'evidence', verdict.reason)
             fall = (CONSTITUTION["ladder"].get("micro_demotion") or {}).get("max_loss")
-            if verdict.decision not in ("die", "eligible") and rung == 2 and fall:
+            allocated = allocator_module.enabled()
+            if allocated and verdict.decision == "eligible":
+                # Capital is the ladder: the screen and the micro bound no longer promote. The
+                # allocator moves bands from evidence at the end of this mark pass; death, drift
+                # and replay stay where they were.
+                verdict = Verdict(verdict.agent, verdict.rung, "hold", "the allocator decides bands from evidence", verdict.numbers)
+            if verdict.decision not in ("die", "eligible") and rung == 2 and fall and not allocated:
                 # The fast lane: a live micro agent down this much since promotion goes back to paper.
                 import math
                 rows = self.evaluator.blocks(agent.id, since_seq=self.evaluator._rung_entered(agent.id), book=book.name)
@@ -1924,7 +1948,10 @@ class House:
             if verdict.decision not in ("die", "eligible") and rung >= 2:
                 drift = self.evaluator.drift(agent.id, book.name, agent.horizon)
                 if drift.decision == "demote":
-                    self._move_books(agent, book)
+                    if allocated and self.evaluator.rung(agent.id) >= 2:
+                        self.seat(agent)  # a swing drifting to a bunt keeps its book: the stake follows, nothing is sold
+                    else:
+                        self._move_books(agent, book)
                     return drift
         if rung == 2 and verdict.decision != "die" and self.auditor is not None:
             # Audit after promotion: an audit that finished before a restart is committed, and
@@ -2214,7 +2241,9 @@ class House:
                 if agent is not None:
                     self._promotion_status(agent, verdict, 'audit_veto', str(audit.get('summary') or audit.get('error') or 'audit did not approve'))
                 return  # it stays on paper, where its record is the auditor's counterfactual
-            self._commit_promotion(agent_id, verdict, 1, generation)
+            # The rung the audit was asked for: 1 -> 2 on the old ladder (and for a known defect under
+            # the allocator), 2 -> 3 for the allocator's first entry into the swing band.
+            self._commit_promotion(agent_id, verdict, int(verdict.rung or 1), generation)
         finally:
             self._drop_audit(agent_id)
             self._save_state()
@@ -2235,7 +2264,12 @@ class House:
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
             authorization = self.campaigns.live_authorization() if self.campaigns else None
-            if rung == 1 and (not self.tuition()["room"] or
+            if rung == 1 and allocator_module.enabled():
+                # A known defect's bunt, committed after its audit: the allocator's envelope decides.
+                if self.allocator.headroom(agent.venue) < self.allocator.target_stake(agent, "bunt"):
+                    self._promotion_status(agent, verdict, 'envelope', 'the envelope has no room for the bunt the audit approved')
+                    return
+            elif rung == 1 and (not self.tuition()["room"] or
                     (authorization and authorization['policy'].get('venue_capital_usd')
                      and not self.tuition(agent.venue)['room'])):
                 self._promotion_status(agent, verdict, 'tuition', 'another admission used the available micro stake')
@@ -3266,6 +3300,13 @@ class House:
                 'live_tuition': {k: str(v) if isinstance(v, Decimal) else v for k, v in self.tuition().items()},
                 'promotion_status': self._state.get('promotion_status', {}).get(agent.id),
                 'new_live_capital_allowed_by_campaign': self.campaigns.allows_live(2) if self.campaigns else self.settings.real_money,
+                # Capital is the ladder (Sept 23, 2026): the rules, and this agent's own evidence and band now.
+                'allocator': ({**{k: v for k, v in (CONSTITUTION.get('allocator') or {}).items()},
+                               'your_band': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('band'),
+                               'your_evidence': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('evidence'),
+                               'note': 'While enabled, the paper screen and the micro bound above no longer promote: bands and '
+                                       'stakes follow E = W_paper^paper_weight x W_real at every mark pass.'}
+                              if allocator_module.enabled() else None),
                 'note': 'Replay selection penalties depend on the observed record and trial history; there is no fixed five-to-nine-trial cutoff. The paper gate is a screen, not a positive confidence bound.'},
             'peer_replay_passes': peers[-3:],
             'peer_evidence_note': 'Recorded historical passes, including retired peers. Counterexamples to impossibility claims, not proof of edge or independent validation. Source programs and all trials remain in their own lineages.',
@@ -3932,10 +3973,12 @@ class House:
             submitted = self._submit_wakes(name, wakes)
             summary["orders"] += sum(1 for o in submitted if o.status not in ("refused", "duplicate"))
         now = self.clock()
+        marked_any = False
         for name, book in self.books.items():
             if now - float(self._state["last_mark"].get(name) or 0) < self.settings.mark_every_seconds:
                 continue
             self._state["last_mark"][name] = now
+            marked_any = True
             try:
                 book.poll()
                 book.mark()
@@ -3965,6 +4008,13 @@ class House:
                     self._retry_wind_down(agent, book)
                     self._observe_wind_down(agent, book)
                     self._sweep(agent.id, book)
+        if marked_any and allocator_module.enabled():
+            # Capital is the ladder: bands and stakes follow the evidence of this very mark pass.
+            try:
+                moved = self.allocator.rebalance()
+                summary["allocator"] = {k: len(v) if isinstance(v, list) else v for k, v in moved.items()}
+            except Exception as exc:  # noqa: BLE001 - a pass that fails runs again at the next mark
+                self.alert("error", f"the allocator's pass failed ({type(exc).__name__}: {str(exc)[:200]})")
         self._cancel_retired_research()
         for agent in self.research_order() if open_for_business else []:
             if self.research_due(agent):
@@ -4008,7 +4058,7 @@ class House:
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
-                for agent in self.registry.living():
+                for agent in self.registry.living() if not allocator_module.enabled() else ():
                     if self.evaluator.rung(agent.id) >= 3:
                         capital.resize(self, agent)
                     elif self.evaluator.rung(agent.id) == 2:

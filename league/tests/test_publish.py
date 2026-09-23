@@ -239,6 +239,33 @@ class PublisherTest(HouseCase):
         self.assertEqual(row["cost_usd"], money(total_cost, 4))
         self.assertGreater(row["decisions"], 0)
 
+    def test_the_roster_never_exceeds_the_sites_desk_limit(self):
+        # Sept 23, 2026: 96 living + the last 8 dead = 104 rows, and the site refused every checkpoint.
+        from league import publish
+
+        for index in range(6):
+            agent = self.house.registry.born(name=f"gone-{index}", family="test-family", code=BUYER,
+                                              needs={"venue": "alpaca", "horizon": "hour", "style": "test"})
+            self.house.registry.died(agent.id, "test")
+        living = [self.house.registry.born(name=f"alive-{index}", family="test-family", code=BUYER,
+                                           needs={"venue": "alpaca", "horizon": "hour", "style": "test"}) for index in range(5)]
+        old_max, old_dead = publish.MAX_DESKS, publish.MAX_DEAD_SHOWN
+        try:
+            publish.MAX_DESKS, publish.MAX_DEAD_SHOWN = 7, 8
+            body = self.publisher(FakeSite()).checkpoint(self.house)
+            ids = [d["id"] for d in body["desks"]]
+            self.assertEqual(len(ids), 7)
+            self.assertTrue({a.id for a in living} <= set(ids), "the living are shown before the dead")
+            self.assertEqual(len(set(ids)), len(ids))
+            publish.MAX_DESKS = 4
+            body = self.publisher(FakeSite()).checkpoint(self.house)
+            self.assertEqual(len(body["desks"]), 4)
+            self.assertTrue(all(d["status"] == "active" for d in body["desks"]))
+            # the generation curve still counts every agent ever born
+            self.assertEqual(sum(row["desks"] for row in body["lab"]["curve"]), 11)
+        finally:
+            publish.MAX_DESKS, publish.MAX_DEAD_SHOWN = old_max, old_dead
+
     def test_model_costs_exclude_other_compute_and_the_budget_uses_the_sail_meter(self):
         agent = self.seated()
         self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={

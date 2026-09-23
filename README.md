@@ -51,6 +51,14 @@ budget follows the owner's real spend, and the foundry spends more of it on hour
 around-the-clock desks. The [execution record](docs/runs/2026-09-23-dynamism-ii.md) has what the
 watch measured and what shipped.
 
+**The September 23 north-star build: capital is the ladder.** The owner asked for agents that move
+up and down the game "as quickly as possible", on the timescale of 24/7 agents rather than
+human clocks, with real money on both Kalshi and Alpaca. An agent's rank is now its **capital**,
+and its capital follows its **evidence** (its wealth multiple) at every mark pass, with no calendar
+gates. See [Bands of capital](#bands-of-capital) below, the
+[plan](docs/goals/LTCM_NORTH_STAR_BUILD.md) and the
+[execution record](docs/runs/2026-09-23-capital-ladder.md).
+
 Watch it at [blakewoods.us/capital](https://blakewoods.us/capital/). The design is in
 [the game](docs/proposals/2026-09-19-the-game.md) and
 [the architecture](docs/design/2026-09-19-architecture.md).
@@ -68,6 +76,57 @@ with a `decide(ctx)` function ([the contract](league/CONTRACT.md)). An agent is 
 model that researches on its behalf, a small memory, and an account of compute credits. The
 first run's chat desks lost money; its code strategies were the only part that learned, so the
 rebuild selects on code.
+
+### Bands of capital
+
+Since the owner's revision of Sept 23, 2026 (`allocator` in `league/constitution.py`, enforced by
+[`league/allocator.py`](league/allocator.py)), the screen, the micro bound and Kelly sizing below no
+longer move anyone to or on real money. They are the rollback path (`allocator.enabled: False`).
+
+- **Evidence is wealth.** `W_paper` is an agent's wealth multiple on its paper book since it was
+  seated: stakes lent or returned are excluded, the block in progress counts, and Alpaca paper fills
+  are haircut 10 bps a side. `W_real` is the same on its real book since its first real dollar and
+  is never reset. The evidence is `E = W_paper^0.5 × W_real`. The paper purse is traded under
+  conservative fills with fees, so W is an anytime-valid e-value against "no edge after fees": an
+  edgeless strategy reaches W ≥ 1/α with probability at most α, however it sizes (Ville).
+- **Bands.** The allocator computes them at every mark pass. Each maps onto a rung, so the grant,
+  the books, publishing and death keep working. A move writes the usual `eval.verdict`
+  promote/demote row, with `band_from`, `band_to`, `stake_usd` and `via: allocator`; a stake change
+  alone writes a `size` row.
+
+  | Band | Rung | Entry | Stake |
+  |---|---|---|---|
+  | Replay | 0 | new code | none |
+  | Paper | 1 | passed replay | the $200 purse |
+  | Bunt | 2 | E ≥ 1.01 and 5 closed paper trades, or 3 settlements on Kalshi | $10 at Kalshi, $25 at Alpaca |
+  | Swing | 3 | E ≥ 1.5, W_real ≥ 1 and 8 real closed trades; the first swing is audited | the bunt × min(E, 20), up to 60% of the venue |
+  | Star | 3 | the top 3 swings by real P&L with W_real ≥ 1.25 | the swing stake |
+
+  A position is capped at half the stake, never under the venue's minimum order × 1.2, and every
+  order stays within the gateway's $75 cap.
+
+- **Down.** Hysteresis: a bunt leaves below E 0.8585 and a swing below 1.275 or W_real 0.9. A 35%
+  real drawdown from the high-water mark sends an agent back to paper at once. W_paper under 0.80
+  after 10 closed trades is death. Paper death, statistical death and drift still apply.
+- **The envelope.** Per venue, it is the grant's capital plus realized profit there, so stars
+  compound past the starting envelope; losses count in full. When it cannot seat every eligible
+  agent, the best E goes first, and a newcomer with better evidence displaces the weakest flat
+  bunt, one per venue per pass.
+- **Throttle.** If the floor's real P&L falls below −30% of the envelope, every real stake is halved
+  until it recovers to −15%.
+- **Stake changes.** Changes under 10% are ignored. Shrinking returns only free cash and never
+  forces a sale.
+- **Incentives.** 20% of every realized real profit becomes the agent's compute credits (a
+  performance fee, `credit.grant` with id `perf:<ledger id>`).
+- **Two defaults set from evidence, inside the plan's bounds.**
+  - The Alpaca bunt is $25, not $15. The book refuses an order over half an account's equity, and
+    Alpaca takes no crypto order under $10.
+  - `bunt_at` is 1.01, not 1.03. At 06:45 UTC no paper agent was near 1.03.
+- **Where to read it.** The House writes `allocator-board.json` beside `health.json` and an
+  `alloc.board` ledger row every five minutes. `scripts/floor_watch.py` prints it, and the site
+  shows it as the capital board.
+
+### The rungs before Sept 23, 2026 (the rollback path)
 
 **The ladder.** Every agent climbs the same four rungs, and only evidence moves it. The thresholds
 are versioned in [`league/constitution.py`](league/constitution.py), with every owner revision
@@ -398,8 +457,8 @@ What no model and no code path on Sail may change, and where each item is enforc
 |---|---|---|
 | Order caps | $75 an order, $4,000 and 2,000 orders a day | in the gateway, before anything is signed (`gateway/wrangler.jsonc`); `league/book.py` refuses first so it can say why |
 | Kill switch | engaged or released | in the gateway; the House's token can engage it, only the owner's separate token releases it. The paper venue passes it, because no money is behind it |
-| Jev allowance | $20 and 500,000 calls for the pilot's whole life. The pilot was to end on September 21 at 4:01 AM Pacific; since the owner resumed the game its unused allowance continues with no end date (`TYPESAFE_PERSISTENT`) | external Durable Object; backed by retained campaign earmarks, with no calendar reset or refill |
-| OpenAI budget | $374 for the month (`FRONTIER_MONTH_USD`, raised from $174 on Sept 21, 2026, when the owner added $200 of credit); the House's campaign allowance is a further line | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
+| Jev allowance | $42 (Sept 23, 2026: metered $16.14 + $26 funded; $20 before) and 500,000 calls for the pilot's whole life. The pilot was to end on September 21 at 4:01 AM Pacific; since the owner resumed the game its unused allowance continues with no end date (`TYPESAFE_PERSISTENT`) | external Durable Object; backed by retained campaign earmarks, with no calendar reset or refill |
+| OpenAI budget | $408 for the month (`FRONTIER_MONTH_USD`: raised from $174 to $374 on Sept 21, 2026, when the owner added $200 of credit, and on Sept 23 to metered + the owner's funded ~$100); the House's campaign allowance is a further line | in the gateway: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month plus the owner's recorded top-ups that month (September's line was $200 on Sept 22), $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`0f9a8f7e…` from Sept 23, 2026), and the House writes the digest to the ledger every time it starts |
 | The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, 16 agents, no expiry | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`3d01ae90…` from Sept 23, 2026): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |

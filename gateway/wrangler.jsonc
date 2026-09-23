@@ -56,10 +56,14 @@
     // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
     // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
     // Sept 21 22:15 UTC: the owner added $200 of OpenAI credit -> $374.
-    "FRONTIER_MONTH_USD": "374",
+    // Sept 23 06:40 UTC: $308.46 metered this month and the owner reports about $100 of OpenAI
+    // credit funded, so the month is aligned to metered + funded, rounded down -> $408.
+    "FRONTIER_MONTH_USD": "408",
     // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
-    "TYPESAFE_PILOT_USD": "20",
+    // Sept 23 06:40 UTC: $16.14 metered and the owner reports $26 funded at Jev -> metered +
+    // funded, rounded down: $42.
+    "TYPESAFE_PILOT_USD": "42",
     "TYPESAFE_PILOT_END": "2026-09-21T11:01:16.977Z",
     // Continue unused original allowance after the owner resumed the game. No resets or refills.
     "TYPESAFE_PERSISTENT": "true",
