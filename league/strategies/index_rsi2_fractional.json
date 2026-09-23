@@ -1,0 +1,5 @@
+{
+  "name": "index-rsi2-fractional",
+  "family": "equity-reversion",
+  "why": "The index-ETF desk has eleven barren agents and one losing trader. Test the published RSI(2) two-session pullback hypothesis on SPY, QQQ and IWM with completed daily information, a rising 200-session trend, fresh spread-filtered fractional execution and one exposure capped at $2 and further constrained by cash and House limits. Exit on daily recovery, an observed protective price threshold or a bounded holding period. This is not an established edge or a diagnosis of existing agents' inactivity. Preserve applicable equity-reversion selection history and require sufficient after-cost replay evidence, applicable sealed holdout, independent paper observations, audit and capital qualification. Reject inadequate samples or negative economics rather than forcing turnover."
+}
