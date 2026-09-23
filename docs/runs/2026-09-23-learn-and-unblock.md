@@ -48,7 +48,7 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | Wave 2 / Deploy C | from the refreshed study | ⟨pending⟩ |
 | O | Level-3 options design and pure pieces on a pushed branch | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
-| H | Cleanup: worktrees, branches, PRs, dead docs | ⟨pending⟩ |
+| H | Cleanup: worktrees, branches, PRs, dead docs | done 16:49Z (below) |
 | Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md | ⟨pending⟩ |
 | Memory | project memory + MEMORY.md line | ⟨pending⟩ |
 | Report | at the deadline | ⟨pending⟩ |
@@ -143,4 +143,14 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   economics; B: where money is made and lost, does the verifier predict; C: 24/7 coverage, what
   the agents say and ask for), the four builders, and the cleanup agent (H). Study findings are
   due at 17:35Z, builder PRs at 17:50Z, the cleanup by 18:20Z.
-- 16:41Z — PR #194, OpenAI pacing (decision 2).
+- 16:41Z — PR #194, OpenAI pacing (decision 2). Its first CI run failed on a pinned value
+  (`test_house.ResearchPace` pins `unproven_multiple` 3); the test now pins 6 (pushed 16:50Z).
+- 16:42Z — the in-box updater shipped main `cd1b0dc` (#192, #193) as release `main-63b36c385bfe`;
+  the House restarted at about 16:40Z on its own schedule.
+- 16:49Z — **the cleanup (H) finished** (report copied into this record at the deadline): 34
+  worktrees removed (31 merged; `codex/architect-registry-repair`, `night/record` and
+  `night/repairs` pushed to origin first and their local branches kept), 72 merged GitHub branches
+  deleted (remote heads 110 → 38), 11 `merton/` PRs closed with a one-line comment each (#30,
+  #36-#39, #41, #43, #44, #72, #73, #149). Nothing refused. One deletion proposed for the docs
+  pass: `scripts/options_demo.py` (referenced by nothing). Also noted: the plan
+  `docs/goals/LTCM_LEARN_AND_UNBLOCK.md` is not linked from `docs/README.md`.
