@@ -644,3 +644,34 @@ class Lanes(HouseCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StandingsMemo(HouseCase):
+    """Sept 23, 2026: the production tick spent about 80% of its main thread re-ranking every living
+    agent several times a tick (displacement, the refill, the foundry). One table a tick now."""
+
+    def test_the_tick_builds_the_standings_once_and_other_callers_build_them_fresh(self):
+        self.seated("alpha")
+        self.seated("beta")
+        calls = []
+        real = self.house._standing
+
+        def counted(agent, epoch):
+            calls.append(agent.id)
+            return real(agent, epoch)
+
+        with patch.object(self.house, "_standing", side_effect=counted):
+            self.house._standings_memo = {"thread": __import__("threading").get_ident(), "living": None, "rows": None}
+            first = self.house.standings()
+            second = self.house.standings()
+            self.assertEqual([s.agent for s in first], [s.agent for s in second])
+            self.assertEqual(len(calls), 2)  # built once for two agents
+            self.house.registry.born(name="gamma", family="test-family", code=BUYER,
+                                     needs={"venue": "alpaca", "horizon": "hour", "style": "test"})
+            self.house.standings()
+            self.assertEqual(len(calls), 5)  # a birth rebuilds it
+            self.house._standings_memo = None
+            self.house.standings()
+            self.assertEqual(len(calls), 8)  # outside a tick: fresh every time
+        self.house.tick()
+        self.assertIsNone(self.house._standings_memo)  # the memo never outlives its tick

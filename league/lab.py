@@ -608,7 +608,10 @@ class Lab:
             while time.monotonic() - started < float(settings["step_seconds"]):
                 if self.open():
                     break
-                if self.queued() < int(settings["batch_size"]):
+                # Breed when fewer than a batch wait on tapes already built: seeds each need their own
+                # tape (a few a step), so counting every queued row starved breeding behind them
+                # (Sept 23, 2026: 191 seeds queued, 4 elites with cached tapes, 2-6 candidates a batch).
+                if self.ready_queued() < int(settings["batch_size"]):
                     out["calls"] += self.breed()
                 done = self.evaluate_batch()
                 if not done:
@@ -632,6 +635,19 @@ class Lab:
     # ----------------------------------------------------------------- queue
     def queued(self) -> int:
         return int(self._q("SELECT COUNT(*) AS n FROM candidates WHERE status='queued'")[0]["n"])
+
+    def ready_queued(self) -> int:
+        """Queued candidates whose search tape is built and fresh: what the next batches can run now."""
+        fresh = {key for key, hit in self._tapes.items() if self._now() - hit[0] < 6 * 3600}
+        if not fresh:
+            return 0
+        count = 0
+        for row in self._q("SELECT needs FROM candidates WHERE status='queued'"):
+            try:
+                count += json.dumps(json.loads(row["needs"]), sort_keys=True) in fresh
+            except (TypeError, ValueError):
+                continue
+        return count
 
     def admit(self, code: str, *, niche: Any, origin: str, author: str, lineage: str, parents: Sequence[str] = (),
               idea: str = "", priority: int | None = None) -> str:
