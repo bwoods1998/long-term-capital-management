@@ -174,7 +174,7 @@ def gateway_read() -> dict:
             "os.chdir('/workspace/current');from league.service import load_config,load_env,secret;load_env();cfg=load_config();"
             "req=urllib.request.Request(cfg['gateway_url'].rstrip('/')+'/v1/health',headers={'Authorization':'Bearer '+secret('GATEWAY_TOKEN'),'User-Agent':'ltcm-floor/1.0'});"
             "h=json.load(urllib.request.urlopen(req,timeout=20));f=h.get('frontier') or {};t=h.get('typesafe') or {};s=h.get('sail') or {};"
-            "print(json.dumps({'frontier':{k:f.get(k) for k in ('month','spent_usd','cap_usd','effective_cap_usd','profit_share_usd')},"
+            "print(json.dumps({'frontier':{k:f.get(k) for k in ('month','spent_usd','cap_usd','base_cap_usd','profit_index')},"
             "'jev':{k:t.get(k) for k in ('spent_usd','cap_usd')},'sail':{k:s.get(k) for k in ('balance_usd','burn_usd_per_day','runway_days')}}))")
     run = client().exec(require_box(read_state()), ["/workspace/.venv/bin/python", "-c", code], timeout=120, on_output=None)
     lines = (run.stdout or "").strip().splitlines()
