@@ -789,9 +789,12 @@ class Researchers(LabCase):
         self.luna.programs = []
         self.lab.breed()
         children = self.lab.queued()
-        variants = [KNOB.replace('"symbols": ["BTC/USD"]', '"symbols": ["ETH/USD"]'),
-                    KNOB.replace('"timeframe": "5Min"', '"timeframe": "15Min"')]
-        for n, code in enumerate(variants):
+        variants = []
+        for symbol in ("BTC/USD", "ETH/USD"):
+            for frame in ("5Min", "15Min", "1Hour", "1Day"):
+                if (symbol, frame) != ("BTC/USD", "5Min"):  # the elite's own tape
+                    variants.append(KNOB.replace('"symbols": ["BTC/USD"]', f'"symbols": ["{symbol}"]').replace('"timeframe": "5Min"', f'"timeframe": "{frame}"'))
+        for n, code in enumerate(variants[:6]):  # six seeds, a tape each, ahead of the children by priority
             self.lab.admit(code, niche=self.niche, origin="seed", author="house", lineage=f"seed:{n}", parents=[], idea=f"seed {n}")
         self.lab._tapes.clear()  # a restart
         sizes = []
@@ -799,6 +802,7 @@ class Researchers(LabCase):
             self.lab._tapes_built = 0  # a new step: one tape
             out = self.lab.evaluate_batch()
             sizes.append(out["candidates"] if out else 0)
+        # Queue order alone built the seeds' tapes, one a step, for as long as seeds waited: 1, 1, 1, 1.
         self.assertIn(children, sizes, sizes)  # the children's tape was built and they ran together
 
     def test_submissions_are_capped(self):
