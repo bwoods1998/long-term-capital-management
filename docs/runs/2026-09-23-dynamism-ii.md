@@ -108,10 +108,35 @@ behaviour before it.
   - A failed replay counts as a rung-0 agent's chance for displacement, so failing agents give up
     their seats to cards and repairs.
 - **Capacity:** 12 replay workers; the Kalshi crypto desks take 6 agents.
-- **Data:** ⟨the feed recorder⟩.
+- **Data:** a live feed recorder (`league/feeds.py`) starts the history agents asked for:
+  - ESPN scoreboards for the leagues the Kalshi sports desks trade, every minute while a game is
+    live or within 90 minutes, else every 15;
+  - perp funding and open interest (OKX, Hyperliquid, Kraken, Deribit DVOL) for the 18 coins of
+    the crypto desks, every 5 minutes.
+
+  Rows are stamped when the House receives them and never backfilled. `NEEDS["feeds"]` puts them
+  in `ctx["feeds"]` live. A replay reads them point in time, and is refused as unsupported input
+  (not a trial) until every declared key covers the replay gate's 20 blocks. Matching open tool
+  requests are fulfilled once a feed ships, which wakes the research that asked.
 
 ### 4. What the auditor kept finding is fixed in the House
-- ⟨order guards⟩
+- **Order guards** in front of the book (`House._intents`, `league/venues.py`). The book stays the
+  final judge. Each change a guard makes is recorded on `agent.woke` as `adjusted`.
+  - **Minimum size.** A buy asked under Alpaca's $10 crypto minimum is refused as a House refusal
+    (`book.refused`, "below the venue minimum") that the strategy reads in `recent_order_outcomes`
+    and the pre-audit does not count against it. One asked at $10 or more that the step floored
+    just under is raised one step.
+  - **Price grid.** A limit is snapped to the venue's grid: buys down, sells up. Equities use the
+    cent or the hundredth, Kalshi the market's own price bands, and a coin only when the venue's
+    asset record states its increment (never a guessed cent).
+  - **Quantity.** A given quantity is floored to the instrument's step.
+- **A 401/403 to an order POST** is a rejection with Alpaca's message (`AlpacaBroker.submit`). It no
+  longer becomes an `unknown` order followed by "the venue has no such order".
+- **Stale resting buys** (`House._cancel_stale_resting`) are cancelled once an agent's wakes have not
+  completed for three of its wake intervals (at least 30 minutes), noted as `agent.inactive`
+  (`wakes_failing`). Exits are never touched.
+- **`ctx["venue_rules"]`** tells an Alpaca strategy the minimum and the increment. Replay refuses an
+  Alpaca crypto buy under $10 too.
 - **The House pays for promotion audits** (`game.json` `audit.house_pays`), so a paper agent's purse
   no longer decides whether real money looks at it.
 - **The screen counts the block in progress:** the latest mark against the last finished block,
@@ -120,9 +145,9 @@ behaviour before it.
   - The screen's "next look" is the look it really takes.
   - A holdout refusal is recorded, and a clone of a program that already trades on paper gives up
     its seat (cause `redundant`).
-  - Five lessons that stated the old replay bar are corrected, and a new lesson
-    (`2026-09-23-the-ladder-as-it-stands`) states the rules in force. A lesson whose text
-    changes is reloaded.
+  - Twelve lessons that stated the old replay bar or the audit reserve as current are dated, and a
+    new lesson (`2026-09-23-the-ladder-as-it-stands`) states the rules in force. A lesson whose
+    text changes is reloaded. The rules text every agent reads (`league/rules.py`) says the same.
 
 ### 5. Money rules (owner revision; the live grant re-ratified for the same capital)
 - **`ladder.paper.settled_day`:** a daily agent on an event-contract book (Kalshi) with 3 trades

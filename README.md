@@ -619,7 +619,14 @@ dynamism revisions followed that evening:
   and has a settled lane for daily Kalshi agents. Stale Sail holds are absorbed, and frontier
   calls are booked at the gateway's metered cost. The foundry spends $40 a window with up to half
   its calls on the fast desks. Research runs every 15 minutes and is paced by each agent's record.
-- **Live data feeds**, built beside this revision: ⟨feeds: verify⟩
+- **Live data feeds**, built beside this revision (`league/feeds.py`): the House records ESPN
+  scoreboards for the leagues the Kalshi sports desks trade (every minute while a game is live or
+  about to start) and perpetual-futures funding and open interest for the crypto desks' coins
+  (every five minutes). A strategy that declares `NEEDS["feeds"]` reads them live in
+  `ctx["feeds"]`. Its replay reads them point in time once every declared key covers the replay
+  gate's blocks; until then the replay is refused as unsupported input and not counted as a trial.
+  Nothing is backfilled, so the first hourly strategies can qualify about a day after the recorder
+  starts, and daily ones after about three weeks.
 - **Order-path guards in the House**, built beside this revision: a buy asked under Alpaca's $10
   crypto minimum is refused as a House refusal the strategy can read, one floored just under it is
   raised a step, limit prices are put on the venue's grid (a coin's only when the venue states its
