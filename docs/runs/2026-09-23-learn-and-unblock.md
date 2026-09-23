@@ -318,3 +318,23 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   is money-adjacent: an adversarial review was launched at 17:43Z (`w1-bugs/review`).
 - 17:43Z — **W2-options launched** (the level-3 debit-vertical design and pure pieces on a pushed,
   unmerged draft branch; no multi-leg order anywhere this run).
+- 17:44:27Z — Deploy A's watchdog watch passed (all checks; exit 0). The release is final.
+- 17:33-17:46Z — **W1-lab finished (PR #204, CI green, mergeable; `lab.py` protected → Deploy B).**
+  The lab's LLM children get evaluated: `PRIORITY` luna/sol 1 (the stored queue is re-keyed when
+  the lab opens, since 394 children sit at the old priority) and, the real cause, the tape key no
+  longer includes `style`/`parameter_rules`/`wake_minutes`/`max_hours_to_close`, so a Luna child
+  no longer looks like a new tape (372 Luna NEEDS collapse to 137 tapes) and a third of each
+  batch is reserved for agent/Luna/Sol origins with their tapes built first. Forward windows:
+  every hour archived elites and waiting graduates are re-scored on data that arrived after their
+  code froze (`forward` table; `Lab.forward_score`); elites rank by forward record; lineage
+  weights take forward ±1 and the born graduates' practice/real record ±1 (weights within
+  [1/8, 8]); the teacher's lessons become lab priors (`league/playbook/…pause-prior-window-fade-forks.md`
+  with a `lab-prior` block; param mutants of a paused lineage are not bred). The ration check
+  already ran before the House replay (the study's item did not reproduce: all 14 rationed lines
+  had zero trials); it is now pinned by a test. Re-issuing a lineage's holdout budget for a fresh
+  window was deliberately NOT built: the only fresh data has been replayed thousands of times by
+  agents' trials, so it would loosen the seal (documented). 14 new tests; verified against a
+  merge with current main.
+- 17:46Z — A7's live check so far: no equity limit order from any agent since the deploy (the
+  stock agents send market orders), so "mechanism verified in tests, no live instance" may be
+  the record at the close; no refusal and no alert since the deploy.
