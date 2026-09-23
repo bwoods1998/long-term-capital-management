@@ -1110,14 +1110,15 @@ class DayOpenAcrossRestartTest(BookCase):
             self.broker.set_quote(event(ticker=ticker), "0.50", "0.52")
         self.seat("a1", usd="200", position="100", order="75")
 
-    def restarted(self):
+    def restarted(self, marks=True):
         """A House restart: a new Book folded from the same ledger, reconciled to the venue."""
         book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=True, clock=self.clock,
                     band_of=lambda agent: None, halt_basis_usd=lambda: self.basis[0], event_capital_budget=lambda: D("517.75"))
         book.reconcile()
         if getattr(self, "book", None) is not None:
             book.limits.update(self.book.limits)
-            book.marks.update(self.book.marks)  # the marks come back with the first mark pass
+            if marks:
+                book.marks.update(self.book.marks)  # the marks come back with the first mark pass
         return book
 
     def lose(self, ticker, quantity, mark):
@@ -1175,6 +1176,30 @@ class DayOpenAcrossRestartTest(BookCase):
         path.write_text("{not json")
         self.book = self.restarted()
         self.assertEqual(self.day(), D(0))  # forgotten, as before this fix, and said nowhere worse
+
+
+    # Review of #211 (Sept 23, 2026): marks live in memory only, and the House's startup reconcile quotes
+    # only a position that differs from the venue, so until the first mark pass (up to 300 s later; the
+    # tick's wakes come first) a holding was valued at cost against an opening taken at its mark.
+    def test_a_holdings_loss_still_counts_before_the_first_mark_pass(self):
+        self.lose(self.LOST[0], "60", "0.50")
+        self.broker.set_quote(event(ticker=self.LOST[0]), "0.20", "0.22")
+        self.book.mark()  # the day's loss is on the holding: 60 x $0.32 is past 8% of $200
+        self.assertTrue(self.halted())
+        self.book = self.restarted(marks=False)  # the first check after a restart, before the mark pass
+        self.assertTrue(self.halted())  # was lifted: the holding read at its $0.52 cost
+
+    def test_a_winner_unmarked_after_a_restart_is_not_a_false_halt(self):
+        self.lose(self.LOST[0], "60", "0.50")
+        self.clock.advance(86400)  # held overnight: the new day's opening is taken at the mark
+        for ticker in (*self.LOST, "KXBTCD-26SEP2019-T80999"):
+            self.broker.set_quote(event(ticker=ticker), "0.50", "0.52")
+        self.broker.set_quote(event(ticker=self.LOST[0]), "0.90", "0.92")
+        self.book.mark()
+        self.assertEqual(self.day(), D(0))
+        self.book = self.restarted(marks=False)
+        self.assertEqual(self.day(), D(0))  # was -$22.80: a winner read at cost as the day's loss
+        self.assertFalse(self.halted())
 
 
 class PracticeDailyLossTest(BookCase):

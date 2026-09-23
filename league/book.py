@@ -475,6 +475,9 @@ class Book:
         #: day's stakes since.
         self._day_open_taken: dict[str, tuple[str, Decimal, int]] = {}
         self._day_open_dirty = False
+        #: Agents whose opening was restored from the file and whose holdings are not yet marked in this
+        #: process (`_day_pnl` quotes them once before comparing; review of #211, Sept 23, 2026).
+        self._day_open_unmarked: set[str] = set()
         self.orders_today: dict[tuple[str, str], int] = {}
         # Ledger replay is not a fresh venue check. A restart must not clear a mismatch
         # and permit an entry before the first reconciliation of this process.
@@ -991,6 +994,17 @@ class Book:
     def _day_pnl(self, agent: str, now: str, *, save: bool = True) -> Decimal:
         with self._lock:
             day = now[:10]
+            if agent in self._day_open_unmarked:
+                # A restored opening was taken at liquidation marks, but marks live in memory only and
+                # the startup reconcile quotes only a position that differs from the venue: until the
+                # first mark pass (up to `mark_every_seconds` after a restart) a holding would be valued
+                # at cost against it, so a winner read as the day's loss (a false halt) and a loser's
+                # loss, or just the spread, was hidden (review of #211, Sept 23, 2026). Quote each
+                # unmarked holding once, as the mark pass would, before comparing.
+                self._day_open_unmarked.discard(agent)
+                for key, holding in list(self._account(agent).holdings.items()):
+                    if key not in self.marks:
+                        self._quote(holding.instrument)
             equity = self.equity(agent)
             opened = self.day_open.get(agent)
             if opened is None or opened[0] != day:
@@ -1062,6 +1076,7 @@ class Book:
         for agent, (equity, seq) in taken.items():
             self._day_open_taken[agent] = (day, equity, seq)
             self.day_open[agent] = (day, opened[agent])
+            self._day_open_unmarked.add(agent)
 
     def check(self, intent: Intent, quote: Quote | None, now: str, *, pending: Sequence[tuple[Intent, Quote]] = ()) -> list[str]:
         """Every reason this intent may not trade. Empty means it may."""
