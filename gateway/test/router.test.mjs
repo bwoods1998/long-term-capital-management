@@ -611,6 +611,99 @@ test('a venue may carry a tighter per-order cap than the floor', async () => {
   assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
 });
 
+test('a multi-leg order is refused before its symbol is quoted, priced or reserved, exits included', async () => {
+  // Sept 23, 2026: on main the written put was forwarded to the venue metered at $0.25, and the
+  // market spread under a stock symbol was quoted as SPY and forwarded.
+  const legs = [{ symbol: 'SPY261016P00600000', ratio_qty: '1', side: 'sell', position_intent: 'sell_to_open' }];
+  const writtenPut = { order_class: 'mleg', qty: '1', type: 'limit', limit_price: '0.25', time_in_force: 'day', legs };
+  const marketSpread = { symbol: 'SPY', order_class: 'mleg', qty: '1', side: 'buy', type: 'market', time_in_force: 'day', legs };
+  const quote = (url, init) => new Response(JSON.stringify(init.method === 'GET' ? { symbol: 'SPY', quote: { ap: 1, bp: 0.99 } } : { id: 'o1' }));
+  for (const [body, headers] of [[writtenPut, {}], [writtenPut, { 'X-LTCM-Purpose': 'exit' }], [marketSpread, {}]]) {
+    const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body, headers }), { reply: quote });
+    assert.equal(refused.response.status, 400, JSON.stringify(body));
+    assert.match(refused.body.error, /Multi-leg/);
+    assert.equal(refused.calls.length, 0, 'no quote read and nothing forwarded');
+    assert.equal((await refused.gate.status()).today.orders, 0);
+  }
+  // A symbol-less single order is refused for its symbol, before the router's quote lookup.
+  const bare = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { qty: '1', side: 'buy', type: 'limit', limit_price: '60', time_in_force: 'day' } }));
+  assert.equal(bare.response.status, 400);
+  assert.match(bare.body.error, /top-level symbol/);
+  assert.equal(bare.calls.length, 0);
+  // The House's own orders pass as before.
+  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_ORDER, symbol: 'RIVN261002P00014000', limit_price: '0.14', position_intent: 'buy_to_open' } }));
+  assert.equal(ok.response.status, 200);
+  assert.equal((await ok.gate.status()).today.notional_usd, '14.00');
+});
+
+test('an adjusted option symbol is refused before it is quoted, priced or forwarded', async () => {
+  // Sept 23, 2026 review: each of these was forwarded, metered at $50.00; the written put's premium is $5,000.
+  for (const symbol of ['TSLA1261016P00150000', 'XYZ1261016P00005000']) {
+    for (const [side, position_intent] of [['sell', 'sell_to_open'], ['buy', 'buy_to_open']]) {
+      const body = { symbol, qty: '10', side, position_intent, type: 'limit', limit_price: '5', time_in_force: 'day' };
+      const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body }));
+      assert.equal(refused.response.status, 400, `${symbol} ${position_intent}`);
+      assert.match(refused.body.error, /standard OCC symbol/);
+      assert.equal(refused.calls.length, 0, 'no quote read and nothing forwarded');
+      assert.equal((await refused.gate.status()).today.orders, 0);
+    }
+  }
+});
+
+test('a market order is priced by the venue quote, never by a price field or the VM header', async () => {
+  // Sept 23, 2026 review: a truthy limit_price or stop_price, even "0" or "x", skipped the venue
+  // quote and the VM's X-LTCM-Reference-Price then priced 100 AAPL at $1.00; each was forwarded.
+  const quote = (url, init) => new Response(JSON.stringify(init.method === 'GET' ? { symbol: 'AAPL', quote: { ap: 230, bp: 229.9 } } : { id: 'o1' }));
+  const headers = { 'X-LTCM-Reference-Price': '0.01' };
+  const aapl = { symbol: 'AAPL', qty: '100', side: 'buy', time_in_force: 'day' };
+  for (const body of [
+    { ...aapl, type: 'market', limit_price: '0.01' },
+    { ...aapl, type: 'market', limit_price: '0' },
+    { ...aapl, type: 'market', limit_price: 'x' },
+    { ...aapl, type: 'limit', limit_price: '0' },
+    { ...aapl, type: 'limit', limit_price: 'x' },
+    { ...aapl, type: 'market', notional: '0' },
+    { ...aapl, type: 'stop', stop_price: '0.01' },
+    { ...aapl, type: 'market', stop_price: '0.01' },
+  ]) {
+    const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body, headers }), { reply: quote });
+    assert.equal(refused.response.status, 400, JSON.stringify(body));
+    assert.equal(refused.calls.length, 0, `${JSON.stringify(body)}: no quote read and nothing forwarded`);
+    assert.equal((await refused.gate.status()).today.orders, 0);
+  }
+  // The House's market order is still quoted by the venue and priced 10% through the ask; the header is ignored.
+  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...aapl, qty: '0.1', type: 'market' }, headers }), { reply: quote });
+  assert.equal(ok.response.status, 200);
+  assert.equal(ok.calls.length, 2);
+  assert.equal((await ok.gate.status()).today.notional_usd, '25.30', '0.1 x 230 x 1.10');
+  // A market order in dollars needs no quote: its notional is what it spends.
+  const dollars = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { symbol: 'AAPL', notional: '25', side: 'buy', type: 'market', time_in_force: 'day' }, headers }), { reply: quote });
+  assert.equal(dollars.response.status, 200);
+  assert.equal(dollars.calls.length, 1, 'forwarded without a quote');
+  assert.equal((await dollars.gate.status()).today.notional_usd, '25.00');
+});
+
+test('a trailing_stop, stop or stop_limit order is refused before any quote is read', async () => {
+  // Sept 23, 2026 review: a trailing buy at 50% was metered at the ask ($73.37 for 0.29 AAPL at $230)
+  // and passed the cap, though it cannot fill below about $345 a share.
+  const quote = (url, init) => new Response(JSON.stringify(init.method === 'GET' ? { symbol: 'AAPL', quote: { ap: 230, bp: 229.9 } } : { id: 'o1' }));
+  const aapl = { symbol: 'AAPL', qty: '0.29', side: 'buy', time_in_force: 'gtc' };
+  for (const body of [
+    { ...aapl, type: 'trailing_stop', trail_percent: '50' },
+    { ...aapl, type: 'trailing_stop', trail_price: '1000' },
+    { ...aapl, type: 'stop', stop_price: '0.01' },
+    { ...aapl, type: 'stop_limit', stop_price: '0.01', limit_price: '0.01' },
+  ]) {
+    for (const headers of [{}, { 'X-LTCM-Purpose': 'exit' }]) {
+      const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body, headers }), { reply: quote });
+      assert.equal(refused.response.status, 400, JSON.stringify(body));
+      assert.match(refused.body.error, /Only market and limit orders/);
+      assert.equal(refused.calls.length, 0, 'no quote read and nothing forwarded');
+      assert.equal((await refused.gate.status()).today.orders, 0);
+    }
+  }
+});
+
 test('the paper account is its own venue: paper keys, paper host, no caps, no kill switch', async () => {
   const settings = { ALPACA_PAPER_KEY_ID: 'PK-PAPER', ALPACA_PAPER_SECRET_KEY: 'paper-secret-held-by-the-worker' };
   const read = await call(ask('GET', '/v1/alpaca-paper/v2/account'), { settings });

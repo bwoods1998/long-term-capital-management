@@ -83,7 +83,7 @@ redeploying, which is a change the owner makes, not one the VM can.
 
 | Var | Deployed | Default in code | Meaning |
 | --- | --- | --- | --- |
-| `MAX_ORDER_USD` | `75` | `50` | Per-order notional. Kalshi: `count x price` in dollars (legacy cent prices and `buy_max_cost` are understood; an unpriced contract is charged its $1.00 settlement ceiling). Alpaca: `notional`, else `qty x` the dearest of its `limit_price`, its `stop_price` and the `X-LTCM-Reference-Price` header, which can therefore raise what an order is worth and never lower it; a market order with no price of its own is priced from the venue's own quote plus 10%, never from the caller. |
+| `MAX_ORDER_USD` | `75` | `50` | Per-order notional. Kalshi: `count x price` in dollars (legacy cent prices and `buy_max_cost` are understood; an unpriced contract is charged its $1.00 settlement ceiling). Alpaca: `notional`, else `qty x` a price. A limit order uses the dearer of its own positive `limit_price` and the `X-LTCM-Reference-Price` header, which can therefore raise what it is worth and never lower it; a market order is priced from the venue's own quote plus 10%, never from the caller's header or a price field. Only `market` and `limit` orders are priced. |
 | `MAX_ORDER_USD_KALSHI`, `MAX_ORDER_USD_ALPACA` | `75`, `75` | unset | A venue's own per-order cap. The tighter of it and `MAX_ORDER_USD` applies. |
 | `MAX_DAY_USD` | `4000` | `400` | Notional for the whole trading day, both real venues together. |
 | `MAX_DAY_ORDERS` | `2000` | `60` | Order count for the whole trading day, both real venues together. |
@@ -99,6 +99,27 @@ is `423` with `{ error }` and stops **every** order-creating call on a real venu
 an order whose notional cannot be established is `400` rather than a pass, and a market order the
 venue cannot quote is `503`. Money is exact BigInt arithmetic throughout and every partial cent
 rounds **against** the order.
+
+An Alpaca order is priced only as one instrument named by a top-level `symbol`, spelled as a stock
+ticker (`AAPL`, `BRK.B`), a crypto pair (`BTC/USD`) or a standard OCC option symbol (a root of one
+to six capital letters). Each of these is a `400` before any quote is read:
+- an `order_class` other than `simple`, or any `legs` field (multi-leg, bracket, OCO, OTO);
+- a `type` other than `market` or `limit`. A stop, stop-limit or trailing stop fills at market once
+  it triggers, so nothing in its body bounds what it spends. `stop_price`, `trail_price` and
+  `trail_percent` are not accepted;
+- a field outside `ALPACA_ORDER_FIELDS` in `lib/caps.mjs`;
+- a missing symbol, or any other spelling. An adjusted option contract (a digit in its root, as in
+  `XYZ1261016P00005000`) is refused rather than priced, because it can deliver other than 100
+  shares;
+- a market order that carries a `limit_price`, a limit order without a positive one, or a body with
+  both `qty` and `notional`.
+
+These are the only shapes the House sends. Until Sept 23, 2026 a multi-leg order with no top-level
+symbol was priced as a stock, so a $210 debit spread was metered at $2.10. Until the same day's
+review, several other shapes were also underpriced:
+- an adjusted-contract written put worth $5,000 was metered at $50.00;
+- a market order carrying `limit_price: "0.01"` was metered from the caller's header at $1.00;
+- a trailing buy was metered at the ask, though it cannot fill until the price has risen.
 
 An order sent with `X-LTCM-Purpose: exit` skips the two dollar caps (not the order count, and not
 the kill switch), so a position can always be closed however the day's budget was spent. The
