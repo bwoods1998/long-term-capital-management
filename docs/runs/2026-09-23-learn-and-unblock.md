@@ -285,3 +285,36 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   lent mullins-2 $24.75 toward a $34.84 target** (`bunt_usd` $30 × W_real 1.1616; E 1.1815; it had
   been swept to $10.09): U5 and the $30 bunt verified live on the earner. The watchdog's
   10-minute watch runs to about 17:45Z.
+- 17:39Z — the deployed tree's local suites: league 94 modules / 2,392 tests, ltcm 1,791, content
+  checks, money digest `1d63a56e` pinned: all green (CI had passed the same tree on 3.11 and 3.14).
+- 17:29-17:38Z — **W1-loop finished early (PR #202, CI green, unprotected):** research runs on
+  evidence (a fill, settlement, refusal, active block, verdict, repair, lesson, market change)
+  instead of the clock, with the trigger recorded on every `research.gate` row (expected saving
+  about $1.40 an hour from the 41% clock-driven sessions); three empty sessions lock an agent to
+  its own events; the foundry's fast lane drops `kalshi-crypto-strikes` and closes any desk whose
+  foundry-born agents are negative over 6 blocks, asks for maker entries on `kalshi-crypto-15m` and
+  warns of the one-loss trial; failed consults are refunded (the 21 production ones at the agents'
+  next pass); the engineer buys a defect only for a living, trading parent, and a repair child is
+  replayed as a foundry card before it takes any seat (the engineer's 16 children had 0 forward
+  blocks); an hourly yield row (`ops.budget` `what: "yield"`). The foundry was already exempt from
+  the "earned" tier (the brief's premise was wrong there). It conflicts with main after Deploy A
+  (docs, `house.py`); the builder is resolving it, then the updater ships it.
+- 17:33-17:42Z — **W1-bugs finished (PR #203, CI green, `book.py` protected → Deploy B).** The
+  ledger corrected three of the study's defects: no agent ever woke after death (the 607 "no
+  seat" refusals were the House's own wind-downs, fixed on Sept 22); the 125 option-market
+  refusals were wind-downs too; the 153 "no such order" rows were 403 refusals an older adapter
+  read as unknown (fixed Sept 22) plus four transport failures in a gateway outage. What it
+  fixed anyway: an option market intent is fitted to a limit at the touch and a crossing
+  post-only Kalshi order re-priced one tick inside once; unseated agents' intents are dropped
+  with one warning; a resume after a pause drains the wake backlog one desk at a time,
+  longest-waiting first (the Sept 22 "8.4 dark hours" were a pause file left through a restart,
+  then a slow drain, 5 of 12 desks in the first 17 minutes); a never-arrived order needs two
+  venue answers 60 s apart and is re-checked for 15 minutes (a found order is revived with its
+  fills); empty Kalshi rejection reasons now carry the venue's text ("post-only order would
+  cross"); sliced market exits are held while the market is shut; two invariants (a dead agent
+  with a refusal; a 24/7 desk with no wake for 30 minutes while not paused). 13 new tests.
+  Who noticed first: the repair worklist and the engineer saw the option refusals on Sept 22
+  (then stopped for want of authority); nothing noticed the rest. Its `reconcile()` re-read change
+  is money-adjacent: an adversarial review was launched at 17:43Z (`w1-bugs/review`).
+- 17:43Z — **W2-options launched** (the level-3 debit-vertical design and pure pieces on a pushed,
+  unmerged draft branch; no multi-leg order anywhere this run).
