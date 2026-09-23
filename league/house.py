@@ -3113,7 +3113,8 @@ class House:
                 if book is not None and agent.id in book.accounts:
                     if stamp is None:
                         stamp = now_iso(self.clock)
-                    if any(market_hours(h.instrument, stamp) is False for h in book.account(agent.id).holdings.values()):
+                    held = list(book.account(agent.id).holdings.values())  # copied at once: wakes run beside this
+                    if any(market_hours(h.instrument, stamp) is False for h in held):
                         # Its own exit closes this at the next open. Displaced now, the House
                         # would sell it there instead (scholes-23 at 07:11Z on Sept 23, mid-basket).
                         continue
