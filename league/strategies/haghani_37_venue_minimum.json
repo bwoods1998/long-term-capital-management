@@ -1,0 +1,8 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_37_venue_minimum",
+  "repair": {
+    "key": "order_refusal:alpaca-paper:a $# buy is below the venue minimum of $# an order (Alpaca refuses a crypto order under $#); size it"
+  },
+  "why": "Corrected child of haghani-37: preserve its hourly Alpaca alternative-coin maker-reversion specialty and parameters, but skip final entry budgets below the greater of $10 and the supplied symbol venue minimum. Never increase a budget to force an entry. Born at rung 0 with no inherited record; must qualify independently."
+}
