@@ -97,6 +97,16 @@ class Batches(LabCase):
         self.assertEqual([r["origin"] for r in chosen[:2]], ["luna", "luna"])  # a third of six, first
         self.assertEqual({r["id"] for r in chosen[:3]}, set(children))  # and the third by queue order
 
+    def test_a_queue_admitted_at_the_old_priority_is_re_keyed_when_the_lab_opens(self):
+        """The floor's lab.sqlite of Sept 23, 2026 held 394 Luna and Sol children queued at priority 2."""
+        ident = self.lab.admit(LLM_CHILDREN[0], niche=self.niche, origin="luna", author="luna", lineage="founder:test")
+        self.lab._x("UPDATE candidates SET priority=2 WHERE id=?", (ident,))
+        self.lab.close()
+        self.lab = Lab(self.house, box=FakeBox(), mutator=self.luna, leaper=self.sol)
+        self.house.lab = self.lab
+        self.addCleanup(self.lab.close)
+        self.assertEqual(self.candidate(ident)["priority"], PRIORITY["luna"])
+
     def test_the_tape_key_ignores_what_the_tape_does_not_depend_on(self):
         needs = static_literal(KNOB, "NEEDS")
         same = {**needs, "style": "another", "parameter_rules": {"bounds": {"notional": [1, 100]}}, "wake_minutes": 15, "max_hours_to_close": 2}

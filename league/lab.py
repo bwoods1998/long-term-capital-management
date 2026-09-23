@@ -613,6 +613,11 @@ class Lab:
         if self._meta("fee_cursor") is None:
             # A graduate cannot exist before the lab, so no older fee can owe it a royalty.
             self._set_meta("fee_cursor", str(house.ledger.head()[0]))
+        # Queued rows keep the priority they were admitted with, so a change of `PRIORITY` reaches
+        # the queue only if it is re-keyed here (Sept 23, 2026: 394 Luna and Sol children sat
+        # queued at the old priority 2). Every stored priority comes from `PRIORITY`, so this is safe.
+        for origin, priority in PRIORITY.items():
+            self._x("UPDATE candidates SET priority=? WHERE status='queued' AND origin=? AND priority!=?", (priority, origin, priority))
 
     # ------------------------------------------------------------------ store
     def _q(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
