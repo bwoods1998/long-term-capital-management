@@ -397,7 +397,7 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
 - 14:01:41Z — **the shard fix, confirmed by a fill.** meriwether-h2d625d bought 5 KXMLBTOTAL at
   $0.54 on real money: the first real sports fill. The same order had been refused twice before
   shard 3 held collateral.
-- 14:03:24Z — huang-h51fdd3 (the practice parent of the first bunt) died on evidence: down 19.1%
+- 14:03:24Z — huang-h51fdd3 (same family as the first bunt, huang-h51fdd3-2) died on evidence: down 19.1%
   on practice after 6 active blocks.
 
 ## Morning report (the deadline, 14:30:58Z)
@@ -547,3 +547,24 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
     (`codex/architect-registry-repair`), `ltcm-night` (`night/record`) and `ltcm-repairs`
     (`night/repairs`).
   - Left untouched, merged or detached: the other 31 older `ltcm-*` worktrees.
+
+### 8. The owner's two requests during the watch (open at the deadline)
+- **13:51Z: use stocks and the level-3 options the Alpaca accounts are approved for.**
+  - **Measured.** Both accounts are options level 3. Since the open, practice agents trade
+    stocks (70 orders, 16 fills) and options (8 orders, 4 fills). No stock or option agent holds
+    real money: the best Alpaca practice agent is at E 1.0006.
+  - **Why options are shut out.** At a $25 bunt the position cap is $12.50, and one contract
+    costs premium × 100, so options are all but shut out of real money at bunt size.
+  - **In progress.** A read-only investigation (stocks, options and level 3, the Alpaca ladder,
+    each re-checked by a skeptic) is writing a ranked fix plan. The plan separates fixes to what
+    agents can already trade from new level-3 multi-leg support. Nothing will force a trade or
+    lower a promotion line.
+- **14:02Z: the capital page's ladder.** Level 1, 2 and 3 with a word or two each ("Practice",
+  "Live Trading", "Increased Capital"), one dot per agent instead of bars, and made as intuitive
+  and interesting as it can be.
+  - **In progress.** Three concepts judged, then a build in `~/Work/personal-site-levels` with
+    tests and headless screenshots at 390 px and 1,280 px, visual and code review, then the
+    site deploy.
+  - **What does not change.** Only the site changes. The House's data already carries the band,
+    stake, evidence and last move.
+
