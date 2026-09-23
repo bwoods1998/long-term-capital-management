@@ -31,16 +31,16 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | 0.1 | T0 and deadline recorded and committed | done |
 | 0.2 | Baseline (`scripts/floor_watch.py`) | done (below) |
 | 0.3 | First-hour decision 1: ratify and shard transfer permission checks | done (below) |
-| 0.4 | First-hour decision 2: owner told about compute; OpenAI pacing set by T+0:30 | ⟨pending⟩ |
-| 0.5 | First-hour decision 3: Deploy A's money set fixed by T+0:45 | ⟨pending⟩ |
-| 0.6 | Study snapshot taken (read-only sqlite backups) | ⟨pending⟩ |
-| 0.7 | Study (L), Wave 0 and cleanup (H) launched together | ⟨pending⟩ |
+| 0.4 | First-hour decision 2: owner told about compute; OpenAI pacing set by T+0:30 | done 16:29Z / 16:50Z (PR #194) |
+| 0.5 | First-hour decision 3: Deploy A's money set fixed by T+0:45 | done 16:52Z (U1 + U5 + A2a) |
+| 0.6 | Study snapshot taken (read-only sqlite backups) | done 16:28Z |
+| 0.7 | Study (L), Wave 0 and cleanup (H) launched together | done 16:43Z |
 | L | The agent study, `docs/research/2026-09-23-agent-study.md` | ⟨pending⟩ |
 | U1 | Daily-loss rules as constitution keys (real bunts: stay drawdown; real halt per venue) | ⟨pending⟩ |
 | U2 | Durable Kalshi shard funding | ⟨pending⟩ |
 | U5 | Winners compound (`bunt_usd × clamp(W_real, 1, swing_at)`) | ⟨pending⟩ |
 | C2 | The lab decoupled from the OpenAI tier | ⟨pending⟩ |
-| C3 | OpenAI pacing | ⟨pending⟩ |
+| C3 | OpenAI pacing | PR #194 (updater); burn re-read hourly |
 | A7 | Fractional one-day stock limits; wind-down sells held to the open | ⟨pending⟩ |
 | V1 | `kalshi-open` maker fees | ⟨pending⟩ |
 | Deploy A | Wave 0, ratified at promotion if the digest moved | ⟨pending⟩ |
@@ -91,11 +91,56 @@ Execution record for the owner's goal of Sept 23, 2026: execute
      (transfer `93edc423-352e-4f85-8e3e-4047da737ec0`). The account total is unchanged.
    - So this run may change money rules with a ratify at each promotion, and U2 keeps its Wave 0
      place.
-2. **Compute:** ⟨pending⟩
-3. **Deploy A's money set:** ⟨pending⟩
+2. **Compute.**
+   - The owner was told in the session at 16:29Z (the push notification was not sent because the
+     terminal was active): the gateway month reaches the $20 reserve at about 20:50Z unpaced and
+     resets Oct 1; Sail has about 2.6 days; an OpenAI top-up and Sail auto-recharge are asked for.
+     The run carries on without waiting.
+   - **Funded balances at T0** (read from the providers through the gateway and the watch): OpenAI
+     gateway month $367.66 of $408 (cap = funded; the House line has $34.92); Sail $96.38 at
+     $32.32 a day (2.67 days); Jev $16.15 of $42. No credit has arrived, so no cap moves.
+   - **Pacing (C3), set at 16:50Z, PR #194** (risk-free dials, no ratify): the toolsmith waits
+     48 h (8 PRs this month, all refused by CI, $17.72) and the architect 24 h (4 strategies from
+     6 PRs, $47.30; the Sol foundry writes strategies at about a sixth of the cost); the lab's own
+     LLM line is $0.75 an hour (was $1.50; parameter children and batches spend no OpenAI); an
+     agent with no earned record researches every 6 intervals (90 min, was 45; 82-84% of those
+     sessions abstained). The teacher (13 of 13 merged) and audits keep their cadence. Expected
+     burn about $3.50 an hour against the $3.30 target; re-read hourly below. It ships through the
+     in-box updater (unprotected files).
+   - **Floors at the deadline:** OpenAI ≥ $8 in the gateway month; Sail ≥ 1.5 days plus the House's
+     `sail_reserve_usd`.
+3. **Deploy A's money set (fixed 16:52Z):** one digest change, one ratify, from the evidence on
+   record (the 12:21Z daily-loss freeze of huang-h51fdd3-2; the shard refusals at 12:58Z and
+   13:30Z; mullins-2 and mullins-6 shrunk while earning; the options bunt staked $40 but capped at
+   $20):
+   - U1: `allocator.bunt_daily_loss: "stay_drawdown"` (real bunts are governed by the 35% stay
+     drawdown, not the book's 10% daily rule; swings keep the 10%) and
+     `allocator.real_halt: {"basis": "venue_grant_capital", "pct": "0.08"}` (the real book's halt is
+     8% of that venue's grant capital: $41.42 Kalshi, $40.00 Alpaca);
+   - U5: a bunt's target stake is `bunt_usd × clamp(W_real, 1, swing_at)`, carried as a
+     constitution key; losers are not refilled; the envelope's headroom bounds every increase;
+   - A2a: the options bunt stake is $80 so one $40 contract fits under the 50% rules.
+   - Not in Deploy A: `bunt_usd`, `kappa`, the swing lines and the haircut wait for the study's
+     evidence (U4/A8; the run's one later digest change, if any).
 
 ## Log
 
 - 16:22:40Z — T0. Plan read from `origin/main` (`cd1b0dc`, PR #193). Deploy checkout
   `~/Work/ltcm-deploy` moved to `cd1b0dc`. Run worktree `~/Work/ltcm-run`, branch
   `run/learn-and-unblock-2026-09-23`.
+- 16:21-16:27Z — baseline watch; the ratify and shard checks (decision 1).
+- 16:28Z — **the study's snapshot:** `ledger.sqlite` (300 MB, 333,668 rows to 16:28:30Z),
+  `lab.sqlite` and `campaigns.sqlite` backed up on the box with sqlite's backup API into
+  `/tmp/snap`, gzipped, downloaded to the session scratchpad and queried there (the House box has
+  1 vCPU; its tick was 202 s at 16:24Z). Refresh due at T+4:15 (20:37Z) and T+7:30 (23:52Z).
+- 16:34Z — the 15-minute watch loop started (`scripts/floor_watch.py --since`, to the session
+  scratchpad, until the deadline).
+- 16:36Z — four Wave 0 worktrees created from `cd1b0dc`: `ltcm-w0-money` (U1, U5, A2a, A7's
+  book part: owns `constitution.py`, `allocator.py`, `book.py`), `ltcm-w0-shards` (U2: a new
+  protected `league/shards.py`), `ltcm-w0-lab` (C2 and two lab invariants: owns `lab.py`),
+  `ltcm-w0-house` (A7's wind-down hold, V1 maker fees, two floor invariants: owns `house.py`).
+- 16:43Z — **launched together:** the study's three analysts (A: funnel, loop yield, compute
+  economics; B: where money is made and lost, does the verifier predict; C: 24/7 coverage, what
+  the agents say and ask for), the four builders, and the cleanup agent (H). Study findings are
+  due at 17:35Z, builder PRs at 17:50Z, the cleanup by 18:20Z.
+- 16:50Z — PR #194, OpenAI pacing (decision 2).
