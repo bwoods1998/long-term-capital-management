@@ -1678,12 +1678,19 @@ class Book:
         quantity grid, so the last part is never a crumb. Where the venue has a minimum order ($10
         for Alpaca crypto, `venues.min_order_usd`) and equal parts would fall under it, parts are
         merged: one order a little over the cap -- an exit, which the gateway lets through -- rather
-        than an order the venue refuses. A single unit worth more than the cap (a whole share of a
-        limit order, an option contract) cannot be cut, and goes as one unit."""
+        than an order the venue refuses. A single unit worth more than the cap (a whole share of an
+        equity order that is not a `day` order, an option contract) cannot be cut, and goes as one
+        unit: an exit, which the gateway lets through its cap."""
         from .venues import min_order_usd  # the venue's own rule, kept with the venue's others
 
         instrument = intent.instrument
         step = step_of(instrument, intent.order_type)
+        if instrument.asset_class == "equity" and str(intent.time_in_force) != "day":
+            # A fractional share order is a `day` order only (`fractional_tif_reason`): a gtc exit is
+            # cut on whole shares, never into fractional slices the venue, the adapter and this book's
+            # own `check` on the next pass would all refuse (review of A7, Sept 23, 2026: a 2-share gtc
+            # limit exit at $95 went out as three 0.67-share gtc slices).
+            step = ONE
         price = self._cap_price(instrument, intent.order_type, intent.limit_price, quote)
         if price is None:
             return available
