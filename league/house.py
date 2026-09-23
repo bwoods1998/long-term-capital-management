@@ -283,6 +283,15 @@ class House:
         for name, book in self.books.items():
             try:
                 if book.real_money:
+                    # Fills the venue made while no House ran are booked first: a resting order that
+                    # filled during a restart is a receipt, not a mismatch. Sept 23, 2026 05:07Z: a
+                    # $9.50 Kalshi bid filled during a deploy's restart, this reconcile ran before the
+                    # poll, froze the real book, and the watchdog rolled a good release back; the fill
+                    # was booked twelve seconds later, on the first mark pass.
+                    try:
+                        book.poll()
+                    except Exception as exc:  # noqa: BLE001 - the reconcile below says what is unknown
+                        self.alert("warning", f"{name}: could not poll the venue before reconciling ({type(exc).__name__}: {str(exc)[:160]})")
                     book.reconcile()  # repair/check receipts before health, agent wakes or sizing
                 else:
                     book.open_baseline()

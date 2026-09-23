@@ -174,3 +174,45 @@ class RetiredExits(HouseCase):
         self.assertFalse(book.account(agent.id).holdings)
         self.assertFalse(book.open_orders(agent.id))
         self.assertTrue(book.account(agent.id).swept)
+
+
+class StartupReconcile(unittest.TestCase):
+    """Sept 23, 2026 05:07Z: a resting real-money bid filled at Kalshi while the House restarted.
+    The new House reconciled before it polled, took the venue's fill for a mismatch and froze the
+    real book, and a deploy's watchdog rolled a good release back; the fill was booked 12 s later."""
+
+    def test_a_fill_made_while_no_house_ran_is_booked_before_the_startup_reconcile(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        clock = Clock()
+        real = FakeBroker("kalshi", cash="1000", family="kalshi")
+        paper = FakeBroker("kalshi-shadow", family="kalshi")
+        instrument = event()
+        real.set_quote(instrument, ".94", ".95")
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+
+        def house():
+            return House(Path(directory.name), brokers={"kalshi": real, "kalshi-shadow": paper}, sandbox=InProcessSandbox(),
+                         settings=Settings(real_money=True, research=False, mark_every_seconds=0), game=game, clock=clock)
+
+        first = house()
+        agent = first.spawn("favorite", "test", CODE)
+        first.evaluator.seat(agent.id, 2, "test")
+        first.seat(agent)
+        book = first.books["kalshi"]
+        book.resolves_at = lambda _instrument: clock() + 3600
+        intent = Intent.new(agent=agent.id, instrument=instrument, side="buy", quantity=Decimal(2), order_type="limit",
+                            limit_price=Decimal("0.93"), post_only=True, reason="a resting favourite bid", created_at=now_iso(clock))
+        resting = book.submit([intent])[0]
+        self.assertEqual(resting.status, "resting")
+        self.assertTrue(book.reconcile().ok)
+        first.close(wait=None)
+        real.fill_resting(resting.order_id, "2")  # the venue fills it while no House is running
+        clock.advance(30)
+        second = house()
+        self.addCleanup(second.close, wait=None)
+        self.assertIsNone(second.books["kalshi"].frozen)
+        self.assertEqual(second.books["kalshi"].account(agent.id).holdings[instrument.key].quantity, Decimal(2))
+
