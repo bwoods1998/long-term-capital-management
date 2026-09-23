@@ -1,0 +1,182 @@
+## merton.change by role x status (lifetime | last 24h)
+  architect  merged          31  (24h 26)
+  architect  opened          34  (24h 27)
+  architect  refused by CI    6  (24h 1)
+  designer   opened           1  (24h 0)
+  designer   refused by CI    2  (24h 0)
+  operator   closed           2  (24h 0)
+  operator   merged           1  (24h 0)
+  operator   opened           3  (24h 0)
+  teacher    merged          27  (24h 11)
+  teacher    opened          27  (24h 11)
+  teacher    refused by CI    1  (24h 1)
+  toolsmith  closed           1  (24h 1)
+  toolsmith  deployed         2  (24h 1)
+  toolsmith  merged           3  (24h 1)
+  toolsmith  opened          11  (24h 1)
+  toolsmith  refused by CI   16  (24h 0)
+## merged strategy PRs (architect branch incl. repair-*): strategy name -> born? rung, fills, alive, cause
+  09-21T04:15 architect #34 isolate-wti-maker-evidence                 -> NOT BORN
+  09-21T14:52 architect #49 test-numeric-props-touch                   -> NOT BORN
+  09-21T23:06 architect #71 index-overnight-fractional                 -> scholes-23               r1 fills=4 alive=False cause=displaced trials=11/2
+  09-22T15:28 architect #21 sports-fee-capped-taker                    -> meriwether-15            r0 fills=0 alive=False cause=displaced trials=2/0
+  09-22T15:38 repair    #100 hawkins-commodity-resolve-guard            -> hawkins-22               r1 fills=3 alive=True cause=None trials=1/1
+  09-22T17:51 repair    #113 haghani-downward-entry-pricing             -> haghani-34               r0 fills=0 alive=False cause=displaced trials=1/0
+  09-22T18:56 repair    #119 haghani-subcent-prices                     -> haghani-36               r0 fills=0 alive=False cause=displaced trials=2/0
+  09-22T19:13 repair    #120 sports-two-way-game-guard                  -> meriwether-40            r1 fills=0 alive=True cause=None trials=4/1
+  09-22T19:30 repair    #121 options-occ-first-exits                    -> NOT BORN
+  09-22T19:46 repair    #122 options-breakout-occ-exits                 -> krasker                  r1 fills=1 alive=False cause=displaced trials=0/0
+  09-22T20:02 repair    #124 krasker-contract-identity                  -> krasker-14               r1 fills=4 alive=True cause=None trials=18/1
+  09-22T20:19 repair    #125 haghani-minimum-entry                      -> haghani-35               r0 fills=0 alive=False cause=displaced trials=1/0
+  09-22T21:09 repair    #128 leahy-resolution-guard                     -> leahy-32                 r0 fills=0 alive=False cause=displaced trials=2/0
+  09-22T21:26 repair    #130 krasker-option-order-identity              -> krasker-17               r0 fills=0 alive=False cause=displaced trials=3/0
+  09-22T21:44 repair    #133 krasker-3-occ-order-identity               -> krasker-13               r1 fills=1 alive=True cause=None trials=9/3
+  09-22T22:00 repair    #134 hawkins-prices-resolution-check            -> hawkins-24               r1 fills=3 alive=True cause=None trials=1/1
+  09-22T22:04 architect #135 test-megacap-gap-drift                     -> mcentee-36               r0 fills=0 alive=False cause=displaced trials=2/0
+  09-22T22:32 repair    #137 hawkins-prices-payout-guard                -> hawkins-23               r1 fills=3 alive=True cause=None trials=1/1
+  09-22T23:22 repair    #138 krasker-occ-routing-child                  -> krasker-16               r1 fills=1 alive=True cause=None trials=12/3
+  09-23T04:26 repair    #145 haghani-venue-grid-child                   -> haghani-51               r1 fills=20 alive=True cause=None trials=1/1
+  09-23T04:43 repair    #147 haghani-venue-grid-prices                  -> haghani-52               r1 fills=29 alive=True cause=None trials=1/1
+  09-23T04:59 repair    #148 haghani-37-venue-minimum                   -> haghani-54               r1 fills=17 alive=True cause=None trials=2/1
+  09-23T05:33 repair    #152 scholes-overnight-entry-retry              -> scholes-28               r1 fills=0 alive=True cause=None trials=6/6
+  09-23T06:17 architect #154 index-month-start-flow                     -> NOT BORN
+  09-23T07:09 repair    #161 sports-runline-three-market-cap            -> NOT BORN
+  09-23T09:26 architect #169 index-rsi2-fractional                      -> NOT BORN
+  09-23T10:47 repair    #172 haghani-mark-aware-position-budget         -> haghani-55               r1 fills=10 alive=True cause=None trials=1/1
+  09-23T13:10 repair    #180 haghani-40-directional-grid                -> haghani-56               r1 fills=11 alive=True cause=None trials=2/2
+  09-23T13:30 repair    #182 haghani-41-symbol-price-grid               -> haghani-57               r1 fills=1 alive=True cause=None trials=2/2
+  09-23T13:43 repair    #183 haghani-42-unrounded-limits                -> haghani-58               r1 fills=0 alive=True cause=None trials=1/1
+  09-23T14:00 repair    #184 haghani-equity-order-cap                   -> haghani-59               r1 fills=0 alive=True cause=None trials=1/1
+  merged strategy PRs (distinct): 31; born: 25
+## merton.pass role x outcome: summary starts (first 40 chars) top per role
+  architect: n=71 $45.53
+        4 ('nochange', 'Sports has eight barren agents and two losing')
+        2 ('err', 'the pass failed: frontier call refused: HTTP ')
+        2 ('nochange', 'The weakest desks are fifteen-minute crypto, ')
+        2 ('nochange', 'Sports has nine barren agents and one losing ')
+        2 ('err', 'the pass failed: the model response is incomp')
+  teacher: n=49 $19.72
+        3 ('nochange', 'The latest deaths reinforce existing lessons ')
+        2 ('nochange', 'The graveyard is empty, so there is no new po')
+        2 ('nochange', 'The latest records reinforce existing lessons')
+        1 ('PR', 'Meriwether-3 spent $0.48 on four replay trial')
+        1 ('PR', 'A replay pass is not enough to justify expand')
+  toolsmith: n=44 $17.78
+        2 ('nochange', 'no tool requests are waiting')
+        2 ('err', 'the pass failed: the model response is incomp')
+        2 ('nochange', 'The ten open requests and ten existing backlo')
+        1 ('nochange', 'All six requests require additional feed data')
+        1 ('nochange', 'These requests need historical data or replay')
+  operator: n=68 $14.86
+       30 ('nochange', 'Leave the operating dials unchanged: all four')
+       12 ('nochange', 'Leave the operating dials unchanged: the evid')
+        5 ('nochange', 'Leave the operating dials unchanged: research')
+        4 ('nochange', 'Leave the operating dials unchanged: the aler')
+        3 ('nochange', 'Leave the operating dials unchanged: all are ')
+  designer: n=19 $7.13
+        2 ('nochange', 'The population spans many niches, but most ag')
+        1 ('nochange', 'Keep the economy unchanged: the population sp')
+        1 ('nochange', 'Keep the current rules for now. The populatio')
+        1 ('nochange', 'The league shows replacement churn, but this ')
+        1 ('PR', 'Many descendants have no forward blocks, and ')
+  engineer: n=81 $11.20
+        4 ('nochange', 'no change justified: Six paper wakes produced')
+        3 ('nochange', 'no change justified: The supplied evidence do')
+        2 ('nochange', 'needs core authority: The reported failure co')
+        2 ('nochange', 'no change justified: The audit reports six in')
+        2 ('nochange', 'no change justified: The audit reports six id')
+  foundry: n=29 $8.48
+        5 ('cards', '4 hypothesis cards for kalshi-crypto-15m (evi')
+        4 ('cards', '4 hypothesis cards for kalshi-sports (evidenc')
+        3 ('cards', '4 hypothesis cards for alpaca-index-etfs (evi')
+        3 ('cards', '4 hypothesis cards for alpaca-crypto-majors (')
+        3 ('cards', '4 hypothesis cards for kalshi-crypto-strikes ')
+  consultant: n=60 $19.00
+       16 ('err', 'Merton could not be reached (frontier call re')
+        5 ('err', 'Merton returned an unreadable answer (the mod')
+        1 ('nochange', 'Your blocker is the missing underlying-price ')
+        1 ('nochange', 'Change your next research action, not your en')
+        1 ('nochange', 'Change your cancellation rule: a resting bid ')
+## foundry passes: cards per pass, refused, cost
+   {'passes': 29, 'cards': 108, 'refused': 0, 'cost': 8.475986999999998}
+## repair.status by state: n, $cost, with pr
+  admitted       n= 292 $0.00 with_pr=0
+  dormant        n= 125 $1.11 with_pr=1
+  reproducing    n=  81 $0.00 with_pr=3
+  patching       n=  81 $0.00 with_pr=3
+  testing        n=  52 $4.93 with_pr=26
+  rejected       n=  47 $3.14 with_pr=1
+  canary         n=  25 $0.00 with_pr=25
+  observing      n=  25 $0.00 with_pr=25
+  revising       n=   4 $2.02 with_pr=3
+  verified       n=   1 $0.00 with_pr=1
+## repair.reported by kind x source: n, distinct keys
+  ('audit_veto', 'audit')            rows=   13 distinct_keys=8
+  ('bug_report', 'synthetic')        rows=    1 distinct_keys=1
+  ('bug_report', 'triage')           rows=   63 distinct_keys=49
+  ('ci_failure', 'ci')               rows=   13 distinct_keys=12
+  ('missing_data', 'consult')        rows=  146 distinct_keys=19
+  ('missing_data', 'research')       rows=   23 distinct_keys=7
+  ('missing_data', 'tools')          rows=  199 distinct_keys=145
+  ('missing_data', 'triage')         rows= 1047 distinct_keys=135
+  ('order_refusal', 'refusals')      rows=  207 distinct_keys=15
+  ('strategy_defect', 'audit')       rows=  109 distinct_keys=109
+  ('strategy_defect', 'consult')     rows=    2 distinct_keys=2
+  ('strategy_defect', 'triage')      rows=    1 distinct_keys=1
+## playbook.entry and library.note counts, last 24h; teacher merged titles (24h)
+  playbook.entry (395,) 24h (104,)
+  library.note (504,)
+    09-22T17:46 Require a supported validation route before funding more options variants
+    09-22T18:55 Require execution reconciliation before more Haghani mutations
+    09-23T01:53 Require an identity and holdout-budget check before repeat research
+    09-23T03:57 Document sports feed limits before funding another props replay
+    09-23T05:04 Require defect-specific repair evidence before funding descendants
+    09-23T07:03 Require new evidence before another options breakout or pullback replay
+    09-23T08:04 Teach agents to distinguish a late replay pass from new evidence
+    09-23T12:11 Require settlement evidence before more crypto-strike retests
+    09-23T13:12 Pause prior-window fade forks until the forward losses are explained
+    09-23T14:14 Require a loss review before more DOGE flat-spot NO forks
+    09-23T16:16 Require a strike-loss budget review after the downside-insurance death
+## operator/designer/toolsmith changes: titles and status
+    09-20T07:22 operator opened Lower inference daily cap to the permitted $10 maximum
+    09-20T09:23 operator opened Lower inference daily cap to the permitted $10 maximum
+    09-20T10:56 operator closed Lower inference daily cap to the permitted $10 maximum
+    09-20T10:56 operator closed Lower inference daily cap to the permitted $10 maximum
+    09-20T11:33 operator opened Reduce daily inference cap to the permitted $10 maximum
+    09-20T11:37 operator merged Reduce daily inference cap to the permitted $10 maximum
+    09-21T03:25 designer opened Raise fork threshold to $4 to reduce evidence-poor population churn
+    09-21T03:28 designer refused by CI Raise fork threshold to $4 to reduce evidence-poor population churn
+    09-21T05:31 toolsmith opened Add sampled realized-volatility helper; keep finer replay feed blocked
+    09-21T05:34 toolsmith refused by CI Add sampled realized-volatility helper; keep finer replay feed blocked
+    09-21T06:06 toolsmith opened Add causal window realized volatility; keep finer replay feed blocked
+    09-21T06:10 toolsmith refused by CI Add causal window realized volatility; keep finer replay feed blocked
+    09-21T06:41 toolsmith opened Add causal window realized volatility; keep finer replay data blocked
+    09-21T06:44 toolsmith refused by CI Add causal window realized volatility; keep finer replay data blocked
+    09-21T07:15 toolsmith opened Add time-bounded realized volatility; document blocked data-feed requests
+    09-21T07:18 toolsmith refused by CI Add time-bounded realized volatility; document blocked data-feed requests
+    09-21T08:27 toolsmith opened Add window realised volatility helper; document blocked data requirements
+    09-21T08:30 toolsmith refused by CI Add window realised volatility helper; document blocked data requirements
+    09-21T09:02 toolsmith opened Add point-in-time realized volatility helper; retain external-feed blockers
+    09-21T09:05 toolsmith refused by CI Add point-in-time realized volatility helper; retain external-feed blockers
+    09-21T09:36 toolsmith opened Add window realized-volatility helper and document blocked data requests
+    09-21T09:40 toolsmith refused by CI Add window realized-volatility helper and document blocked data requests
+    09-21T14:18 toolsmith opened Add supplied-close realized volatility; keep missing-data feeds blocked
+    09-21T14:22 toolsmith refused by CI Add supplied-close realized volatility; keep missing-data feeds blocked
+    09-22T15:29 designer refused by CI Raise fork threshold to $4 to reduce evidence-poor population churn
+    09-22T15:29 toolsmith refused by CI Add sampled realized-volatility helper; keep finer replay feed blocked
+    09-22T15:29 toolsmith refused by CI Add causal window realized volatility; keep finer replay feed blocked
+    09-22T15:29 toolsmith refused by CI Add causal window realized volatility; keep finer replay data blocked
+    09-22T15:29 toolsmith refused by CI Add time-bounded realized volatility; document blocked data-feed requests
+    09-22T15:29 toolsmith refused by CI Add window realised volatility helper; document blocked data requirements
+    09-22T15:29 toolsmith refused by CI Add point-in-time realized volatility helper; retain external-feed blockers
+    09-22T15:29 toolsmith refused by CI Add window realized-volatility helper and document blocked data requests
+    09-22T15:29 toolsmith merged Add supplied-close realized volatility; keep missing-data feeds blocked
+    09-22T15:29 toolsmith deployed Add supplied-close realized volatility; keep missing-data feeds blocked
+    09-22T16:08 toolsmith opened SYNTHETIC repair drill 20260922t152804: patch 1 (fails by design)
+    09-22T16:12 toolsmith refused by CI SYNTHETIC repair drill 20260922t152804: patch 1 (fails by design)
+    09-22T16:13 toolsmith opened SYNTHETIC repair drill 20260922t152804: patch 2 (revised against CI's failure te
+    09-22T16:17 toolsmith merged SYNTHETIC repair drill 20260922t152804: patch 2 (revised against CI's failure te
+    09-22T16:28 toolsmith closed SYNTHETIC repair drill 20260922t152804: patch 1 (fails by design)
+    09-23T01:44 toolsmith opened Add a conservative game-status helper over existing sports scoreboards
+    09-23T01:50 toolsmith merged Add a conservative game-status helper over existing sports scoreboards
+    09-23T02:17 toolsmith deployed Add a conservative game-status helper over existing sports scoreboards

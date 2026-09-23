@@ -1,0 +1,77 @@
+## provider.request: line (request_key prefix) x model: n, $ (last 24h), $ (last 6h), $ lifetime; hit rate
+  research       gpt-6-luna     openai_luna      n24=12065 $24h=  29.184 ( 1.216/h)  $6h= 15.015 ( 2.503/h)  $life=  29.184 n_life=12065  hit=0.49
+  research       gpt-5.6-luna   openai_luna      n24= 1937 $24h=   6.048 ( 0.252/h)  $6h=  0.000 ( 0.000/h)  $life= 104.203 n_life=17756  hit=0.54
+  research       None           openai_luna      n24=   14 $24h=   0.000 ( 0.000/h)  $6h=  0.000 ( 0.000/h)  $life=   0.000 n_life=16  hit=0.00
+  TOTAL provider.request $24h=35.23 (1.47/h) $6h=15.02 (2.50/h) $life=133.39
+
+## provider.request by hour (last 24h): $ per hour, by line
+   2026-09-22T16 {'research': 0.55} sum 0.55
+   2026-09-22T17 {'research': 0.71} sum 0.71
+   2026-09-22T18 {'research': 1.14} sum 1.14
+   2026-09-22T19 {'research': 1.24} sum 1.24
+   2026-09-22T20 {'research': 1.26} sum 1.26
+   2026-09-22T21 {'research': 1.14} sum 1.14
+   2026-09-23T01 {'research': 0.53} sum 0.53
+   2026-09-23T02 {'research': 0.61} sum 0.61
+   2026-09-23T03 {'research': 0.91} sum 0.91
+   2026-09-23T04 {'research': 1.47} sum 1.47
+   2026-09-23T05 {'research': 1.31} sum 1.31
+   2026-09-23T06 {'research': 1.49} sum 1.49
+   2026-09-23T07 {'research': 1.75} sum 1.75
+   2026-09-23T08 {'research': 2.79} sum 2.79
+   2026-09-23T09 {'research': 2.03} sum 2.03
+   2026-09-23T10 {'research': 2.65} sum 2.65
+   2026-09-23T11 {'research': 3.35} sum 3.35
+   2026-09-23T12 {'research': 2.43} sum 2.43
+   2026-09-23T13 {'research': 2.45} sum 2.45
+   2026-09-23T14 {'research': 2.25} sum 2.25
+   2026-09-23T15 {'research': 1.99} sum 1.99
+   2026-09-23T16 {'research': 1.17} sum 1.17
+
+## merton.pass by role: passes, $ lifetime, $ last 24h, passes with files>0, dropped, errors; $ per pass
+  architect   passes= 71 $life=  45.53 $24h= 19.41 (n24=25) with_files/branch= 10 dropped=  0 errors=  4 $/pass=0.641
+  teacher     passes= 49 $life=  19.72 $24h=  7.87 (n24=19) with_files/branch= 27 dropped=  0 errors=  0 $/pass=0.402
+  consultant  passes= 60 $life=  19.00 $24h=  8.03 (n24=20) with_files/branch=  0 dropped=  0 errors= 21 $/pass=0.317
+  toolsmith   passes= 44 $life=  17.78 $24h=  3.62 (n24=8) with_files/branch=  9 dropped=  0 errors=  3 $/pass=0.404
+  operator    passes= 68 $life=  14.86 $24h=  2.53 (n24=11) with_files/branch=  3 dropped=  0 errors=  0 $/pass=0.219
+  engineer    passes= 81 $life=  11.20 $24h= 10.70 (n24=77) with_files/branch= 26 dropped=  0 errors=  1 $/pass=0.138
+  foundry     passes= 29 $life=   8.48 $24h=  7.68 (n24=28) with_files/branch=  0 dropped=  0 errors=  2 $/pass=0.292
+  designer    passes= 19 $life=   7.13 $24h=  0.86 (n24=2) with_files/branch=  1 dropped=  0 errors=  0 $/pass=0.375
+
+## credit.charge by what: n, $ lifetime, $ last 24h
+  research tokens    n= 37413 $life=  221.49 $24h=  64.71
+  merton's time      n=    44 $life=   19.00 $24h=   8.03
+  sandbox seconds    n= 14177 $life=    3.49 $24h=   1.14
+  frontier audit     n=    12 $life=    3.05 $24h=   1.13
+  web search         n=    24 $life=    0.24 $24h=   0.02
+  jev classification n=   154 $life=    0.02 $24h=   0.01
+
+## ops.budget what=sail: latest rows (spent_usd, balance_usd, month_usd, cap_usd) and rate over last 24h
+  first 2026-09-19T21:13:30.383Z {'spent_usd': '0', 'balance_usd': '96.46', 'month_usd': '0', 'cap_usd': '100', 'mode': 'open'}
+  last  2026-09-23T16:21:16.778Z {'spent_usd': '0.35', 'balance_usd': '96.30', 'month_usd': '99.03', 'cap_usd': '200', 'mode': 'open'}
+  24h ago 2026-09-22T16:26:41.306Z {'spent_usd': '0.22', 'balance_usd': '128.20', 'month_usd': '67.13'}
+  sail spent over 24h: $ 0.13  balance delta $ -31.9
+
+## ops.budget payout rows (epoch payouts): last 5
+   2026-09-23T16:00:51.126Z {"agents":96,"epoch_at":1790179251.0888736,"paid_usd":"11.50145506","pool_usd":"11.50145522","what":"payout"}
+   2026-09-23T14:59:14.249Z {"agents":96,"epoch_at":1790175554.1925542,"paid_usd":"11.64801618","pool_usd":"11.64801651","what":"payout"}
+   2026-09-23T13:58:49.996Z {"agents":96,"epoch_at":1790171929.917755,"paid_usd":"11.99491181","pool_usd":"11.99491200","what":"payout"}
+   2026-09-23T12:58:42.475Z {"agents":96,"epoch_at":1790168322.4254234,"paid_usd":"12.16621880","pool_usd":"12.16621917","what":"payout"}
+   2026-09-23T11:58:31.895Z {"agents":96,"epoch_at":1790164711.676122,"paid_usd":"12.67487190","pool_usd":"12.67487228","what":"payout"}
+
+## ops.budget expedition rows: last 3
+   2026-09-23T16:00:51.243Z {"allowance_scope":"entire immutable burst, not daily replenishment","campaign":{"accounts":{"infrastructure":{"cap_usd":"50","committed_usd":"50","external_reserve_usd":"50","remaining_usd":"0"},"openai":{"cap_usd":"978","committed_usd":"922.087004","external_reserve_usd":"350","remaining_usd":"36.1932"},"sail":{"cap_usd":"225","committed_usd":"88.276269","external_reserve_usd":"5","remaining_usd":"95.348017"}},"allow_new_live_capital":false,"burst":{"caps_usd":{"openai":"578","sail":"175"},"co
+   2026-09-23T14:59:14.509Z {"allowance_scope":"entire immutable burst, not daily replenishment","campaign":{"accounts":{"infrastructure":{"cap_usd":"50","committed_usd":"50","external_reserve_usd":"50","remaining_usd":"0"},"openai":{"cap_usd":"978","committed_usd":"916.854685","external_reserve_usd":"350","remaining_usd":"41.425519"},"sail":{"cap_usd":"225","committed_usd":"87.82307","external_reserve_usd":"5","remaining_usd":"95.801216"}},"allow_new_live_capital":false,"burst":{"caps_usd":{"openai":"578","sail":"175"},"c
+   2026-09-23T13:58:50.147Z {"allowance_scope":"entire immutable burst, not daily replenishment","campaign":{"accounts":{"infrastructure":{"cap_usd":"50","committed_usd":"50","external_reserve_usd":"50","remaining_usd":"0"},"openai":{"cap_usd":"978","committed_usd":"911.764384","external_reserve_usd":"350","remaining_usd":"46.51582"},"sail":{"cap_usd":"225","committed_usd":"86.936538","external_reserve_usd":"5","remaining_usd":"96.687748"}},"allow_new_live_capital":false,"burst":{"caps_usd":{"openai":"578","sail":"175"},"c
+
+## campaigns.sqlite commitments: $ settled by kind, last 24h / 6h / lifetime; pending reserved
+  openai: 24h n=14298 settled=$130.38 (5.43/h) pending_reserved=$32.87 (n=25);  6h settled=$29.57 (4.93/h);  lifetime n=30361 settled=$475.18 pending=$98.36
+  sail: 24h n=2499 settled=$29.27 (1.22/h) pending_reserved=$0.66 (n=3);  6h settled=$3.27 (0.54/h);  lifetime n=6866 settled=$76.11 pending=$0.66
+  commitments id prefixes (24h): [('frontier', 'openai', 14298, 130.38), ('sail', 'sail', 2499, 29.27)]
+  meter: [('sail', 461075257, 543786327)] meter_balance: [('sail', 96154304, 1790180884.320512)] gateway_bonus: [('openai', 0, 1790180909.7652676)]
+  phase: ['(\'phase1-foundation\', \'{"allow_new_live_capital":false,"campaigns":{"baseline-research":{"acceptance":"A reproducible comparison or a demonstrated missing-input constraint; no reward for repeating a known failure.","artifact":"Archived code, parameters, tape, evaluator and result; a specific conclusion and next test.","baseline":"The existing program and complete previous trial history.","cap_usd"']
+  burst: ['(\'overnight-learning-20260921\', 1789959676.977059, 1789988476.977059, \'{"acceptance":"Report completed and failed sessions by frozen provider, unique code/tape experiments, admission latency, retained candidates, forward closed trades and blocks, unresolved costs and execution failures. Keep development performance separate from forward evidence. Stop new paid work at the immutable deadline or provider allowance.","caps_usd":{"openai":"250","sail":"75"},"duration_hours":8,"luna_fraction":0.75,"max_population":48,"minimum_research_passes":2,"newcomer_seconds":600,"niche_floor_share":0.15,"perfo']
+
+## hypothesis.card cost fields & audit.verdict cost
+  audit.verdict n=21 $=4.77
+  card sample keys: {'author': 'merton', 'code_sha256': '801510aaf338bac398096dcd09659b61dfc1460fcd13ffe10137afbaaf5a49eb', 'created_epoch': '1790144866.326778', 'created_for': 'foundry:f8b49dd9c1ea:1790144728', 'data': "['symbols: BTC/USD, ETH/USD', 'bars: 5Min for both symbols', 'quotes: BTC/USD']", 'edge_after_costs': 'Hypothesized 0.75%–1.15% subsequent BTC rise − 0.30% maker/maker fees − at least', 'family': 'crypto-majors-btc-quality-rotation', 'horizon': 'Buy BTC only during concurrent ETH weakness and BTC relative strength; seek a ma', 'id': '030d5982cdf13b76', 'line_id': 'rosenfeld-h030d59', 'lineage': "['rosenfeld-h030d59']", 'mechanism': 'During an ETH decline, allocators reducing higher-beta crypto exposure may rotat', 'model': 'gpt-6-sol', 'name': 'btc-quality-rotation', 'niche': 'alpaca-crypto-majors', 'parent_card': 'None', 'prompt_version': 'foundry-2026-09-23.3', 'rejection': 'Reject if the replay produces fewer than 10 closes or 20 blocks, deflated Sharpe', 'transfer': 'None', 'venue': 'alpaca'}

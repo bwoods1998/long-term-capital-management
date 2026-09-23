@@ -1,0 +1,38 @@
+## agent.research rows by tool (24h): [('summary', 3875), ('finish', 3637), ('markets_now', 3469), ('journal_write', 3051), ('journal', 3051), ('library_search', 1717), ('library_read', 1362), ('replay_coverage', 840), ('replay', 646), ('candidate', 624), ('runtime_status', 379), ('candidate_admission', 345), ('playbook_read', 323), ('lab_query', 272), ('library_write', 154), ('classify', 141), ('jev', 123), ('research_grant', 77), ('ask_merton', 55), ('request_tool', 40), ('lab_submit', 25), ('merton', 20), ('web_search', 2), ('truncated', 2), ('refreshed_read', 1)]
+## sample summary payloads (3)
+   krasker-12 2026-09-23T16:27:45.808Z {'candidate': 'True', 'cost_usd': '0.030289', 'elapsed_seconds': '278.426', 'finished': '1790180865.7992463', 'profile': 'openai_luna', 'reason': 'finished', 'session': 'research:krasker-12:de4afaf31c5c45c5b422f19294c50c35', 'started': '1790180587.3729498', 'summary': 'Historical option-chain coverage is absent for SPY/QQQ/IWM, so the proposed index-ETF momentum candidate received only a non-counted smoke check, with no trades', 'tool': 'summary', 'trials': '0', 'turns': '11'}
+   huang-hd8ff7c 2026-09-23T16:27:38.623Z {'candidate': 'False', 'cost_usd': '0.014724', 'elapsed_seconds': '88.845', 'finished': '1790180858.5751326', 'profile': 'openai_luna', 'reason': 'finished', 'session': 'research:huang-hd8ff7c:8dfb2db8d2214e389137f432e47fbd03', 'started': '1790180769.7301247', 'summary': 'No credits, specialist grant, or counted replay are justified now: the live book is flat with no fresh closed-trade evidence, and the tested impulse/maker appro', 'tool': 'summary', 'trials': '0', 'turns': '6'}
+   meriwether-37 2026-09-23T16:27:21.476Z {'candidate': 'True', 'cost_usd': '0.009002', 'elapsed_seconds': '115.776', 'finished': '1790180841.4375172', 'profile': 'openai_luna', 'reason': 'finished', 'session': 'research:meriwether-37:1c5223d59ded4e3d8608f4aa7067fc7c', 'started': '1790180725.6617582', 'summary': 'The proposed bounded WNBA pregame pilot passed replay (11 trades, +1.8474%), but this repeats inspected development evidence and does not establish a fresh edge', 'tool': 'summary', 'trials': '1', 'turns': '4'}
+## summary rows: keys
+  keys {'candidate': 11480, 'cost_usd': 11480, 'reason': 11480, 'session': 11480, 'summary': 11480, 'tool': 11480, 'trials': 11480, 'turns': 11480, 'elapsed_seconds': 11184, 'finished': 11184, 'profile': 11184, 'started': 11184}
+  outcomes lifetime [('finished', 10808), ('provider: provider_http_503', 171), ('no tool call', 153), ('provider: campaign_post_unconf', 134), ('provider: provider_http_502', 65), ('provider: research_request_unc', 20), ('max_turns', 19), ('provider: provider_http_504', 18), ('tool outcome unconfirmed: repl', 14), ('retired or changed', 13), ('provider: max_output_tokens', 12), ('provider: provider_transport_t', 11), ('provider: provider_transport_u', 10), ('provider: provider_floor_cap_e', 9), ('session expired after six hour', 8)]
+  outcomes 24h [('finished', 3637), ('no tool call', 85), ('provider: campaign_post_unconf', 70), ('max_turns', 18), ('provider: research_request_unc', 17), ('provider: provider_http_502', 17), ('provider: provider_http_504', 16), ('retired or changed', 7), ('tool outcome unconfirmed: repl', 7), ('provider: provider_transport_u', 1)] n24 3875 per h 161.5
+  outcomes 6h [('finished', 1086), ('no tool call', 32), ('provider: campaign_post_unconf', 16), ('provider: provider_http_504', 7), ('provider: research_request_unc', 6), ('tool outcome unconfirmed: repl', 6), ('max_turns', 4), ('provider: provider_http_502', 1)] n6 1158 per h 193.0
+## research.gate decisions per hour (24h) and reasons (24h)
+  24h {'skip': 4133, 'run': 2957, 'sample': 810} per h {'skip': 172.2, 'run': 123.2, 'sample': 33.8}  6h {'run': 925, 'skip': 974, 'sample': 166}
+     1646 ('run', 'trigger')
+     725 ('run', 'backoff_elapsed')
+     494 ('run', 'clock')
+     382 ('skip', 'blocked:missing_data:jev_una')
+     291 ('skip', 'blocked:missing_data')
+     132 ('sample', 'blocked:missing_data:jev_una')
+     101 ('skip', 'blocked:market_closed:jev_un')
+     96 ('skip', 'backoff:4:jev_unavailable')
+     92 ('run', 'jev_relevant_note')
+     92 ('skip', 'backoff:7')
+     82 ('skip', 'backoff:4')
+     81 ('skip', 'backoff:6:jev_unavailable')
+     80 ('skip', 'backoff:5')
+     78 ('skip', 'backoff:3')
+## agent.inactive reasons (24h): [(None, 268), ('abstained', 119), ('market_closed', 111), ('missing_data', 79), ('order_rejected', 45), ('provider_failure', 33)]
+## agent.strategy rows: n lifetime / 24h / 6h; passed_replay; reason class
+  lifetime 581 passed_replay=238 | 24h 428 passed=194 (17.8/h) | 6h 180 passed=89
+  reason classes 24h: [('it rewrote itself: it had', 194), ('Test a materially differe', 23), ('it rewrote itself: its ow', 19), ('Replace the repeatedly id', 3), ('Materially replace the re', 3), ('Replace the rarely firing', 3)]
+  passed_replay values 24h: Counter({'None': 215, 'True': 194, 'False': 19})
+## eval.trial per hour 24h: n, passed; and by whether the agent's rung was 0 or 1
+   {'n': 856, 'passed': 459} per h 35.7  top fail reasons: [('out-of-sample growth is not above zero', 94), ('out-of-sample growth is not above -0.050% a block', 94), ('0 closed trades, 10 needed', 41), ('7 closed trades, 10 needed', 15), ('it did not trade out of sample: no out-of-sample block was a', 15), ('5 closed trades, 10 needed', 14)]
+## forward result of rewrites (agent.strategy with was!=None, 24h): eval.block log_growth after the rewrite, active blocks
+  rewrites 24h with prior code: 213; with >=1 active block after: 107; positive sum growth: 40; negative: 67; total growth -1.2357
+  those that passed replay: [('meriwether-h42bdbb-2', 1, 0.0005), ('scholes-hb39be6', 2, -0.0004), ('huang-h6d3302', 8, -0.0603), ('mcentee-h6bd08d', 2, -0.0001), ('huang-h609d6f', 3, -0.0589), ('scholes-hb39be6', 2, -0.0004), ('mcentee-h6bd08d-2', 2, -0.0011), ('mcentee-h6bd08d', 2, -0.0001), ('mcentee-h4054c4', 2, 0.0007), ('mcentee-h6bd08d', 2, -0.0001), ('mcentee-h6bd08d-2', 2, -0.0011), ('mcentee-h4054c4', 2, 0.0007), ('mcentee-hddb4ae', 2, 0.001), ('mcentee-hfadaea', 2, 0.0009), ('rosenfeld-h76403a', 2, -0.0004), ('mcentee-h6bd08d', 2, -0.0001), ('scholes-hb39be6', 2, -0.0004), ('mcentee-hfadaea', 2, 0.0009), ('mcentee-hddb4ae', 2, 0.001), ('mcentee-h4054c4', 2, 0.0007)]
+## cost per session: provider.request cost (24h) / summaries (24h)
+  luna cost 24h $35.23; research tokens charged (luna+sail) $64.71; sessions 24h 3875; $/session (charged) 0.0167; strategies 24h 428; $/strategy 0.151; $/replay-passing strategy 0.334

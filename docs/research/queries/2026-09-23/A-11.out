@@ -1,0 +1,8 @@
+## ops.alert mentioning 'could not be born' / 'enroll' / 'waits for a seat' (last 24h): count and last 5
+  alerts 24h: 133 matching: 0
+## ops.alert levels 24h: Counter({'warning': 115, 'info': 12, 'error': 6})
+## residents now: protected by rung>=2 / W_paper>1 (latest board) / seated <12h / seated <12h session-time desks; the rest are displaceable
+  living 96: rung>=2 5; W_paper>1 16; seated <12h (others) 29; remaining 46
+  of the remaining, on desks that keep hours (grace in session time): 21
+  remaining by desk: Counter({'alpaca-index-etfs': 10, 'alpaca-options': 8, 'kalshi-sports': 8, 'kalshi-crypto-15m': 4, 'kalshi-prices': 3, 'alpaca-megacaps': 3, 'alpaca-crypto-majors': 3, 'alpaca-crypto-alts': 3, 'kalshi-sports-props': 2, 'kalshi-weather': 2})
+  remaining that have traded (protected until 5 closed trades / 3 sessions): 34

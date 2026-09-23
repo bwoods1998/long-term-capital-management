@@ -1,0 +1,24 @@
+last board 2026-09-23T16:25:19.759Z
+
+alpaca: agents on board 48; W_paper median 0.9980, p25 0.9831, p75 1.0000, >1: 3, ==1 (no record): 13
+   with >=1 closed trade: 27; with enough trades for a bunt: 8; of those E>=1.01: 0 (0%); bands: Counter({'paper': 48})
+   E>=1.01 & enough: []
+   E>=1.01 but not enough trades: []
+
+kalshi: agents on board 46; W_paper median 1.0000, p25 0.9590, p75 1.0047, >1: 18, ==1 (no record): 6
+   with >=1 closed trade: 27; with enough trades for a bunt: 18; of those E>=1.01: 2 (11%); bands: Counter({'paper': 41, 'bunt': 5})
+   E>=1.01 & enough: [('mullins-2', 1.1776, 11), ('mullins-6', 1.053, 11)]
+   E>=1.01 but not enough trades: []
+
+=== across all 83 boards: agents that ever met the bunt line (E>=1.01 with enough trades) by venue, and how long after their first board row
+ever qualified by venue: {'kalshi': 7} of agents seen on boards: {'alpaca': 52, 'kalshi': 51}
+  hawkins-19 (kalshi, kalshi-prices): first board 09-23T08:30, met line 09-23T08:30, now bunt
+  mullins-2 (kalshi, kalshi-weather): first board 09-23T08:30, met line 09-23T08:30, now bunt
+  mullins-6 (kalshi, kalshi-weather): first board 09-23T08:30, met line 09-23T08:30, now bunt
+  huang-h427345 (kalshi, kalshi-crypto-15m): first board 09-23T08:30, met line 09-23T09:31, now paper
+  huang-h6d3302 (kalshi, kalshi-crypto-15m): first board 09-23T08:30, met line 09-23T09:31, now gone
+  huang-h51fdd3-2 (kalshi, kalshi-crypto-15m): first board 09-23T08:30, met line 09-23T10:06, now bunt
+  meriwether-h2d625d (kalshi, kalshi-sports): first board 09-23T08:30, met line 09-23T12:50, now bunt
+kalshi: median |closed-trade P&L| as % of the purse 0.450% (n 460); trades needed at that size for +1% W: 2
+alpaca: median |closed-trade P&L| as % of the purse 0.153% (n 227); trades needed at that size for +1% W: 7
+horizon by venue on the board: {('alpaca', 'hour'): 31, ('kalshi', 'day'): 37, ('kalshi', 'hour'): 9, ('alpaca', 'day'): 17}

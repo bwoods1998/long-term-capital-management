@@ -1,0 +1,17 @@
+=== (a) W_real path on the boards for the real agents: agent | first board (W_real, real_trades) | last (W_real, real_trades) | log W_real per real trade | settlements/day | days to W_real needed for E 1.5
+mullins-2 | 09-23T08:30 (1.0956, 4) | 09-23T16:25 (1.1578, 10) | +0.0147 | 5.9/d over 1.7 d | needs W_real 1.475: 17 more settlements = 2.8 d at the historic rate
+mullins-6 | 09-23T08:30 (1.0067, 0) | 09-23T16:25 (1.0383, 2) | +0.0188 | 3.3/d over 0.6 d | needs W_real 1.479: 19 more settlements = 5.6 d at the historic rate
+hawkins-19 | 09-23T08:30 (1.0160, 0) | 09-23T16:25 (0.9920, 0) | +nan | 0.0/d over nan d | needs W_real 1.496: inf more settlements = inf d at the historic rate
+meriwether-h2d625d | 09-23T08:30 (1.0000, 0) | 09-23T16:25 (0.9953, 0) | +nan | 0.0/d over nan d | needs W_real 1.480: inf more settlements = inf d at the historic rate
+huang-h51fdd3-2 | 09-23T08:30 (1.0000, 0) | 09-23T16:25 (0.8480, 1) | -0.1649 | 5.6/d over 0.2 d | needs W_real 1.462: inf more settlements = inf d at the historic rate
+
+=== (b) families re-bred after a member died of evidence: family | evidence deaths | births after the first such death | members alive now | alive members practice P&L
+('kalshi-favorites', 1, 23, 0, 0, ['hilibrand-15', 'hilibrand-16', 'hilibrand-17', 'hilibrand-18'])
+('crypto-15m-favorites', 5, 21, 0, 0, ['huang-8', 'huang-9', 'huang-10', 'huang-11'])
+('crypto-alts-trend', 1, 0, 0, 0, [])
+('crypto-15m-doge-flat-spot-no', 1, 0, 1, 10.4, [])
+('crypto-strikes-downside-insurance-s', 1, 0, 0, 0, [])
+families with an evidence death: 5; re-bred after it: 2; births after evidence deaths: 44
+
+=== (c) allocator sweeps since 08:28Z
+{('mullins-2', 'kalshi'): -54.89, ('mullins-6', 'kalshi'): -23.3, ('hawkins-19', 'kalshi'): -32.52, ('haghani-37', 'alpaca'): -35.0, ('huang-h51fdd3-2', 'kalshi'): 1.52} total -144.19 moves 13

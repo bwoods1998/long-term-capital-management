@@ -1,0 +1,37 @@
+## commitments x responses.profile: n, $settled 24h, $/h, $6h, $/h, $lifetime, pending reserved $ (no cost yet)
+  (no response row)      openai  n= 30361 n24= 14298 $24h=  130.38 ( 5.43/h) $6h=  29.57 ( 4.93/h) $life=  475.18 pending=$ 98.36
+  pro_asap               sail    n=  4685 n24=  2393 $24h=   29.27 ( 1.22/h) $6h=   3.27 ( 0.54/h) $life=   61.99 pending=$  0.00
+  (no response row)      sail    n=   404 n24=   106 $24h=    0.00 ( 0.00/h) $6h=   0.00 ( 0.00/h) $life=    0.00 pending=$  0.66
+  pro_flex               sail    n=  1777 n24=     0 $24h=    0.00 ( 0.00/h) $6h=   0.00 ( 0.00/h) $life=   14.12 pending=$  0.00
+## responses profiles: [('pro_asap', 4685), ('pro_flex', 1777)]
+## commitments without a response row, by kind and cost: n, $24h, $life
+   [('openai', 30361, 130.378076, 475.17875, 98.360906), ('sail', 404, 0.0, 0.0, 0.66033)]
+## openai settled per hour (last 24h) vs ledger provider.request+merton.pass per hour
+  22T16: commitments $  4.29 | provider.request $ 0.55 merton.pass $ 1.15 audit $0.00  sum $  1.69
+  22T17: commitments $  5.23 | provider.request $ 0.71 merton.pass $ 1.43 audit $0.00  sum $  2.13
+  22T18: commitments $  8.35 | provider.request $ 1.14 merton.pass $ 2.16 audit $0.00  sum $  3.30
+  22T19: commitments $ 12.08 | provider.request $ 1.24 merton.pass $ 4.10 audit $0.00  sum $  5.34
+  22T20: commitments $ 10.94 | provider.request $ 1.26 merton.pass $ 2.82 audit $0.57  sum $  4.65
+  22T21: commitments $  8.11 | provider.request $ 1.14 merton.pass $ 1.92 audit $0.00  sum $  3.06
+  22T22: commitments $  4.76 | provider.request $ 0.00 merton.pass $ 3.49 audit $0.37  sum $  3.86
+  22T23: commitments $  1.91 | provider.request $ 0.00 merton.pass $ 1.62 audit $0.00  sum $  1.62
+  23T00: commitments $  1.47 | provider.request $ 0.00 merton.pass $ 0.57 audit $0.19  sum $  0.76
+  23T01: commitments $  4.00 | provider.request $ 0.53 merton.pass $ 2.75 audit $0.72  sum $  4.00
+  23T02: commitments $  3.57 | provider.request $ 0.61 merton.pass $ 2.82 audit $0.00  sum $  3.44
+  23T03: commitments $  3.79 | provider.request $ 0.91 merton.pass $ 3.01 audit $0.00  sum $  3.92
+  23T04: commitments $  4.68 | provider.request $ 1.47 merton.pass $ 3.01 audit $0.19  sum $  4.68
+  23T05: commitments $  4.07 | provider.request $ 1.31 merton.pass $ 2.62 audit $0.00  sum $  3.93
+  23T06: commitments $  4.09 | provider.request $ 1.49 merton.pass $ 2.75 audit $0.00  sum $  4.24
+  23T07: commitments $  4.81 | provider.request $ 1.75 merton.pass $ 2.61 audit $0.00  sum $  4.36
+  23T08: commitments $  4.92 | provider.request $ 2.79 merton.pass $ 2.40 audit $0.19  sum $  5.37
+  23T09: commitments $  5.48 | provider.request $ 2.03 merton.pass $ 3.12 audit $0.33  sum $  5.49
+  23T10: commitments $  6.01 | provider.request $ 2.65 merton.pass $ 3.22 audit $0.13  sum $  6.01
+  23T11: commitments $  5.62 | provider.request $ 3.35 merton.pass $ 2.12 audit $0.00  sum $  5.46
+  23T12: commitments $  5.29 | provider.request $ 2.43 merton.pass $ 2.06 audit $0.15  sum $  4.64
+  23T13: commitments $  4.97 | provider.request $ 2.45 merton.pass $ 2.88 audit $0.00  sum $  5.33
+  23T14: commitments $  5.18 | provider.request $ 2.25 merton.pass $ 2.77 audit $0.00  sum $  5.01
+  23T15: commitments $  5.04 | provider.request $ 1.99 merton.pass $ 2.78 audit $0.00  sum $  4.77
+  23T16: commitments $  1.73 | provider.request $ 1.17 merton.pass $ 0.55 audit $0.00  sum $  1.72
+## cost distribution of openai commitments 24h with a response profile: per-profile mean $ per call
+## sample commitment ids by profile (24h)
+   pro_asap sail:e4acb7504f42fc9be0efc93239d58717bc75cfcf28372 7875 159054
