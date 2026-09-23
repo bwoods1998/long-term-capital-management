@@ -731,7 +731,9 @@ class Evaluator:
         return [row for row in rows if row.get("book") == main]
 
     def promote(self, agent: str, to_rung: int, reason: str, numbers: Mapping[str, Any] | None = None) -> Verdict:
-        """Move an agent up one rung. The House calls this for rung 2 only after the audit passes."""
+        """Move an agent up one rung. Under the constitution's `ladder.paper.audit` "after" (Sept 23,
+        2026) the House calls this for rung 2 when the screen and the allocation gates pass, and the
+        frontier audit follows on the micro rung; under "before", only once the audit passes."""
         rung = self.rung(agent)
         if to_rung != rung + 1:
             raise ValueError(f"{agent} is on rung {rung}; it cannot be promoted to {to_rung}")

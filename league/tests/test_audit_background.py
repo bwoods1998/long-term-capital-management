@@ -278,6 +278,21 @@ class AuditAfter(unittest.TestCase):
         self.assertEqual(self.house._state["promotion_status"][agent.id]["stage"], "audit_confirmed")
         self.assertIsNone(self.house._audit_owed(agent))
 
+    def test_an_owed_audit_waits_out_a_maintenance_pause(self):
+        agent = self.fixture.on_micro("paused", rung=1)
+        calls = self.auditor(approve=False, error="HTTP 502")
+        self.house._promote(agent, Verdict(agent.id, 1, "eligible", "screen", {"book": "alpaca-paper"}))
+        self.house.wait(5)
+        self.fixture.clock.advance(3600)
+        (Path(self.house.root) / "PAUSE").write_text("maintenance")
+        self.house._settle_after_audit(agent, self.house._generation(agent.id))
+        self.house.wait(5)
+        self.assertEqual(len(calls), 1)  # nothing bought while paused
+        (Path(self.house.root) / "PAUSE").unlink()
+        self.house._settle_after_audit(agent, self.house._generation(agent.id))
+        self.house.wait(5)
+        self.assertEqual(len(calls), 2)
+
     def test_an_agent_with_a_known_defect_is_audited_before_any_money(self):
         agent = self.fixture.on_micro("defective", rung=1)
         calls = self.auditor(approve=False)

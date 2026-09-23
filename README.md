@@ -620,7 +620,12 @@ dynamism revisions followed that evening:
   calls are booked at the gateway's metered cost. The foundry spends $40 a window with up to half
   its calls on the fast desks. Research runs every 15 minutes and is paced by each agent's record.
 - **Live data feeds**, built beside this revision: ⟨feeds: verify⟩
-- **Order-path guards in the House**, built beside this revision: ⟨guards: verify⟩
+- **Order-path guards in the House**, built beside this revision: a buy asked under Alpaca's $10
+  crypto minimum is refused as a House refusal the strategy can read, one floored just under it is
+  raised a step, limit prices are put on the venue's grid (a coin's only when the venue states its
+  increment), a 401/403 to an order POST is a rejection with the venue's message, and an agent's
+  resting buys are cancelled when its wakes have stopped completing. Strategies read the rules in
+  `ctx["venue_rules"]` ([the contract](league/CONTRACT.md)).
 
 Known limits:
 

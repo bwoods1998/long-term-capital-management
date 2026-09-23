@@ -1901,6 +1901,8 @@ class House:
         inflight = self._audit_inflight(agent.id, generation)
         if inflight == "running":
             return
+        if self.paused() and not isinstance(inflight, dict):
+            return  # a maintenance pause stops paid work, an owed audit included; it runs after
         owed = self._audit_owed(agent) if not isinstance(inflight, dict) else None
         if not isinstance(inflight, dict) and owed is None:
             return
@@ -2305,12 +2307,14 @@ class House:
                    f"has lost ${state['spent_usd']:.2f} of its ${state['limit_usd']} tuition, and one more agent's full stake "
                    f"no longer fits under the line")
             self.alert("error", f"The micro rung {why} and is closed. Further promotion waits for settled headroom "
-                                "or a change to `tuition.max_loss_usd` in the constitution.")
+                                "or a larger envelope from the owner: the live grant's `max_loss_usd` while one is active, "
+                                "`tuition.max_loss_usd` in the constitution otherwise.")
 
     def _audit_due(self, agent: Agent) -> bool:
-        """An audit is about a quarter of a dollar, charged to the agent. A vetoed agent is not
+        """An audit is about a quarter of a dollar, paid by the House (`game.json` `audit.house_pays`,
+        Sept 23, 2026; charged to the agent before, or when that is off). A vetoed agent is not
         audited again at every look: it waits out a cooldown on paper (where its record is the
-        auditor's counterfactual), and no agent is audited that cannot pay for it and live.
+        auditor's counterfactual), and, where agents pay, no agent is audited that cannot pay and live.
 
         An audit that did not happen -- the call refused, the answer unreadable -- is not a verdict
         and must not cost the agent a day at the top of the ladder for the gate's own malfunction.

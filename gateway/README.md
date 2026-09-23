@@ -117,8 +117,10 @@ request body is limited to 64 KiB. This is an experiment interface; the trading 
 loops do not act on its answers. The shared lab supplies fallible classifications to research
 context and evaluates them separately against future observations.
 
-The external gate has a **$20 lifetime allowance and 500,000 accepted calls**, expiring at
-**2026-09-21 11:01:16.977 UTC**. These counters never reset by day, month or deployment. Retained
+The external gate has a **$20 lifetime allowance and 500,000 accepted calls**. It was to expire at
+2026-09-21 11:01:16.977 UTC (`TYPESAFE_PILOT_END`); `TYPESAFE_PERSISTENT` is `true`, so it no longer
+expires and only the allowance and the call count close it ($16.12 and 137,961 calls used at
+23:50Z Sept 22, 2026). These counters never reset by day, month or deployment. Retained
 $20 `foundation-review` campaign reservations back the allowance. This
 is a cross-provider pilot earmark from that existing research allocation, not an OpenAI bill
 or an addition to the phase budget. Keep that reservation until the route has expired or is
@@ -140,7 +142,7 @@ shape is not evidence that a decision is correct. Source: [TypeSafe models](http
 ## The frontier month
 
 `POST /v1/frontier/responses` forwards one call to `https://api.openai.com/v1/responses` with
-`OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$300** a UTC calendar month). Existing monthly
+`OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$374** a UTC calendar month since Sept 21, 2026; it was $300). Existing monthly
 spend remains counted when the configured cap increases; the House's immutable campaign
 allowance is an additional restriction.
 A call is priced twice. Before it leaves, at its worst case: every byte of the request as input at
@@ -161,6 +163,8 @@ call is an uncapped one.
 | `gpt-5.6-sol` | 5.00 | 4.00 | 0.40 | 20 |
 | `gpt-5.6-terra` | 2.50 | 2.00 | 0.20 | 12 |
 | `gpt-5.6-luna` | 0.25 | 0.20 | 0.02 | 1.20 |
+| `gpt-6-sol` | 2.50 | 2.00 | 0.20 | 10 |
+| `gpt-6-luna` | 0.125 | 0.10 | 0.01 | 0.50 |
 
 Input is priced at the cache-write rate, the dearest an input token can be, so the meter errs
 high. When the usage block reports `input_tokens_details.cache_write_tokens` (GPT-5.6 and later
@@ -177,8 +181,10 @@ Prompt-cache hints are admitted because they change the bill only through that u
 These are conservative estimates, not provider invoices. Also refused: a streaming or background call (`400`: the usage that settles the bill arrives
 only with a complete response), `max_output_tokens` missing or outside 1 to 16,000 (`400`), a body
 over 512 KiB (`413`), no `OPENAI_SECRET_KEY` (`503`). A provider `4xx` is settled at zero; a
-provider error, a timeout (280 seconds) or a reply with no readable usage keeps its whole
-reservation, because unknown is not free.
+provider error, a timeout (570 seconds since Sept 21, 2026; it was 280) or a reply with no readable
+usage keeps its whole reservation, because unknown is not free. Since Sept 23, 2026 the House settles
+its own campaign commitment for a verified call at this meter's `X-LTCM-Cost-USD`, and releases the
+hold of a refused (4xx) call; a call with no answer keeps its worst case on both lines.
 
 ## Pull requests
 
