@@ -12,7 +12,11 @@ now; everything under "History" describes something that no longer runs.
 - [Operating the league](operations.md): the operator's page. How to pause, inspect, deploy, roll
   back and recover the running league, how a money rule is deployed and the live grant
   re-ratified, and the switches.
-- [Dynamism II](runs/2026-09-23-dynamism-ii.md) (Sept 23): the latest execution record. Merged
+- [Capital is the ladder](runs/2026-09-23-capital-ladder.md) (Sept 23): the latest execution
+  record, for [the north-star build plan](goals/LTCM_NORTH_STAR_BUILD.md). The allocator's bands of
+  capital on both venues, the capital board, sliced exits, the Alpha Lab, a tick that never
+  blocks, profit-indexed compute and the open desks.
+- [Dynamism II](runs/2026-09-23-dynamism-ii.md) (Sept 23): the execution record before it. Merged
   repairs seated, the audit after promotion, the settled lane, the budget following the owner's
   real spend, and the foundry on fast markets.
 - [The overnight rebuild](runs/2026-09-22-overnight-rebuild.md) (Sept 22): the learning loop

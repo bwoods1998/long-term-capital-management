@@ -4,13 +4,64 @@ Written at the end of the overnight build (Sept 20, 2026). Every command runs fr
 `~/Work/long-term-capital-management` on your Mac unless it says otherwise. Nothing here asks you
 to paste a secret into a chat or a file.
 
-> Since then (Sept 23, 2026): real money is on, the owner's persistent live grant is active, and
-> the House deploys attested merged code by itself. Sections 1 to 3 describe the switch as it was
-> made; the thresholds in them are updated to the constitution in force. The running league is
-> operated from [operations.md](operations.md), and its state is in the
+> Since then: real money is on, the owner's persistent live grant is active, and the House deploys
+> attested merged code by itself. "Where things stand now" below is current as of Sept 23, 2026.
+> Sections 1 to 3 describe the switch as it was made on Sept 20 and are kept for the record;
+> sections 4 to 6 still apply, and section 7 is superseded. The running league is operated from [operations.md](operations.md), and its state is in the
 > [README's status](../README.md#status).
 
-## What state things are in right now
+## Where things stand now (Sept 23, 2026)
+
+- **Real money is on.** `league/config.json` says `"real_money": true` (your switch, Sept 20) and
+  the persistent live grant is active. The in-box updater deploys attested merged code every half
+  hour, except a change to the judges (`ci.FORBIDDEN`, which holds the money rules), the workflows
+  or `real_money`: those are your deploy.
+- **Capital is the ladder.** Since the allocator's release (`20260923T082402Z-7c69b3eb57f0`,
+  promoted at 08:27:54Z on Sept 23) an agent's evidence, its wealth multiple, moves it between
+  bands at every mark pass, around the clock:
+  - **Bunt:** $10 at Kalshi or $25 at Alpaca, once E ≥ 1.01 with 5 closed paper trades (or 3
+    settlements on Kalshi).
+  - **Swing:** the bunt × min(E, 20), up to 60% of the venue, once E ≥ 1.5, W_real ≥ 1 and 8 real
+    closed trades. The first swing is audited.
+  - **Down as fast:** hysteresis, a 35% real drawdown straight back to paper, death on paper
+    wealth under 0.80, and a floor throttle that halves every real stake once the floor's real P&L
+    falls below −30% of the envelope, until it recovers to −15%.
+
+  The README's [Bands of capital](../README.md#bands-of-capital) has the whole rule.
+  `allocator.enabled: False` in `league/constitution.py` is the rollback to the old ladder of
+  sections 2 and 3. It is a money rule, so it needs your deploy and a ratify.
+- **The grant.** `earned-live-20260921`: Alpaca $500, Kalshi $517.75, a $1,017.75 loss line, no
+  expiry. It counts 101 agents, the allocation over the $10 stake line (the smallest bunt). It is
+  pinned to money digest `44e8d48d…` (constitution `9fa83727…`), ratified at 08:28:13Z on Sept 23.
+  The allocator's envelope at each venue is that capital plus the realized profit there.
+- **After a money-rule change**, from a clean worktree at `origin/main`:
+
+  ```sh
+  cd ~/Work/ltcm-deploy && git fetch -q origin && git checkout -q --detach origin/main
+  python3 scripts/floor_box.py deploy      # in the background; watch its log for promoted, ROLLED_BACK, EXIT
+  python3 scripts/live_trading.py --ratify earned-live-20260921   # at once, the moment it says promoted
+  ```
+
+  Until the ratify, the grant reads inactive: real-money entries are refused (exits continue) and
+  no agent moves up. On Sept 23 the ratify came 19 s after promotion; a late one had once stopped
+  the floor for 9 minutes. A rollback across a money-rule change leaves the grant pinned to the
+  new digest, so ratify again on the rolled-back release. To check whether a change touches a money
+  rule, compare `python3 -c "from league.constitution import money_digest; print(money_digest())"`
+  with the grant's digest.
+- **The lab box.** The Alpha Lab runs on its own Sailbox, `ltcm-lab`
+  (`sb_742fe765-f041-450a-acda-e9d898137949`, size l, sealed, created 07:01:49Z on Sept 23), named
+  in `league/config.json` `lab`. `python3 scripts/lab_box.py status` reads it and `sleep` puts it to
+  sleep; it also sleeps by itself after ten idle minutes. If Sail terminates it, the lab stops with
+  an error alert and is never given a replacement from the agents' image: make one with
+  `python3 scripts/lab_box.py create`, which records the new id in `league/config.json`, and deploy.
+- **Compute.** The OpenAI month is $408 and Jev's allowance $42, each metered spend plus your funded
+  balance on Sept 23. The gateway indexes the OpenAI month to profit (0.3 of the real accounts'
+  equity above $1,017.75), but holds it to the funded $408, so profit buys nothing more until you
+  fund more. Sail is prepaid; its auto-recharge is your decision.
+- **The watch.** `python3 scripts/floor_watch.py` prints, read-only, the bands, real money,
+  evidence, the lab, costs, health and the site's checkpoint. Section 5 has the rest.
+
+## What state things were in at the build (Sept 20, 2026)
 
 - **Nothing is trading and nothing is publishing.** The gateway's kill switch is engaged. The
   House loop is stopped. The production page `https://blakewoods.us/capital/` is empty and shows
@@ -98,14 +149,17 @@ admits no agent to real money without it, and a change to any money rule leaves 
 you re-ratify it for the same capital (`--ratify <identity>`; see [operations](operations.md)).
 
 What changes: the House opens a book on the real Kalshi and Alpaca accounts and records their
-baselines. **Still no order is sent** until an agent has cleared the paper screen: 3 active hourly
+baselines. (Since Sept 23, 2026 the allocator decides who reaches real money; see "Where things
+stand now" above. What follows is the old ladder, which is now the rollback path.) **Still no order
+is sent** until an agent has cleared the paper screen: 3 active hourly
 blocks or 1 finished day, or 10 completed exposures; 3 closed trades; growth above zero, the block
 in progress counted; a drawdown under 25%. Then it
 takes a $60 real stake with positions and orders of at most $30, and Merton's audit follows on
 that rung (since Sept 23, 2026). A veto sends it back to paper, and so does a 20% loss since
 promotion. An agent with a known defect is audited before it is promoted. The screen is easy on
 purpose, and what it may cost you is capped in dollars. While the grant is active its envelope is
-the cap: 16 agents, a $1,017.75 loss line, and $500 on Alpaca and $517.75 on Kalshi. Without a
+the cap: 16 agents on this path (101 under the allocator), a $1,017.75 loss line, and $500 on
+Alpaca and $517.75 on Kalshi. Without a
 grant it is the constitution's tuition: at most 4 agents on that rung at once, and a $50 net
 loss. When a line is reached everyone on that rung goes back to paper (for a venue's line, the
 agents on that venue), and the aggregate line also raises an error alert. The constitution's line is raised by changing `tuition.max_loss_usd` in
@@ -157,6 +211,8 @@ The same is true of anything you push to `main`. Some things never travel that w
 python3 scripts/floor_box.py status            # loop, release, health, last deploy, log tail
 python3 scripts/floor_box.py logs -n 50        # the House's own log: one JSON line a tick
 python3 scripts/gateway_admin.py status        # kill switch, today's real orders, OpenAI month, Sail balance
+python3 scripts/floor_watch.py                 # the watch (Sept 23, 2026): bands, money, lab, costs, health
+python3 scripts/lab_box.py status              # the Alpha Lab's box: its seal, python, the tapes it holds
 ```
 
 The page is the rest: `https://blakewoods.us/capital/`. The test tape used during the build is at
