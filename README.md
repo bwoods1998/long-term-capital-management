@@ -598,7 +598,7 @@ What no model and no code path on Sail may change, and where each item is enforc
 | OpenAI budget | $408 for the month (`FRONTIER_MONTH_USD`: raised from $174 to $374 on Sept 21, 2026, when the owner added $200 of credit, and on Sept 23 to metered + the owner's funded ~$100). Since Sept 23 it also rises by 0.3 of the real accounts' equity above $1,017.75 (`COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`), held to `FRONTIER_MONTH_MAX_USD`, which is the funded $408, so profit buys nothing above funded money yet. The House's campaign allowance is a further line | in the gateway, which reads the equity itself: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month plus the owner's recorded top-ups that month (September's line was $200 on Sept 22), $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`9fa83727…` since the allocator of Sept 23, 2026; `64a206c6…` under swing-and-bunt earlier that day), and the House writes the digest to the ledger every time it starts |
-| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since the allocator it counts 101 agents: the allocation over a $10 stake line, the smallest bunt (16 over the $60 micro stake before). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
+| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since Deploy A of Sept 23 it counts 40 agents: the allocation over a $25 stake line, the smallest bunt (101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
 | The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, the campaign, live-trading and experiment-record files, the agent-box seal (`sandbox.py`), the history a strategy is judged on (`history.py`, `deep_replay.py`), `gateway/`, `.github/` (`ci.FORBIDDEN` has the full list) | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
 | Real money | `"real_money": true` in `league/config.json` -- the owner threw that switch on Sept 20 | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 
@@ -879,6 +879,28 @@ dynamism revisions followed that evening:
   tapes first. From 12:44Z it evaluated about 200 candidates per 10 minutes in batches of 32.
   None of Deploys 3-6 changed a money rule; the grant stayed on money digest `44e8d48d`. The
   execution record has the watch that followed.
+- **Deploy 7 (#187, #189, #190), 15:29Z.** The gateway refuses multi-leg, symbol-less, stop and
+  adjusted-option Alpaca orders (version `3e79ad85`); real-money limits shown to agents are the
+  ones the book enforces, stock and options desks wake just after the open, and trading agents on
+  those desks keep their seats until they close 5 trades or have had 3 sessions. No money rule
+  changed. The investigation behind it is
+  [the Alpaca stocks and level-3 options proposal](docs/proposals/2026-09-23-alpaca-stocks-and-level-3-options.md).
+
+**The Sept 23 learn-and-unblock run** ([plan](docs/goals/LTCM_LEARN_AND_UNBLOCK.md),
+[execution record](docs/runs/2026-09-23-learn-and-unblock.md),
+[the agent study](docs/research/2026-09-23-agent-study.md); T0 16:22:40Z, deadline 02:22:40Z):
+- **Deploy A (#200: #195, #196, #197, #198, #199 and their reviews), 17:34Z.** Release
+  `20260923T173244Z-8c7467281a19` was promoted at 17:34:17Z and the grant re-ratified 19 s later on
+  money digest `1d63a56e…` (max_agents 40). What changed: the two daily-loss rules are constitution
+  keys (a real bunt is governed by the allocator's 35% stay drawdown, not the book's 10% daily rule;
+  the real book's halt is 8% of that venue's grant capital), a bunt keeps what it makes
+  (`bunt_usd × clamp(W_real, 1, swing_at)`), the Kalshi bunt is $30, the swing line 1.25 and the
+  swing stake `bunt × E²`, the options bunt is $80, stock limit orders may be fractional (`day`),
+  wind-down sells of stocks and options wait for the open, `kalshi-open` lists its maker-fee
+  series, the House funds every Kalshi exchange shard its desks trade (`league/shards.py`), the
+  Alpha Lab keeps running below the "all" OpenAI tier, and four invariants raise ops alerts (a
+  quiet desk, a bunt frozen by a daily-loss rule, a lab closed 30 minutes, a graduate waiting 6
+  hours). The first allocator pass re-staked mullins-2 from $10.09 toward $34.84.
 
 Known limits:
 

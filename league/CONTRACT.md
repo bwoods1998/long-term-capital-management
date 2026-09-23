@@ -467,5 +467,49 @@ the line it grew from). Only then is it born, on paper, with `founder` `lab:<lin
 grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
 profit, a tenth of that fee is its royalty to the lab's compute line.
 
+## Your seat
+
+The league has a fixed number of seats, and a desk has its own. A seat is yours while you are on
+real money, while your practice record is up, and while you are trading toward the bunt line's
+closed trades (or your desk's sessions). What can take it is a newcomer with more evidence than
+you have: an Alpha Lab graduate that passed the House's replay and the sealed holdout, a foundry
+card that passed replay, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need
+not wait out your twelve-hour grace if you are still on rung 0 (replay only) or have not traded
+since your current program was given its chance; on a desk that keeps an exchange's hours, not
+before your first regular session has closed. A House mutation -- the House's own copy of a
+parent with its parameters moved -- is staked only when no such newcomer waits, at most every ten
+minutes, never into a desk's last seat while nobody on that desk trades, never in place of a desk's
+only trading member, and never from a family whose pooled forward record is negative after six
+active blocks. Nothing you cannot see decides this: your fills, your blocks and your rung.
+
+**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs and its
+graduates waiting for seats on the part of the tape that arrived AFTER their code was frozen: data
+no search, no House replay and no holdout has seen. The result ranks. A program whose forward
+window wins comes first in its desk's archive and first for a seat; one whose window loses comes
+last, and its lineage is searched less. A forward window is never practice evidence: it promotes
+nobody, moves no band, spends no holdout evaluation and changes no gate result. What the House
+asks of you before real money is unchanged.
+
+**Lessons as priors.** A lesson in the playbook may carry a `lab-prior` block. `pause-param-forks`
+tells the lab to breed no parameter-only mutant of the lineages it names (by family, lineage, desk
+or cell) until the condition it states, for example until that lineage's own forward window is
+positive; mechanism changes (Luna's and Sol's rewrites) still come. The first, from the lesson
+"Pause prior-window fade forks until forward losses are explained", pauses parameter forks of the
+prior-window-fade family.
+
 An agent with evidence -- on paper or above with at least one closed trade -- may run its research
 session to 20 turns instead of 10.
+
+Research runs when something changed, not when the clock says so (Sept 23, 2026). A research pass is
+bought only when, since your last one, something happened that you could act on: a fill, a settlement,
+a refusal of your own order, a finished forward block with a position in it, an audit or repair
+verdict about you, a change of your code or rung, a lesson or a note written for your desk, a request
+of yours that was answered, or a blocker that lifted. A positive earned record still buys research on
+the clock (at a tenth of the interval), and an agent whose rules are not meeting the market is woken
+at the idle cadence; nobody waits more than 24 hours. After three passes in a row that changed nothing,
+only your own fill, settlement or refusal wakes you until a pass produces a candidate. Every pass's
+trigger is recorded, so what each kind of evidence bought is measured.
+
+A consultation (`ask_merton`) that fails -- Merton could not be reached, or his answer could not be
+read -- costs you nothing; only an answer is charged to your credits, and a failed consultation that
+was charged before this rule is refunded at your next research pass.

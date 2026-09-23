@@ -1,5 +1,5 @@
 {
- "_about": "The specialties of the league. An agent belongs to one for life and its children inherit it: the House shows it only this universe, refuses entries outside it, tags its research with it and pays niche floors by it. A Kalshi universe is the series listed here (real tickers, ranked by the 24-hour volume of their markets that resolve within 48 hours; surveyed Sept 19, 2026: 736 series, $63M a day) plus any series the House's daily survey finds that matches `patterns` (and `category`, which Kalshi reports per series), so a universe follows the sporting calendar without an edit. Each specialty is one partner's DESK, named for a figure of the firm the league is named after; every agent of a desk is numbered from that name (meriwether, meriwether-2 ...) and a child takes the next free number in the line, as the first run's desks were Mullins VI and VIII. Sept 23, 2026: seats follow evidence -- the weather desk (the one mechanism earning real money) takes 10 and prices 8, the 24/7 crypto desks 8 (Kalshi) and 12 (Alpaca), and the hourly ETF and megacap desks 12, beside a population of 96; three replay-passing foundry cards had waited for seats on full desks. Sept 23, 2026 (the open desks): `kalshi-open` and `alpaca-open` (`open: true`) hold every tradable market of their venue -- any Kalshi series but the multivariate combos (`exclude_patterns`), any US stock, ETF or coin against the dollar (`asset_classes`; never options) -- list nothing, plant no founders and take 8 seats each. A program is born there only when no one desk holds most of what its NEEDS name (`niches.match`, `niches.spanning`); what it is shown when it names nothing it may trade is a capped discovery list (Kalshi: the daily survey's busiest series, those no desk claims first; Alpaca: the other Alpaca desks' symbols, coins first).",
+ "_about": "The specialties of the league. An agent belongs to one for life and its children inherit it: the House shows it only this universe, refuses entries outside it, tags its research with it and pays niche floors by it. A Kalshi universe is the series listed here (real tickers, ranked by the 24-hour volume of their markets that resolve within 48 hours; surveyed Sept 19, 2026: 736 series, $63M a day) plus any series the House's daily survey finds that matches `patterns` (and `category`, which Kalshi reports per series), so a universe follows the sporting calendar without an edit. Each specialty is one partner's DESK, named for a figure of the firm the league is named after; every agent of a desk is numbered from that name (meriwether, meriwether-2 ...) and a child takes the next free number in the line, as the first run's desks were Mullins VI and VIII. Sept 23, 2026: seats follow evidence -- the weather desk (the one mechanism earning real money) takes 10 and prices 8, the 24/7 crypto desks 8 (Kalshi) and 12 (Alpaca), and the hourly ETF and megacap desks 12, beside a population of 96; three replay-passing foundry cards had waited for seats on full desks. Sept 23, 2026 (the open desks): `kalshi-open` and `alpaca-open` (`open: true`) hold every tradable market of their venue -- any Kalshi series but the multivariate combos (`exclude_patterns`), any US stock, ETF or coin against the dollar (`asset_classes`; never options) -- list nothing, plant no founders and take 8 seats each. A program is born there only when no one desk holds most of what its NEEDS name (`niches.match`, `niches.spanning`); what it is shown when it names nothing it may trade is a capped discovery list (Kalshi: the daily survey's busiest series, those no desk claims first; Alpaca: the other Alpaca desks' symbols, coins first). Sept 23, 2026 (the learn-and-unblock run, the seat market follows evidence): 16 seats were free on desks nobody graduates into (strikes 2 of 8, megacaps 8 of 12, the open desks 0 of 8) while the desks with waiting lab graduates were full, and `kalshi-weather` was the only desk with a positive forward record (7 of 10 living W_paper > 1; the two real earners). So weather 10 -> 14, sports 12 -> 16, index ETFs 12 -> 14, 15-minute crypto 8 -> 10; the graveyards shrink: crypto strikes 8 -> 4 (40 born, 2 passed replay, -10.3% a block), sports props 6 -> 4 (34 born, 5 passed) and attention 4 (34 born, 2 passed; it had no cap and took the default 5). The sum of the caps (134) stays above the population (112).",
  "niches": [
   {
    "id": "kalshi-crypto-strikes",
@@ -46,7 +46,7 @@
    "category": "Crypto",
    "desk": "hilibrand",
    "desk_note": "Larry Hilibrand, the arbitrageur who pressed the firm's one measured edge hardest",
-   "max_members": 8
+   "max_members": 4
   },
   {
    "id": "kalshi-crypto-15m",
@@ -92,7 +92,7 @@
    "category": "Crypto",
    "desk": "huang",
    "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm",
-   "max_members": 8
+   "max_members": 10
   },
   {
    "id": "kalshi-weather",
@@ -171,7 +171,7 @@
    "category": "Climate and Weather",
    "desk": "mullins",
    "desk_note": "David Mullins, Vice Chairman of the Federal Reserve before he joined",
-   "max_members": 10
+   "max_members": 14
   },
   {
    "id": "kalshi-sports",
@@ -181,7 +181,7 @@
    ],
    "title": "Sports results on Kalshi: winners, spreads and totals in every league",
    "category": "Sports",
-   "max_members": 12,
+   "max_members": 16,
    "patterns": [
     "^KX[A-Z0-9]+(GAME|MATCH|FIGHT|SPREAD|TOTAL|TEAMTOTAL|BTTS|MAP|TOTALMAPS|1H|1HSPREAD|1HTOTAL|1Q|1QSPREAD|1QTOTAL|F5|F5TOTAL|RFI|ADVANCE)$"
    ],
@@ -499,7 +499,7 @@
    ],
    "desk": "hufschmid",
    "desk_note": "Hans Hufschmid, who worked the thin and awkward corners of the book",
-   "max_members": 6
+   "max_members": 4
   },
   {
    "id": "kalshi-prices",
@@ -609,7 +609,8 @@
     "^KX(RT|TRUMPAPPROVE|TRUMPSAY|TRUTHSOCIAL|TRUMPACT|TOKENUSE|TSAW)$"
    ],
    "desk": "leahy",
-   "desk_note": "Dick Leahy, the partner who sold the firm to the world: attention is his market"
+   "desk_note": "Dick Leahy, the partner who sold the firm to the world: attention is his market",
+   "max_members": 4
   },
   {
    "id": "alpaca-crypto-majors",
@@ -754,7 +755,7 @@
    ],
    "desk": "scholes",
    "desk_note": "Myron Scholes, Nobel 1997, whose formula priced the options the equity desks live on",
-   "max_members": 12
+   "max_members": 14
   },
   {
    "id": "alpaca-megacaps",

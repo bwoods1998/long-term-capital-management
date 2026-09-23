@@ -283,6 +283,32 @@ class EngineerLoop(Base):
         passes = [e.payload for e in self.ledger.iter(kinds="merton.pass") if e.payload.get("role") == "engineer"]
         self.assertEqual([p["cost_usd"] for p in passes], ["0.50", "0.50"], "every paid call is a row the pacer reads")
 
+    def test_a_strategy_defect_is_bought_only_for_a_living_parent_that_has_traded(self):
+        """Sept 23, 2026: 16 repair children born, 0 forward active blocks, 7 died on rung 0; $0.70 a
+        born child. A dead parent's defect is closed; a living parent waits until it has traded."""
+        dead = self.job(key="strategy_defect:ghost:abcdef123456", kind="strategy_defect", agents=("ghost",))
+        self.ledger.append("agent.born", {"founder": None, "specialty": "kalshi-sports"}, agent="ghost", id="born:ghost")
+        self.ledger.append("agent.died", {"cause": "displaced"}, agent="ghost")
+        waiting = self.job(key="strategy_defect:parent:abcdef123456", kind="strategy_defect", agents=("parent",))
+        frontier = FakeFrontier(self.tool_answer(), self.tool_answer())
+        engineer = self.engineer(frontier, FakeGitHub())
+        engineer.step()
+        self.assertEqual(self.worklist.get(dead).state, "rejected")
+        self.assertIn("dead parent", self.worklist.get(dead).note)
+        self.assertEqual(self.worklist.get(waiting).state, "admitted", "alive but never traded: it waits, for free")
+        self.assertEqual(frontier.asked, [], "nothing was bought")
+        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "dust", "quantity": "1"}, agent="parent")
+        engineer.step()
+        self.assertEqual((self.worklist.get(waiting).state, frontier.asked), ("admitted", []), "the House's dust sweep is not a trade")
+        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "venue", "quantity": "1"}, agent="parent")
+        engineer.step()
+        self.assertEqual(self.worklist.get(waiting).state, "testing")
+        self.assertEqual(len(frontier.asked), 1)
+        # A shared defect (not one agent's strategy) is untouched by the rule.
+        shared = self.job()
+        engineer.step()
+        self.assertEqual(self.worklist.get(shared).state, "testing")
+
     def test_attempts_are_bounded_and_the_costs_are_kept(self):
         key = self.job()
         forge = FakeGitHub(judge=lambda files: "FAIL: still wrong")
@@ -544,6 +570,30 @@ class EngineerLoop(Base):
         self.ledger.append("agent.born", {"founder": "parent-fixed", "family": "fam", "parent": None}, agent="child")
         engineer.step()
         self.assertEqual(self.worklist.get(key).state, "verified")
+
+    def test_a_corrected_child_that_fails_its_replay_closes_the_job_with_the_reasons(self):
+        """Sept 23, 2026: the child is replayed before any seat (House.enroll -> Foundry.takes_strategy);
+        the engineer reads the refusal instead of waiting forever for a birth that cannot come."""
+        (self.repo / "league/strategies/old.py").write_text(GOOD)
+        key = self.job(key="audit_veto:parent", kind="audit_veto", agents=("parent",), severity="blocker")
+        answer = {"summary": "s", "role": "architect", "slug": "fixed", "title": "Corrected child", "body": "b", "needs_core": None,
+                  "files": [{"path": "league/strategies/parent_fixed.py", "content": GOOD},
+                            {"path": "league/strategies/parent_fixed.json", "content": json.dumps({"name": "parent-fixed", "family": "other", "why": "fix"})}]}
+        forge = FakeGitHub()
+        engineer = self.engineer(FakeFrontier(answer), forge)
+        engineer.step()
+        self.deploy(forge.proposed[0]["files"])
+        self.merton.follow()
+        engineer.step()
+        engineer.step()
+        self.assertEqual(self.worklist.get(key).state, "observing")
+        self.clock.advance(7200)
+        self.ledger.append("trace.record", {"task": "hypothesis.evaluate", "id": "c1", "outcome": "failed", "strategy": "parent-fixed",
+                                            "detail": "0 closed trades, 20 needed"})
+        engineer.step()
+        job = self.worklist.get(key)
+        self.assertEqual(job.state, "dormant")
+        self.assertIn("failed replay before any seat: failed: 0 closed trades", job.note)
 
     def test_a_merged_fix_whose_files_never_run_is_not_verified(self):
         key = self.job()
