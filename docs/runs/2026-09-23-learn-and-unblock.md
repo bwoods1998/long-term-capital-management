@@ -338,3 +338,25 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 - 17:46Z — A7's live check so far: no equity limit order from any agent since the deploy (the
   stock agents send market orders), so "mechanism verified in tests, no live instance" may be
   the record at the close; no refusal and no alert since the deploy.
+- 17:27-17:47Z — **W1-seats finished (PR #201, CI green, unprotected).** One seat queue: waiting
+  lab graduates, replay-passed cards and merged strategies take every freed seat first, in that
+  order, and `_refill` stakes no House mutation while any of them waits (mutations at most every
+  10 minutes: `newcomer_seconds` 120 → 600); a newcomer with forward evidence may displace a
+  rung-0 resident or a rung-1 resident that has never traded since its program's chance, inside
+  the 12-hour grace (a keeps-hours desk only after its first session; never real money, a winner,
+  a trader short of its record, or a position held through a shut market; one displacement a
+  desk a tick); a desk keeps one seat for a trading member and never loses its only trader to a
+  mutation; no mutation, fork or revival of a family whose pooled forward record is negative
+  after 6 active blocks; refused births are alerted instead of silently dropped; desk caps
+  follow the graduates (weather 14, sports 16, index-etfs 14, crypto-15m 10; strikes 4,
+  sports-props 4, attention 4); population 96 → 112 (16 more boxes ≈ $0.43 a day of Sail: the
+  runway stays 2.9 days, over the 1.5-day floor); a `seats` health block and hourly warnings.
+  18 tests. The one line it needs in the protected `lab.py` (`evidenced=True` on the lab's four
+  `_weakest` calls) is applied on the Wave 1 integration branch. Seen outside scope: `spawn` and
+  `enroll` never check a desk's `max_members` (crypto-alts sat at 14/12); the lab overwrites a
+  graduate's `graduations.at` on every retry.
+- 17:47Z — **the Wave 1 integration branch** `w1/integration` started: #201 and #204 merged (two
+  additive docs conflicts), the lab one-liner applied. #203 joins after its review (~18:35Z) and
+  #202 after its conflict resolution. Deploy B goes as soon as the branch is green rather than
+  at the plan's 21:00Z: the lab's tape-key fix and the seat market earn more hours of evidence,
+  and Deploy A's stock-session verification is unaffected by a restart.
