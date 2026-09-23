@@ -614,6 +614,12 @@ the first closed real Alpaca trade. At the deadline the real Alpaca account held
     clock. mcentee-34 gets DST-correct session hours. Every agent sees its distance to the bunt
     line.
   - None changes a money rule: the grant stays on `44e8d48d`.
+  - **Deploy 7 (15:29Z).** #187 changed a protected path (`gateway/`), so the in-box updater
+    refused the range, and main `da846db` (#187, #189, #190) went out as an owner deploy. Release
+    `20260923T152910Z-9a5970c56aca` passed its canary, was promoted at 15:30:50Z, and passed all
+    20 watch checks by 15:40:50Z. The running `house.py` carries `_fit_real_entry`,
+    `_trading_pending` and `bunt_line`. The grant stayed active on `44e8d48d`, with no
+    re-ratification needed.
 - **Next:** B1, level-3 debit verticals on practice. Real multi-leg orders only after a week on
   practice and a re-ratified grant, per the proposal.
 
