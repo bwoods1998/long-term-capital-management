@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 import re
 import threading
@@ -3016,10 +3017,21 @@ class House:
         active blocks of the fifteen the screen wants -- while twenty-six agents that had never
         traded at all sat untouched. An agent that is trading and losing is being judged by the
         evaluator, which will kill it on its own evidence at twenty blocks; an agent that trades
-        nothing is judged by nobody and costs a box and a seat for as long as it is left there."""
+        nothing is judged by nobody and costs a box and a seat for as long as it is left there.
+
+        On a desk that keeps an exchange's hours (stocks, options) the chance is counted in the
+        market's own time (Sept 23, 2026). The grace is regular-session time, not wall-clock time;
+        an agent that is trading keeps its seat until it has closed the bunt line's
+        `bunt_min_trades` or had `displace_trading_after_sessions` sessions (`_trading_pending`);
+        one holding a position while its market is shut is not removed, because its own exit is at
+        the next open and the House would only sell it there instead; and a rewrite of an agent
+        that has never traded does not restart its clock. Nine stock and option agents were
+        displaced Sept 21-23 after a median 6.5 session hours, every one with fills and none with
+        more than four closed trades, and three of them while holding contracts."""
         epoch = float(rules["epoch_seconds"])
         grace = float(rules.get("displace_after_epochs", 2)) * epoch
         now = self.clock()
+        stamp = None  # now, as a market-hours check reads it: made once, and only if a desk keeps hours
         rank = []
         for standing in self.standings():
             agent = self.registry.get(standing.agent)
@@ -3030,6 +3042,8 @@ class House:
             opportunity = _epoch(agent.born_at)
             opportunity_seq = 0
             agent_grace = grace
+            niche = self.niche_of(agent)
+            keeps_hours = standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs)
             if standing.rung == 0 and self._burst:
                 # Completed research is the opportunity; waiting out an hour adds no evidence.
                 # Queued/paid work and a late-qualified program must not die on a calendar timer.
@@ -3054,13 +3068,23 @@ class House:
                 # already fourteen hours old. Recover the current program's start from
                 # the ledger, including across restarts; duplicate strategy rows do not
                 # buy another grace period.
+                #
+                # On a desk that keeps hours, a rewrite of an agent that has never traded is NOT a
+                # new opportunity (Sept 23, 2026): research rewrote idle stock agents every few
+                # hours (mcentee-34 three times in eight), each rewrite restarted the clock, and
+                # the agents that never traded outlived the ones that did.
+                first_fill = None
+                if keeps_hours:
+                    found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
+                    first_fill = None if found is None else found.seq
                 signature = None
                 for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
                     p = entry.payload
                     if entry.kind in ("agent.born", "agent.strategy"):
                         current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
                         if current != signature:
-                            opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                            if signature is None or not keeps_hours or (first_fill is not None and first_fill < entry.seq):
+                                opportunity, opportunity_seq = _epoch(entry.at), entry.seq
                             signature = current
                     elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
                         opportunity, opportunity_seq = _epoch(entry.at), entry.seq
@@ -3074,8 +3098,8 @@ class House:
                         if self.research_jobs.active(agent.id):
                             continue
                         agent_grace = 0
-            niche = self.niche_of(agent)
-            if standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs):
+            traded = False
+            if keeps_hours:
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
                 # its equity agents were displaced before their first market session. Start
                 # their paper-seat grace at an actual offered opportunity (or a legacy fill),
@@ -3085,11 +3109,25 @@ class House:
                 if first is None:
                     continue
                 opportunity = max(opportunity, _epoch(first.at))
+                book = self.book_of(agent)
+                if book is not None and agent.id in book.accounts:
+                    if stamp is None:
+                        stamp = now_iso(self.clock)
+                    if any(market_hours(h.instrument, stamp) is False for h in book.account(agent.id).holdings.values()):
+                        # Its own exit closes this at the next open. Displaced now, the House
+                        # would sell it there instead (scholes-23 at 07:11Z on Sept 23, mid-basket).
+                        continue
+                traded = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id, after=opportunity_seq)), None) is not None
+                if traded and self._trading_pending(agent, book, opportunity, now, rules):
+                    continue
             if standing.rung == 1 and agent_grace > 0 and agent.horizon == "day" and self._screen_pending(agent, opportunity_seq, now - opportunity):
                 continue
-            if now - opportunity < agent_grace:
+            # A desk that keeps hours offers nothing between the close and the next open: its grace
+            # is counted in regular-session time.
+            seated = session_time(opportunity, now)[0] if keeps_hours else now - opportunity
+            if seated < agent_grace:
                 continue
-            rank.append((standing.active_blocks > 0, standing.mean_growth, standing.active_blocks,
+            rank.append((standing.active_blocks > 0 or traded, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
         rank.sort(key=lambda row: row[:4])  # has it traded at all, then growth, then how much, then its purse
         return rank[0][4] if rank else None
@@ -3113,6 +3151,25 @@ class House:
         # The screen's own view: finished blocks that began after the seat, past any accounting cutoff.
         closed = sum(1 for row in self.evaluator.blocks(agent.id, since_seq=since_seq) if row.get("horizon") == "day")
         return closed < days
+
+    def _trading_pending(self, agent: Agent, book: Book | None, opportunity: float, now: float,
+                         rules: Mapping[str, Any]) -> bool:
+        """Is a trading agent on a desk that keeps hours still short of a record the bunt line can read?
+
+        Real money needs `bunt_min_trades` closed trades (the constitution's allocator, read here
+        and never changed), and a stock or option desk offers a round trip or two a session: an
+        ETF basket bought in the last hour is sold at the next open. So an agent that is trading,
+        hourly or daily, keeps its seat until it has closed that many trades, or until
+        `displace_trading_after_sessions` (game.json) regular sessions have closed since its
+        opportunity -- whichever comes first. Only its seat is kept: an unprofitable one is still
+        displaced once either is reached, and a profitable one never was displaceable."""
+        owed = int(rules.get("displace_trading_after_sessions", 3))
+        if session_time(opportunity, now)[1] >= owed:
+            return False
+        if book is None:
+            return False
+        closed, _ = allocator_module.closed_trades(self, agent.id, book.name)
+        return closed < int(CONSTITUTION["allocator"]["bunt_min_trades"])
 
     def frontier_remaining(self) -> Decimal | None:
         """The tighter of the two OpenAI lines: the gateway's month (`FrontierMonth`) and the House's
@@ -4425,3 +4482,37 @@ def _new_york(clock: Callable[[], float]) -> tuple[str, float]:
 
     moment = datetime.fromtimestamp(clock(), tz=timezone.utc).astimezone(ZoneInfo("America/New_York"))
     return moment.strftime("%Y-%m-%d"), moment.hour + moment.minute / 60.0
+
+
+def session_time(start: float, end: float, *, horizon_days: int = 30) -> tuple[float, int]:
+    """(seconds of regular US equity session, sessions that closed) between two instants, holidays
+    and early closes included. A session counts as closed when its close falls after `start` and
+    no later than `end`, so the session an agent was first offered counts once it closes.
+
+    A span longer than `horizon_days` is plenty of both: it is reported as infinite time and as
+    many sessions as it has days, without walking the calendar. Outside the computed NYSE calendar
+    the span is wall-clock time and whole days, which is what the grace measured before."""
+    from datetime import datetime, timedelta, timezone
+
+    from ltcm.data import NEW_YORK, DataError, to_datetime, us_equity_session
+
+    if end <= start:
+        return 0.0, 0
+    if end - start > horizon_days * 86400:
+        return math.inf, int((end - start) // 86400)
+    day = datetime.fromtimestamp(start, timezone.utc).astimezone(NEW_YORK).date()
+    last = datetime.fromtimestamp(end, timezone.utc).astimezone(NEW_YORK).date()
+    seconds, closed = 0.0, 0
+    try:
+        while day <= last:
+            session = us_equity_session(day)
+            if session is not None:
+                opened = to_datetime(session.open_at).timestamp()
+                closes = to_datetime(session.close_at).timestamp()
+                seconds += max(0.0, min(end, closes) - max(start, opened))
+                if start < closes <= end:
+                    closed += 1
+            day += timedelta(days=1)
+    except DataError:
+        return end - start, int((end - start) // 86400)
+    return seconds, closed
