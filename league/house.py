@@ -4786,6 +4786,7 @@ class House:
             "stopped_because": summary.get("stopped_because"),
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
+            "lab": self.lab.health() if self.lab is not None else None,  # closed since when, paid phases skipped, graduates waiting
             "feeds": self.feeds.health() if self.feeds is not None else None,
             "deferred": deferred,
         }

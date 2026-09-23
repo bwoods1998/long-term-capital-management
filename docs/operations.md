@@ -54,8 +54,8 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
   - Jev's jobs;
   - births and payouts;
   - promotions;
-  - the Alpha Lab (it also stops while a release is staged, when the Sail meter stops the floor,
-    and when the OpenAI tier falls below `all`);
+  - the Alpha Lab (it also stops while a release is staged and when the Sail meter stops the
+    floor; an OpenAI tier below `all` stops only its Luna and Sol calls, since Sept 23, 2026);
   - every new entry.
 - **What continues:**
   - holders are still woken, and their sells and cancels reach the books;
@@ -164,6 +164,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled).
   - `hypotheses`: cards, pending evaluations, the foundry's `refusal` reason and its window spend.
+  - `lab` (Sept 23, 2026): the Alpha Lab's `refusal`, `closed_since` and `closed_minutes`, `llm`
+    (`paused`, `skipped`: the Luna and Sol phases skipped below the `all` tier), `waiting_seat`
+    (`count`, `longest_hours`, up to eight graduates with their line, desk and hours), `queued`
+    and `born_total`.
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `deferred` (Sept 23, 2026): work the tick put off because a box was busy or Sail did not
@@ -240,14 +244,19 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     hour: `batches`, `evaluated`, `per_hour`, `candidates_per_box_second`, `stages` (programs written
     by origin, ran, eligible, gate, archived, graduations by state), `pass_rates`, `calls`,
     `coverage` (cells by desk), `queued`, `spend` (OpenAI, the Sail estimate, the royalty balance),
-    `born_total` and `refusal`. A row is written only at the end of a lab step, and a step runs
-    only while the lab is open, so `refusal` is the last reason a Luna or Sol call was refused
-    inside a step (no model client, an OpenAI tier below `all`, the House's OpenAI allowance
-    closed, or the lab's hourly line too small for the call's hold), or null. When the lab is
-    stopped (disabled, the House closing, stopped or paused, a release being staged, the Sail
-    allowance closed or the Sail meter stopped, a lab box that failed a batch in the last five
-    minutes, or an OpenAI tier below `all`), no step runs and no `lab.stats` row is written: the
-    rows stop.
+    `born_total`, `refusal`, `llm` (`paused`: why Luna and Sol are being skipped, or null;
+    `skipped`: the Luna and Sol phases skipped since the process started), `closed_since` and
+    `waiting_seat` (`count`, `longest_hours`). A row is written only at the end of a lab step, and
+    a step runs only while the lab is open, so `refusal` is the last reason a Luna or Sol call was
+    refused or skipped inside a step (no model client, an OpenAI tier below `all`, the House's
+    OpenAI allowance closed, or the lab's hourly line too small for the call's hold), or null.
+    Below the `all` tier the lab keeps seeding, breeding parameter children, evaluating on its box
+    and graduating (C2, Sept 23, 2026); only the paid phases stop, and `llm.paused` says so. When
+    the lab is stopped (disabled, the House closing, stopped or paused, a release being staged,
+    the Sail allowance closed or the Sail meter stopped, or a lab box that failed a batch in the
+    last five minutes), no step runs and no `lab.stats` row is written: the rows stop, and
+    `health.json` `lab` (`refusal`, `closed_since`, `closed_minutes`, `llm`, `waiting_seat` with
+    up to eight graduates, `queued`, `born_total`) says why.
   - **`lab.graduate` rows**, one per candidate and outcome, carry the program's lineage, origin,
     author, parents, idea, fitness and cell. **`lab.royalty` rows** record each royalty charged to
     a graduate that earned a performance fee.
@@ -311,6 +320,17 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   Make a new box with `python3 scripts/lab_box.py create`, which writes the new `box_id` into
   `league/config.json`, and deploy it. A batch that fails for any other reason is a warning: its
   candidates stay queued, and the lab leaves the box alone for five minutes.
+- **"the Alpha Lab has been closed for N minutes (since ...): <why>"** (a warning, once per
+  closing, after `closed_alert_minutes`, 30; Sept 23, 2026). The refusal is the one `Lab.open`
+  gives now (the House paused, stopped or staging a release, the Sail allowance or meter, the box
+  after a failed batch, the lab disabled, the House not open for business). The since-when is kept
+  in `lab.sqlite` `meta`, so a restart does not reset it. "the Alpha Lab is open again after N
+  minutes closed" (an info) follows when it works again.
+- **"the Alpha Lab graduate <line> (<candidate>, <desk>) has waited N hours for a seat"** (a
+  warning, once per graduate, after `seat_wait_alert_hours`, 6). Its desk or the league is full of
+  agents that have earned their seats (`league/niches.json` seats, `league/turbo.json`
+  `max_population`); the lab asks again every ten minutes. `health.json` `lab.waiting_seat` lists
+  them, longest wait first.
 - **Research ends with `provider: campaign_post_unconfirmed`.** A Sail request was in flight when
   the House restarted. The House cannot prove whether the vendor accepted it, so it will not buy it
   again inside the idempotency window, and the agent researches on its next due session. Many at
@@ -366,13 +386,14 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `hypotheses.transfer_share` | 0.3 | Up to 30% of the foundry's calls port a family with an earned forward record (real money first) to the best-scored desk of its venue where it has never been tried; the packet carries its mechanism in words and asks for at least half the batch as adaptations. Offered before the fast route, then exploration, then evidence. 0 is off, as before Sept 23, 2026 |
 | | `hypotheses.prefer_horizon` | `hour` | The horizon the foundry's packet tells Merton to prefer where a desk allows it. Empty: the desk's first listed horizon |
 | | `hypotheses.max_pending_cards` | 8 | How many cards may await replay before the next call. 0: any pending card holds the next call, as before Sept 23, 2026 |
-| | `lab.enabled`, `lab.budget_usd_per_hour` | on (with a `config.json` `lab.box_id`), $1.50 | The Alpha Lab (`league/lab.py`): its OpenAI line per trailing hour, plus royalties, inside the campaign allowance and only at frontier tier `all` |
+| | `lab.enabled`, `lab.budget_usd_per_hour` | on (with a `config.json` `lab.box_id`), $1.50 | The Alpha Lab (`league/lab.py`): its OpenAI line per trailing hour, plus royalties, inside the campaign allowance. Its Luna and Sol calls run only at frontier tier `all`; the rest of the lab (seeds, parameter children, batches, graduation) runs whatever the tier (C2, Sept 23, 2026) |
 | | `lab.batch_size`, `param_children`, `llm_children`, `leap_every` | 32, 48, 6, 10 | Candidates a batch on the lab box; parameter mutants bred each time fewer than a batch of queued candidates have their tape built (16 until later on Sept 23, 2026, when 191 seeds waiting on their tapes starved breeding); programs one Luna call writes; a Sol leap after every ten Luna calls |
 | | `lab.search_fraction`, `step_seconds` | 0.66, 240 s | The share of the House's replay tape the search sees (the rest is the graduation replay's out-of-sample test); how long one lab step runs off the tick |
 | | `lab.max_births_per_hour`, `royalty_share`, `submit_max` | 6, 0.10, 8 | Graduates born on paper an hour; the share of a graduate's performance fee paid to the lab's line; programs an agent may have waiting in the lab |
 | | `lab.leap_candidates`, `max_graduations_per_step`, `luna_model`, `sol_model` | 4, 1, `gpt-6-luna`, `gpt-6-sol` | Programs a Sol leap writes; graduations tried per lab step; the models behind mutations and leaps |
 | | `lab.box_usd_per_hour` | $0.20 | The price the lab records for its box's time (`lab.stats` `spend.sail_usd_estimate`, `batches.sail_usd`) |
 | | `lab.holdout_reserve`, `stats_every_minutes`, `max_queue`, `max_tapes_per_step` | 1, 10, 600, 4 | Not in `game.json`: defaults in `league/lab.py` `DEFAULTS`, which a `game.json` `lab` key of the same name overrides. The sealed-holdout evaluations of a living line the lab never spends (they stay with the line's own forks); how often a `lab.stats` row is written; the most candidates queued at once; search tapes built a step |
+| | `lab.closed_alert_minutes`, `seat_wait_alert_hours` | 30, 6 | Also `DEFAULTS` only (Sept 23, 2026): after how long closed the lab raises its one warning, and after how long waiting for a seat a graduate is named once |
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
