@@ -85,7 +85,22 @@ CONSTITUTION: dict[str, Any] = {
         # cost a daily agent a whole day. Growth above zero, the drawdown screen, the frontier audit,
         # accounting integrity, the owner's capital envelope, `micro_demotion` and the statistical
         # bound for scale are all unchanged.
-        "paper": {"gate": "screen", "min_active_blocks": 4, "min_active_blocks_day": 2, "max_drawdown": 0.15},
+        # Owner revision, Sept 23, 2026 ~00:00 UTC ("do 1-5 right now fully"; more volatility on the
+        # accounts accepted for more movement up and down the ladder). Measured Sept 22 23:35 UTC: 0
+        # promotions from paper to money in 24 hours and 2 ever; 37 of 40 paper agents trade a daily
+        # horizon; 11 audits had approved 2.
+        #   - `settled_day`: a daily agent on an event-contract book whose trades have SETTLED --
+        #     three market outcomes on this rung -- is screened after one finished active day, not
+        #     two. A settlement is evidence, not a mark; the two-day wait bought only calendar.
+        #   - `audit: "after"`: the frontier audit no longer stands BEFORE the micro rung. An agent
+        #     that clears the screen, with room in the owner's capital envelope, goes to the micro
+        #     rung at once and is audited there; a veto sends it straight back to paper, and a veto's
+        #     cooldown still bars another promotion. The micro stake, its order and position caps,
+        #     `micro_demotion`, drift, the capital envelope and the bound for rung 3 are unchanged.
+        # The screen also counts the block in progress (the evaluator, same date): a daily screen
+        # that read only finished days passed hawkins while that morning's settlements had lost $15.50.
+        "paper": {"gate": "screen", "min_active_blocks": 4, "min_active_blocks_day": 2, "max_drawdown": 0.15,
+                  "settled_day": {"min_active_blocks": 1, "min_settled_trades": 3}, "audit": "after"},
         # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
         # this is the gate that protects real size. Promotion spends its own alpha: the looks
         # that can only kill (before `min_active_blocks`) spend none of it.
@@ -188,4 +203,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '6ebd41acaaca4195da74bb8a387d43efa98f8b52ce9ddd211b10f2a89c784c26'
+PINNED_DIGEST = '0f9a8f7e3bf67a801332ff496c4ddfff561e0d33b4bc22237cf7f6c75cee9c46'

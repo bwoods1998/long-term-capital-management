@@ -219,6 +219,27 @@ class HouseDeepReplayTest(HouseCase):
             self.assertEqual(out["holdout"], holdout)
             self.assertEqual(self.house.evaluator.rung(agent.id), rung)
 
+    def test_a_holdout_refusal_is_said_and_a_clone_of_a_paper_agent_gives_up_its_seat(self):
+        """Sept 22, 2026: mcentee-32 and -33 passed replay, the lineage's holdout ration was spent by
+        clones of their own code, their code was marked as tried, and nothing said so: they sat on
+        rung 0 for good. The refusal is now a progress row, and a clone of a paper agent retires."""
+        refused = {"evaluated": False, "refused": "the lineage has spent its 3 holdout evaluations"}
+        alone = self.house.spawn("deep", "test-deep", SPY_BUYER, reason="a test agent")
+        with patch.object(self.house.evaluator, "record_trial", side_effect=self._passing), \
+                patch.object(type(self.house), "_holdout", return_value=refused):
+            self.house._replay_own(alone)
+        rows = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=alone.id) if e.payload.get("stage") == "holdout"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("lineage has spent its 3 holdout evaluations", rows[0]["reason"])
+        self.assertIn(alone.id, {a.id for a in self.house.registry.living()})  # nothing on paper runs its code
+        self.house.evaluator.seat(alone.id, 1, "test")                        # now the same program trades on paper...
+        clone = self.house.spawn("deep", "test-deep", SPY_BUYER, reason="a House mutation")
+        with patch.object(self.house.evaluator, "record_trial", side_effect=self._passing), \
+                patch.object(type(self.house), "_holdout", return_value=refused):
+            self.house._replay_own(clone)
+        died = self.house.ledger.last("agent.died", agent=clone.id)
+        self.assertEqual(died.payload["cause"], "redundant")                  # ...so the clone gives up its seat
+
     def test_a_researchers_replay_is_development_history_fold_by_fold_and_never_the_holdout(self):
         agent = self.house.spawn("deep", "test-deep", SPY_BUYER, reason="a test agent")
         out = self.house._candidate_replay(agent, SPY_BUYER.replace('"notional": 20.0', '"notional": 25.0'))

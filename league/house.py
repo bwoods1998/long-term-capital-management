@@ -36,7 +36,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ltcm.broker import Instrument, money
 
 from . import seeds as seeds_module
-from .agents import Agent, Registry, niche_of
+from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
 from . import capital, niches as niches_module
 from . import parameters
@@ -85,6 +85,10 @@ class Settings:
     max_wakes_per_tick: int = 16
     cold_wakes_per_tick: int = 5  # in a House's first five minutes (see `due`)
     enroll_per_tick: int = 3  # architect strategies born per tick (see `enroll`)
+    # A merged strategy takes a seat even when the league is full (the weakest eligible resident, or
+    # an agent still running the code a repair corrects, gives it up), and agents running code a
+    # BORN repair corrects are retired. Off: merged strategies wait for an empty seat, as before.
+    enroll_displaces: bool = True
     # No new research from the moment a release is staged. It wants to be a little longer than a
     # research pass (one to three minutes, measured) so the ones in flight finish before the
     # restart, and a good deal SHORTER than a deploy: at fifteen minutes against a half-hourly
@@ -454,8 +458,14 @@ class House:
         return born
 
     def enroll(self) -> list[Agent]:
-        """Give the architect's merged strategies their life: each is born once, on rung 0, with a
-        seed's endowment, while the population has room. They answer to replay like any child."""
+        """Give merged strategies their life: each is born once, on rung 0, with a seed's
+        endowment. They answer to replay like any child. Corrected children (a `repair` row) come
+        first, and a full league makes room for them.
+
+        Until Sept 23, 2026 a strategy was born only while the population had an empty seat, and
+        the refill kept all 64 seats full: the engineer's fifteen merged repairs and the architect's
+        megacap strategy were deployed as files and never born. The repair queue waited at
+        `observing` for children that could not arrive, and the defective parents kept trading."""
         from . import strategies
 
         # A few a tick: each birth probes the strategy's NEEDS in a box (about 20 s). Measured Sept 22,
@@ -464,18 +474,80 @@ class House:
         # failed the same way as the engineer merged more strategies. The rest are born next tick.
         born = []
         known = {a.founder for a in self.registry.agents.values()}
-        for row in strategies.all_strategies():
+        refused = self._state.setdefault("enroll_refused", {})
+        rules = self.game["economy"]
+        rows = [row for row in strategies.all_strategies()
+                if row["name"] not in known and refused.get(row["name"]) != code_sha(row["code"])]
+        rows.sort(key=lambda row: not isinstance(row.get("repair"), dict))  # corrected children first
+        for row in rows:
             if len(born) >= max(1, int(self.settings.enroll_per_tick)):
                 break
-            if row["name"] in known or len(self.registry.living()) >= int(self.game["economy"]["max_population"]):
-                continue
+            loser = None
+            if len(self.registry.living()) >= int(rules["max_population"]):
+                if not self.settings.enroll_displaces:
+                    break
+                # The seat of an agent still running the code this strategy corrects (it cannot be
+                # promoted: its defect is on record), else the weakest resident that has had its chance.
+                loser = self._defective_resident(row) or self._weakest(rules)
+                if loser is None:
+                    break
             try:
                 # Named from the desk its NEEDS put it on, like every other agent: the strategy's
                 # own name in the registry is what says it has already been born.
-                born.append(self.spawn("", row["family"], row["code"], reason="Merton, as architect: " + row["why"], founder=row["name"]))
+                child = self.spawn("", row["family"], row["code"], reason="Merton, as architect: " + row["why"], founder=row["name"])
             except ValueError as exc:
+                refused[row["name"]] = code_sha(row["code"])  # once per file version, not every tick
                 self.alert("warning", f"the architect's strategy {row['name']} could not be born: {str(exc)[:200]}")
+                continue
+            born.append(child)
+            if loser is not None:
+                self.kill(loser, "displaced", self.postmortem(loser, "displaced",
+                    f"the league was full and the merged strategy {row['name']} ({child.id}) takes its seat"))
+        if self.settings.enroll_displaces:
+            self._retire_superseded()
         return born
+
+    def _defective_shas(self, row: Mapping[str, Any]) -> set[str]:
+        """The code a merged repair corrects: the sha in a `strategy_defect:<agent>:<sha12>` key, and
+        the named parent's code. Empty for a repair that names neither (a bug report or a refusal
+        pattern is evidence about a desk, not about one program)."""
+        repair = row.get("repair") if isinstance(row.get("repair"), Mapping) else {}
+        shas = set()
+        parts = str(repair.get("key") or "").split(":")
+        if len(parts) == 3 and parts[0] == "strategy_defect" and len(parts[2]) >= 12:
+            shas.add(parts[2])
+        parent = self.registry.get(str(repair.get("parent") or ""))
+        if parent is not None:
+            shas.add(parent.code_sha256)
+        return shas
+
+    def _running_defect(self, shas: set[str], *, exclude: Sequence[str] = ()) -> list[Agent]:
+        """Living agents off real money whose code is one of `shas` (a full sha or a 12-character prefix)."""
+        return [a for a in self.registry.living()
+                if a.id not in exclude and self.evaluator.rung(a.id) <= 1 and any(a.code_sha256.startswith(s) for s in shas)]
+
+    def _defective_resident(self, row: Mapping[str, Any]) -> Agent | None:
+        """An agent running the code `row` corrects, replay agents before paper ones."""
+        found = self._running_defect(self._defective_shas(row))
+        return min(found, key=lambda a: (self.evaluator.rung(a.id), a.born_at)) if found else None
+
+    def _retire_superseded(self) -> int:
+        """Retire every agent (never one on real money) still running code that a BORN corrected
+        child replaces. Its defect is on record, so no audit would pass it and its forward record
+        measures the defect as much as the idea; the child is judged on its own evidence."""
+        from . import strategies
+
+        born = {a.founder: a for a in self.registry.agents.values() if a.founder}
+        retired = 0
+        for row in strategies.all_strategies():
+            child = born.get(row["name"])
+            if child is None or not isinstance(row.get("repair"), Mapping):
+                continue
+            for agent in self._running_defect(self._defective_shas(row), exclude=(child.id,)):
+                self.kill(agent, "superseded", f"its code carries the defect that {row['name']} ({child.id}) corrects "
+                                               f"(repair {row['repair'].get('key')}); the corrected child is judged on its own evidence")
+                retired += 1
+        return retired
 
     def learn(self) -> int:
         """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook, once each."""
@@ -1325,12 +1397,30 @@ class House:
         holdout = None
         if sealed and current and verdict.numbers.get("passed") and self.evaluator.rung(agent.id) == 0:
             holdout = self._holdout(agent, agent.code, agent.needs, agent.params)  # slow: outside the lock
+            redundant = None
             with self._lifecycle_lock:
                 if holdout.get("passed") and holdout.get("evaluated") and self._generation(agent.id) == generation \
                         and self.evaluator.rung(agent.id) == 0:
                     verdict = self.evaluator.promote(agent.id, 1, "passed deep replay and the sealed holdout",
                                                      {**verdict.numbers, "holdout": holdout})
                     self.seat(self.registry.get(agent.id))
+                elif self._generation(agent.id) == generation:
+                    # A development pass the holdout did not admit must say why, or the agent sits on
+                    # rung 0 with a passing trial and nothing to act on (mcentee-32 and -33, Sept 22,
+                    # 2026: the lineage's three holdout evaluations were spent by clones of their own
+                    # code, and their code was marked as tried).
+                    reason = (f"its development replay passed, but the sealed holdout refused it: {holdout.get('refused')}"
+                              if not holdout.get("evaluated") else "its development replay passed, but the sealed holdout did not")
+                    self.ledger.append("eval.verdict", {"decision": "progress", "rung": 0, "stage": "holdout",
+                                                        "reason": reason, "holdout": holdout}, agent=agent.id)
+                    if not holdout.get("evaluated"):
+                        # The same program already holding a seat on paper makes this one a clone: it
+                        # cannot add evidence the sibling is not already gathering, and it holds a seat.
+                        redundant = next((a for a in self.registry.living() if a.id != agent.id and a.code_sha256 == agent.code_sha256
+                                          and self.evaluator.rung(a.id) >= 1), None)
+            if redundant is not None:
+                self.kill(agent, "redundant", f"{reason}; the same program already trades on paper as {redundant.id}",
+                          expected_generation=generation)
         out = {"agent": agent.id, "replay": verdict.decision, "reasons": verdict.numbers.get("reasons")}
         if holdout is not None:
             out["holdout"] = holdout
@@ -1424,6 +1514,10 @@ class House:
                 if drift.decision == "demote":
                     self._move_books(agent, book)
                     return drift
+        if rung == 2 and verdict.decision != "die" and self.auditor is not None:
+            # Audit after promotion: an audit that finished before a restart is committed, and
+            # one that is owed (never run, or it could not run) is started.
+            self._settle_after_audit(agent, generation)
         if verdict.decision == "die":
             self.kill(agent, "evidence", verdict.reason, expected_generation=generation)
         elif verdict.decision == "eligible":
@@ -1507,6 +1601,9 @@ class House:
                     if wait:
                         self._promotion_status(agent, verdict, **wait)
                         return
+                    if self._audit_after() and self._known_defect(agent) is None:
+                        self._promote_then_audit(agent, verdict, source_book)
+                        return
                     self._promotion_status(agent, verdict, 'auditing', 'a fresh production audit is in progress')
                     self._start_audit(agent, verdict, generation)
                     return
@@ -1550,15 +1647,103 @@ class House:
         with self._state_lock:
             (self._state.get(self.AUDITS) or {}).pop(agent_id, None)
 
-    def _start_audit(self, agent: Agent, verdict: Verdict, generation: tuple) -> None:
+    def _audit_after(self) -> bool:
+        """The constitution's audit timing (`ladder.paper.audit`, owner revision of Sept 23, 2026):
+        "after" promotes a screen-passer to the micro rung at once and audits it there."""
+        return str(CONSTITUTION["ladder"]["paper"].get("audit", "before")) == "after"
+
+    def _promote_then_audit(self, agent: Agent, verdict: Verdict, source_book: Book | None) -> None:
+        """Audit AFTER, not before (called under the lifecycle lock, once the screen, accounting,
+        the campaign, the live venue and the capital envelope have all passed, and no veto's
+        cooldown is running). The agent takes the micro stake now; the frontier audit runs on the
+        record that earned it, and a veto sends it straight back to paper (`_finish_audit`)."""
+        numbers = {**verdict.numbers, "audit_timing": "after"}
+        promoted = Verdict(verdict.agent, verdict.rung, verdict.decision, verdict.reason, numbers)
+        self.evaluator.promote(agent.id, verdict.rung + 1, verdict.reason + "; the frontier audit follows on the micro rung", numbers)
+        self._promotion_status(agent, promoted, 'promoted', 'the screen and allocation gates passed; the frontier audit follows on the micro rung')
+        if source_book is not None:
+            self._move_books(agent, source_book)
+        generation = self._generation(agent.id)
+        if generation is not None:
+            self._start_audit(agent, promoted, generation, after=True)
+
+    def _audit_owed(self, agent: Agent) -> dict[str, Any] | None:
+        """The promotion row of a micro agent promoted under audit-after whose audit has not yet
+        reached a verdict (a restart, or an audit that could not run), else None."""
+        entered = self.evaluator._rung_entered(agent.id)
+        promotion = next((e for e in self.ledger.iter(kinds="eval.verdict", agent=agent.id, after=entered - 1)
+                          if e.seq == entered), None)
+        if promotion is None or promotion.payload.get("decision") != "promote" or promotion.payload.get("audit_timing") != "after":
+            return None
+        if any(not e.payload.get("error") for e in self.ledger.iter(kinds="audit.verdict", agent=agent.id, after=entered)):
+            return None
+        return dict(promotion.payload)
+
+    def _settle_after_audit(self, agent: Agent, generation: tuple) -> None:
+        """On the micro rung: commit an after-audit that finished before a restart, or start one
+        that is owed (called from `judge`, outside the lifecycle lock)."""
+        inflight = self._audit_inflight(agent.id, generation)
+        if inflight == "running":
+            return
+        owed = self._audit_owed(agent) if not isinstance(inflight, dict) else None
+        if not isinstance(inflight, dict) and owed is None:
+            return
+        numbers = {k: v for k, v in (owed or {}).items() if k not in ("decision", "from_rung", "to_rung", "reason")}
+        verdict = Verdict(agent.id, 1, "eligible", "the micro promotion's audit (audit after promotion)", {**numbers, "audit_timing": "after"})
+        if isinstance(inflight, dict):
+            with self._state_lock:
+                record = (self._state.get(self.AUDITS) or {}).get(agent.id) or {}
+            if record.get("after"):
+                self._finish_audit(agent.id, verdict, generation, inflight)
+            return
+        if self._audit_wait(agent) is not None:
+            return  # an audit that could not run waits out the short error cooldown
+        with self._lifecycle_lock:
+            if self._generation(agent.id) == generation:
+                self._start_audit(agent, verdict, generation, after=True)
+
+    def _known_defect(self, agent: Agent) -> str | None:
+        """Why an agent's code is known to be defective, or None: a red pre-audit, or a merged
+        corrected child of its code. Such an agent is audited BEFORE any promotion, never after."""
+        from . import strategies
+        from .preaudit import mark_of
+
+        with self._state_lock:
+            mark = mark_of(self._state, agent)
+        if mark and mark.get("verdict") == "red":
+            return f"the pre-audit found {', '.join(mark.get('flags') or []) or 'a defect'}"
+        for row in strategies.all_strategies():
+            if isinstance(row.get("repair"), Mapping) and any(agent.code_sha256.startswith(s) for s in self._defective_shas(row)):
+                return f"the merged repair {row['name']} corrects its code"
+        return None
+
+    def _start_audit(self, agent: Agent, verdict: Verdict, generation: tuple, *, after: bool = False) -> None:
         """Persist the audit before dispatching it (called under the lifecycle lock)."""
         with self._state_lock:
             self._state.setdefault(self.AUDITS, {})[agent.id] = {
                 "generation": list(generation), "since_seq": self.ledger.head()[0], "at": now_iso(self.clock),
-                "rung": verdict.rung, "code_sha256": agent.code_sha256}
+                "rung": verdict.rung, "code_sha256": agent.code_sha256, "after": bool(after)}
         self._save_state()
         if not self._background(f"audit:{agent.id}", self._run_audit, agent.id, verdict, generation):
             self._drop_audit(agent.id)  # closing: the next process audits it afresh
+
+    def _audit_charges_agent(self) -> bool:
+        """Who pays for a promotion audit. From Sept 23, 2026 the House does (`game.json`
+        `audit.house_pays`): hawkins cleared the screen on Sept 22 and waited at "cannot cover its
+        audit and operating credit floor", a paper agent's purse deciding whether real money looks at it."""
+        return not bool((self.game.get("audit") or {}).get("house_pays", False))
+
+    def _call_auditor(self, agent: Agent, verdict: Verdict) -> Mapping[str, Any]:
+        """The audit, telling an auditor that takes `charge` who pays (a stand-in may not take it)."""
+        import inspect
+
+        try:
+            takes_charge = "charge" in inspect.signature(self.auditor.audit).parameters
+        except (TypeError, ValueError):
+            takes_charge = False
+        if takes_charge:
+            return self.auditor.audit(agent, verdict, charge=self._audit_charges_agent())
+        return self.auditor.audit(agent, verdict)
 
     def _run_audit(self, agent_id: str, verdict: Verdict, generation: tuple) -> None:
         with self._lifecycle_lock:
@@ -1567,7 +1752,7 @@ class House:
                 return  # retired, rewritten or moved while it waited for a lane
             agent = deepcopy(self.registry.get(agent_id))
         try:
-            audit = self.auditor.audit(agent, verdict)  # the provider never holds the lifecycle lock
+            audit = self._call_auditor(agent, verdict)  # the provider never holds the lifecycle lock
         except Exception as exc:  # noqa: BLE001 - an auditor that raises has not audited
             # Recorded the way the auditor records its own failures, so the short error cooldown
             # applies: otherwise a broken audit is retried at every mark pass, five minutes apart.
@@ -1576,7 +1761,39 @@ class House:
             self.ledger.append("audit.verdict", {**audit, "policy_digest": getattr(self.auditor, "policy_digest", None)}, agent=agent_id)
         self._finish_audit(agent_id, verdict, generation, audit)
 
+    def _finish_after_audit(self, agent_id: str, verdict: Verdict, generation: tuple, audit: Mapping[str, Any]) -> None:
+        """The verdict on an agent already on the micro rung: a veto sends it back to paper; an
+        audit that could not run leaves it trading and is owed again after the error cooldown."""
+        with self._lifecycle_lock:
+            if self._generation(agent_id) != generation:
+                return  # demoted, retired or rewritten while it was audited: nothing to act on
+            agent = self.registry.get(agent_id)
+            if audit.get("approve"):
+                self._promotion_status(agent, verdict, 'audit_confirmed', 'the frontier audit confirmed the micro promotion')
+                return
+            if audit.get("error"):
+                self._promotion_status(agent, verdict, 'audit_retry',
+                                       f"the audit could not run ({str(audit.get('error'))[:120]}); it trades the micro stake "
+                                       "and is audited again after the short cooldown")
+                return
+            old = self.book_of(agent)
+            summary = str(audit.get("summary") or "the audit did not approve")[:300]
+            self.evaluator.demote(agent_id, f"the frontier audit after promotion vetoed it: {summary}",
+                                  {"audit_timing": "after", "findings": [f.get("issue") for f in audit.get("findings") or []][:5]})
+            if old is not None:
+                self._move_books(agent, old)
+            self._promotion_status(agent, verdict, 'audit_veto', summary)
+
     def _finish_audit(self, agent_id: str, verdict: Verdict, generation: tuple, audit: Mapping[str, Any]) -> None:
+        with self._state_lock:
+            after = bool(((self._state.get(self.AUDITS) or {}).get(agent_id) or {}).get("after"))
+        if after:
+            try:
+                self._finish_after_audit(agent_id, verdict, generation, audit)
+            finally:
+                self._drop_audit(agent_id)
+                self._save_state()
+            return
         try:
             if not audit.get("approve"):
                 agent = self.registry.get(agent_id)
@@ -1886,7 +2103,7 @@ class House:
 
     def _audit_wait(self, agent: Agent) -> dict | None:
         rules = self.game.get("audit") or {}
-        if self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
+        if self._audit_charges_agent() and self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
             return {'stage': 'audit_credits', 'reason': 'the agent cannot cover its audit and operating credit floor'}
         last = self.ledger.last("audit.verdict", agent=agent.id)
         if last is None:

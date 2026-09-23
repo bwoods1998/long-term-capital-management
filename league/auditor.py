@@ -173,7 +173,9 @@ class Auditor:
         }
 
     # ------------------------------------------------------------------ audit
-    def audit(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
+    def audit(self, agent: Agent, verdict: Verdict, *, charge: bool = True) -> dict[str, Any]:
+        """`charge=False`: the House pays (game.json `audit.house_pays`, Sept 23, 2026). The cost is
+        still recorded on the verdict and still booked against the owner's frontier allowance."""
         packet = self.packet(agent, verdict)
         try:
             # 12,000, as Merton's own passes get: reasoning tokens are spent out of this budget
@@ -186,7 +188,7 @@ class Auditor:
                 "policy_digest": packet['audit_policy_digest'],
                 "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
             return {"approve": False, "error": str(exc)}
-        if answer.cost_usd > 0:
+        if answer.cost_usd > 0 and charge:
             self.economy.charge(agent.id, answer.cost_usd, "frontier audit", detail={"model": answer.model})
         try:
             result = answer.json()
@@ -208,6 +210,7 @@ class Auditor:
             "summary": str(result.get("summary") or "")[:1200],
             "findings": [{"severity": str(f.get("severity"))[:12], "issue": str(f.get("issue"))[:400], "evidence": str(f.get("evidence"))[:400]} for f in findings],
             "cost_usd": format(answer.cost_usd, "f"),
+            "paid_by": "agent" if charge else "house",
             "model": answer.model,
             "book": packet["test_passed"].get("book"),
             "blocks_at_audit": len(packet["paper_blocks"]),

@@ -61,9 +61,11 @@
     ]
   },
   "audit": {
+    "_about": "The promotion audit. house_pays (Sept 23, 2026): the House pays for the audit of an agent that cleared the screen, so a paper agent's purse no longer decides whether real money looks at it (hawkins waited at 'cannot cover its audit' on Sept 22). min_credits_usd applies only when house_pays is false.",
     "cooldown_hours": 24,
     "error_cooldown_hours": 0.5,
-    "min_credits_usd": "0.60"
+    "min_credits_usd": "0.60",
+    "house_pays": true
   },
   "research": {
     "profile": "pro_flex",
