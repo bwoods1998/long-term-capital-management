@@ -865,12 +865,20 @@ dynamism revisions followed that evening:
 - **Deploy 3 (#170, #171).** The tick that never blocks, profit-indexed compute, the Alpha Lab and
   the open desks. Release `20260923T104142Z-5d86b468fbde` was promoted at 10:43:05Z, and the
   gateway's profit-indexed month went out as version `3eef1b8a`.
-- **After Deploy 3 (#173, #174).** A profile of the live House found the tick ranking every agent
+- **Deploy 4 (#173, #174).** A profile of the live House found the tick ranking every agent
   several times, and the lab starved of children behind seeds waiting for their tapes (#173: one
   standings table a tick, and breeding while fewer than a batch have built tapes). An audit veto of
-  the best paper agent turned out to rest on a mislabelled Kalshi maker fill (#174). Both change
-  judges (`book.py`, `lab.py`), so they reach the box with an owner deploy; the execution record
-  has it.
+  the best paper agent turned out to rest on a mislabelled Kalshi maker fill (#174). Promoted at
+  11:17Z; ticks fell from 191 s to 60-130 s.
+- **Deploy 5 (#176).** Audits the allocator asks for now carry its `allocation_context` (the
+  stake, limits, envelope and grant), and the allocator's rules joined the audit policy digest.
+  The vetoes judged against the legacy $50 tuition were reconsidered, and huang-h51fdd3-2 became
+  the first allocator bunt at 12:10Z. Lab batches alternate between queue order and the largest
+  ready group.
+- **Deploy 6 (#178).** On the largest-group turn the lab builds the biggest waiting groups'
+  tapes first. From 12:44Z it evaluated about 200 candidates per 10 minutes in batches of 32.
+  None of Deploys 3-6 changed a money rule; the grant stayed on money digest `44e8d48d`. The
+  execution record has the watch that followed.
 
 Known limits:
 

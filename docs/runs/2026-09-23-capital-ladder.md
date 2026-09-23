@@ -259,3 +259,39 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
 - **12:50:25Z — the second allocator bunt**, and the first through the pure allocator path (no audit):
   meriwether-h2d625d, paper → bunt, a $10 stake at Kalshi, E 1.0100 on 7 closed paper trades.
 
+- 12:54:00Z — the lab's `alpaca-index-etfs` elite was `holdout_rationed`: its lineage
+  (agent:scholes-21) had spent its 3 sealed-holdout evaluations. It joins agent:mcentee-31
+  (`alpaca-megacaps`, 11:29:48Z). Rationing is the plan's D4 rule, working as written.
+- 12:56Z — **why the graduate waits.** `Lab._seat_for` asks `House._weakest` for a resident to
+  displace, the same rule the House's own births use. The league is at its 96 cap (6 bunts,
+  90 on paper). Of the 90 on paper, 39 are below W_paper 1 and 61 have never traded, yet
+  `_weakest` found none it may displace. Each one is still inside a grace the rule guarantees:
+  - completed research passes (rung 0);
+  - a first offered market opportunity (equity agents seated overnight);
+  - a daily agent's pending screen.
+
+  Those graces exist because of the Sept 20-22 deaths recorded in the code. Three residents
+  were displaced since T0, all to House births. Shortening a grace to seat the lab's program
+  would buy a move with the rule the evidence set, so it is left alone. The graduate is asked
+  again every 10 minutes.
+- 12:57Z — **`scripts/floor_watch.py` counted practice as real money.** Its "real money" line
+  summed every book with venue fills, including the practice books `alpaca-paper` and
+  `kalshi-shadow`. Fixed on this branch: only `kalshi` and `alpaca` are real, and practice gets
+  its own line. Since T0, real money is:
+  - **Kalshi:** 3 fills, $19.30 notional, −$1.52 realized (huang-h51fdd3-2's DOGE 15-minute contract).
+  - **Alpaca:** 1 fill (haghani-37 bought $12.00 of LTC/USD at 11:26:20Z), still open.
+
+  Practice since T0: alpaca-paper 100 fills ($3,148, +$0.99 realized); kalshi-shadow 69 fills
+  ($759, −$108.66 realized).
+- **Lab throughput, measured at 12:57Z.** The first evaluation was at 10:51:07Z.
+  - **The first hour evaluated 87 candidates**, against the plan's 1,000. The batch evaluator
+    was never the limit: 109 batches took 577 s of lab-box time and $0.03 of Sail. Two things
+    held it back:
+    - until #176 every batch was a single seed waiting for its own tape;
+    - the House box (1 vCPU) builds only 4 tapes a step, and every restart empties the tape cache.
+  - **Hour 12 evaluated 324.** Since Deploy 6 it has run at about 200 per 10 minutes.
+  - **Totals:** 423 evaluated (123 seeds, 292 parameter children, 8 agent submissions), 0 errors.
+    335 were eligible (79%) and 279 cleared the replay gate (66%). The archive holds 22 cells
+    across 9 desks.
+  - **Graduation, per stage:** 3 elites went to the sealed holdout. 2 were holdout-rationed and
+    1 passed the House replay, then `waiting_seat`.
