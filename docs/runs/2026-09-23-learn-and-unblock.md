@@ -540,3 +540,18 @@ Execution record for the owner's goal of Sept 23, 2026: execute
     closed trades).
   - 22:40:13Z — meriwether-h2d625d, lent up to $30 at 22:30Z, filled 16 KXMLBTOTAL at $0.54 ($8.64)
     on shard 3.
+- **23:05Z — the Sail floor is at risk.** The Sail balance fell from $91.39 (20:16Z) to $76.35
+  (23:02Z); the 24-hour burn read $42.60 a day and rising (runway 1.56 days). The House's own
+  commitments show why, hour by hour: Sail $0.57, $1.10, $1.78 (17-20Z) while research ran on Luna,
+  then $5.76 and $5.98 (20-22Z) after the OpenAI tier fell to "earned" and cheap-model research
+  moved to Sail, and $11.66 (22-23Z, 344 calls) with 112 agents researching on evidence triggers
+  (library notes 31 an hour, heartbeats 17, clock runs for winners and idle agents 12, fills and
+  settlements 18). At that rate the balance lasts about six hours. The plan: stop growth before
+  anything that trades. **PR #216** (23:08Z, risk-free `turbo.json` dials): the base research interval
+  15 → 120 minutes and research workers 16 → 6; refused orders still get prompt research; every
+  agent keeps trading. It ships through the in-box updater once merged. Sail auto-recharge or a
+  top-up is the owner's step (asked at T0).
+- 23:00Z watch — 112 living (the population cap reached through the seat market: 3 lab births in
+  the quarter hour), no book frozen, the grant active on `c2b0e09c`; OpenAI House line $11.32,
+  gateway month $16.92 left of $408; seats: 28 graduates and 5 cards waiting, 21 residents
+  displaceable. 23:03:18Z — hilibrand-h6ca596-3's first real settlement lost $2.20.
