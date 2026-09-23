@@ -47,7 +47,9 @@ class Rules(unittest.TestCase):
         r = CONSTITUTION["allocator"]
         self.assertTrue(r["enabled"])
         self.assertTrue(0.25 <= r["evidence"]["paper_weight"] <= 1)
-        self.assertTrue(0 <= r["evidence"]["alpaca_paper_haircut_bps"] <= 50)
+        # A8 (Sept 23, 2026): per asset class, each within the table's floor of 2 bps a side.
+        self.assertEqual(set(r["evidence"]["alpaca_paper_haircut_bps"]), {"crypto", "equity", "option"})
+        self.assertTrue(all(2 <= bps <= 50 for bps in r["evidence"]["alpaca_paper_haircut_bps"].values()))
         self.assertTrue(1.0 <= r["bunt_at"] <= 1.25 and 3 <= r["bunt_min_trades"] <= 20)
         self.assertTrue(1.2 <= r["swing_at"] <= 3 and 5 <= r["swing_min_real_trades"] <= 30)
         self.assertTrue(0.5 <= r["kappa"] <= 2 and 5 <= r["e_cap"] <= 50)
@@ -158,10 +160,11 @@ class EvidenceOnTheBooks(HouseCase):
             self.clock.advance(300)
         fills = [e for e in self.house.ledger.iter(kinds="book.fill", agent=agent.id) if e.payload.get("source") == "venue"]
         self.assertTrue(fills)
-        cut = allocator._paper_haircut(self.house, agent.id, "alpaca-paper", 10)
+        table = CONSTITUTION["allocator"]["evidence"]["alpaca_paper_haircut_bps"]
+        cut = allocator._paper_haircut(self.house, agent.id, "alpaca-paper", table)
         notional = sum(float(e.payload["quantity"]) * float(e.payload["price"]) for e in fills)
-        self.assertAlmostEqual(cut, notional * 10 / 10_000 / 200.0, places=9)
-        self.assertEqual(allocator._paper_haircut(self.house, agent.id, "kalshi-shadow", 10), 0.0)
+        self.assertAlmostEqual(cut, notional * table["crypto"] / 10_000 / 200.0, places=9)  # BTC: the crypto rate
+        self.assertEqual(allocator._paper_haircut(self.house, agent.id, "kalshi-shadow", table), 0.0)
         row = allocator.evidence(self.house, agent)
         raw = self.house.evaluator.wealth(agent.id, "alpaca-paper", agent.horizon)["log"]
         self.assertAlmostEqual(math.log(row.w_paper), raw - cut, places=9)
@@ -725,6 +728,51 @@ class LifecycleRegressions(HouseCaseReal):
             self.assertEqual(house.evaluator.rung(a.id), 2)  # the cooldown keeps it a bunt
 
 
+class HaircutByAssetClass(ReviewRegressions):
+    """A8 (Sept 23, 2026): the Alpaca practice haircut is charged per asset class, each class at the
+    optimism measured on its own practice fills against the quote at intent time
+    (`docs/research/queries/2026-09-23/A8-haircut.py`); a plain number still charges every class."""
+
+    TABLE = CONSTITUTION["allocator"]["evidence"]["alpaca_paper_haircut_bps"]
+
+    def fill(self, asset_class, quantity, price, multiplier=None):
+        instrument = {"asset_class": asset_class, "symbol": "X"}
+        if multiplier:
+            instrument["multiplier"] = multiplier
+        self.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue", "side": "buy", "quantity": quantity,
+                                         "price": price, "instrument": instrument}, agent="a")
+
+    def cut(self, bps):
+        return allocator._paper_haircut(SimpleNamespace(ledger=self.ledger), "a", "alpaca-paper", bps)
+
+    def test_a_crypto_and_an_equity_fill_of_the_same_notional_pay_their_own_class_rate(self):
+        self.stake(200, book="alpaca-paper")
+        self.fill("crypto", "0.001", "80000")  # $80
+        self.assertAlmostEqual(self.cut(self.TABLE), 80 * 4 / 10_000 / 200, places=12)
+        self.fill("equity", "0.2", "400")  # $80
+        self.assertAlmostEqual(self.cut(self.TABLE), 80 * (4 + 2) / 10_000 / 200, places=12)
+        self.assertAlmostEqual(self.cut({"crypto": 5, "equity": 2}), 80 * (5 + 2) / 10_000 / 200, places=12)
+
+    def test_an_option_fill_pays_its_class_rate_and_its_notional_counts_the_multiplier(self):
+        self.stake(200, book="alpaca-paper")
+        self.fill("option", "1", "0.40", multiplier="100")  # one $40 contract
+        self.assertAlmostEqual(self.cut(self.TABLE), 40 * 24 / 10_000 / 200, places=12)
+        self.assertAlmostEqual(self.cut({"crypto": 5, "equity": 2, "option": 30}), 40 * 30 / 10_000 / 200, places=12)
+
+    def test_a_plain_number_still_charges_every_class_and_an_unlisted_class_pays_the_tables_largest(self):
+        self.stake(200, book="alpaca-paper")
+        self.fill("crypto", "0.001", "80000")
+        self.fill("equity", "0.2", "400")
+        self.fill("option", "1", "0.40", multiplier="100")
+        self.assertAlmostEqual(self.cut(10), (80 + 80 + 40) * 10 / 10_000 / 200, places=12)  # the rollback form
+        self.assertAlmostEqual(self.cut({"crypto": 5}), (80 + 80 + 40) * 5 / 10_000 / 200, places=12)
+        self.assertEqual(self.cut({"crypto": 0, "equity": 0, "option": 0}), 0.0)
+
+    def test_the_constitution_carries_the_measured_table(self):
+        # docs/research/queries/2026-09-23/A8-haircut.out: 368 crypto, 136 equity and 46 option fills.
+        self.assertEqual(self.TABLE, {"crypto": 4, "equity": 2, "option": 24})
+
+
 class BuntGrowth(HouseCaseReal):
     """U5 (Sept 23, 2026): a bunt keeps what it makes. Its target is `bunt_usd x clamp(W_real, 1,
     swing_at)`, so profit inside the envelope's headroom is not swept, and a bunt whose W_real is below
@@ -765,6 +813,44 @@ class BuntGrowth(HouseCaseReal):
         self.assertIsNone(self.sized(a, book, 0.9, "22.50"))  # 11% under its $25: the flat rule would have topped it up
         self.assertEqual(book.account(a.id).staked, D("25"))
         self.assertEqual([e for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "size"], [])
+
+    def test_a_bunt_lent_less_than_todays_base_is_lent_up_to_it_once(self):
+        """Deploy A raised the Kalshi base $10 -> $30 and `_size` lent nothing to a bunt under W_real 1, so
+        a bunt seated at $10 before the raise stayed at $10 (meriwether-h2d625d on the 21:31Z board,
+        W_real 0.9978, stake $10, target $30). It is lent up to the base, net of what it was lent."""
+        a, book = self.bunted()
+        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}):  # the base raised under it
+            row = self.sized(a, book, 0.9978, "24.95")
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("40", "15.00"))  # 40 - 25 lent, not 40 - 24.95
+            self.assertEqual(book.account(a.id).staked, D("40"))
+            self.assertIsNone(self.sized(a, book, 0.95, "36.00"))  # lent the base, down $4: not refilled
+
+    def test_a_throttle_halved_bunt_is_restored_to_the_base_less_its_own_losses(self):
+        """The #198 review, item 4: a bunt halved by the throttle stayed halved when it lifted."""
+        a, book = self.bunted()
+        alloc = self.house.allocator
+        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}), \
+                patch.object(type(alloc), "headroom", return_value=D("1000")):  # the test House's $50 envelope aside
+            self.sized(a, book, 0.95, "24")  # lent up to the $60 base
+            self.assertEqual(book.account(a.id).staked, D("60"))
+            alloc.state["throttle"] = True
+            row = self.sized(a, book, 0.95, "59")  # $1 lost; the throttle halves the target to $30
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("30.00", "-29.00"))
+            self.assertEqual(book.account(a.id).staked, D("31"))
+            self.assertIsNone(self.sized(a, book, 0.95, "25"))  # $5 more lost under the throttle: not refilled
+            alloc.state["throttle"] = False
+            row = self.sized(a, book, 0.95, "25")
+            self.assertEqual((row["stake_usd"], row["moved_usd"]), ("60", "29.00"))  # $54: the base less its $6 of losses
+            self.assertEqual(book.account(a.id).staked, D("60"))
+
+    def test_lending_up_to_the_base_stays_inside_the_envelope(self):
+        a, book = self.bunted()
+        alloc = self.house.allocator
+        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}), \
+                patch.object(type(alloc), "headroom", return_value=D("6.50")):
+            row = self.sized(a, book, 0.99, "25")
+            self.assertEqual(row["moved_usd"], "6.50")  # 15 owed to the base, 6.50 of room
+        self.assertEqual(book.account(a.id).staked, D("31.50"))
 
     def test_the_seat_the_limits_the_audit_packet_and_the_board_show_the_same_target(self):
         a, book = self.bunted()

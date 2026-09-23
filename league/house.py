@@ -82,6 +82,32 @@ QUIET_DESK_SECONDS = 3600.0
 QUIET_DESK_WAKES = 3
 #: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
 REAL_BOOKS = ("kalshi", "alpaca")
+#: A reconcile that fails is read once more after this many seconds and a fresh poll, before it is
+#: called a mismatch (`reconcile_with_second_look`).
+SECOND_LOOK_SECONDS = 3.0
+
+
+def reconcile_with_second_look(book: Any) -> Any:
+    """`book.reconcile()`, and when it fails, one more look after a short wait and a fresh poll.
+
+    A fill in flight is not a mismatch. Measured Sept 23, 2026 at 21:48:57Z: haghani-37's marketable
+    LINK/USD limit sell on the practice account filled seconds after the mark pass's poll, the venue's
+    positions and cash already showed it while its orders endpoint did not, and the reconcile read
+    "cash differs by 40.0116; positions differ: LINK -3.262934654". The fill was booked one poll
+    later, but the error alert inside the deploy's watch rolled Deploy B back. A mismatch that is
+    still there on the second look is real and stands (the book stays frozen, the alert is raised).
+    """
+    result = book.reconcile()
+    if result.ok or not book.open_orders():
+        return result  # with no order working, nothing can be in flight: the mismatch stands as read
+    # The second look re-reads the same pass: it must not count twice toward a practice book's
+    # adoption of the venue (`Book.reconcile`, ADOPT_AFTER consecutive failed readings).
+    counted = getattr(book, "_unreconciled", None)
+    if isinstance(counted, int) and counted > 0:
+        book._unreconciled = counted - 1
+    book.sleep(SECOND_LOOK_SECONDS)
+    book.poll()
+    return book.reconcile()
 CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
 #: An agent's resting entries are cancelled once none of its wakes has completed on their book for
 #: this many of its own wake intervals, and never sooner than `STALE_FLOOR_SECONDS` (see
@@ -95,6 +121,14 @@ PRICE_GRID_TTL_SECONDS = 600.0
 PRACTICE_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
 PROBE_BOX = "house-probe"
+#: The order path's own invariants (`House._order_path_invariants`, workstream B, Sept 23, 2026):
+#: how often they run, how many ledger rows the first pass reads back (never the whole ledger),
+#: and how long a round-the-clock desk may go without one wake, while the House is not paused,
+#: before the operator is told. Measured Sept 22, 2026: 8.4 hours without a wake on any desk
+#: (07:05-15:28Z) while the 15-minute crypto series settled 96 times a coin, and nothing said so.
+ORDER_INVARIANTS_EVERY_SECONDS = 60.0
+ORDER_INVARIANTS_FIRST_ROWS = 2000
+QUIET_ROUND_THE_CLOCK_SECONDS = 1800.0
 
 
 @dataclass
@@ -1152,7 +1186,39 @@ class House:
         # watchdog rightly rolled the release back as a House whose ticks do not finish. For its
         # first five minutes a House wakes a few agents a tick; the rest are a minute late.
         cold = now - self._born_at < 300
-        return out[: min(self.settings.max_wakes_per_tick, self.settings.cold_wakes_per_tick) if cold else self.settings.max_wakes_per_tick]
+        cap = min(self.settings.max_wakes_per_tick, self.settings.cold_wakes_per_tick) if cold else self.settings.max_wakes_per_tick
+        if len(out) <= cap:
+            return out
+        return self._every_desk_first(out, cap)
+
+    def _every_desk_first(self, due: list[Agent], cap: int) -> list[Agent]:
+        """The `cap` agents woken this tick when more are due than fit: one from each desk in turn,
+        the desk that has gone longest without a wake first (`desk_woke`, stamped in `wake`), and
+        within a desk the oldest deadline first, as `due` sorted them.
+
+        A backlog is what a resumed House has: every agent is due at once after a maintenance pause
+        lifts or a restart, and served in deadline order alone the first ticks all went to whichever
+        desks happened to be oldest. Measured Sept 22, 2026, after the 15:28Z resume: the first
+        seventeen minutes reached five of the twelve desks (scholes first, then krasker, meriwether,
+        hawkins, mullins) while the 15-minute crypto desks, live around the clock, waited. The desk
+        stamps live in house.json, so the turn carries across ticks and restarts; with no backlog the
+        order does not matter and `due` returns everyone."""
+        woke = self._state.get("desk_woke") or {}
+        queues: dict[str, list[Agent]] = {}
+        for agent in due:
+            queues.setdefault(getattr(agent, "specialty", None) or agent.id, []).append(agent)  # an agent of no desk is its own
+        order = sorted(queues, key=lambda desk: (float(woke.get(desk) or 0), float(self._state["next_wake"].get(queues[desk][0].id) or 0)))
+        picked: list[Agent] = []
+        while len(picked) < cap:
+            before = len(picked)
+            for desk in order:
+                if queues[desk]:
+                    picked.append(queues[desk].pop(0))
+                    if len(picked) >= cap:
+                        break
+            if len(picked) == before:
+                break
+        return picked
 
     def _next_wake(self, agent: Agent, now: float) -> float:
         """When an agent woken at `now` is due again: `wake_minutes` on, or a few seconds after the
@@ -1187,7 +1253,15 @@ class House:
             if generation is None:
                 return {"agent": agent.id, "skipped": "retired"}
             agent = deepcopy(self.registry.get(agent.id))
-            self._state["next_wake"][agent.id] = self._next_wake(agent, self.clock())
+            next_wake = self._next_wake(agent, self.clock())
+            # Under the state lock (the #203 review, Sept 23, 2026): `_save_state` serializes the
+            # state under it from the audit thread, and a key added here while it iterates would
+            # raise "dictionary changed size during iteration" (the desk stamps are new keys on the
+            # first round after a deploy).
+            with self._state_lock:
+                self._state["next_wake"][agent.id] = next_wake
+                if agent.specialty:
+                    self._state.setdefault("desk_woke", {})[agent.specialty] = self.clock()  # the desk's turn was served (`_every_desk_first`)
             rung = self.evaluator.rung(agent.id)
             if self._state["tried"].get(agent.id) != agent.code_sha256 and not self.paused():
                 self._background(f"replay:{agent.id}", self._replay_own, agent)
@@ -1260,6 +1334,17 @@ class House:
                 if self.book_of(agent) is not self.books[book_name]:
                     continue
                 rows = list(outcome.get("intents") or [])
+                if agent.id not in self.books[book_name].limits:
+                    # No seat on the book means the book refuses every intent, one `book.refused`
+                    # row each ("has no seat on the ... book"), and a strategy reads its own
+                    # decisions as refused for a reason it cannot act on. A wake seats a living agent
+                    # (`seat`), so this is a seat lost between the decision and its submission (a
+                    # demotion, a closed account): drop the intents here, and say so once an agent a
+                    # day (workstream B, Sept 23, 2026: 607 such refusals in 48 hours, all of them
+                    # the House's own wind-down exits after a restart, fixed in `_wind_down` on Sept
+                    # 22; this is the same guard on the agents' side of the path).
+                    self._note_unseated(agent, book_name, len(rows))
+                    continue
                 if self.paused() and any(intent.side == 'buy' for intent in rows):
                     self.ledger.append('book.refused', {'book': book_name,
                         'reasons': ['the House is paused for maintenance: exits and cancels only']}, agent=agent.id)
@@ -1272,6 +1357,89 @@ class House:
                     rows = [intent for intent in rows if intent.side != 'buy']
                 intents.extend(rows)
             return self.books[book_name].submit(intents) if intents else []
+
+    def _note_unseated(self, agent: Agent, book_name: str, dropped: int) -> None:
+        """Say once an agent a day that its decisions were dropped for want of a seat (`_submit_wakes`)."""
+        today = now_iso(self.clock)[:10]
+        with self._state_lock:
+            told = self._state.setdefault("unseated_told", {})
+            if told.get(agent.id) == today:
+                return
+            told[agent.id] = today
+            for key in [k for k, day in told.items() if day != today]:
+                told.pop(key, None)
+        self.alert("warning", f"{agent.id}: {dropped} intent(s) dropped before the {book_name} book: it has no seat there "
+                              "(a seat lost between its decision and the submission). Nothing was refused on its record; "
+                              "its next wake seats it again if it is still on that book.")
+
+    def _order_path_invariants(self) -> None:
+        """Workstream B (Sept 23, 2026): the order path finds its own next defect. Two checks a
+        tick, each raised as an ops warning, each throttled so a standing condition is told once:
+
+        - A `book.refused` row for an agent that is not alive, told once an agent a day. The dead
+          do not decide: such a refusal is the House's own exit of an abandoned account walking into
+          a wall on every mark pass (Sept 21-22, 2026: 607 "has no seat" and 576 "outside regular
+          hours" refusals, found by reading the ledger a day later). Read from a cursor kept in
+          house.json, never the whole ledger; the first pass reads back `ORDER_INVARIANTS_FIRST_ROWS`.
+        - A round-the-clock desk (coins, Kalshi: `Niche.keeps_hours` false) with living members and
+          no wake for `QUIET_ROUND_THE_CLOCK_SECONDS` while the House is not paused, told once a desk
+          per that long. The stamps are `desk_woke` (set by `wake`); a pause, and the House's own
+          start, reset the clock, since neither is a scheduler fault. A closed compute allowance
+          stops wakes too (`_note_stopped` says so after three ticks): this says which markets it
+          is leaving unattended.
+        """
+        now = self.clock()
+        with self._state_lock:
+            state = self._state.setdefault("order_invariants", {})
+            if now - float(state.get("at") or 0) < ORDER_INVARIANTS_EVERY_SECONDS:
+                return
+            state["at"] = now
+            cursor = state.get("cursor")
+            told_dead: dict[str, str] = dict(state.get("dead_told") or {})
+            told_quiet: dict[str, float] = dict(state.get("quiet_told") or {})
+            paused_at = float(state.get("paused_at") or 0)
+        if cursor is None:
+            head = self.ledger.read(limit=1, newest=True)
+            cursor = max(0, (head[-1].seq if head else 0) - ORDER_INVARIANTS_FIRST_ROWS)
+        alerts: list[str] = []
+        today = time.strftime("%Y-%m-%d", time.gmtime(now))
+        walls: dict[str, list[Any]] = {}
+        for row in self.ledger.iter(kinds="book.refused", after=int(cursor)):
+            cursor = row.seq
+            agent = self.registry.get(row.agent)
+            if row.agent == HOUSE or (agent is not None and agent.alive) or told_dead.get(row.agent) == str(row.at)[:10]:
+                continue
+            wall = walls.setdefault(row.agent, [0, str(row.payload.get("book") or ""), ""])
+            wall[0] += 1
+            wall[2] = wall[2] or str((row.payload.get("reasons") or [""])[0])[:160]
+        for agent_id, (count, book_name, reason) in walls.items():
+            told_dead[agent_id] = today
+            alerts.append(f"{agent_id}: {count} intent(s) refused on {book_name} for an agent that is not alive ({reason!r}). "
+                          "The dead do not decide: this is the House's own exit of an abandoned account walking into a wall "
+                          "on every mark pass (`_wind_down`), not a strategy's mistake.")
+        if self.paused():
+            paused_at = now
+        else:
+            woke = self._state.get("desk_woke") or {}
+            living = self.registry.living()
+            for niche_id, niche in self.niches.items():
+                members = [a for a in living if a.specialty == niche_id]
+                if not members or all(niche.keeps_hours(a.needs) for a in members):
+                    continue  # no one to wake, or a desk that keeps the session: its quiet nights are its own
+                last = max(float(woke.get(niche_id) or 0), paused_at, self._born_at)
+                if now - last < QUIET_ROUND_THE_CLOCK_SECONDS or now - float(told_quiet.get(niche_id) or float("-inf")) < QUIET_ROUND_THE_CLOCK_SECONDS:
+                    continue
+                told_quiet[niche_id] = now
+                stopped = str((self._state.get("stopped") or {}).get("reason") or "")
+                alerts.append(f"{niche_id}: no wake on a round-the-clock desk for {int((now - last) // 60)} minutes with {len(members)} "
+                              f"living member(s) and the House not paused" + (f" ({stopped})" if stopped else "")
+                              + ". Its markets are live and unattended.")
+        with self._state_lock:
+            state.update(cursor=int(cursor), paused_at=paused_at,
+                         dead_told={k: v for k, v in told_dead.items() if v >= today},
+                         quiet_told={k: v for k, v in told_quiet.items() if now - float(v) < QUIET_ROUND_THE_CLOCK_SECONDS})
+        for text in alerts:
+            self.alert("warning", text)
 
     def _offered(self, agent: Agent, ctx: Mapping[str, Any]) -> int:
         """How many live, tradeable things this wake actually put in front of the strategy.
@@ -1327,7 +1495,10 @@ class House:
         - a real-money Alpaca BUY is trimmed to what the book will take (`_fit_real_entry`): the
           position it leaves valued at the ask, as the book values it, within `_real_limits`. A bid
           under the ask sized to its own price was otherwise refused as over half the equity. A bid
-          the same decision cancels (`cancelling`) is not counted against the new one.
+          the same decision cancels (`cancelling`) is not counted against the new one;
+        - an OPTION asked for at market becomes a limit at the touch, and a POST-ONLY Kalshi bid or
+          offer that would cross the touch is re-priced one tick inside it (`_fit_order_type`,
+          Sept 23, 2026): the decision trades, or rests, instead of being refused or rejected.
 
         Each change a guard made is appended to `adjusted` (the wake records it on `agent.woke`)."""
         intents, dropped = [], []
@@ -1351,6 +1522,10 @@ class House:
                     if snapped != limit:
                         notes.append(f"limit {limit} snapped {'down' if side == 'buy' else 'up'} to {snapped} (the venue's {increment} grid)")
                         limit = snapped
+                fitted_order = self._fit_order_type(book, instrument, side, order_type, limit, bool(row.get("post_only")))
+                if fitted_order is not None:
+                    order_type, limit, note = fitted_order
+                    notes.append(note)
                 step = step_of(instrument, order_type)
                 price = limit
                 requested: Decimal | None = None  # the order's dollars as asked, once there is a price to count them at
@@ -1414,6 +1589,57 @@ class House:
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
         return intents, dropped
+
+    def _fit_order_type(self, book: Book, instrument: Instrument, side: str, order_type: str, limit: Decimal | None,
+                        post_only: bool) -> tuple[str, Decimal | None, str] | None:
+        """Two fittings of an order's type and price to what the book and the venue take, each done
+        once and said on the wake (`adjusted`): (order type, limit, why), or None when the order
+        stands as asked. The book stays the judge of the fitted order.
+
+        - An OPTION asked for at market becomes a limit at the touch: the ask to buy, the bid to
+          sell. The book takes no option market order ("an option order must be a limit order",
+          `Book.check`) and neither does Alpaca; a decision sent that way was refused whole.
+          Measured Sept 22, 2026: 125 refusals on alpaca-paper, every one of them the House's own
+          wind-down of a dead options account (fixed at the bid the same day); this is the same
+          guard for the agents' own decisions. The book's `max_limit_deviation_pct` is measured
+          from the touch on the order's side (`ltcm.risk.rule_limit_sanity`), so a limit AT the
+          touch is inside it by construction.
+        - A POST-ONLY Kalshi bid at or over the ask (an offer at or under the bid) is re-priced one
+          tick inside the touch, snapped to the market's grid. Kalshi rejects a post-only order that
+          would cross ("post only cross": 8 of 50 real maker orders on Sept 23, 2026, huang-h51fdd3-2
+          bidding NO at a touch that had moved since its decision) and the shadow book does the
+          same, so the decision was lost each time; resting one tick inside is what the strategy
+          meant by post-only. Re-priced once, on the quote of this moment: if the touch moves again
+          before the venue has it, the venue's rejection stands and says so (`Book._route`).
+        The re-price for the House's own wind-down (an exit that would meet the House's own bid rests
+        at the ask, `_wind_down`) is the same idea for the other wall."""
+        option_at_market = instrument.asset_class == "option" and order_type == "market"
+        maker = post_only and order_type == "limit" and limit is not None and family_of(book.broker.venue) == "kalshi"
+        if not option_at_market and not maker:
+            return None
+        try:
+            quote = book.broker.quote(instrument)
+        except Exception:  # noqa: BLE001 - no quote, no fitting: the book judges the order as asked
+            return None
+        touch = getattr(quote, "ask" if side == "buy" else "bid", None) if quote is not None else None
+        if touch is None or touch <= 0:
+            return None
+        touch = money(touch)
+        increment = self._price_increment(book, instrument, touch)
+        if option_at_market:
+            fitted = snap_limit(instrument, side, touch, increment) or touch
+            return "limit", fitted, (f"a market {side} became a limit at the {'ask' if side == 'buy' else 'bid'} of {fitted}: "
+                                     "an option order must be a limit order (the book takes no other)")
+        crosses = limit >= touch if side == "buy" else limit <= touch
+        if not crosses:
+            return None
+        tick = increment if increment is not None and increment > 0 else Decimal("0.01")
+        inside = touch - tick if side == "buy" else touch + tick
+        inside = snap_limit(instrument, side, inside, tick) or inside
+        if not 0 < inside < 1:
+            return None  # nothing rests inside a touch at the contract's own bound; the venue says so
+        return order_type, inside, (f"post-only limit {limit} re-priced to {inside}, one tick inside the "
+                                    f"{'ask' if side == 'buy' else 'bid'} of {touch}: it would have crossed, and the venue rejects a post-only order that crosses")
 
     def _price_increment(self, book: Book, instrument: Instrument, price: Decimal | None) -> Decimal | None:
         """The price grid of this book's venue for this instrument at this price
@@ -3079,8 +3305,12 @@ class House:
     def _sweep(self, agent_id: str, book: Book) -> None:
         """Return a finished account's free cash to the House's side of the book."""
         account = book.account(agent_id)
-        if not account.holdings and not book.open_orders(agent_id) and account.cash > 0 and not account.swept:
-            book.stake(agent_id, -account.cash, note="account closed")  # all of it: what is left of the stake, and any profit
+        # Free cash only: what a buy closed as never arrived still binds while the book keeps asking
+        # the venue about it (`Book._reservations`) is swept on a later pass, once that window closes;
+        # `stake` refuses to take reserved cash, and this runs unguarded in the mark pass.
+        free = account.cash - book._reserved_cash(agent_id)
+        if not account.holdings and not book.open_orders(agent_id) and free > 0 and not account.swept:
+            book.stake(agent_id, -free, note="account closed")  # all of it: what is left of the stake, and any profit
 
     def _observe_wind_down(self, agent: Agent, book: Book) -> None:
         """Keep the evidence until an abandoned account's final trades and sweep are observed.
@@ -4917,6 +5147,10 @@ class House:
             self._cancel_stale_resting()
         except Exception as exc:  # noqa: BLE001 - a guard that fails this tick runs again on the next
             self.alert("warning", f"stale resting orders could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
+        try:
+            self._order_path_invariants()  # code over house.json and the ledger's new refusals; runs while paused too
+        except Exception as exc:  # noqa: BLE001 - a check that fails this tick runs again on the next
+            self.alert("warning", f"the order path's invariants could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
         # Past the monthly compute line only agents holding real money are woken, so they can exit.
         open_for_business = self.budget is None or self.budget.check() == "open"
         stopped_because = "" if open_for_business else f"the Sail meter's monthly line or reserve (league/budget.py mode {getattr(self.budget, 'mode', '?')})"
@@ -4968,7 +5202,7 @@ class House:
             try:
                 book.poll()
                 book.mark()
-                result = book.reconcile()
+                result = reconcile_with_second_look(book)
                 summary["reconciled"][name] = result.ok
                 if not result.ok:
                     # A few cents short on a PAPER book, with every position agreeing, is the venue's
@@ -4978,6 +5212,13 @@ class House:
                     # good release back. Real money, or any position difference, stays an error.
                     minor = (not book.real_money and not result.position_diffs
                              and abs(Decimal(result.cash_diff)) <= Decimal("1.00"))
+                    # Only an order whose outcome the venue has not yet told (the book asks a second
+                    # time 60 s later before it calls an order never-arrived, #203): the book stays
+                    # frozen for entries until it is known, which is the protection; an error here
+                    # would roll a good release back inside a deploy's watch (the #203 review).
+                    pending_only = (not result.position_diffs and "outcome is unknown" in result.detail
+                                    and "cash differs" not in result.detail)
+                    minor = minor or pending_only
                     self.alert("warning" if minor else "error", f"{name} does not reconcile: {result.detail}")
             except Exception as exc:  # noqa: BLE001
                 self.alert("warning", f"{name}: could not mark or reconcile ({type(exc).__name__}: {str(exc)[:200]})")
