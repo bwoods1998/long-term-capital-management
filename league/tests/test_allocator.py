@@ -47,7 +47,9 @@ class Rules(unittest.TestCase):
         r = CONSTITUTION["allocator"]
         self.assertTrue(r["enabled"])
         self.assertTrue(0.25 <= r["evidence"]["paper_weight"] <= 1)
-        self.assertTrue(0 <= r["evidence"]["alpaca_paper_haircut_bps"] <= 50)
+        # A8 (Sept 23, 2026): per asset class, each within the table's floor of 2 bps a side.
+        self.assertEqual(set(r["evidence"]["alpaca_paper_haircut_bps"]), {"crypto", "equity", "option"})
+        self.assertTrue(all(2 <= bps <= 50 for bps in r["evidence"]["alpaca_paper_haircut_bps"].values()))
         self.assertTrue(1.0 <= r["bunt_at"] <= 1.25 and 3 <= r["bunt_min_trades"] <= 20)
         self.assertTrue(1.2 <= r["swing_at"] <= 3 and 5 <= r["swing_min_real_trades"] <= 30)
         self.assertTrue(0.5 <= r["kappa"] <= 2 and 5 <= r["e_cap"] <= 50)
@@ -158,10 +160,11 @@ class EvidenceOnTheBooks(HouseCase):
             self.clock.advance(300)
         fills = [e for e in self.house.ledger.iter(kinds="book.fill", agent=agent.id) if e.payload.get("source") == "venue"]
         self.assertTrue(fills)
-        cut = allocator._paper_haircut(self.house, agent.id, "alpaca-paper", 10)
+        table = CONSTITUTION["allocator"]["evidence"]["alpaca_paper_haircut_bps"]
+        cut = allocator._paper_haircut(self.house, agent.id, "alpaca-paper", table)
         notional = sum(float(e.payload["quantity"]) * float(e.payload["price"]) for e in fills)
-        self.assertAlmostEqual(cut, notional * 10 / 10_000 / 200.0, places=9)
-        self.assertEqual(allocator._paper_haircut(self.house, agent.id, "kalshi-shadow", 10), 0.0)
+        self.assertAlmostEqual(cut, notional * table["crypto"] / 10_000 / 200.0, places=9)  # BTC: the crypto rate
+        self.assertEqual(allocator._paper_haircut(self.house, agent.id, "kalshi-shadow", table), 0.0)
         row = allocator.evidence(self.house, agent)
         raw = self.house.evaluator.wealth(agent.id, "alpaca-paper", agent.horizon)["log"]
         self.assertAlmostEqual(math.log(row.w_paper), raw - cut, places=9)
@@ -723,6 +726,51 @@ class LifecycleRegressions(HouseCaseReal):
             with self.evidence_of({a.id: {**table[a.id], "cooling": True}}):
                 self.tick()
             self.assertEqual(house.evaluator.rung(a.id), 2)  # the cooldown keeps it a bunt
+
+
+class HaircutByAssetClass(ReviewRegressions):
+    """A8 (Sept 23, 2026): the Alpaca practice haircut is charged per asset class, each class at the
+    optimism measured on its own practice fills against the quote at intent time
+    (`docs/research/queries/2026-09-23/A8-haircut.py`); a plain number still charges every class."""
+
+    TABLE = CONSTITUTION["allocator"]["evidence"]["alpaca_paper_haircut_bps"]
+
+    def fill(self, asset_class, quantity, price, multiplier=None):
+        instrument = {"asset_class": asset_class, "symbol": "X"}
+        if multiplier:
+            instrument["multiplier"] = multiplier
+        self.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue", "side": "buy", "quantity": quantity,
+                                         "price": price, "instrument": instrument}, agent="a")
+
+    def cut(self, bps):
+        return allocator._paper_haircut(SimpleNamespace(ledger=self.ledger), "a", "alpaca-paper", bps)
+
+    def test_a_crypto_and_an_equity_fill_of_the_same_notional_pay_their_own_class_rate(self):
+        self.stake(200, book="alpaca-paper")
+        self.fill("crypto", "0.001", "80000")  # $80
+        self.assertAlmostEqual(self.cut(self.TABLE), 80 * 4 / 10_000 / 200, places=12)
+        self.fill("equity", "0.2", "400")  # $80
+        self.assertAlmostEqual(self.cut(self.TABLE), 80 * (4 + 2) / 10_000 / 200, places=12)
+        self.assertAlmostEqual(self.cut({"crypto": 5, "equity": 2}), 80 * (5 + 2) / 10_000 / 200, places=12)
+
+    def test_an_option_fill_pays_its_class_rate_and_its_notional_counts_the_multiplier(self):
+        self.stake(200, book="alpaca-paper")
+        self.fill("option", "1", "0.40", multiplier="100")  # one $40 contract
+        self.assertAlmostEqual(self.cut(self.TABLE), 40 * 24 / 10_000 / 200, places=12)
+        self.assertAlmostEqual(self.cut({"crypto": 5, "equity": 2, "option": 30}), 40 * 30 / 10_000 / 200, places=12)
+
+    def test_a_plain_number_still_charges_every_class_and_an_unlisted_class_pays_the_tables_largest(self):
+        self.stake(200, book="alpaca-paper")
+        self.fill("crypto", "0.001", "80000")
+        self.fill("equity", "0.2", "400")
+        self.fill("option", "1", "0.40", multiplier="100")
+        self.assertAlmostEqual(self.cut(10), (80 + 80 + 40) * 10 / 10_000 / 200, places=12)  # the rollback form
+        self.assertAlmostEqual(self.cut({"crypto": 5}), (80 + 80 + 40) * 5 / 10_000 / 200, places=12)
+        self.assertEqual(self.cut({"crypto": 0, "equity": 0, "option": 0}), 0.0)
+
+    def test_the_constitution_carries_the_measured_table(self):
+        # docs/research/queries/2026-09-23/A8-haircut.out: 368 crypto, 136 equity and 46 option fills.
+        self.assertEqual(self.TABLE, {"crypto": 4, "equity": 2, "option": 24})
 
 
 class BuntGrowth(HouseCaseReal):

@@ -12,6 +12,16 @@ from typing import Any, Mapping
 from .constitution import CONSTITUTION
 
 
+def _haircut_words(bps: Any) -> str:
+    """The Alpaca paper haircut in words: one number for every class, or (A8, Sept 23, 2026) each
+    asset class's own measured rate."""
+    if not isinstance(bps, Mapping):
+        return f"{bps} bps a side"
+    names = {"crypto": "crypto", "equity": "stocks", "option": "options"}
+    order = [k for k in names if k in bps] + sorted(k for k in bps if k not in names)
+    return ", ".join(f"{bps[k]} bps a side on {names.get(k, k)}" for k in order)
+
+
 def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None = None) -> str:
     c = dict(constitution or CONSTITUTION)
     ladder, rungs, tuition, e = c["ladder"], c["rungs"], c["tuition"], game["economy"]
@@ -111,7 +121,8 @@ or never swings at all.
   moves at every mark pass, around the clock, with NO calendar gates, NO looks and NO screens.
   EVIDENCE IS WEALTH: W_paper is your paper account's wealth multiple since you were seated
   (${rungs['1']['stake_usd']} purse, ${rungs['1']['max_position_usd']} a position, ${rungs['1']['max_order_usd']} an order; stakes lent or returned are not profit; the block in
-  progress counts; Alpaca paper fills are haircut {weights.get('alpaca_paper_haircut_bps', 0)} bps a side because paper fills flatter).
+  progress counts; Alpaca paper fills are haircut {_haircut_words(weights.get('alpaca_paper_haircut_bps', 0))} because paper
+  fills flatter, each class by what its own paper fills were measured to flatter).
   W_real is the same on real money since your first real dollar, never reset. Your evidence is
   E = W_paper^{w:g} x W_real: paper counts as its square root, real results dominate.
   An edgeless strategy reaches a high W only by luck, however it sizes (Ville's inequality), so
