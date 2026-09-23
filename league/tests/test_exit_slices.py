@@ -237,6 +237,23 @@ class CryptoSlices(SliceCase):
         self.assertIn("order cap", out.detail)
         self.assertEqual(self.broker.sent, [])
 
+    def test_a_venue_that_fills_a_moment_later_gets_every_slice_at_once(self):
+        """Alpaca's habit: an order is accepted first and filled on a later read. Each working slice
+        already holds its own units, so the next one goes at once, and none oversells."""
+        held, _ = self.position_worth("200")
+        self.broker.asynchronous = True
+        sell = self.intent("a1", self.instrument, "sell", held)
+        out = self.book.submit([sell])[0]
+        self.assertEqual(out.status, "sent", out.detail)
+        self.assertEqual(len(self.sells()), 3)
+        self.assertEqual(sum((o.quantity for o, _, _ in self.sells()), D(0)), held)
+        self.assertEqual(self.held(self.instrument), held)  # nothing has filled yet
+        self.book.poll()
+        self.assertEqual(self.held(self.instrument), 0)
+        self.assertEqual(len(self.sells()), 3)
+        self.assertEqual(self.book.exit_plans, {})
+        self.assert_sound([sell.id])
+
     def test_a_partly_filled_slice_leaves_the_rest_to_the_next_pass(self):
         held, _ = self.position_worth("200")
         self.broker.fractions = ["0.5"]
