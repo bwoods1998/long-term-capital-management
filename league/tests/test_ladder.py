@@ -214,7 +214,8 @@ class LadderTest(unittest.TestCase):
         # Regression: every wake re-seats the agent, and a seat once reset a scaled agent's limits to
         # the micro rung's, so its larger stake traded at $12 a position until the next day's sizing.
         self.run_hours(1, edge=0.78)
-        self.assertEqual(real.limits[agent.id].max_position_usd, min(real.account(agent.id).staked / 2, D("60")).quantize(D("0.01")))
+        # Half the stake, no longer held to $60: the book slices an exit larger than one order.
+        self.assertEqual(real.limits[agent.id].max_position_usd, max(D("12"), (real.account(agent.id).staked / 2).quantize(D("0.01"))))
         self.assertGreater(real.limits[agent.id].max_position_usd, D("12"))
         recommendation = house.ledger.last("ops.recommendation").payload
         self.assertEqual(recommendation["ranked"][0]["agent"], agent.id)

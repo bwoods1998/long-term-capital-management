@@ -1,8 +1,8 @@
 import unittest
 from decimal import Decimal
 
-from league.book import Book
-from league.capital import kelly_stake, recommend, resize
+from league.book import GATEWAY_MARKET_MARKUP, Book
+from league.capital import kelly_stake, recommend, resize, scaled_limits
 from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.tests.fakes import FakeBroker
@@ -39,6 +39,36 @@ class KellyStakeTest(unittest.TestCase):
         share = D(str(CONSTITUTION["rungs"]["3"]["max_share_of_venue"]))  # 60% since swing and bunt (40% before)
         self.assertEqual(stake, (D(400) * share).quantize(D("0.01")))  # whatever Kelly says
         self.assertEqual(numbers["ceiling_usd"], str((D(400) * share).quantize(D("0.01"))))
+
+
+class ScaledLimitsTest(unittest.TestCase):
+    """Since the book slices exits (Sept 23, 2026) a position follows the stake; only an ORDER is capped."""
+
+    def test_a_position_follows_the_stake_past_what_one_order_can_close(self):
+        cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
+        position, order = scaled_limits(Decimal("400"))
+        self.assertEqual(position, Decimal("200"))  # half the stake: once $60 at most
+        self.assertEqual(order, Decimal("60.00"))
+        self.assertGreater(position, cap)
+
+    def test_every_order_passes_the_gateway_on_its_own_pricing(self):
+        """The gateway counts an Alpaca market order at the touch plus ten per cent: an order limit
+        of $75 was $82.50 there, and every rung-3 market entry from $68.19 to $75 would have had a 403."""
+        cap = Decimal(CONSTITUTION["order_caps"]["max_order_usd"])
+        for staked in ("0", "20", "60", "100", "120", "136", "137", "150", "151", "400", "1000", "100000"):
+            with self.subTest(staked=staked):
+                position, order = scaled_limits(Decimal(staked))
+                self.assertLessEqual(order, cap)
+                self.assertLessEqual(order * GATEWAY_MARKET_MARKUP, cap)
+                self.assertLess(order * GATEWAY_MARKET_MARKUP, cap * Decimal("0.9"))  # room for the touch to move
+                self.assertLessEqual(order, position)
+
+    def test_never_below_the_micro_rung(self):
+        micro = CONSTITUTION["rungs"]["2"]
+        position, order = scaled_limits(Decimal("10"))
+        self.assertEqual(position, Decimal(micro["max_position_usd"]))
+        self.assertEqual(order, min(Decimal(micro["max_order_usd"]), Decimal(CONSTITUTION["order_caps"]["max_order_usd"])))
+        self.assertEqual(scaled_limits(Decimal("100")), (Decimal("50.00"), Decimal("50.00")))
 
 
 class RecommendationTest(HouseCase):
