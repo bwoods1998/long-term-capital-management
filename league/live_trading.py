@@ -25,7 +25,8 @@ def policy(venue_capital):
             'venue_capital_usd': {k: str(v) for k, v in amounts.items()},
             'constitution_digest': money_digest(), 'expires': None,
             'research_funding': 'Only unused original burst allowance within campaign caps; no calendar expiry or replenishment.',
-            'scaling': 'Existing performance gates and quarter-Kelly sizing; venue and aggregate capital limits include historical losses.',
+            'scaling': (f"Existing performance gates and {CONSTITUTION['rungs']['3']['kelly_fraction']:g} of Kelly on the lower bound; "
+                        'venue and aggregate capital limits include historical losses.'),
             'capital_source': 'Existing cash only; later deposits do not enlarge this allocation.'}
 
 

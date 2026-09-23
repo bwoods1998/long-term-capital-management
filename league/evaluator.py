@@ -1,8 +1,9 @@
 """The ladder: who climbs, who stays, who dies, and the statistics that decide it.
 
 Four rungs. 0 is mechanical replay, 1 a forward test on paper (Alpaca's paper account, the Kalshi
-shadow book), 2 real money at $1 to $10 a position, 3 real money sized at a quarter of Kelly on
-the lower bound. Every threshold is in `league/constitution.py`, written before any agent traded.
+shadow book), 2 real money at the micro stake, 3 real money sized by Kelly on the lower bound
+(full Kelly since the owner's swing-and-bunt revision of Sept 23, 2026). Every threshold is in
+`league/constitution.py`; the owner's revisions to them are recorded there with their reasons.
 
 What is measured is after-cost log growth of the agent's own account, in blocks (an hour or a
 day, by the strategy's declared horizon): ln(equity at the block's end / equity at its start),
@@ -11,7 +12,8 @@ slippage are all inside the number.
 
 - **Promotion** needs a lower confidence bound on mean block growth above zero. Looks are taken
   every few active blocks, and look k spends alpha * 6 / (pi^2 k^2), so an agent that is looked at
-  a hundred times gets no more than alpha of false-pass chance in total. A record that wins
+  a hundred times gets no more than alpha of false-pass chance in total. Promotion to scaled size
+  spends `promotion_alpha`, death spends `alpha`. A record that wins
   nearly every trade (favourites) must ALSO clear an exact (Clopper-Pearson) bound on its loss
   rate: a t-interval flatters that shape until the first loss arrives.
 - **Death** is the mirror: an upper bound below zero, or a drawdown past the limit. (The economy
@@ -152,8 +154,12 @@ class Evaluator:
             reasons.append(f"{int(result.get('trades') or 0)} closed trades, {rules['min_trades']} needed")
         if len(growth) < rules["min_blocks"]:
             reasons.append(f"{len(growth)} blocks, {rules['min_blocks']} needed")
-        if int(oos.get("blocks") or 0) < rules["min_oos_blocks"] or float(oos.get("mean_log_growth") or 0.0) <= 0:
-            reasons.append("out-of-sample growth is not above zero")
+        # A floor below zero (owner revision, Sept 23, 2026) lets a near-breakeven idea earn a paper
+        # seat: forward fills judge it there, and `paper_death` takes the seat back from a loser.
+        floor = float(rules.get("min_oos_growth", 0.0))
+        if int(oos.get("blocks") or 0) < rules["min_oos_blocks"] or float(oos.get("mean_log_growth") or 0.0) <= floor:
+            reasons.append("out-of-sample growth is not above zero" if floor == 0.0 else
+                           f"out-of-sample growth is not above {floor:+.3%} a block")
         if deflated is None or deflated["dsr"] < rules["min_deflated_sharpe"]:
             shown = "undefined" if deflated is None else f"{deflated['dsr']:.3f}"
             reasons.append(f"deflated Sharpe {shown} against {len(trials)} trials, {rules['min_deflated_sharpe']} needed")
@@ -427,6 +433,9 @@ class Evaluator:
                         f"{settled['settled']} so far)")
             return Verdict(agent, rung, "hold", f"{active} active blocks; the next look is at {when}{hint}", numbers)
         alpha = float(self.ladder["alpha"])
+        # Promotion to scaled size spends its own budget (`promotion_alpha`, the owner's swing-and-bunt
+        # revision of Sept 23, 2026); death spends `alpha`. They are errors in opposite directions.
+        alpha_up = float(self.ladder.get("promotion_alpha", alpha))
         # Once death tests begin, their cadence must still not delay the free paper screen.
         # A check between paid looks reads the screen without spending either test's alpha.
         tests_death = statistical_due and active >= death["min_active_blocks"]
@@ -436,7 +445,7 @@ class Evaluator:
         k_promote = 1 + sum(1 for row in looks if row.get("tested_promotion", True))
         episode_share = float(self.ladder.get('completed_exposures', {}).get('promotion_alpha_share', 0))
         share = episode_share if rung == 2 else 0
-        alpha_death, alpha_promote = stats.spend(alpha * (1 - episode_share), k_death), stats.spend(alpha * (1 - share), k_promote)
+        alpha_death, alpha_promote = stats.spend(alpha * (1 - episode_share), k_death), stats.spend(alpha_up * (1 - share), k_promote)
         lower, upper = stats.mean_bounds(growth, alpha_promote), stats.mean_bounds(growth, alpha_death)
         if lower is None or upper is None:
             if not (screen_due and growth and not tests_death and not tests_bound):
@@ -581,6 +590,8 @@ class Evaluator:
     def _episode_allowance(self, agent, entered, test):
         """Legacy full-alpha block looks remain spent when adding a second evidence route."""
         alpha = float(self.ladder['alpha'])
+        if test == 'promotion':
+            alpha = float(self.ladder.get('promotion_alpha', alpha))
         share = float(self.ladder['completed_exposures']['promotion_alpha_share'])
         excess, k = 0.0, 0
         field = 'alpha_spent' if test == 'promotion' else 'alpha_death'
