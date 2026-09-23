@@ -93,8 +93,9 @@
       "winner_share": 0.1,
       "loser_multiple": 8,
       "loser_min_observations": 5,
-      "unproven_multiple": 3,
-      "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry."
+      "unproven_multiple": 6,
+      "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry.",
+      "_about_sept23_pacing": "Sept 23, 2026, 16:50 UTC (C3 pacing): an agent with no earned record researches every 6 intervals (90 minutes at the 15-minute burst interval; was 45 minutes): 82-84% of such sessions abstained on Sept 22, and the paced OpenAI line goes first to agents with a record and to audits."
     },
     "gate": {
       "_about": "Sept 22, 2026 overnight v0: after `after` empty passes in a row (no candidate, no replay, no Merton strategy) and nothing new on the agent's record, the interval doubles per further empty pass up to max_factor; sample_percent of skipped windows still run so misses stay measurable.",
@@ -177,7 +178,14 @@
     "mutation_min_per_day": 2,
     "card_ttl_hours": 24,
     "_about_sept23": "Sept 23, 2026 (the owner: a 24/7 swarm; 'do 1-5 right now fully'): the first GPT-6 Sol call wrote 4 cards for $0.128 and one was on paper 43 s later, while agent research cost about $1 per replay-passing candidate. So the foundry gets more of the budget ($40 a window, a call every 10 minutes), half of its calls go to the fast-evidence desks (hourly, around the clock) whose low pass rates never win the evidence route, cards may queue for replay (max_pending_cards) instead of holding the next call, and Merton is told to prefer hourly programs where a desk allows them.",
-    "fast_desks": ["alpaca-crypto-majors", "alpaca-crypto-alts", "kalshi-crypto-15m", "kalshi-crypto-strikes", "alpaca-index-etfs", "alpaca-megacaps"],
+    "fast_desks": [
+      "alpaca-crypto-majors",
+      "alpaca-crypto-alts",
+      "kalshi-crypto-15m",
+      "kalshi-crypto-strikes",
+      "alpaca-index-etfs",
+      "alpaca-megacaps"
+    ],
     "fast_share": 0.5,
     "prefer_horizon": "hour",
     "max_pending_cards": 8,
@@ -203,7 +211,7 @@
   "lab": {
     "_about": "The Alpha Lab (league/lab.py), Sept 23, 2026, the north-star build: a MAP-Elites archive of strategy programs searched in batches on the lab box (league/labbox.py). Seeds are the living agents' programs, the foundry's cards and the founders; children are parameter mutants of the archive's elites and Luna's mutations and crossovers, with a Sol leap every leap_every Luna calls. Fitness is out-of-sample growth after fees on the first search_fraction of the House's own replay tape; the fittest gate-passing program of a cell is replayed by the House on the whole tape (and by the sealed holdout on the history store) and born on paper, at most max_births_per_hour. OpenAI spend is its own line (budget_usd_per_hour, plus royalties: royalty_share of a graduate's performance fee), inside the campaign allowance and only while the frontier tier is 'all'. It runs only where league/config.json names a lab box.",
     "enabled": true,
-    "budget_usd_per_hour": "1.50",
+    "budget_usd_per_hour": "0.75",
     "box_usd_per_hour": "0.20",
     "batch_size": 32,
     "param_children": 48,
@@ -217,6 +225,7 @@
     "submit_max": 8,
     "royalty_share": "0.10",
     "luna_model": "gpt-6-luna",
-    "sol_model": "gpt-6-sol"
+    "sol_model": "gpt-6-sol",
+    "_about_sept23_pacing": "Sept 23, 2026, 16:50 UTC (C3 pacing, the learn-and-unblock run): the lab's Luna seeds and Sol leaps share the paced September OpenAI line, so the lab's own LLM line is $0.75 an hour until the month resets on Oct 1; parameter children, batch replay on the lab box and graduation spend no OpenAI and are unchanged."
   }
 }
