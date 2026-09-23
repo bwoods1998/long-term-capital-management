@@ -481,3 +481,18 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   batches at last) and its first forward windows ran (3 rows, 2 ranked, both positive); the
   research gate runs on triggers (library notes, lessons, a fill, a block, heartbeats; clock runs
   only for winners and idle agents); no book frozen, no error alert, tick 35 s.
+- 22:12Z — **the adversarial review of #211 (W2-money)** finished on `w2-money/review`: one major
+  (narrow) confirmed and fixed with two regression tests: a day opening restored after a restart was
+  compared against holdings valued at cost until the first mark pass (up to 300 s), so a winning
+  holding could read as the day's loss and falsely halt a book, or a losing one mask the real 8%
+  halt; now a restored account's first check quotes its unmarked holdings once. The haircut held:
+  `A8-haircut.py` re-run on the 21:36Z snapshot reproduces its output byte for byte (crypto 3.32 →
+  4, equity 0.22 → 2, option 23.97 → 24 bps a side, from 368, 136 and 46 practice fills measured
+  against the quote); every practice fill carries a class; a missing class pays the largest rate.
+  The lending rule never lends past the target. Two plausible follow-ups recorded: a holding with
+  no positive bid after a restart stays at cost until a bid appears (needs persisted marks), and a
+  bunt under W_real 1 may be lent back, within its stay, profit it handed back earlier (its net
+  loan still never passes the target; the stricter rule counts only the current stay's stakes).
+- 22:11Z — **the Deploy C integration branch** `w2/integration`: #203 with its review and follow-ups,
+  #211 with its review, main (Deploy B, #212) and the run branch; no conflicts. Money digest
+  `c2b0e09c` (full `34adf385`), pinned. **PR #213** opened; CI and the local suites running.
