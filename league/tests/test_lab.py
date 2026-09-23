@@ -323,8 +323,16 @@ class Spend(LabCase):
 
 
 class Graduation(LabCase):
+    def test_a_seed_or_a_running_program_is_never_graduated(self):
+        seed = self.queue(KNOB)  # a seed: a parent only
+        child = self.queue(SPARSE, origin="luna")
+        self.lab.evaluate_batch()
+        self.seated("already", SPARSE)  # and a living agent already runs the child's program
+        self.assertEqual(self.lab.graduate(), [])
+        self.assertTrue(self.candidate(seed)["gate"] and self.candidate(child)["gate"])
+
     def evolve(self, *codes):
-        ids = [self.queue(code) for code in codes]
+        ids = [self.queue(code, origin="luna") for code in codes]
         self.lab.evaluate_batch()
         return ids
 
@@ -351,7 +359,9 @@ class Graduation(LabCase):
         grads = [e.payload for e in self.house.ledger.iter(kinds="lab.graduate")]
         self.assertEqual([g["state"] for g in grads], ["passed", "born"])
         self.assertEqual(grads[-1]["agent"], child.id)
-        self.assertIn(grads[-1]["author"], ("house", seed.id, "luna"))  # authorship on every graduate
+        self.assertIn(grads[-1]["origin"], ("param", "luna"))  # a seed is a parent, never a graduate
+        self.assertIn(grads[-1]["author"], ("house", "luna"))  # authorship on every graduate
+        self.assertEqual(grads[-1]["lineage"], f"agent:{seed.id}")
         self.assertTrue(grads[-1]["lineage"])
         stats = [e.payload for e in self.house.ledger.iter(kinds="lab.stats")]
         self.assertTrue(stats and stats[-1]["evaluated"] >= 2 and stats[-1]["born_total"] == 1)

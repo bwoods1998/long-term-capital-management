@@ -1192,10 +1192,14 @@ class Lab:
         # An infrastructure failure is not the candidate's: it may be tried again after an hour.
         tried = {r["candidate"] for r in self._q("SELECT candidate FROM graduations WHERE state!='replay_unavailable' OR at>=?",
                                                   (self._now() - 3600,))}
+        # Seeds are parents, never graduates: a living agent's own program, a card or a founder has had
+        # its own chance. Neither is a program a living agent already runs.
+        running = {a.code_sha256 for a in self.house.registry.living()}
         for row in self.elites():
             if budget <= 0 or self.births_last_hour() >= int(settings["max_births_per_hour"]):
                 break
-            if row["id"] in tried or not row["gate"] or self._desk(row["niche"]) is None:
+            if (row["id"] in tried or not row["gate"] or row["origin"] == "seed" or row["code_sha256"] in running
+                    or self._desk(row["niche"]) is None):
                 continue
             budget -= 1
             out.append(self._graduate_one(row))
