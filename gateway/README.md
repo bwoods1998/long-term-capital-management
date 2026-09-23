@@ -142,7 +142,7 @@ shape is not evidence that a decision is correct. Source: [TypeSafe models](http
 ## The frontier month
 
 `POST /v1/frontier/responses` forwards one call to `https://api.openai.com/v1/responses` with
-`OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$374** a UTC calendar month since Sept 21, 2026; it was $300). Existing monthly
+`OPENAI_SECRET_KEY`, inside `FRONTIER_MONTH_USD` (**$408** a UTC calendar month since Sept 23, 2026: metered $308.46 plus the owner's funded ~$100; it was $374, and $300 before Sept 21). Existing monthly
 spend remains counted when the configured cap increases; the House's immutable campaign
 allowance is an additional restriction.
 A call is priced twice. Before it leaves, at its worst case: every byte of the request as input at

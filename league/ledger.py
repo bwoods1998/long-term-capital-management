@@ -127,6 +127,9 @@ KINDS: dict[str, bool] = {
     "data.coverage": False,  # what history was ingested, from where, and what is missing
     "holdout.access": False,  # a sealed-holdout evaluation: who, what, when, how often
     "agent.inactive": False,  # an explicit reason an agent is not trading or researching
+    # Capital is the ladder (Sept 23, 2026): the allocator's board -- every agent's band, stake and
+    # evidence -- at most every five minutes. Private: the site reads the board from the checkpoint.
+    "alloc.board": False,
 }
 
 

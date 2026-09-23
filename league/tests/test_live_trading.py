@@ -26,6 +26,19 @@ def research_policy():
     return value
 
 
+
+from league.tests.fakes import old_ladder as _old_ladder  # noqa: E402
+_OLD_LADDER = _old_ladder()
+
+
+def setUpModule():
+    # These tests pin the grant, the micro stake and the tuition of the ladder before the allocator.
+    _OLD_LADDER.start()
+
+
+def tearDownModule():
+    _OLD_LADDER.stop()
+
 class PersistentAuthorization(PhaseCase):
     def expired(self):
         guard = self.budget()

@@ -14,6 +14,7 @@ from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.ledger import now_iso
 from league.tests.test_book import BookCase
+from league.tests.fakes import old_ladder
 from league.tests.test_house import HouseCase
 from league.venues import instrument_for
 from league import seeds
@@ -174,6 +175,7 @@ class BookRules(BookCase):
         self.assertFalse(self.book.reconcile().ok)
 
 
+@old_ladder()
 class InTheHouse(HouseCase):
     def options_agent(self, name="options-breakout", rung=1):
         agent = self.house.spawn(name, name, seeds.load(name), reason="test", specialty="alpaca-options")

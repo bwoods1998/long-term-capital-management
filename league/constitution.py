@@ -197,6 +197,52 @@ CONSTITUTION: dict[str, Any] = {
         # buys a small stake: the swing grows with the evidence. Every order still meets the gateway's cap.
         "3": {"max_order_usd": "75", "kelly_fraction": 1.0, "max_share_of_venue": 0.6},
     },
+    # Owner revision, Sept 23, 2026 ~06:00 UTC, "capital is the ladder" (docs/goals/
+    # LTCM_NORTH_STAR_BUILD.md, Workstream A): "I deeply want to speed up the dynamism of agents moving
+    # up and down the levels of the game as quickly as possible and aggressively aligned on incentives
+    # so star traders can compound and run wild and profit exponentially and losing agents die off
+    # ... allow for trading to be done on the timescale of 24/7 agents not human clocks and defined
+    # times ... trading live on both my kalshi and alpaca account, I'm willing to accept volatility
+    # and risk of these funds". While `enabled`, an agent's rank is its capital and `league/
+    # allocator.py` moves it at every mark pass: evidence is the agent's wealth multiple (paper at
+    # its square root, real in full), bunts are small real stakes at once, swings are sized by the
+    # evidence, and hysteresis, a real drawdown line, paper-wealth death and a floor throttle move
+    # capital down as fast. The paper screen and the micro bound no longer promote and `rungs.2`/
+    # `rungs.3` sizing is superseded (kept for rollback: `enabled: False` restores the old ladder).
+    # The grant's per-venue capital, the gateway's order cap, day caps and kill switch, no leverage
+    # and no shorts are the whole risk budget; inside them the allocator decides. Measured Sept 23
+    # 06:30 UTC: 3 agents on real money (all Kalshi favourites, $60 each), the Alpaca real account
+    # had never traded, 93 agents on paper.
+    "allocator": {
+        "enabled": True,
+        "evidence": {"paper_weight": 0.5, "alpaca_paper_haircut_bps": 10},
+        # 1.01, not the plan's 1.03 (its bounds are 1.0-1.25): measured on the floor at 06:45 UTC,
+        # paper agents size a few percent of their $200 purse, so no paper agent without real money
+        # had E >= 1.03 (paper +6.1%) and the bunt -- a cheap real test by design -- would have seated
+        # nobody for days, while the owner's first priority is movement onto real money on both
+        # venues. 1.01 still asks for +2% on the whole purse after fees, and hysteresis sends a bunt
+        # back below 0.8585.
+        "bunt_at": 1.01, "bunt_min_trades": 5, "bunt_min_settled": 3,
+        # Alpaca 25, not the plan's 15: the book refuses any order over half of an account's equity
+        # (`book.DEFAULT_RULES` max_order_notional_pct / max_position_pct 0.50, the same share as
+        # `position_share`), and Alpaca takes no crypto order under $10 -- so a $15 bunt could never
+        # trade crypto (measured in `test_allocator`, Sept 23: "order notional 10.80 exceeds 50% of
+        # desk equity"). $25 leaves a $10 order room for its fee and a price step.
+        "bunt_usd": {"kalshi": "10", "alpaca": "25"},
+        "venue_minimum_usd": {"kalshi": "1", "alpaca": "10"},
+        "swing_at": 1.5, "swing_min_real_trades": 8, "swing_min_w_real": 1.0, "swing_exit_w_real": 0.9,
+        "kappa": 1.0, "e_cap": 20, "max_share_of_venue": 0.6, "position_share": 0.5,
+        "stars": 3, "star_min_w_real": 1.25,
+        # An agent back on paper from real money waits this long before it may bunt again, so a
+        # record near a line cannot flap between books (and pay a sweep and a fresh stake) at every
+        # mark pass.
+        "hysteresis": 0.85, "real_drawdown_demote": 0.35, "reentry_cooldown_hours": 1.0,
+        "die_below": 0.80, "die_min_trades": 10,
+        "throttle": {"halve_below": -0.30, "restore_above": -0.15},
+        "min_stake_change": 0.10,
+        "performance_fee_share": 0.2,
+        "profit_indexed_envelope": True,
+    },
 }
 
 
@@ -238,4 +284,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '64a206c6c9dc2c672b3339ed29113e7fe6f55ddfc0d369ec16d3c43663eab761'
+PINNED_DIGEST = '9fa83727aabd720e7d937eb5ed4aaab19f4a0454af818d8a6f8e4abe83eb4416'
