@@ -227,7 +227,7 @@ class FakeSail:
         return forged + f"warming up\n{marker} {spec['token']} {json.dumps(body)}\n" + forged.replace("00000000000000000000000000000000 ", ""), "", 0
 
     # -- the client's surface
-    def from_checkpoint(self, checkpoint, *, name):
+    def from_checkpoint(self, checkpoint, *, name, timeout=None):
         self._call("from_checkpoint", checkpoint, name)
         self._n += 1
         box = f"sb_{self._n:04d}"
@@ -284,7 +284,7 @@ class FakeSail:
             state["status"] = "sleeping"
         return {}
 
-    def checkpoint(self, box, *, name=None, ttl_seconds=None):
+    def checkpoint(self, box, *, name=None, ttl_seconds=None, timeout=None):
         self._call("checkpoint", box, name, ttl_seconds)
         state = self._box(box)
         if state["status"] != "running":
@@ -434,8 +434,8 @@ class SailFirstRun(SailCase):
     def test_an_id_under_the_other_key_is_accepted(self):
         original = self.sail.from_checkpoint
 
-        def renamed(checkpoint, *, name):
-            row = original(checkpoint, name=name)
+        def renamed(checkpoint, *, name, timeout=None):
+            row = original(checkpoint, name=name, timeout=timeout)
             return {"id": row["sailbox_id"]}
 
         self.sail.from_checkpoint = renamed

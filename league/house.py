@@ -738,10 +738,13 @@ class House:
               # it on": that is how the architect's strategies join a desk rather than arriving
               # with a slug of their own.
               params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False,
-              specialty: str | None = None, founder: str | None = None) -> Agent:
+              specialty: str | None = None, founder: str | None = None, described: Any | None = None) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
         # sealed probe box the House keeps for the purpose, never the House's own process.
-        described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
+        # `described`: that probe's run of this same code, made by a caller that must not call Sail
+        # here (a research admission, under the lifecycle lock: `_admit_researched`).
+        if described is None:
+            described = self.sandbox.needs(PROBE_BOX, code, keep_awake=keep_probe_awake) if keep_probe_awake else self.sandbox.needs(PROBE_BOX, code)
         info = described.result
         if not info.get("ok"):
             if keep_probe_awake:
@@ -2765,7 +2768,7 @@ class House:
 
     # ------------------------------------------------------------------- forks
     def fork(self, parent: Agent, *, code: str | None = None, params: Mapping[str, Any] | None = None, reason: str = "", passed_replay: bool = False,
-             staked_by_house: bool = False) -> Agent | None:
+             staked_by_house: bool = False, described: Any | None = None) -> Agent | None:
         """A rich agent has a child and endows it. With no new code the child is a mechanical
         mutation of the parent's parameters; either way it answers for itself from replay up,
         unless its code already passed replay as its parent's candidate.
@@ -2773,7 +2776,11 @@ class House:
         `staked_by_house`: the child's code is a research candidate that PASSED replay and its
         parent cannot afford the endowment. The House stakes it from the pool instead (at most one
         a parent a day): an agent above rung 0 cannot edit itself, so without this an improvement
-        that research found and replay confirmed would wait weeks for its parent to save up."""
+        that research found and replay confirmed would wait weeks for its parent to save up.
+
+        `described`: the child's NEEDS, read by the caller in the probe box before it took the
+        lifecycle lock (`_admit_researched`). Then nothing here calls Sail: the child's box starts
+        from the clean image, not a checkpoint of its parent's."""
         rules = self.game["economy"]
         if len(self.registry.living()) >= int(rules["max_population"]):
             return None
@@ -2791,14 +2798,14 @@ class House:
         if child_params is None:
             return None
         child = self.spawn(parent.line or parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
-                           endowment=rules["endowment_usd"] if staked_by_house else None)
+                           endowment=rules["endowment_usd"] if staked_by_house else None, described=described)
         if staked_by_house:
             self._state["last_staked"][parent.id] = self.clock()
         else:
             self.economy.transfer(parent.id, child.id, rules["fork_endowment_usd"], "fork endowment")
         forked = False
         try:
-            forked = bool(self.sandbox.fork(parent.id, child.id))
+            forked = described is None and bool(self.sandbox.fork(parent.id, child.id))
         except SandboxBusy:
             pass  # the parent's box is in use by its own replay or research: the clean image, no wait
         except SandboxError as exc:
@@ -3413,13 +3420,7 @@ class House:
                 with self._lifecycle_lock:
                     candidate = self._commit_research(agent.id, generation, outcome)
                 if candidate:
-                    # The probe box first, the lifecycle lock second (the tick's order): waiting for
-                    # the box here, outside the lock, keeps the tick's wakes free meanwhile.
-                    claim = getattr(self.sandbox, 'claim', None)
-                    with claim(PROBE_BOX, wait=600) if claim is not None else nullcontext(True):
-                        with self._lifecycle_lock:
-                            row = Admissions(self.ledger).enqueue(agent.id, generation, candidate, session)
-                            self._admit_candidate(row)
+                    self._admit_researched(agent.id, generation, candidate, session)
                 self._trace_adoption(agent.id, session, outcome.candidate)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
             self._note_research_result(agent.id, outcome)
@@ -3450,8 +3451,10 @@ class House:
                 if claimed:
                     self.research_jobs.finish(job['session'], 'retired before resume', cancelled=True)
 
-    def _admit_candidate(self, row, *, displace=False):
-        """Retry a known deferred fork under the lifecycle lock; never retry an unknown write."""
+    def _admission_gate(self, row, *, displace=False):
+        """An admission's checks, under the lifecycle lock and with no Sail call: `(parent, candidate,
+        staked, niche, loser)` when it may go ahead, else None with the row recorded (waiting,
+        cancelled or unconfirmed)."""
         queue = Admissions(self.ledger)
         if row['status'] == 'admitting':
             queue.record(row, 'unconfirmed', 'restart during admission; inspect the retained evidence before retrying')
@@ -3486,12 +3489,25 @@ class House:
             if loser is None:
                 queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')
                 return None
+        return parent, candidate, staked, niche, loser
+
+    def _admit_candidate(self, row, *, displace=False, described=None):
+        """Retry a known deferred fork under the lifecycle lock; never retry an unknown write.
+
+        `described`: the candidate's NEEDS, read in the probe box by a caller that holds the lifecycle
+        lock and must make no Sail call under it (`_admit_researched`, which never displaces)."""
+        gate = self._admission_gate(row, displace=displace)
+        if gate is None:
+            return None
+        parent, candidate, staked, niche, loser = gate
+        queue = Admissions(self.ledger)
+        if loser is not None:
             # Verify the replacement before retiring anyone. Its module executes only in the
             # sealed probe box, exactly as at spawn. A bad file must not displace a resident.
             try:
-                described = self.sandbox.needs(PROBE_BOX, candidate['code'])
-                self._charge_box(parent.id, described, note='validating a deferred candidate admission')
-                info = described.result
+                validated = self.sandbox.needs(PROBE_BOX, candidate['code'])
+                self._charge_box(parent.id, validated, note='validating a deferred candidate admission')
+                info = validated.result
                 if not info.get('ok') or niche_of(info['needs'])[:2] != (parent.venue, parent.horizon):
                     raise ValueError('candidate no longer describes the same venue and horizon')
                 needs = niches_module.constrain(info['needs'], niche) if niche else info['needs']
@@ -3501,10 +3517,10 @@ class House:
             except Exception as exc:
                 queue.record(row, 'deferred', f'candidate validation unavailable: {type(exc).__name__}: {str(exc)[:160]}')
                 return None
-        # The child's birth probes its NEEDS in the probe box. This runs under the lifecycle lock
-        # (from research, a background thread, too), so it never waits long for that box: held by
-        # background work, the admission is deferred and retried, before anything is written.
-        claim = getattr(self.sandbox, 'claim', None)
+        # The child's birth probes its NEEDS in the probe box, under the lifecycle lock, so it never
+        # waits long for that box: held by background work, the admission is deferred and retried,
+        # before anything is written. Already `described`, the birth needs no box at all.
+        claim = getattr(self.sandbox, 'claim', None) if described is None else None
         with claim(PROBE_BOX, wait=self.settings.probe_wait_seconds) if claim is not None else nullcontext(True) as free:
             if not free:
                 queue.record(row, 'deferred', 'the probe box is in use by background work; retried at the next admission pass')
@@ -3515,7 +3531,7 @@ class House:
                     self.kill(loser, 'displaced', self.postmortem(loser, 'displaced',
                         'a replay-passing deferred candidate has priority over an untested mutation'))
                 child = self.fork(parent, code=candidate['code'], params=candidate['params'],
-                                  reason=candidate['purpose'], passed_replay=True, staked_by_house=staked)
+                                  reason=candidate['purpose'], passed_replay=True, staked_by_house=staked, described=described)
             except SandboxError as exc:
                 if loser is None:
                     # Sail did not answer before anything was born (the NEEDS probe comes first): a
@@ -3534,6 +3550,45 @@ class House:
             return None
         queue.record(row, 'admitted', 'a replay-passing child was seated on paper', child=child.id)
         return child
+
+    def _admit_researched(self, agent_id: str, generation: tuple, candidate: Mapping[str, Any], session: str) -> Agent | None:
+        """A research candidate's child, from the research thread, with no Sail call under the
+        lifecycle lock. Every wake of the tick takes that lock, so Sail stalling under it stalls the
+        whole tick, and TERM with it (review of PR 159: this path held it through the child's NEEDS
+        probe and the parent's box fork, a checkpoint and a restore at the client's ten- and
+        fifteen-minute timeouts). So: the queue row and its checks first (an admission that must
+        wait buys no probe); then the NEEDS probe, holding nothing but the probe box; then, under
+        the lock again, the birth from that probe's result into a box from the clean image. The row
+        is read back before the birth, so a candidate the tick's admission pass seated meanwhile is
+        never born twice. A busy probe box or a Sail failure leaves it deferred for that pass:
+        infrastructure, never the candidate's result."""
+        queue = Admissions(self.ledger)
+        with self._lifecycle_lock:
+            row = queue.enqueue(agent_id, generation, candidate, session)
+            if self._admission_gate(row) is None:
+                return None
+        described, why = None, ''
+        claim = getattr(self.sandbox, 'claim', None)
+        try:
+            with claim(PROBE_BOX, wait=600) if claim is not None else nullcontext(True) as free:
+                if free:
+                    described = self.sandbox.needs(PROBE_BOX, candidate['code'])
+                else:
+                    why = 'the probe box is in use by background work; retried at the next admission pass'
+        except Exception as exc:  # noqa: BLE001 - nothing is written yet: the admission pass retries it
+            why = f"{'infrastructure' if isinstance(exc, SandboxError) else 'NEEDS probe failed'}: {type(exc).__name__}: {str(exc)[:160]}"
+        with self._lifecycle_lock, self._box_patience():
+            row = queue.enqueue(agent_id, generation, candidate, session)  # as it stands now
+            if described is None:
+                if row['status'] in ('queued', 'deferred'):
+                    queue.record(row, 'deferred', why)
+                return None
+            child = self._admit_candidate(row, described=described)
+            if child is None and row.get('status') != 'unconfirmed' and self._generation(agent_id) is not None:
+                # The probe seated nobody (the seat went meanwhile, or the tick's pass seated it):
+                # its seconds are the parent's, as a validation probe's are.
+                self._charge_box(agent_id, described, note="reading a candidate's NEEDS for an admission that did not seat it")
+            return child
 
     def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
         """Apply a candidate under the lifecycle lock, or return it for a separate child."""

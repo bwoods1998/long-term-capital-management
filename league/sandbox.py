@@ -202,6 +202,12 @@ class SailSandbox:
     RESUME_TIMEOUT = 120.0
     UPLOAD_TIMEOUT = 60.0
     UPLOAD_SECONDS_PER_MB = 4.0
+    #: A checkpoint of a parent's box (a fork) and a box started from a checkpoint (every new box):
+    #: the client waits ten and fifteen minutes. Measured on the floor Sept 23, 2026: an agent's
+    #: first run, its box's creation included, took 8.7 s at the median and 10.7 s at p90 over 514
+    #: agents, and 182 s at the slowest.
+    CHECKPOINT_TIMEOUT = 120.0
+    CREATE_TIMEOUT = 180.0
     #: How long a background sleep waits for a box another caller holds. The holder is a run,
     #: which puts the box to sleep itself when it ends, so giving up loses nothing; waiting for
     #: ever would hold a pool thread, and the process's exit, behind a hung Sail call.
@@ -269,7 +275,8 @@ class SailSandbox:
         box = self.box_of(agent)
         created = False
         if box is None:
-            row = self.client.from_checkpoint(checkpoint or self.image_checkpoint, name=f"{self.name_prefix}-{agent}"[:60])
+            row = self.client.from_checkpoint(checkpoint or self.image_checkpoint, name=f"{self.name_prefix}-{agent}"[:60],
+                                              timeout=self.CREATE_TIMEOUT)
             box = str(row.get("sailbox_id") or row.get("id"))
             created = True
             # No network at all: everything a strategy sees is handed to it as data. The box is
@@ -412,7 +419,8 @@ class SailSandbox:
                 status = str((self.client.get(box) or {}).get("status") or "")
                 if status in ("sleeping", "paused", "asleep"):
                     self.client.resume(box, timeout=self.RESUME_TIMEOUT)
-                row = self.client.checkpoint(box, name=f"{self.name_prefix}-fork-{child}"[:60], ttl_seconds=86400)
+                row = self.client.checkpoint(box, name=f"{self.name_prefix}-fork-{child}"[:60], ttl_seconds=86400,
+                                             timeout=self.CHECKPOINT_TIMEOUT)
                 self._ensure(child, checkpoint=str(row.get("checkpoint_id")))
                 return True
             except SandboxError:

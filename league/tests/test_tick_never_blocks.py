@@ -45,16 +45,24 @@ class StallingSail:
     def __init__(self):
         self.boxes: dict[str, dict] = {}
         self.stalled: set[str] = set()
+        self.stall_checkpoints = False  # a parent's checkpoint hangs, then fails, like `exec` above
         self.entered = threading.Event()
         self.release = threading.Event()
         self.calls: list[tuple] = []
+        self.observer = None  # called with each method's name as it is entered
         self._n = 0
         self._lock = threading.Lock()
 
     def agent_of(self, box: str) -> str:
         return self.boxes[box]["name"].split("-", 1)[1]
 
-    def from_checkpoint(self, checkpoint, *, name):
+    def _seen(self, name: str) -> None:
+        if self.observer is not None:
+            self.observer(name)
+
+    def from_checkpoint(self, checkpoint, *, name, timeout=None):
+        self._seen("from_checkpoint")
+        self.calls.append(("from_checkpoint", checkpoint, timeout))
         with self._lock:
             self._n += 1
             box = f"sb_{self._n:04d}"
@@ -62,22 +70,27 @@ class StallingSail:
         return {"sailbox_id": box, "checkpoint_id": checkpoint, "status": "running"}
 
     def set_egress(self, box, hosts):
+        self._seen("set_egress")
         return {}
 
     def get(self, box):
+        self._seen("get")
         return {"sailbox_id": box, "status": self.boxes[box]["status"]}
 
     def resume(self, box, *, timeout=None):
+        self._seen("resume")
         self.calls.append(("resume", box, timeout))
         self.boxes[box]["status"] = "running"
         return {}
 
     def upload(self, box, path, content, *, mode=0o600, timeout=None):
+        self._seen("upload")
         self.calls.append(("upload", box, path, timeout))
         self.boxes[box]["files"][path] = bytes(content)
         return {}
 
     def exec(self, box, argv, *, timeout=600):
+        self._seen("exec")
         agent = self.agent_of(box)
         if agent in self.stalled:
             self.entered.set()
@@ -95,14 +108,22 @@ class StallingSail:
         return SimpleNamespace(stdout=f"\n{marker} {spec['token']} {json.dumps(result)}\n", stderr="", return_code=0)
 
     def sleep(self, box):
+        self._seen("sleep")
         self.calls.append(("sleep", box))
         self.boxes[box]["status"] = "sleeping"
         return {}
 
-    def checkpoint(self, box, *, name=None, ttl_seconds=None):
+    def checkpoint(self, box, *, name=None, ttl_seconds=None, timeout=None):
+        self._seen("checkpoint")
+        self.calls.append(("checkpoint", box, timeout))
+        if self.stall_checkpoints:
+            self.entered.set()
+            self.release.wait(30)
+            raise Transport("sailbox transport failed: TimeoutError")
         return {"checkpoint_id": f"cp_{box}", "sailbox_id": box}
 
     def terminate(self, box):
+        self._seen("terminate")
         self.boxes[box]["status"] = "terminated"
         return {}
 
@@ -230,6 +251,159 @@ class TheProbeBox(StalledSailCase):
         self.assertEqual(revived, [True], "once per change of the rules")
 
 
+class ResearchAdmissions(StalledSailCase):
+    """Review of PR 159: a research admission held the lifecycle lock, which every wake needs, through
+    the child's NEEDS probe and the parent's box fork (a Sail checkpoint and restore, at the client's
+    ten- and fifteen-minute timeouts), so a Sail stall on the research thread stalled the whole tick
+    (reproduced: 6.4 s of tick for a 6 s stall of `checkpoint`), and TERM with it."""
+
+    def setUp(self):
+        super().setUp()
+        self.under_lock: list[str] = []  # Sail calls made while the lifecycle lock was held off the tick's thread
+        self.tick_thread = threading.current_thread()
+        lock = self.house._lifecycle_lock
+        self.sail.observer = lambda name: (self.under_lock.append(name)
+                                           if threading.current_thread() is not self.tick_thread and lock._is_owned() else None)
+        # The stall is released after the bound, so a regression fails quickly instead of hanging.
+        timer = threading.Timer(BOUNDED + 2, self.sail.release.set)
+        timer.daemon = True
+        timer.start()
+        self.addCleanup(timer.cancel)
+
+    def candidate_ready(self):
+        parent = self.seated()
+        self.timed_tick()  # its box exists, so a fork of it would be a checkpoint and a restore
+        self.assertIsNotNone(self.sandbox.box_of(parent.id))
+        self.house.record_is_empty = lambda agent: False  # a record to protect: the candidate becomes a child
+        code = BUYER + "\n# a better idea\n"
+        self.house.researcher = SimpleNamespace(research=lambda *a, **k: SimpleNamespace(
+            candidate={"code": code, "needs": parent.needs, "params": parent.params, "purpose": "a replay-passing candidate",
+                       "numbers": {}, "passed": True}, consulted=""))
+        return parent, code
+
+    def research_in_background(self, parent) -> tuple[threading.Event, list]:
+        done, errors = threading.Event(), []
+
+        def run():
+            try:
+                self.house.research(parent)
+            except BaseException as exc:  # noqa: BLE001 - reported by the test
+                errors.append(exc)
+            finally:
+                done.set()
+
+        threading.Thread(target=run, daemon=True).start()
+        return done, errors
+
+    def children(self, code):
+        return [a for a in self.house.registry.living() if a.code == code]
+
+    def test_a_research_admission_forks_no_box_under_the_lifecycle_lock_and_the_tick_never_waits(self):
+        from league.admissions import Admissions
+
+        parent, code = self.candidate_ready()
+        self.sail.stall_checkpoints = True  # the parent's checkpoint would hang, as the 05:07Z transport did
+        done, errors = self.research_in_background(parent)
+        deadline = time.monotonic() + 5
+        while not (done.is_set() or self.sail.entered.is_set()) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        summary, seconds = self.timed_tick()
+        self.assertLess(seconds, BOUNDED)
+        self.assertEqual(self.health()["at"], summary["at"])
+        self.assertTrue(done.wait(BOUNDED), "the research admission hung in Sail")
+        self.assertEqual(errors, [])
+        self.assertEqual(self.under_lock, [], "a Sail call was made under the lifecycle lock off the tick's thread")
+        self.assertFalse(any(c[0] == "checkpoint" for c in self.sail.calls), "no parent's box was checkpointed")
+        [child] = self.children(code)
+        self.assertEqual(child.parent, parent.id)
+        self.assertEqual(self.house.evaluator.rung(child.id), 1)
+        forked = self.house.ledger.last("agent.forked", agent=parent.id).payload
+        self.assertEqual((forked["child"], forked["box_forked"]), (child.id, False))  # the clean image
+        self.assertEqual(Admissions(self.house.ledger).rows()[-1]["status"], "admitted")
+        # Its NEEDS probe was read once, before the lock, and charged to the child as at any birth.
+        charges = [e.payload for e in self.house.ledger.iter(kinds="credit.charge", agent=child.id)]
+        self.assertEqual([c["detail"]["for"] for c in charges if "NEEDS" in c.get("detail", {}).get("for", "")], ["reading its strategy's NEEDS"])
+        self.timed_tick()  # the child wakes in a box of its own, from the image
+        self.assertIsNotNone(self.sandbox.box_of(child.id))
+
+    def test_a_research_admission_stalled_in_its_needs_probe_holds_nothing_the_tick_needs(self):
+        from league.admissions import Admissions
+
+        parent, code = self.candidate_ready()
+        self.sail.stalled.add(PROBE_BOX)
+        done, errors = self.research_in_background(parent)
+        self.assertTrue(self.sail.entered.wait(5), "the admission never reached the probe box")
+        self.house._state["next_wake"][parent.id] = self.clock()  # due again
+        summary, seconds = self.timed_tick()
+        self.assertLess(seconds, BOUNDED)
+        self.assertIn(parent.id, summary["woke"])  # its wake did not wait for the research thread
+        self.assertEqual(self.health()["at"], summary["at"])
+        self.sail.release.set()
+        self.assertTrue(done.wait(BOUNDED))
+        self.assertEqual(errors, [])
+        self.assertEqual(self.under_lock, [])
+        self.assertEqual(self.children(code), [])
+        [row] = Admissions(self.house.ledger).pending()
+        self.assertEqual(row["status"], "deferred")
+        self.assertTrue(row["reason"].startswith("infrastructure: SandboxError"), row["reason"])
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial"), 0)  # Sail's failure is nobody's trial
+        # Not lost: the tick's admission pass seats it once Sail answers.
+        self.sail.stalled.clear()
+        with self.house._lifecycle_lock:
+            child = self.house._admit_candidate(row, displace=True)
+        self.assertEqual(self.children(code), [child])
+
+    def test_term_while_a_research_admission_hangs_in_sail_still_closes_the_house(self):
+        parent, code = self.candidate_ready()
+        self.sail.stalled.add(PROBE_BOX)
+        self.assertTrue(self.house._background(f"research:{parent.id}", self.house.research, parent))
+        self.assertTrue(self.sail.entered.wait(5), "the admission never reached the probe box")
+        started = time.monotonic()
+        self.house.begin_close()  # what TERM does (league/__main__.py)
+        self.house._state["next_wake"][parent.id] = self.clock()
+        summary = self.house.tick()  # the tick in hand returns: nothing it needs is held
+        self.house.close(wait=1)
+        self.assertLess(time.monotonic() - started, BOUNDED)
+        self.assertIn(parent.id, summary["woke"])
+        self.assertEqual(self.under_lock, [])
+        self.closed = True
+
+    def test_a_candidate_the_tick_seats_while_research_probes_it_is_born_once(self):
+        from league.admissions import Admissions
+
+        parent, code = self.candidate_ready()
+        probe, seated = self.sandbox.needs, []
+
+        def needs(agent, source, **kw):
+            run = probe(agent, source, **kw)
+            if source == code and not seated:
+                seated.append(True)
+                # Meanwhile the tick's refill seats the same queued candidate.
+                with self.house._lifecycle_lock:
+                    [row] = Admissions(self.house.ledger).pending()
+                    seated.append(self.house._admit_candidate(row, displace=True))
+            return run
+
+        with patch.object(self.sandbox, "needs", side_effect=needs):
+            self.house.research(parent)
+        self.assertIsNotNone(seated[1])
+        self.assertEqual(self.children(code), [seated[1]], "born once")
+        self.assertEqual(Admissions(self.house.ledger).rows()[-1]["status"], "admitted")
+        # The probe research bought for it seated nobody: it is the parent's, as a validation probe is.
+        charges = [e.payload["detail"]["for"] for e in self.house.ledger.iter(kinds="credit.charge", agent=parent.id) if "detail" in e.payload]
+        self.assertIn("reading a candidate's NEEDS for an admission that did not seat it", charges)
+
+    def test_a_research_admission_that_must_wait_buys_no_probe(self):
+        from league.admissions import Admissions
+
+        parent, code = self.candidate_ready()
+        self.house.game["economy"]["max_population"] = 1
+        execs = len([c for c in self.sail.calls if c[0] == "upload"])
+        self.house.research(parent)
+        self.assertIn("population is full", Admissions(self.house.ledger).rows()[-1]["reason"])
+        self.assertEqual(len([c for c in self.sail.calls if c[0] == "upload"]), execs, "no probe for an admission that waits")
+
+
 class AnAgentsBox(StalledSailCase):
     def test_a_wake_whose_box_is_busy_is_skipped_and_retried_on_the_next_tick(self):
         agent = self.seated()
@@ -336,6 +510,17 @@ class TheSandbox(unittest.TestCase):
         resume = [c for c in self.sail.calls if c[0] == "resume"]
         self.assertEqual(resume, [("resume", box, SailSandbox.RESUME_TIMEOUT)])
         self.assertLess(SailSandbox.RESUME_TIMEOUT, 300)
+
+    def test_a_fork_and_a_new_box_carry_tighter_timeouts_than_the_clients_ten_and_fifteen_minutes(self):
+        self.box.needs("alpha", BUYER)
+        self.assertTrue(self.box.fork("alpha", "beta"))
+        box = self.box.box_of("alpha")
+        self.assertIn(("checkpoint", box, SailSandbox.CHECKPOINT_TIMEOUT), self.sail.calls)
+        restores = [c for c in self.sail.calls if c[0] == "from_checkpoint"]
+        self.assertEqual(restores, [("from_checkpoint", "cp_image", SailSandbox.CREATE_TIMEOUT),
+                                    ("from_checkpoint", f"cp_{box}", SailSandbox.CREATE_TIMEOUT)])
+        self.assertLess(SailSandbox.CHECKPOINT_TIMEOUT, 600)
+        self.assertLess(SailSandbox.CREATE_TIMEOUT, 900)
 
     def test_a_background_sleep_gives_up_on_a_box_a_run_holds(self):
         self.hold("alpha")
