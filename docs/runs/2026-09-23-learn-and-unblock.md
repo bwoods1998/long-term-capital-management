@@ -471,3 +471,13 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   version did, and `test_house`'s "more than cents is an error" test caught it). Deploy B is
   redeployed with it once CI is green: the same release content plus the fix, still the run's
   second owner deploy in substance.
+- 22:01Z — PR #212 green on both Pythons; merged as `cb955cb`; **Deploy B redeployed** (the same
+  Wave 1 content plus the second look). **22:03:12Z promoted:** release
+  `20260923T220154Z-b460e9de858e`. No money rule changed, no ratify.
+- 22:08Z — **Deploy B verified on the box:** 104 living (the population rises toward 112 as the
+  seat market seats waiters: 3 lab graduates born in five minutes, among them leahy-l9acfcb, plus a
+  card and two House births); the seat market shows 34 graduates and 5 cards waiting, 11 desks
+  reserved; the lab evaluated 7 Luna children in its first minutes (#204: the LLM children reach
+  batches at last) and its first forward windows ran (3 rows, 2 ranked, both positive); the
+  research gate runs on triggers (library notes, lessons, a fill, a block, heartbeats; clock runs
+  only for winners and idle agents); no book frozen, no error alert, tick 35 s.
