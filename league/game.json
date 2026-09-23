@@ -23,6 +23,7 @@
     "newcomer_seconds": 3600,
     "performance_exponent": 2,
     "displace_after_epochs": 2,
+    "displace_trading_after_sessions": 3,
     "line_exhausted_trials": 15,
     "explore_every": 5
   },
@@ -58,6 +59,10 @@
     "newcomer_seconds": [
       60,
       86400
+    ],
+    "displace_trading_after_sessions": [
+      1,
+      10
     ]
   },
   "audit": {

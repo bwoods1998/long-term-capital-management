@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 import re
 import threading
@@ -3016,10 +3017,21 @@ class House:
         active blocks of the fifteen the screen wants -- while twenty-six agents that had never
         traded at all sat untouched. An agent that is trading and losing is being judged by the
         evaluator, which will kill it on its own evidence at twenty blocks; an agent that trades
-        nothing is judged by nobody and costs a box and a seat for as long as it is left there."""
+        nothing is judged by nobody and costs a box and a seat for as long as it is left there.
+
+        On a desk that keeps an exchange's hours (stocks, options) the chance is counted in the
+        market's own time (Sept 23, 2026). The grace is regular-session time, not wall-clock time;
+        an agent that is trading keeps its seat until it has closed the bunt line's
+        `bunt_min_trades` or had `displace_trading_after_sessions` sessions (`_trading_pending`);
+        one holding a position while its market is shut is not removed, because its own exit is at
+        the next open and the House would only sell it there instead; and a rewrite of an agent
+        that has never traded does not restart its clock. Nine stock and option agents were
+        displaced Sept 21-23 after a median 6.5 session hours, every one with fills and none with
+        more than four closed trades, and three of them while holding contracts."""
         epoch = float(rules["epoch_seconds"])
         grace = float(rules.get("displace_after_epochs", 2)) * epoch
         now = self.clock()
+        stamp = None  # now, as a market-hours check reads it: made once, and only if a desk keeps hours
         rank = []
         for standing in self.standings():
             agent = self.registry.get(standing.agent)
@@ -3030,6 +3042,8 @@ class House:
             opportunity = _epoch(agent.born_at)
             opportunity_seq = 0
             agent_grace = grace
+            niche = self.niche_of(agent)
+            keeps_hours = standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs)
             if standing.rung == 0 and self._burst:
                 # Completed research is the opportunity; waiting out an hour adds no evidence.
                 # Queued/paid work and a late-qualified program must not die on a calendar timer.
@@ -3054,13 +3068,23 @@ class House:
                 # already fourteen hours old. Recover the current program's start from
                 # the ledger, including across restarts; duplicate strategy rows do not
                 # buy another grace period.
+                #
+                # On a desk that keeps hours, a rewrite of an agent that has never traded is NOT a
+                # new opportunity (Sept 23, 2026): research rewrote idle stock agents every few
+                # hours (mcentee-34 three times in eight), each rewrite restarted the clock, and
+                # the agents that never traded outlived the ones that did.
+                first_fill = None
+                if keeps_hours:
+                    found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
+                    first_fill = None if found is None else found.seq
                 signature = None
                 for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
                     p = entry.payload
                     if entry.kind in ("agent.born", "agent.strategy"):
                         current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
                         if current != signature:
-                            opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                            if signature is None or not keeps_hours or (first_fill is not None and first_fill < entry.seq):
+                                opportunity, opportunity_seq = _epoch(entry.at), entry.seq
                             signature = current
                     elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
                         opportunity, opportunity_seq = _epoch(entry.at), entry.seq
@@ -3074,8 +3098,8 @@ class House:
                         if self.research_jobs.active(agent.id):
                             continue
                         agent_grace = 0
-            niche = self.niche_of(agent)
-            if standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs):
+            traded = False
+            if keeps_hours:
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
                 # its equity agents were displaced before their first market session. Start
                 # their paper-seat grace at an actual offered opportunity (or a legacy fill),
@@ -3085,11 +3109,26 @@ class House:
                 if first is None:
                     continue
                 opportunity = max(opportunity, _epoch(first.at))
+                book = self.book_of(agent)
+                if book is not None and agent.id in book.accounts:
+                    if stamp is None:
+                        stamp = now_iso(self.clock)
+                    held = list(book.account(agent.id).holdings.values())  # copied at once: wakes run beside this
+                    if any(market_hours(h.instrument, stamp) is False for h in held):
+                        # Its own exit closes this at the next open. Displaced now, the House
+                        # would sell it there instead (scholes-23 at 07:11Z on Sept 23, mid-basket).
+                        continue
+                traded = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id, after=opportunity_seq)), None) is not None
+                if traded and self._trading_pending(agent, book, opportunity, now, rules):
+                    continue
             if standing.rung == 1 and agent_grace > 0 and agent.horizon == "day" and self._screen_pending(agent, opportunity_seq, now - opportunity):
                 continue
-            if now - opportunity < agent_grace:
+            # A desk that keeps hours offers nothing between the close and the next open: its grace
+            # is counted in regular-session time.
+            seated = session_time(opportunity, now)[0] if keeps_hours else now - opportunity
+            if seated < agent_grace:
                 continue
-            rank.append((standing.active_blocks > 0, standing.mean_growth, standing.active_blocks,
+            rank.append((standing.active_blocks > 0 or traded, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
         rank.sort(key=lambda row: row[:4])  # has it traded at all, then growth, then how much, then its purse
         return rank[0][4] if rank else None
@@ -3113,6 +3152,25 @@ class House:
         # The screen's own view: finished blocks that began after the seat, past any accounting cutoff.
         closed = sum(1 for row in self.evaluator.blocks(agent.id, since_seq=since_seq) if row.get("horizon") == "day")
         return closed < days
+
+    def _trading_pending(self, agent: Agent, book: Book | None, opportunity: float, now: float,
+                         rules: Mapping[str, Any]) -> bool:
+        """Is a trading agent on a desk that keeps hours still short of a record the bunt line can read?
+
+        Real money needs `bunt_min_trades` closed trades (the constitution's allocator, read here
+        and never changed), and a stock or option desk offers a round trip or two a session: an
+        ETF basket bought in the last hour is sold at the next open. So an agent that is trading,
+        hourly or daily, keeps its seat until it has closed that many trades, or until
+        `displace_trading_after_sessions` (game.json) regular sessions have closed since its
+        opportunity -- whichever comes first. Only its seat is kept: an unprofitable one is still
+        displaced once either is reached, and a profitable one never was displaceable."""
+        owed = int(rules.get("displace_trading_after_sessions", 3))
+        if session_time(opportunity, now)[1] >= owed:
+            return False
+        if book is None:
+            return False
+        closed, _ = allocator_module.closed_trades(self, agent.id, book.name)
+        return closed < int(CONSTITUTION["allocator"]["bunt_min_trades"])
 
     def frontier_remaining(self) -> Decimal | None:
         """The tighter of the two OpenAI lines: the gateway's month (`FrontierMonth`) and the House's
@@ -3389,6 +3447,8 @@ class House:
         return {
             'rung': rung, 'credits_usd': format(self.economy.balance(agent.id), 'f'),
             'blocks': len(self.evaluator.blocks(agent.id)),
+            # How far its own evidence is from real money, as the allocator measured it (read only).
+            'bunt_line': self.bunt_line(agent),
             'last_trial': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.trial', agent=agent.id)))), None),
             'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') in ('look', 'episode-look')), None),
             'can_fork': self.economy.can_fork(agent.id), 'recent_trades': self._recent_trades(agent.id),
@@ -3766,7 +3826,55 @@ class House:
         return {'rung': row.rung, 'active_blocks': row.active_blocks,
                 'mean_growth': row.mean_growth, 'niche': agent.niche,
                 'earned_observations': row.score_observations, 'earned_growth': row.score_growth,
-                'earned_rung': row.score_rung}
+                'earned_rung': row.score_rung, 'bunt_line': self.bunt_line(agent)}
+
+    def bunt_line(self, agent: Agent) -> dict[str, Any] | None:
+        """How far this agent's own evidence is from real money: its E, W_paper and closed trades as
+        the allocator measured them at its last pass, against the constitution's bunt line. Read
+        only -- nothing here moves a band, and the line is the constitution's, quoted, never set.
+        None while the allocator is off.
+
+        Sept 23, 2026: the best stock agent (scholes-21) was at E 0.9987 on 4 closed trades, $4.53
+        short, and no stock or options agent could see that. rules.py states the line; this is the
+        agent's own position against it."""
+        if not allocator_module.enabled():
+            return None
+        r = allocator_module.rules()
+        at, trades_needed = float(r["bunt_at"]), int(r["bunt_min_trades"])
+        settled_needed = int(r.get("bunt_min_settled") or 0)
+        weight = float((r.get("evidence") or {}).get("paper_weight", 0.5))
+        board = self.allocator.board()
+        row = (board.get("agents") or {}).get(agent.id) or {}
+        ev = row.get("evidence")
+        out: dict[str, Any] = {"band": row.get("band"), "bunt_at": at, "bunt_min_trades": trades_needed,
+                               **({"bunt_min_settled": settled_needed} if agent.venue == "kalshi" else {})}
+        if not ev:
+            return {**out, "measured": False,
+                    "note": "The allocator reads evidence from rung 1 (paper) on, at every mark pass; there is none for you yet."}
+        e, w_paper, w_real = float(ev["E"]), float(ev["W_paper"]), float(ev["W_real"])
+        trades, settled = int(ev.get("trades") or 0), int(ev.get("settled") or 0)
+        short = max(0, trades_needed - trades)
+        if agent.venue == "kalshi" and settled_needed:
+            short = min(short, max(0, settled_needed - settled))
+        # E = W_paper ** weight x W_real, so with the real record as it stands the line is this W_paper.
+        needed = (at / w_real) ** (1.0 / weight) if weight > 0 and w_real > 0 else math.inf
+        gain = max(0.0, needed / w_paper - 1.0) if w_paper > 0 else math.inf
+        paper = self.books.get(PRACTICE_BOOK[agent.venue])
+        equity = float(paper.equity(agent.id)) if paper is not None and agent.id in paper.accounts else None
+        out.update(measured=True, measured_at=board.get("at"), E=e, W_paper=w_paper, W_real=w_real,
+                   closed_trades=trades, **({"settled": settled} if agent.venue == "kalshi" else {}),
+                   e_short=round(max(0.0, at - e), 6), trades_short=short,
+                   w_paper_needed=round(needed, 6) if math.isfinite(needed) else None,
+                   paper_gain_needed_pct=round(100 * gain, 4) if math.isfinite(gain) else None,
+                   paper_gain_needed_usd=(round(gain * equity, 2) if equity is not None and math.isfinite(gain) else None),
+                   at_the_line=bool(e >= at and short == 0),
+                   note=("W_paper is after the practice haircut, and more trading pays more of it; the dollars are "
+                         "the gain on your paper equity now that would put E on the line. Crossing it is judged by "
+                         "the allocator at its next pass, as for everyone; nothing here changes the line."))
+        if row.get("band") in ("bunt", "swing", "star"):
+            # Already on real money: the line it now has to hold is the bunt line with hysteresis.
+            out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6))
+        return out
 
     def standings(self) -> list[Standing]:
         """Every living agent's standing. Inside a tick, on the tick's own thread, the table is built
@@ -4425,3 +4533,37 @@ def _new_york(clock: Callable[[], float]) -> tuple[str, float]:
 
     moment = datetime.fromtimestamp(clock(), tz=timezone.utc).astimezone(ZoneInfo("America/New_York"))
     return moment.strftime("%Y-%m-%d"), moment.hour + moment.minute / 60.0
+
+
+def session_time(start: float, end: float, *, horizon_days: int = 30) -> tuple[float, int]:
+    """(seconds of regular US equity session, sessions that closed) between two instants, holidays
+    and early closes included. A session counts as closed when its close falls after `start` and
+    no later than `end`, so the session an agent was first offered counts once it closes.
+
+    A span longer than `horizon_days` is plenty of both: it is reported as infinite time and as
+    many sessions as it has days, without walking the calendar. Outside the computed NYSE calendar
+    the span is wall-clock time and whole days, which is what the grace measured before."""
+    from datetime import datetime, timedelta, timezone
+
+    from ltcm.data import NEW_YORK, DataError, to_datetime, us_equity_session
+
+    if end <= start:
+        return 0.0, 0
+    if end - start > horizon_days * 86400:
+        return math.inf, int((end - start) // 86400)
+    day = datetime.fromtimestamp(start, timezone.utc).astimezone(NEW_YORK).date()
+    last = datetime.fromtimestamp(end, timezone.utc).astimezone(NEW_YORK).date()
+    seconds, closed = 0.0, 0
+    try:
+        while day <= last:
+            session = us_equity_session(day)
+            if session is not None:
+                opened = to_datetime(session.open_at).timestamp()
+                closes = to_datetime(session.close_at).timestamp()
+                seconds += max(0.0, min(end, closes) - max(start, opened))
+                if start < closes <= end:
+                    closed += 1
+            day += timedelta(days=1)
+    except DataError:
+        return end - start, int((end - start) // 86400)
+    return seconds, closed
