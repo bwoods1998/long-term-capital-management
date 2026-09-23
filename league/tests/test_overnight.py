@@ -146,6 +146,20 @@ class BurstGame(HouseCase):
         self.assertEqual(game['research']['profile'], 'pro_asap')
         self.assertEqual(accelerated['research_workers'], 20)
 
+    def test_a_newborn_forks_only_once_it_has_earned_credits(self):
+        """Sept 23, 2026: the burst's fork threshold sits above its endowment (turbo), so a newborn
+        cannot spend its stake on a parameter copy of itself; one that earns payouts can."""
+        from unittest.mock import patch
+        from league import overnight
+        policy = load_policy()
+        with patch.object(overnight, 'load_turbo', return_value={'endowment_usd': 8, 'fork_threshold_usd': 10}):
+            game = game_for(load_game(), {'policy': policy})
+        economy = game['economy']
+        self.assertGreater(float(economy['fork_threshold_usd']), float(economy['endowment_usd']))
+        with patch.object(overnight, 'load_turbo', return_value={}):
+            self.assertEqual(game_for(load_game(), {'policy': policy})['economy']['fork_threshold_usd'], '2.00')
+        self.assertEqual(overnight.load_turbo()['fork_threshold_usd'], 10)  # the repository's turbo.json
+
     def test_turbo_out_of_range_is_refused(self):
         from unittest.mock import patch
         from league import overnight
