@@ -429,3 +429,8 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   watch rolls a good release back). Left as recorded follow-ups: re-reading settlements after a
   revived fill on a settled market (rare; pre-PR it froze too), re-snapping a re-priced post-only
   order to a coarser price band (the venue rejects it as before), and a docstring.
+- 21:44Z — PR #209 (Wave 1: #201 seats, #204 lab, #202 research and foundry, the lab one-liner,
+  Merton's #205-#207, the run branch) green on 3.11 (9m13s) and 3.14 (7m35s) and locally (league
+  98 modules / 2,442 tests, ltcm 1,791); merged as `563a030` and deployed at once.
+- **21:46:00Z — Deploy B promoted:** release `20260923T214445Z-f5650ac1d870` (was
+  `main-24bda8977420`). No money rule changed (digest `1d63a56e`), so no ratify.
