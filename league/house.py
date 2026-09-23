@@ -33,7 +33,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Collection, Iterator, Mapping, Sequence
 
 from ltcm.broker import Instrument, money
 
@@ -63,9 +63,15 @@ from .venues import family_of, instrument_for, market_hours, min_order_usd, pric
 #: memory (Sept 19, 2026); four thousand of them is about two megabytes for six symbols.
 MAX_OBSERVED_BARS = 4000
 OBSERVED_BAR_SIZES = (("5Min", 300), ("15Min", 900), ("1Hour", 3600), ("1Day", 86400))
-from ltcm.data import market_open_at
+from ltcm.data import market_open_at, next_session, to_datetime, us_equity_session
 
 ZERO = Decimal(0)
+CENT = Decimal("0.01")
+#: A desk that keeps an exchange's session is woken this many seconds after the regular open when
+#: its next wake would otherwise land later (`House._next_wake`). Measured Sept 23, 2026: the options
+#: desk woke at 13:29:55Z on a clock 4.3-4.6 s slow, saw a shut market, and 5 of its 8 agents did
+#: not wake again until 14:01Z or later.
+OPEN_WAKE_SECONDS = 5.0
 CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
 #: An agent's resting entries are cancelled once none of its wakes has completed on their book for
 #: this many of its own wake intervals, and never sooner than `STALE_FLOOR_SECONDS` (see
@@ -242,7 +248,8 @@ class House:
         for niche_id, live in (self._state.get("niche_live") or {}).items():
             if niche_id in self.niches:
                 self.niches[niche_id].live = tuple(live)
-        self._data_cache: dict[str, tuple[float, Any]] = {}
+        self._data_cache: dict[str, tuple[Any, ...]] = {}  # key -> (read at, value, fetch began at)
+        self._opens: dict[str, float | None] = {}  # UTC date -> that day's regular-session open (`_opened_since`)
         self._price_grids: dict[str, tuple[float, tuple[Any, ...]]] = {}  # "book:ticker" -> (read at, bands)
         self._tapes: dict[str, tuple[float, dict[str, Any]]] = {}
         self._tape_lock = threading.Lock()
@@ -811,6 +818,9 @@ class House:
         return self.books.get(PRACTICE_BOOK[agent.venue])
 
     def _limits(self, rung: int, agent: Agent | None = None, staked: Decimal | None = None) -> Limits:
+        """The seat's own caps, which `seat` writes into the book and the book enforces as "this
+        rung's". Not always what an entry can have: on real-money Alpaca the book also holds it to
+        half the account's equity, and an agent is SHOWN the smaller of the two (`_real_limits`)."""
         row = CONSTITUTION["rungs"][str(min(max(rung, 1), 2))]
         position, order = Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"])
         allocated = rung >= 2 and agent is not None and allocator_module.enabled()
@@ -829,6 +839,74 @@ class House:
             elif allocated:
                 position = order = max(position, Decimal(row["option_max_position_usd"]))
         return Limits(position, order, asset_classes=classes, max_hours_to_resolve=self.horizon_hours(agent))
+
+    def _real_limits(self, agent: Agent, book: Book, limits: Limits) -> tuple[Decimal, Decimal]:
+        """(max position, max order) in dollars that a fresh entry can actually have on this book now:
+        what an agent is shown (`snapshot`), what its option chain is filtered by, and what the House
+        trims a real buy to (`_fit_real_entry`). It changes nothing the book enforces.
+
+        On a real-money Alpaca book the seat's caps (`_limits`) are not the only rule. The book's risk
+        rules also hold a position, valued at the ask, and an order to half the account's CURRENT
+        equity (`book.DEFAULT_RULES` max_position_pct and max_order_notional_pct). Measured Sept 23,
+        2026: haghani-37, a $25 crypto bunt shown $12.50, was refused 3 times once its equity fell to
+        $24.89-24.96; and an options bunt is staked $40 and shown $40, while the book takes $20 a
+        contract. Here it is the smaller of the two, a cent under the equity line, so an order sized
+        to it is under the line rather than on it. Every other book: the seat's caps as they are."""
+        position, order = limits.max_position_usd, limits.max_order_usd
+        if not book.real_money or family_of(book.broker.venue) != "alpaca":
+            return position, order
+        equity = book.equity(agent.id)
+
+        def line(rule: str) -> Decimal:
+            return max((equity * money(str(book.rules[rule])) - CENT).quantize(CENT, rounding=ROUND_DOWN), ZERO)
+
+        return min(position, line("max_position_pct")), min(order, line("max_order_notional_pct"))
+
+    def _fit_real_entry(self, agent: Agent, book: Book, instrument: Instrument, quantity: Decimal, limit: Decimal | None,
+                        step: Decimal, minimum: Decimal | None, cancelling: Collection[str] = ()) -> tuple[Decimal, str] | None:
+        """A real-money Alpaca buy trimmed to what the book will take: (quantity, why) when less than
+        asked fits, None when the order fits as it is or cannot be made to (the book then refuses it
+        and says why). Only ever smaller, never under the venue's minimum, and never for a sell.
+
+        The book values the position a buy leaves at the ASK (`ltcm.risk.rule_position_limit`), with
+        what the agent holds and bids already, while an order is sized at its own limit price. So a
+        bid under the ask sized to its limit to the dollar is over the line at the ask: 7 of
+        haghani-37's 10 real refusals by Sept 23, 2026, all at equity at or above its stake.
+
+        `cancelling` is the order ids the same decision cancels. `wake` sizes before it applies the
+        decision's cancels, and the book judges the new bid after them, so a bid being cancelled is
+        not counted as one the agent still has. Otherwise a strategy that cancels its resting bid and
+        bids again each wake had a room of a sliver under the $10 minimum, its replacement was sent
+        untrimmed, and the book refused it at the ask once the old bid was gone: no order at all. If a
+        cancel does not go through, the old bid stays and the book, still the judge, refuses the new
+        one as it would have."""
+        limits = book.limits.get(agent.id)
+        if limits is None:
+            return None
+        try:
+            ask = book.broker.quote(instrument).ask
+        except Exception:  # noqa: BLE001 - no quote, no trim: the book judges the order as asked
+            return None
+        if ask is None or ask <= 0:
+            return None
+        position_cap, order_cap = self._real_limits(agent, book, limits)
+        unit = ask * instrument.multiplier
+        held = book.account(agent.id).holdings.get(instrument.key)
+        committed = held.quantity * unit if held else ZERO
+        for working in book.open_orders(agent.id):
+            if working.side == "buy" and working.instrument.key == instrument.key and working.order_id not in cancelling:
+                left = sum((share.quantity - share.filled for share in working.shares if share.agent == agent.id), ZERO)
+                committed += left * (working.limit_price or ask) * instrument.multiplier
+        paid = min(ask, limit) if limit is not None and limit > 0 else ask  # the book's order notional
+        room = min((position_cap - committed) / unit, order_cap / (paid * instrument.multiplier))
+        fits = (room / step).to_integral_value(rounding=ROUND_DOWN) * step
+        if fits <= 0 or fits >= quantity:
+            return None
+        if minimum is not None and fits * (limit or ask) * instrument.multiplier < minimum:
+            return None
+        return fits, (f"the book values the position at the ask of {ask} and holds it to ${position_cap}, "
+                      f"an order to ${order_cap} (half this account's ${book.equity(agent.id):.2f} equity, less a cent, "
+                      f"or the seat's limits if smaller)")
 
     def horizon_hours(self, agent: Agent | None) -> float | None:
         """The horizon rule for this agent's entries: Kalshi only (hours by its block length)."""
@@ -864,9 +942,13 @@ class House:
     def _cached(self, key: str, ttl: float, build: Callable[[], Any], *, record: bool = True) -> Any:
         """`build()`, shared for `ttl` seconds, and kept in the market recordings. `record=False` for
         what is already stored with its receive time elsewhere (the feed store): recorded twice, a
-        scoreboard every half minute would crowd market snapshots out of the recorder's 256 MB."""
+        scoreboard every half minute would crowd market snapshots out of the recorder's 256 MB.
+
+        What a fetch that began before the regular session opened read is never served after the
+        open: a desk woken at the open (`_next_wake`) must see the session, not the quotes and the
+        option chain an agent woken a few seconds earlier cached from a shut market."""
         hit = self._data_cache.get(key)
-        if hit and self.clock() - hit[0] < ttl:
+        if hit and self.clock() - hit[0] < ttl and not self._opened_since(hit[2] if len(hit) > 2 else hit[0]):
             return hit[1]
         started = self.clock()
         value = build()
@@ -875,8 +957,29 @@ class House:
                 self.recorder.record(key, value, started=started)
             except Exception as exc:  # recording failure must not prevent position management
                 self.alert("warning", f"market recording failed ({type(exc).__name__})")
-        self._data_cache[key] = (self.clock(), value)
+        self._data_cache[key] = (self.clock(), value, started)
         return value
+
+    def _session_open(self, moment: float) -> float | None:
+        """When the regular US equity session opened (or opens) on `moment`'s UTC date; None on a
+        closed day. The open is 13:30 or 14:30 UTC, so the UTC date is New York's date there."""
+        day = time.strftime("%Y-%m-%d", time.gmtime(moment))
+        if day not in self._opens:
+            try:
+                session = us_equity_session(day)
+                opened = to_datetime(session.open_at).timestamp() if session is not None else None
+            except Exception:  # noqa: BLE001 - a date outside the computed calendar has no open we know of
+                opened = None
+            if len(self._opens) > 64:
+                self._opens.clear()
+            self._opens[day] = opened
+        return self._opens[day]
+
+    def _opened_since(self, then: float) -> bool:
+        """Whether the regular session opened after `then` and by now."""
+        now = self.clock()
+        opened = self._session_open(now)
+        return opened is not None and then < opened <= now
 
     def snapshot(self, agent: Agent, book: Book) -> dict[str, Any]:
         """Everything a strategy sees, as plain data (floats: the box converts nothing back)."""
@@ -884,15 +987,17 @@ class House:
         needs = agent.needs
         account = book.account(agent.id)
         limits = book.limits.get(agent.id) or self._limits(1, agent)
+        # What an entry can actually have on this book now (`_real_limits`), not only the seat's caps.
+        max_position, max_order = self._real_limits(agent, book, limits)
+        # `now` is stamped at the end, once the market data is in hand (`_stamped`).
         ctx: dict[str, Any] = {
-            "now": now_iso(self.clock),
             "venue": agent.venue,
             "rung": self.evaluator.rung(agent.id),
             "params": agent.params,
             "memory": self._state["memory"].get(agent.id) or {},
             "cash": float(account.cash),
             "equity": float(book.equity(agent.id)),
-            "limits": {"max_position_usd": float(limits.max_position_usd), "max_order_usd": float(limits.max_order_usd)},
+            "limits": {"max_position_usd": float(max_position), "max_order_usd": float(max_order)},
             "fees": {"crypto_taker": 0.0025, "crypto_maker": 0.0015, "kalshi_taker_rate": 0.07},
             "positions": [],
             "open_orders": [],
@@ -957,7 +1062,10 @@ class House:
             niche = self.niche_of(agent)
             if niche is not None and niche.asset_class == "option":
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
-                afford = float(limits.max_order_usd) / 100.0  # a contract is 100 shares: what one order can pay a share
+                # A contract is 100 shares: what one contract may cost a share, by the same number the
+                # agent is shown, so the chain holds nothing the book would refuse on size (an options
+                # bunt staked $40 is held to $20 a contract by half its equity).
+                afford = float(min(max_order, max_position)) / 100.0
                 ctx["chain"] = self._cached(f"chain:{','.join(symbols)}:{days}:{afford}", 120, lambda: self._chain(symbols[:8], days, afford, ctx["quotes"]))
             else:
                 ctx["venue_rules"] = self._venue_rules(book, symbols, ctx["quotes"])
@@ -981,7 +1089,16 @@ class House:
                 # accounts for existing holdings and other agents' pending orders below them.
                 for key in ('max_position_usd', 'max_order_usd'):
                     ctx['limits'][key] = min(ctx['limits'][key], *caps)
-        return ctx
+        return self._stamped(ctx)
+
+    def _stamped(self, ctx: dict[str, Any]) -> dict[str, Any]:
+        """The snapshot with its `now`, read AFTER the bars, the quotes, the option chain and the
+        listings were fetched, so no quote in it is later than its `now` because the fetch took
+        time. Measured Sept 23, 2026: stamped before an options desk's chain was fetched, 170-280 of
+        about 300 contracts a snapshot carried quotes later than `now`, and a strategy that rejects a
+        quote from the future could not enter. No quote's own timestamp is ever changed. (The rest
+        was the box's clock, 4.3-4.6 s slow: that is the box's NTP, not something to paper over.)"""
+        return {"now": now_iso(self.clock), **ctx}
 
     # ------------------------------------------------------------------- wake
     def due(self) -> list[Agent]:
@@ -997,6 +1114,23 @@ class House:
         # first five minutes a House wakes a few agents a tick; the rest are a minute late.
         cold = now - self._born_at < 300
         return out[: min(self.settings.max_wakes_per_tick, self.settings.cold_wakes_per_tick) if cold else self.settings.max_wakes_per_tick]
+
+    def _next_wake(self, agent: Agent, now: float) -> float:
+        """When an agent woken at `now` is due again: `wake_minutes` on, or a few seconds after the
+        regular session's open (`OPEN_WAKE_SECONDS`) for a desk that keeps the session (stocks,
+        options, an open desk naming a stock) when its next wake would otherwise land later. The
+        wake is moved, not added: the cadence runs on from it (so a cadence of a day or more wakes at
+        each open), and every other wake, and every coin or Kalshi desk's, is where it was."""
+        due = now + agent.wake_minutes * 60
+        niche = self.niche_of(agent)
+        if niche is None or not niche.keeps_hours(agent.needs):
+            return due
+        try:
+            session = next_session(now)  # the first session opening strictly after now
+            at_open = to_datetime(session.open_at).timestamp() + OPEN_WAKE_SECONDS if session is not None else None
+        except Exception:  # noqa: BLE001 - no calendar, no move: the cadence stands
+            return due
+        return at_open if at_open is not None and at_open < due else due
 
     def _generation(self, agent_id: str) -> tuple[str, str, int, int] | None:
         """Identity of the strategy and rung stay, read while holding the lifecycle lock."""
@@ -1014,7 +1148,7 @@ class House:
             if generation is None:
                 return {"agent": agent.id, "skipped": "retired"}
             agent = deepcopy(self.registry.get(agent.id))
-            self._state["next_wake"][agent.id] = self.clock() + agent.wake_minutes * 60
+            self._state["next_wake"][agent.id] = self._next_wake(agent, self.clock())
             rung = self.evaluator.rung(agent.id)
             if self._state["tried"].get(agent.id) != agent.code_sha256 and not self.paused():
                 self._background(f"replay:{agent.id}", self._replay_own, agent)
@@ -1047,7 +1181,11 @@ class House:
         result = run.result
         # Sizing may need a venue quote, so do it before the short result commit.
         adjusted: list[str] = []
-        intents, dropped = self._intents(agent, book, result.get("intents") or [], adjusted=adjusted) if result.get("ok") else ([], [])
+        # The decision's cancels are applied below, after sizing, but the book judges its new orders
+        # after them: the real-money trim must not count a bid this decision withdraws (`_fit_real_entry`).
+        cancelling = frozenset(c for c in (result.get("cancels") or ()) if isinstance(c, str)) if result.get("ok") else frozenset()
+        intents, dropped = (self._intents(agent, book, result.get("intents") or [], adjusted=adjusted, cancelling=cancelling)
+                            if result.get("ok") else ([], []))
         offered = self._offered(agent, ctx)
         with self._lifecycle_lock:
             if self._generation(agent.id) != generation:
@@ -1130,7 +1268,7 @@ class House:
         return idle
 
     def _intents(self, agent: Agent, book: Book, rows: list[Mapping[str, Any]], *,
-                 adjusted: list[str] | None = None) -> tuple[list[Intent], list[str]]:
+                 adjusted: list[str] | None = None, cancelling: Collection[str] = ()) -> tuple[list[Intent], list[str]]:
         """What a decision asked for, as sized intents for the book; what cannot be read is dropped.
 
         On the way the order guards (Sept 22, 2026) put each order on the venue's own terms. They
@@ -1147,6 +1285,10 @@ class House:
           paper orders under its $10 minimum in 48 hours, among them requests of exactly $10.00 the
           step had floored to $9.9999999. Sells are left alone: whether Alpaca holds an exit to the
           minimum is not measured.
+        - a real-money Alpaca BUY is trimmed to what the book will take (`_fit_real_entry`): the
+          position it leaves valued at the ask, as the book values it, within `_real_limits`. A bid
+          under the ask sized to its own price was otherwise refused as over half the equity. A bid
+          the same decision cancels (`cancelling`) is not counted against the new one.
 
         Each change a guard made is appended to `adjusted` (the wake records it on `agent.woke`)."""
         intents, dropped = [], []
@@ -1206,6 +1348,11 @@ class House:
                             quantity += step
                             notes.append(f"quantity raised one step to {quantity}: the ${requested:.2f} asked, floored to the step, "
                                          f"was under the venue minimum of ${minimum}")
+                if side == "buy" and not refusal and book.real_money and family_of(book.broker.venue) == "alpaca":
+                    fitted = self._fit_real_entry(agent, book, instrument, quantity, limit, step, minimum, cancelling)
+                    if fitted is not None:
+                        notes.append(f"quantity {quantity} trimmed to {fitted[0]}: {fitted[1]}")
+                        quantity = fitted[0]
                 intent = Intent.new(
                     agent=agent.id, instrument=instrument, side=side, quantity=quantity, order_type=order_type,
                     limit_price=limit, post_only=bool(row.get("post_only")), reason=str(row.get("reason") or ""),
