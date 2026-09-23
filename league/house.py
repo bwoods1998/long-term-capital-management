@@ -48,13 +48,13 @@ from .economy import Economy, Standing, load_game
 from .evaluator import Evaluator, Verdict
 from .fees import Fees
 from .frontier import TIER_ROLES
-from .ledger import HOUSE, Ledger, now_iso
+from .ledger import HOUSE, Ledger, LedgerConflict, now_iso
 from .researcher import Researcher, pass_state, restore_pass
 from .research_jobs import ResearchJobs, ResearchPending
 from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxError
-from .venues import family_of, instrument_for, market_hours
+from .venues import family_of, instrument_for, market_hours, min_order_usd, price_increment, snap_limit
 
 #: How many bars of a watched underlier a replay tape carries per symbol, and the sizes it may
 #: choose between. A three-week window of one-minute bars is millions of rows and a box killed for
@@ -65,6 +65,13 @@ from ltcm.data import market_open_at
 
 ZERO = Decimal(0)
 CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
+#: An agent's resting entries are cancelled once none of its wakes has completed on their book for
+#: this many of its own wake intervals, and never sooner than `STALE_FLOOR_SECONDS` (see
+#: `House._cancel_stale_resting`).
+STALE_WAKES = 3
+STALE_FLOOR_SECONDS = 1800
+#: How long a Kalshi market's price grid is trusted before it is read again (as the adapter's).
+PRICE_GRID_TTL_SECONDS = 600.0
 
 #: Which book an agent trades on, by venue family and rung.
 PRACTICE_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
@@ -220,6 +227,7 @@ class House:
             if niche_id in self.niches:
                 self.niches[niche_id].live = tuple(live)
         self._data_cache: dict[str, tuple[float, Any]] = {}
+        self._price_grids: dict[str, tuple[float, tuple[Any, ...]]] = {}  # "book:ticker" -> (read at, bands)
         self._tapes: dict[str, tuple[float, dict[str, Any]]] = {}
         self._tape_lock = threading.Lock()
         self._state_lock = threading.RLock()
@@ -698,6 +706,9 @@ class House:
             "positions": [],
             "open_orders": [],
             "recent_order_outcomes": order_outcomes(self.ledger, agent.id, book.name),
+            # What the venue asks of an order, by tradeable symbol, where it is known (`_venue_rules`).
+            # Empty for a Kalshi or options agent: a market's or a contract's grid is not known up front.
+            "venue_rules": {},
         }
         for holding in account.holdings.values():
             inst = holding.instrument
@@ -747,6 +758,8 @@ class House:
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
                 afford = float(limits.max_order_usd) / 100.0  # a contract is 100 shares: what one order can pay a share
                 ctx["chain"] = self._cached(f"chain:{','.join(symbols)}:{days}:{afford}", 120, lambda: self._chain(symbols[:8], days, afford, ctx["quotes"]))
+            else:
+                ctx["venue_rules"] = self._venue_rules(book, symbols, ctx["quotes"])
         else:
             series = [str(s) for s in (needs.get("series") or [])][:12]
             hours = float(needs.get("max_hours_to_close") or 24)
@@ -825,7 +838,8 @@ class House:
         self._charge_box(agent.id, run, note="a decision")
         result = run.result
         # Sizing may need a venue quote, so do it before the short result commit.
-        intents, dropped = self._intents(agent, book, result.get("intents") or []) if result.get("ok") else ([], [])
+        adjusted: list[str] = []
+        intents, dropped = self._intents(agent, book, result.get("intents") or [], adjusted=adjusted) if result.get("ok") else ([], [])
         offered = self._offered(agent, ctx)
         with self._lifecycle_lock:
             if self._generation(agent.id) != generation:
@@ -842,7 +856,8 @@ class House:
             self.ledger.append(
                 "agent.woke",
                 {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds"),
-                 "offered": offered, **({"barren": idle["barren"]} if idle["barren"] else {}), **({"shut": idle["shut"]} if idle["shut"] else {})},
+                 "offered": offered, **({"barren": idle["barren"]} if idle["barren"] else {}), **({"shut": idle["shut"]} if idle["shut"] else {}),
+                 **({"adjusted": adjusted[:16]} if adjusted else {})},
                 agent=agent.id,
             )
         return {"agent": agent.id, "book": book.name, "intents": intents, "dropped": dropped, "offered": offered,
@@ -905,7 +920,26 @@ class House:
             self._state["idle"][agent.id] = idle
         return idle
 
-    def _intents(self, agent: Agent, book: Book, rows: list[Mapping[str, Any]]) -> tuple[list[Intent], list[str]]:
+    def _intents(self, agent: Agent, book: Book, rows: list[Mapping[str, Any]], *,
+                 adjusted: list[str] | None = None) -> tuple[list[Intent], list[str]]:
+        """What a decision asked for, as sized intents for the book; what cannot be read is dropped.
+
+        On the way the order guards (Sept 22, 2026) put each order on the venue's own terms. They
+        only ever make an order smaller or less aggressive -- except one step up to reach a venue
+        minimum, which the book still caps -- and the book stays the final judge of every order:
+
+        - a limit price is snapped to the venue's grid (`venues.price_increment`), a buy DOWN and a
+          sell UP; a coin whose increment the venue has not stated is left as it is;
+        - a given `quantity` is floored to the instrument's step, as a `notional_usd` always was;
+        - a BUY asked under the venue's minimum (`venues.min_order_usd`, $10 for Alpaca crypto) is
+          refused here, as a House refusal on the record (`book.refused`, "below the venue
+          minimum") that the strategy sees in `recent_order_outcomes`; one asked at or over it that
+          the step floored under it is raised one step. Measured Sept 20-22, 2026: Alpaca refused 55
+          paper orders under its $10 minimum in 48 hours, among them requests of exactly $10.00 the
+          step had floored to $9.9999999. Sells are left alone: whether Alpaca holds an exit to the
+          minimum is not measured.
+
+        Each change a guard made is appended to `adjusted` (the wake records it on `agent.woke`)."""
         intents, dropped = [], []
         now = now_iso(self.clock)
         for index, row in enumerate(rows):
@@ -919,29 +953,202 @@ class House:
                 if niche is not None and side == "buy" and not niche.holds(instrument):
                     raise ValueError(f"{instrument.market_id or instrument.symbol} is outside the {niche.id} specialty")
                 order_type = str(row.get("type") or "market").lower()
+                notes: list[str] = []
                 limit = None if row.get("limit_price") is None else money(str(row["limit_price"]))
+                if limit is not None:
+                    increment = self._price_increment(book, instrument, limit)
+                    snapped = snap_limit(instrument, side, limit, increment)
+                    if snapped != limit:
+                        notes.append(f"limit {limit} snapped {'down' if side == 'buy' else 'up'} to {snapped} (the venue's {increment} grid)")
+                        limit = snapped
+                step = step_of(instrument, order_type)
+                price = limit
+                requested: Decimal | None = None  # the order's dollars as asked, once there is a price to count them at
                 if row.get("quantity") is not None:
-                    quantity = money(str(row["quantity"]))
+                    asked = money(str(row["quantity"]))
+                    floored = (asked / step).to_integral_value(rounding=ROUND_DOWN) * step
+                    quantity = asked if floored == asked else floored
+                    if 0 < quantity != asked:
+                        notes.append(f"quantity {asked} floored to {quantity} (the instrument's step of {step})")
                 else:
-                    notional = money(str(row["notional_usd"]))
+                    requested = money(str(row["notional_usd"]))
                     quote = book.broker.quote(instrument)
                     price = limit or (quote.ask if side == "buy" else quote.bid)
                     if price is None or price <= 0:
                         raise ValueError("no price to size the order at")
-                    step = step_of(instrument, order_type)
-                    quantity = ((notional / (price * instrument.multiplier)) / step).to_integral_value(rounding=ROUND_DOWN) * step
+                    quantity = ((requested / (price * instrument.multiplier)) / step).to_integral_value(rounding=ROUND_DOWN) * step
                 if quantity <= 0:
                     raise ValueError("the size rounds down to nothing")
-                intents.append(
-                    Intent.new(
-                        agent=agent.id, instrument=instrument, side=side, quantity=quantity, order_type=order_type,
-                        limit_price=limit, post_only=bool(row.get("post_only")), reason=str(row.get("reason") or ""),
-                        created_at=now, nonce=f"{now}:{index}",
-                    )
+                minimum = min_order_usd(instrument) if side == "buy" else None
+                refusal = ""
+                if minimum is not None:
+                    if price is None:
+                        try:  # a market buy sized in units: the ask it will pay
+                            price = book.broker.quote(instrument).ask
+                        except Exception:  # noqa: BLE001 - no price, no guess: the book and the venue judge it
+                            price = None
+                    if price is not None and price > 0:
+                        if requested is None:
+                            requested = asked * price * instrument.multiplier
+                        if requested < minimum:
+                            refusal = (f"a ${requested:.2f} buy is below the venue minimum of ${minimum} an order "
+                                       f"(Alpaca refuses a crypto order under ${minimum}); size it at ${minimum} or more")
+                        elif quantity * price * instrument.multiplier < minimum:
+                            quantity += step
+                            notes.append(f"quantity raised one step to {quantity}: the ${requested:.2f} asked, floored to the step, "
+                                         f"was under the venue minimum of ${minimum}")
+                intent = Intent.new(
+                    agent=agent.id, instrument=instrument, side=side, quantity=quantity, order_type=order_type,
+                    limit_price=limit, post_only=bool(row.get("post_only")), reason=str(row.get("reason") or ""),
+                    created_at=now, nonce=f"{now}:{index}",
                 )
+                if refusal:
+                    try:
+                        # The shape of the book's own refusal row, so the strategy, the pre-audit and
+                        # the site read it the same way; it was never sent, so there is no order row.
+                        self.ledger.append("book.refused", {"book": book.name, "intent_id": intent.id, "reasons": [refusal],
+                                                            "instrument": instrument.to_dict()},
+                                           agent=agent.id, id=f"refused:{intent.id}")
+                    except LedgerConflict:
+                        pass  # this very intent was refused already
+                    continue
+                intents.append(intent)
+                if adjusted is not None:
+                    shown = occ_symbol(instrument) if instrument.asset_class == "option" else (instrument.market_id or instrument.symbol)
+                    adjusted.extend(f"{shown} {side}: {note}" for note in notes)
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
         return intents, dropped
+
+    def _price_increment(self, book: Book, instrument: Instrument, price: Decimal | None) -> Decimal | None:
+        """The price grid of this book's venue for this instrument at this price
+        (`venues.price_increment`), with what only the venue can say: a coin's asset record (the
+        adapter's cached `asset`; fakes, the simulator and the Kalshi shadow have none, so a coin's
+        increment is then unknown) and a Kalshi market's price bands."""
+        if instrument.asset_class == "crypto":
+            lookup = getattr(book.broker, "asset", None)
+            asset = None
+            if callable(lookup):
+                try:
+                    asset = lookup(instrument.market_id or instrument.symbol)
+                except Exception:  # noqa: BLE001 - an unread record is an unknown increment
+                    asset = None
+            return price_increment(instrument, price, asset=asset if isinstance(asset, Mapping) else None)
+        if instrument.asset_class == "event":
+            return price_increment(instrument, price, bands=self._price_grid(book, instrument))
+        return price_increment(instrument, price)
+
+    def _price_grid(self, book: Book, instrument: Instrument) -> tuple[Any, ...]:
+        """A Kalshi market's own price bands as its book's venue reads them -- the real adapter's
+        `price_ranges`, the shadow's market data -- kept `PRICE_GRID_TTL_SECONDS` a ticker. Empty when
+        the venue cannot say; `venues.price_increment` then takes the cent, as both adapters do."""
+        ticker = str(instrument.market_id or instrument.symbol).upper()
+        key = f"{book.name}:{ticker}"
+        hit = self._price_grids.get(key)
+        if hit is not None and self.clock() - hit[0] < PRICE_GRID_TTL_SECONDS:
+            return hit[1]
+        reader = getattr(book.broker, "price_ranges", None) or getattr(getattr(book.broker, "market_data", None), "price_ranges", None)
+        bands: tuple[Any, ...] = ()
+        if callable(reader):
+            try:
+                bands = tuple(band for band in reader(ticker) or () if isinstance(band, Mapping)
+                              and all(isinstance(band.get(k), Decimal) for k in ("start", "end", "step")))
+            except Exception:  # noqa: BLE001 - an unread grid is the cent, never a guessed finer one
+                bands = ()
+        if len(self._price_grids) > 5000:
+            self._price_grids.clear()  # a day's markets are gone by the next; nothing here is state
+        self._price_grids[key] = (self.clock(), bands)
+        return bands
+
+    def _venue_rules(self, book: Book, symbols: Sequence[str], quotes: Mapping[str, Any] | None) -> dict[str, dict[str, float]]:
+        """`ctx["venue_rules"]`: what the venue asks of an order in each tradeable symbol, where it
+        is known -- `min_order_usd` ($10 for Alpaca crypto) and `price_increment` (a stock's at its
+        current touch, a coin's from the venue's asset record). A strategy that sizes and prices by
+        these is never refused or adjusted by the order guards in `_intents`."""
+        rules: dict[str, dict[str, float]] = {}
+        for symbol in symbols:
+            try:
+                instrument = instrument_for(book.broker.venue, {"symbol": symbol})
+                quote = (quotes or {}).get(symbol) or {}
+                touch = (quote.get("ask") or quote.get("bid")) if isinstance(quote, Mapping) else None
+                price = money(str(touch)) if isinstance(touch, (int, float, str, Decimal)) and not isinstance(touch, bool) else None
+                rule: dict[str, float] = {}
+                minimum = min_order_usd(instrument)
+                if minimum is not None:
+                    rule["min_order_usd"] = float(minimum)
+                increment = self._price_increment(book, instrument, price if price is not None and price > 0 else None)
+                if increment is not None:
+                    rule["price_increment"] = float(increment)
+            except Exception:  # noqa: BLE001 - a rule that cannot be told is left out, never guessed
+                continue
+            if rule:
+                rules[symbol] = rule
+        return rules
+
+    def _cancel_stale_resting(self) -> int:
+        """Cancel the resting ENTRIES of an agent whose wakes have stopped completing. Returns how
+        many orders it asked the venue to cancel.
+
+        Only a strategy's own wake can cancel its order, so a resting buy outlives every wake that
+        does not complete: a snapshot that cannot be built (the wake is skipped), a box that does
+        not run, a decide that raises, a floor whose meter has stopped waking paper agents. Sept 22,
+        2026: the frontier auditor vetoed a crypto agent partly because its resting buys had no
+        stale guard, and the House had none either. Here, a buy -- on Kalshi, every buy opens or
+        adds to a position -- is cancelled through the book's own cancel path once no wake of every
+        agent sharing it has completed (`agent.woke` with ok) on its book for `STALE_WAKES` of that
+        agent's wake intervals, and never sooner than `STALE_FLOOR_SECONDS`. The clock starts at
+        this House's own start at the earliest: a wake the House did not attempt is not the
+        strategy failing. Exits are never touched, on any book. Each cancellation is noted on the
+        agent's record (`agent.inactive`, reason `wakes_failing`).
+
+        Cheap by construction, since it runs every tick: only open, acknowledged buys are looked at,
+        with one indexed ledger read for each agent that owns one."""
+        now = self.clock()
+        asked = 0
+        for book in list(self.books.values()):
+            last_wakes: dict[str, Any] = {}
+            for working in book.open_orders():
+                if working.side != "buy" or working.status not in ("accepted", "partially_filled"):
+                    continue  # an exit, or an order the venue has not acknowledged (the poll resolves those)
+                owners = sorted({share.agent for share in working.shares})
+                stale: list[tuple[Agent, Any, float]] = []
+                for owner in owners:
+                    agent = self.registry.get(owner)
+                    if agent is None or not agent.alive:
+                        break  # a dead agent's account is the wind-down's to close, not this guard's
+                    if owner not in last_wakes:
+                        last_wakes[owner] = next((e for e in reversed(self.ledger.read(kinds="agent.woke", agent=owner, limit=50, newest=True))
+                                                  if e.payload.get("ok") is True and e.payload.get("book") in (None, book.name)), None)
+                    last = last_wakes[owner]
+                    allowance = max(STALE_WAKES * agent.wake_minutes * 60, STALE_FLOOR_SECONDS)
+                    since = max(_epoch(last.at) if last is not None else 0.0, self._born_at)
+                    if now - since <= allowance:
+                        break  # this agent is managing its orders
+                    stale.append((agent, last, allowance))
+                if not owners or len(stale) != len(owners):
+                    continue
+                try:
+                    outcome = book.cancel(owners[0], working.order_id)
+                except Exception as exc:  # noqa: BLE001 - one order that cannot be cancelled now is asked again next tick
+                    self.alert("warning", f"{owners[0]}: a stale resting buy {working.order_id} on {book.name} could not be cancelled "
+                                          f"({type(exc).__name__}: {str(exc)[:160]})")
+                    continue
+                if outcome.status in ("refused", "rejected"):
+                    continue  # the venue did not take the cancel (or it closed meanwhile): asked again next tick while it stays open
+                asked += 1
+                for agent, last, allowance in stale:
+                    since = last.at if last is not None else None
+                    payload = {"agent": agent.id, "reason": "wakes_failing", "book": book.name, "order_id": working.order_id,
+                               "last_completed_wake": since, "allowance_minutes": round(allowance / 60, 1),
+                               "detail": (f"no wake has completed on {book.name} since {since or 'the record began'}, "
+                                          f"over the {allowance / 60:g} minutes allowed: the House asked the venue to cancel its "
+                                          f"resting buy {working.order_id} (exits are never cancelled)")}
+                    try:
+                        self.ledger.append("agent.inactive", payload, agent=agent.id,
+                                           id=f"agent-inactive:{agent.id}:wakes_failing:{working.order_id}")
+                    except LedgerConflict:
+                        pass  # already noted when the cancel was first asked
+        return asked
 
     def _pace_inference(self) -> None:
         """The provider's own daily cap on the floor's inference follows the expedition's allowance.
@@ -3377,6 +3584,10 @@ class House:
                                 self._state["settled"][name] = stamp
             except Exception as exc:  # noqa: BLE001 - one venue's outage must not stop the others
                 self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
+        try:
+            self._cancel_stale_resting()
+        except Exception as exc:  # noqa: BLE001 - a guard that fails this tick runs again on the next
+            self.alert("warning", f"stale resting orders could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
         # Past the monthly compute line only agents holding real money are woken, so they can exit.
         open_for_business = self.budget is None or self.budget.check() == "open"
         stopped_because = "" if open_for_business else f"the Sail meter's monthly line or reserve (league/budget.py mode {getattr(self.budget, 'mode', '?')})"

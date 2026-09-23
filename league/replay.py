@@ -71,6 +71,11 @@ FEES = {"crypto_taker": CRYPTO_TAKER, "crypto_maker": CRYPTO_MAKER, "kalshi_take
 DEFAULT_LIMITS = {"max_position_usd": 100.0, "max_order_usd": 75.0}
 
 MIN_EVENT_PRICE = 0.15  # the House's firm rule: no opening Kalshi buy under 15 cents
+#: Alpaca refuses a crypto order under $10 (55 paper orders in 48 hours to Sept 22, 2026), and the
+#: House refuses a crypto buy asked under it (`league/venues.py`), so none fills here either. As in
+#: the House it is the dollars ASKED that are held to it: one asked at $10 and floored a hair under
+#: by the step is raised one step there and fills here at the floored size. Sells are not held to it.
+ALPACA_CRYPTO_MIN_ORDER_USD = 10.0
 MAX_INTENTS = 8
 MAX_CANCELS = 20
 MAX_ERRORS = 20
@@ -589,6 +594,9 @@ class _Account:
         else:
             if self.venue == "kalshi" and price < MIN_EVENT_PRICE - EPS:
                 return self.refuse("kalshi buys under $0.15 are refused")
+            if (self.venue != "kalshi" and not is_equity(key)
+                    and (amount if has_notional else amount * (price if limit_price is None else limit_price)) < ALPACA_CRYPTO_MIN_ORDER_USD - EPS):
+                return self.refuse("alpaca refuses a crypto buy under $10")
             if notional > self.limits["max_order_usd"] + EPS:
                 return self.refuse("over the order cap")
             held_value = self.positions.get(key, {}).get("quantity", 0.0) * price

@@ -265,7 +265,8 @@ class PersistentLadder(TestCase):
         agent = f.on_micro('trader')
         f.lose_about_five_dollars(agent)
         book = h.books['alpaca']
-        intents, _ = h._intents(agent, book, [{'symbol': 'BTC/USD', 'side': 'buy', 'notional_usd': '1'}])
+        # $12, not $1: a crypto buy asked under Alpaca's $10 minimum is refused by the House before it can queue.
+        intents, _ = h._intents(agent, book, [{'symbol': 'BTC/USD', 'side': 'buy', 'notional_usd': '12'}])
         self.assertTrue(intents)
         before = len(f.real.submitted)
         guard.revoke_live_trading()
