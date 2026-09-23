@@ -173,6 +173,16 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     `first_at`, and drops out an hour after its last deferral. An info alert says so at most every
     fifteen minutes a kind. A count that keeps rising means one job holds a box for long: look in
     `background_jobs` for a `running_seconds` in the hundreds. The tick itself stays short.
+  - `shards` (Sept 23, 2026, `league/shards.py`): the Kalshi shard funder's last check, the cash
+    per exchange shard (`balances`), the shards the desks are offered or hold positions on
+    (`wanted`), series or tickers whose shard no listing has named (`unmapped`), the rolling
+    day's `moved_24h_usd` against `day_cap_usd`, shards backing off after a failed move, and
+    `blocked` (why nothing may move: the kill switch, no active grant, a pause, a frozen real
+    book). Every move is an `ops.alert` whose payload carries `shard_move` (transfer id, amount,
+    source and destination shards, balances before and after); a refusal with
+    `insufficient_shard_balance` is a warning alert naming the agent, market and shard, and the
+    next pass runs at once. `scripts/kalshi_shard.py balance` reads the same breakdown by hand,
+    and `transfer` still moves collateral by hand when the funder is blocked.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
@@ -364,6 +374,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
+| `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
 | | `allocator.evidence` `paper_weight`, `alpaca_paper_haircut_bps` | 0.5, 10 | E = W_paper^paper_weight × W_real; Alpaca paper fills haircut per side of filled notional |
 | | `allocator` `bunt_at`, `bunt_min_trades`, `bunt_min_settled` | 1.01, 5, 3 | Paper → bunt: E at the line and 5 closed paper trades, or 3 settlements on Kalshi (plan default 1.03; set from the Sept 23 06:45 UTC distribution, bounds 1.0-1.25) |
 | | `allocator.bunt_usd` | Kalshi $10, Alpaca $25 | A bunt's real stake (plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum) |
