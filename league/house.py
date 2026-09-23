@@ -1141,7 +1141,7 @@ class House:
         woke = self._state.get("desk_woke") or {}
         queues: dict[str, list[Agent]] = {}
         for agent in due:
-            queues.setdefault(agent.specialty or agent.id, []).append(agent)
+            queues.setdefault(getattr(agent, "specialty", None) or agent.id, []).append(agent)  # an agent of no desk is its own
         order = sorted(queues, key=lambda desk: (float(woke.get(desk) or 0), float(self._state["next_wake"].get(queues[desk][0].id) or 0)))
         picked: list[Agent] = []
         while len(picked) < cap:
