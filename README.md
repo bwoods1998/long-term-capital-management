@@ -928,6 +928,24 @@ dynamism revisions followed that evening:
 
 Known limits:
 
+- **A fresh Kalshi bunt is still a one-loss trial** (the study's first blocker,
+  `docs/research/2026-09-23-agent-study.md`). With W_real at 1, one lost position over about 15% of
+  the stake drops E under `bunt_at × hysteresis` and sends the agent back to practice; on Sept 23
+  that happened at $10 (huang-h427345) and again at $30 (the lab graduate huang-l23cdb7). The rules
+  tell agents so, and a bunt keeps what it makes, but the fix (the hysteresis exit only after
+  `bunt_min_settled` real settlements, or a 15% position share on event books) is outside the money
+  rules the Sept 23 run could move: it is the owner's decision (`docs/operations.md`, "Owner steps").
+- **Replay does not predict the forward record.** 0 of 20 replay passes were positive after 6
+  active practice blocks and the rank correlation was −0.68 (Sept 23). Seats, breeding and the lab
+  now rank on forward results (Deploy B), but a paper seat is still earned by replay.
+- **The Alpaca envelope is idle.** No Alpaca agent has reached the bunt line (E ≥ 1.01 on 5 closed
+  practice trades); a Kalshi settlement moves the purse about three times what an Alpaca trade
+  does. The practice haircut is now measured per asset class, and level-3 spreads are a design on a
+  draft branch (#210), not a capability.
+- **The OpenAI month ends before the calendar does.** The September gateway month ($408, funded)
+  reached the "earned" tier on Sept 23 evening; research then runs on Sail and only the code roles,
+  the foundry, audits and winners' consultations use OpenAI until Oct 1 or a top-up.
+
 - **Daily-bar replay now has separate execution bars.** Signal bars become available after
   their market day ends; five-minute execution observations provide trading opportunities.
   Unsupported or missing candidate inputs are reported explicitly. Existing historical tails
