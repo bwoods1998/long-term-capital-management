@@ -46,6 +46,9 @@ now; everything under "History" describes something that no longer runs.
 - [Jev as the cheap sensor and router](design/2026-09-22-jev-sensor.md) (Sept 22): the research
   gate, inactivity reasons, triage, hypothesis links and exposure, with no order, promotion,
   spending or merge authority.
+- [Level-3 options: debit verticals](design/2026-09-24-level-3-debit-verticals.md) (Sept 23): a
+  design against the code as it is and the pure pieces (`league/verticals.py`), on a branch that
+  nothing in the House imports. Not deployed: the owner steps and the three unknowns come first.
 - Contracts in force: [event capital and feedback](contracts/2026-09-21-event-capital-and-feedback.md),
   [Kalshi fill accounting](contracts/2026-09-21-kalshi-fill-accounting.md) and the
   [public game ladder](contracts/2026-09-21-game-ladder.md).
