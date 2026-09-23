@@ -434,3 +434,23 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   98 modules / 2,442 tests, ltcm 1,791); merged as `563a030` and deployed at once.
 - **21:46:00Z — Deploy B promoted:** release `20260923T214445Z-f5650ac1d870` (was
   `main-24bda8977420`). No money rule changed (digest `1d63a56e`), so no ratify.
+- 21:47-21:49Z — **Deploy B verified on the box** (first ticks): health fresh, no book frozen,
+  the grant active on `1d63a56e`; the seat market is live (`seats`: 32 graduates waiting, 10
+  desks reserved for them); the research gate records its triggers (`abstain_lock`, `backoff`,
+  `lesson`, `repair.status`, `book.settle`: #202 live); the lab marked itself closed while the
+  House started (21:46:04Z) and its forward windows have not run yet (checked again below).
+- **U2's first move, read in full** (the ledger's `shard_move` row): at 20:40:17Z the hourly pass
+  found shard 3 at $14.07 (under the $20 floor after meriwether-h7d7702's sports fill at 20:39:57Z)
+  and moved $30 from shard 0 (transfer `3e9591d4`). The source was debited at once
+  ($347.54 → $317.54) but **the destination was credited about an hour later**: shard 3 still read
+  $14.07 at 21:32Z and $44.07 by 21:40Z. The account total is unchanged ($361.61 across the two
+  shards before and after). The review's conservative re-read (#197 review fix 2) is what kept the
+  funder from moving a second $30 while the credit was in flight. A venue fact worth keeping: a
+  Kalshi cross-shard move can take about an hour to land.
+- 21:39-21:46Z — **workstream O done:** draft PR #210 (`w2-options/design`, CI green, not for
+  deploy): `docs/design/2026-09-24-level-3-debit-verticals.md` (every claim cited to the code;
+  owner steps first: a second Alpaca practice account with its keys in the gateway, and the three
+  unknowns settled only with a practice order; about 2,200 lines and 5-6 build days) and
+  `league/verticals.py`, a pure module imported by nothing in the House (the spread, its maximum
+  loss, the caps, Alpaca's multi-leg order shape, and one spread counted as one trade from per-leg
+  fills), with 33 tests including a guard that nothing imports it.
