@@ -336,7 +336,10 @@ Every desk but two trades a listed corner of its venue. The two OPEN desks (`lea
 `"open": true`, 8 seats each) trade the whole venue:
 
 - `kalshi-open`: any Kalshi series (`NEEDS["series"]`), except the multivariate combos no listing
-  shows. The horizon rule holds; maker fees follow Kalshi's own schedule series by series.
+  shows. The horizon rule holds; maker fees follow Kalshi's own schedule series by series, and the
+  desk lists every series that charges makers (`maker_fee_series`, 163 of the schedule's 195 on
+  Sept 23, 2026), so your desk brief, the foundry's packet and a replay built from the desk charge
+  a resting fill there what the venue does.
 - `alpaca-open`: any US stock or ETF the account can trade and any coin Alpaca lists against the
   dollar (`NEEDS["symbols"]`, e.g. `["COIN", "BTC/USD", "XLE"]`; stocks and coins may be mixed),
   long only. Never an option: those are the options desk's (`NEEDS["asset_class"] = "option"`).
