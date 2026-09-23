@@ -1591,10 +1591,12 @@ class House:
         finally:
             store.close()
 
-    def _holdout(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    def _holdout(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
+                 lineage: Sequence[str] | None = None) -> dict[str, Any]:
         """The sealed holdout, once per strategy version, rationed per lineage: the base replay
         and the double-spread one must both pass the replay gate. Pass or fail and coarse
-        numbers come back; the detail stays in the private `holdout.access` row."""
+        numbers come back; the detail stays in the private `holdout.access` row. `lineage`: the
+        selection path of a candidate not in the registry yet (league/lab.py), root last."""
         from . import deep_replay
 
         store = self._history_store()
@@ -1604,7 +1606,7 @@ class House:
         row = CONSTITUTION["rungs"]["1"]
         stake = float(row["stake_usd"])
         limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}
-        lineage = self.registry.lineage(agent.id)
+        lineage = list(lineage) if lineage else self.registry.lineage(agent.id)
 
         def run(window: tuple[str, str]) -> dict[str, Any]:
             out = {}
@@ -1845,8 +1847,9 @@ class House:
             out["holdout"] = holdout
         return out
 
-    def _candidate_replay(self, agent: Agent, code: str) -> dict[str, Any]:
-        """The researcher's `replay` tool: a counted trial of candidate code, never a promotion."""
+    def _candidate_replay(self, agent: Agent, code: str, *, lineage: Sequence[str] | None = None) -> dict[str, Any]:
+        """The researcher's `replay` tool: a counted trial of candidate code, never a promotion.
+        `lineage`: the selection path of a candidate not in the registry yet (league/lab.py)."""
         described = self.sandbox.needs(PROBE_BOX, code)
         self._charge_box(agent.id, described, note="reading a candidate's NEEDS")
         info = described.result
@@ -1891,7 +1894,8 @@ class House:
             return {"counted_as_trial": False, "passed": False, "error": f"the replay could not be run and is NOT a trial against you: {crash[:160]}. "
                                               "Ask for a smaller question of the tape, or tell the House with `request_tool`.",
                     "numbers": {}, "needs": info["needs"], "params": info.get("params") or {}}
-        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False, lineage=self.registry.lineage(agent.id))
+        verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False,
+                                              lineage=list(lineage) if lineage else self.registry.lineage(agent.id))
         out = {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
                "digest": result.get("digest")}
         if result.get("tape_source") == "history-dev":

@@ -400,10 +400,13 @@ Two research tools reach it (offered only where it runs):
   adopt or fork a program you still `replay` it.
 
 The fittest program of a cell that clears the replay gate's numbers is replayed by the House on the
-whole tape -- its last third never seen by any search -- as a counted trial on its own new line and,
-on the history store's development window, by the sealed holdout (whose budget one lab lineage
-shares across all its lines). Only then is it born, on paper, with `founder` `lab:<lineage>`, at most
-six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
+whole tape -- its last third never seen by the lab's search -- as a counted trial on its own new line,
+judged against its whole selection path: the lab lineage's earlier lines and, when it grew from an
+agent's program (a seed, a mutant of it, or that agent's own `lab_submit`), every trial on that
+agent's line, as that agent's own child would be. On the history store's development window it then
+goes to the sealed holdout, whose budget that path shares (one lab lineage across all its lines, and
+the line it grew from). Only then is it born, on paper, with `founder` `lab:<lineage>` and the agent it
+grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
 profit, a tenth of that fee is its royalty to the lab's compute line.
 
 An agent with evidence -- on paper or above with at least one closed trade -- may run its research

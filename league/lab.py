@@ -18,8 +18,10 @@ not, has a cell of its own to win, whatever it does. No House template is impose
 `search_fraction` (two thirds) of the very tape the House replays that program on (`House.tape_for`:
 the development window of the history store, or the recent live tape). A candidate is eligible only
 with the replay gate's minimum trades, blocks and out-of-sample blocks. The last third of the tape is
-never shown to the search, so when a winner is graduated, the House's own replay judges its
-out-of-sample third on history no selection in the lab ever touched.
+never shown to the lab's search, so when a winner is graduated, the House's own replay judges its
+out-of-sample third on history no selection in the lab touched. An agent's own `replay` does see
+the whole tape, so a program that grew from an agent's line (its seeded program, a mutant of it,
+its `lab_submit`) is judged against every trial on that line, as the agent's own child would be.
 
 **The loop** (`step`, off the tick on a background lane; the tick only schedules it):
 1. Seeds: living agents' programs, the foundry's cards that reached code, and the founders.
@@ -31,10 +33,12 @@ out-of-sample third on history no selection in the lab ever touched.
 3. Every program passes `safety.check_code` and parameter validation before it is queued.
 4. Batch evaluation on the lab box (`league/labbox.py`): many candidates against one uploaded tape.
 5. Graduation: the fittest elite of a cell that clears the replay gate's numbers is replayed by the
-   House itself (`House._candidate_replay`: the sealed NEEDS probe, a counted trial on its own line)
-   and, when that tape is the history store's development window, sent to the sealed holdout
-   through `House._holdout` -- the one door, with its per-version and per-line rationing, plus a
-   per-lab-lineage budget here so that many lines of one lineage cannot probe it. A survivor is born
+   House itself (`House._candidate_replay`: the sealed NEEDS probe, a counted trial judged against its
+   whole selection path -- its lab lineage's earlier lines and the agent, card or founder line it
+   grew from, whose descendant it is born) and, when that tape is the history store's development
+   window, sent to the sealed holdout through `House._holdout` -- the one door, with its per-version
+   and per-lineage rationing keyed by that path's root, plus a per-lab-lineage budget here so that
+   many lines of one lineage cannot probe it. A survivor is born
    with `founder="lab:<lineage>"` and seated on paper exactly as a replay-passing foundry card is,
    at most `max_births_per_hour`, under the league's population and desk caps.
 6. Royalties: 10% of the performance fee a graduate earns on realized real profit is paid to the
@@ -776,7 +780,7 @@ class Lab:
         rows = self._q("SELECT * FROM candidates WHERE status='queued' ORDER BY priority, created LIMIT ?", (size * 16,))
         if not rows:
             return None
-        groups: dict[str, list[sqlite3.Row]] = {}
+        groups: dict[str, list[sqlite3.Row]] = {}  # in the order of each tape's first ready row
         tapes: dict[str, dict[str, Any]] = {}
         for row in rows:
             try:
@@ -793,7 +797,11 @@ class Lab:
             tapes[tape_id] = tape
         if not groups:
             return None
-        tape_id = max(groups, key=lambda k: (len(groups[k]), -min(r["priority"] for r in groups[k])))
+        # Queue order decides the tape: the one the queue's first ready row needs (an agent's own
+        # submission, then a seed, then children, oldest first), and the batch is filled with whatever
+        # else waits on it. Largest group first starved a lone submission or seed for as long as
+        # breeding kept two children of one elite queued, which the step does whenever the queue runs low.
+        tape_id = next(iter(groups))
         chosen = groups[tape_id][:size]
         tape = tapes[tape_id]
         row1 = CONSTITUTION["rungs"]["1"]
@@ -1184,9 +1192,11 @@ class Lab:
         holdout where it applies, and birth. Passers waiting for a seat go first."""
         settings = self.settings
         out = []
-        for row in self._q("SELECT * FROM graduations WHERE state='passed' ORDER BY at"):
-            if self.births_last_hour() >= int(settings["max_births_per_hour"]):
-                return out
+        for row in self._q("SELECT g.candidate, g.lineage, c.code_sha256 FROM graduations g JOIN candidates c ON c.id = g.candidate"
+                           " WHERE g.state='passed' ORDER BY g.at"):
+            # A birth a crash interrupted is finished whatever the cap: its agent already exists.
+            if self.births_last_hour() >= int(settings["max_births_per_hour"]) and self._born_already(row["lineage"], row["code_sha256"]) is None:
+                continue
             out.append(self._birth(row["candidate"]))
         budget = int(settings["max_graduations_per_step"])
         # An infrastructure failure is not the candidate's: it may be tried again after an hour.
@@ -1240,28 +1250,94 @@ class Lab:
                 pass  # written by an earlier step with other counts: the first stands
         return payload
 
+    def _origin(self, lineage: str) -> list[str]:
+        """The registry lines a lab lineage grew from, nearest first and root last: an agent's own
+        selection path (itself, its parent, ...) for `agent:<id>`, a card's line for `card:<id>`, a
+        founder's line for `founder:<key>`. Empty for Sol's leaps, which start from nothing."""
+        registry = self.house.registry
+        kind, _, key = str(lineage).partition(":")
+        start: list[str] = []
+        if kind == "agent" and key:
+            start = [key]
+        elif kind == "card" and key:
+            start = [a.id for a in registry.agents.values() if a.founder == f"card:{key}"]
+            if not start:
+                foundry = getattr(self.house, "hypotheses", None)
+                try:
+                    card = foundry.cards().get(key) if foundry is not None else None
+                except Exception:  # noqa: BLE001 - an unreadable card adds no line; the lab's own still count
+                    card = None
+                if card and card.get("line_id"):
+                    start = [str(card["line_id"])]
+        elif kind == "founder" and key:
+            start = [a.id for a in registry.agents.values() if a.founder == key]
+        out: list[str] = []
+        for ident in start:
+            for step in registry.lineage(ident) or [ident]:
+                if step not in out:
+                    out.append(step)
+        return out
+
+    def _selection_path(self, row: Mapping[str, Any], line: str, family: str) -> list[str]:
+        """Every line whose House replays selected this graduate, as the House's own lineage is read
+        (`Registry.lineage`: nearest first, root last): its own line; the lines this lab lineage has
+        already sent to the House's replay (their trials carry its family), newest first; then the
+        selection path the lineage grew from (`_origin`).
+
+        This is what its deflated Sharpe is judged against and whose sealed-holdout ration it spends
+        (the ration is keyed by the path's root). A program an agent ground variants of on its own
+        line, and saw on the whole tape, is not judged as a first try: 'a child inherits its
+        parent's count, so there is no way to spend the budget and start again' holds through the
+        lab too."""
+        earlier: list[str] = []
+        for entry in self.house.ledger.iter(kinds="eval.trial"):
+            if entry.payload.get("family") == family and entry.agent and entry.agent != line and entry.agent not in earlier:
+                earlier.append(entry.agent)
+        path = [line]
+        for ident in [*reversed(earlier), *self._origin(row["lineage"])]:
+            if ident not in path:
+                path.append(ident)
+        return path
+
+    def _parent(self, lineage: str) -> str | None:
+        """The registry agent a graduate descends from (its lineage's origin), so that its own later
+        replays inherit that selection path as every House child does. None for Sol's leaps."""
+        origin = self._origin(lineage)
+        return origin[0] if origin and self.house.registry.get(origin[0]) is not None else None
+
     def _virtual(self, row: Mapping[str, Any], line: str, family: str) -> Any:
         from .agents import Agent, niche_of
 
         needs = json.loads(row["needs"])
         venue, horizon, style = niche_of(needs)
-        return Agent(id=line, name=line, family=family, venue=venue, horizon=horizon, style=style, generation=1, parent=None,
-                     code=row["code"], params={}, wake_minutes=15, born_at=now_iso(self.house.clock), needs=needs,
-                     specialty=row["niche"], line=line, founder=None)
+        return Agent(id=line, name=line, family=family, venue=venue, horizon=horizon, style=style, generation=1,
+                     parent=self._parent(row["lineage"]), code=row["code"], params={}, wake_minutes=15,
+                     born_at=now_iso(self.house.clock), needs=needs, specialty=row["niche"], line=line, founder=None)
+
+    def _holdouts_used(self, row: Mapping[str, Any], path: Sequence[str]) -> int:
+        """Sealed-holdout evaluations already spent against this graduate: by the lab lineage's lines,
+        and by the root of the selection path it grew from (the key the House's seal rations)."""
+        from .deep_replay import HoldoutSeal
+
+        house = self.house
+        seal = HoldoutSeal(house.ledger, budget=house.settings.holdout_lineage_budget, window=house.holdout_window)
+        return max(self._lineage_holdouts(row["lineage"]), seal.used(path[-1]))
 
     def _graduate_one(self, row: Mapping[str, Any]) -> dict[str, Any]:
         house = self.house
         line, family = self._names(row)
         if house.registry.get(line) is not None:
             return self._record(row, "refused", f"the line {line} already exists", line=line, family=family)
-        if self._deep(row) and house.settings.holdout_gate and self._lineage_holdouts(row["lineage"]) >= int(house.settings.holdout_lineage_budget):
+        path = self._selection_path(row, line, family)
+        if self._deep(row) and house.settings.holdout_gate and self._holdouts_used(row, path) >= int(house.settings.holdout_lineage_budget):
             # Many lines of one lineage must not be a way to probe the sealed window: the lineage's
-            # budget is the House's per-line budget, counted over all of its lines.
+            # budget is the House's per-line budget, counted over all of its lines and the line it
+            # grew from. Refused before the replay, which would be a trial spent on nothing.
             return self._record(row, "holdout_rationed",
                                 f"the lab lineage {row['lineage']} has spent its {house.settings.holdout_lineage_budget} sealed-holdout evaluations",
                                 line=line, family=family)
         agent = self._virtual(row, line, family)
-        result = house._candidate_replay(agent, row["code"])
+        result = house._candidate_replay(agent, row["code"], lineage=path)
         if not result.get("counted_as_trial") or not result.get("passed"):
             try:
                 house.sandbox.retire(line)
@@ -1272,7 +1348,7 @@ class Lab:
             return self._record(row, state, reasons or str(result.get("error") or "the House's replay did not pass"), line=line, family=family)
         needs, params = result.get("needs") or json.loads(row["needs"]), result.get("params") or {}
         if "walk_forward" in result and house.settings.holdout_gate:
-            holdout = house._holdout(agent, row["code"], needs, params)
+            holdout = house._holdout(agent, row["code"], needs, params, lineage=path)
             if not (holdout.get("evaluated") and holdout.get("passed")):
                 try:
                     house.sandbox.retire(line)
@@ -1304,6 +1380,9 @@ class Lab:
         niche = house.niches.get(row["niche"])
         rules = house.game["economy"]
         with house._lifecycle_lock:
+            earlier = self._born_already(row["lineage"], row["code_sha256"])
+            if earlier is not None:
+                return self._finish_birth(row, earlier, line=line, family=family, niche=niche, rules=rules, resumed=True)
             living = house.registry.living()
             displaced = None
             if niche is None or niche.dormant:
@@ -1325,26 +1404,65 @@ class Lab:
                    f"-- fittest in its cell ({row['cell']}) at {float(row['fitness'] or 0):+.6f} a block out of sample on the lab's "
                    f"search tape, then passed the House's replay{' and the sealed holdout' if sealed else ''}")
             try:
-                child = house.spawn(line, family, row["code"], reason=why[:1500], params=params, endowment=rules["endowment_usd"],
-                                    specialty=niche.id, founder=f"lab:{row['lineage']}"[:120])
+                child = house.spawn(line, family, row["code"], parent=self._parent(row["lineage"]), reason=why[:1500], params=params,
+                                    endowment=rules["endowment_usd"], specialty=niche.id, founder=f"lab:{row['lineage']}"[:120])
             except ValueError as exc:
                 return self._record(row, "refused_at_birth", str(exc), line=line, family=family)
-            seated = child.id == line and child.code_sha256 == row["code_sha256"]
-            if seated:
+            return self._finish_birth(row, child, line=line, family=family, niche=niche, rules=rules, displaced=displaced,
+                                      sealed=sealed)
+
+    def _born_already(self, lineage: str, code_sha256: str) -> Any:
+        """The agent an earlier `_birth` of this candidate spawned, if any (living or not). The
+        graduation row is marked born only after the seat, the route row and the displacement, so a
+        crash or a deploy's shutdown in between leaves it 'passed' with the agent already in the
+        registry: the next step must finish that birth, never spawn and endow a second one."""
+        founder = f"lab:{lineage}"[:120]
+        for agent in list(self.house.registry.agents.values()):
+            if agent.founder != founder:
+                continue
+            born = self.house.ledger.get(f"born:{agent.id}")
+            spawned = str((born.payload if born is not None else {}).get("code_sha256") or agent.code_sha256)
+            if spawned == code_sha256:  # the program it was born with: this candidate, whatever it runs now
+                return agent
+        return None
+
+    def _finish_birth(self, row: Mapping[str, Any], child: Any, *, line: str, family: str, niche: Any, rules: Mapping[str, Any],
+                      displaced: Any = None, sealed: bool | None = None, resumed: bool = False) -> dict[str, Any]:
+        """Seat a newborn graduate, write its route row, free the seat it takes, record it born. Each
+        step is idempotent, so a birth resumed after a crash (`_born_already`) finishes exactly once:
+        it is seated only if it is not on a rung yet, endowed only if it never was, and displaces
+        someone only while its desk or the league is still over its cap because of it."""
+        house = self.house
+        ident = row["id"]
+        if sealed is None:
+            passed = house.ledger.get(f"lab.graduate:{ident}:passed")
+            sealed = passed is not None and "holdout" in str(passed.payload.get("detail") or "")
+        seated = child.id == line and child.code_sha256 == row["code_sha256"]
+        if resumed and child.alive:
+            if house.ledger.get(f"endow:{child.id}") is None:
+                house.economy.grant(child.id, rules["endowment_usd"], "endowment", id=f"endow:{child.id}")
+            living = house.registry.living()
+            if niche is not None and sum(1 for a in living if a.specialty == niche.id) > niche.max_members:
+                displaced = house._weakest(rules, specialty=niche.id, exclude=[child.id])
+            elif len(living) > int(rules["max_population"]):
+                displaced = house._weakest(rules, exclude=[child.id])
+        if seated and child.alive:
+            if house.evaluator.rung(child.id) < 1:
                 house.evaluator.seat(child.id, 1, f"an Alpha Lab graduate: candidate {ident} passed the House's replay before birth, on its own line")
-                with house._state_lock:
-                    house._state["tried"][child.id] = child.code_sha256
-                house.seat(child)
-            evidence = {"candidate": ident, "lineage": row["lineage"], "origin": row["origin"], "author": row["author"],
-                        "cell": row["cell"], "fitness": row["fitness"], "replay_passed": True, "holdout_passed": sealed,
-                        "seated_on_paper": seated, "displaced": displaced.id if displaced is not None else None}
-            if house.ledger.get(f"birth-route:{child.id}") is None:  # before the foundry's labeller can call it something else
-                house.ledger.append("route.decision", {"task": f"birth:{child.id}", "route": "lab", "model": None,
-                                                       "reason": f"an Alpha Lab graduate for {niche.id}", "evidence": evidence},
-                                    id=f"birth-route:{child.id}")
-            if displaced is not None and displaced.alive:
-                house.kill(displaced, "displaced", house.postmortem(displaced, "displaced",
-                           "an Alpha Lab graduate that passed the House's replay takes the seat of the weakest eligible agent"))
+            with house._state_lock:
+                house._state["tried"][child.id] = child.code_sha256
+            house.seat(child)
+        evidence = {"candidate": ident, "lineage": row["lineage"], "origin": row["origin"], "author": row["author"],
+                    "cell": row["cell"], "fitness": row["fitness"], "replay_passed": True, "holdout_passed": sealed,
+                    "seated_on_paper": seated, "displaced": displaced.id if displaced is not None else None,
+                    "parent": child.parent}
+        if house.ledger.get(f"birth-route:{child.id}") is None:  # before the foundry's labeller can call it something else
+            house.ledger.append("route.decision", {"task": f"birth:{child.id}", "route": "lab", "model": None,
+                                                   "reason": f"an Alpha Lab graduate for {row['niche']}", "evidence": evidence},
+                                id=f"birth-route:{child.id}")
+        if displaced is not None and displaced.alive and displaced.id != child.id:
+            house.kill(displaced, "displaced", house.postmortem(displaced, "displaced",
+                       "an Alpha Lab graduate that passed the House's replay takes the seat of the weakest eligible agent"))
         return self._record(row, "born", f"born as {child.id}" + ("" if seated else " (not seated: its probe read other NEEDS)"),
                             line=line, family=family, agent=child.id)
 
@@ -1419,8 +1537,10 @@ class Lab:
             "note": ("Development results on the lab's search tape: the first two thirds of the tape the House replays this desk on. "
                      "Fitness is out-of-sample mean log growth per block after fees; a program needs the replay gate's trades and "
                      "blocks to be scored. The fittest program of a cell that clears the gate's numbers is replayed by the House on "
-                     "the whole tape (its last third unseen by any search) and, on the history store, by the sealed holdout; only "
-                     "then is it born. Nothing here is a trial against you: to adopt or fork a program you still `replay` it."),
+                     "the whole tape (its last third unseen by the lab's search) and, on the history store, by the sealed holdout; only "
+                     "then is it born. Submitting is not a trial against you, but a program that grew from your line is "
+                     "judged at graduation against every trial on your line, as your own child would be. To adopt or fork "
+                     "a program you still `replay` it."),
         }
 
     def submit(self, agent: Any, candidates: Sequence[Any]) -> dict[str, Any]:

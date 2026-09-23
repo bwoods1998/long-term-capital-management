@@ -362,6 +362,7 @@ class Graduation(LabCase):
         self.assertIn(grads[-1]["origin"], ("param", "luna"))  # a seed is a parent, never a graduate
         self.assertIn(grads[-1]["author"], ("house", "luna"))  # authorship on every graduate
         self.assertEqual(grads[-1]["lineage"], f"agent:{seed.id}")
+        self.assertEqual(child.parent, seed.id)  # a descendant of the program it grew from
         self.assertTrue(grads[-1]["lineage"])
         stats = [e.payload for e in self.house.ledger.iter(kinds="lab.stats")]
         self.assertTrue(stats and stats[-1]["evaluated"] >= 2 and stats[-1]["born_total"] == 1)
@@ -428,6 +429,89 @@ class Graduation(LabCase):
         replay.assert_not_called()
         self.assertEqual(out[0]["state"], "holdout_rationed")
 
+
+    def grind(self, agent, n):
+        """`n` failed replays on the agent's own line, as its own research would record them."""
+        for _ in range(n):
+            self.house.evaluator.record_trial(agent.id, agent.family, {"ok": True, "blocks": [{"log_growth": 0.0001 * ((-1) ** i)} for i in range(40)],
+                                                                       "trades": 20, "out_of_sample": {"blocks": 13, "mean_log_growth": -0.001}},
+                                              promote=False, lineage=self.house.registry.lineage(agent.id))
+
+    def test_a_graduate_is_judged_against_the_line_it_grew_from(self):
+        """Review, Sept 23: an agent's submission (or a mutant of its program) was replayed by the
+        House as a line with no past, so twenty variants ground on the agent's own line became one
+        trial at graduation. It is judged against every trial on that line, and born its descendant."""
+        agent = self.seated("sawtooth", KNOB)
+        self.grind(agent, 20)
+        self.assertEqual(len(self.house.evaluator.family_trials(agent.family, self.house.registry.lineage(agent.id))), 20)
+        out = self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant I already replayed"}])
+        self.lab.evaluate_batch()
+        grads = self.lab.graduate()
+        self.assertEqual(len(grads), 1)
+        line = self.lab._q("SELECT line FROM graduations WHERE candidate=?", (out["queued"][0],))[0]["line"]
+        trial = self.house.ledger.last("eval.trial", agent=line).payload
+        self.assertEqual(trial["trials"], 21)  # the agent's twenty and this one, not a first try
+        if grads[0]["agent"]:
+            child = self.house.registry.get(grads[0]["agent"])
+            self.assertEqual(child.parent, agent.id)
+            self.assertEqual(self.house.registry.lineage(child.id), [child.id, agent.id])  # its later replays inherit the count
+
+    def test_the_lines_of_one_lab_lineage_count_against_each_other(self):
+        self.house.game["lab"]["max_graduations_per_step"] = 5
+        first, second = self.evolve(KNOB, SPARSE)
+        self.lab.graduate()
+        counts = sorted(self.house.ledger.last("eval.trial", agent=r["line"]).payload["trials"]
+                        for r in self.lab._q("SELECT line FROM graduations WHERE candidate IN (?, ?)", (first, second)))
+        self.assertEqual(counts, [1, 2])
+
+    def test_the_holdout_ration_of_the_line_a_program_grew_from_applies(self):
+        agent = self.seated("sawtooth", KNOB)
+        for n in range(self.house.settings.holdout_lineage_budget):
+            self.house.ledger.append("holdout.access", {"agent": agent.id, "lineage": agent.id, "version": f"v{n}", "state": "opened",
+                                                        "window": ["a", "b"]}, agent=agent.id, id=f"holdout:v{n}:opened")
+        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.evaluate_batch()
+        with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay:
+            out = self.lab.graduate()
+        replay.assert_not_called()  # no trial spent on a program that could never reach the holdout
+        self.assertEqual(out[0]["state"], "holdout_rationed")
+
+    def test_a_birth_interrupted_after_spawn_is_finished_not_repeated(self):
+        """Review, Sept 23: a crash (or a deploy's shutdown) between `spawn` and the born row left the
+        graduation 'passed', and the next step spawned and endowed the program a second time."""
+        (ident,) = self.evolve(KNOB)
+        self.niche.max_members = 1
+        resident = self.seated("resident", IDLE)
+        real_seat = self.house.seat
+        calls = {"n": 0}
+
+        def flaky_seat(agent):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("the process stopped right after spawn")
+            return real_seat(agent)
+
+        with patch.object(self.house, "_weakest", return_value=resident), patch.object(self.house, "seat", side_effect=flaky_seat):
+            with self.assertRaises(RuntimeError):
+                self.lab.graduate()
+            self.assertEqual(self.lab._q("SELECT state FROM graduations WHERE candidate=?", (ident,))[0]["state"], "passed")
+            self.assertTrue(self.house.registry.get("resident").alive)  # the displacement never ran
+            # Another birth fills the hour's cap meanwhile: an interrupted birth is finished anyway.
+            self.house.game["lab"]["max_births_per_hour"] = 1
+            self.lab._x("INSERT INTO graduations(candidate, niche, lineage, line, family, state, agent, at, detail) VALUES(?,?,?,?,?,?,?,?,?)",
+                        ("other", DESK, "sol:x", "other-line", "f", "born", "other-line", self.clock(), ""))
+            out = self.lab.graduate()
+        born = [a for a in self.house.registry.agents.values() if str(a.founder or "").startswith("lab:")]
+        self.assertEqual(len(born), 1)
+        child = born[0]
+        self.assertEqual([(o["state"], o["agent"]) for o in out], [("born", child.id)])
+        self.assertEqual(self.house.evaluator.rung(child.id), 1)
+        self.assertEqual(sum(1 for e in self.house.ledger.iter(kinds="eval.verdict", agent=child.id) if e.payload.get("decision") == "seat"), 1)
+        self.assertIsNotNone(self.house.books["alpaca-paper"].accounts.get(child.id))
+        endowments = [e for e in self.house.ledger.iter(kinds="credit.grant", agent=child.id) if e.payload.get("reason") == "endowment"]
+        self.assertEqual(len(endowments), 1)
+        self.assertFalse(self.house.registry.get("resident").alive)  # the seat it took is freed, once
+        self.assertEqual(self.lab.graduate(), [])
 
 class Royalties(LabCase):
     def test_a_graduates_performance_fee_pays_the_lab_once(self):
@@ -501,6 +585,23 @@ class Researchers(LabCase):
         self.assertIn("folds", mine["results"])
         self.assertNotIn("code", json.dumps(seen["archive"]) + json.dumps(seen["leaderboard"]))
         self.assertTrue(seen["archive"])
+
+    def test_a_submission_is_evaluated_first_while_breeding_runs(self):
+        """Review, Sept 23: the largest tape group went first, so a lone submission waited as long
+        as breeding kept two children of an elite queued -- which the step does whenever it runs low."""
+        self.house.game["lab"]["param_children"] = 4
+        self.queue(KNOB)  # a seed: the elite breeding works from
+        self.lab.evaluate_batch()
+        agent = self.seated("submitter", KNOB)
+        ident = self.lab.submit(agent, [{"code": IDLE.replace("PARAMS = {}", "PARAMS = {}  # mine"), "idea": "mine"}])["queued"][0]
+        self.luna.programs = []  # only the free parameter mutants of the elite
+        self.clock.advance(30)
+        self.lab.breed()
+        self.assertGreaterEqual(self.lab.queued(), 3)  # the submission and at least two children of the elite
+        self.lab.evaluate_batch()
+        self.assertNotEqual(self.candidate(ident)["status"], "queued")
+        self.lab.evaluate_batch()  # and then the children
+        self.assertEqual(self.lab.queued(), 0)
 
     def test_submissions_are_capped(self):
         agent = self.seated("sawtooth", KNOB)
