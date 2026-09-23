@@ -263,6 +263,31 @@ status is exposed in health and agent research context; qualification is distinc
    or had `displace_trading_after_sessions` (game.json, 3) sessions; one holding a stock or
    contract while the market is shut is not removed before the open; and a rewrite of one that
    has never traded does not restart its clock.
+   **The seat market follows evidence** (Sept 23, 2026, the learn-and-unblock run; measured on the
+   16:28Z snapshot: 312 of 345 deaths were displacements, 254 of them of rung-0 House mutations
+   after a median three hours, while 20 lab graduates, 6 replay-passed cards and 6 merged
+   strategies waited). `House.seat_waiters` lists who waits, by class in `SEAT_WAITERS` order:
+   Alpha Lab graduates (replay and sealed holdout passed), replay-passed foundry cards, merged
+   strategies. While any of them waits `_refill` stakes no mutation; a waiting graduate's desk is
+   held from cards and merged strategies, a waiting card's from merged strategies
+   (`_reserved_desks`). Each of the three asks `_weakest(..., evidenced=True)`: a newcomer with
+   forward evidence may take a rung-0 seat, or a rung-1 seat that has never traded since its
+   current program's opportunity, inside its holder's grace (a desk that keeps hours only once its
+   first regular session has closed, #190), and never a trader short of its record on any desk,
+   a winner, real money or a position held through a shut market. Replay-only code ranks before
+   code that passed replay, and at most one resident a desk is displaced in a tick. A waiter class
+   that cannot be born is recorded (`seat_refusals` in house.json, `seats.last_refused_birth` in
+   health.json) and told as a warning once an hour a class; more than
+   `economy.seat_waiters_warning` (8) newcomers waiting for over an hour is a warning too
+   (`_seat_market_watch`, hourly, also `seats.displaceable` and `seats.never_traded_past_grace`).
+   Every desk keeps one seat for a member that trades (`_mutation_room`: a rung-0 mutation never
+   takes a desk's last free seat while no member has a fill since its seat, and never displaces a
+   desk's last trading member), because two crypto desks had no trading member for 34 of 48 hours
+   while "full" of replay-only children. And no House mutation, parameter fork or revival of a
+   family whose pooled forward record (`family_forward`: every member's active `eval.block`, living
+   or dead) is negative after `economy.losing_family_min_blocks` (6) active blocks is made
+   (`_losing_family`, an info alert once an hour a family); a child with different code -- a
+   research candidate's fork, a card, a graduate -- is judged on its own.
    Since Sept 23, 2026 every birth of this step (forks, founders, merged strategies, the refill)
    holds the probe box for the whole step, where each birth reads its NEEDS. When background work
    has that box, the step waits at most `probe_wait_seconds` (15 s) and the births are deferred to
