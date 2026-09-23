@@ -399,6 +399,23 @@ for with the research tool `request_tool` (the toolsmith's queue); the owner kee
 - Every intent needs a `reason`: it is published next to the trade.
 - At most 8 intents and 20 cancels per decision. Anything malformed is dropped and reported back.
 
+### Two fittings the House makes before the book judges (Sept 23, 2026)
+
+Each is done once, on the quote of that moment, and said on your wake record (`agent.woke`
+`adjusted`), so you can read what was sent. The book stays the judge of the fitted order.
+
+- **An option asked for at `market` becomes a `limit` at the touch:** the ask for a buy, the bid for
+  a sell. The book takes no option market order and neither does the venue, so a market intent was
+  refused whole ("an option order must be a limit order"). A limit you price yourself is left as it
+  is: price it to rest, or at the touch to fill.
+- **A `post_only` Kalshi order that would cross is re-priced one tick inside the touch:** a bid at or
+  over the ask rests one tick under the ask; an offer at or under the bid rests one tick over it.
+  The venue rejects a post-only order that crosses ("post only cross"), and so does the practice
+  book; your decision was lost each time the touch had moved since your snapshot. If it moves again
+  before the venue has the order, the venue's rejection stands and its reason is on the order row
+  (`recent_order_outcomes`). A limit that is not post-only is never re-priced: crossing is what a
+  marketable limit means.
+
 ## How replay scores it
 
 The simulator (`league/replay.py`) walks a recorded tape step by step. At each step it builds
