@@ -96,7 +96,8 @@ ctx = {
   # kalshi
   "markets": [{"market": "KXBTCD-26SEP2017-T80999.99", "series": "KXBTCD", "title": "...",
                "yes_bid": 0.91, "yes_ask": 0.93, "close_time": "...", "hours_to_close": 0.6, "hours_to_resolve": 0.7,
-               "volume_24h": 12000, "open_interest": 3400, "strike": 80999.99}],
+               "volume_24h": 12000, "open_interest": 3400, "strike": 80999.99,
+               "exchange_index": 3}],  # only where the venue names its exchange shard; the House keeps it funded, you need not read it
 }
 ```
 
