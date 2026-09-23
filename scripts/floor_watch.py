@@ -134,6 +134,23 @@ if cdb is not None:
         out['costs']['openai_pending_holds'] = round(held / 1e6, 2)
     except Exception as exc:
         out['costs']['openai_error'] = str(exc)[:120]
+# The run's health blocks (Sept 23, 2026, the learn-and-unblock run): the OpenAI tier, the shard
+# funder, the seat market, the lab's waiters, and the newest hourly yield row (`ops.budget` "yield").
+try:
+    hs = json.loads((root / 'house.json').read_text())
+except Exception:
+    hs = {}
+sh, seats, labh = h.get('shards') or {}, h.get('seats') or {}, h.get('lab') or {}
+out['blocks'] = {
+    'tier': hs.get('frontier_tier'),
+    'shards': {k: sh.get(k) for k in ('balances', 'moved_24h_usd', 'unattributed_usd', 'blocked', 'pending', 'last_error')} if sh else None,
+    'seats': {k: seats.get(k) for k in ('waiters', 'displaceable', 'never_traded_past_grace', 'waiting_over_an_hour')} if seats else None,
+    'lab': {'closed_since': labh.get('closed_since'), 'llm_paused': (labh.get('llm') or {}).get('paused'),
+            'waiting_seat': (labh.get('waiting_seat') or {}).get('count'), 'queued': labh.get('queued')} if labh else None}
+row = db.execute("select at, payload from ledger where kind='ops.budget' and payload like '%\"what\": \"yield\"%' order by seq desc limit 1").fetchone()
+if row:
+    yp = json.loads(row[1])
+    out['yield'] = {'at': row[0], **{k: yp.get(k) for k in ('spend', 'evidence', 'usd_per', 'window') if k in yp}}
 print(json.dumps(out, default=str))
 '''
 
@@ -197,6 +214,10 @@ def render(box: dict, site: dict, gateway: dict) -> str:
               for r in box["top_evidence"]]
     lines.append(f"## lab {box.get('lab')} {box.get('lab_ledger', '')}")
     lines.append(f"## costs {json.dumps(box['costs'])}  gateway {json.dumps(gateway)}")
+    if box.get("blocks"):
+        lines.append(f"## blocks {json.dumps(box['blocks'], default=str)}")
+    if box.get("yield"):
+        lines.append(f"## yield {json.dumps(box['yield'], default=str)[:600]}")
     lines.append(f"## health refusals {json.dumps(box['refusals'])}")
     lines += ["  alert " + a for a in box["alerts"]]
     lines.append(f"## site {json.dumps(site)}")
