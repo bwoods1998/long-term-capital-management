@@ -250,4 +250,12 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   that each need their own tape, so the children's tapes were never built. Release
   `20260923T123231Z-4c6c96522a1c`, promoted at 12:34:00Z. CI was green on both 3.11 and 3.14, which
   supports reading the earlier 3.11 hangs on #176 as runner flakiness.
+- 12:44-12:53Z — **the lab at scale.** After Deploy 6 the children's tapes were built: 196 parameter
+  children in about 10 minutes, in batches of 32 (a 10-minute rate of about 1,200 an hour). In total:
+  119 seeds, 8 agent submissions and 196 children evaluated; 21 archive cells.
+- 12:46:39Z — **the first lab graduate candidate.** A lab-made program for `kalshi-crypto-15m` passed
+  the House's own replay (a counted trial on its own line). It is `waiting_seat`: the league is at 96
+  and no resident is displaceable. It is asked again every 10 minutes.
+- **12:50:25Z — the second allocator bunt**, and the first through the pure allocator path (no audit):
+  meriwether-h2d625d, paper → bunt, a $10 stake at Kalshi, E 1.0100 on 7 closed paper trades.
 
