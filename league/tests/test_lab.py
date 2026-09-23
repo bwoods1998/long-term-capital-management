@@ -3,6 +3,7 @@ through the House's replay and the holdout's rationing, the birth cap, royalties
 and the researchers' lab tools -- against a fake lab box that runs the real replay engine locally and
 fake Luna and Sol clients."""
 
+import importlib.util
 import json
 import unittest
 from decimal import Decimal
@@ -480,6 +481,28 @@ class Researchers(LabCase):
         self.assertFalse(lab_module.has_evidence(self.house, agent))  # on paper, but no closed trade yet
         with patch.object(self.house, "_recent_trades", return_value=[{"pnl_usd": "0.1"}]):
             self.assertTrue(lab_module.has_evidence(self.house, agent))
+
+
+@unittest.skipUnless(importlib.util.find_spec("league.labbox"), "the lab box's evaluator (league/labbox.py) is not in this tree")
+class RealLabBox(LabCase):
+    """The same batch through D-core's `LabBox` over the local sandbox: the lab scores it exactly as it
+    scores a batch of single replays."""
+
+    def test_the_real_batch_evaluator_scores_as_single_replays_do(self):
+        from league.labbox import LabBox
+
+        ids = [self.queue(code) for code in (KNOB, LOSER, SPARSE)]
+        single = Lab(self.house, box=FakeBox(), mutator=self.luna, leaper=self.sol, path=self.house.root / "lab-single.sqlite")
+        self.addCleanup(single.close)
+        for code in (KNOB, LOSER, SPARSE):
+            single.admit(code, niche=self.niche, origin="seed", author="house", lineage="founder:test")
+        single.evaluate_batch()
+        self.lab.use_box(LabBox(self.house.sandbox, box_key="lab", clock=self.clock))
+        self.assertEqual(self.lab.evaluate_batch()["candidates"], 3)
+        for ident in ids:
+            batch, alone = self.candidate(ident), single._q("SELECT * FROM candidates WHERE id=?", (ident,))[0]
+            for field in ("status", "eligible", "gate", "fitness", "trades", "cell"):
+                self.assertEqual(batch[field], alone[field], f"{ident} {field}")
 
 
 class Wiring(LabCase):

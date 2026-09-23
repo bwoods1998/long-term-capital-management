@@ -123,7 +123,8 @@ class Settings:
     deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
     holdout_gate: bool = True
     holdout_lineage_budget: int = 3
-    # The Alpha Lab's box (`league/config.json` `lab.box`): with `game.json` `lab.enabled`, the lab runs.
+    # The Alpha Lab's box key, when `league/config.json` `lab` names a box (`service.lab_box_key`):
+    # with `game.json` `lab.enabled` too, the lab runs (league/lab.py).
     lab_box: str = ""
 
 
