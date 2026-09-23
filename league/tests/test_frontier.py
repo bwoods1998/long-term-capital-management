@@ -284,5 +284,44 @@ class Failures(unittest.TestCase):
                 frontier(FakeOpener(FakeResponse(raw=raw))).ask(system="s", user="u", agent="a")
 
 
+
+class Settlement(unittest.TestCase):
+    """What the House books against the owner's campaign for each call (Sept 23, 2026)."""
+
+    class Guard:
+        def __init__(self):
+            self.reserved, self.settled = {}, {}
+
+        def reserve(self, ident, campaign, amount):
+            self.reserved[ident] = Decimal(str(amount))
+            return True
+
+        def settle(self, ident, amount):
+            self.settled[ident] = Decimal(str(amount))
+
+    def test_a_verified_call_settles_at_the_gateways_metered_cost_not_the_ceiling(self):
+        guard = self.Guard()
+        frontier(FakeOpener(ok(cost="0.0421")), spend_guard=guard).ask(system="s", user="u", agent="a")
+        (hold,), (paid,) = guard.reserved.values(), guard.settled.values()
+        self.assertEqual(paid, Decimal("0.0421"))
+        self.assertGreater(hold, paid)
+
+    def test_a_refused_call_releases_its_hold_and_a_call_with_no_answer_keeps_it(self):
+        for code, kept in ((402, False), (400, False), (429, False), (502, True), (500, True)):
+            guard = self.Guard()
+            refusal = http_error(code)
+            self.addCleanup(refusal.close)
+            with self.assertRaises(FrontierError):
+                frontier(FakeOpener(refusal), spend_guard=guard).ask(system="s", user="u", agent="a")
+            self.assertEqual(bool(guard.reserved), True)
+            self.assertEqual(guard.settled == {}, kept, code)
+            if not kept:
+                self.assertEqual(list(guard.settled.values()), [Decimal(0)])
+        guard = self.Guard()
+        with self.assertRaises(FrontierError):
+            frontier(FakeOpener(TimeoutError("slow")), spend_guard=guard).ask(system="s", user="u", agent="a")
+        self.assertEqual(guard.settled, {})  # the provider may have billed a call it received
+
+
 if __name__ == "__main__":
     unittest.main()

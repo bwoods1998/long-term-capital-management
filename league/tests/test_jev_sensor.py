@@ -113,6 +113,7 @@ class GateCase(HouseCase):
             "start": now_iso(self.clock)[:10], "days": 10, "sail_usd": "50", "openai_usd": "50"})
         self.house.pacer.may_spend = lambda kind: True
         self.house.behind_the_clock = lambda kind: False  # a fixed interval; the halving has its own tests
+        self.house.game["research"]["pace"] = {}  # the gate under test, not the record-based pace (test_house)
         self.house.researcher = SimpleNamespace(research=lambda *a, **k: SimpleNamespace(candidate=None))
         self.jev = FakeJev(p, fail=fail)
         self.sensor = Sensor(self.house.root / "jev.sqlite", self.jev, clock=self.clock)
@@ -178,7 +179,7 @@ class ResearchGateTest(GateCase):
             ("book.settle", lambda: ledger.append("book.settle", {"book": "alpaca-paper"}, agent=agent.id)),
             ("book.refused", lambda: ledger.append("book.refused", {"book": "kalshi", "reasons": ["x"]}, agent=agent.id)),
             ("eval.verdict:promote", lambda: ledger.append("eval.verdict", {"decision": "promote", "to_rung": 1}, agent=agent.id)),
-            ("credit.grant", lambda: ledger.append("credit.grant", {"reason": "epoch payout", "usd": "1"}, agent=agent.id)),
+            ("credit.grant", lambda: ledger.append("credit.grant", {"reason": "fork endowment", "usd": "1"}, agent=agent.id)),
             ("library.note:niche", lambda: ledger.append("library.note", {"title": "t", "text": "x" * 50, "niche": agent.niche}, agent="peer")),
         ]
         for name, write in cases:
@@ -193,6 +194,19 @@ class ResearchGateTest(GateCase):
                 self.assertTrue(self.house.research_due(agent))
                 self.assertEqual(self.gates()[-1]["reason"], "trigger")
                 self.assertTrue(any(t.startswith(name) for t in self.gates()[-1]["triggers"]), self.gates()[-1])
+
+    def test_the_hourly_payout_is_not_a_trigger(self):
+        """Sept 23, 2026: every working paper agent was paid each hour, so the payout re-woke each
+        one's research at least hourly, however long it had been abstaining."""
+        agent = self.ready()
+        summary(self.house.ledger, agent.id)
+        summary(self.house.ledger, agent.id)
+        self.researched(agent)
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent))
+        self.house.ledger.append("credit.grant", {"reason": "epoch payout", "usd": "1"}, agent=agent.id)
+        self.clock.advance(60)
+        self.assertFalse(self.house.research_due(agent))
 
     def test_routine_verdicts_and_own_notes_are_not_triggers(self):
         agent = self.ready()

@@ -550,13 +550,20 @@ class House:
         return retired
 
     def learn(self) -> int:
-        """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook, once each."""
-        have = {e.payload.get("title") for e in self.ledger.iter(kinds="playbook.entry")}
+        """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook: once
+        each, and again when a lesson's text changes. Until Sept 23, 2026 a corrected lesson never
+        reached the ledger, and agents kept planning against thresholds it no longer stated."""
+        from .commons import MAX_NOTE_CHARS
+
+        have: dict[str, str] = {}
+        for entry in self.ledger.iter(kinds="playbook.entry"):
+            have[str(entry.payload.get("title"))] = str(entry.payload.get("text") or "")
         added = 0
         for path in sorted((Path(__file__).resolve().parent / "playbook").glob("*.md")):
             title = f"Lesson: {path.stem}"
-            if path.name != "README.md" and title not in have:
-                self.commons.playbook_add(title, path.read_text(encoding="utf-8"), source="teacher")
+            text = path.read_text(encoding="utf-8")
+            if path.name != "README.md" and have.get(title) != text[:MAX_NOTE_CHARS]:
+                self.commons.playbook_add(title, text, source="teacher")
                 added += 1
         return added
 
@@ -2478,6 +2485,11 @@ class House:
                 completed = sum(1 for e in self.ledger.iter(kinds='agent.research', agent=agent.id)
                     if e.payload.get('tool') == 'summary' and _epoch(e.at) >= opportunity
                     and not str(e.payload.get('reason') or '').startswith(('provider:', 'tool outcome unconfirmed')))
+                # A failed replay of its own code is a finished chance too. Sept 23, 2026: research is
+                # paced by record now (an agent with none waits three intervals), and without this a
+                # rung-0 agent that failed replay twice would hold its seat until the 72-hour cull.
+                completed += sum(1 for e in self.ledger.iter(kinds='eval.trial', agent=agent.id)
+                                 if not e.payload.get('passed') and _epoch(e.at) >= opportunity)
                 if completed < self._burst['policy']['minimum_research_passes']:
                     continue
                 agent_grace = 0
@@ -2648,8 +2660,10 @@ class House:
         Winners run: an agent whose earned record is profitable researches at `winner_share` of the
         interval, and every candidate its research passes through replay is born its child -- so a
         winning line breeds faster. An agent on paper or above with `loser_min_observations` of
-        evidence and a losing record waits `loser_multiple` times as long. Everyone else, and every
-        agent still in replay, keeps the interval (owner's direction, Sept 21, 2026)."""
+        evidence and a losing record waits `loser_multiple` times as long. An agent with no earned
+        record at all waits `unproven_multiple` times as long (Sept 23, 2026: 84% of sessions ended
+        by abstaining, most of them by agents with nothing yet to learn from); everyone else keeps
+        the interval (owner's direction, Sept 21, 2026)."""
         pace = (self.game.get("research") or {}).get("pace") or {}
         if not pace:
             return 1.0
@@ -2662,6 +2676,8 @@ class House:
             return float(pace.get("winner_share", 1.0))
         if row.get("rung", 0) >= 1 and seen >= int(pace.get("loser_min_observations", 5)) and growth < 0:
             return float(pace.get("loser_multiple", 1.0))
+        if seen == 0:
+            return float(pace.get("unproven_multiple", 1.0))
         return 1.0
 
     def _research_if_due(self, agent: Agent) -> Any:
@@ -3341,6 +3357,26 @@ class House:
                            id=f"line-retired:{line}:{tried}")
 
     # -------------------------------------------------------------------- tick
+    #: A Sail hold older than this has had its charge (if any) reach the balance meter.
+    STALE_HOLD_SECONDS = 3600
+
+    def _absorb_stale_holds(self) -> None:
+        """Every ten minutes, release Sail holds older than the meter's lag into the balance meter
+        that already counts their charge (`CampaignBudget.absorb_stale`), and say so on the ledger."""
+        if self.clock() - float(self._state.get("holds_absorbed_at") or 0) < 600:
+            return
+        self._state["holds_absorbed_at"] = self.clock()
+        absorb = getattr(self.campaigns, "absorb_stale", None)
+        if absorb is None or "sail" not in (getattr(self.campaigns, "policy", {}) or {}).get("meter_required", []):
+            return
+        try:
+            out = absorb("sail", older_than_seconds=self.STALE_HOLD_SECONDS, evidence={"by": "house", "release": Path(__file__).resolve().parents[1].name})
+        except Exception as exc:  # noqa: BLE001 - a reconciliation that fails leaves the holds counted
+            self.alert("warning", f"stale Sail holds could not be absorbed ({type(exc).__name__}: {str(exc)[:160]})")
+            return
+        if out.get("absorbed"):
+            self.ledger.append("ops.budget", {"what": "holds absorbed", "kind": "sail", **out})
+
     def tick(self) -> dict[str, Any]:
         if self._burst and not self.campaigns.running():
             self.game = deepcopy(self._base_game)
@@ -3383,6 +3419,8 @@ class House:
         if self.campaigns:
             meter = getattr(self.provider, "transport", None)
             metered = bool(meter and hasattr(meter, "refresh") and meter.refresh())
+            if metered:
+                self._absorb_stale_holds()
             allowed = self.pacer.may_spend("sail")
             if open_for_business and not metered:
                 stopped_because = "the campaign's Sail meter is unread or failed (meter_health in campaigns.sqlite)"

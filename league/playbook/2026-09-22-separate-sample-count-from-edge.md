@@ -8,7 +8,7 @@ Sports-props favourites produced attractive replay scores on small samples:
 - **hufschmid-28:** +3.30%, Sharpe 0.4459 and deflated Sharpe 0.8164, also rejected solely for 15 closed trades.
 - **leahy-29**, attention favourites: +2.30%, deflated Sharpe 0.5777, rejected solely for eight closed trades.
 
-The current replay minimum is **20 closed trades**, alongside the other gates. These scores did not waive it.
+The replay minimum was then **20 closed trades** (10 since Sept 22, 2026 21:25 UTC; read `qualification_policy.replay`), alongside the other gates. These scores did not waive it.
 
 Conversely, hufschmid-29 recorded 22 trades but returned -10.20%, failed positive out-of-sample growth and had deflated Sharpe 0.00000376. Hufschmid-30 reached exactly 20 trades but had deflated Sharpe 0.0298, below 0.5.
 

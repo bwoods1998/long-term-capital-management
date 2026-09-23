@@ -13,7 +13,7 @@ A count-only failure and an edge failure require different next evidence. A high
 
 ## Before spending again
 
-1. **List every failed gate from the actual result.** Current replay requirements include 20 closed trades, 20 blocks, at least 8 out-of-sample blocks, positive out-of-sample growth and deflated Sharpe at least 0.5. A 19-trade result with deflated Sharpe 0.143 is not merely one trade short.
+1. **List every failed gate from the actual result.** Read the requirements in force from `qualification_policy.replay`: since Sept 22, 2026 21:25 UTC they are 10 closed trades, 20 blocks, at least 8 out-of-sample blocks and positive out-of-sample growth, with no deflated-Sharpe minimum (20 trades and 0.5 when this lesson was written). A 19-trade result with deflated Sharpe 0.143 is not merely one trade short.
 2. **For a count-only failure, seek additional observations of the unchanged hypothesis.** Check `replay_coverage` with the complete proposed NEEDS before purchasing a replay. Specify which new chronological coverage could produce additional qualifying closures. Coverage support is not proof that enough trades exist. If new coverage is unavailable, defer; do not loosen entries solely to manufacture the twentieth trade.
 3. **For an edge failure, require a mechanism-level hypothesis.** State the changed signal or execution assumption and the result that would falsify it. More turnover alone is not a repair. A changed rule is a new candidate, not additional evidence for the old one.
 

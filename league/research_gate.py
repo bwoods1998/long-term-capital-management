@@ -319,6 +319,11 @@ class ResearchGate:
         for entry in self.ledger.read(kinds=TRIGGER_KINDS, agent=agent.id, after=after, limit=1000):
             if entry.kind == "book.fill" and entry.payload.get("source") == "dust":
                 continue
+            if entry.kind == "credit.grant" and str(entry.payload.get("reason") or "").startswith("epoch payout"):
+                # The hourly payout says nothing new about the agent. Measured Sept 23, 2026: during
+                # the burst every working paper agent was paid each hour, so each researched at
+                # least hourly however long it had been abstaining, and the gate could not back off.
+                continue
             if entry.kind == "eval.verdict":
                 decision = str(entry.payload.get("decision") or "")
                 if decision in ROUTINE_VERDICTS:

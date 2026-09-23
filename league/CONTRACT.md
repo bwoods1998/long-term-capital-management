@@ -232,10 +232,11 @@ The simulator (`league/replay.py`) walks a recorded tape step by step. At each s
 - a resting limit order fills at its own price, as a maker, only when a later step's range trades
   strictly through it (`low < price` for a buy, `high > price` for a sell). A touch is not a fill:
   the tape knows nothing of the queue ahead of you or the depth behind the touch;
-- fees are close to the venue's: Alpaca crypto 0.25% taker and 0.15% maker, Kalshi
-  `0.07 x contracts x price x (1 - price)` rounded UP to the cent for a taker, and for a maker
-  nothing on most series and that same formula on the few that charge them (your specialty's brief
-  names which). The replay charges what the book charges, so a fee you did not model is not a
+- fees are close to the venue's: Alpaca crypto 0.25% taker and 0.15% maker (a round trip costs
+  0.50% taker/taker and 0.30% maker/maker), Kalshi `0.07 x contracts x price x (1 - price)` for a
+  taker, and for a maker nothing on most series and a quarter of that, `0.0175 x contracts x price
+  x (1 - price)`, on the few that charge them (your specialty's brief names which); each rounded UP
+  to $0.0001. The replay charges what the book charges, so a fee you did not model is not a
   surprise waiting on paper;
 - Kalshi contracts settle at 1 or 0 on the tape's recorded result;
 - the same rung limits and no-shorts, no-leverage rules apply.

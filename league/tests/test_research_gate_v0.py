@@ -11,6 +11,7 @@ class ResearchBackoff(HouseCase):
         self.house.researcher = SimpleNamespace()  # research_due only asks that one exists
         self.house.game["research"]["min_hours_between"] = 1
         self.house.game["research"]["gate"] = {"after": 2, "max_factor": 8, "sample_percent": 0}
+        self.house.game["research"]["pace"] = {}  # the gate under test, not the record-based pace
         self.agent = self.seated()
         self.house.economy.grant(self.agent.id, "5", "rich enough to research")
         self.house.pacer.may_spend = lambda kind: True

@@ -83,9 +83,11 @@
     "tool_choice": "required",
     "pace": {
       "_about": "Winners run, losers wait (owner's direction, Sept 21, 2026). A profitable earned record researches at winner_share of the interval, and replay-passing candidates are born its children; an agent on paper or above with loser_min_observations of evidence and a losing record waits loser_multiple times as long.",
-      "winner_share": 0.33,
-      "loser_multiple": 4,
-      "loser_min_observations": 5
+      "winner_share": 0.1,
+      "loser_multiple": 8,
+      "loser_min_observations": 5,
+      "unproven_multiple": 3,
+      "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry."
     },
     "gate": {
       "_about": "Sept 22, 2026 overnight v0: after `after` empty passes in a row (no candidate, no replay, no Merton strategy) and nothing new on the agent's record, the interval doubles per further empty pass up to max_factor; sample_percent of skipped windows still run so misses stay measurable.",
@@ -151,12 +153,12 @@
     "_about": "The hypothesis foundry (league/hypotheses.py): Merton writes 3-4 falsifiable strategy cards for the desk the evidence favours (exploration_share of calls go to the least-explored desk), replay admits them before any paper seat, and routine refill stops breeding random mutations. Calls are at most one per call_minutes, only while a seat is open, the frontier tier pays for code work and the day's OpenAI allowance has room, and never past budget_usd within budget_window_hours. It writes on `model` (GPT-6 Sol from Sept 22, 2026, at high effort and a quarter-hour cadence: about a fifth of Astra's price, so the same budget buys four to five times the cards); the auditor and the engineer keep Astra. A family with retire_after_failures counted replay failures and no pass is retired from House breeding. mutation_share (at least mutation_min_per_day) bounds House mutations, and only of parents earning forward.",
     "enabled": true,
     "replace_mutation_refill": true,
-    "call_minutes": 15,
+    "call_minutes": 10,
     "candidates": 4,
     "max_output_tokens": 16000,
     "effort": "high",
     "model": "gpt-6-sol",
-    "budget_usd": "20",
+    "budget_usd": "40",
     "budget_window_hours": 24,
     "exploration_share": 0.2,
     "exploration_window": 10,
@@ -166,7 +168,12 @@
     "blocked_hours": 24,
     "mutation_share": 0.2,
     "mutation_min_per_day": 2,
-    "card_ttl_hours": 24
+    "card_ttl_hours": 24,
+    "_about_sept23": "Sept 23, 2026 (the owner: a 24/7 swarm; 'do 1-5 right now fully'): the first GPT-6 Sol call wrote 4 cards for $0.128 and one was on paper 43 s later, while agent research cost about $1 per replay-passing candidate. So the foundry gets more of the budget ($40 a window, a call every 10 minutes), half of its calls go to the fast-evidence desks (hourly, around the clock) whose low pass rates never win the evidence route, cards may queue for replay (max_pending_cards) instead of holding the next call, and Merton is told to prefer hourly programs where a desk allows them.",
+    "fast_desks": ["alpaca-crypto-majors", "alpaca-crypto-alts", "kalshi-crypto-15m", "kalshi-crypto-strikes", "alpaca-index-etfs", "alpaca-megacaps"],
+    "fast_share": 0.5,
+    "prefer_horizon": "hour",
+    "max_pending_cards": 8
   },
   "consult": {
     "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits, and what it must have DONE to be allowed to. Frontier intelligence is the scarcest thing on the floor: it is the prize for trading well, never a rebate for existing. An agent that has not traded is served by Merton's own roles -- the architect who writes strategies, the toolsmith who builds what the queue asks for, the teacher who writes the lessons -- which cost it nothing and reach the whole firm.",

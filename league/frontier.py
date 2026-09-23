@@ -148,6 +148,11 @@ class Frontier:
                 cost = response.headers.get(COST_HEADER)
         except urllib.error.HTTPError as exc:
             detail = exc.read()[:300].decode("utf-8", "replace")
+            if self.spend_guard is not None and 400 <= exc.code < 500:
+                # Refused, not billed: the gateway reserves nothing for its own refusals (402 month,
+                # 400, 401, 403, 413) and settles an upstream 4xx at $0 (gateway/lib/router.mjs). Until
+                # Sept 23, 2026 the House kept the worst-case hold of every refused call for good.
+                self.spend_guard.settle(commitment, 0)
             raise FrontierError(f"frontier call refused: HTTP {exc.code} {detail}", status=exc.code) from None
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise FrontierError(f"frontier call failed: {type(exc).__name__}") from None
@@ -168,11 +173,15 @@ class Frontier:
                 if (confirmed.is_finite() and confirmed >= 0 and type(tokens_in) is int and type(tokens_out) is int
                         and min(tokens_in, tokens_out) >= 0 and payload.get('model') == self.model):
                     verified = True
-                    # The gateway's header is an estimate, not an invoice. Keep the phase bound
-                    # conservative even if its pricing omits long-context/cache-write premiums.
+                    # The gateway's metered cost, the same figure its month line enforces. It prices
+                    # cache reads, cache writes and the long-context premiums from the provider's own
+                    # usage block (gateway/lib/frontier.mjs actualCost, since Sept 22, 2026). Until
+                    # Sept 23 the House booked max(this, every token at the long-context ceiling):
+                    # measured then, the gateway's whole September was $267.29 while the House had
+                    # settled $393.08 since Sept 21 alone, so the allowance closed at about half the
+                    # owner's real spend. The hold is the ceiling; a verified call settles at its cost.
                     if self.spend_guard is not None:
-                        bounded = (Decimal(tokens_in) * input_rate + Decimal(tokens_out) * output_rate) / 1000000
-                        self.spend_guard.settle(commitment, max(confirmed, bounded))
+                        self.spend_guard.settle(commitment, confirmed)
             except InvalidOperation:
                 pass  # unknown costs retain the full hold, including across restarts
         return Answer(output_text(payload), cost_usd, dict(payload.get("usage") or {}), str(payload.get("model") or self.model),

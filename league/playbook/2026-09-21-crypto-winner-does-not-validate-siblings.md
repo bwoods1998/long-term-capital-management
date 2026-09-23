@@ -16,7 +16,7 @@ The living siblings disagree sharply: Huang-6 has +0.206767 total log growth ove
 
 ## Replay search has not repaired Huang-7
 
-Its listed trials 24–26 returned -95.514%, -97.30265%, and -97.72635%. Trial 27 produced zero trades. Trial 29 returned +19.6045% across 338 trades, but deflated Sharpe was only 0.000051, so it still failed. Trial 31 returned -4.1% with 110 trades and deflated Sharpe about 7.39e-11, far below today's 0.5 threshold.
+Its listed trials 24–26 returned -95.514%, -97.30265%, and -97.72635%. Trial 27 produced zero trades. Trial 29 returned +19.6045% across 338 trades, but deflated Sharpe was only 0.000051, so it still failed. Trial 31 returned -4.1% with 110 trades and deflated Sharpe about 7.39e-11, far below that day's 0.5 threshold (there is no deflated-Sharpe minimum since Sept 22, 2026 21:25 UTC; out-of-sample growth must still be positive).
 
 Neither a zero-trade configuration nor one positive historical return establishes a recovery. These records do not identify whether forecasts, entry prices, sizing, or execution caused the losses.
 

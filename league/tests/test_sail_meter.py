@@ -89,5 +89,61 @@ class Meter(unittest.TestCase):
         self.assertEqual(self.guard.remaining("sail"), Decimal("4"))
 
 
+class StaleHolds(unittest.TestCase):
+    """Sept 23, 2026: 329 Sail holds ($60.59) pending since the burst began, none with a response,
+    while the balance meter had already counted every real charge once: the campaign read $54.76
+    left with $116 in the account. A hold older than the meter's lag is absorbed into the meter."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.now = [1800000000.0]
+        rules = policy()
+        rules["meter_required"] = ["sail"]
+        rules["caps_usd"] = {**rules["caps_usd"]}
+        self.guard = CampaignBudget(Path(self.tmp.name) / "campaigns.sqlite", rules, clock=lambda: self.now[0])
+        self.addCleanup(self.guard.close)
+        self.campaign = next(k for k, v in rules["campaigns"].items() if v["kind"] == "sail")
+
+    def test_an_old_unconfirmed_hold_is_absorbed_into_a_meter_that_already_counts_its_charge(self):
+        g = self.guard
+        g.observe_balance("sail", "100.00")
+        self.assertTrue(g.reserve("old", self.campaign, "2.00"))
+        self.assertTrue(g.reserve("answered", self.campaign, "2.00"))
+        g.link_response("resp-1", "answered", "pro_asap")          # a response exists: settled from it, not here
+        g.observe_balance("sail", "99.00")                          # the vendor charged $1 in all
+        before = g.remaining("sail")
+        self.assertEqual(g.absorb_stale("sail", older_than_seconds=3600)["absorbed"], 0)  # too young
+        self.now[0] += 3601
+        g.observe_balance("sail", "99.00")
+        out = g.absorb_stale("sail", older_than_seconds=3600, evidence={"why": "test"})
+        self.assertEqual((out["absorbed"], out["usd"]), (1, "2"))
+        self.assertEqual(g.remaining("sail") - before, Decimal("2"))      # the double count is gone...
+        used = g.db.execute("SELECT COALESCE(SUM(cost),0) FROM commitments").fetchone()[0]
+        self.assertEqual(used, 0)
+        self.assertEqual(g.db.execute("SELECT COUNT(*) FROM cost_reconciliations").fetchone()[0], 1)
+        self.assertEqual(g.db.execute("SELECT cost FROM commitments WHERE id='answered'").fetchone()[0], None)
+        # ...and the $1 the vendor charged is still counted, by the meter.
+        self.assertEqual(g.absorb_stale("sail", older_than_seconds=3600)["absorbed"], 0)  # idempotent
+
+    def test_nothing_is_absorbed_while_the_meter_is_stale_or_behind_what_was_settled(self):
+        g = self.guard
+        g.observe_balance("sail", "100.00")
+        self.assertTrue(g.reserve("old", self.campaign, "2.00"))
+        self.assertTrue(g.reserve("settled", self.campaign, "3.00"))
+        g.settle("settled", "2.50")                                  # settled more than the meter has seen
+        self.now[0] += 3601
+        g.observe_balance("sail", "99.00")
+        self.assertEqual(g.absorb_stale("sail", older_than_seconds=3600)["absorbed"], 0)
+        self.now[0] += 400                                            # no reading for over three minutes
+        g.observe_balance("sail", "97.00")
+        self.now[0] += 181
+        self.assertEqual(g.absorb_stale("sail", older_than_seconds=3600)["why"], "the meter is not healthy")
+
+    def test_a_provider_without_a_meter_cannot_absorb(self):
+        with self.assertRaises(ValueError):
+            self.guard.absorb_stale("openai", older_than_seconds=3600)
+
+
 if __name__ == "__main__":
     unittest.main()

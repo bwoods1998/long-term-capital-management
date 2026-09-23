@@ -1,8 +1,10 @@
 """Owner-funded campaigns with atomic commitments and no calendar catch-up spending.
 
 Reservations survive timeouts, process restarts and the end of the phase. Unknown charges are
-never converted to zero or expired by a timer. The policy is outside every model role's write
-paths. External development/infrastructure reserves are commitments, not claimed invoice costs.
+never converted to zero or expired by a timer -- with one exception, on a provider with an account
+meter: a hold older than the meter's lag is absorbed into the meter, which already counts whatever
+the vendor charged (`absorb_stale`). The policy is outside every model role's write paths.
+External development/infrastructure reserves are commitments, not claimed invoice costs.
 """
 from __future__ import annotations
 
@@ -84,6 +86,8 @@ class CampaignBudget:
             CREATE TABLE IF NOT EXISTS meter_balance(id TEXT PRIMARY KEY, last INTEGER NOT NULL, at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS meter_reconciliations(id TEXT PRIMARY KEY, kind TEXT NOT NULL, at REAL NOT NULL,
                 evidence TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS cost_reconciliations(id TEXT PRIMARY KEY, commitment TEXT NOT NULL,
+                evidence TEXT NOT NULL, at REAL NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -468,6 +472,50 @@ class CampaignBudget:
                 self.db.execute("ROLLBACK")
                 raise
         return Decimal(added) / UNIT
+
+    def absorb_stale(self, kind: str, *, older_than_seconds: float, evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Release the holds of a METERED provider that are older than the meter's lag, and settle
+        them against the meter: their charge, if the vendor made one, is already inside the account
+        meter, which `_burst_used` counts as `max(settled, measured)`. Each release is kept with its
+        evidence in `cost_reconciliations`; nothing is released while the meter is unhealthy or
+        below what has been settled (the meter must dominate for the charge to be counted).
+
+        Measured Sept 22, 2026 23:50Z: 329 Sail holds ($60.59) were pending since the burst began,
+        none with a linked response -- requests whose POST was never confirmed (restarts, timeouts).
+        The balance meter had measured $59.65 of Sail spend against $55.14 settled, so every real
+        charge was already counted once, and the holds counted it again: the campaign read $54.76
+        left while the account held $116."""
+        if kind not in self.policy.get("meter_required", []):
+            raise ValueError(f"{kind} has no account meter to absorb holds into")
+        cutoff = self.clock() - float(older_than_seconds)
+        with self.lock:
+            if not self.ready(kind):
+                return {"absorbed": 0, "usd": "0", "why": "the meter is not healthy"}
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                burst = self.burst()
+                first = int(burst["first_row"]) if burst else 0
+                settled = self.db.execute("SELECT COALESCE(SUM(cost),0) FROM commitments WHERE kind=? AND rowid>?", (kind, first)).fetchone()[0]
+                latest = self.db.execute("SELECT latest FROM meter WHERE id=?", (kind,)).fetchone()
+                baseline = (burst["meters"].get(kind) if burst else None)
+                measured = max(0, latest[0] - (baseline if baseline is not None else latest[0])) if latest else 0
+                if measured < settled:
+                    self.db.execute("COMMIT")
+                    return {"absorbed": 0, "usd": "0", "why": "the meter has not caught up with settled costs"}
+                rows = self.db.execute(
+                    "SELECT c.id, c.reserved FROM commitments c LEFT JOIN responses r ON r.commitment = c.id "
+                    "WHERE c.kind=? AND c.cost IS NULL AND c.created < ? AND r.id IS NULL", (kind, cutoff)).fetchall()
+                record = {"cause": "a hold older than the meter's lag, with no response to settle it from",
+                          "measured_micro_usd": measured, "settled_micro_usd": settled, **dict(evidence or {})}
+                for ident, reserved in rows:
+                    self.db.execute("UPDATE commitments SET cost=0 WHERE id=? AND cost IS NULL", (ident,))
+                    self.db.execute("INSERT OR IGNORE INTO cost_reconciliations VALUES(?,?,?,?)",
+                                    (f"absorbed:{ident}", ident, canonical({**record, "reserved_micro_usd": reserved}), self.clock()))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        return {"absorbed": len(rows), "usd": usd(sum(int(r[1]) for r in rows)), "measured_usd": usd(measured), "settled_usd": usd(settled)}
 
     def today(self, kind: str) -> Decimal:
         midnight = int(self.clock() // 86400) * 86400

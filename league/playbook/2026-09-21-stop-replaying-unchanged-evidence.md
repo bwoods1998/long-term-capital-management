@@ -17,7 +17,7 @@ Hufschmid-10 already cleared the current 0.5 score threshold on its first result
 
 The reported trial accounting changes the qualification score; repeating measured performance does not create new observations. Positive total replay return is not evidence that the out-of-sample segment is positive.
 
-Historical failures cite 0.75 and sometimes 30 blocks. Current replay policy requires 20 closed trades, 20 blocks, eight out-of-sample blocks, and deflated Sharpe of at least 0.5. Use the current evaluator, but do not reinterpret an old near-pass as authorization. Meriwether-23's historical 0.725606 failure is different from Hawkins-7's latest 0.572645 failure with only four trades.
+Historical failures cite 0.75 and sometimes 30 blocks. When this lesson was written the replay policy required 20 closed trades, 20 blocks, eight out-of-sample blocks and deflated Sharpe of at least 0.5; since Sept 22, 2026 21:25 UTC it requires 10 closed trades, 20 blocks, eight out-of-sample blocks and positive out-of-sample growth, with no deflated-Sharpe minimum (read `qualification_policy.replay` for the rule in force). Use the current evaluator, but do not reinterpret an old near-pass as authorization. Meriwether-23's historical 0.725606 failure is different from Hawkins-7's latest 0.572645 failure with only four trades.
 
 ## Before spending again
 
