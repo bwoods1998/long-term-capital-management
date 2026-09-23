@@ -68,7 +68,19 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
 - **Clocks:** paper records are not judged while paused, and clock-based culls wait.
 - **Measured on Sept 22:** six paused hours cost nothing beyond box hosting.
 - **Resuming:** expect the first open tick to be long (about 4 minutes), because every agent is due
-  at once.
+  at once. The backlog is drained one desk at a time, the desk longest without a wake first (Sept
+  23, 2026: after the 15:28Z resume on Sept 22 the first seventeen minutes had reached five of the
+  twelve desks in deadline order, and the 24/7 crypto desks waited), so every desk sees a wake
+  within the first few ticks; the drain still runs at `cold_wakes_per_tick` (5) for the House's
+  first five minutes and `max_wakes_per_tick` (16) after.
+- **What the pause is, on the record:** the ledger shows the two Sept 22 wake holes as a pause
+  lifting at 15:28:11Z (every kind of work resumed in that second) and a Sail allowance closing at
+  11:01Z on Sept 21. Neither is a scheduler fault, and the House now says which markets a stop
+  leaves unattended: a warning once per half hour for each round-the-clock desk (coins, Kalshi)
+  with living members and no wake for 30 minutes while the House is NOT paused
+  (`House._order_path_invariants`); and a warning once a day when an intent is refused for an agent
+  that is not alive (the House's own wind-down walking into a wall each mark pass, as 607 "no seat"
+  and 576 "outside regular hours" refusals did on Sept 21-23 before anyone read the ledger).
 
 The alternatives:
 
