@@ -496,3 +496,21 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 - 22:11Z — **the Deploy C integration branch** `w2/integration`: #203 with its review and follow-ups,
   #211 with its review, main (Deploy B, #212) and the run branch; no conflicts. Money digest
   `c2b0e09c` (full `34adf385`), pinned. **PR #213** opened; CI and the local suites running.
+- 22:21Z — PR #213 (Deploy C) merged as `731db82`. **A slip:** it was merged while its Python 3.14
+  CI job had been cancelled at GitHub's 10-minute job limit (the ltcm suite passed; the league
+  suite was still running at the limit; 3.11 passed in 7m34s; the same tree passed both full suites
+  locally on 3.14: league 100 modules / 2,484 tests, ltcm 1,791). As on Sept 23 morning (Deploy 5),
+  it went out through the watchdog's canary with main's own CI run in the background.
+- **22:24:27Z — Deploy C promoted:** release `20260923T222246Z-cede38138dff`. **22:24:33Z — the grant
+  re-ratified** (6 s after promotion) on money digest `c2b0e09c` (constitution `34adf385`),
+  `max_agents` 40, active. The run's second and last digest change.
+- 22:26Z — verified on the box: health fresh, no book frozen, 107 living, the grant active on
+  `c2b0e09c`. The OpenAI tier read "audits" after a "$0.00 left" alert at 22:25:05Z, written by the
+  old House during its shutdown; at 22:27Z the gateway month had $16.10 left of $408 and the House
+  line $13.69, which is the "earned" tier. The last hour's OpenAI spend was $2.55 (the architect
+  $1.18 and the toolsmith $0.58 came due on their paced 24 h and 48 h clocks; consults $0.46;
+  the engineer $0.33). At the remaining ~$0.8 an hour the House line ends near $10.5 at the
+  deadline, over the $8 floor; the tier's own `code_roles_usd` line ($8) stops everything but audits
+  and winners' consultations if it runs lower. The House's campaign still carries $101.55 of OpenAI
+  holds, some 67-73 hours old (Sept 20-21 calls that never settled): a known defect (Sept 22), left
+  for the owner's review because state changes go through House code, not by hand.

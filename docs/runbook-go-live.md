@@ -32,8 +32,9 @@ to paste a secret into a chat or a file.
   sections 2 and 3. It is a money rule, so it needs your deploy and a ratify.
 - **The grant.** `earned-live-20260921`: Alpaca $500, Kalshi $517.75, a $1,017.75 loss line, no
   expiry. It counts 40 agents, the allocation over the $25 stake line (the smallest bunt). It is
-  pinned to money digest `1d63a56e…` (constitution `52c6c7e5…`), re-ratified at 17:34:36Z on Sept 23
-  (Deploy A of the learn-and-unblock run; before it `44e8d48d…`, 101 agents over a $10 line).
+  pinned to money digest `c2b0e09c…` (constitution `34adf385…`), re-ratified at 22:24:33Z on Sept 23
+  (Deploy C of the learn-and-unblock run; `1d63a56e…` from Deploy A at 17:34:36Z; before them
+  `44e8d48d…`, 101 agents over a $10 line).
   The allocator's envelope at each venue is that capital plus the realized profit there.
 - **After a money-rule change**, from a clean worktree at `origin/main`:
 

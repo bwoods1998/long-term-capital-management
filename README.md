@@ -912,6 +912,19 @@ dynamism revisions followed that evening:
   never promote) and reads the teacher's lessons as priors. Research runs on evidence (a fill,
   settlement, refusal, block, verdict or lesson) rather than the clock, the foundry follows
   forward yield, failed consults are refunded, and repair children are replayed before a seat.
+  The first attempt (21:44Z) was rolled back at 21:49Z by the watchdog: a practice fill in flight
+  between a mark pass's poll and its reconcile read as a mismatch (a pre-existing race). #212 reads a
+  failing reconcile once more when an order is working, and B was redeployed with it
+  (`20260923T220154Z-b460e9de858e`, promoted 22:03:12Z, watch passed).
+- **Deploy C (#213: #203, #211 and their reviews), 22:24Z.** Release `20260923T222246Z-cede38138dff`
+  was promoted at 22:24:27Z and the grant re-ratified 6 s later on money digest `c2b0e09c…` (max_agents
+  40). The Alpaca practice haircut is per asset class from measured fills (crypto 4, equity 2, options
+  24 bps a side; options tightened from 10); a bunt lent less than today's base is lent up to it once,
+  never refilling a loss beyond its net loan; the day's opening equity survives a restart. The order
+  path: option market intents fitted to limits, a crossing post-only order re-priced once, "no such
+  order" believed on the second look (a never-arrived buy keeps its cash reserved), a resumed backlog
+  drained desk by desk, empty Kalshi rejections given the venue's reason, sliced exits held while the
+  market is shut, and two invariants (a dead agent's refusal, a 24/7 desk with no wake for 30 minutes).
 
 Known limits:
 
