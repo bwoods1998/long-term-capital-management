@@ -21,13 +21,13 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | 0.5 | `scripts/floor_watch.py` | done (in PR #163) |
 | 0.6 | Builders B, C, D, E spawned in their own worktrees | done 07:05Z |
 | A | The allocator: evidence as wealth, bands, stakes, death, performance fee | live: PR #163, release `20260923T082402Z-7c69b3eb57f0` |
-| B | The capital board (publisher + site) | ⟨⟩ |
-| C | Exit splitting and stake-scaled positions | ⟨⟩ |
+| B | The capital board (publisher + site) | live: site #4 (`5772ac0c`, 06:54Z), House #162 in release `20260923T090513Z-7009e67356f0` |
+| C | Exit splitting and stake-scaled positions | live: #164 + #168 in release `20260923T090513Z-7009e67356f0` |
 | D | The Alpha Lab (box, batch evaluator, evolution, graduation, royalties, tools) | ⟨⟩ |
 | E | Profit-indexed compute and envelope; a tick that never blocks | ⟨⟩ |
 | F | Open desks (stretch) | ⟨⟩ |
 | Deploy 1 | A (B's publisher follows through the updater; C in Deploy 2), ratified at promotion | done 08:27:54Z, ratified 08:28:13Z |
-| Deploy 2 | D+E | ⟨⟩ |
+| Deploy 2 | B + C (+ #168: positions follow stakes) | done 09:09:29Z (no money rule changed; no ratify) |
 | Watch | ≥ 90 minutes, every 15 minutes through `scripts/floor_watch.py` | ⟨⟩ |
 | Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md, rules, playbook | ⟨⟩ |
 | Cleanup | this build's worktrees and branches removed once merged | ⟨⟩ |
@@ -124,4 +124,24 @@ Execution record for the owner's goal of Sept 23, 2026: execute
       P&L −$2.64.
   - The site kept publishing: the 08:31Z checkpoint had 100 desks (the #156 roster bound is in
     this release).
+- 08:40-09:03Z — builders finished (each with an adversarial review and a fix pass):
+  - D-evo #160: 3 majors fixed (graduates' trial counts, idempotent births, submission starvation).
+  - C #164: 1 major fixed (the gateway prices an Alpaca market order at ask × 1.10, so an entry
+    of $68.19-$75 at the ask was a 403; the book now counts orders as the gateway does).
+  - D-core #167: no major; lab box `sb_742fe765` (8 vCPU, sealed) measured 11.1/s (Kalshi),
+    3.2/s (sports), 1.7/s (crypto) against about 0.02/s for the old path; batch equals the House's
+    recorded results in 13/13.
+  - B #162: 1 major fixed (reasons cut in UTF-16 units, as the site counts them; an emoji had
+    been able to get a checkpoint refused), and the allocator's empty pre-pass board falls back to rung bands.
+  - E #159/#166: 1 major fixed (a research admission held the lifecycle lock across a Sail fork).
+- 09:04Z — #162 (board publisher) merged; #164 (exit slices) merged 08:57Z; #168 (positions follow
+  stakes, Alpaca orders ≤ $68.18 = $75 / 1.10) merged 09:05Z.
+- 09:05:12Z — **Deploy 2**, release `20260923T090513Z-7009e67356f0`, promoted 09:09:29Z. No money
+  rule changed (digest `44e8d48d`), so the grant stayed active. The 09:15Z checkpoint on
+  blakewoods.us carries the board (`enabled: true`, bands per venue, 50 moves) and every desk's
+  band, stake and evidence.
+- 09:10Z — Deploy 3 integration workflow launched (worktree `ltcm-labint`, branch
+  `night/lab-integration`): E3 + E1 + D-core + D-evo onto main, the two conflicts (sandbox.py E3 vs
+  D-core, house.py E3 vs D-evo), D-core's minors, and the lab's birth taking the probe box before
+  the lifecycle lock.
 
