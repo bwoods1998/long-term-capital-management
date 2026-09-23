@@ -1,0 +1,9 @@
+{
+  "family": "equity-trend",
+  "name": "scholes_overnight_entry_retry",
+  "repair": {
+    "key": "strategy_defect:scholes-22:0584c13f77df",
+    "parent": "scholes-22"
+  },
+  "why": "Corrected child of scholes-22: preserve entry eligibility after transient quote or cash failures and after a prior-session basket's morning exit. Retains the parent's Alpaca daily index-ETF specialty, timing, spread filter, and sizing; must qualify independently from rung 0."
+}
