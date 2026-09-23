@@ -148,6 +148,13 @@ def count_field(market: dict[str, Any], name: str) -> "Decimal | None":
     return decimal_or_none(market.get(name))
 
 
+def _int_or_none(value: Any) -> "int | None":
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class KalshiMarketData:
     """Public Kalshi market data. Read-only; no credentials are used or accepted."""
 
@@ -394,6 +401,10 @@ class KalshiMarketData:
             "strike_type": row.get("strike_type"),
             "floor_strike": decimal_or_none(row.get("floor_strike")),
             "cap_strike": decimal_or_none(row.get("cap_strike")),
+            # The exchange shard the market trades on (Sept 23, 2026): an order on a shard with no
+            # collateral fails with `insufficient_shard_balance`, and `league/shards.py` keeps every
+            # shard the desks are offered funded. None where the venue does not say.
+            "exchange_index": _int_or_none(row.get("exchange_index")),
         }
 
     # ------------------------------------------------------------- MarketData
