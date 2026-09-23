@@ -379,3 +379,17 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   deserves the adversarial review this build gave the allocator, not a deploy in the last 40
   minutes. Until it lands, shard 3 runs down as sports bunts trade, and shard 2 ($39.14) is
   similarly unreplenished for the crypto and commodities bunts.
+  - 13:52:33Z — the House's next reconciliation after the move: all four books `ok` (Kalshi
+    expected $370.6533, venue $370.6533; Alpaca $488 = $488).
+- 13:51Z — **the owner asked** that stocks and the Alpaca accounts' level-3 options be fully used
+  by the agents now that the market is open.
+  - **Account reads.** Both accounts are options level 3 (approved and trading). The real account
+    is a cash account (multiplier 1, no shorting) with $488 of options buying power.
+  - **Activity from 13:30Z to 13:52Z:**
+    - Practice: 70 equity orders and 16 equity fills (5 agents); 8 option orders and 4 option
+      fills (4 agents).
+    - Real Alpaca: only haghani-37's crypto, 3 orders, one refused by the book's 50%-of-equity
+      rule.
+    - No Alpaca stock or option agent holds real money.
+  - **Response.** A read-only investigation workflow was launched (stocks, options and level 3,
+    and the Alpaca ladder, each re-checked by a skeptic, then a fix plan). Its findings follow.
