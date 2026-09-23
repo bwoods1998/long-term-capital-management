@@ -28,11 +28,12 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | F | Open desks (stretch) | live: #171 (`kalshi-open`, `alpaca-open`, 8 seats each) in release `20260923T104142Z-5d86b468fbde` |
 | Deploy 1 | A (B's publisher follows through the updater; C in Deploy 2), ratified at promotion | done 08:27:54Z, ratified 08:28:13Z |
 | Deploy 2 | B + C (+ #168: positions follow stakes) | done 09:09:29Z (no money rule changed; no ratify) |
-| Watch | ≥ 90 minutes, every 15 minutes through `scripts/floor_watch.py` | ⟨⟩ |
-| Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md, rules, playbook | ⟨⟩ |
-| Cleanup | this build's worktrees and branches removed once merged | ⟨⟩ |
-| Memory | project memory + MEMORY.md line | ⟨⟩ |
-| Report | morning report at the deadline | ⟨⟩ |
+| Deploys 3-6 | E3 + E1 + D + F; #173/#174; #176; #178 | done 10:43Z, 11:17Z, 12:07Z, 12:34Z (no money rule changed) |
+| Watch | ≥ 90 minutes, every 15 minutes through `scripts/floor_watch.py` | done: 12:08Z to the deadline, plus a floor-events monitor. Found and fixed: the auditor's context (#176), lab tape order (#178), the watch's labels (#179), Kalshi shard 3 funding |
+| Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md, rules, playbook | done: #175 and #179; the rules and playbook in #163 |
+| Cleanup | this build's worktrees and branches removed once merged | done at the deadline (see the report) |
+| Memory | project memory + MEMORY.md line | done: `ltcm-capital-ladder-2026-09-23.md` |
+| Report | morning report at the deadline | done: below |
 
 ## Baseline (T0, 06:30Z)
 
@@ -325,3 +326,245 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   $1,016.00 (Kalshi $516.10, Alpaca $499.90) against the $1,017.75 baseline, with `read_ok` true.
   Profit is $0, so the bonus is $0 ("no profit above the baseline"), and the cap is the funded
   $408 with $351.54 spent this month.
+- 13:10:18Z — a third lab candidate passed the House replay, for `kalshi-sports`. It is waiting for
+  a seat: that desk is full.
+- 13:11Z — **the House's teacher disagreed with the lab.** Merton (teacher) merged #181, a playbook
+  lesson: pause parameter-only forks of the ETH prior-window fade until its forward losses are
+  explained. The evidence behind it:
+  - huang-h6d3302 passed replay, then logged −0.0603 total forward log growth;
+  - huang-h6d3302-2 has −0.0498 over 9 blocks;
+  - huang-h609d6f has −0.0589 over 11 blocks.
+
+  The lab's first graduate, huang-l23cdb7, is such a fork: a parameter child from that lineage's
+  archive cell. The lab's gate (the House replay on its own line, plus the sealed holdout) does
+  not consult a lineage's forward record. The plan leaves that to practice, where the
+  allocator's evidence takes over and death comes at W_paper < 0.8 after 10 trades. Nothing was
+  changed: the graduate trades practice money only, and whether its fork holds up is exactly
+  what practice will show. It is recorded as a design question for the lab (see the report).
+- 13:15:37Z — PR #179 (this record, the `floor_watch` fixes, README Deploys 4-6, operations)
+  merged as `8e5c22a`, after CI passed on 3.11 and 3.14. Main also carries Merton's #180
+  (a Haghani-40 child strategy) and #181, which the in-box updater will ship as usual.
+- 13:30:05Z — **a real-money blocker at Kalshi: exchange shards.** The new sports bunt
+  meriwether-h2d625d placed its first real order: buy 5 NO on KXMLBTOTAL-26SEP231840STLPIT-8
+  at $0.54 ($2.70). Kalshi rejected it with HTTP 404 `insufficient_shard_balance` ("Exchange user
+  not found ... Exchange Sharding"), as it had its 12:58:27Z order.
+  - **Cause.** Kalshi now runs markets on several exchange shards. Crypto and commodities are
+    on shard 2, and since August 24, 2026 new baseball and tennis events are on shard 3 (basketball
+    since September 10). An order fails unless its shard holds collateral.
+  - **Cash per shard,** read through the gateway at 13:39Z (`GET /portfolio/balance`
+    `balance_breakdown`, read-only): shard 0 $331.51, shard 1 $0, shard 2 $39.14, shard 3 $0.
+  - **Events per shard:** KXMLBTOTAL, KXMLBGAME, KXWNBAGAME and KXATPMATCH open events are
+    all on shard 3; KXNFLGAME is on shard 0. Every accepted real Kalshi order in the ledger is on
+    a funded shard: weather, WTI, gold and the 15-minute crypto series.
+  - **Why the League never funds shard 3.** The first run's service (`ltcm/service.py`
+    `_fund_kalshi_shards`) topped up shards 0 and 2 hourly, and the gateway allows exactly
+    this one funds move (`POST /portfolio/intra_exchange_instance_transfer`, money between
+    shards of the owner's own account). The League has no shard code at all (nothing under
+    `league/` mentions a shard). Shard 2's $39.14 is what the first run left there, and shard 3
+    was never in the first run's list (`ltcm/config.json` `kalshi_shards.shards`).
+- 13:48:57Z — the updater's release `main-1615d78c07bd` (main `23ccab4`: #179, plus Merton's #180,
+  #181 and #182, new strategy children and a lesson) passed its canary and its 10-minute watch.
+  The in-box updater shipped it, as it ships every unprotected main commit.
+- **13:50:00Z — shard 3 funded, one time.** I moved $30 of collateral from shard 0 to shard 3
+  inside the Kalshi account, through the gateway's one allowed funds move
+  (`KalshiBroker.transfer_between_shards`, transfer `d2d4de3f-502b-42e2-ad11-f2daea67d218`). It
+  ran after the release's watch had passed, so a reconcile blip could not roll a release back.
+  - Before: shard 0 $331.51, shard 2 $39.14, shard 3 $0.
+  - After: shard 0 $301.51, shard 2 $39.14, shard 3 $30.00.
+  - The account total is unchanged ($370.6533) and the envelope is unchanged. It is not a
+    deposit and not a transfer between venues, the two moves the plan forbids.
+
+  $30 covers the one sports bunt ($10 stake, $5 position cap). **The durable fix is left
+  unbuilt:** the House should keep collateral on every shard it trades, as the first run's
+  service did (shards 0, 2 and 3, hourly, floor/top-up/keep). That is money-path code, and it
+  deserves the adversarial review this build gave the allocator, not a deploy in the last 40
+  minutes. Until it lands, shard 3 runs down as sports bunts trade, and shard 2 ($39.14) is
+  similarly unreplenished for the crypto and commodities bunts.
+  - 13:52:33Z — the House's next reconciliation after the move: all four books `ok` (Kalshi
+    expected $370.6533, venue $370.6533; Alpaca $488 = $488).
+- 13:51Z — **the owner asked** that stocks and the Alpaca accounts' level-3 options be fully used
+  by the agents now that the market is open.
+  - **Account reads.** Both accounts are options level 3 (approved and trading). The real account
+    is a cash account (multiplier 1, no shorting) with $488 of options buying power.
+  - **Activity from 13:30Z to 13:52Z:**
+    - Practice: 70 equity orders and 16 equity fills (5 agents); 8 option orders and 4 option
+      fills (4 agents).
+    - Real Alpaca: only haghani-37's crypto, 3 orders, one refused by the book's 50%-of-equity
+      rule.
+    - No Alpaca stock or option agent holds real money.
+  - **Response.** A read-only investigation workflow was launched (stocks, options and level 3,
+    and the Alpaca ladder, each re-checked by a skeptic, then a fix plan). Its findings follow.
+- 14:01:41Z — **the shard fix, confirmed by a fill.** meriwether-h2d625d bought 5 KXMLBTOTAL at
+  $0.54 on real money: the first real sports fill. The same order had been refused twice before
+  shard 3 held collateral.
+- 14:03:24Z — huang-h51fdd3 (same family as the first bunt, huang-h51fdd3-2) died on evidence: down 19.1%
+  on practice after 6 active blocks.
+
+## Morning report (the deadline, 14:30:58Z)
+
+### 1. What is live
+- **Release** `main-1615d78c07bd` (main `23ccab4`: Deploy 6's code plus #179-#182, shipped by the in-box updater at 13:38:57Z, watch passed 13:48:57Z), tick 56-84 s. Nothing stopped, no book frozen.
+- **Grant** `earned-live-20260921` is active on money digest `44e8d48d` (constitution `9fa83727`),
+  ratified 19 s after Deploy 1. No later deploy changed a money rule.
+- **Workstreams**, all on the running release:
+
+| # | Workstream | State on the running release |
+|---|---|---|
+| A | The allocator (capital is the ladder) | live since 08:27:54Z (#163): 7 bunts (Kalshi 6, $171.81; Alpaca 1, $25), 88 on practice, 0 swings |
+| B | The capital board | live: blakewoods.us/capital, the checkpoint of 14:02:24Z carries the board (104 desks) with bands, stakes, evidence and the moves trail |
+| C | Exit slicing, positions follow stakes | live (#164, #168). No slice has run on a venue: every position is under the order caps |
+| D | The Alpha Lab | live (#170, #173, #176, #178). First graduate born 12:59:39Z (huang-l23cdb7) |
+| E | A tick that never blocks, profit-indexed compute | live: E3 defers births when the probe box is busy; E1 gateway `3eef1b8a` reads equity $1,015.12 (read 13:57Z) against the $1,017.75 baseline (bonus $0) |
+| F | Open desks (stretch) | live (#171). 0 members: no birth has spanned desks |
+
+### 2. The ladder
+- **Band moves since T0.** Each was earned on evidence, and none was forced:
+
+| At (Z) | Agent | Move | Why |
+|---|---|---|---|
+| 08:06:22 | haghani-37 (Alpaca) | practice → micro rung (old screen) | 3 active hour blocks, 3 closed trades; made a $25 bunt at the first allocator pass (08:30:03Z) |
+| 12:10:19 | huang-h51fdd3-2 (Kalshi) | practice → bunt $10 | E 1.0257 on 4 settlements, after the corrected re-audit approved |
+| 12:24:20 | haghani-55 (Alpaca) | replay → practice | deep replay and the sealed holdout |
+| 12:50:25 | meriwether-h2d625d (Kalshi) | practice → bunt $10 | E 1.0100 on 7 closed trades (no audit needed) |
+| 13:35:56 | huang-h427345 (Kalshi) | practice → bunt $10 | E 1.0162 on 7 closed trades |
+
+- **Births and deaths since T0:** 5 births (3 foundry cards, 1 House, 1 lab graduate) and
+  6 deaths (5 displaced; huang-h51fdd3 died on evidence at 14:03Z, down 19.1% on practice). There was no demotion and no swing: no
+  agent has the 8 real trades a swing needs.
+- **Real stakes now:**
+  - **Kalshi** (6):
+    - mullins-2 $56.11 (E 1.114, 4 real trades, +$1.29 realized)
+    - mullins-6 $56.70 (E 1.021)
+    - hawkins-19 $27.48 (E 0.990)
+    - huang-h51fdd3-2 $11.52 (E 0.870, frozen for the day by the daily-loss rule)
+    - meriwether-h2d625d $10 (E 1.011)
+    - huang-h427345 $10 (E 0.957)
+  - **Alpaca** (1): haghani-37 $25 (E 0.999, crypto)
+  - No Alpaca stock or option agent holds real money (see the owner's request below).
+- **The first Alpaca real trade:** haghani-37 bought 0.1923 LTC/USD at $62.39 ($12.00) at 11:26:20Z,
+  as a $25 bunt. The position is still open.
+- **Top practice evidence below the bunt line:** at 14:05Z:
+  - **Kalshi:** the lab graduate huang-l23cdb7 is at E 1.011, over the line, but it has 1 closed trade of the 5 it needs. Next are mullins-13 at 1.006 (4 trades), meriwether-36 at 1.006 (6 trades), and the hawkins-22/23/24 family at 1.005 (0 trades).
+  - **Alpaca:** the best practice agent is haghani-39 at E 1.0006 on 2 trades. No Alpaca stock or option agent is near the line.
+
+### 3. Real P&L per venue, and the throttle
+- **Since T0 (fills made during the build):**
+  - Kalshi: 4 fills, $22.00 notional; realized −$1.52 (huang-h51fdd3-2's DOGE 15-minute contract). Includes the first sports fill, 5 KXMLBTOTAL at $0.54 at 14:01:41Z, after the shard fix.
+  - Alpaca: 1 fill, $12.00 (haghani-37, LTC/USD), still open; the account holds $488 cash and $500.05 equity.
+- **Floor real P&L since the grant:** −$5.84.
+- **The throttle** triggers at −30% of the $1,017.75 envelope (−$305). It was never active. Across
+  every 15-minute watch the floor's real P&L stayed between −$2.63 and −$5.07.
+- **Performance fees:** $0, since no agent has realized a profit on real money yet.
+
+### 4. The lab
+- **Throughput:** the first evaluation was at 10:51:07Z.
+  - The first hour evaluated 87 candidates, against the plan's 1,000. It was tape-bound, not
+    evaluator-bound: 109 batches took 577 s on the lab box and $0.03 of Sail. #173, #176 and
+    #178 fixed the batching.
+  - From 12:44Z it ran at about 200 candidates per 10 minutes, in batches of 32.
+- **Totals:** 905 evaluated by 14:03Z (139 seeds, 753 parameter children, 13 agent submissions), 0 errors; 807 eligible (89%) and 661 through the replay gate (73%). 374 were evaluated in hour 13. 155 batches used 809 s of lab-box time and $0.045 of Sail. The archive holds 26 cells across 9 desks.
+- **Graduation:**   - **Born:** 1 graduate, huang-l23cdb7 at 12:59:39Z.
+  - **Passed the House replay, waiting for a seat** (their desks or the league are full of agents inside their grace): 2 at kalshi-attention, 2 at kalshi-sports, 1 more at kalshi-crypto-15m.
+  - **Failed the House replay:** 2 kalshi-sports and 1 kalshi-weather, on out-of-sample growth.
+  - **Refused a holdout run by rationing:** 4 candidates from 3 lineages (alpaca-megacaps and alpaca-index-etfs).
+  - **Now trading on practice:** the born graduate is at E 1.011 after 1 trade.
+- **What the graduate trades:** a KXETH15M prior-window fade on 5-minute ETH bars, on the
+  kalshi-crypto-15m desk, with a $200 practice stake.
+
+### 5. Costs (since T0)
+- **OpenAI:**
+  - Gateway month: $308.46 → $358.74, so **$50.28** spent. The cap is the funded $408.
+  - House line: $65.88 plus the $28 top-up, now $46.44, about **$47** at the House's ceiling prices.
+- **Sail:** the balance went $102.26 → $98.35 (**$3.91**). The House line went $100.66 → $96.04. The burn estimate is $31.45 a day, a 2.8-day runway.
+- **Jev:** $16.14 → $16.14 (**$0**) of its $42 cap.
+- **Cost per dollar of real P&L:** undefined. Real P&L since the grant is negative (−$5.84),
+  so there is no profit to divide by.
+
+### 6. Defects
+- **Found and fixed (all verified on the running release):**
+  - the site refusing checkpoints (#156, site #4);
+  - 14 allocator defects from the adversarial review (#163);
+  - the gateway's Alpaca ask markup (#164);
+  - the lab spending a living line's holdout (#170);
+  - `/v1/health` reading both venues inline (#170, gateway `3eef1b8a`);
+  - repeated standings making ticks 191 s (#173);
+  - the Kalshi maker label (#174);
+  - the auditor judging bunts against the legacy tuition (#176);
+  - lab batches of one and unbuilt children's tapes (#173, #176, #178);
+  - the watch script's real-money and gateway lines (#179).
+- **Found and worked around:**
+  - **Kalshi exchange shards.** MLB, WNBA and tennis markets sit on shard 3, and shard 3 held $0,
+    so the sports bunt's real orders were refused (`insufficient_shard_balance`, 12:58Z and
+    13:30Z). At 13:50Z I moved $30 from shard 0 to shard 3 inside the account (transfer
+    `d2d4de3f`). The durable fix is still to build: the House should keep collateral on shards 0,
+    2 and 3, as the first run's service did for 0 and 2. It needs a reviewed PR.
+- **Still open:**
+  - **The daily-loss rule freezes small bunts.** The book's 10% per-desk rule holds a $10 bunt
+    out of new entries for the day after one small loss (huang-h51fdd3-2: −$1.52). This is left
+    for the owner.
+  - **Pre-audit red flags are noisy.** "barren" and "refusals" force an audit before a bunt.
+  - **The lab's first hour was 87 candidates, not 1,000.** Tapes are built on the 1-vCPU House
+    box, 4 a step, and every restart empties the tape cache. Building tapes on the 8-vCPU lab box
+    is the likely next step.
+  - **Holdout rationing is binding.** 3 lab lineages (agent:mcentee-31, agent:scholes-21,
+    agent:mcentee-30) have spent their 3 sealed-holdout evaluations, so their elites cannot
+    graduate. This is the plan's D4 rule working as written, not a bug. It does mean the
+    Alpaca desks' best lab programs are held back.
+  - **The open desks are empty.** The lab seeds per desk, so it does not produce spanning programs.
+  - **`kalshi-open` maker fees.** The desk lists no `maker_fee_series`, so its replay and desk
+    brief treat maker fills as free. In fact 163 of the 195 series in its universe charge makers,
+    so replay understates cost on that desk. It has no members yet.
+  - **GitHub's 3.11 runner hung twice on #176.** Neither hang reproduced; watch for it.
+
+### 7. Rollback, and the owner's decisions
+- **Rollback:**
+  - **The House, to the previous release:** on the box, run
+    `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`.
+  - **The allocator only:** set `allocator.enabled` to `False` in `league/constitution.py`, run
+    an owner deploy (`python3 scripts/floor_box.py deploy`), then re-ratify with
+    `python3 scripts/live_trading.py --ratify earned-live-20260921`. The old screen, micro bound and Kelly sizing
+    then decide again.
+  - **The gateway:** `npx wrangler rollback` in `gateway/`. The version before E1 is `c6c507ad`.
+  - **Stop all real trading:** `python3 scripts/gateway_admin.py kill`.
+- **Decisions pending:**
+  1. **Sail auto-recharge.** The balance is $98.35, about 2.8 days at $31.45 a day.
+  2. **The daily-loss rule for bunts:** keep 10% of the stake, or judge a bunt on the allocator's
+     own 35% stay drawdown.
+  3. **Compute indexing:** E1's ceiling is the funded $408 (`FRONTIER_MONTH_MAX_USD`). Raise it
+     only when more is funded. Until then profit is measured but buys no compute.
+  4. **Alpaca permissions:** none were needed tonight. The account was ACTIVE with crypto ACTIVE
+     at T0.
+  5. **The envelope:** grant capital is Kalshi $517.75 and Alpaca $500. No deposit was made
+     and nothing moved between venues. The only funds move was $30 between Kalshi shards of the
+     same account.
+  6. **Kalshi shard funding:** approve the durable fix (the House funds shards 0, 2 and 3 hourly),
+     or keep topping up shard 3 by hand as sports bunts appear.
+- **Worktrees:**
+  - Removed: all of this build's worktrees (`ltcm-ladder`, `ltcm-record`, the builders' and the
+    integration's).
+  - Kept: `ltcm-deploy`, which is the deploy tree.
+  - Left untouched, from earlier builds, with unmerged branches: `ltcm-architect-repair`
+    (`codex/architect-registry-repair`), `ltcm-night` (`night/record`) and `ltcm-repairs`
+    (`night/repairs`).
+  - Left untouched, merged or detached: the other 31 older `ltcm-*` worktrees.
+
+### 8. The owner's two requests during the watch (open at the deadline)
+- **13:51Z: use stocks and the level-3 options the Alpaca accounts are approved for.**
+  - **Measured.** Both accounts are options level 3. Since the open, practice agents trade
+    stocks (70 orders, 16 fills) and options (8 orders, 4 fills). No stock or option agent holds
+    real money: the best Alpaca practice agent is at E 1.0006.
+  - **Why options are shut out.** At a $25 bunt the position cap is $12.50, and one contract
+    costs premium × 100, so options are all but shut out of real money at bunt size.
+  - **In progress.** A read-only investigation (stocks, options and level 3, the Alpaca ladder,
+    each re-checked by a skeptic) is writing a ranked fix plan. The plan separates fixes to what
+    agents can already trade from new level-3 multi-leg support. Nothing will force a trade or
+    lower a promotion line.
+- **14:02Z: the capital page's ladder.** Level 1, 2 and 3 with a word or two each ("Practice",
+  "Live Trading", "Increased Capital"), one dot per agent instead of bars, and made as intuitive
+  and interesting as it can be.
+  - **In progress.** Three concepts judged, then a build in `~/Work/personal-site-levels` with
+    tests and headless screenshots at 390 px and 1,280 px, visual and code review, then the
+    site deploy.
+  - **What does not change.** Only the site changes. The House's data already carries the band,
+    stake, evidence and last move.
+
