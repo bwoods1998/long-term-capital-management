@@ -839,7 +839,18 @@ class Lab:
         # submission, then a seed, then children, oldest first), and the batch is filled with whatever
         # else waits on it. Largest group first starved a lone submission or seed for as long as
         # breeding kept two children of one elite queued, which the step does whenever the queue runs low.
-        tape_id = next(iter(groups))
+        #
+        # But seeds each carry their own NEEDS, so their groups are one row, and with a queue of seeds
+        # ahead every batch was a single candidate (Sept 23, 2026 on the lab box: 60 evaluated in an
+        # hour, 543 queued, children of the archive's elites waiting 32 to a tape). So an agent's
+        # submission is always served first, and otherwise batches alternate: queue order, then the
+        # largest group ready now. Seeds still get every other batch; children run 32 at a time.
+        self._batch_turn = getattr(self, "_batch_turn", 0) + 1
+        first = next(iter(groups))
+        if int(groups[first][0]["priority"]) == 0 or self._batch_turn % 2 == 1:
+            tape_id = first
+        else:
+            tape_id = max(groups, key=lambda key: len(groups[key]))
         chosen = groups[tape_id][:size]
         tape = tapes[tape_id]
         row1 = CONSTITUTION["rungs"]["1"]
