@@ -293,5 +293,6 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   - **Totals:** 423 evaluated (123 seeds, 292 parameter children, 8 agent submissions), 0 errors.
     335 were eligible (79%) and 279 cleared the replay gate (66%). The archive holds 22 cells
     across 9 desks.
-  - **Graduation, per stage:** 3 elites went to the sealed holdout. 2 were holdout-rationed and
-    1 passed the House replay, then `waiting_seat`.
+  - **Graduation, per stage:** 3 elites were put forward. 2 were refused a sealed-holdout run,
+    because their lineages had spent their ration. 1 passed the House's replay, and is now
+    `waiting_seat`.
