@@ -29,7 +29,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, the cap in force and its profit-indexed parts, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. |
+| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, the cap in force and its profit-indexed parts from the stored equity reading, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. It never reads a venue itself (Sept 23, 2026). |
 | `POST` | `/v1/kill` | Engages the kill switch. The runtime token may: stopping is never gated. |
 | `POST` | `/v1/unkill` | Releases it. **Owner token only**; the runtime token is a `401` here. |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
@@ -117,11 +117,13 @@ request body is limited to 64 KiB. This is an experiment interface; the trading 
 loops do not act on its answers. The shared lab supplies fallible classifications to research
 context and evaluates them separately against future observations.
 
-The external gate has a **$20 lifetime allowance and 500,000 accepted calls**. It was to expire at
+The external gate has a **$42 lifetime allowance** (`TYPESAFE_PILOT_USD`: $20 until Sept 23, 2026,
+when it was aligned to the metered $16.14 plus the owner's funded $26) **and 500,000 accepted calls**. It was to expire at
 2026-09-21 11:01:16.977 UTC (`TYPESAFE_PILOT_END`); `TYPESAFE_PERSISTENT` is `true`, so it no longer
 expires and only the allowance and the call count close it ($16.12 and 137,961 calls used at
 23:50Z Sept 22, 2026). These counters never reset by day, month or deployment. Retained
-$20 `foundation-review` campaign reservations back the allowance. This
+$20 `foundation-review` campaign reservations back the first $20 of the allowance; the rest is the
+owner's funded Jev balance. This
 is a cross-provider pilot earmark from that existing research allocation, not an OpenAI bill
 or an addition to the phase budget. Keep that reservation until the route has expired or is
 closed and its provider bill is reconciled. `/v1/health.typesafe` reports Jev usage separately.
@@ -169,7 +171,8 @@ The cap is also held to `FRONTIER_MONTH_MAX_USD` when that var is set.
   - Alpaca: `GET /v2/account`, `equity`.
 
   The House cannot report its own profit to buy compute. Both reads round down, and a missing Kalshi position value counts as nothing.
-- **Caching.** A reading is kept ten minutes. It is taken again by the next `/v1/health` or `/v1/frontier/responses` after that.
+- **Caching.** A reading is kept ten minutes. It is taken again by the next `/v1/frontier/responses` after that, which reads Kalshi and then Alpaca with an 8-second timeout each.
+- **Health never reads the venues** (Sept 23, 2026). `/v1/health` reports the stored reading and never refreshes it. The House reads its kill switch there on the order path and treats a slow answer as the switch engaged, and until this change a health request more than ten minutes after the last reading read both venues inline. So the cap and parts it reports are as old as the last frontier call's reading, and once that reading is twenty minutes old it reports exactly `FRONTIER_MONTH_USD` until the next frontier call reads the accounts again. The House reads its mirror of the raise from `/v1/health`, so its line follows the same reading.
 - **Dials:**
   - `COMPUTE_PROFIT_SHARE`: 0.3.
   - `EQUITY_BASELINE_USD`: the live grant's capital, $517.75 at Kalshi plus $500 at Alpaca, which is $1017.75.
@@ -182,7 +185,7 @@ The cap is also held to `FRONTIER_MONTH_MAX_USD` when that var is set.
 - **Health.** `/v1/health` `frontier` reports:
   - the cap in force as `cap_usd`;
   - the configured month as `base_cap_usd`;
-  - the parts as `profit_index`: `share`, `baseline_usd`, `max_cap_usd`, `equity_usd`, `kalshi_usd`, `alpaca_usd`, `profit_usd`, `bonus_usd`, `read_at`, `read_ok` and `reason`.
+  - the parts as `profit_index`: `share`, `baseline_usd`, `max_cap_usd`, `equity_usd`, `kalshi_usd`, `alpaca_usd`, `profit_usd`, `earned_usd` (what the share buys), `bonus_usd` (what the cap in force carries of it), `read_at`, `read_ok` and `reason`.
 - **The House's line.** The House's own OpenAI line (the burst in `league/campaigns.py`) is raised by exactly `cap_usd - base_cap_usd`, never more, and that raise lapses if the gateway has not been read for thirty minutes (`CampaignBudget.mirror_gateway_bonus`).
 - **Setting the baseline.** Set `EQUITY_BASELINE_USD` to the accounts' equity at the grant, so that only profit raises the cap. Check `profit_index.equity_usd` against it after deploying.
 - **The cap stays inside funded money.** The raise could otherwise pass the OpenAI account's prepaid credit. The owner's rule is that no cap exceeds funded money, so `FRONTIER_MONTH_MAX_USD` is set to the month ($408) and the raise buys nothing until the owner funds more.

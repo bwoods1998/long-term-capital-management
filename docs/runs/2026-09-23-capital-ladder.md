@@ -211,4 +211,19 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 - No band moves happened between Deploy 1 and 11:50Z. The two paper agents over the bunt line
   (huang-h6d3302 E 1.037, huang-h51fdd3-2 E 1.026) were both held by those vetoes; every other paper
   agent was below E 1.01.
+- 12:05:52Z — **Deploy 5** (#176: lab batches alternate; audits under the allocator see its envelope),
+  release `20260923T120553Z-1fb264401995`, promoted at 12:07:20Z. No money rule changed (`44e8d48d`).
+  - The 3.11 CI job hung twice at the same point in the league suite on GitHub's runner, and was
+    cancelled at the 10-minute job limit. Neither hang reproduced: this branch's `test_lab`,
+    `test_auditor`, `test_episodes`, `test_economy` and `test_evaluator`, and then the first 300
+    league tests in one process, all passed under Python 3.11 on the House box. The 3.14 job
+    passed, and main and the docs PR passed on 3.11. It went out through the watchdog's canary
+    with a CI rerun in the background.
+- 12:05Z — docs PR #175 merged (README, operations, runbook, league README, CONTRACT, gateway README;
+  a verifier checked every added claim against the code and corrected four).
+
+## The watch (from 12:08Z)
+
+Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop has run since
+09:17Z). The entries below are what changed, what broke and what was fixed.
 

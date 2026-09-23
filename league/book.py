@@ -1465,6 +1465,14 @@ class Book:
             venue_fees = money(order.fees or 0)
             fee_delta = max(venue_fees - working.fees_seen, ZERO)
             liquidity = working.liquidity
+            if self.fees.family == "kalshi" and working.order_type == "limit" and liquidity == "taker" and fee_delta == 0:
+                # Kalshi decides maker or taker at the moment of the fill and reports the fee (the
+                # shadow book does the same): a limit order that rested and was then filled paid the
+                # maker's fee, nothing on most series. Booked as "taker" it read as a taker execution
+                # with no fee, and the frontier auditor vetoed the best paper agent on the floor for
+                # "unexplained zero-fee taker executions" (huang-h6d3302, Sept 23, 2026 09:32Z). The
+                # money is the venue's number either way; only the label was wrong.
+                liquidity = "maker"
             step = step_of(working.instrument, working.order_type)
             rooms = [s.quantity - s.filled for s in working.shares]
             parts = allocate(delta, rooms, step)

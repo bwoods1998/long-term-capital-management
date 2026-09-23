@@ -54,6 +54,12 @@ Inspect book_accounting and recent_order_outcomes: a reconciled aggregate can co
 offsetting an agent's phantom holding. Submitted exit intentions do not establish executed exits, and venue
 rejections can explain an apparent strategy failure. Unresolved attribution invalidates affected performance.
 paper_fills includes both executions and settlements; use each row's kind, cost, payout, pnl and result when present.
+Since Sept 23, 2026 capital is the ladder: when promotion_context.allocation_context names the allocator,
+the experiment is the allocator's BUNT (a small real stake: allocation_context.stake_usd, with its
+max_position_usd and max_order_usd) or an agent's FIRST SWING (a stake sized by its evidence), inside the owner's
+live grant for that venue (allocation_context.venue_capital_usd, venue_headroom_usd, fits). Judge capacity against
+that envelope, not against the legacy $50 / four-agent tuition or the $60 micro_real_limits, which apply only when
+no allocation_context is given. A real drawdown, hysteresis and a cooldown send a losing bunt back to paper.
 Answer with ONE JSON object and nothing else:
 {"approve": true|false, "confidence": 0.0-1.0, "summary": "two or three plain sentences",
  "findings": [{"severity": "blocker"|"concern"|"note", "issue": "...", "evidence": "what in the packet shows it"}]}
@@ -115,7 +121,7 @@ class Auditor:
         # trusted policy/packet definition can: the earlier veto may have relied on a fixed defect.
         return hashlib.sha256(canonical({'system': SYSTEM, 'execution_policy': EXECUTION_POLICY,
             'ladder': CONSTITUTION['ladder'], 'rungs': CONSTITUTION['rungs'],
-            'tuition': CONSTITUTION['tuition']}).encode()).hexdigest()
+            'tuition': CONSTITUTION['tuition'], 'allocator': CONSTITUTION.get('allocator')}).encode()).hexdigest()
 
     # ----------------------------------------------------------------- packet
     def packet(self, agent: Agent, verdict: Verdict) -> dict[str, Any]:
@@ -153,7 +159,10 @@ class Auditor:
             "promotion_context": {"from_rung": verdict.rung, "to_rung": verdict.rung + 1,
                                   "paper_gate": CONSTITUTION["ladder"]["paper"],
                                   "completed_exposure_gate": CONSTITUTION['ladder'].get('completed_exposures'),
-                                  "purpose": "bounded micro-real experiment",
+                                  "purpose": ("the allocator's " + str((verdict.numbers.get('allocation_context') or {}).get('band_to') or 'bunt')
+                                              + ": a small real stake sized inside the owner's per-venue grant"
+                                              if (verdict.numbers.get('allocation_context') or {}).get('allocator')
+                                              else "bounded micro-real experiment"),
                                   "tuition": (verdict.numbers.get('allocation_context') or {}).get('tuition', CONSTITUTION["tuition"]),
                                   "allocation_context": verdict.numbers.get('allocation_context')},
             "thresholds": CONSTITUTION["ladder"],
@@ -167,7 +176,8 @@ class Auditor:
             "book_accounting": self.book_evidence(agent.id, book) if self.book_evidence else None,
             "recent_order_outcomes": order_outcomes(self.ledger, agent.id, book),
             "already_on_real_money": self.live_agents(),
-            "micro_real_limits": CONSTITUTION["rungs"]["2"],
+            "micro_real_limits": ({k: (verdict.numbers.get('allocation_context') or {}).get(k) for k in ("stake_usd", "max_position_usd", "max_order_usd")}
+                                  if (verdict.numbers.get('allocation_context') or {}).get('allocator') else CONSTITUTION["rungs"]["2"]),
             "execution_policy": dict(EXECUTION_POLICY),
             "audit_policy_digest": self.policy_digest,
         }

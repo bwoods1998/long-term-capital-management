@@ -201,7 +201,7 @@
     "budget_usd_per_hour": "1.50",
     "box_usd_per_hour": "0.20",
     "batch_size": 32,
-    "param_children": 16,
+    "param_children": 48,
     "llm_children": 6,
     "leap_every": 10,
     "leap_candidates": 4,

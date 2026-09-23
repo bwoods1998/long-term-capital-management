@@ -608,7 +608,10 @@ class Lab:
             while time.monotonic() - started < float(settings["step_seconds"]):
                 if self.open():
                     break
-                if self.queued() < int(settings["batch_size"]):
+                # Breed when fewer than a batch wait on tapes already built: seeds each need their own
+                # tape (a few a step), so counting every queued row starved breeding behind them
+                # (Sept 23, 2026: 191 seeds queued, 4 elites with cached tapes, 2-6 candidates a batch).
+                if self.ready_queued() < int(settings["batch_size"]):
                     out["calls"] += self.breed()
                 done = self.evaluate_batch()
                 if not done:
@@ -632,6 +635,19 @@ class Lab:
     # ----------------------------------------------------------------- queue
     def queued(self) -> int:
         return int(self._q("SELECT COUNT(*) AS n FROM candidates WHERE status='queued'")[0]["n"])
+
+    def ready_queued(self) -> int:
+        """Queued candidates whose search tape is built and fresh: what the next batches can run now."""
+        fresh = {key for key, hit in self._tapes.items() if self._now() - hit[0] < 6 * 3600}
+        if not fresh:
+            return 0
+        count = 0
+        for row in self._q("SELECT needs FROM candidates WHERE status='queued'"):
+            try:
+                count += json.dumps(json.loads(row["needs"]), sort_keys=True) in fresh
+            except (TypeError, ValueError):
+                continue
+        return count
 
     def admit(self, code: str, *, niche: Any, origin: str, author: str, lineage: str, parents: Sequence[str] = (),
               idea: str = "", priority: int | None = None) -> str:
@@ -823,7 +839,18 @@ class Lab:
         # submission, then a seed, then children, oldest first), and the batch is filled with whatever
         # else waits on it. Largest group first starved a lone submission or seed for as long as
         # breeding kept two children of one elite queued, which the step does whenever the queue runs low.
-        tape_id = next(iter(groups))
+        #
+        # But seeds each carry their own NEEDS, so their groups are one row, and with a queue of seeds
+        # ahead every batch was a single candidate (Sept 23, 2026 on the lab box: 60 evaluated in an
+        # hour, 543 queued, children of the archive's elites waiting 32 to a tape). So an agent's
+        # submission is always served first, and otherwise batches alternate: queue order, then the
+        # largest group ready now. Seeds still get every other batch; children run 32 at a time.
+        self._batch_turn = getattr(self, "_batch_turn", 0) + 1
+        first = next(iter(groups))
+        if int(groups[first][0]["priority"]) == 0 or self._batch_turn % 2 == 1:
+            tape_id = first
+        else:
+            tape_id = max(groups, key=lambda key: len(groups[key]))
         chosen = groups[tape_id][:size]
         tape = tapes[tape_id]
         row1 = CONSTITUTION["rungs"]["1"]

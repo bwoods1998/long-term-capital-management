@@ -736,6 +736,49 @@ class Researchers(LabCase):
         self.lab.evaluate_batch()  # and then the children
         self.assertEqual(self.lab.queued(), 0)
 
+    def test_breeding_is_not_starved_by_seeds_waiting_for_their_tapes(self):
+        """Sept 23, production: 191 seeds queued, each on its own tape (a few built a step), and the
+        step bred only when fewer than a batch were queued at all, so 4 elites with built tapes
+        produced no children and batches ran 1-6 candidates."""
+        self.house.game["lab"]["param_children"] = 8
+        self.queue(KNOB)
+        self.lab.evaluate_batch()  # an elite, its tape built
+        for n in range(40):  # seeds on NEEDS no tape is built for
+            self.lab._x("INSERT INTO candidates(id, code, code_sha256, params, needs, niche, venue, horizon, origin, author, lineage, parents, idea, priority, created, status)"
+                        " SELECT ?, code, ?, params, ?, niche, venue, horizon, 'seed', author, lineage, parents, idea, 1, ?, 'queued' FROM candidates LIMIT 1",
+                        (f"waiting{n}", f"sha{n}", json.dumps({"venue": "alpaca", "horizon": "hour", "symbols": [f"X{n}"]}), self.clock()))
+        self.assertGreaterEqual(self.lab.queued(), 40)
+        self.assertEqual(self.lab.ready_queued(), 0)
+        self.luna.programs = []
+        self.lab.breed()
+        self.assertGreater(self.lab.ready_queued(), 0)  # children of the elite, on its built tape
+
+    def test_batches_alternate_between_queue_order_and_the_largest_ready_group(self):
+        """Sept 23, production: seeds (one row a tape) ahead of the queue kept every batch at one
+        candidate while the archive's children waited 32 to a tape."""
+        self.house.game["lab"]["param_children"] = 12
+        self.queue(KNOB)
+        self.lab.evaluate_batch()  # an elite on a built tape
+        self.luna.programs = []
+        self.lab.breed()  # its children, all on that tape
+        children = self.lab.queued()
+        self.assertGreaterEqual(children, 8)
+        variants = [KNOB.replace('"symbols": ["BTC/USD"]', '"symbols": ["ETH/USD"]'),
+                    KNOB.replace('"timeframe": "5Min"', '"timeframe": "15Min"'),
+                    KNOB.replace('"symbols": ["BTC/USD"]', '"symbols": ["ETH/USD"]').replace('"timeframe": "5Min"', '"timeframe": "15Min"')]
+        for n, code in enumerate(variants):  # later seeds, each on a tape of its own, ahead of the children by priority
+            self.lab.admit(code, niche=self.niche, origin="seed", author="house", lineage=f"seed:{n}", parents=[], idea=f"seed {n}")
+        sizes = []
+        for _ in range(4):
+            self.lab._tapes_built = 0  # a new step's tape budget
+            out = self.lab.evaluate_batch()
+            sizes.append(out["candidates"] if out else 0)
+        # The children run whole within the first two batches (queue order alone gave 1, 1, 1, then
+        # them) and every seed still has its turn.
+        self.assertIn(children, sizes[:2], sizes)
+        self.assertEqual(sizes.count(1), 3, sizes)
+        self.assertEqual(self.lab.queued(), 0)
+
     def test_submissions_are_capped(self):
         agent = self.seated("sawtooth", KNOB)
         self.lab.seed(force=True)  # its own program queued as a seed is not a submission
