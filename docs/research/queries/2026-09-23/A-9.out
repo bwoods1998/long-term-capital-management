@@ -1,0 +1,8 @@
+  any fill row at all (incl. House dust/closing)                         never: 21/96
+  agent fill (excl. dust/closing), any time, any book                    never: 21/96
+  agent fill since its rung-1 seat                                       never: 21/96
+  agent fill since 06:30Z today (floor_watch window)                     never: 31/96
+  agent fill in the last 24h                                             never: 22/96
+  source=venue fill (excl. closing)                                      never: 21/96
+  living with no agent.intent ever: 17/96; with no book.order ever: 96/96
+  24h: wakes(living) 4708; intents 2102; orders 5591; refused 839; cancels 571; agent fills 597

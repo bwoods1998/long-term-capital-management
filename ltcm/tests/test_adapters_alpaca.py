@@ -257,6 +257,16 @@ class OptionTests(unittest.TestCase):
         client.submit(intent(order_type="limit", limit_price="230.50", time_in_force="day"))
         self.assertNotIn("position_intent", transport.last["body"])
 
+    def test_a_fractional_share_order_is_sent_as_given_and_only_as_a_day_order(self):
+        """A7 (Sept 23, 2026): a fractional limit order goes with its quantity unrounded and `day`; Alpaca takes no other."""
+        client, transport = broker({("POST", PAPER_BASE + "/v2/orders"): ORDER})
+        client.submit(intent(quantity="0.25", order_type="limit", limit_price="230.50", time_in_force="day"))
+        body = transport.last["body"]
+        self.assertEqual((body["qty"], body["type"], body["time_in_force"]), ("0.25", "limit", "day"))
+        with self.assertRaises(RejectedOrder):
+            client.submit(intent(quantity="0.25", order_type="limit", limit_price="230.50", time_in_force="gtc"))
+        self.assertEqual(len(transport.calls), 1)  # nothing was sent for the refused one
+
     def test_the_chain_keeps_two_sided_contracts_in_order_with_what_the_feed_knows(self):
         snapshots = {
             "F260925C00013000": {"latestQuote": {"bp": 0.41, "ap": 0.44, "t": "2026-09-18T19:59:59Z"}, "impliedVolatility": 0.31, "greeks": {"delta": 0.52}, "dailyBar": {"v": 812}},

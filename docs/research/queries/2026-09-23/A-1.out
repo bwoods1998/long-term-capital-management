@@ -1,0 +1,131 @@
+agents born: 441 living: 96
+
+## funnel by founder class: born / any trial / passed replay / reached r1 / r2 / r3 / living / living never-filled / died / displaced
+house-mutation                327  323   78   70   5   0   35    9  292  274   life_med/p90_h=(3.8, 22.8, 327)
+seed                           28   26    4   28   1   0    1    0   27   20   life_med/p90_h=(24.2, 76.5, 28)
+foundry                        27   27   27   27   2   0   24    3    3    1   life_med/p90_h=(10.8, 19.4, 27)
+agent-fork                     17   11    8   17   0   0   12    1    5    4   life_med/p90_h=(18.0, 26.3, 17)
+repair                         16   16    9    9   0   0    9    3    7    7   life_med/p90_h=(12.5, 14.8, 16)
+architect                      14   14   10   10   0   0    9    3    5    5   life_med/p90_h=(4.3, 11.2, 14)
+house-revival                  11   11   11   10   1   0    5    2    6    1   life_med/p90_h=(12.0, 12.6, 11)
+lab                             1    1    1    1   0   0    1    0    0    0   life_med/p90_h=(3.5, 3.5, 1)
+
+## funnel by desk: born / any trial / passed replay / reached r1 / r2 / r3 / living / living never-filled / died / displaced
+alpaca-crypto-alts             61   61   25   24   1   0   14    2   47   37   life_med/p90_h=(2.7, 12.7, 61)
+alpaca-crypto-majors           49   49   16   11   0   0    8    3   41   32   life_med/p90_h=(3.2, 20.4, 49)
+kalshi-sports                  47   46   24   30   2   0   12    2   35   35   life_med/p90_h=(17.2, 35.8, 47)
+alpaca-megacaps                45   45   15   11   0   0    8    2   37   32   life_med/p90_h=(2.8, 20.6, 45)
+kalshi-crypto-strikes          40   39    2    6   0   0    2    1   38   36   life_med/p90_h=(3.2, 20.8, 40)
+kalshi-crypto-15m              37   37   13   15   3   0    7    0   30   24   life_med/p90_h=(9.1, 26.3, 37)
+kalshi-sports-props            34   33    5    7   0   0    5    1   29   29   life_med/p90_h=(3.6, 33.8, 34)
+kalshi-attention               34   34    2    3   0   0    2    2   32   31   life_med/p90_h=(3.3, 19.8, 34)
+alpaca-index-etfs              32   32   14   18   0   0   12    6   20   20   life_med/p90_h=(12.4, 29.1, 32)
+kalshi-prices                  25   25   13   13   1   0    8    0   17   17   life_med/p90_h=(12.4, 34.7, 25)
+kalshi-weather                 19   14   13   19   2   0   10    0    9    9   life_med/p90_h=(12.5, 61.3, 19)
+alpaca-options                 18   14    6   15   0   0    8    2   10   10   life_med/p90_h=(14.8, 66.3, 18)
+
+## time in stage (hours): birth->first trial, birth->first pass, first pass->seat(r1), seat->r2, r2->r3
+ birth->first trial (0.0, 0.2, 429)
+ birth->first pass  (0.0, 13.4, 148)
+ birth->seat r1     (0.0, 2.6, 172)
+ seat r1->r2        (11.8, 49.4, 9)
+ seat r1->r2 (from birth if no seat row) (11.8, 49.4, 9)
+ r2->r3             None
+ r1 time until death (displaced, r1) (18.0, 47.5, 57)
+ r0 time until death (displaced, r0) (3.0, 18.1, 254)
+
+## deaths: cause x founder class
+  displaced    house-mutation   274
+  displaced    seed             20
+  redundant    house-mutation   14
+  displaced    repair           7
+  displaced    architect        5
+  displaced    agent-fork       4
+  superseded   house-revival    4
+  evidence     seed             3
+  evidence     house-mutation   3
+  superseded   seed             2
+  evidence     foundry          2
+  stuck        seed             1
+  credits      seed             1
+  evidence     agent-fork       1
+  displaced    foundry          1
+  displaced    house-revival    1
+  redundant    house-revival    1
+  superseded   house-mutation   1
+
+## deaths: cause x rung at death
+  displaced    r0 254
+  displaced    r1 57
+  redundant    r0 15
+  evidence     r1 8
+  superseded   r1 7
+  stuck        r1 1
+  credits      r1 1
+  evidence     r2 1
+  displaced    r2 1
+
+## displaced: 312; with any fill 40; with >=3 fills 24; with real fills 0; median life h (4.0, 20.9, 312)
+   displaced by desk: n / had fills
+   alpaca-crypto-alts         37    3
+   kalshi-crypto-strikes      36    1
+   kalshi-sports              35   12
+   alpaca-crypto-majors       32    0
+   alpaca-megacaps            32    0
+   kalshi-attention           31    0
+   kalshi-sports-props        29    0
+   kalshi-crypto-15m          24    2
+   alpaca-index-etfs          20    2
+   kalshi-prices              17    5
+   alpaca-options             10    7
+   kalshi-weather              9    8
+
+## the living, by desk: n / rung0 / rung1 / rung2 / rung3 / never filled / median age h / median hours since seat
+   alpaca-crypto-alts        14   0  14   0   0   2  age=(10.8, 12.6, 14) seated=(10.8, 12.5, 14)
+   alpaca-index-etfs         12   0  12   0   0   6  age=(13.6, 40.2, 12) seated=(13.5, 39.4, 12)
+   kalshi-sports             12   0  11   1   0   2  age=(19.4, 35.8, 12) seated=(19.4, 35.8, 12)
+   kalshi-weather            10   0   8   2   0   0  age=(17.0, 91.2, 10) seated=(17.0, 91.2, 10)
+   alpaca-options             8   0   8   0   0   2  age=(16.4, 44.9, 8) seated=(15.1, 44.9, 8)
+   kalshi-prices              8   0   7   1   0   0  age=(18.7, 38.2, 8) seated=(16.1, 38.2, 8)
+   alpaca-megacaps            8   0   8   0   0   2  age=(11.2, 34.3, 8) seated=(11.2, 18.0, 8)
+   alpaca-crypto-majors       8   0   8   0   0   3  age=(10.9, 12.6, 8) seated=(10.9, 12.5, 8)
+   kalshi-crypto-15m          7   0   6   1   0   0  age=(13.2, 14.3, 7) seated=(13.2, 14.3, 7)
+   kalshi-sports-props        5   0   5   0   0   1  age=(33.8, 35.1, 5) seated=(18.0, 18.0, 5)
+   kalshi-attention           2   0   2   0   0   2  age=(11.6, 11.6, 2) seated=(11.6, 11.6, 2)
+   kalshi-crypto-strikes      2   0   2   0   0   1  age=(5.5, 10.7, 2) seated=(5.5, 10.7, 2)
+living total 96; never filled 21; rung0 0 r1 91 r2 5 r3 0
+living by founder class: Counter({'house-mutation': 35, 'foundry': 24, 'agent-fork': 12, 'repair': 9, 'architect': 9, 'house-revival': 5, 'seed': 1, 'lab': 1})
+
+## the 30 enroll() births (architect or repair): founder name, class, rung_max, fills, alive
+   sports-fee-capped-taker                  architect  r0 fills=0 alive=False desk=kalshi-sports
+   wti-isolated-maker                       architect  r0 fills=0 alive=False desk=kalshi-prices
+   props-numeric-touch                      architect  r0 fills=0 alive=False desk=kalshi-sports-props
+   index-overnight-fractional               architect  r1 fills=4 alive=False desk=alpaca-index-etfs
+   haghani_downward_entry                   repair     r0 fills=0 alive=False desk=alpaca-crypto-alts
+   haghani_minimum_entry                    repair     r0 fills=0 alive=False desk=alpaca-crypto-alts
+   haghani_subcent_prices                   repair     r0 fills=0 alive=False desk=alpaca-crypto-alts
+   hawkins-commodity-resolve-guard          repair     r1 fills=3 alive=True desk=kalshi-prices
+   hawkins_prices_payout_guard              repair     r1 fills=3 alive=True desk=kalshi-prices
+   hawkins_prices_resolution_check          repair     r1 fills=3 alive=True desk=kalshi-prices
+   krasker_3_occ_first                      repair     r1 fills=0 alive=True desk=alpaca-options
+   krasker_3_occ_order_identity             repair     r1 fills=1 alive=True desk=alpaca-options
+   krasker-contract-identity                repair     r1 fills=4 alive=True desk=alpaca-options
+   krasker_occ_first                        repair     r0 fills=0 alive=False desk=alpaca-options
+   krasker_occ_routing_child                repair     r1 fills=1 alive=True desk=alpaca-options
+   krasker_option_order_identity            repair     r0 fills=0 alive=False desk=alpaca-options
+   leahy_resolution_guard                   repair     r0 fills=0 alive=False desk=kalshi-attention
+   options_breakout_occ_exits               repair     r0 fills=0 alive=False desk=alpaca-options
+   sports_two_way_game_guard                repair     r1 fills=0 alive=True desk=kalshi-sports
+   megacap-gap-drift                        architect  r0 fills=0 alive=False desk=alpaca-megacaps
+   haghani_venue_grid_child                 architect  r1 fills=20 alive=True desk=alpaca-crypto-alts
+   haghani_venue_grid_prices                architect  r1 fills=29 alive=True desk=alpaca-crypto-alts
+   haghani_37_venue_minimum                 architect  r1 fills=17 alive=True desk=alpaca-crypto-alts
+   scholes_overnight_entry_retry            repair     r1 fills=0 alive=True desk=alpaca-index-etfs
+   haghani_mark_aware_position_budget       architect  r1 fills=10 alive=True desk=alpaca-crypto-alts
+   haghani-40-directional-grid              architect  r1 fills=11 alive=True desk=alpaca-crypto-alts
+   haghani_41_symbol_price_grid             architect  r1 fills=1 alive=True desk=alpaca-crypto-alts
+   haghani-42-unrounded-limits              architect  r1 fills=0 alive=True desk=alpaca-crypto-alts
+   haghani_equity_order_cap                 architect  r1 fills=0 alive=True desk=alpaca-crypto-alts
+   mcentee_34_session_hours                 architect  r1 fills=0 alive=True desk=alpaca-megacaps
+living never-filled by founder class: Counter({'house-mutation': 9, 'repair': 3, 'foundry': 3, 'architect': 3, 'house-revival': 2, 'agent-fork': 1})
+living rung-0 age h by class: {'architect': None, 'agent-fork': None, 'seed': None, 'foundry': None, 'house-mutation': None, 'lab': None, 'repair': None, 'house-revival': None}

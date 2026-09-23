@@ -502,6 +502,17 @@ class KalshiMarketsTest(unittest.TestCase):
         data.resolves_at("GAME")
         self.assertEqual(source.calls, 3)  # a schedule is asked for once; a failure is asked again
 
+    def test_the_exchange_shard_is_shown_only_where_the_venue_names_it(self):
+        # Sept 23, 2026: the shard funder (league/shards.py) learns which shard a series trades on
+        # from the listing; a strategy that never read the key sees the shape it always has.
+        data = FakeMarketData({"KXMLBTOTAL": [[
+            live("KXMLBTOTAL-26SEP231840STLPIT-8", "0.40", "0.44", "2026-09-10T15:00:00Z", exchange_index=3),
+            live("KXMLBTOTAL-26SEP231840STLPIT-9", "0.40", "0.44", "2026-09-10T15:00:00Z"),
+        ]]})
+        rows = KalshiData(data, clock=clock).markets(["KXMLBTOTAL"], max_hours_to_close=24)
+        self.assertEqual([row.get("exchange_index") for row in rows], [3, None])
+        self.assertNotIn("exchange_index", rows[1])
+
     def test_snapshot_shape_filters_and_order(self):
         data = FakeMarketData({
             "KXBTCD": [

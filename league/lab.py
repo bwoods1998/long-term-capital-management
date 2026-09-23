@@ -49,7 +49,15 @@ its `lab_submit`) is judged against every trial on that line, as the agent's own
 Spend: OpenAI through the lab's own line (`budget_usd_per_hour`, plus royalties), inside the House's
 campaign allowance (every call reserves through the same metered `Frontier` client and its spend
 guard) and only while the frontier tier is "all"; the lab box's Sail time is recorded as it runs and
-stops with the Sail allowance.
+stops with the Sail allowance. Only Luna and Sol spend OpenAI: below the "all" tier they are skipped
+(`breed`, `_llm_pause`) and the rest of the loop -- seeds, parameter children, batches on the lab
+box, graduation -- goes on (Sept 23, 2026, C2: `open()` used to stop the whole lab with the tier,
+which the House's OpenAI line was to fall under that evening with the month resetting on Oct 1).
+
+The lab watches itself (`_watch`, on every tick, Sept 23, 2026): closed for longer than
+`closed_alert_minutes` it says so once (a warning naming the refusal, an info when it works again;
+the since-when lives in `meta`, so a restart does not reset it), and a graduate that has waited for a
+seat longer than `seat_wait_alert_hours` is named once. `health()` is the lab's line in health.json.
 
 What the agents get (`league/researcher.py`): `lab_query` (the archive and leaderboard for their
 desk, and their own submissions' results) and `lab_submit` (queue up to `submit_max` programs for
@@ -112,6 +120,10 @@ DEFAULTS: dict[str, Any] = {
     "seed_every_minutes": 60,
     "max_queue": 600,
     "stats_every_minutes": 10,
+    # The lab's own invariants (Sept 23, 2026): one warning when it has been closed this long, one
+    # when a graduate has waited this long for a seat.
+    "closed_alert_minutes": 30,
+    "seat_wait_alert_hours": 6,
     "luna_model": "gpt-6-luna",
     "luna_effort": "low",
     "luna_max_output_tokens": 12000,
@@ -172,6 +184,11 @@ class SealedTape(LabError):
 
 
 # ---------------------------------------------------------------------------------- pure helpers
+
+def _iso(epoch: float) -> str:
+    """An epoch as the ledger writes times, to the second."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
 
 def static_literal(code: str, name: str) -> dict[str, Any] | None:
     """A module-level `NAME = {...}` literal read WITHOUT running the file, or None."""
@@ -471,6 +488,11 @@ class Lab:
         self._weights: tuple[float, dict[str, float]] | None = None
         self._rng = random.Random(int(house.clock()))
         self.refusal = ""
+        #: Why Luna and Sol are being skipped ('' when they are asked), and the phases skipped since
+        #: this process started: what `stats` and `health` show for the paid work (C2, Sept 23, 2026).
+        self._llm_paused = ""
+        self._skipped: dict[str, Any] = {"luna": 0, "sol": 0, "since": now_iso(house.clock)}
+        self._watch_error = ""
         if self._meta("fee_cursor") is None:
             # A graduate cannot exist before the lab, so no older fee can owe it a royalty.
             self._set_meta("fee_cursor", str(house.ledger.head()[0]))
@@ -556,7 +578,9 @@ class Lab:
     # ---------------------------------------------------------------- cadence
     def open(self) -> str:
         """'' when the lab may work now, else why not. The House being stopped, paused, deploying
-        or out of Sail allowance stops it, and so does an OpenAI tier below "all"."""
+        or out of Sail allowance stops it, and so does a failed lab box. The OpenAI tier does not:
+        the lab's search runs on Sail time, and only its Luna and Sol calls are the tier's
+        (`_llm_pause`; C2, Sept 23, 2026)."""
         house = self.house
         if not self.settings.get("enabled"):
             return "disabled in game.json"
@@ -576,24 +600,109 @@ class Lab:
             return "the Sail meter has stopped the floor"
         if self.box_down():
             return "the lab box failed a batch in the last five minutes"
-        tier = house.frontier_tier()
-        if tier != "all":
-            return f"the OpenAI tier is {tier!r}"
         return ""
 
     def tick(self, *, open_for_business: bool) -> bool:
-        """Called from `House.tick`: schedules one bounded `step` on a background lane. Never works
-        on the tick itself."""
+        """Called from `House.tick`: schedules one bounded `step` on a background lane, and runs the
+        lab's own watch (`_watch`). Never works on the tick itself."""
         if not open_for_business:
             self.refusal = "the House is not open for business"
+            self._watch(self.refusal)
             return False
         job = self.house._jobs.get(LAB_JOB)
         if job is not None and job.is_alive():
+            self._watch(None)  # a step is running: the lab is not closed, whatever `refusal` says of its paid calls
             return False
         self.refusal = self.open()
+        self._watch(self.refusal)
         if self.refusal:
             return False
         return bool(self.house._background(LAB_JOB, self.step))
+
+    # ----------------------------------------------------------------- watch
+    def _watch(self, closed: str | None) -> None:
+        """The lab's two invariants (Sept 23, 2026), checked on every tick and each told once: closed
+        for longer than `closed_alert_minutes` (`closed` is why, '' when it works now, None when a
+        step is running and the question is not asked), and a graduate waiting for a seat longer than
+        `seat_wait_alert_hours`. Never raises into the tick (`House.tick` calls `tick` bare); a
+        failure is told once per distinct message."""
+        try:
+            if closed is not None:
+                self._watch_closed(closed)
+            self._watch_waiting()
+        except Exception as exc:  # noqa: BLE001 - the watch must never take the tick down
+            text = f"the lab's watch failed ({type(exc).__name__}: {str(exc)[:160]})"
+            if text != self._watch_error:
+                self._watch_error = text
+                self.house.alert("warning", text)
+
+    def _watch_closed(self, refusal: str) -> None:
+        """Since when the lab has been closed is `meta` `closed_since` (a restart does not reset it:
+        a deploy's own minutes closed count), `closed_told` once the warning went out."""
+        now = self._now()
+        since = self._meta("closed_since")
+        if refusal:
+            if since is None:
+                self._set_meta("closed_since", str(now))
+                return
+            minutes = (now - float(since)) / 60
+            if minutes >= float(self.settings["closed_alert_minutes"]) and self._meta("closed_told") is None:
+                self._set_meta("closed_told", str(now))
+                self.house.alert("warning", f"the Alpha Lab has been closed for {minutes:.0f} minutes (since {_iso(float(since))}): {refusal}")
+            return
+        if since is None:
+            return
+        told = self._meta("closed_told")
+        self._x("DELETE FROM meta WHERE key IN ('closed_since', 'closed_told')")
+        if told is not None:
+            self.house.alert("info", f"the Alpha Lab is open again after {(now - float(since)) / 60:.0f} minutes closed")
+
+    def _watch_waiting(self) -> None:
+        """One warning per graduate that has waited `seat_wait_alert_hours` for a seat (`meta`
+        `seat_told:<candidate>` keeps it to one across restarts)."""
+        limit = float(self.settings["seat_wait_alert_hours"])
+        for row in self.waiting():
+            if row["hours"] < limit or self._meta(f"seat_told:{row['candidate']}") is not None:
+                continue
+            self._set_meta(f"seat_told:{row['candidate']}", str(self._now()))
+            self.house.alert("warning", f"the Alpha Lab graduate {row['line']} ({row['candidate'][:12]}, {row['niche']}) has waited "
+                                        f"{row['hours']:.1f} hours for a seat: {row['detail']}")
+
+    def waiting(self) -> list[dict[str, Any]]:
+        """Graduates that passed the House's replay and wait for a seat (`waiting_seat`: their desk or
+        the league is full of agents that have earned their seats), longest wait first. The wait is
+        counted from the ledger's `lab.graduate:<id>:passed` row, written once: the table's `at`
+        moves at every retry (`graduate` asks again every ten minutes)."""
+        from .house import _epoch
+
+        now = self._now()
+        out = []
+        for row in self._q("SELECT candidate, niche, line, at, detail FROM graduations WHERE state='passed' AND detail LIKE '%earned their seats%'"):
+            passed = self.house.ledger.get(f"lab.graduate:{row['candidate']}:passed")
+            since = _epoch(passed.at) if passed is not None else float(row["at"])
+            out.append({"candidate": row["candidate"], "line": row["line"], "niche": row["niche"], "since": _iso(since),
+                        "hours": round(max(0.0, now - since) / 3600, 1), "detail": row["detail"]})
+        return sorted(out, key=lambda r: -r["hours"])
+
+    def health(self) -> dict[str, Any]:
+        """The lab's line in health.json (`House._health`, every tick): whether it may work now and
+        why not, since when it has been closed, the paid phases skipped and why, the graduates waiting
+        for seats. Cheap (a few small queries), and never raises."""
+        try:
+            since = self._meta("closed_since")
+            waiting = self.waiting()
+            return {
+                "refusal": self.refusal or None,
+                "closed_since": _iso(float(since)) if since is not None else None,
+                "closed_minutes": round((self._now() - float(since)) / 60, 1) if since is not None else 0,
+                "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
+                "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0,
+                                 "graduates": [{k: r[k] for k in ("candidate", "line", "niche", "since", "hours")} for r in waiting[:8]]},
+                "queued": self.queued(),
+                "born_total": int(self._q("SELECT COUNT(*) AS n FROM graduations WHERE state='born'")[0]["n"]),
+            }
+        except Exception as exc:  # noqa: BLE001 - health is written on the tick
+            return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
     def step(self) -> dict[str, Any]:
         """One bounded pass: seed, breed, evaluate in batches until `step_seconds`, graduate,
@@ -1075,7 +1184,16 @@ class Lab:
             return 0
         luna_since_sol = int(self._q("SELECT COUNT(*) AS n FROM calls WHERE kind='luna' AND at > "
                                      "COALESCE((SELECT MAX(at) FROM calls WHERE kind='sol'), 0)")[0]["n"])
-        if luna_since_sol >= int(settings["leap_every"]):
+        kind = "sol" if luna_since_sol >= int(settings["leap_every"]) else "luna"
+        # Below the "all" tier (or with the House's OpenAI allowance closed) no packet is built and
+        # no client asked: the phase is skipped on the record, and the step's time goes to parameter
+        # children and batches (C2, Sept 23, 2026). `_ask` refuses for the same reasons regardless.
+        self._llm_paused = self._llm_pause()
+        if self._llm_paused:
+            self._skipped[kind] += 1
+            self.refusal = self._llm_paused
+            return 0
+        if kind == "sol":
             return int(self.leap())
         return int(self.mutate_llm())
 
@@ -1106,14 +1224,23 @@ class Lab:
         size = len(json.dumps({"input": [system, user]}).encode("utf-8")) + 4096
         return (Decimal(size) * rates[0] + Decimal(int(max_output_tokens)) * rates[1]) / Decimal(1_000_000)
 
-    def _llm_refusal(self, client: Any, hold: Decimal) -> str:
+    def _llm_pause(self) -> str:
+        """Why no Luna or Sol call may be made now, whatever the call: an OpenAI tier below "all"
+        (`House.frontier_tier`) or the House's OpenAI allowance closed. '' when one may be tried."""
         house = self.house
-        if client is None:
-            return "no model client"
-        if house.frontier_tier() != "all":
-            return f"the OpenAI tier is {house.frontier_tier()!r}"
+        tier = house.frontier_tier()
+        if tier != "all":
+            return f"the OpenAI tier is {tier!r}"
         if not house.pacer.may_spend("openai"):
             return "the House's OpenAI allowance is closed"
+        return ""
+
+    def _llm_refusal(self, client: Any, hold: Decimal) -> str:
+        if client is None:
+            return "no model client"
+        pause = self._llm_pause()
+        if pause:
+            return pause
         base, royalties = self.room()
         if hold > base + royalties:
             return f"the lab's line has ${base + royalties:.4f} left this hour and the call may cost ${hold:.4f}"
@@ -1126,7 +1253,9 @@ class Lab:
         refusal = self._llm_refusal(client, hold)
         if refusal:
             self.refusal = refusal
+            self._llm_paused = self._llm_pause()  # the tier or the allowance; '' when it was this call's own client or hold
             return None
+        self._llm_paused = ""  # a call is being made: the paid phases are not paused
         base, _ = self.room()
         ident = f"lab-{kind}:{self._now():.6f}:{self._rng.random():.6f}"
         answer = None
@@ -1763,6 +1892,8 @@ class Lab:
         origin = {r["origin"]: r["n"] for r in self._q("SELECT origin, COUNT(*) AS n FROM candidates WHERE created>=? GROUP BY origin", (since,))}
         coverage = {r["niche"]: r["n"] for r in self._q("SELECT niche, COUNT(*) AS n FROM archive GROUP BY niche")}
         evaluated = int(batch["n"] or 0)
+        waiting = self.waiting()
+        closed = self._meta("closed_since")
         return {
             "window_seconds": window, "batches": int(batch["b"] or 0), "evaluated": evaluated,
             "per_hour": round(evaluated * 3600.0 / window, 1),
@@ -1778,6 +1909,11 @@ class Lab:
                                               "royalty_balance_usd": format(self.royalty_balance(), "f")},
             "born_total": int(self._q("SELECT COUNT(*) AS n FROM graduations WHERE state='born'")[0]["n"]),
             "refusal": self.refusal or None,
+            # Sept 23, 2026: the paid phases skipped and why (C2), since when the lab has been closed,
+            # and the graduates waiting for seats (the two invariants), as `health()` shows them.
+            "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
+            "closed_since": _iso(float(closed)) if closed is not None else None,
+            "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0},
         }
 
     def publish(self, *, force: bool = False) -> dict[str, Any] | None:

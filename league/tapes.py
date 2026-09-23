@@ -689,7 +689,7 @@ class KalshiData:
         if not two_sided(bid, ask):
             return None
         ticker = str(raw["ticker"]).upper()
-        return stop_ts, {
+        row: dict[str, Any] = {
             "market": ticker,
             "series": series,
             "title": str(raw.get("title") or ""),
@@ -702,6 +702,12 @@ class KalshiData:
             "open_interest": _float(raw.get("open_interest")) or 0.0,
             "strike": parse_strike(ticker, raw),
         }
+        # The exchange shard the market trades on, where the venue names it (Sept 23, 2026): what
+        # `league/shards.py` keeps funded. Not something a strategy needs to read, and absent, not
+        # null, where the venue is silent, so the shape every strategy has seen is unchanged.
+        if isinstance(raw.get("exchange_index"), int) and not isinstance(raw.get("exchange_index"), bool):
+            row["exchange_index"] = int(raw["exchange_index"])
+        return stop_ts, row
 
     # -------------------------------------------------------------------- tape
     def tape(

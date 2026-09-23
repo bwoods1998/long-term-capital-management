@@ -1,0 +1,172 @@
+summary rows since 09-22: 7532
+by (reason, candidate, ran trials): [(('finished', False, False), 6306), (('finished', True, True), 658), (('provider: provider_http_503', False, False), 170), (('no tool call', False, False), 100), (('provider: campaign_post_unconfirmed', False, False), 98), (('provider: provider_http_502', False, False), 62), (('no tool call', True, True), 26), (('finished', True, False), 23), (('provider: research_request_unconfirmed', False, False), 17), (('provider: provider_http_504', False, False), 15), (('max_turns', True, True), 14), (('session expired after six hours', False, False), 8), (('retired or changed', False, False), 8), (('tool outcome unconfirmed: replay', False, False), 7), (('provider: campaign_post_unconfirmed', True, True), 5), (('max_turns', False, False), 4), (('provider: provider_http_502', True, True), 3), (('provider: provider_desk_cap_exceeded', False, False), 3), (('credits', False, False), 1), (('tool outcome unconfirmed: replay', True, True), 1), (('provider: provider_http_504', True, True), 1), (('provider: provider_transport_unconfirmed', False, False), 1), (('provider: research_request_unconfirmed', True, True), 1)]
+abstained (no candidate, no trials): 6800 of 7532 = 90.3 %
+
+=== abstention share by desk (abstained/all summaries)
+kalshi-sports          1177/1297  90.7%
+kalshi-weather          960/ 979  98.1%
+alpaca-crypto-alts      801/ 846  94.7%
+alpaca-options          522/ 647  80.7%
+kalshi-prices           556/ 595  93.4%
+kalshi-crypto-15m       536/ 593  90.4%
+alpaca-index-etfs       440/ 570  77.2%
+alpaca-megacaps         436/ 521  83.7%
+kalshi-sports-props     371/ 439  84.5%
+alpaca-crypto-majors    381/ 398  95.7%
+kalshi-crypto-strikes   345/ 367  94.0%
+kalshi-attention        275/ 280  98.2%
+
+=== abstention share by rung
+rung 0 2108/2208  95.5%
+rung 1 4382/4993  87.8%
+rung 2  310/ 331  93.7%
+
+=== keyword classes among abstentions (multi-label; first-hit primary)
+primary: [('no-data', 1685, '25%'), ('budget', 1581, '23%'), ('rules', 1419, '21%'), ('other', 1368, '20%'), ('waiting-forward', 341, '5%'), ('closed-market', 226, '3%'), ('no-idea', 129, '2%'), ('missing-tool', 51, '1%')]
+any-mention: [('rules', 3249, '48%'), ('budget', 2284, '34%'), ('waiting-forward', 1720, '25%'), ('no-data', 1685, '25%'), ('no-idea', 628, '9%'), ('closed-market', 386, '6%'), ('missing-tool', 82, '1%')]
+by desk (primary):
+  alpaca-crypto-alts     [('no-data', 314), ('budget', 201), ('other', 122), ('rules', 97)]
+  kalshi-crypto-strikes  [('budget', 136), ('rules', 96), ('no-data', 56), ('other', 40)]
+  alpaca-megacaps        [('no-data', 174), ('closed-market', 95), ('other', 57), ('rules', 44)]
+  kalshi-prices          [('rules', 176), ('other', 156), ('budget', 88), ('no-data', 84)]
+  kalshi-sports          [('budget', 385), ('other', 330), ('rules', 235), ('no-data', 107)]
+  alpaca-index-etfs      [('rules', 132), ('budget', 84), ('no-data', 72), ('other', 70)]
+  kalshi-attention       [('no-data', 121), ('budget', 56), ('other', 54), ('rules', 25)]
+  kalshi-sports-props    [('budget', 108), ('other', 82), ('no-data', 73), ('rules', 63)]
+  alpaca-crypto-majors   [('rules', 146), ('no-data', 115), ('other', 55), ('budget', 35)]
+  alpaca-options         [('no-data', 184), ('budget', 109), ('other', 99), ('closed-market', 57)]
+  kalshi-weather         [('rules', 298), ('no-data', 231), ('budget', 220), ('other', 166)]
+  kalshi-crypto-15m      [('no-data', 154), ('other', 137), ('budget', 116), ('rules', 65)]
+by rung (primary):
+  rung 0 [('no-data', 608), ('budget', 495), ('rules', 481), ('other', 313), ('closed-market', 98)]
+  rung 1 [('budget', 1029), ('no-data', 998), ('other', 970), ('rules', 864), ('waiting-forward', 296)]
+  rung 2 [('other', 85), ('no-data', 79), ('rules', 74), ('budget', 57), ('waiting-forward', 15)]
+
+=== research.gate decisions since 09-22 by desk (skip reasons collapsed)
+all: [(('skip', 'backoff'), 1864), (('run', 'trigger'), 1740), (('skip', 'backoff:jev_unavailable'), 1543), (('run', 'backoff_elapsed'), 754), (('run', 'clock'), 532), (('skip', 'blocked:missing_data:jev_unavailable'), 382), (('skip', 'blocked:missing_data'), 362), (('sample', 'backoff'), 328), (('sample', 'backoff:jev_unavailable'), 287), (('sample', 'blocked:missing_data:jev_unavailable'), 132), (('run', 'jev_relevant_note'), 129), (('skip', 'blocked:market_closed:jev_unavailable'), 101), (('sample', 'blocked:missing_data'), 65), (('skip', 'blocked:market_closed'), 42), (('sample', 'blocked:market_closed:jev_unavailable'), 19), (('sample', 'blocked:market_closed'), 12)]
+  alpaca-index-etfs      [(('run', 'trigger'), 195), (('skip', 'backoff:jev_unavailable'), 95), (('skip', 'backoff'), 79), (('run', 'backoff_elapsed'), 40), (('skip', 'blocked:missing_data'), 31)]
+  alpaca-megacaps        [(('run', 'trigger'), 145), (('skip', 'blocked:missing_data:jev_unavailable'), 67), (('skip', 'blocked:missing_data'), 50), (('skip', 'backoff'), 34), (('run', 'clock'), 32)]
+  kalshi-crypto-strikes  [(('skip', 'backoff'), 105), (('skip', 'backoff:jev_unavailable'), 81), (('run', 'backoff_elapsed'), 42), (('run', 'clock'), 25), (('sample', 'backoff:jev_unavailable'), 22)]
+  kalshi-sports-props    [(('run', 'trigger'), 88), (('skip', 'blocked:missing_data'), 59), (('skip', 'blocked:missing_data:jev_unavailable'), 53), (('run', 'clock'), 41), (('skip', 'backoff:jev_unavailable'), 32)]
+  alpaca-options         [(('run', 'trigger'), 250), (('run', 'clock'), 81), (('skip', 'backoff:jev_unavailable'), 79), (('skip', 'backoff'), 62), (('skip', 'blocked:market_closed:jev_unavailable'), 37)]
+  kalshi-weather         [(('skip', 'backoff'), 517), (('skip', 'backoff:jev_unavailable'), 426), (('run', 'backoff_elapsed'), 256), (('run', 'trigger'), 134), (('sample', 'backoff'), 97)]
+  kalshi-sports          [(('skip', 'backoff'), 459), (('run', 'trigger'), 400), (('skip', 'backoff:jev_unavailable'), 295), (('run', 'backoff_elapsed'), 146), (('run', 'clock'), 126)]
+  kalshi-crypto-15m      [(('skip', 'backoff'), 160), (('run', 'trigger'), 136), (('skip', 'backoff:jev_unavailable'), 115), (('run', 'backoff_elapsed'), 66), (('run', 'clock'), 51)]
+  alpaca-crypto-majors   [(('skip', 'blocked:missing_data:jev_unavailable'), 79), (('skip', 'blocked:missing_data'), 55), (('run', 'trigger'), 34), (('run', 'clock'), 28), (('skip', 'backoff:jev_unavailable'), 28)]
+  kalshi-attention       [(('skip', 'blocked:missing_data:jev_unavailable'), 53), (('skip', 'blocked:missing_data'), 52), (('sample', 'blocked:missing_data:jev_unavailable'), 21), (('run', 'jev_relevant_note'), 12), (('sample', 'blocked:missing_data'), 10)]
+  alpaca-crypto-alts     [(('skip', 'backoff'), 245), (('run', 'trigger'), 213), (('skip', 'backoff:jev_unavailable'), 190), (('run', 'backoff_elapsed'), 80), (('run', 'clock'), 45)]
+  kalshi-prices          [(('skip', 'backoff'), 187), (('skip', 'backoff:jev_unavailable'), 167), (('run', 'trigger'), 119), (('run', 'backoff_elapsed'), 70), (('skip', 'blocked:missing_data'), 36)]
+
+=== sample abstention summaries (desk,rung,agent,at): 
+-- kalshi-crypto-15m r1 huang-hd8ff7c 09-23T16:27 $0.014724 cls=['budget', 'waiting-forward']
+    No credits, specialist grant, or counted replay are justified now: the live book is flat with no fresh closed-trade evidence, and the tested impulse/maker approach has failed while desk evidence warns of adverse selection. Lab leaders’ high development returns carry severe drawdowns and are not independent evidence for this strategy; preserve resources until fresh outcomes or a distinct, auditable probability hypothesis could change the decision.
+-- alpaca-megacaps r1 mcentee-h4054c4 09-23T16:27 $0.006434 cls=['waiting-forward']
+    The hourly VWAP lab submission is modestly positive on selected development data, but it is neither independently validated nor available as code to adopt; the deployed strategy’s replay was negative and paper wealth remains slightly below 1. No credit spend or replay is justified now. Continue gathering fresh paper evidence and reassess only if it supports a concrete decision-changing experiment.
+-- alpaca-crypto-alts r0 haghani-59 09-23T16:27 $0.012011 cls=[]
+    Preserved the remaining credits and did not spend a replay: existing niche evidence discourages another reversion trial, and recent descendants’ small negative forward growth cautions against treating historical replay passes as proof of edge. I recorded the conclusion and next checks in the journal.
+-- alpaca-crypto-alts r1 haghani-39 09-23T16:26 $0.006446 cls=['rules', 'waiting-forward']
+    No credit spend is justified now: four positions remain open, the seven-trade paper record is still below the bunt threshold, and the last replay was sharply negative. Leave the strategy unchanged while exposed; reassess after fresh exits and outcomes.
+-- alpaca-megacaps r1 mcentee-hfadaea 09-23T16:26 $0.005988 cls=['rules']
+    No research spend is justified now: the AMD position is closed, but there is only one independent forward episode and no refusal or fresh evidence separating a new hypothesis. Preserve credits, keep the passing strategy unchanged, and gather more distinct closed episodes before reconsidering replay or other research.
+-- kalshi-weather r2 mullins-2 09-23T16:26 $0.007140 cls=['budget']
+    No discretionary credits or replay are worth spending now: the account is nearly fully committed in three open LAX positions, and current headroom is small. Preserve resources and reassess after settlement restores capacity and yields fresh outcome evidence.
+-- kalshi-crypto-15m r1 huang-h609d6f 09-23T16:26 $0.019850 cls=[]
+    Preserved credits and replay trials: the live book has no new outcome and one accepted XRP maker order remains open. Current lab leaders are opaque and drawdown-heavy, while the available peer impulse replay lost overall; there is no sufficiently reproducible new hypothesis to test this pass.
+-- kalshi-weather r2 mullins-6 09-23T16:26 $0.006981 cls=['rules']
+    No research spend or replay is justified this pass: the account has $0 cash, four open positions, and no working orders, so a new entry rule cannot be deployed now. The known resolution-time filter defect and post-only-cross rejections remain documented; revisit when settlement frees cash or fresh execution evidence makes a specific change actionable.
+-- alpaca-index-etfs r1 scholes-25 09-23T16:26 $0.006209 cls=['rules']
+    The paper account is still holding IWM below cost, with no refusal or closed-trade evidence to diagnose. No credit spend or replay is worth it before the scheduled exit; reassess after the position closes.
+-- kalshi-sports r2 meriwether-h2d625d 09-23T16:25 $0.006870 cls=['budget']
+    No credits or replay trials are worth spending now: the live strategy is still adding KXMLBTOTAL exposure, while research tools cannot pause it or verify/install a replacement. I recorded the current book state; escalate containment and deployment verification to the House/operator, then reassess when code status or fresh settled evidence changes.
+-- alpaca-options r1 krasker-10 09-23T16:24 $0.07270010 cls=['no-data', 'rules', 'no-idea', 'waiting-forward']
+    Nothing is worth credits this pass. Free library search + markets_now confirm the picture: live OPRA forward results (INTC -35%, BAC -16% then slight recovery, T -8% mark-to-bid) match the estimated-quote replay band (~-70 to -95%), proving the long-premium bleed is structural (spread + variance premium + theta), not a tape artifact. Every lever the desk could reach — entry timing (RSI/momentum/breakout), cheap-vol timing, deep-ITM delta, maker/passive spread capture, exit policy — is already falsified by my lineag
+-- kalshi-weather r1 mullins-13 09-23T16:23 $0.02328969 cls=[]
+    Book verified via free check: 5/6 slots (3 held record NO all recovered — MKE 0.98, DAL 0.96, SATX 0.90 — plus 2 resting), one free slot, and CHI is back in band at NO 0.97 so the strategy re-bids it on its next wake automatically. Still only 4 settled trades (all wins, W_paper 1.0125, E 1.006), no outcome split to classify, and the bid-tier/hours realized-edge test must wait for tomorrow's 6 SEP23 settlements. Nothing is credit-worthy; preserved the rain-only maker candidate unchanged and spent nothing.
+-- alpaca-index-etfs r1 scholes-24 09-23T16:22 $0.03526674 cls=['rules']
+    Preserved all credits. Confirmed via free markets_now that I remain flat ($200/$200, no positions/orders/refusals, 0 blocks, 0 closed trades, E=1.0). Nothing is worth a 41st lineage trial or the remaining $1.17: the alpaca-index-etfs anomaly map is measurably null end-to-end, and Merton is gated on the earned observations my deployed daily-momentum strategy will begin generating at today's 15:40 ET close. Let it trade and collect forward evidence; reassess on the first block/closed trade.
+-- kalshi-sports r1 meriwether-h42bdbb 09-23T16:22 $0.01981145 cls=['rules', 'no-idea']
+    Deadlock unchanged and already fully documented for the lineage: my deployed central-UNDER MLB-total taker (56b156) is structurally -EV with 6/6 underwater positions (W_paper 0.971, 6 settled, equity ~194), cannot be rewritten in place or forked, and my banked maker-free cricket moneyline edge (88c0fb, defl Sharpe 0.42) is already carried by seated child -2. The desk's literature condemns totals/spreads both ways, so no new falsifiable hypothesis a 6th trial would decide exists — spending would only raise the 5-tri
+-- alpaca-crypto-alts r1 haghani-56 09-23T16:21 $0.015521 cls=['waiting-forward']
+    Nothing merits spending credits or a replay right now. The current strategy is actively collecting paper evidence, but its historical replay lost 9.36%, lab leaders remain negative, and the promising perps hypothesis is still below the 20-hour replay-coverage gate; preserve credits and reassess when fresh evidence or qualifying coverage changes the decision.
+-- kalshi-crypto-strikes r1 hilibrand-h6ca596-2 09-23T16:20 $0.031575 cls=['no-idea']
+    I checked the live book, lab archive, specialty evidence, and replay coverage. The favorite-maker evidence is weak or negative, so I did not spend a replay trial; I queued a distinct, small-risk spot/DVOL probability-model candidate for lab evaluation, not adoption. Check its results in a later pass and require credible fill and settlement evidence before changing the deployed strategy.
+-- kalshi-prices r1 hawkins-15 09-23T16:18 $0.006990 cls=['budget']
+    No credits or replay are justified this pass: the live book remains heavily exposed to one imminent WTI settlement, while current marks are not settled evidence and the latest replay failed the trade-count gate. Reassess after exposure resolves; require a genuinely distinct, testable hypothesis before spending.
+-- kalshi-sports r1 meriwether-37 09-23T16:18 $0.022723 cls=['waiting-forward']
+    The deployed 90–98¢ rule is idle against today’s WNBA markets, while the existing paper record is negative, so price-only entries are not justified. I submitted a strictly one-contract WNBA pregame pilot to the lab, but it is only a proposal; the next useful evidence is fresh paper fills and settlements, not another replay of the inspected development tape.
+-- kalshi-prices r1 hawkins-20 09-23T16:18 $0.008478 cls=['budget', 'waiting-forward']
+    No research spend is justified now: the already-passing strategy is actively trading, with four unsettled positions and two resting orders, but no demonstrated new execution blocker or settled evidence supporting a change. Preserve credits and the replay budget; reassess after settlement and fresh paper evidence, especially given correlated WTI exposure and the gold drawdown.
+-- kalshi-weather r1 mullins-14 09-23T16:17 $0.011087 cls=['no-data']
+    The weather desk is shut in the current snapshot, with no positions or orders, and the three rain-NO settlements remain too small and mixed to support a falsifiable strategy change. Lab leaders offer development evidence but no accessible code or independent validation, so I preserved credits and replay trials; reassess when markets reopen or additional settlements provide a meaningful comparison.
+-- alpaca-options r1 krasker-14 09-23T16:15 $0.006857 cls=[]
+    No further spend is justified now. The only closed forward trade is a $5 RIVN loss, while SNAP and RIVN positions remain open; that is too little evidence for a useful classification or strategy change, and further replay on the reused estimated-quote tape would not test generalization. I recorded the possible RIVN stop-and-reentry churn for the next pass; reassess after more completed forward trades.
+-- alpaca-crypto-majors r1 rosenfeld-h76403a 09-23T16:15 $0.006419 cls=['budget', 'waiting-forward']
+    No credits are worth spending now: the BTC position remains open, so there is no new closed-trade evidence, and the existing replay lost 3.80%. Preserve the forward test under its current exits and reassess after a closure or meaningful order outcome.
+-- kalshi-sports-props r1 hufschmid-28 09-23T16:00 $0.024668 cls=[]
+    No further replay or paid research is justified now: the lab has no eligible programs, the latest replay failed out-of-sample growth, and the only closed paper trade is a loss. Preserve credits and wait for fresh paper settlements while verifying which candidate is actually deployed; prior near-close YES gains are development evidence, not validation.
+-- alpaca-crypto-majors r1 rosenfeld-37 09-23T15:58 $0.014680 cls=['no-data', 'budget']
+    No credits or replay trial are worth spending now. Funding is replayable, but the BTC/ETH perps input is still below the 20-hour replay gate, and even after it clears, the preregistered OI-unwind hypothesis lacks suitable point-in-time OI history; the latest pullback/bounce replay already lost 0.88% after fees. I recorded the updated blockers in my journal; preserve resources and reconsider only if coverage or the testable hypothesis materially changes.
+-- kalshi-sports-props r1 hufschmid-30 09-23T15:56 $0.013336 cls=['closed-market']
+    No discretionary credit spend or replay is justified. The live view shows two accepted but unfilled MLB HR NO bids while the named NFL series is dark; prior settled NO losses and shared evidence indicate adverse selection, and the promising YES replay result is already-seen development data, not validation. Preserve credits and seek fresh forward evidence or a genuinely new information advantage before changing the strategy.
+-- kalshi-sports r2 meriwether-h2d625d 09-23T15:40 $0.006891 cls=[]
+    The active Kalshi strategy is still deployed and adding exposure; with three open positions, only $1.77 cash, and unverified replacement status, further research spend cannot address the immediate containment/deployment blocker. Preserve credits and replay trials, escalate to the House/operator, and reassess after deployment is verified or fresh settled evidence arrives.
+-- kalshi-crypto-strikes r1 hilibrand-hc4567e 09-23T15:24 $0.013002 cls=[]
+    
+-- kalshi-prices r2 hawkins-19 09-23T15:12 $0.014963 cls=['no-data', 'missing-tool', 'budget']
+    No credits or trials are justified this pass. Runtime still lacks the fixing feed needed for the only identified alternative, while the current holdings are unresolved and the unconditional-favourite strategy remains unsupported; wait for the feed and verify coverage or for new settled evidence.
+-- alpaca-crypto-alts r2 haghani-37 09-23T15:02 $0.011009 cls=['no-data', 'no-idea']
+    No replay or paid research is justified now: the book is flat, the current maker-reversion evidence is negative, and the alt funding/perps replay gate is not yet open. Preserve credits, avoid known cap-boundary entries, and reconsider only after coverage matures and a full candidate preflight supports a specific test.
+-- alpaca-crypto-alts r2 haghani-37 09-23T14:54 $0.012297 cls=['rules']
+    The live book is flat, but prior cap-boundary refusals and negative/marginal reversion evidence argue against repeating that strategy or spending a replay now. The alt funding/OI squeeze remains untested; perps coverage has not yet reached the 20-hour replay gate, so recheck coverage after it opens and preflight inputs before deciding whether to run a trial.
+-- kalshi-crypto-15m r2 huang-h427345 09-23T14:43 $0.039579 cls=[]
+    
+-- kalshi-prices r2 hawkins-19 09-23T14:26 $0.010134 cls=['budget']
+    No credits, replay, or paid research are justified now: the remaining positions are unresolved, cash is zero, and the existing evidence still does not support the favourite-hold rule. The only identified alternative depends on a point-in-time fixing feed that runtime has not confirmed as implemented; revisit only after that input or settled evidence provides a testable hypothesis.
+-- kalshi-crypto-15m r2 huang-h51fdd3-2 09-23T14:07 $0.016057 cls=['rules']
+    The account is flat and the desk loss lock blocks new entries; the latest post-only-cross refusal does not justify a strategy change. Existing same-desk evidence rejects nearby spot-confirmed maker variants, while available forward evidence is too small and the newer perps feed has not met its replay coverage gate, so I preserved credits and replay trials.
+-- kalshi-attention r1 leahy-h6b99df 09-23T13:51 $0.017895 cls=['budget']
+    No credits or replay trials are warranted now: the only live market is an ineligible KXTRUMPAPPROVE contract, and the lab’s broader KXTRUMPACT evidence shows losses and severe drawdown despite the earlier small-sample pass. Keep the candidate unchanged and wait for eligible forward markets or a usable point-in-time underlying-count input before testing a new rule.
+-- kalshi-attention r1 leahy-h6b99df-2 09-23T13:31 $0.004346 cls=[]
+    The only live market is KXTRUMPAPPROVE, outside the narrow Say/Act candidate; the previous approval extension lost badly. With no trades or orders to diagnose, no credit spend or replay is warranted—retain the candidate as proposed and wait for eligible activity or new measurable evidence.
+-- alpaca-crypto-alts r0 haghani-55 09-23T12:10 $0.024794 cls=['no-data', 'budget']
+    No replay, paid research, or candidate is worthwhile now: the alt price-pattern families are already closed, and the prior funding-squeeze replay was sparse and negative; the newly confirmed SOL/LINK funding coverage only supports reusing the same development tape, not fresh validation. I spent no credits, made no strategy changes, and recorded the next trigger: genuinely new observations or a distinct, falsifiable funding/OI hypothesis.
+-- alpaca-megacaps r0 mcentee-36 09-23T05:50 $0.009593 cls=[]
+    I found no sufficiently distinct, evidence-backed hypothesis to justify spending credits or another replay: the available tape has coverage, not edge, the tested technical families are poor, and PEAD remains blocked on point-in-time earnings data. I preserved credits and trials and recorded the next trigger in my journal.
+-- alpaca-options r0 krasker-18 09-23T05:43 $0.023636 cls=['waiting-forward']
+    I found no evidence justifying another replay: prior long-premium results are negative, and historical options quotes are synthetic, so they cannot validate a patient-bid OPRA execution hypothesis. I would preserve credits and rely on forward paper fills for any such test; the current snapshot is outside market hours and supplies no fresh execution evidence.
+-- kalshi-attention r0 leahy-32 09-23T05:43 $0.015017 cls=['budget', 'no-idea']
+    I spent no credits on a replay or model call: the inherited favourite-maker logic is already measured negative, and the needed point-in-time underlying data for a count-mispricing strategy is not yet available. I recorded that blocker and the next check in my journal; current tape coverage alone does not justify another trial.
+-- alpaca-options r0 krasker-17 09-23T05:42 $0.028634 cls=[]
+    
+-- alpaca-crypto-majors r0 rosenfeld-44 09-23T05:32 $0.011468 cls=[]
+    Fresh runtime checks confirm BTC funding and spot history are replayable, but the BTC perps feed has only 4 of the 20 hourly blocks required, so a funding-plus-positioning replay is currently blocked. The available OI is USD-denominated rather than the preregistered base-unit measure; with no evidence validating a proxy, zero earned observations, and limited credits, I will not spend a trial now and will reconsider after perps coverage matures.
+-- alpaca-crypto-majors r0 rosenfeld-43 09-23T05:32 $0.006392 cls=[]
+    The expensive-short-positioning/unwind hypothesis is not replayable yet: perp snapshots have only four recorded hours, below the 20-hour gate, and the library warns that negative funding alone is not the edge. With no earned observations and no distinct testable substitute, I will preserve credits and replay trials; recheck coverage after adequate perp history accrues.
+-- alpaca-megacaps r0 mcentee-39 09-23T04:43 $0.017014 cls=[]
+    
+-- alpaca-index-etfs r0 scholes-h7dd043-2 09-23T04:04 $0.001413 cls=['waiting-forward']
+    No paid research or replay is justified now: there are still no forward trades or blocks to diagnose, and the existing replay passed despite weak results. Preserve credits and wait for paper evidence before changing the strategy.
+-- alpaca-index-etfs r0 scholes-27 09-23T04:01 $0.004147 cls=['budget', 'rules']
+    No credit spend is worthwhile now: the authoritative standing shows rung 0 with zero blocks, no trades, no positions, and no orders; the inherited journal’s claimed paper activity is inconsistent with that record. The current market snapshot is outside the strategy’s trading window, and the lineage already has 11 replay trials with no specific untested hypothesis that justifies another. Conserve credits and reassess after the strategy has actually traded.
+-- kalshi-sports r0 meriwether-41 09-23T03:57 $0.008452 cls=[]
+    Nothing is worth spending credits on right now. Family evidence says further deep-favourite replays worsen an already deflation-limited lineage, and the current three MLS markets offer no qualifying signal; preserve credits and wait for relevant forward evidence or a specific new hypothesis.
+-- kalshi-crypto-strikes r0 hilibrand-36 09-23T02:51 $0.003642 cls=[]
+    
+-- kalshi-attention r0 leahy-32 09-23T02:05 $0.07069987 cls=['budget', 'no-idea']
+    My inherited favourite-maker strategy is an exhaustively measured dead axis for kalshi-attention (family consolidation shows every variant negative OOS and too thin to reach 10 trades), so I spent no credits on a replay to re-confirm it. The niche's real edge is count-mispricing, gated on the missing underlying-value feed — the startup grant is already spent at family level, so I helped unblock it by filing a refined, per-series feed spec via request_tool, and journaled the dead-axis map so my children don't re-bur
+-- kalshi-sports r0 meriwether-40 09-23T01:45 $0.002819 cls=[]
+    
+-- kalshi-crypto-15m r0 huang-28 09-23T01:28 $0.04430852 cls=['rules', 'no-idea']
+    Nothing is worth credits this pass. I closed the last "materially different" thread I could identify — cross-coin lead-lag — which the library already shows dead (haghani's alpaca-alts notes). Every lever is exhausted: replay 40 trials all negative, Merton blocked (0 observations), grant spent, no forward capital at rung 0. Wrote a terminal dead-end map for successors noting this is the displacement path; only a new external condition (rule change, seed seat, new settlement feed) can break the impasse.
+-- kalshi-crypto-strikes r0 hilibrand-33 09-23T01:23 $0.02110791 cls=['no-idea', 'waiting-forward']
+    Favourites-NO remains falsified after 35 trials; the vol-adjusted distance gate was the correct test and near-passed (OOS -0.0003) but is structurally break-even, with all tail losses in sub-1h-to-close entries and too few observations to refine further. No genuinely distinct, decision-changing hypothesis remains, so I preserve credits this pass.
+-- kalshi-crypto-15m r0 huang-25 09-23T01:20 $0.03830837 cls=['no-data', 'no-idea']
+    Confirmed the desk's hypothesis space is exhaustively closed: lagged spot momentum (huang-6, -35.83% after fees), cross-asset lead/lag (haghani-3), and fast repricing (huang-5) are all measured dead alongside the fair-priced favorite-maker and my overfit contrarian-reversal. No new falsifiable branch remains, so no replay/search/Merton spend is justified; preserved the $7.51 credits and recorded the closed branches for descendants.
+-- kalshi-prices r0 hawkins-21 09-22T22:32 $0.02947273 cls=['rules']
+    Nothing is worth credits. markets_now confirms rung 0 with zero capacity (cash/equity/limits all 0, every market's remaining principal 0); the inherited "negative rung-2 LCB" notes describe my ancestor's record, not my state. My real blocker is the replay line: 13 trials have pushed the effective deflated-Sharpe bar to 0.5 while my tape returns only 6-8 settled trades (vs 10), and the distance-guard work that passes (hawkins-15/19, 66 trades, Sharpe 0.785) already exists among descendants. Abstained from all paid t
+-- kalshi-sports-props r0 hufschmid-28 09-22T22:25 $0.01835238 cls=['no-data', 'closed-market', 'no-idea', 'waiting-forward']
+    No change in my situation: runtime still lacks a score/lineup feed, the deployed KXNFLRSHYDS series has no live markets (0 cash/equity), and 24 lineage trials reject price-only NO-makers while underdog-YES variants stay below the deflated-Sharpe gate. Nothing here justifies spending credits or another replay trial, so I preserve both until a materially new state/lineup feed is implemented and preflighted.
+-- kalshi-sports-props r0 hufschmid-30 09-22T22:16 $0.00808349 cls=[]
+    
+-- kalshi-prices r0 hawkins-21 09-22T22:16 $0 cls=[]
+    

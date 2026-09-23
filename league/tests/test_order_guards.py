@@ -175,9 +175,9 @@ class OrderGuardsTest(HouseCase):
         agent = self.seated()
         intents, dropped, adjusted = self.sized(agent, {"symbol": "BTC/USD", "side": "sell", "quantity": "0.00012345678912"},
                                                 {"symbol": "SPY", "side": "sell", "quantity": "2.5", "type": "limit", "limit_price": 650})
-        self.assertEqual([i.quantity for i in intents], [D("0.000123456"), D("2")])  # nine decimals; whole shares at a limit
+        self.assertEqual([i.quantity for i in intents], [D("0.000123456"), D("2.5")])  # nine decimals; fractional shares at a limit too (A7, Sept 23, 2026)
         self.assertEqual(dropped, [])
-        self.assertEqual(len(adjusted), 2)
+        self.assertEqual(len(adjusted), 1)
         self.assertIn("floored to 0.000123456", adjusted[0])
 
     def test_a_limit_is_snapped_to_the_venues_increment_and_the_wake_says_so(self):

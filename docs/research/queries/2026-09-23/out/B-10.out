@@ -1,0 +1,52 @@
+
+=== active eval.block log growth since 09-22 13:30Z: book | desk | agents | active blocks | sum log | mean log/block | +blocks | -blocks
+kalshi-shadow | kalshi-crypto-strikes | 2 | 9 | -0.9252 | -0.10280 | 3 | 6
+kalshi-shadow | kalshi-crypto-15m | 9 | 39 | -0.7359 | -0.01887 | 14 | 23
+kalshi | kalshi-crypto-15m | 2 | 3 | -0.4587 | -0.15290 | 0 | 3
+alpaca-paper | alpaca-crypto-alts | 18 | 123 | -0.2729 | -0.00222 | 52 | 66
+alpaca-paper | alpaca-options | 8 | 8 | -0.0724 | -0.00905 | 3 | 4
+kalshi-shadow | kalshi-prices | 7 | 7 | -0.0554 | -0.00791 | 4 | 1
+alpaca-paper | alpaca-crypto-majors | 5 | 28 | -0.0367 | -0.00131 | 6 | 22
+kalshi-shadow | kalshi-weather | 9 | 10 | -0.0267 | -0.00267 | 7 | 3
+kalshi-shadow | kalshi-sports | 17 | 20 | -0.0217 | -0.00108 | 13 | 7
+alpaca | alpaca-crypto-alts | 1 | 4 | -0.0204 | -0.00510 | 1 | 3
+alpaca-paper | alpaca-index-etfs | 7 | 27 | -0.0025 | -0.00009 | 9 | 11
+alpaca-paper | alpaca-megacaps | 5 | 10 | +0.0014 | +0.00014 | 6 | 4
+kalshi | kalshi-weather | 1 | 1 | +0.1261 | +0.12608 | 1 | 0
+
+=== active eval.block log growth since allocator (09-23 08:28Z): book | desk | agents | active blocks | sum log | mean log/block | +blocks | -blocks
+kalshi-shadow | kalshi-crypto-strikes | 1 | 6 | -0.5625 | -0.09375 | 3 | 3
+kalshi-shadow | kalshi-crypto-15m | 8 | 27 | -0.5259 | -0.01948 | 8 | 17
+kalshi | kalshi-crypto-15m | 2 | 3 | -0.4587 | -0.15290 | 0 | 3
+alpaca-paper | alpaca-crypto-alts | 14 | 79 | -0.3107 | -0.00393 | 25 | 54
+alpaca-paper | alpaca-crypto-majors | 5 | 23 | -0.0314 | -0.00136 | 6 | 17
+alpaca | alpaca-crypto-alts | 1 | 4 | -0.0204 | -0.00510 | 1 | 3
+alpaca-paper | alpaca-index-etfs | 3 | 10 | -0.0015 | -0.00015 | 4 | 6
+alpaca-paper | alpaca-megacaps | 5 | 10 | +0.0014 | +0.00014 | 6 | 4
+
+=== base rate, all agents ever: practice active blocks and sum log growth
+  >= 1 active blocks, kalshi: n 58, positive 31 (53%), median sum log +0.0002
+  >= 1 active blocks, alpaca: n 45, positive 14 (31%), median sum log -0.0013
+  >= 3 active blocks, kalshi: n 18, positive 3 (17%), median sum log -0.0896
+  >= 3 active blocks, alpaca: n 20, positive 3 (15%), median sum log -0.0139
+  >= 6 active blocks, kalshi: n 13, positive 1 (8%), median sum log -0.1392
+  >= 6 active blocks, alpaca: n 14, positive 3 (21%), median sum log -0.0195
+  >= 10 active blocks, kalshi: n 7, positive 0 (0%), median sum log -0.1392
+  >= 10 active blocks, alpaca: n 12, positive 3 (25%), median sum log -0.0151
+  >= 20 active blocks, kalshi: n 2, positive 0 (0%), median sum log -0.0931
+  >= 20 active blocks, alpaca: n 2, positive 2 (100%), median sum log +0.0411
+
+=== the positive agents: replay pass on record? active practice blocks, sum log, board W_paper
+  mullins-2: replay pass True; active blocks 4, sum log +0.0339, board Wp 1.0345, horizon day
+  mullins-6: replay pass True; active blocks 2, sum log +0.0223, board Wp 1.0285, horizon day
+  mullins-13: replay pass False; active blocks 1, sum log +0.0050, board Wp 1.0125, horizon day
+  meriwether-h2d625d: replay pass True; active blocks 1, sum log +0.0028, board Wp 1.026864, horizon day
+  huang-h51fdd3-2: replay pass True; active blocks 3, sum log +0.0507, board Wp 1.052, horizon hour
+  hawkins-19: replay pass True; active blocks 1, sum log +0.0060, board Wp 1.006, horizon day
+  haghani-56: replay pass True; active blocks 2, sum log +0.0086, board Wp 1.011185, horizon hour
+  meriwether-36: replay pass True; active blocks 1, sum log -0.0101, board Wp 1.010466, horizon day
+
+=== one-loss demotion arithmetic (allocator.py target_band: E < bunt_at*hysteresis = 1.01*0.85 = 0.8585 sends a bunt to paper; real_drawdown_demote 0.35)
+  W_paper 1.01: W_real below 0.8542 demotes -> a single lost binary position of more than 14.6% of the real stake ($1.46 on a $10 bunt) demotes; position_share 0.5 allows $5.00
+  W_paper 1.03: W_real below 0.8459 demotes -> a single lost binary position of more than 15.4% of the real stake ($1.54 on a $10 bunt) demotes; position_share 0.5 allows $5.00
+  W_paper 1.05: W_real below 0.8378 demotes -> a single lost binary position of more than 16.2% of the real stake ($1.62 on a $10 bunt) demotes; position_share 0.5 allows $5.00

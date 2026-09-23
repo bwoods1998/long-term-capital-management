@@ -1,0 +1,83 @@
+settle sample: 2026-09-23T16:15:36.602Z huang-h427345 {"book":"kalshi-shadow","cost":"20.84000000","instrument":{"asset_class":"event","currency":"USD","expiry":null,"market_id":"KXBTC15M-26SEP231215-15","multiplier":"1","right":"yes","strike":null,"symbol":"KXBTC15M-26SEP231215-15","venue":"kalshi-shadow"},"opened_at":"2026-09-23T16:05:05.190Z","payout":"50.00000000","pnl":"29.16000000","quantity":"50","real_money":false,"reason":"Fade completed-window BTC order flow after the fifteen-minute reference resets; ignore the unreliable displayed volume field and cap the ask including taker fees.","result":"yes"}
+keys: ['book', 'cost', 'instrument', 'opened_at', 'payout', 'pnl', 'quantity', 'real_money', 'reason', 'result']
+
+=== book.settle totals by (agent, book) sorted by realized/pnl
+  huang-h51fdd3-2        kalshi-shadow  n=  4  {'cost': 19.6, 'payout': 30.0, 'pnl': 10.4}
+  meriwether-h2d625d     kalshi-shadow  n=  7  {'cost': 72.81, 'payout': 80.0, 'pnl': 7.19}
+  mullins-2              kalshi-shadow  n= 11  {'cost': 105.1, 'payout': 112.0, 'pnl': 6.9}
+  meriwether-12          kalshi-shadow  n=  2  {'cost': 19.46, 'payout': 26.0, 'pnl': 6.54}
+  mullins-6              kalshi-shadow  n= 11  {'cost': 105.3, 'payout': 111.0, 'pnl': 5.7}
+  mullins-2              kalshi         n= 10  {'cost': 90.11, 'payout': 95.0, 'pnl': 4.89}
+  meriwether-25          kalshi-shadow  n=  7  {'cost': 66.71, 'payout': 70.0, 'pnl': 3.29}
+  meriwether-16          kalshi-shadow  n=  1  {'cost': 9.8, 'payout': 13.0, 'pnl': 3.2}
+  meriwether-14          kalshi-shadow  n=  1  {'cost': 9.8, 'payout': 13.0, 'pnl': 3.2}
+  hawkins-2              kalshi-shadow  n=  5  {'cost': 47.0, 'payout': 50.0, 'pnl': 3.0}
+  hawkins-3              kalshi-shadow  n=  5  {'cost': 47.3, 'payout': 50.0, 'pnl': 2.7}
+  mullins-13             kalshi-shadow  n=  4  {'cost': 37.5, 'payout': 40.0, 'pnl': 2.5}
+  meriwether-27          kalshi-shadow  n=  4  {'cost': 38.55, 'payout': 41.0, 'pnl': 2.45}
+  meriwether-34          kalshi-shadow  n=  4  {'cost': 38.55, 'payout': 41.0, 'pnl': 2.45}
+  meriwether-35          kalshi-shadow  n=  4  {'cost': 38.55, 'payout': 41.0, 'pnl': 2.45}
+  hawkins-19             kalshi-shadow  n=  5  {'cost': 47.7, 'payout': 50.0, 'pnl': 2.3}
+  meriwether-36          kalshi-shadow  n=  6  {'cost': 57.81, 'payout': 60.0, 'pnl': 2.19}
+  meriwether-30          kalshi-shadow  n=  3  {'cost': 28.84, 'payout': 31.0, 'pnl': 2.16}
+  huang-6                kalshi-shadow  n= 12  {'cost': 115.42, 'payout': 117.0, 'pnl': 1.58}
+  meriwether-4           kalshi-shadow  n=  2  {'cost': 18.5, 'payout': 20.0, 'pnl': 1.5}
+  mullins-5              kalshi-shadow  n=  2  {'cost': 18.8, 'payout': 20.0, 'pnl': 1.2}
+  mullins-4              kalshi-shadow  n=  2  {'cost': 18.8, 'payout': 20.0, 'pnl': 1.2}
+  leahy                  kalshi-shadow  n=  1  {'cost': 9.9, 'payout': 11.0, 'pnl': 1.1}
+  mullins-7              kalshi-shadow  n=  2  {'cost': 19.0, 'payout': 20.0, 'pnl': 1.0}
+  hufschmid-32           kalshi-shadow  n=  2  {'cost': 19.0, 'payout': 20.0, 'pnl': 1.0}
+  mullins-6              kalshi         n=  2  {'cost': 19.0, 'payout': 20.0, 'pnl': 1.0}
+  huang-hd8ff7c          kalshi-shadow  n=  1  {'cost': 11.06, 'payout': 12.0, 'pnl': 0.94}
+  mullins-11             kalshi-shadow  n=  1  {'cost': 9.4, 'payout': 10.0, 'pnl': 0.6}
+  mullins-12             kalshi-shadow  n=  1  {'cost': 9.4, 'payout': 10.0, 'pnl': 0.6}
+  hufschmid-31           kalshi-shadow  n=  1  {'cost': 9.6, 'payout': 10.0, 'pnl': 0.4}
+  huang-6                kalshi         n=  7  {'cost': 38.67, 'payout': 39.0, 'pnl': 0.33}
+  mullins-18             kalshi-shadow  n=  1  {'cost': 9.7, 'payout': 10.0, 'pnl': 0.3}
+  huang-h51fdd3-2        kalshi         n=  1  {'cost': 1.52, 'payout': 0.0, 'pnl': -1.52}
+  huang-h427345          kalshi         n=  1  {'cost': 2.55, 'payout': 0.0, 'pnl': -2.55}
+  meriwether-h42bdbb     kalshi-shadow  n=  6  {'cost': 69.44, 'payout': 64.0, 'pnl': -5.44}
+  mullins-8              kalshi-shadow  n=  6  {'cost': 55.8, 'payout': 50.0, 'pnl': -5.8}
+  mullins-9              kalshi-shadow  n=  5  {'cost': 40.19, 'payout': 34.0, 'pnl': -6.19}
+  meriwether             kalshi-shadow  n=  6  {'cost': 58.25, 'payout': 52.0, 'pnl': -6.25}
+  mullins-3              kalshi-shadow  n=  6  {'cost': 57.8, 'payout': 51.0, 'pnl': -6.8}
+  mullins-10             kalshi-shadow  n=  5  {'cost': 48.3, 'payout': 41.0, 'pnl': -7.3}
+  hawkins-9              kalshi-shadow  n=  4  {'cost': 38.0, 'payout': 30.0, 'pnl': -8.0}
+  mullins-14             kalshi-shadow  n=  3  {'cost': 29.2, 'payout': 21.0, 'pnl': -8.2}
+  hawkins-15             kalshi-shadow  n=  5  {'cost': 48.3, 'payout': 40.0, 'pnl': -8.3}
+  meriwether-37          kalshi-shadow  n=  3  {'cost': 28.47, 'payout': 20.0, 'pnl': -8.47}
+  hawkins-8              kalshi-shadow  n=  3  {'cost': 28.9, 'payout': 20.0, 'pnl': -8.9}
+  meriwether-32          kalshi-shadow  n=  1  {'cost': 9.3, 'payout': 0.0, 'pnl': -9.3}
+  huang-h427345          kalshi-shadow  n= 10  {'cost': 222.67, 'payout': 213.0, 'pnl': -9.67}
+  hufschmid-28           kalshi-shadow  n=  1  {'cost': 9.68, 'payout': 0.0, 'pnl': -9.68}
+  meriwether-h42bdbb-2   kalshi-shadow  n=  3  {'cost': 33.95, 'payout': 24.0, 'pnl': -9.95}
+  huang-l23cdb7          kalshi-shadow  n=  3  {'cost': 27.11, 'payout': 16.0, 'pnl': -11.11}
+  huang-h609d6f          kalshi-shadow  n=  2  {'cost': 23.43, 'payout': 12.0, 'pnl': -11.43}
+  huang-h6d3302          kalshi-shadow  n= 15  {'cost': 139.71, 'payout': 128.0, 'pnl': -11.71}
+  hilibrand-2            kalshi-shadow  n= 59  {'cost': 558.1, 'payout': 544.0, 'pnl': -14.1}
+  meriwether-39          kalshi-shadow  n=  6  {'cost': 57.51, 'payout': 42.0, 'pnl': -15.51}
+  huang-h6d3302-2        kalshi-shadow  n=  6  {'cost': 24.06, 'payout': 8.0, 'pnl': -16.06}
+  hilibrand              kalshi-shadow  n= 20  {'cost': 190.2, 'payout': 172.0, 'pnl': -18.2}
+  hufschmid-30           kalshi-shadow  n=  2  {'cost': 18.3, 'payout': 0.0, 'pnl': -18.3}
+  huang                  kalshi-shadow  n= 29  {'cost': 277.37, 'payout': 256.0, 'pnl': -21.37}
+  huang-h4ee182          kalshi-shadow  n=  1  {'cost': 21.6, 'payout': 0.0, 'pnl': -21.6}
+  meriwether-17          kalshi-shadow  n= 11  {'cost': 105.8, 'payout': 83.0, 'pnl': -22.8}
+  hawkins                kalshi-shadow  n= 12  {'cost': 114.2, 'payout': 91.0, 'pnl': -23.2}
+  huang-3                kalshi-shadow  n= 16  {'cost': 144.98, 'payout': 119.0, 'pnl': -25.98}
+  meriwether-hadd32b     kalshi-shadow  n=  7  {'cost': 89.12, 'payout': 60.0, 'pnl': -29.12}
+  huang-5                kalshi-shadow  n= 11  {'cost': 103.31, 'payout': 70.0, 'pnl': -33.31}
+  huang-7                kalshi-shadow  n= 11  {'cost': 118.55, 'payout': 85.0, 'pnl': -33.55}
+  huang-h51fdd3          kalshi-shadow  n=  6  {'cost': 38.28, 'payout': 0.0, 'pnl': -38.28}
+  huang-4                kalshi-shadow  n= 52  {'cost': 496.56, 'payout': 450.0, 'pnl': -46.56}
+  hilibrand-h6ca596      kalshi-shadow  n=  3  {'cost': 60.37, 'payout': 0.0, 'pnl': -60.37}
+  hilibrand-hc4567e      kalshi-shadow  n=  9  {'cost': 204.45, 'payout': 111.0, 'pnl': -93.45}
+
+=== Alpaca fills: realized by (book) split by House-close vs agent exit (reason text)
+   ('alpaca', 'agent') realized= -0.51 fills= 2
+   ('alpaca-paper', 'House-close') realized= -13.77 fills= 22
+   ('alpaca-paper', 'agent') realized= -100.34 fills= 477
+
+=== Kalshi settle by book split by whether the agent was dead at settlement (House wind-down)
+   ('kalshi', 'living') realized= 2.15 n= 21
+   ('kalshi-shadow', 'dead-agent(House)') realized= -40.29 n= 53
+   ('kalshi-shadow', 'living') realized= -563.94 n= 407

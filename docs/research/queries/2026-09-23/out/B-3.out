@@ -1,0 +1,130 @@
+=== every real venue fill since 2026-09-21 (at | agent | book | side | symbol | q | px | notional | fee | liq | realized | stake then | size % of stake | reason)
+09-21T16:06 | huang-6 | kalshi | buy | KXDOGE15M-26SEP211215-15 | 10 | 0.0055 | $0.05 | fee 0.000 | taker | market | realized None | stake $25.00 | 0% | Lagged DOGE/USD spot momentum was 1.731% over six 5-minute bars; buy Y
+09-21T18:33 | huang-6 | kalshi | buy | KXDOGE15M-26SEP211445-45 | 9 | 0.5099 | $4.59 | fee 0.158 | taker | market | realized None | stake $25.00 | 18% | Lagged DOGE/USD spot momentum was 1.713% over six 5-minute bars; buy Y
+09-21T19:23 | huang-6 | kalshi | buy | KXETH15M-26SEP211530-30 | 11 | 0.7400 | $8.14 | fee 0.147 | taker | market | realized None | stake $25.00 | 33% | Lagged ETH/USD spot momentum was 0.385% over six 5-minute bars; buy YE
+09-21T21:56 | huang-6 | kalshi | buy | KXDOGE15M-26SEP211800-00 | 4 | 0.6900 | $2.76 | fee 0.060 | taker | market | realized None | stake $25.00 | 11% | Lagged DOGE/USD spot momentum was 0.607% over six 5-minute bars; buy Y
+09-21T22:42 | huang-6 | kalshi | buy | KXSOL15M-26SEP211845-45 | 8 | 0.7775 | $6.22 | fee 0.097 | taker | market | realized None | stake $25.00 | 25% | Lagged SOL/USD spot momentum was 0.248% over six 5-minute bars; buy YE
+09-21T23:11 | huang-6 | kalshi | buy | KXXRP15M-26SEP211915-15 | 11 | 0.6100 | $6.71 | fee 0.183 | taker | market | realized None | stake $25.00 | 27% | Lagged XRP/USD spot momentum was 0.718% over six 5-minute bars; buy YE
+09-21T23:48 | mullins-2 | kalshi | buy | KXRAIN-26SEP21-HOU | 7 | 0.9600 | $6.72 | fee 0.000 | maker | limit | realized None | stake $25.00 | 27% | Resting a post-only NO bid for 7 at 0.96 on KXRAIN-26SEP21-HOU: the fa
+09-22T00:49 | mullins-2 | kalshi | buy | KXRAIN-26SEP21-CHI | 7 | 0.9700 | $6.79 | fee 0.000 | maker | limit | realized None | stake $25.00 | 27% | Resting a post-only NO bid for 7 at 0.97 on KXRAIN-26SEP21-CHI: the fa
+09-22T01:38 | huang-6 | kalshi | buy | KXDOGE15M-26SEP212145-45 | 16 | 0.5800 | $9.28 | fee 0.272 | taker | market | realized None | stake $60.00 | 15% | Lagged DOGE/USD spot momentum was 0.509% over six 5-minute bars; buy Y
+09-22T02:08 | mullins-2 | kalshi | buy | KXRAIN-26SEP21-LV | 10 | 0.9600 | $9.60 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only NO bid for 10 at 0.96 on KXRAIN-26SEP21-LV: the fa
+09-22T02:50 | mullins-2 | kalshi | buy | KXRAIN-26SEP21-ATL | 10 | 0.9600 | $9.60 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only NO bid for 10 at 0.96 on KXRAIN-26SEP21-ATL: the f
+09-22T05:52 | mullins-2 | kalshi | buy | KXHIGHNY-26SEP22-B69.5 | 0.09 | 0.9600 | $0.09 | fee 0.000 | maker | limit | realized None | stake $60.00 | 0% | Resting a post-only NO bid for 10 at 0.96 on KXHIGHNY-26SEP22-B69.5: t
+09-22T11:06 | mullins-2 | kalshi | buy | KXHIGHNY-26SEP22-B69.5 | 9.91 | 0.9600 | $9.51 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only NO bid for 10 at 0.96 on KXHIGHNY-26SEP22-B69.5: t
+09-22T15:42 | mullins-2 | kalshi | buy | KXHIGHTATL-26SEP22-B91.5 | 9 | 0.9500 | $8.55 | fee 0.000 | maker | limit | realized None | stake $60.00 | 14% | Resting a post-only NO bid for 10 at 0.95 on KXHIGHTATL-26SEP22-B91.5:
+09-22T16:17 | mullins-2 | kalshi | buy | KXHIGHTATL-26SEP22-B91.5 | 1 | 0.9500 | $0.95 | fee 0.000 | maker | limit | realized None | stake $60.00 | 2% | Resting a post-only NO bid for 10 at 0.95 on KXHIGHTATL-26SEP22-B91.5:
+09-22T20:02 | mullins-2 | kalshi | buy | KXHIGHTATL-26SEP22-B89.5 | 5.16 | 0.9600 | $4.95 | fee 0.000 | maker | limit | realized None | stake $60.00 | 8% | Resting a post-only NO bid for 10 at 0.96 on KXHIGHTATL-26SEP22-B89.5:
+09-22T20:07 | mullins-2 | kalshi | buy | KXHIGHTATL-26SEP22-B89.5 | 4.84 | 0.9600 | $4.65 | fee 0.000 | maker | limit | realized None | stake $60.00 | 8% | Resting a post-only NO bid for 10 at 0.96 on KXHIGHTATL-26SEP22-B89.5:
+09-22T20:19 | mullins-2 | kalshi | buy | KXHIGHAUS-26SEP22-B97.5 | 11 | 0.9000 | $9.90 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only NO bid for 11 at 0.90 on KXHIGHAUS-26SEP22-B97.5: 
+09-23T00:28 | mullins-2 | kalshi | buy | KXRAIN-26SEP22-SATX | 10 | 0.9300 | $9.30 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only NO bid for 10 at 0.93 on KXRAIN-26SEP22-SATX: the 
+09-23T01:42 | mullins-6 | kalshi | buy | KXHIGHCHI-26SEP23-T63 | 10 | 0.9600 | $9.60 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting post-only NO bid at 0.96; favourite in target band, integer st
+09-23T02:07 | mullins-6 | kalshi | buy | KXRAIN-26SEP22-AUS | 10 | 0.9700 | $9.70 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting post-only NO bid at 0.97; favourite in target band, integer st
+09-23T02:17 | hawkins-19 | kalshi | buy | KXWTI-26SEP2314-T85.99 | 10 | 0.9300 | $9.30 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only YES bid for 10 at 0.93 on KXWTI-26SEP2314-T85.99: 
+09-23T02:43 | mullins-6 | kalshi | buy | KXHIGHMIA-26SEP23-T89 | 10 | 0.9200 | $9.20 | fee 0.000 | maker | limit | realized None | stake $60.00 | 15% | Resting post-only NO bid at 0.92; favourite in target band, integer st
+09-23T03:01 | mullins-6 | kalshi | buy | KXHIGHLAX-26SEP23-T85 | 0.56 | 0.9400 | $0.53 | fee 0.000 | maker | limit | realized None | stake $60.00 | 1% | Resting post-only NO bid at 0.94; favourite in target band, integer st
+09-23T03:04 | mullins-6 | kalshi | buy | KXHIGHLAX-26SEP23-T85 | 9.44 | 0.9400 | $8.87 | fee 0.000 | maker | limit | realized None | stake $60.00 | 15% | Resting post-only NO bid at 0.94; favourite in target band, integer st
+09-23T03:19 | mullins-6 | kalshi | buy | KXRAIN-26SEP22-SATX | 10 | 0.9300 | $9.30 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting post-only NO bid at 0.93; favourite in target band, integer st
+09-23T03:45 | hawkins-19 | kalshi | buy | KXWTI-26SEP2314-T86.49 | 11 | 0.9000 | $9.90 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only YES bid for 11 at 0.90 on KXWTI-26SEP2314-T86.49: 
+09-23T05:08 | mullins-2 | kalshi | buy | KXRAIN-26SEP22-AUS | 10 | 0.9500 | $9.50 | fee 0.000 | maker | limit | realized None | stake $60.00 | 16% | Resting a post-only NO bid for 10 at 0.95 on KXRAIN-26SEP22-AUS: the f
+09-23T09:35 | mullins-6 | kalshi | buy | KXHIGHLAX-26SEP23-T78 | 10 | 0.9500 | $9.50 | fee 0.000 | maker | limit | realized None | stake $56.74 | 17% | Resting post-only NO bid at 0.95; favourite in target band, integer st
+09-23T09:49 | hawkins-19 | kalshi | buy | KXGOLDD-26SEP2317-T4275 | 9 | 0.9200 | $8.28 | fee 0.000 | maker | limit | realized None | stake $57.40 | 14% | Resting a post-only YES bid for 10 at 0.92 on KXGOLDD-26SEP2317-T4275:
+09-23T11:26 | haghani-37 | alpaca | buy | LTC-USD | 0.192333 | 62.3919 | $12.00 | fee 0.000 | taker | limit | realized None | stake $25.00 | 48% | Resting a limit buy of $12.00 of LTC/USD at 62.39: 1.7% under the 32-b
+09-23T12:11 | huang-h51fdd3-2 | kalshi | buy | KXDOGE15M-26SEP230815-15 | 2 | 0.7600 | $1.52 | fee 0.000 | maker | limit | realized None | stake $10.00 | 15% | Rest a small maker bid only in the direction of confirmed recent spot 
+09-23T14:01 | meriwether-h2d625d | kalshi | buy | KXMLBTOTAL-26SEP231840STLPIT-8 | 5 | 0.5400 | $2.70 | fee 0.043 | taker | limit | realized None | stake $10.00 | 27% | Central over-total may carry a scoring-entertainment premium; buy the 
+09-23T14:19 | haghani-37 | alpaca | sell | LTC-USD | 0.191852 | 60.0723 | $11.52 | fee 0.030 | taker | market | realized -0.50501961 | stake $25.00 | 46% | Market-selling all LTC/USD and cancelling the resting sell, stop: the 
+09-23T14:32 | meriwether-h2d625d | kalshi | buy | KXMLBTOTAL-26SEP232040AZCOL-12 | 5 | 0.5400 | $2.70 | fee 0.043 | taker | limit | realized None | stake $10.00 | 27% | Central over-total may carry a scoring-entertainment premium; buy the 
+09-23T14:48 | huang-h427345 | kalshi | buy | KXBTC15M-26SEP231100-00 | 4 | 0.6200 | $2.48 | fee 0.066 | taker | market | realized None | stake $10.00 | 25% | Fade completed-window BTC order flow after the fifteen-minute referenc
+09-23T15:02 | meriwether-h2d625d | kalshi | buy | KXMLBTOTAL-26SEP231840MILPHI-8 | 5 | 0.5400 | $2.70 | fee 0.043 | taker | limit | realized None | stake $10.00 | 27% | Central over-total may carry a scoring-entertainment premium; buy the 
+09-23T15:12 | mullins-2 | kalshi | buy | KXHIGHLAX-26SEP23-B84.5 | 3 | 0.9600 | $2.88 | fee 0.000 | maker | limit | realized None | stake $5.11 | 56% | Resting a post-only NO bid for 3 at 0.96 on KXHIGHLAX-26SEP23-B84.5: t
+09-23T15:13 | mullins-2 | kalshi | buy | KXHIGHLAX-26SEP23-T85 | 3 | 0.9700 | $2.91 | fee 0.000 | maker | limit | realized None | stake $5.11 | 57% | Resting a post-only NO bid for 3 at 0.97 on KXHIGHLAX-26SEP23-T85: the
+09-23T15:16 | mullins-2 | kalshi | buy | KXHIGHLAX-26SEP23-T78 | 3 | 0.9700 | $2.91 | fee 0.000 | maker | limit | realized None | stake $5.11 | 57% | Resting a post-only NO bid for 3 at 0.97 on KXHIGHLAX-26SEP23-T78: the
+fills by (book, liquidity): n, notional, fees: {('kalshi', 'taker'): (11, 48.33, 1.112), ('kalshi', 'maker'): (27, 184.51, 0.0), ('alpaca', 'taker'): (2, 23.52, 0.03)}
+
+=== every real settlement (at | agent | market | right | result | q | cost | payout | pnl | held h)
+09-21T16:15 | huang-6 | KXDOGE15M-26SEP211215-15 | yes | no | 10 | $0.06 | $0.00 | -0.06 | 0.1h
+09-21T18:45 | huang-6 | KXDOGE15M-26SEP211445-45 | yes | yes | 9 | $4.75 | $9.00 | +4.25 | 0.2h
+09-21T19:30 | huang-6 | KXETH15M-26SEP211530-30 | yes | yes | 11 | $8.29 | $11.00 | +2.71 | 0.1h
+09-21T22:00 | huang-6 | KXDOGE15M-26SEP211800-00 | yes | no | 4 | $2.82 | $0.00 | -2.82 | 0.1h
+09-21T22:46 | huang-6 | KXSOL15M-26SEP211845-45 | yes | yes | 8 | $6.32 | $8.00 | +1.68 | 0.1h
+09-21T23:15 | huang-6 | KXXRP15M-26SEP211915-15 | yes | yes | 11 | $6.89 | $11.00 | +4.11 | 0.1h
+09-22T01:46 | huang-6 | KXDOGE15M-26SEP212145-45 | yes | no | 16 | $9.55 | $0.00 | -9.55 | 0.1h
+09-22T11:32 | mullins-2 | KXRAIN-26SEP21-ATL | no | no | 10 | $9.60 | $10.00 | +0.40 | 8.7h
+09-22T12:31 | mullins-2 | KXRAIN-26SEP21-CHI | no | no | 7 | $6.79 | $7.00 | +0.21 | 11.7h
+09-22T12:31 | mullins-2 | KXRAIN-26SEP21-HOU | no | no | 7 | $6.72 | $7.00 | +0.28 | 12.7h
+09-22T14:31 | mullins-2 | KXRAIN-26SEP21-LV | no | no | 10 | $9.60 | $10.00 | +0.40 | 12.4h
+09-23T12:16 | huang-h51fdd3-2 | KXDOGE15M-26SEP230815-15 | yes | no | 2 | $1.52 | $0.00 | -1.52 | 0.1h
+09-23T14:11 | mullins-2 | KXHIGHNY-26SEP22-B69.5 | no | no | 10 | $9.60 | $10.00 | +0.40 | 32.3h
+09-23T14:11 | mullins-2 | KXHIGHAUS-26SEP22-B97.5 | no | no | 11 | $9.90 | $11.00 | +1.10 | 17.9h
+09-23T14:13 | mullins-2 | KXHIGHTATL-26SEP22-B89.5 | no | no | 10 | $9.60 | $10.00 | +0.40 | 18.2h
+09-23T14:13 | mullins-2 | KXHIGHTATL-26SEP22-B91.5 | no | no | 10 | $9.50 | $10.00 | +0.50 | 22.5h
+09-23T14:31 | mullins-2 | KXRAIN-26SEP22-AUS | no | no | 10 | $9.50 | $10.00 | +0.50 | 9.4h
+09-23T14:31 | mullins-6 | KXRAIN-26SEP22-AUS | no | no | 10 | $9.70 | $10.00 | +0.30 | 12.4h
+09-23T14:31 | mullins-2 | KXRAIN-26SEP22-SATX | no | no | 10 | $9.30 | $10.00 | +0.70 | 14.1h
+09-23T14:31 | mullins-6 | KXRAIN-26SEP22-SATX | no | no | 10 | $9.30 | $10.00 | +0.70 | 11.2h
+09-23T15:01 | huang-h427345 | KXBTC15M-26SEP231100-00 | no | yes | 4 | $2.55 | $0.00 | -2.55 | 0.2h
+settlements per agent (n, pnl, wins): {'huang-6': (7, 0.33, 4), 'mullins-2': (10, 4.89, 10), 'huang-h51fdd3-2': (1, -1.52, 0), 'mullins-6': (2, 1.0, 2), 'huang-h427345': (1, -2.55, 0)}
+real realized P&L since grant: $+1.65; venue fees on real fills $1.14
+
+=== promotions to rung 2 (bunt) with evidence at promotion
+09-21T14:50 huang-6 promote E=None Wp=None Wr=None trades=None settled=None | completed-exposure screen passed: closed trades, positive marked equity and bounded drawdown
+09-21T22:37 mullins-2 promote E=None Wp=None Wr=None trades=None settled=None | it cleared the screen: 2 active day blocks, 6 closed trades, growth above zero and a drawdown under 
+09-23T00:03 mullins-6 promote E=None Wp=None Wr=None trades=None settled=None | it cleared the screen: 2 active day blocks, 8 closed trades, growth above zero and a drawdown under 
+09-23T01:38 meriwether-35 promote E=None Wp=None Wr=None trades=None settled=None | it cleared the screen: 1 active day blocks, 3 closed trades, growth above zero (the block in progres
+09-23T01:38 hawkins-19 promote E=None Wp=None Wr=None trades=None settled=None | it cleared the screen: 1 active day blocks, 5 closed trades, growth above zero (the block in progres
+09-23T04:52 meriwether-h2d625d promote E=None Wp=None Wr=None trades=None settled=None | it cleared the screen: 1 active day blocks, 5 closed trades, growth above zero (the block in progres
+09-23T08:06 haghani-37 promote E=None Wp=None Wr=None trades=None settled=None | it cleared the screen: 3 active hour blocks, 3 closed trades, growth above zero (the block in progre
+09-23T12:10 huang-h51fdd3-2 promote E=1.025671 Wp=1.052 Wr=1.0 trades=4 settled=4 | E 1.0257 is at or above 1.01 on 4 closed trades
+09-23T12:50 meriwether-h2d625d promote E=1.010007 Wp=1.020115 Wr=1.0 trades=7 settled=7 | bunt: E 1.0100 is at or above 1.01 on 7 closed trades
+09-23T13:35 huang-h427345 promote E=1.01617 Wp=1.032602 Wr=1.0 trades=7 settled=7 | bunt: E 1.0162 is at or above 1.01 on 7 closed trades
+
+=== demotions / sizes
+09-21T18:41 hilibrand-2 die rung=1 to=None stake=None moved=None | not profitable on paper after 42 active blocks (-2.7%); 30 is the chance a paper seat gives
+09-21T18:41 huang die rung=1 to=None stake=None moved=None | down 10.7% on paper after 21 active blocks; paper keeps no agent down 10%
+09-21T18:41 huang-3 die rung=1 to=None stake=None moved=None | down 13.0% on paper after 11 active blocks; paper keeps no agent down 10%
+09-21T19:04 huang-5 die rung=1 to=None stake=None moved=None | down 16.7% on paper after 10 active blocks; paper keeps no agent down 10%
+09-21T20:01 haghani-2 die rung=1 to=None stake=None moved=None | not profitable on paper after 31 active blocks (-0.3%); 30 is the chance a paper seat gives
+09-22T01:19 mullins-2 size rung=2 to=None stake=60 moved=35 | micro stake raised to the constitution's
+09-22T01:19 huang-6 size rung=2 to=None stake=60 moved=35 | micro stake raised to the constitution's
+09-22T02:03 huang-6 die rung=2 to=None stake=None moved=None | drawdown of 33% is past the 30% limit
+09-22T06:04 huang-7 die rung=1 to=None stake=None moved=None | down 16.8% on paper after 10 active blocks; paper keeps no agent down 10%
+09-23T01:38 meriwether-35 demote rung=None to=1 stake=None moved=None | the frontier audit after promotion vetoed it: The packet meets the settled-day paper screen, but unresolved ex
+09-23T04:52 meriwether-h2d625d demote rung=None to=1 stake=None moved=None | the frontier audit after promotion vetoed it: The bounded experiment should wait because the recorded taker fe
+09-23T08:30 mullins-2 size rung=2 to=None stake=10 moved=-3.89 | bunt stake follows the evidence (E 1.1144)
+09-23T08:30 mullins-6 size rung=2 to=None stake=10 moved=-3.26 | bunt stake follows the evidence (E 1.0164)
+09-23T08:30 hawkins-19 size rung=2 to=None stake=10 moved=-2.60 | bunt stake follows the evidence (E 1.0208)
+09-23T08:30 haghani-37 size rung=2 to=None stake=25 moved=-31.21 | bunt stake follows the evidence (E 1.0005)
+09-23T09:37 mullins-6 size rung=2 to=None stake=10 moved=-0.04 | bunt stake follows the evidence (E 1.0097)
+09-23T09:54 hawkins-19 size rung=2 to=None stake=10 moved=-0.05 | bunt stake follows the evidence (E 1.0190)
+09-23T10:00 haghani-37 size rung=2 to=None stake=25 moved=-3.79 | bunt stake follows the evidence (E 0.9994)
+09-23T10:06 hawkins-19 size rung=2 to=None stake=10 moved=-0.92 | bunt stake follows the evidence (E 1.0206)
+09-23T11:07 hawkins-19 size rung=2 to=None stake=10 moved=-28.95 | bunt stake follows the evidence (E 1.0243)
+09-23T12:21 huang-h51fdd3-2 size rung=2 to=None stake=10 moved=1.52 | bunt stake follows the evidence (E 0.8698)
+09-23T14:03 huang-h51fdd3 die rung=1 to=None stake=None moved=None | down 19.1% on paper after 6 active blocks; paper keeps no agent down 10%
+09-23T14:14 mullins-2 size rung=2 to=None stake=10 moved=-41.00 | bunt stake follows the evidence (E 1.1580)
+09-23T14:35 mullins-2 size rung=2 to=None stake=10 moved=-10.00 | bunt stake follows the evidence (E 1.1798)
+09-23T14:35 mullins-6 size rung=2 to=None stake=10 moved=-20.00 | bunt stake follows the evidence (E 1.0564)
+09-23T14:57 huang-h427345 demote rung=None to=1 stake=None moved=None | E 0.7157 fell below 0.8585 (the bunt line with hysteresis)
+09-23T15:02 haghani-37 demote rung=None to=1 stake=None moved=None | its growth has decayed from the record that earned this rung
+09-23T16:02 hilibrand-hc4567e die rung=1 to=None stake=None moved=None | drawdown of 43% is past the 40% limit
+
+=== last board 2026-09-23T16:25:19.759Z throttle=False envelope={'alpaca': {'capital_usd': '500.00', 'committed_usd': '0.50501961'}, 'kalshi': {'capital_usd': '517.75', 'committed_usd': '98.64430000'}}
+agent | venue | band | stake | W_paper | W_real | E | trades | real_trades | U5 stake | real closed trades total | first real at | real trades/day | days to 8 trades | real P&L
+hawkins-19 | kalshi | bunt | 27.48 | 1.0060 | 0.9920 | 0.9950 | 5 | 0 | $10.00 | 0 | 2026-09-23T02:17:05.680Z | 0.00/d | inf d | $+0.00
+huang-h51fdd3-2 | kalshi | bunt | 11.52 | 1.0520 | 0.8480 | 0.8698 | 4 | 1 | $10.00 | 1 | 2026-09-23T12:11:51.781Z | 5.62/d | 1.2 d | $-1.52
+meriwether-h2d625d | kalshi | bunt | 10 | 1.0269 | 0.9953 | 1.0086 | 7 | 0 | $10.00 | 0 | 2026-09-23T14:01:41.946Z | 0.00/d | inf d | $+0.00
+mullins-2 | kalshi | bunt | 5.11 | 1.0345 | 1.1578 | 1.1776 | 11 | 10 | $11.58 | 10 | 2026-09-21T23:48:52.488Z | 5.90/d | 0.0 d | $+4.89
+mullins-6 | kalshi | bunt | 36.70 | 1.0285 | 1.0383 | 1.0530 | 11 | 2 | $10.38 | 2 | 2026-09-23T01:42:02.844Z | 3.25/d | 1.8 d | $+1.00
+
+=== what-if bunt_at 1.005 / bunt_min_trades 3 (Kalshi: settled>=2 proxy = trades>=2): paper agents that would have qualified but did not under 1.01/5(3)
+meriwether-35 (kalshi,kalshi-sports) qualified-low at 09-23T08:30: Wp 1.0117 E 1.0058 trades 4 -> gone from board (died 2026-09-23T13:39:01.967Z displaced)
+meriwether-36 (kalshi,kalshi-sports) qualified-low at 09-23T08:30: Wp 1.0110 E 1.0055 trades 6 settled 6 -> now Wp 1.0105 E 1.0052 trades 6 band paper; forward log -0.0005
+meriwether-h2d625d (kalshi,kalshi-sports) qualified-low at 09-23T12:38: Wp 1.0111 E 1.0055 trades 7 settled 7 -> now Wp 1.0269 E 1.0086 trades 7 band bunt; forward log +0.0155
+mullins-13 (kalshi,kalshi-weather) qualified-low at 09-23T14:03: Wp 1.0125 E 1.0062 trades 4 settled 4 -> now Wp 1.0125 E 1.0062 trades 4 band paper; forward log +0.0000
+haghani-56 (alpaca,alpaca-crypto-alts) qualified-low at 09-23T16:07: Wp 1.0123 E 1.0061 trades 4 settled 0 -> now Wp 1.0112 E 1.0056 trades 4 band paper; forward log -0.0011
+lower-line cohort: 5 agents; forward: 1 up, 2 down, mean forward log +0.0035, median -0.0002
+
+=== on the last board, paper agents meeting the lower line now:
+haghani-56 alpaca alpaca-crypto-alts Wp 1.011185 E 1.005577 trades 4 settled 0 meets 1.01/5: False
+meriwether-36 kalshi kalshi-sports Wp 1.010466 E 1.005219 trades 6 settled 6 meets 1.01/5: False
+mullins-13 kalshi kalshi-weather Wp 1.0125 E 1.006231 trades 4 settled 4 meets 1.01/5: False

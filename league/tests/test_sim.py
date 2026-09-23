@@ -237,7 +237,7 @@ class SurfaceTest(SimCase):
         cases = [
             self.intent(Instrument("crypto", "BTC-USD", "alpaca", market_id="BTC/USD"), "buy", "0.0005"),
             self.intent(Instrument("event", "KXBTCD-X", VENUE, market_id="KXBTCD-X", right="yes"), "buy", "1"),
-            self.intent(SPY, "buy", "1.5", order_type="limit", limit_price="50", time_in_force="day"),
+            self.intent(SPY, "buy", "1.5", order_type="limit", limit_price="50", time_in_force="gtc"),  # fractional shares are day orders
             self.intent(BTC, "buy", "0.00000000015"),
         ]
         for intent in cases:
@@ -255,6 +255,19 @@ class SurfaceTest(SimCase):
         self.touch.set(slashed, "80000", "80010")
         self.broker.get_order(self.broker.submit(self.intent(slashed, "buy", "0.0005")).id)
         self.assertEqual(self.held(), {"BTCUSD": D("0.0009975")})
+
+
+class FractionalLimitTest(SimCase):
+    def test_a_fractional_equity_limit_order_rests_as_a_day_order_and_no_other(self):
+        """A7 (Sept 23, 2026): the practice simulator takes what Alpaca takes, a fractional limit order with `day`."""
+        order = self.broker.submit(self.intent(SPY, "buy", "0.25", order_type="limit", limit_price="49.98", time_in_force="day"))
+        self.assertEqual((order.status, order.quantity), ("accepted", D("0.25")))
+        self.assertEqual(self.broker.get_order(order.id).status, "accepted")  # resting under the ask, not rounded away
+        with self.assertRaises(RejectedOrder) as refused:
+            self.broker.submit(self.intent(SPY, "buy", "0.25", order_type="limit", limit_price="49.98", time_in_force="gtc"))
+        self.assertIn("day order", str(refused.exception))
+        whole = self.broker.submit(self.intent(SPY, "buy", "1", order_type="limit", limit_price="49.98", time_in_force="gtc"))
+        self.assertEqual(whole.status, "accepted")
 
 
 class PersistenceTest(SimCase):

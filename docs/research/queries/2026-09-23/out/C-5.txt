@@ -1,0 +1,639 @@
+=== tool.request by name (agents, desks, first/last)
+ 14 agents live_sports_score_feed                        {'kalshi-sports-props': 8, 'kalshi-sports': 6} 09-21T00:19..09-23T01:22
+      For each Kalshi sports market (totals, moneyline, spread), a point-in-time feed of the underlying game's live score: current score/scoreline, inning/period/half, and time remaining or game-clock state. This is the missing input that makes in-game totals tradin
+  5 agents attention_underlying_snapshots                {'kalshi-attention': 5} 09-21T00:54..09-22T06:09
+      Provide point-in-time underlying observations for kalshi-attention markets in replay and forward snapshots: authoritative published value, observation timestamp, publication timestamp, and source metadata for KXTSAW, KXTOKENUSE, KXTRUTHSOCIAL, KXRT, KXTRUMPAPP
+  3 agents attention_underlying_value_feed               {'kalshi-attention': 3} 09-20T13:13..09-23T00:45
+      Point-in-time current value of each attention-market underlying, to enable the count-mispricing / frozen-monotone-count margin-of-safety edge.
+
+WHY: The kalshi-attention specialty trades BAND/RANGE ladders around continuously-valued underlyings that accumulate
+  3 agents point_in_time_earnings_surprise_panel         {'alpaca-megacaps': 3} 09-21T03:48..09-22T01:01
+      A point-in-time panel of US megacap earnings events: for each of NVDA/AAPL/MSFT/AMZN/GOOGL/META/TSLA/AVGO/AMD/NFLX/JPM/PLTR, the earnings ANNOUNCEMENT DATE as it was known contemporaneously, the consensus EPS and revenue estimate before the call, and the actua
+  3 agents point_in_time_earnings_calendar_and_surp      {'alpaca-megacaps': 2, 'alpaca-options': 1} 09-21T20:34..09-23T03:06
+      Feed of scheduled earnings dates for the 16 options underlyings (F, SOFI, AAL, T, PFE, INTC, RIVN, SNAP, CCL, BAC, VALE, HOOD, PLTR, SPY, QQQ, IWM), point-in-time, plus the post-event move and the pre-vs-post implied-vol change (IV crush). This is the one data
+  3 agents point_in_time_earnings_calendar               {'alpaca-options': 3} 09-23T02:03..09-23T16:25
+      For the alpaca-options desk, supply a point-in-time earnings event calendar for the approved underlyings (at minimum F, SOFI, T, AAL, RIVN, SNAP, CCL, VALE), including when each date/time was first knowable, scheduled release time/session, and subsequent revis
+  2 agents megacap_earnings_calendar                     {'alpaca-megacaps': 2} 09-20T02:04..09-20T02:11
+      Unblock post-earnings drift (PEAD) testing for the alpaca-megacaps desk. We need, joined to the replay tape so a strategy can act on it: (1) for each of the 12 names (NVDA AAPL MSFT AMZN GOOGL META TSLA AVGO AMD NFLX JPM PLTR), every earnings announcement date
+  2 agents attention_underlying_current_value_feed       {'kalshi-attention': 2} 09-20T05:56..09-20T06:03
+      For the kalshi-attention specialty, supply the CURRENT value of each series' settle-underlying, per market if it maps to a strike/threshold, delivered both live and on the replay tape. Concretely: for KXRT markets the current Rotten Tomatoes Tomatometer score 
+  2 agents attention_current_value_feed                  {'kalshi-attention': 2} 09-20T18:14..09-22T04:22
+      Provide point-in-time per-market underlying-value snapshots for Kalshi attention/count markets (for example current cumulative count, rating, or share value), with receive timestamps and authoritative source metadata, aligned to each market snapshot. The feed 
+  2 agents point_in_time_earnings_calendar_surprise      {'alpaca-megacaps': 2} 09-21T18:21..09-22T04:33
+      A point-in-time feed of earnings events for the alpaca-megacaps universe (NVDA AAPL MSFT AMZN GOOGL META TSLA AVGO AMD NFLX JPM PLTR). The megacaps desk has now measured every OHLCV-only signal family as null over 55 lineage trials: intraday VWAP reversion (-0
+  2 agents perpetual_funding_open_interest_feed          {'alpaca-crypto-majors': 2} 09-21T21:47..09-22T22:45
+      Point-in-time perpetual funding rate and open interest for BTC/USD and ETH/USD on Alpaca (or a compatible crypto feed), delivered into ctx for live, replay, and markets_now. The crypto-reversion lineage's remaining falsifiable hypothesis is a funding-squeeze e
+  2 agents live_sports_score_and_lineup_feed             {'kalshi-sports-props': 2} 09-22T04:30..09-22T05:11
+      For Kalshi player-prop markets (KXNFLRSHYDS, KXNFLRECYDS, KXNFLREC, KXNFLPASSYDS, KXMLBHR, KXMLBHIT, KXMLBKS, and the other sports-props series), supply a point-in-time feed of the game state each market settles on, so a strategy can be the INFORMED side inste
+  1 agents crypto_strike_spot_and_vol                    {'kalshi-crypto-strikes': 1} 09-19T21:23..09-19T21:23
+      The kalshi crypto-strike specialty needs the underlying spot price and a measure of realized volatility for its series (KXBTCD, KXETHD, and the other crypto strike ladders). The current kalshi ctx shows only the ladder (strike, yes_bid/yes_ask, hours_to_close,
+  1 agents kalshi_crypto_underlier                       {'kalshi-crypto-strikes': 1} 09-19T21:25..09-19T21:25
+      For the Kalshi hourly/daily crypto strike series (KXBTCD, KXETHD, KXXRPD, KXSOLD etc.), the current spot price (or recent mid/ticks of the underlying BTC/ETH/SOL/XRP) alongside the strike ladder. Today the Kalshi ctx gives only yes_bid/yes_ask per strike with 
+  1 agents soccer_live_match_state                       {'kalshi-sports': 1} 09-19T22:22..09-19T22:22
+      A live match-state feed (current score, minute/period, and an in-play flag) joined onto each active Kalshi soccer market in this specialty, next to the existing touch and hours-to-close. The playbook shows a resting bid left during a match is picked off the in
+  1 agents attention_underlying_feed                     {'kalshi-attention': 1} 09-19T22:40..09-19T22:40
+      A per-series live feed of the current underlying value for the kalshi-attention specialty, so a strategy can compute the margin of safety between the current count/score/rating and a market's strike. Needed: current Rotten Tomatoes approved-tomato-meter % for 
+  1 agents btc_lead_bar_feed                             {'alpaca-crypto-alts': 1} 09-19T22:57..09-19T22:57
+      Add BTC/USD (and ETH/USD) 15Min bars to the Alpaca bar feed as OBSERVATION-ONLY symbols, so that alpaca-crypto-alts strategies can measure how their altcoins lag or lead BTC/ETH. The alts universe (SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHI
+  1 agents crypto_settlement_spot_and_volatility         {'kalshi-crypto-strikes': 1} 09-19T23:12..09-19T23:12
+      Merton, for hilibrand: Expose timestamped BTC/ETH settlement-reference prices, trailing one-minute price history covering at least the preceding hour, and each market's settlement/averaging rule, with identical as-of data semantics in replay and live contexts 
+  1 agents replay_diagnostics_why_a_run_is_killed        {'kalshi-sports': 1} 09-19T23:54..09-19T23:54
+      When a replay ends with "no result line (exit 137): Killed" (SIGKILL, 0 trades, 0 blocks, undefined Sharpe), the agent cannot tell a resource crash from a no-trade strategy, so the natural response is to re-run and burn another counted trial that also raises t
+  1 agents kalshi_sports_historical_settlement_tape      {'kalshi-sports': 1} 09-19T23:54..09-19T23:54
+      The favourite-longshot bias ("favourites slightly underpriced, longshots overpriced, strongest in moneylines with a big underdog and in extreme totals") is the published edge for this specialty but is UNMEASURED in sports, and the one test so far (pre-start NO
+  1 agents megacap_multi_week_intraday_tape_earning      {'alpaca-megacaps': 1} 09-20T00:58..09-20T00:58
+      The alpaca-megacaps niche can only replay a ~2-week 5-min tape of 4 names (AAPL/AMD/NVDA/TSLA). Two orthogonal intraday signals (VWAP reversion, opening-range breakout) both came back null there, but the niche's ideas with real prior are multi-day: post-earnin
+  1 agents resolved_sports_moneyline_price_outcome_      {'kalshi-sports': 1} 09-20T01:17..09-20T01:17
+      The sports-favorites desk cannot validate its core edge because there is no historical data pairing price with outcome. Need: (1) for resolved Kalshi sports moneyline markets (KXNCAAFGAME, KXNFLGAME, and the other 2-way GAME series), the YES bid/ask at a few f
+  1 agents sports_price_history_with_outcome             {'kalshi-sports': 1} 09-20T01:50..09-20T01:50
+      Expose, for kalshi-sports series, the historical time series of each market's yes bid/ask (and last trade) from listing to resolution, joined with its final outcome (YES/NO). This is the single missing input for the whole specialty's core idea: the favourite-l
+  1 agents multiday_inseason_kalshi_sports_replay_t      {'kalshi-sports': 1} 09-20T01:55..09-20T01:55
+      A multi-day (30+ days) in-season replay tape for the Kalshi sports series. The current tape is a single pre-football-season day (2026-08-01), when KXNCAAFGAME and KXNFLGAME have almost no games. A day-horizon strategy accumulates one block per day, so it needs
+  1 agents kalshi_football_history                       {'kalshi-sports': 1} 09-20T02:02..09-20T02:02
+      Historical Kalshi CFB/NFL moneyline and spread market data WITH final settlement outcomes, for the series KXNCAAFGAME, KXNFLGAME, KXNCAAFSPREAD, KXNFLSPREAD. Each record: market, side/leg, a time series of yes_bid/yes_ask/volume over the listing life, and the 
+  1 agents crypto_hourly_session_stats                   {'alpaca-crypto-majors': 1} 09-20T02:46..09-20T02:46
+      For the BTC/USD and ETH/USD hourly replay tape (Alpaca crypto), I need an hour-of-day aggregate so I can test the one named avenue not yet measured: which UTC hours actually have ranges large enough to pay a 0.3% maker / 0.5% taker round trip. Concretely: for 
+  1 agents crypto_strike_tape_with_underlying            {'kalshi-crypto-strikes': 1} 09-20T03:12..09-20T03:12
+      Re-record (or extend) the Kalshi crypto hourly strike replay tape (KXBTCD, KXETHD, plus the other live series KXETH/KXBTC/KXSOLD/KXXRPD/KXBNBD/KXDOGE if available) so that each step also carries the underlying coin's bars+quotes (BTC/USD, ETH/USD, SOL/USD, XRP
+  1 agents point_in_time_earnings_replay_panel           {'alpaca-megacaps': 1} 09-20T03:19..09-20T03:19
+      Merton, for mcentee-2: Supply all 12 permitted megacaps with point-in-time scheduled and actual earnings-release timestamps, including revisions and announcement timing, joined to 18–24 months of split-consistent daily price history and hourly-or-finer executa
+  1 agents alpaca_replay_tape_full_index_etf_univer      {'alpaca-index-etfs': 1} 09-20T03:59..09-20T03:59
+      The alpaca-index-etfs replay tape currently covers only DIA, IWM, QQQ, SPY at 5Min over ~86 days (May 17 - Sep 2026). That blocks the desk's whole mission: cross-asset momentum needs TLT (bonds), GLD (gold), EEM (emerging) for dispersion, and sector/asset rota
+  1 agents crypto_perpetual_funding_and_open_intere      {'alpaca-crypto-majors': 1} 09-20T04:17..09-20T04:17
+      A feed of the 8-hour perpetual-swap funding rate and open interest for BTC/USD and ETH/USD (from a public aggregator such as Binance/Bybit, batched as hourly or 8h observations). Why: this niche (alpaca-crypto-majors) is LONG-ONLY, and all six signal families 
+  1 agents live_spread_and_volume_audit_for_unmeasu      {'alpaca-crypto-alts': 1} 09-20T04:21..09-20T04:21
+      I need to measure the quoted spread, quote availability and bar volume of the six alt books my desk has never measured — BCH/USD, UNI/USD, AAVE/USD, DOT/USD, ADA/USD, SHIB/USD — in the alpaca-crypto-alts niche, so I can decide the tradeable universe before spe
+  1 agents replay_tape_1hour_aggregation                 {'alpaca-index-etfs': 1} 09-20T04:35..09-20T04:35
+      The alpaca replay tape serves ONLY 5Min bars: both 1Day and 1Hour requests return zero fills (now confirmed by 5 family trials, including my RSI-2 run that returned 0 trades). With 5Min x 500 ≈ 6 sessions of visible history, all multi-day-lookback strategies a
+  1 agents megacap_tape_extension_and_earnings_pane      {'alpaca-megacaps': 1} 09-20T04:37..09-20T04:37
+      For the alpaca-megacaps desk (and all alpaca-equity niches). Two data unblocks, one urgent:
+
+1. LONGER 5Min TAPE. The equites replay tape has SHRUNK: the index-etfs desk (scholes-4, 2026-09-20T04:23) measured ~13 sessions from ~Aug 30, and scholes measured 1Da
+  1 agents realized_volatility_bars_on_the_16_optio      {'alpaca-options': 1} 09-20T05:10..09-20T05:10
+      The alpaca-options desk needs to measure whether realized volatility on its 16 underlyings (F, SOFI, AAL, T, PFE, INTC, RIVN, SNAP, CCL, BAC, VALE, HOOD, PLTR, SPY, QQQ, IWM) runs above or below the implied volatility the chain shows. Option BUYERS pay the var
+  1 agents crypto_perpetual_funding_rate_and_open_i      {'alpaca-crypto-majors': 1} 09-20T05:56..09-20T05:56
+      For the alpaca-crypto-majors desk (BTC/USD, ETH/USD on Alpaca). We have now measured SEVEN signal families fee-negative (reversion x2, dip-limit, intraday momentum, Donchian breakout, frozen-target reversion, crash-bounce): the average gross move per trade is 
+  1 agents forward_earnings_event_feed                   {'alpaca-megacaps': 1} 09-20T06:51..09-20T06:51
+      A forward, point-in-time earnings-event signal for the 12 alpaca-megacaps names (NVDA/AAPL/MSFT/AMZN/GOOGL/META/TSLA/AVGO/AMD/NFLX/JPM/PLTR), delivered in ctx: at minimum a flag the morning after each name announces earnings (plus the announced date/time; cons
+  1 agents intrawindow_market_quote_history              {'kalshi-crypto-15m': 1} 09-20T09:25..09-20T09:25
+      For the 15-min crypto up/down series (KXBTC15M, KXETH15M, KXSOL15M, KXNEAR15M, KXDOGE15M, KXBNB15M, KXHYPE15M, etc.), expose each market's intra-window quote path — yes_bid and yes_ask at <=1 minute granularity over the market's ~15-minute life (from open to c
+  1 agents in_season_multi_day_kalshi_sports_props_      {'kalshi-sports-props': 1} 09-20T09:50..09-20T09:50
+      The kalshi-sports-props family's only replay tape is a single off-season day (2026-08-02: no NFL/CFB/NBA games, only sparse MLB-HR/NCAA-team markets), so every day-horizon favorites-NO replay lands 0 trades and can never reach the 20 closed trades / 30 blocks 
+  1 agents alt_universe_live_quotes                      {'alpaca-crypto-alts': 1} 09-20T10:03..09-20T10:03
+      Expose live bid/ask (spread) and 24h volume for ALL 12 symbols of the alpaca-crypto-alts universe (SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHIB) in `markets_now`, not only the symbols named in a strategy's NEEDS. Today a desk agent can only 
+  1 agents live_alt_spread_volume_survey                 {'alpaca-crypto-alts': 1} 09-20T10:23..09-20T10:23
+      A feed (surfaced in markets_now and in ctx) with the live bid/ask/mid spread and trailing volume for the SIX unmeasured alt books of the alpaca-crypto-alts specialty: BCH/USD, UNI/USD, AAVE/USD, DOT/USD, ADA/USD, SHIB/USD (LTC/USD too). These have live Alpaca 
+  1 agents alpaca_1hour_bars_replay                      {'alpaca-index-etfs': 1} 09-20T11:05..09-20T11:05
+      Provide 1Hour bars on the Alpaca replay tape. Today the tape fills ONLY 5Min bars; 1Hour and 1Day requests return ZERO fills (measured repeatedly by the equity-trend/scholes family). 500 x 1Hour bars = ~76 sessions, which is exactly the lookback the two publis
+  1 agents longer_historical_alpaca_alt_tape_backfi      {'alpaca-crypto-alts': 1} 09-20T12:50..09-20T12:50
+      The hour-horizon Alpaca crypto replay tape records only ~21 days (recording began ~Aug 30 2026), listing only DOGE/LINK/SOL/XRP. On that window the ONLY alt signal that beats fees — multi-% Donchian trend on the tight books SOL/LINK (~+3%/trade net) — fires on
+  1 agents sports_props_in_season_replay_tape            {'kalshi-sports-props': 1} 09-20T12:54..09-20T12:54
+      THE unblock for the whole kalshi-sports-props family's replay gate. The only replay tape today is a single off-season day (2026-08-02): no football, so the KXNFL* individual player-prop series are empty, and the sparse MLB markets carry no NO favourite in the 
+  1 agents sports_moneyline_inseason_replay_tape         {'kalshi-sports': 1} 09-20T13:15..09-20T13:15
+      The kalshi-sports favourite-longshot strategy needs to pass the 20-closed-trade replay gate, but the only replay tape available (August) is off-season for college football / NFL, which is exactly where the deep 90-97c moneyline favourites live. Replaying the c
+  1 agents attention_underlying_value_near_finalnes      {'kalshi-attention': 1} 09-20T13:30..09-20T13:30
+      The kalshi-attention desk's only promising edge — margin-of-safety on a near-FINAL count vs a threshold-ladder strike — is gated on data the House does not yet expose. Every favourite-bias variant has been measured rich (overpriced): 5 trials across leahy/leah
+  1 agents kalshi_sports_price_vs_outcome_feed           {'kalshi-sports': 1} 09-20T13:53..09-20T13:53
+      A per-series price-vs-outcome measurement feed for Kalshi sports: for every resolved market on the replay tape (and forward), the time series of yes_bid/yes_ask (or trade price) and the final settlement (1/0), so a strategy or analyst can measure the favourite
+  1 agents backfill_alt_hour_tape_and_add_unmeasure      {'alpaca-crypto-alts': 1} 09-20T14:29..09-20T14:29
+      Unblock the crypto-alts replay's 20-closed-trade barrier by growing the sample, in either (better: both) of two ways: (1) backfill the existing hour tape (SOL/LINK/XRP/DOGE/AVAX, began 2026-08-30) to >=90 days; (2) add the six never-measured alts (BCH, UNI, AA
+  1 agents daily_crypto_strike_ladder_replay_tape        {'kalshi-crypto-strikes': 1} 09-20T14:54..09-20T14:54
+      A multi-week replay tape for the DAILY-settlement crypto strike ladders (KXBTC, KXETH, KXETH*, KXSOLD, KXXRPD, and the other KX* daily series of the kalshi-crypto-strikes universe), day horizon, showing the full strike ladder (yes_bid/ask, strike, close_time, 
+  1 agents kalshi_sports_props_price_vs_outcome_his      {'kalshi-sports-props': 1} 09-20T15:15..09-20T15:15
+      A historical feed of settled prices vs outcomes for the kalshi-sports-props player-prop series (KXNFLTD, KXNFLPASSTDS, KXNFLPASSYDS, KXNFLREC, KXNFLRECYDS, KXMLBHR, KXMLBKS, KXMLBHIT, KXMLBOUTS, etc.): for each closed market, its YES/NO price (bid/ask/mark) at
+  1 agents kalshi_sports_price_vs_outcome_feed_with      {'kalshi-sports': 1} 09-20T15:37..09-20T15:37
+      The desk's binding input, blocked on this (flagged by meriwether-4): a feed of every listed kalshi-sports market's traded price history AND its settlement outcome, so sign and magnitude of the favourite-longshot bias can be measured PER SERIES and (critically)
+  1 agents funding_rate_open_interest_feed_for_btc_      {'alpaca-crypto-majors': 1} 09-20T16:05..09-20T16:05
+      Re-escalating the desk's only remaining thesis. Already queued ~10h ago (le-2944acfb), still absent from live ctx (checked 15:53 UTC). Needed to unblock a replayable strategy: (1) current 8h perp funding rate for BTC/USD and ETH/USD, plus a short trailing hist
+  1 agents kalshi_attention_underlying_value_feed_c      {'kalshi-attention': 1} 09-20T16:56..09-20T16:56
+      For kalshi-attention, the favourite axis is closed (overpriced; NO leg refused <15c) and the ONLY open edge is margin-of-safety: buy a threshold-ladder YES only when the underlying count is ALREADY safely past the strike AND near-final. That decision needs the
+  1 agents in_season_30_hour_sports_props_replay_ta      {'kalshi-sports-props': 1} 09-20T17:09..09-20T17:09
+      The kalshi sports-props replay tape is a single 1800-minute (30-hour) window on 2026-08-02 — an off-season day with no football — so every sports-props-favorites family replay returns 0 trades. Separately, a day-horizon strategy accrues 1 block/day while repla
+  1 agents in_season_moneyline_replay_tape               {'kalshi-sports': 1} 09-20T17:13..09-20T17:13
+      The sports-favorites desk is blocked at rung 0: the only replay tape (recorded history starting 2026-08-02) predates US football season, so the confirmed 90c-favourite maker edge (CFB/NFL 2-way moneyline YES 90-97c + soccer 3-way NO-underdog fade) produces onl
+  1 agents point_in_time_perp_positioning                {'alpaca-crypto-majors': 2} 09-20T17:28..09-20T21:49
+      Point-in-time perpetual-futures positioning feed for BTC and ETH, identical in replay and live, so a long-only spot strategy on alpaca-crypto-majors can test the one structural edge that clears the 0.30% maker fee wall: the expensive-short-positioning unwind (
+  1 agents current_underlying_value_feed_attention_      {'kalshi-attention': 1} 09-20T17:29..09-20T17:29
+      This is the hard blocker for the only non-dead edge in kalshi-attention (margin-of-safety on a near-final count vs strike). Requested twice before; this is the tightened, minimal version. Favourite-bias is measured dead at every band and blocked in reverse, so
+  1 agents kalshi_sports_in_game_score_live_state_f      {'kalshi-sports': 1} 09-20T18:10..09-20T18:10
+      Add the live game state to ctx for Kalshi sports markets: current score/goals, game clock/inning/period, and time remaining, mapped per market. WHY (evidence-based, not speculative): the favourite-longshot edge on Kalshi sports is documented as concentrated NE
+  1 agents kalshi_daily_crypto_strike_replay_tape_w      {'kalshi-crypto-strikes': 1} 09-20T18:28..09-20T18:28
+      Refinement of the Hilibrand desk's earlier tape requests (daily-series tape ~14:54, hourly+underlying ~03:13; neither has landed). Request: a replay tape for the DAILY crypto strike series KXBTC and KXETH (and, if cheap, KXSOLD/KXXRPD/KXBNBD/KXDOGED), recorded
+  1 agents record_6_unmeasured_alt_books_into_hourl      {'alpaca-crypto-alts': 1} 09-20T18:32..09-20T18:32
+      The hour-horizon alpaca-crypto-alts replay bar (20 closed profitable trades + deflated Sharpe 0.75) is unreachable on the current 21-day tape because only SOL (0.06% spread) and LINK (0.21%) are tight enough to trade, and their multi-% Donchian breakouts fire 
+  1 agents alpaca_alts_backfill_unmeasured_six           {'alpaca-crypto-alts': 1} 09-20T18:35..09-20T18:35
+      Add BCH/USD, UNI/USD, AAVE/USD, DOT/USD, ADA/USD, SHIB/USD to the Alpaca replay tape with >=90 days of hourly bars. Why: the specialty's one net-positive edge (SOL/LINK Donchian breakout) is replay-gated on 20 closed trades but produces only 13 on the 21-day t
+  1 agents kalshi_15m_underlying_spot_on_replay_tap      {'kalshi-crypto-15m': 1} 09-20T18:54..09-20T18:54
+      Re-record (or add a new) replay tape for the kalshi-crypto-15m specialty that includes, alongside each 15-min market, the UNDERLYING coin's spot bars and quotes — BTC/USD, ETH/USD, SOL/USD, XRP/USD, DOGE/USD, BNB/USD, and the other series in the universe. Why:
+  1 agents replay_intraday_execution_clock_pre_wind      {'alpaca-index-etfs': 1} 09-20T19:20..09-20T19:20
+      The alpaca replay's decision clock advances on the declared bar timeframe, with no separate intraday execution clock and no pre-window warmup (per the teacher's 2026-09-20 18:05 lesson). For daily-horizon index-ETF strategies this means: 1Hour/1Day bars only w
+  1 agents in_season_kalshi_sports_replay_tape_exte      {'kalshi-sports': 1} 09-20T19:25..09-20T19:25
+      The day-horizon kalshi-sports replay tape starts 2026-08-01/02 and only thinly reaches early-season CFB. The entire sports-favourites family measures 0-5 closed trades on it (meriwether-5: 1 in 50 blocks; meriwether-6: 5; meriwether-2: 2 with min_hours=4), aga
+  1 agents kalshi_sports_live_score_in_game_state_f      {'kalshi-sports': 1} 09-20T19:44..09-20T19:44
+      Per-market live game state for kalshi-sports, surfaced in ctx (and on the replay tape where recorded): current score, period/inning/half, elapsed clock, and whether the market's YES outcome is currently winning. Why: the family's measured +2.15c favourite-make
+  1 agents attention_underlier_feed                      {'kalshi-attention': 1} 09-20T21:48..09-20T21:48
+      Refinement of my queued request to make it shippable fast (this is a scope-narrowing, not a duplicate): I need the CURRENT underlying value of my threshold-ladder speciality FEED LIVE/FORWARD only -- drop the historical point-in-time re-record if that is the b
+  1 agents kalshi_15m_replay_tape_re_recorded_with_      {'kalshi-crypto-15m': 1} 09-20T23:24..09-20T23:24
+      Re-record the kalshi-crypto-15m replay tape (KXBTC15M, KXETH15M, KXSOL15M, KXXRP15M, KXDOGE15M, KXBNB15M; Sep13+ window) WITH observed Alpaca bars for the underlying coins (BTC/USD, ETH/USD, SOL/USD, XRP/USD, DOGE/USD, BNB/USD) at 5Min granularity (1Min exceed
+  1 agents sports_props_replay_tape_cover_the_busie      {'kalshi-sports-props': 1} 09-21T03:02..09-21T03:02
+      replay_coverage for my kalshi-sports-props strategy shows the in-season tape (Aug 6–Sep 20) is capped at 500 distinct settled markets and the 500 are dominated by KXMLBHR (345) + KXNFLRSHYDS (96). The busiest live NFL series have ~ZERO tape coverage: KXNFLTD 0
+  1 agents kalshi_crypto_spot_vol_history                {'kalshi-crypto-15m': 1} 09-21T04:17..09-21T04:17
+      Provide point-in-time BTC/ETH/SOL/XRP/DOGE spot bars and realized-volatility features aligned to each KALSHI 15-minute market snapshot, both in live ctx['observed'] and on newly recorded replay tapes. The existing observed-bars code path is implemented but the
+  1 agents sub_5min_spot_per_market_realised_vol_fo      {'kalshi-crypto-15m': 1} 09-21T05:19..09-21T05:19
+      The kalshi-crypto-15m desk has now measured both obvious channels closed at 5-minute granularity (maker resting bids adverse-selected across the whole 0.90-0.97 band; momentum-taker shows a 0.2% early in-window spot move is already repriced to a ~0.70 ask). 5-
+  1 agents sports_lineup_status_feed                     {'kalshi-sports-props': 1} 09-21T06:47..09-21T06:47
+      A point-in-time feed of player lineup/active/inactive status for Kalshi player-prop series (KXNFLTD, KXNFLREC, KXNFLRECYDS, KXNFLRSHYDS, KXNFLPASSYDS, KXNFLPASSTDS, KXMLBHR, etc.), surfacing per-market whether the underlying player is ACTIVE or ruled OUT/inact
+  1 agents live_sports_score_feed_for_kalshi_player      {'kalshi-sports-props': 1} 09-21T06:48..09-21T06:48
+      The hufschmid sports-props desk has measured (8 lineage trials) that passive market-making loses on both legs of player props because a resting bid is adversarially selected the moment the underlying event fires (in-game soccer goals, MLB home runs). The ONLY 
+  1 agents historical_alt_bid_ask_spread_series          {'alpaca-crypto-alts': 1} 09-21T06:58..09-21T06:58
+      Replay tapes for alpaca-crypto-alts carry only OHLCV bars; there is no historical bid/ask (spread) series, and runtime_capabilities confirms "bar-based fills; no historical queue position." This is the concrete blocker on the niche's ONLY measured edge. The mu
+  1 agents point_in_time_earnings_panel                  {'alpaca-megacaps': 1} 09-21T07:11..09-21T07:11
+      Build a replay-available, point-in-time earnings-event feed for the alpaca-megacap universe (NVDA, AAPL, MSFT, AMZN, GOOGL, META, TSLA, AVGO, AMD, NFLX, JPM, PLTR), including announcement timestamp, reported and consensus EPS/revenue surprise fields, and revis
+  1 agents live_sports_score_state_feed_for_player_      {'kalshi-sports-props': 1} 09-21T10:43..09-21T10:43
+      The sports-props desk's ONE positive but sub-threshold result is taker underdog-YES (+38%, deflated Sharpe 0.275), and every maker variant is dead to entry adverse selection. The family's own 9-trial verdict (hufschmid-5/-6) is that the big, qualifiable edges 
+  1 agents kxrt_underlier_observation                    {'kalshi-attention': 1} 09-21T10:51..09-21T10:51
+      Provide a point-in-time replay and live observation feed for Rotten Tomatoes critic scores underlying KXRT threshold markets, including timestamped score, authoritative source/settlement mapping, and the score available at each market decision step. The curren
+  1 agents crypto_alts_perpetual_funding_rate_open_      {'alpaca-crypto-alts': 1} 09-21T10:59..09-21T10:59
+      A point-in-time per-hour funding rate and aggregate open-interest history (plus live) for the 12 alt coins in NWS — SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHIB — sourced from a perpetuals venue (Binance or Bybit), exposed through NEEDS.obse
+  1 agents underlying_quote_receive_time                 {'alpaca-options': 1} 09-21T15:40..09-21T15:40
+      Expose a reliable receive-time or as_of timestamp on each live Alpaca underlying quote in ctx['quotes'] for the options specialty, sourced from the SIP snapshot. The current OPRA option quotes are timestamped, but underlying quote objects contain only bid/ask,
+  1 agents rotten_tomatoes_point_in_time_feed            {'kalshi-attention': 1} 09-21T15:53..09-21T15:53
+      Provide point-in-time Rotten Tomatoes score observations for KXRT markets, including publication timestamps and the authoritative source used for settlement. The proposed rt-margin-versus-strike strategy needs these observations to compare the latest score wit
+  1 agents alpaca_underlying_quote_receive_time          {'alpaca-options': 1} 09-21T16:17..09-21T16:17
+      Add a reliable receive-time or as_of timestamp to ctx['quotes'] for every Alpaca underlying shown to the options strategy, using the SIP snapshot receipt time rather than an exchange field. Preserve the existing OPRA option as_of timestamps. The current freshn
+  1 agents attention_fraction_snapshots                  {'kalshi-attention': 1} 09-21T16:50..09-21T16:50
+      Feed the current underlying value of each attention ratio/score market so a margin-of-safety strategy can be tested. For KXRT (Rotten Tomatoes) markets, per market/title provide: F (number of positive/fresh reviews), N (total reviews), the timestamp of the mos
+  1 agents underlying_print_feed                         {'kalshi-prices': 1} 09-21T17:07..09-21T17:07
+      For the kalshi-prices specialty, the measured favourites edge is DISTANCE-FROM-SETTLEMENT-PRINT, not the 0.90-0.97 band alone: a 0.93 YES favourite ~$3 below the WTI settlement survives while a 0.93 favourite within ~$0.50 of it torches to $0 (my live n=3 forw
+  1 agents slow_number_daily_settlement_history_max      {'kalshi-prices': 1} 09-21T20:36..09-21T20:36
+      For the kalshi-prices specialty: historical daily settlement/settlement-print values for AAA national (KXAAAGASD) and liquid state gasoline (NJ/TX/GA/NC/OH), diesel (KXDIESELD), WTI (KXWTI), gold (KXGOLD), going back >=6-12 months, with per-series max absolute
+  1 agents attention_underlying_snapshot_kxrt_kxtru      {'kalshi-attention': 1} 09-21T20:49..09-21T20:49
+      Add a per-market current-underlying field to the Kalshi snapshot for the two TRADEABLE, replay-populated ratio series, so the margin-of-safety edge can be computed (favorite-maker is proven dead in attention; KX*SHARE are horizon-refused ~178h resolve; KXTSAW 
+  1 agents lineup_inactive_player_feed                   {'kalshi-sports-props': 1} 09-21T20:57..09-21T20:57
+      Player active/inactive + lineup status feed (the 60-90 min pre-game window). The one structural corner my lineage has not measured is the VOID mechanic: when a player is ruled OUT, does his prop market void (money returned) or resolve NO (pay 0)? This matters 
+  1 agents attention_market_underlying_value_feed        {'kalshi-attention': 1} 09-21T21:09..09-21T21:09
+      Attention markets (KXTRUMPAPPROVE, KXTRUMPSAY, KXRT, KXTSAW, KX*SHARE, KXTRUTHSOCIAL, KXTOKENUSE) settle on counts/ratings/mentions published externally and accumulating toward a deadline: the RCP Trump approval average, weekly TSA throughput, weekly post/ment
+  1 agents kalshi_quote_history                          {'kalshi-crypto-15m': 1} 09-21T21:33..09-21T21:33
+      Provide point-in-time Kalshi quote history and quote timestamps for each 15-minute crypto market in replay and live snapshots, including recent yes_bid/yes_ask observations and executable depth or displayed size when available. The current strategy only receiv
+  1 agents point_in_time_perpetual_funding_oi_feed       {'alpaca-crypto-majors': 1} 09-21T21:40..09-21T21:40
+      Build a replay- and live-compatible point-in-time feed for BTC/USD and ETH/USD perpetual funding rates and open interest, aligned to each closed 1Hour Alpaca crypto bar without lookahead. Expose it in ctx with explicit timestamps and missing-value behavior so 
+  1 agents point_in_time_crypto_positioning_feed         {'alpaca-crypto-majors': 1} 09-21T23:31..09-21T23:31
+      Add a point-in-time Alpaca crypto positioning feed for BTC/USD and ETH/USD, including perpetual funding rates and open interest with timestamps aligned to each replay/live decision. Preserve historical availability and prevent look-ahead. This is needed to tes
+  1 agents point_in_time_megacap_earnings_calendar_      {'alpaca-megacaps': 1} 09-21T23:35..09-21T23:35
+      The alpaca-megacaps desk has exhaustively nulled every OHLCV-only reversion/momentum signal on the 12 liquid names: intraday session-VWAP reversion, opening-range-breakout momentum, daily RSI(2)/two-day pullback, unfiltered close-to-open overnight drift, and d
+  1 agents perpetual_funding_open_interest_feed_btc      {'alpaca-crypto-majors': 1} 09-22T00:15..09-22T00:15
+      Point-in-time perpetual-swap funding rate and open interest for BTC/USD and ETH/USD (hourly or finer, aligned to bar timestamps, available in replay). Why: this desk's only untested escape hypothesis after 20 fee-negative price-reversion trials is the short-po
+  1 agents perp_funding_open_interest_feed               {'alpaca-crypto-alts': 1} 09-22T00:32..09-22T00:32
+      Point-in-time perpetual funding rates and open interest for the 12-alt universe (SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHIB), from a public perp venue (e.g. Binance/Bybit/OKX) with historical bars covering the replay window. Why: this is t
+  1 agents kalshi_atomic_complementary_order             {'kalshi-crypto-15m': 1} 09-22T00:33..09-22T00:33
+      Provide an atomic or otherwise guaranteed-linked two-leg Kalshi order for the same 15-minute market: buy equal quantities of YES and NO together, with all-or-none execution and automatic cancellation if both legs cannot fill within a defined interval. The curr
+  1 agents kalshi_crypto_atomic_pair_and_depth_hist      {'kalshi-crypto-15m': 1} 09-22T00:39..09-22T00:39
+      Build a specialty-scoped Kalshi crypto-15m capability that records point-in-time YES/NO bid-ask depth and supports an atomic complementary YES+NO order pair with all-or-cancel semantics, including replay support for queue-aware fills and fees. Existing sampled
+  1 agents kalshi_replay_orderbook_adverse_selectio      {'kalshi-crypto-15m': 1} 09-22T00:44..09-22T00:44
+      The root blocker for the kalshi-crypto-15m niche: replay currently uses "bar-based fills; no historical queue position or adverse-selection calibration" (runtime_capabilities.replay.limitations). huang-4 (le-05aa2ab4) and huang-5 (le-8f52efb8) proved this is n
+  1 agents alt_perpetual_funding_open_interest_feed      {'alpaca-crypto-alts': 1} 09-22T01:02..09-22T01:02
+      The Haghani alts niche (alpaca-crypto-alts: SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHIB) is measured CLOSED for every OHLCV signal family (reversion, momentum/RSI, lead/lag, beta-residual, dip-limit, and tight-book maker breakout: haghani-9
+  1 agents point_in_time_earnings_surprise_feed          {'alpaca-megacaps': 1} 09-22T01:03..09-22T01:03
+      Add a point-in-time earnings calendar and surprise input to Alpaca replay and forward contexts for the megacap specialty. Each record should include symbol, announcement timestamp, fiscal period, consensus estimate, reported value, and availability timestamp, 
+  1 agents kalshi_depth_and_atomic_complementary_or      {'kalshi-crypto-15m': 1} 09-22T01:04..09-22T01:04
+      Implement point-in-time Kalshi 15-minute crypto quote/depth history in replay, including executable bid/ask depth and fill timestamps, plus an atomic complementary YES/NO order capability with explicit all-or-none risk handling. Existing bar-only snapshots can
+  1 agents atomic_complementary_kalshi_orders            {'kalshi-crypto-15m': 1} 09-22T01:06..09-22T01:06
+      Implement an atomic or contingent complementary YES/NO order capability for Kalshi crypto 15-minute markets, with pre-submission fee-aware pricing, shared market-risk accounting, cancellation of an unmatched leg, and replay/paper support. Existing paired strat
+  1 agents attention_underlying_observations             {'kalshi-attention': 1} 09-22T01:31..09-22T01:31
+      Build a point-in-time underlying-observation feed for Kalshi attention markets, aligned to each replay snapshot and live decision. At minimum provide the current RCP approval average for KXTRUMPAPPROVE, Rotten Tomatoes score for KXRT, Trump post count for KXTR
+  1 agents alt_tape_backfill                             {'alpaca-crypto-alts': 1} 09-22T01:32..09-22T01:32
+      Extend the Alpaca replay tape beyond the current 21-day window for the alt books (at minimum SOL/USD and LINK/USD, ideally all 12: SOL/XRP/DOGE/LTC/LINK/AVAX/BCH/UNI/AAVE/DOT/ADA/SHIB) at 15Min bars. Why: the only measured net-positive OHLCV edge on this desk 
+  1 agents kalshi_crypto_depth_and_atomic_complemen      {'kalshi-crypto-15m': 1} 09-22T01:34..09-22T01:34
+      Implement point-in-time Kalshi order-book depth/history and atomic complementary YES/NO order support for the kalshi-crypto-15m specialty. Expose historical and live executable depth, queue-aware fill inputs, and an atomic paired-order intent that guarantees b
+  1 agents point_in_time_attention_underlier_feed        {'kalshi-attention': 1} 09-22T01:56..09-22T01:56
+      Provide a point-in-time historical and live feed for the authoritative underlying values used by kalshi-attention markets, beginning with KXTRUMPAPPROVE's RCP approval average. Each observation must include value, observation timestamp, receive timestamp, sour
+  1 agents attention_underying_value_snapshot_per_m      {'kalshi-attention': 1} 09-22T02:06..09-22T02:06
+      Add a per-Kalshi-market current-underlying-value column to ctx['markets'] for the kalshi-attention specialty: `underlying_value` (float, the latest published value of the quantity the market settles on) and `underlying_updated_at` (ISO timestamp of that public
+  1 agents kalshi_player_prop_lineup_inactive_feed       {'kalshi-sports-props': 1} 09-22T02:18..09-22T02:18
+      A pre-game feed of lineup and inactive-player status for each player-prop market in kalshi-sports-props (NFL/MLB/NBA/soccer), stamped 60-90 minutes before the scheduled start. The House's own specialty brief flags that inactive-player and lineup news in the 60
+  1 agents point_in_time_crypto_positioning              {'alpaca-crypto-majors': 1} 09-22T02:38..09-22T02:38
+      Add a point-in-time BTC/USD and ETH/USD perpetual-market observation feed to Alpaca crypto strategy contexts and replay tapes: funding rate, open interest, and a timestamped long/short positioning measure, aligned strictly to each decision time with no lookahe
+  1 agents attention_market_current_value_finality_      {'kalshi-attention': 1} 09-22T04:34..09-22T04:34
+      Minimal re-scope of the previously-requested attention_underlying_snapshots feed, narrowed to what actually unlocks the one surviving edge in kalshi-attention. The surviving, measured pocket is margin-of-safety on MONOTONE counts that are FROZEN near deadline 
+  1 agents point_in_time_alt_perp_funding_oi             {'alpaca-crypto-alts': 1} 09-22T04:55..09-22T04:55
+      Point-in-time perpetual funding + open-interest history for the ALT coin universe on Alpaca (SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHIB), exposed identically in replay tape and live ctx via NEEDS/ctx so it can actually pass the 0.5 deflate
+  1 agents attention_count_observation_feed              {'kalshi-attention': 1} 09-22T05:32..09-22T05:32
+      Provide point-in-time, authoritative underlying observations for Kalshi attention/count markets in the kalshi-attention specialty, including the measured value, source/publisher, observation timestamp, publication/receipt timestamp, and revisions. The feed mus
+  1 agents sub_5_min_tick_quote_depth_feed_for_cryp      {'kalshi-crypto-15m': 1} 09-22T05:33..09-22T05:33
+      The kalshi-crypto-15m niche trades up-or-down contracts that settle on 15-minute spot moves. Its only plausible edge requires repricing faster than the current 5Min bar. Today the replay "recording" is documented as "Shared sampled REST snapshots with receive 
+  1 agents attention_count_snapshot                      {'kalshi-attention': 1} 09-22T06:09..09-22T06:09
+      Build a point-in-time per-market underlying-value feed for kalshi-attention count and rating markets. For each visible market, provide the authoritative current observed count/average, observation timestamp, source identifier, and whether the value is monotone
+  1 agents crypto_derivatives_crowding_feed              {'alpaca-crypto-alts': 1} 09-22T15:31..09-22T15:31
+      Build a replayable Alpaca-crypto-alts derivatives positioning feed with point-in-time funding rates, open interest, and timestamps for the 12 specialty coins, or report that no reliable historical source can be supported. This is needed to test a genuinely new
+  1 agents point_in_time_earnings_announcement_surp      {'alpaca-megacaps': 1} 09-22T16:02..09-22T16:02
+      The 12 megacap names of the alpaca-megacaps specialty (NVDA AAPL MSFT AMZN GOOGL META TSLA AVGO AMD NFLX JPM PLTR) need historical, point-in-time earnings announcement data: at minimum the announcement DATE per name, ideally the reported-vs-consensus EPS surpr
+  1 agents lineup_inactive_player_news_feed              {'kalshi-sports-props': 1} 09-22T16:06..09-22T16:06
+      A feed that flags, 60-90 minutes before a player-prop game starts, when a player is scratched, inactive, or otherwise not in the starting lineup. The specialty brief explicitly calls out lineup/inactive news as a real mover of player-prop prices (a scratched p
+  1 agents sports_score_feed                             {'kalshi-sports-props': 1} 09-22T18:04..09-22T18:04
+      Build a supported point-in-time sports game-state feed for Kalshi player-prop strategies: score, inning/quarter/period, elapsed time, game status, and pre-game/in-game indicator keyed to market/event. The current specialty's only plausible alternative to repea
+  1 agents attention_underlying_count_snapshot_feed      {'kalshi-attention': 1} 09-22T20:38..09-22T20:38
+      Provide, on every decision snapshot (ctx, live and replay), the current REAL-WORLD VALUE of each open attention market's underlying count plus when it was observed, as a per-market field (e.g. ctx["markets"][i]["underlying_value"] float + "underlying_as_of" IS
+  1 agents sports_score_state                            {'kalshi-sports-props': 1} 09-22T20:50..09-22T20:50
+      Add a score-aware input for Kalshi sports-props strategies: provide, for each open player-prop market's underlying game, point-in-time game status (scheduled/live/final), elapsed period or inning, score, and game start time in ctx['sports_scores']; make the sa
+  1 agents kalshi_fallback_format_restriction            {'kalshi-sports': 1} 09-22T21:01..09-22T21:01
+      A Kalshi moneyline strategy (NEEDS.series all ending in "GAME") is silently re-targeted onto unrelated market formats when its named series go dark: the House substitutes the specialty's busiest live series, so a deep-favourite TAKER edge measured on soccer/NF
+  1 agents point_in_time_earnings_dates_for_the_16_      {'alpaca-options': 1} 09-22T22:25..09-22T22:25
+      A feed of each underlying's known earnings date (next scheduled and past), available in replay (point-in-time) and live. The two directional long-premium replay trials (fade, momentum) both failed at -95%; the one structural edge not yet testable is event-driv
+  1 agents point_in_time_underlying_value_feed_for_      {'kalshi-attention': 1} 09-22T23:22..09-22T23:22
+      The kalshi-attention series settle on EXTERNAL accumulating metrics, not on anything in the Kalshi book: RCP approval average (KXTRUMPAPPROVE), Rotten Tomatoes score (KXRT), TSA weekly throughput (KXTSAW), token-use counts (KXTOKENUSE), weekly model/AI market 
+  1 agents sports_game_status                            {'kalshi-sports': 1} 09-22T23:41..09-22T23:41
+      Add a field to Kalshi sports markets indicating whether the underlying game is live/in-progress versus pre-game, plus the scheduled start time (or hours_to_start). My strategy bids pre-game 90-98c favourites, and the measured evidence is stark: in-game resting
+  1 agents point_in_time_earnings_surprise_panel_fo      {'alpaca-megacaps': 1} 09-22T23:43..09-22T23:43
+      The megacaps desk needs a point-in-time earnings-announcement/surprise data feed to test post-earnings drift (PEAD), the last non-OHLCV falsifiable hypothesis we have. Concretely: for the 12-name megacap universe (NVDA AAPL MSFT AMZN GOOGL META TSLA AVGO AMD N
+  1 agents point_in_time_perpetual_funding_open_int      {'alpaca-crypto-majors': 1} 09-23T00:11..09-23T00:11
+      For the alpaca-crypto-majors niche: every price-pattern family on BTC/USD and ETH/USD is measured fee-negative (best gross ceiling +0.26%/trade vs the 0.30% maker round-trip), so the only mechanically open edge is the perpetual short-positioning unwind (fundin
+  1 agents crypto_perp_funding_and_open_interest_fe      {'alpaca-crypto-alts': 1} 09-23T00:15..09-23T00:15
+      A daily (or higher-frequency) feed of aggregate perpetual-futures funding rate and open interest for the crypto-alts universe (SOL, XRP, DOGE, LTC, LINK, AVAX, BCH, UNI, AAVE, DOT, ADA, SHIB), delivered alongside or mergeable with the Alpaca bars/quotes that s
+  1 agents point_in_time_settlement_fixings              {'kalshi-prices': 1} 09-23T00:56..09-23T00:56
+      Merton, for hawkins-19: Supply live and replayable official fixings for the agent's slow-number series, with source observation period, first authenticated availability time, revisions/finality status, and each market's exact comparison, rounding and settlemen
+  1 agents live_sports_gamestate_feed                    {'kalshi-sports-props': 1} 09-23T01:08..09-23T01:08
+      Per-market, point-in-time game state for Kalshi sports-player-props. My specialty's only live edge (the longshot NO maker) is structurally defeated by adverse selection precisely because fills land in-game (replay #26: 11/12 fills at 1-3h to end) and a resting
+  1 agents kalshi_attention_underlying_count_feed_w      {'kalshi-attention': 1} 09-23T01:25..09-23T01:25
+      Refining/consolidating the attention-desk feed request (leahy-29's prior spec). The ONLY surviving edge in kalshi-attention, per the exhaustive dead-axis map (le-949e0e48) and leahy-2's "closed axis" note (le-93081611), is margin-of-safety: enter a threshold-l
+  1 agents attention_underlying_value_feed_refined_      {'kalshi-attention': 1} 09-23T02:04..09-23T02:04
+      Refinement of the already-queued 'attention-underlying-value-feed' (filed by leahy-28 and leahy). The kalshi-attention speciality's only surviving edge is count-mispricing — compare the near-final CURRENT underlying value against the ladder's strikes for a mar
+  1 agents player_props_game_status_feed_lineup_in_      {'kalshi-sports-props': 1} 09-23T02:42..09-23T02:42
+      For the kalshi-sports-props desk, a per-player feed covering the players named in open prop markets (KXMLBHR/KXMLBHIT/KXNFLTD/KXNFLREC etc): (1) pre-game lineup/inactive status — active, starting, inactive, or ruled out, where a league lineup source provides i
+  1 agents point_in_time_earnings_feed                   {'alpaca-options': 1} 09-23T05:32..09-23T05:32
+      Build a point-in-time earnings feed for the alpaca-options universe (F, SOFI, AAL, T, RIVN, SNAP, CCL, VALE, BAC, INTC, PFE, HOOD, PLTR, SPY, QQQ, IWM): historical and upcoming report dates/times plus actual and consensus EPS with availability timestamps. The 
+  1 agents kalshi_contract_fixings                       {'kalshi-prices': 1} 09-23T05:32..09-23T05:32
+      Add a point-in-time, contract-aware feed for Hawkins kalshi-prices settlement fixings. For each supported series/market, provide the authoritative source value, the observation/publication timestamp as received, whether it is final under the contract’s settlem
+  1 agents attention_count_snapshots                     {'kalshi-attention': 1} 09-23T06:27..09-23T06:27
+      Build a point-in-time feed for Kalshi attention/count markets: capture the authoritative underlying value (for example, approval average, cumulative count, or model share), its source and observation timestamp, polling cadence/count, and any published rounding
+  1 agents point_in_time_earnings_surprises              {'alpaca-megacaps': 1} 09-23T06:49..09-23T06:49
+      For alpaca-megacaps, provide replayable point-in-time earnings release records for the 12 permitted tickers: actual EPS and revenue, contemporaneous analyst consensus (and/or surprise percentages), release timestamp, fiscal quarter, and the first time each val
+  1 agents kalshi_shared_leg_permissions                 {'kalshi-crypto-15m': 1} 09-23T08:01..09-23T08:01
+      Merton, for huang-h6d3302-2: Expose point-in-time allowed buy legs and blocking shared holdings or working orders for each market, with a pre-submission recheck. Owned positions and scalar remaining headroom cannot reveal the hidden opposite-leg commitments al
+  1 agents kalshi_15m_spot_quote_history                 {'kalshi-crypto-15m': 1} 09-23T08:16..09-23T08:16
+      Add point-in-time historical DOGE/USD spot quotes (bid/ask with timestamps, preferably tick or 1-second resolution) to Kalshi 15-minute crypto replay observations, aligned to each market observation and settlement. The existing 5-minute bars are stale relative
+  1 agents point_in_time_btc_spot_quotes_for_kalshi      {'kalshi-crypto-15m': 1} 09-23T08:22..09-23T08:22
+      Add synchronized, point-in-time BTC/USD spot quotes or at least 1-minute bars to KXBTC15M live snapshots and historical replay, aligned to each decision and the market's settlement strike. Current observed 5-minute bars are stale relative to these short market
+  1 agents kalshi_player_prop_live_stats                 {'kalshi-sports-props': 1} 09-23T08:30..09-23T08:30
+      Add a point-in-time sports feed for Kalshi player-prop markets: pregame confirmed active/inactive status and, during games, player-level stats (NFL rush yards/TDs/receptions, MLB hits/HR/strikeouts, etc.), with event/player identifiers and timestamps. The exis
+  1 agents crypto_15m_execution_chronology               {'kalshi-crypto-15m': 1} 09-23T08:52..09-23T08:52
+      Merton, for huang-h609d6f: Record synchronized Kalshi book updates, depth and trades with exchange and receipt timestamps, observed spot updates, and owned order submission, acknowledgment, cancellation and fill events; attach each contract's benchmark, strike
+  1 agents player_prop_state_feed                        {'kalshi-sports-props': 1} 09-23T09:28..09-23T09:28
+      Build a point-in-time player-prop context feed, initially MLB: map Kalshi player-prop markets to the underlying game/player and provide pregame lineup/active status plus in-game player stat lines and game state, with timestamps and replayable historical covera
+  1 agents kalshi_official_fixings                       {'kalshi-prices': 1} 09-23T09:33..09-23T09:33
+      Build a point-in-time, auditable feed for this specialty’s official fixing/settlement values and their publication/finality timestamps: AAA gasoline/diesel average releases (including publication time and daily/state series), WTI official settlement, and gold 
+  1 agents promotion_audit_trace                         {'kalshi-crypto-15m': 1} 09-23T10:16..09-23T10:16
+      Merton, for huang-h6d3302: For an agent and repair key, return the exact flag-emitting predicate and implementation revision, evaluated operands and thresholds, strategy hash, evidence scope/cutoff, excluded-record reasons, and a deterministic failing fixture.
+  1 agents mlb_player_boxscore                           {'kalshi-sports-props': 1} 09-23T12:04..09-23T12:04
+      Add a point-in-time live MLB box-score feed for the Kalshi sports-props desk, keyed to the existing ESPN event IDs and including inning/score plus each listed player's confirmed lineup status and relevant live stats (especially home runs for KXMLBHR). The curr
+  1 agents player_prop_live_state                        {'kalshi-sports-props': 1} 09-23T12:40..09-23T12:40
+      Add a point-in-time live MLB/NFL player box-score and participation feed, keyed to Kalshi prop tickers or normalized player/team/game IDs (at minimum batting stats and active/inactive status for MLB; participation/touchdown/reception/yards for NFL). Current sc
+  1 agents kalshi_crypto_15m_point_in_time_spot_tic      {'kalshi-crypto-15m': 1} 09-23T13:33..09-23T13:33
+      Add replayable, point-in-time high-frequency BTC/ETH/SOL/XRP/DOGE spot quotes (ideally 1-second trades or NBBO, with receive timestamps) aligned to Kalshi 15-minute market observations. Current observed spot input is 5-minute bars, which is stale relative to t
+  1 agents kalshi_15_minute_crypto_execution_tape        {'kalshi-crypto-15m': 1} 09-23T13:45..09-23T13:45
+      Add point-in-time Kalshi 15-minute crypto best bid/ask and trade prints (ideally depth/queue or at least trades through price) to replay and forward snapshots, with receive timestamps. Existing replay uses bar-based fills without queue position or adverse-sele
+  1 agents kalshi_player_prop_context                    {'kalshi-sports-props': 1} 09-23T15:37..09-23T15:37
+      Add point-in-time player-prop context keyed to Kalshi market/player and game: pregame confirmed active/inactive and starting-lineup status, then timestamped player box-score stats during games. The existing ESPN scoreboard only has game-level status and scores
+
+=== tool.blocked / tool.fulfilled: status, change, request name, outcome
+tool.blocked 97
+    1 ('blocked', 'le-e73565ca-79f7-4243-a150-0a0428f5a25b', False)
+    1 ('blocked', 'le-7da45569-37df-40a7-81e5-caf56c245703', False)
+    1 ('blocked', 'le-542466b9-325a-4cab-b181-9bc603382c75', False)
+    1 ('blocked', 'le-86c0bac6-1e01-4779-81b5-c37e89e32b3d', False)
+    1 ('blocked', 'le-02fbfb8d-f2d2-4043-8637-42ee8efc1713', False)
+    1 ('blocked', 'le-b3142c3a-d40f-4a22-a796-7b3f71012ca5', False)
+    1 ('blocked', 'le-b1cb4803-c3c8-4fbf-8b0e-253c655ffe5d', False)
+    1 ('blocked', 'le-25a76696-fcf7-470d-a2cc-2120f149e5af', False)
+    1 ('blocked', 'le-139575d3-9d11-404e-9886-682c4e66ea55', False)
+    1 ('blocked', 'le-a265143a-1236-4f09-aeeb-ea0d0ba07d17', False)
+    1 ('blocked', 'le-ee0ba1bb-a0ba-4665-ad0c-586de26dc4e9', False)
+    1 ('blocked', 'le-770f5e98-0a20-417d-a09b-7e8e824e7fdc', False)
+    1 ('blocked', 'le-1965bc1b-e205-4964-b564-9b13ae3ae723', False)
+    1 ('blocked', 'le-3ace3b15-ebe0-4b43-abe4-30b24e626e3b', False)
+    1 ('blocked', 'le-8557c4ac-a02a-4727-b7d1-f35612133777', False)
+    1 ('blocked', 'le-2ccfd89f-fe73-46e8-bc4a-6b07d8a20ff4', False)
+    1 ('blocked', 'le-0d5a4639-3d61-4910-92c4-49d65289c364', False)
+    1 ('blocked', 'le-a8cb8ce1-0899-4a03-be74-62764ea5536a', False)
+    1 ('blocked', 'le-45e07638-be74-48aa-89fc-75b548b11bf7', False)
+    1 ('blocked', 'le-1f4c24f0-1067-4902-8753-efe869bd1a86', False)
+    1 ('blocked', 'le-fa9ae681-b4ed-43f6-9dc7-7c2b9a9722b7', False)
+    1 ('blocked', 'le-07e79f4a-3321-4fee-8321-63c3a59f71bb', False)
+    1 ('blocked', 'le-4bbdab27-0fc5-4f2e-a9cc-2369a41703a3', False)
+    1 ('blocked', 'le-8ea33f6c-e8c2-4aaa-af50-c9c90ba3eeb3', False)
+    1 ('blocked', 'le-611febb4-e06e-4413-b528-ff2a2968f6ff', False)
+    1 ('blocked', 'le-49476ff9-5bce-4466-a263-9ea840d6b239', False)
+    1 ('blocked', 'le-a290578c-1b94-4979-bbed-8506d97aa76c', False)
+    1 ('blocked', 'le-a5105f8b-f907-4ba5-b0a0-9270205e6326', False)
+    1 ('blocked', 'le-a40082b6-c004-4c62-827b-4ea6b1fc765e', False)
+    1 ('blocked', 'le-6f01f389-93e8-4b05-81a4-a00a09f2c257', False)
+    1 ('blocked', 'le-82aceb47-818b-4e38-b6dd-9704aa56d84d', False)
+    1 ('blocked', 'le-ced4b374-b169-49fb-9862-604254556a40', False)
+    1 ('blocked', 'le-a0ff3890-5e17-4ac0-8c8c-a137af2c9bc3', False)
+    1 ('blocked', 'le-9d9ee074-01f0-4713-bc70-94b1bfa05fd4', False)
+    1 ('blocked', 'le-a2f0b4e3-04e6-47a9-867b-60964835c76f', False)
+    1 ('blocked', 'le-2377a335-96e6-43f5-bfbb-8cc93d986078', False)
+    1 ('blocked', 'le-329cb3cb-d29f-42b3-ac34-3bd4a12cf3e3', False)
+    1 ('blocked', 'le-923c1672-ff62-4435-b2f3-d7cfe1875e55', False)
+    1 ('blocked', 'le-e316500d-8e8a-4156-a469-06b3308da9d2', False)
+    1 ('blocked', 'le-964b00f0-753b-4d46-9ec8-2716131b69fb', False)
+    1 ('blocked', 'le-3492e774-fc82-4a8c-b507-b0d63e7cbec6', False)
+    1 ('blocked', 'le-b554e3c5-b2ea-4bee-868d-cd6df44a8934', False)
+    1 ('blocked', 'le-88157390-e141-4713-98d1-708e19ade843', False)
+    1 ('blocked', 'le-7860d0c2-bc9a-4693-9733-68d5b77f034d', False)
+    1 ('blocked', 'le-71c6ca88-cec9-4f02-96f3-937548d98f98', False)
+    1 ('blocked', 'le-50091271-faaf-4378-ba9d-c052e83425a1', False)
+    1 ('blocked', 'le-9b391efd-0fdf-4b59-a531-ea1823dc7e35', False)
+    1 ('blocked', 'le-dcc22f20-1cf9-44e5-bd87-64ecd0916c4e', False)
+    1 ('blocked', 'le-e39432ba-d8e7-4348-8e10-a87576727ff2', False)
+    1 ('blocked', 'le-873c7a4b-514e-4993-b252-7d39920f6e0d', False)
+    1 ('blocked', 'le-37de3536-ecc0-41fc-b29a-16de81a488b5', False)
+    1 ('blocked', 'le-7c4639c2-3960-4d76-a2a0-1e4e85cc5cb7', False)
+    1 ('blocked', 'le-91f30560-bb5e-4e8f-8675-9ce74c99b388', False)
+    1 ('blocked', 'le-3a5a4340-c237-477f-8d8e-6257f3a60fd5', False)
+    1 ('blocked', 'le-8c6f02d6-465b-444a-8704-8df0bbd9c5e0', False)
+    1 ('blocked', 'le-367b64f7-e01d-4ca7-b362-c2b5d2828c29', False)
+    1 ('blocked', 'le-181748f4-56b7-4411-9538-72d0fb097685', False)
+    1 ('blocked', 'le-6e6a3772-4c45-44cc-82ad-c83b7d241eac', False)
+    1 ('blocked', 'le-bf6f1148-26d8-41f3-863a-914638a6dc54', False)
+    1 ('blocked', 'le-d133a7fc-4f6a-4f17-99d3-59ff3e74d182', False)
+tool.fulfilled 106
+    1 (None, 'le-4c5cc084-5727-49b0-9b25-ab5ef1633e5f', False)
+    1 (None, 'le-d344123a-43e0-4f07-bcbe-34f7667de8d9', False)
+    1 (None, 'le-99efe8d9-8811-43df-874b-a2fe601ba87f', False)
+    1 (None, 'le-c2e5a0d1-a0d2-4a8e-8821-786e99a69a0f', False)
+    1 (None, 'le-dd4b0e23-895a-4b3c-9c12-dbad1c83e2b4', False)
+    1 (None, 'le-37c9bf5a-813f-46dc-aba6-25b508c5f5dc', False)
+    1 (None, 'le-d939d9ce-08c6-45c0-add9-0f4d3fd1ca5d', False)
+    1 (None, 'le-71b5870b-1e6e-4a04-95e4-a6a0aba8175c', False)
+    1 (None, 'le-ba117fca-2368-4395-8e77-d6026393c9a6', False)
+    1 (None, 'le-8947e6ef-038f-4c1b-a44e-05109b584bb9', False)
+    1 (None, 'le-2246accf-4bcd-447e-83cb-d62e65102d07', False)
+    1 (None, 'le-d5bb68a3-d2ae-4b9e-ba64-8250a377b522', False)
+    1 (None, 'le-bb3ad4d1-1b50-45c5-85d8-8ca4d658059b', False)
+    1 (None, 'le-c832ff30-ca46-4ac8-b65c-860c36d86711', False)
+    1 (None, 'le-da0989d2-0d31-41f4-bf7a-518405e31736', False)
+    1 (None, 'le-32ae61c4-4f5e-4808-be12-788dce7af0f8', False)
+    1 (None, 'le-7cfbedf1-6bbd-4b05-9239-d5a01a8b9abc', False)
+    1 (None, 'le-7e5764f5-6cf5-46df-bdd5-daab76b6cf03', False)
+    1 (None, 'le-ad6dc972-36c2-49a9-9ef0-4595b8099c9f', False)
+    1 (None, 'le-f593f3c1-24f1-442a-900c-747ae73742a0', False)
+    1 (None, 'le-45dea91f-d456-445d-84a6-437066f4499e', False)
+    1 (None, 'le-a02d0e9c-2bc8-4667-bb91-e0ec51a829f4', False)
+    1 (None, 'le-27a39e7e-c52d-43d7-83d4-ac05a4c13891', False)
+    1 (None, 'le-23f8b1a4-311f-43bd-96d4-3a03c3039675', False)
+    1 (None, 'le-274f69a1-c3d8-467f-bcd9-cdc3a9e5dfdd', False)
+    1 (None, 'le-2944acfb-e07c-470f-b94e-566194bff8ca', False)
+    1 (None, 'le-d933be56-e74b-469c-90b0-022240a5582b', False)
+    1 (None, 'le-7f7773a2-015c-4c7d-88fe-a8917eb8bbe4', False)
+    1 (None, 'le-7d1715cb-56a2-44cc-ad8a-02f315e937a5', False)
+    1 (None, 'le-4e4a1389-7fd2-4844-9f0d-bd64e94f5384', False)
+    1 (None, 'le-2c5aa585-6754-41be-ac0c-4093d9d31c7c', False)
+    1 (None, 'le-e4cb5410-ff53-4338-8ac1-b2b363e5cd0e', False)
+    1 (None, 'le-08956483-74ea-4b11-ad20-7b0887029267', False)
+    1 (None, 'le-9620a3c9-e35f-4930-9c59-3f9c68cf00aa', False)
+    1 (None, 'le-8cfaa313-c271-44ca-a7c9-921188e46fa1', False)
+    1 ('answered', 'le-e0904eac-c66f-4f27-8c38-b505eadaba18', False)
+    1 ('answered', 'le-ffe5be11-f6ed-440e-80ab-fc41baef6631', False)
+    1 ('answered', 'le-3da8fa8c-ec60-4a72-9f31-0bbb473a0667', False)
+    1 ('answered', 'le-d613577d-abc1-4d73-b03a-2083e0e80b27', False)
+    1 ('answered', 'le-39458fc7-341c-42dd-ae07-ec99a65ab153', False)
+    1 ('answered', 'le-10492ea8-d0d9-4547-b807-facd88bfc243', False)
+    1 ('answered', 'le-49e750fc-21a7-4956-b262-54c772f077ed', False)
+    1 ('answered', 'le-8f626bbc-3615-48ef-b9c6-237c8a7d8e79', False)
+    1 ('answered', 'le-e35fed34-a150-4079-81b3-d4a0c7cdd90a', False)
+    1 ('answered', 'le-3736dcf2-b5ec-482e-b1be-4d9cbc0e226a', False)
+    1 ('answered', 'le-28cd9056-a30d-41ed-8a76-7d6266f577a5', False)
+    1 ('answered', 'le-21a078a1-8740-455b-aadc-ad45bf7af1bc', False)
+    1 ('answered', 'le-789c5d47-60a7-4f43-bac6-f2e6999abb40', False)
+    1 ('answered', 'le-43481c1b-0da0-479c-aeb2-27de91c4d617', False)
+    1 ('answered', 'le-bc0f7aa3-f63d-4c6e-8d11-f2c39685fb77', False)
+    1 ('answered', 'le-2a1050ed-5d03-498b-bf9f-43cb67be64bc', False)
+    1 ('answered', 'le-23851a88-9b14-4866-b0fe-9c4faf614ef0', False)
+    1 ('answered', 'le-22813cda-1572-4ddc-86ac-2c836dd2359b', False)
+    1 ('answered', 'le-1df400f8-c13b-4c50-aefd-731a5039dc7a', False)
+    1 ('answered', 'le-bf3f7178-158a-41c4-bb4a-457532cfdb74', False)
+    1 ('answered', 'le-838726d5-5112-4ad5-9122-df8d2fdcef6b', False)
+    1 ('answered', 'le-49a5deae-52e4-4fb5-bd78-6cdc60a5acf3', False)
+    1 ('answered', 'le-f658b18b-f36b-4608-bf52-4ae27241a76b', False)
+    1 ('answered', 'le-a24f6f1e-0c87-465a-b5e9-047a2412a20c', False)
+    1 ('answered', 'le-25277848-68aa-4a89-aa8c-e05fbcb29ed6', False)
+
+=== tool.blocked outcomes (why), first 120 chars each, grouped
+    1 ('?', 'cannot be a pure tool: ctx lacks settlement-matched film/source identities, rating types, published scores, positive and total review counts')
+    1 ('?', 'cannot be a pure tool: market quotes and hours_to_close do not contain game scores, periods/clocks, scoring events, or accumulating player s')
+    1 ('?', 'cannot be a pure tool: a helper cannot supply missing historical 5Min bars or re-record a tape. Owner: House Alpaca market-data and Kalshi r')
+    1 ('?', 'cannot be a pure tool: missing inputs are historical executable price observations, contract metadata, and settlements for the requested NFL')
+    1 ('?', 'cannot be a pure tool: scores, set/map counts, clock/period state, and live/finished status are not present in ctx and cannot be inferred re')
+    1 ('?', 'cannot be a pure tool: ctx lacks timestamped earnings announcements, fiscal-period records, pre-release consensus vintages, actuals, revisio')
+    1 ('?', 'cannot be a pure tool: the reported missing spot-bar coverage and historical receive-time provenance cannot be generated from market snapsho')
+    1 ('?', 'cannot be a pure tool: scores, game clock, period and in-play status are absent from market rows and cannot be recovered from prices or hour')
+    1 ('?', 'cannot be a pure tool: neither game-state snapshots nor scoring-event history is supplied. Owner: House sports-data/context and replay engin')
+    1 ('?', 'cannot be a pure tool: bars do not contain historically announced earnings schedules, reported EPS or pre-announcement analyst consensus. Ow')
+    1 ('?', 'cannot be a pure tool: spot OHLCV and Kalshi open_interest do not provide perpetual funding or derivatives open interest. Owner: House deriv')
+    1 ('?', 'cannot be a pure tool: a KXRT price and strike do not reveal the contemporaneous Rotten Tomatoes critic score or authoritative settlement ma')
+    1 ('?', 'cannot be a pure tool: game state and player counting statistics are external observations, not derivable from prop prices. Owner: House spo')
+    1 ('?', 'cannot be a pure tool: announcement timestamps, actual EPS/revenue and historical consensus vintages are missing inputs. Owner: House corpor')
+    1 ('?', 'cannot be a pure tool: OHLCV cannot reconstruct historical executable bid/ask spreads, and current snapshots cannot supply past observations')
+    1 ('?', 'cannot be a pure tool: live box scores and timestamped lineup/inactive announcements are not supplied. Owner: House sports-data/context and ')
+    1 ('?', 'cannot be a pure tool: authoritative player-status announcements, status-change timestamps and market-specific nonparticipation rules are mi')
+    1 ('?', 'cannot be a pure tool: genuine sub-five-minute spot observations, compatible Kalshi quote timing and any replay-capacity or decision-cadence')
+    1 ('?', 'cannot be a pure tool: missing inputs are historical RT score observations, their publication and availability timestamps, and the mapping f')
+    1 ('?', "cannot be a pure tool: bid/ask and ctx.now cannot establish the underlying quote's source age or actual receipt time. House engineering's Al")
+    1 ('?', 'cannot be a pure tool: the SIP snapshot receipt time associated with each underlying quote is missing from strategy inputs and cannot be inf')
+    1 ('?', 'cannot be a pure tool: KXRT F, N, latest counted-review timestamp and authoritative snapshot/rounding rules, plus the RCP approval mean, pol')
+    1 ('?', 'cannot be a pure tool: current scores, sport-specific game progress and timestamped event-to-market mappings are missing external inputs. Ho')
+    1 ('?', 'cannot be a pure tool: AAA gasoline/diesel values, the applicable WTI settlement and LBMA fixing are not supplied observations. House settle')
+    1 ('?', 'cannot be a pure tool: live scores and player statistics are absent from ctx and cannot be recovered from prop prices. Owner: House engineer')
+    1 ('?', 'cannot be a pure tool: close/resolve times do not establish kickoff, and live game state and lineup status are missing. Owner: House enginee')
+    1 ('?', 'cannot be a pure tool: the current score, elapsed/game clock, and underlying player count are independent observations not contained in mark')
+    1 ('?', 'cannot be a pure tool: spot OHLCV does not determine perpetual funding or perpetual open interest; Kalshi open_interest is unrelated. Owner:')
+    1 ('?', "cannot be a pure tool: existing BTC/ETH bar coverage supplies neither funding nor OI history. Owner: House engineering's perpetual-data and ")
+    1 ('?', 'cannot be a pure tool: a helper can retain previously seen touches in strategy memory, but cannot recover pre-start/inter-wake quotes, excha')
+    1 ('?', 'cannot be a pure tool: approval, throughput, post/mention counts, review scores, and model shares require external settlement-source observa')
+    1 ('?', 'cannot be a pure tool: player availability is missing, and an inactive announcement alone cannot determine whether a specific contract voids')
+    1 ('?', 'cannot be a pure tool: RT review counts and RCP poll metadata, historical snapshots, and authoritative settlement conventions are absent. Ow')
+    1 ('?', 'cannot be a pure tool: the requested official daily prints and six-to-twelve-month histories are not strategy inputs. Owner: House engineeri')
+    1 ('?', 'cannot be a pure tool: point-in-time earnings schedules, schedule revisions and actual/pre-announcement-consensus EPS are absent. Bars permi')
+    1 ('?', 'cannot be a pure tool: next/prior earnings events and historical consensus vintages are not derivable from OHLCV, and runtime explicitly lis')
+    1 ('?', 'cannot be a pure tool: authoritative TSA observations and their publication history are missing. The House settlement-source/context and rep')
+    1 ('?', 'cannot be a pure tool: scores, game clocks, player statistics and lineup/inactive status are external inputs explicitly absent from current ')
+    1 ('?', 'cannot be a pure tool: historical and live RCP approval observations, provenance, availability timestamps and coverage gaps are not supplied')
+    1 ('?', 'cannot be a pure tool: executable depth, book/trade event history, queue-relevant inputs and an atomic paired-order primitive are absent. Th')
+
+=== tool.fulfilled: request -> change (PR/branch)
+    09-19T23:34 None ? -> None | cannot be a pure tool: Kalshi ctx has neither observed crypto spot prices nor the return history nee
+    09-19T23:34 None ? -> None | cannot be a pure tool: Current underlying BTC/ETH/SOL/XRP observations are missing from Kalshi ctx. 
+    09-19T23:34 None ? -> None | cannot be a pure tool: Scores, match clocks, periods, and in-play status are external observations a
+    09-19T23:34 None ? -> None | cannot be a pure tool: Rotten Tomatoes ratings, AI market shares, approval averages, categorical cou
+    09-19T23:34 None ? -> None | cannot be a pure tool: A helper cannot add BTC/ETH bars to ctx or establish observation-only symbol 
+    09-19T23:34 None ? -> None | cannot be a pure tool: Settlement-reference prices, preceding-hour one-minute history, and contract-
+    09-20T05:21 None ? -> None | cannot be a pure tool: exit 137 indicates SIGKILL but does not establish OOM versus timeout, and a k
+    09-20T05:21 None ? -> None | cannot be a pure tool: historical sports results, actual scores, and close/resolve histories are not
+    09-20T05:21 None ? -> None | cannot be a pure tool: extending intraday history to 3–6 months across twelve stocks and supplying e
+    09-20T05:21 None ? -> None | cannot be a pure tool: fixed-offset historical football quotes joined to settlements, and replay dat
+    09-20T05:21 None ? -> None | cannot be a pure tool: listing-to-resolution bid/ask and last-trade histories with outcomes require 
+    09-20T05:21 None ? -> None | cannot be a pure tool: a 30-plus-day in-season sports tape is a replay-data coverage change, not a c
+    09-20T05:21 None ? -> None | cannot be a pure tool: historical KXNCAAFGAME, KXNFLGAME, KXNCAAFSPREAD, and KXNFLSPREAD quotes, vol
+    09-20T05:21 None ? -> None | cannot be a pure tool: corporate earnings schedules and actual-versus-estimate surprises are externa
+    09-20T05:21 None ? -> None | cannot be a pure tool: adding 18–24 months of daily bars and timestamped earnings events to replay a
+    09-20T05:21 None ? -> None | cannot be a pure tool: the requested whole-tape UTC-hour statistics need historical BTC/USD and ETH/
+    09-20T07:08 None ? -> None | cannot be a pure tool: recording or extending underlying bars and quotes requires the House data rec
+    09-20T07:08 None ? -> None | cannot be a pure tool: scheduled and actual earnings timestamps, announcement revisions, corporate-a
+    09-20T07:08 None ? -> None | cannot be a pure tool: adding eight missing ETFs and extending the tape to six or more months requir
+    09-20T07:08 None ? -> None | cannot be a pure tool: perpetual funding rates and open interest are external observations absent fr
+    09-20T07:08 None ? -> None | cannot be a pure tool: spread and volume calculations are straightforward only after the six books' 
+    09-20T07:08 None ? -> None | cannot be a pure tool: aggregation of supplied five-minute bars is pure, but serving hourly history 
+    09-20T07:08 None ? -> None | cannot be a pure tool: extending megacap coverage to at least 60 sessions, adding the full universe 
+    09-20T07:08 None ? -> None | cannot be a pure tool: the requested delivery of missing underlying histories or an observed realize
+    09-20T07:08 None ? -> None | cannot be a pure tool: current review scores, model shares, approval averages, post counts, TSA thro
+    09-20T07:08 None ? -> None | cannot be a pure tool: current and predicted funding, open interest, long/short ratios, and next-set
+    09-20T08:39 None ? -> None | cannot be a pure tool: Tomatometer scores for KXRT, RCP approval for KXTRUMPAPPROVE, weekly Truth So
+    09-20T08:39 None ? -> None | cannot be a pure tool: ctx contains no earnings-announcement events or actual release timestamps for
+    09-20T10:09 None ? -> None | cannot be a pure tool: current bid/ask and 24-hour volume for unexposed symbols are new inputs, and 
+    09-20T10:09 None ? -> None | cannot be a pure tool: a multi-day in-season sports-props tape requires historical market observatio
+    09-20T10:09 None ? -> None | cannot be a pure tool: isolated snapshots do not determine the missing intra-window bid/ask path; st
+    09-20T13:10 None ? -> None | cannot be a pure tool: an in-season, multi-day NFL/MLB player-prop tape requires historical market s
+    09-20T13:10 None ? -> None | cannot be a pure tool: extending crypto coverage to at least 90 days and adding symbols requires his
+    09-20T13:10 None ? -> None | cannot be a pure tool: providing 1Hour bars on the replay tape and a substantially longer lookback r
+    09-20T13:10 None ? -> None | cannot be a pure tool: fetching a live spread-and-volume survey or adding it to markets_now and ctx 
+    09-20T16:11 answered ? -> None | cannot be a pure tool: BTC/ETH perpetual funding, perpetual open interest, and the next funding sett
+    09-20T16:11 answered ? -> None | cannot be a pure tool: current market snapshots do not provide every listed sports market's historic
+    09-20T16:11 answered ? -> None | cannot be a pure tool: settled player-prop histories, historical bid/ask observations, and settlemen
+    09-20T16:11 answered ? -> None | cannot be a pure tool: a helper cannot generate genuine multi-week daily strike-ladder quotes, cover
+    09-20T16:11 answered ? -> None | cannot be a pure tool: extending the existing altcoin tape to at least 90 days and adding six symbol
+    09-20T16:11 answered ? -> None | cannot be a pure tool: strategies are not given the replay engine's complete resolved-market price h
+    09-20T16:11 answered ? -> None | cannot be a pure tool: current Rotten Tomatoes scores and review counts, RCP averages and poll metad
+    09-20T16:11 answered ? -> None | cannot be a pure tool: an in-season CFB/NFL replay tape or historical moneyline prices paired with s
+    09-20T16:11 answered ? -> None | cannot be a pure tool: tomatometer scores and review counts, weekly post counts, polling metadata, T
+    09-20T19:13 answered ? -> None | cannot be a pure tool: recording underlying bars and quotes requires external data and replay integr
+    09-20T19:13 answered ? -> None | cannot be a pure tool: adding at least 90 days of BCH/USD, UNI/USD, AAVE/USD, DOT/USD, ADA/USD, and 
+    09-20T19:13 answered ? -> None | cannot be a pure tool: forward-recording six additional books and exposing their live quotes require
+    09-20T19:13 answered ? -> None | cannot be a pure tool: creating daily crypto-strike tapes with aligned underlying history requires m
+    09-20T19:13 answered ? -> None | cannot be a pure tool: current Tomatometer scores and review counts, approval averages and poll coun
+    09-20T19:13 answered ? -> None | cannot be a pure tool: scores, periods, innings, and game clocks require a sports-state provider and
+    09-20T19:13 answered ? -> None | cannot be a pure tool: the requested attention underlying values and their publication/change histor
+    09-20T19:13 answered ? -> None | cannot be a pure tool: 24–36 months of perpetual funding, open interest, mark/index prices, specific
+    09-20T19:13 answered ? -> None | cannot be a pure tool: an in-season moneyline tape requires recorded quotes, market lifecycles, and 
+    09-20T19:13 answered ? -> None | cannot be a pure tool: recutting a 30-hour in-season sports-props tape requires actual historical ma
+    09-20T22:15 answered ? -> None | cannot be a pure tool: perp marks, funding, and aggregate perpetual open interest are not supplied; 
+    09-20T22:15 answered ? -> None | cannot be a pure tool: narrowing this to live/forward removes historical reconstruction but still re
+    09-20T22:15 answered ? -> None | cannot be a pure tool: the runtime explicitly lacks a live sports score feed, and prices or hours_to
+    09-20T22:15 answered ? -> None | cannot be a pure tool: extending the sports tape requires archive access, additional recorded market
+    09-20T22:15 answered ? -> None | cannot be a pure tool: execution scheduling and pre-window loading belong to the House replay engine
+    09-20T22:15 answered ? -> None | cannot be a pure tool: current settlement-source values, source-update timestamps, sample metadata, 
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: current scores, periods, clocks, and in-play status are external observations
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: game state and scoring-event history are missing inputs. BLOCKED; House sport
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: spot OHLCV does not contain perpetual funding or perpetual open interest. BLO
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: the point-in-time Rotten Tomatoes critic score and authoritative movie/settle
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: live game state and per-player NFL yards/receptions/carries/TDs, MLB Ks/H/HR,
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: announcement timestamps, as-known consensus, reported EPS/revenue, and revisi
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: historical Alpaca bid/ask observations are absent; OHLC high-low ranges and p
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: game scores, player counting stats, and timestamped lineup/inactive news are 
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: historical and live lineup announcements, player identity mappings, and statu
+    09-22T15:29 deployed ? -> merton/toolsmith/realized-volatility-and-blocked-data-feeds-de0a25c9 | cannot be a pure tool: genuine finer spot observations and replay-capacity changes require House mar
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records perpetual funding and open interest (OKX, Hyperliquid, 
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T01:31 None ? -> league/feeds.py | Shipped (league/feeds.py): the House records ESPN scoreboards -- status, score, period, clock, start
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: current attention-underlying values, publication cadence, update/change histo
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: RCP averages, weekly mentions, RT scores, TSA totals, token-use counts, and m
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: the requested underlying value, sample/depth metadata, and authoritative froz
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: covered leagues already supply game score/period/status, but not player parti
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: official slow-number fixings, observation periods, first authenticated availa
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: earnings announcement times, reported EPS, and prior-close consensus vintages
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | built as tools/sports_game_status.py: declare NEEDS['feeds'] = {'sports': ['mlb']} and call game_sta
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: N requires external settlement-source observations and F requires update hist
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: point-in-time earnings schedules, schedule revisions, and actual past announc
+    09-23T02:17 deployed ? -> merton/toolsmith/read-sports-status-from-recorded-scoreboards-0be0e2c0 | cannot be a pure tool: fallback selection, NEEDS validation, and adoption/replay parity are House en
+
+=== data.coverage by feed/status/asset (latest per feed)
+    ('funding', 'feed') ('2026-09-23T16:02:09.501Z', 'current', 'every 30 minutes (OKX settles at 00:00, 08:00 and 16:00 UTC); backfilled over the replay window', 'okx: www.okx.com/api/v5/public/funding-rate-history (<COIN>-USDT-SWAP, settled rates)', '2026-06-25T08:00:00.000Z', '2026-09-23T16:00:00.000Z', 18, "each row is a settled OKX funding rate stamped at its settlement (fundingTime) and shown only from then on, live and in replay; the history before recording began is backfilled from OKX's settled history and stamped the same way, and its averages and z-score read only rates settled at or before it")
+    ('perps', 'feed') ('2026-09-23T16:02:09.487Z', 'current', 'every 5 minutes', 'okx, hyperliquid, kraken futures, deribit (ltcm/data/derivs.py Derivatives.snapshot)', '2026-09-23T01:31:02.726Z', '2026-09-23T16:01:57.642Z', 18, "each row is stamped with the House's receive time and shown only from then on, live and in replay; nothing is backfilled")
+    ('sports', 'feed') ('2026-09-23T16:02:09.477Z', 'current', 'every 60 s while a game of the league is live or starts within 90 minutes, else every 15 minutes', "espn: site.api.espn.com/apis/site/v2/sports/<league>/scoreboard (today's board only)", '2026-09-23T01:30:43.380Z', '2026-09-23T16:01:45.089Z', 17, "each row is stamped with the House's receive time and shown only from then on, live and in replay; nothing is backfilled, and ESPN is never asked for a past date")
+    ('vol', 'feed') ('2026-09-23T16:02:09.500Z', 'current', 'hourly, 90 seconds after the hour; backfilled over the replay window', 'deribit: www.deribit.com/api/v2/public/get_volatility_index_data (resolution 3600: hourly DVOL candles)', '2026-07-24T04:00:00.000Z', '2026-09-23T16:00:00.000Z', 2, "each row is a completed hourly DVOL candle stamped at its close and shown only from then on, live and in replay; the history before recording began is backfilled from Deribit's own candles and stamped the same way, never with the time it was fetched, and a candle still open is never stored")
+    (None, 'option') ('2026-09-22T21:05:39.876Z', 'current', None, 'alpaca:/v1beta1/options/bars (OPRA trade bars)', '2026-05-14', '2026-09-22', 0, None)
+    (None, None) ('2026-09-22T17:01:45.458Z', 'finished', None, 'alpaca', None, None, 0, None)
+
+=== asks inside research summaries and journals since 09-22 (phrases)
+    54  12 agents  no earned observation
+    53  13 agents  no historical option-chain
+    39  21 agents  no earned observations
+    30   6 agents  no point-in-time earnings panel
+    17   6 agents  no historical option chain
+    12   6 agents  no underlying-value feed
+    12   3 agents  no option-chain
+    11   4 agents  no trades or earned observations
+    10   5 agents  no options-feature history
+     9   4 agents  without historical option chain
+     8   1 agents  unavailable point-in-time underlying observations
+     8   4 agents  missing underlying-value feed
+     7   6 agents  no new data
+     7   4 agents  no kalshi event-series observation
+     7   1 agents  without score data
+     7   1 agents  no dev-tape
+     6   3 agents  unavailable underlying-value feed
+     6   3 agents  missing point-in-time earnings panel
+     6   2 agents  without fresh tape
+     6   5 agents  no live capi
+     6   6 agents  no forward observations
+     6   3 agents  unavailable point-in-time earnings panel
+     6   4 agents  no earnings panel
+     6   4 agents  no further same-tape
+     5   2 agents  no capital or earned observations
+     5   4 agents  no point-in-time earnings-surprise panel
+     5   5 agents  lacks point-in-time earnings data
+     5   2 agents  no new execution or depth
+     5   2 agents  no point-in-time earnings feed
+     5   2 agents  no actionable capi
+     5   1 agents  without earned observations
+     5   3 agents  no new feed
+     5   5 agents  no further tuning on this reused tape
+     4   2 agents  no capital or observations
+     4   2 agents  without an earned observation
+     4   3 agents  lacks the point-in-time earnings feed
+     4   4 agents  no historical chain
+     4   1 agents  no tick/depth
+     4   2 agents  unavailable point-in-time underlying-value feed
+     4   1 agents  no underlying-count/value feed
+     4   3 agents  no distinct coverage
+     4   2 agents  no further replay on this reused tape
+     4   2 agents  no more same-tape
+     3   2 agents  lacks funding/open-interest and range feed
+     3   2 agents  unavailable point-in-time funding/open-interest feed
+     3   1 agents  missing crypto_settlement_spot_and_volatility feed
+     3   2 agents  no score/lineup feed
+     3   2 agents  no qualifying favourite and no underlying-value feed
+     3   1 agents  no replay-validata
+     3   2 agents  missing count feed
+     3   3 agents  without a score feed
+     3   3 agents  no score feed
+     3   1 agents  no falsifiable new hypothesis or fresh validation data
+     3   1 agents  lacks underlying-value snapshots
+     3   1 agents  no fresh falsifiable hypothesis or validation data
+     3   1 agents  missing flow feed
+     3   1 agents  lacks replay coverage
+     3   1 agents  unavailable point-in-time underlying feed
+     3   2 agents  no replay on reused history
+     3   1 agents  no point-in-time fixing feed

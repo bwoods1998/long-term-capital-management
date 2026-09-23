@@ -12,8 +12,14 @@ now; everything under "History" describes something that no longer runs.
 - [Operating the league](operations.md): the operator's page. How to pause, inspect, deploy, roll
   back and recover the running league, how a money rule is deployed and the live grant
   re-ratified, and the switches.
-- [Capital is the ladder](runs/2026-09-23-capital-ladder.md) (Sept 23): the latest execution
-  record, for [the north-star build plan](goals/LTCM_NORTH_STAR_BUILD.md). The allocator's bands of
+- [Learn what blocks the north star, then unblock it](runs/2026-09-23-learn-and-unblock.md)
+  (Sept 23-24): the latest execution record, for [the learn-and-unblock plan](goals/LTCM_LEARN_AND_UNBLOCK.md):
+  a ten-hour run that studied the agents while every venue traded, then unblocked what it found.
+- [The agent study](research/2026-09-23-agent-study.md) (Sept 23): the funnel, where money is made
+  and lost, whether the verifier predicts, the yield of the loop, 24/7 coverage, compute economics
+  and what the agents ask for, with the ten ranked blockers and every query that reproduces a number.
+- [Capital is the ladder](runs/2026-09-23-capital-ladder.md) (Sept 23): the execution record
+  before it, for [the north-star build plan](goals/LTCM_NORTH_STAR_BUILD.md). The allocator's bands of
   capital on both venues, the capital board, sliced exits, the Alpha Lab, a tick that never
   blocks, profit-indexed compute and the open desks.
 - [Dynamism II](runs/2026-09-23-dynamism-ii.md) (Sept 23): the execution record before it. Merged

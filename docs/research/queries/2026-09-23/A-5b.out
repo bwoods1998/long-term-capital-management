@@ -1,0 +1,18 @@
+## 24h: sessions 3875 (161/h); produced a candidate 556 (14%); spent a counted trial 547 (14%); $ 72.78 ($0.0188/session; $0.131/candidate session); median turns 3
+    house-mutation   sessions= 1844 candidate= 232 (13%) trial= 230 $34.05
+    foundry          sessions=  819 candidate= 160 (20%) trial= 160 $18.46
+    agent-fork       sessions=  539 candidate=  84 (16%) trial=  78 $10.79
+    seed             sessions=  215 candidate=   2 (1%) trial=   2 $2.93
+    repair           sessions=  179 candidate=  57 (32%) trial=  56 $2.90
+    architect        sessions=  165 candidate=   5 (3%) trial=   5 $2.05
+    house-revival    sessions=  105 candidate=  15 (14%) trial=  15 $1.22
+    lab              sessions=    9 candidate=   1 (11%) trial=   1 $0.38
+## 6h: sessions 1158 (193/h); produced a candidate 273 (24%); spent a counted trial 268 (23%); $ 22.13 ($0.0191/session; $0.081/candidate session); median turns 4
+    house-mutation   sessions=  436 candidate= 113 (26%) trial= 113 $8.04
+    foundry          sessions=  370 candidate=  77 (21%) trial=  77 $7.62
+    agent-fork       sessions=  130 candidate=  37 (28%) trial=  33 $3.14
+    repair           sessions=   70 candidate=  38 (54%) trial=  37 $1.34
+    architect        sessions=   66 candidate=   2 (3%) trial=   2 $0.79
+    house-revival    sessions=   46 candidate=   5 (11%) trial=   5 $0.54
+    seed             sessions=   31 candidate=   0 (0%) trial=   0 $0.28
+    lab              sessions=    9 candidate=   1 (11%) trial=   1 $0.38
