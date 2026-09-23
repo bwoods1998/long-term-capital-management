@@ -172,3 +172,14 @@ class FakeBroker:
 
     def fills(self, since: str | None = None) -> list[Fill]:
         return []
+
+
+def old_ladder():
+    """The ladder as it stood before capital was the ladder (Sept 23, 2026): the allocator switched
+    off, exactly as its rollback (`allocator.enabled: False`) would. For the tests of the old rungs'
+    screen, micro stake, tuition and Kelly sizing, which still guard that rollback path."""
+    from unittest.mock import patch
+
+    from league.constitution import CONSTITUTION
+
+    return patch.dict(CONSTITUTION["allocator"], {"enabled": False})

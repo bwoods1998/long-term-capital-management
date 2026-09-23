@@ -249,16 +249,19 @@ class Evaluator:
                 first = by_block[key][0]
                 start_equity = (float(first.payload['equity']) if cutoff else
                                 sum(float(s.payload["usd"]) for s in stakes if s.seq < first.seq))
-                flow = sum(float(s.payload["usd"]) for s in stakes if first.seq < s.seq <= last.seq)
+                window = [float(s.payload["usd"]) for s in stakes if first.seq < s.seq <= last.seq]
             else:
                 start_equity = previous_equity
-                flow = sum(float(s.payload["usd"]) for s in stakes if previous_seq < s.seq <= last.seq)
-            if start_equity <= 0 < flow:
+                window = [float(s.payload["usd"]) for s in stakes if previous_seq < s.seq <= last.seq]
+            flow = sum(window)
+            if start_equity <= 0 and any(v > 0 for v in window):
                 # The account was funded INSIDE this block: its marks read zero until the stake
                 # landed. The block starts from the stake, not from nothing, and it counts. Measured
                 # Sept 22, 2026: meriwether-32 was marked at $0 from 22:48, staked at 01:00, and its
-                # whole first funded day was dropped from its paper record.
-                start_equity, flow = flow, 0.0
+                # whole first funded day was dropped from its paper record. What was LENT is the
+                # start and only what was taken back is a flow (Sept 23, 2026: the net of both as
+                # the start let a withdrawal in the same block inflate the growth, or read as ruin).
+                start_equity, flow = sum(v for v in window if v > 0), sum(v for v in window if v < 0)
             if finished and start_equity > 0 and key not in recorded:
                 active = any(int(m.payload.get("holdings") or 0) > 0 for m in by_block[key]) or any(
                     block_key(f.at, horizon) == key for f in fills
@@ -644,11 +647,69 @@ class Evaluator:
         boundary = int(block.get("last_mark_seq") or entry.seq)
         end = float(block.get("end_equity") or 0.0)
         marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent, after=boundary) if e.payload.get("book") == book]
-        if end <= 0 or not marks:
+        if not marks:
             return 0.0
-        flow = sum(float(e.payload["usd"]) for e in self.ledger.iter(kinds="book.stake", agent=agent, after=boundary)
-                   if e.payload.get("book") == book and e.seq <= marks[-1].seq)
+        window = [float(e.payload["usd"]) for e in self.ledger.iter(kinds="book.stake", agent=agent, after=boundary)
+                  if e.payload.get("book") == book and e.seq <= marks[-1].seq]
+        flow = sum(window)
+        if end <= 0:
+            # A swept account staked afresh (a re-seat after a demotion or a sweep): the new stay grows
+            # from what was lent, exactly as `observe` starts a block funded inside it. Until Sept 23,
+            # 2026 this read 0.0, and a re-seated account's losses were invisible for its first block.
+            lent = sum(v for v in window if v > 0)
+            if lent <= 0:
+                return 0.0
+            return stats.log_growth(lent, float(marks[-1].payload["equity"]), sum(v for v in window if v < 0))
         return stats.log_growth(end, float(marks[-1].payload["equity"]), flow)
+
+    def wealth(self, agent: str, book: str, horizon: str = "hour", *, current: bool = True,
+               drawdown_since: int | None = None) -> dict[str, Any]:
+        """The agent's wealth on one book, as a log multiple with stakes lent or returned taken out
+        (the allocator's evidence, Sept 23, 2026): every finished block on the book since its
+        evidence cutoff, plus -- with `current` -- the block in progress up to the latest mark, or,
+        before any block has finished, the growth from what was first staked to the latest mark.
+        Also the drawdown of that wealth index from its high-water mark (the current point
+        included) and the number of finished blocks. `drawdown_since`: measure the drawdown only
+        over blocks that began after that ledger position (the current stay), from the level the
+        record stood at when it began."""
+        from .accounting import evidence_cutoffs
+
+        cutoff = evidence_cutoffs(self.ledger, agent).get(book, 0)
+        rows = self.blocks(agent, book=book)
+        level = 0.0
+        peak = None if drawdown_since is not None else 0.0
+        drawdown = 0.0
+        for row in rows:
+            if peak is None and int(row.get("first_mark_seq") or 0) > int(drawdown_since or 0):
+                peak = level  # the stay begins here: its high-water mark starts where the record stood
+            level += float(row["log_growth"])
+            if peak is not None:
+                peak = max(peak, level)
+                drawdown = max(drawdown, 1.0 - math.exp(max(level - peak, -700.0)))
+        pending = 0.0
+        if current:
+            if rows:
+                pending = self._unfinished_growth(agent, book, cutoff)
+            else:
+                marks = [e for e in self.ledger.iter(kinds="book.mark", agent=agent, after=cutoff) if e.payload.get("book") == book]
+                if marks:
+                    stakes = [e for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
+                    first, last = marks[0], marks[-1]
+                    start = (float(first.payload["equity"]) if cutoff else
+                             sum(float(s.payload["usd"]) for s in stakes if s.seq < first.seq))
+                    window = [float(s.payload["usd"]) for s in stakes if first.seq < s.seq <= last.seq]
+                    flow = sum(window)
+                    if start <= 0 and any(v > 0 for v in window):
+                        # Marked before it was funded: grow from what was lent; only withdrawals are flows.
+                        start, flow = sum(v for v in window if v > 0), sum(v for v in window if v < 0)
+                    grown = stats.log_growth(start, float(last.payload["equity"]), flow) if start > 0 else None
+                    pending = float(grown) if grown is not None else 0.0
+            if peak is None:
+                peak = level  # the stay has no finished block yet: its mark starts where the record stood
+            level += pending
+            peak = max(peak, level)
+            drawdown = max(drawdown, 1.0 - math.exp(max(level - peak, -700.0)))
+        return {"log": level, "drawdown": drawdown, "blocks": len(rows), "pending": pending}
 
     def _gate(self, rung: int) -> Mapping[str, Any] | None:
         """The promotion rule out of this rung, or None from the top."""

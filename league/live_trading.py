@@ -18,6 +18,11 @@ def policy(venue_capital):
     amounts = {k: v.quantize(Decimal('.01'), rounding=ROUND_DOWN) for k, v in amounts.items()}
     total = sum(amounts.values())
     stake = Decimal(CONSTITUTION['rungs']['2']['stake_usd'])
+    allocator = CONSTITUTION.get('allocator') or {}
+    if allocator.get('enabled'):
+        # Capital is the ladder (Sept 23, 2026): the smallest real stake is a bunt, and the envelope
+        # in dollars -- not a head count sized for $60 stakes -- is what bounds the real money.
+        stake = min(Decimal(str(v)) for v in allocator['bunt_usd'].values())
     if max(amounts.values()) < stake or not stake <= total <= Decimal('10000'):
         raise ValueError('live allocation must cover a micro stake and remain within the $10,000 project envelope')
     return {'version': 1, 'max_rung': 3, 'max_agents': int(total // stake),
@@ -25,8 +30,12 @@ def policy(venue_capital):
             'venue_capital_usd': {k: str(v) for k, v in amounts.items()},
             'constitution_digest': money_digest(), 'expires': None,
             'research_funding': 'Only unused original burst allowance within campaign caps; no calendar expiry or replenishment.',
-            'scaling': (f"Existing performance gates and {CONSTITUTION['rungs']['3']['kelly_fraction']:g} of Kelly on the lower bound; "
-                        'venue and aggregate capital limits include historical losses.'),
+            'scaling': ((f"Capital is the ladder: bunts of {', '.join(f'${v} at {k}' for k, v in sorted(allocator['bunt_usd'].items()))}, "
+                         f"swings sized by evidence up to {allocator['max_share_of_venue']:g} of a venue; "
+                         'venue and aggregate capital limits include historical losses; realized profit enlarges a venue.')
+                        if allocator.get('enabled') else
+                        (f"Existing performance gates and {CONSTITUTION['rungs']['3']['kelly_fraction']:g} of Kelly on the lower bound; "
+                         'venue and aggregate capital limits include historical losses.')),
             'capital_source': 'Existing cash only; later deposits do not enlarge this allocation.'}
 
 
