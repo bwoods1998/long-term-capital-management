@@ -31,8 +31,9 @@ to paste a secret into a chat or a file.
   `allocator.enabled: False` in `league/constitution.py` is the rollback to the old ladder of
   sections 2 and 3. It is a money rule, so it needs your deploy and a ratify.
 - **The grant.** `earned-live-20260921`: Alpaca $500, Kalshi $517.75, a $1,017.75 loss line, no
-  expiry. It counts 101 agents, the allocation over the $10 stake line (the smallest bunt). It is
-  pinned to money digest `44e8d48d…` (constitution `9fa83727…`), ratified at 08:28:13Z on Sept 23.
+  expiry. It counts 40 agents, the allocation over the $25 stake line (the smallest bunt). It is
+  pinned to money digest `1d63a56e…` (constitution `52c6c7e5…`), re-ratified at 17:34:36Z on Sept 23
+  (Deploy A of the learn-and-unblock run; before it `44e8d48d…`, 101 agents over a $10 line).
   The allocator's envelope at each venue is that capital plus the realized profit there.
 - **After a money-rule change**, from a clean worktree at `origin/main`:
 

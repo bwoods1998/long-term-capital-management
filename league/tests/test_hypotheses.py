@@ -10,7 +10,7 @@ from league.constitution import CONSTITUTION
 from league.economy import load_game
 from league.frontier import Answer
 from league.house import House, Settings
-from league.hypotheses import DEFAULTS, SEED_WHY, Foundry, card_id
+from league.hypotheses import DEFAULTS, FOUNDRY_BRIEF, SEED_WHY, Foundry, card_id
 from league.sandbox import LocalSandbox
 from league.seeds import load as seed_code
 from league.tests.fakes import FakeBroker
@@ -353,6 +353,51 @@ class FastEvidence(FoundryCase):
         self.assertEqual({d for d, r in routes if r == "fast"}, {self.DESK})
         self.assertEqual({d for d, r in routes if r == "evidence"}, {"alpaca-index-etfs"})
         self.assertEqual(sum(1 for _, r in routes if r == "fast"), 5)
+
+    def test_a_desk_whose_foundry_children_lose_forward_gets_no_fast_lane_call(self):
+        """Sept 23, 2026: the foundry's Kalshi crypto cards were the practice loss engine (-$272.96 of
+        -$361 since Sept 22 13:30Z; strikes -10.3% a block). The fast lane follows the forward ledger."""
+        other = "alpaca-crypto-alts"
+        self.settings(fast_desks=[self.DESK, other], fast_share=1.0, exploration_share=0, transfer_share=0,
+                      fast_lane_min_blocks=6, fast_lane_reopen_blocks=3)
+        for desk in (self.DESK, other):
+            self.house.game["economy"]["max_population"] = 64
+        loser = self.house.spawn("majors-h1", "majors-vol-shock", PASSER, reason="a card's child", founder="card:1111", specialty=self.DESK)
+        self.earn(loser, growth=-0.01, n=6)
+        forward = self.foundry.desk_forward()
+        self.assertEqual((forward[self.DESK]["blocks"], forward[self.DESK]["closed"], forward[self.DESK]["measured"]), (6, True, True))
+        self.assertAlmostEqual(forward[self.DESK]["per_block"], -0.01)
+        desk, route, reason = self.foundry.allocate(fresh=True)
+        self.assertEqual((route, desk.niche), ("fast", other))
+        self.assertIn("closed to the fast lane on forward losses: " + self.DESK, reason)
+        # One family with three positive active blocks reopens the desk, even while the pool is negative.
+        winner = self.house.spawn("majors-h2", "majors-carry", PASSER, reason="a card's child", founder="card:2222", specialty=self.DESK)
+        self.earn(winner, growth=0.001, n=3)
+        forward = self.foundry.desk_forward()
+        self.assertEqual((forward[self.DESK]["closed"], forward[self.DESK]["positive_families"]), (False, ["majors-carry"]))
+        self.assertLess(forward[self.DESK]["growth"], 0)
+        # A desk with a positive measured yield outranks an unmeasured one in the fast rotation.
+        for a in (loser, winner):
+            self.earn(a, growth=0.02, n=3)
+        self.assertGreater(self.foundry.desk_forward()[self.DESK]["per_block"], 0)
+        self.foundry._allocation = None
+        desks = {d.niche: d for d in self.foundry.desk_scores(fresh=True)}
+        # The evidence route's best desk is served by that route; the fast pick is the best-yield OTHER fast desk.
+        best = next(d for d in self.foundry.desk_scores() if d.eligible)
+        picked, route, reason = self.foundry.allocate(fresh=True)
+        self.assertEqual(route, "fast")
+        if best.niche != self.DESK:
+            self.assertEqual(picked.niche, self.DESK)
+            self.assertIn("best forward yield", reason)
+
+    def test_the_brief_demands_maker_entries_on_the_fifteen_minute_desk_and_warns_on_binary_size(self):
+        self.assertIn("kalshi-crypto-15m` MAKER ENTRIES ARE REQUIRED", FOUNDRY_BRIEF)
+        self.assertIn("182 bps", FOUNDRY_BRIEF)
+        self.assertIn("15% of the stake is a ONE-LOSS TRIAL", FOUNDRY_BRIEF)
+        game = json.loads((Path(__file__).resolve().parents[1] / "game.json").read_text(encoding="utf-8"))
+        self.assertNotIn("kalshi-crypto-strikes", game["hypotheses"]["fast_desks"], "40 born, 2 replay passes, -10.3% a block")
+        self.assertIn("kalshi-crypto-15m", game["hypotheses"]["fast_desks"])
+        self.assertEqual((game["hypotheses"]["fast_lane_min_blocks"], game["hypotheses"]["fast_lane_reopen_blocks"]), (6, 3))
 
     def test_cards_may_queue_for_replay_and_another_role_does_not_hold_the_foundry(self):
         import threading
@@ -717,6 +762,66 @@ class Gates(FoundryCase):
             self.assertEqual(foundry.evaluations()[foundry.cards().popitem()[0]]["outcome"], "passed")
         finally:
             restarted.close(wait=None)
+
+
+class RepairAdmission(FoundryCase):
+    """Sept 23, 2026: a merged corrected child is replayed before it takes any seat. Until then
+    `House.enroll` seated it at once (displacing the defective parent or the weakest resident) and
+    retired every agent on the old code; 16 were born, 7 died on rung 0, 0 forward blocks."""
+
+    def merged(self, name, code, **extra):
+        import league.strategies as strategies
+
+        row = {"name": name, "family": "fam", "code": code, "why": "a corrected child",
+               "repair": {"key": "strategy_defect:parent:abcdef123456", "parent": "parent"}, **extra}
+        strategies.all_strategies.return_value = [row]
+        return row
+
+    def test_a_corrected_child_is_born_only_after_its_replay_passes_and_keeps_its_name(self):
+        row = self.merged("majors-fixed", PASSER)
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.house.settings.enroll_displaces = True
+        self.assertEqual(self.house.enroll(), [], "not born on merge: replayed first")
+        card = self.foundry.strategy_cards()["majors-fixed"]
+        self.assertEqual((card["author"], card["niche"], card["family"], card["repair"]["parent"]), ("engineer", self.DESK, "fam", "parent"))
+        self.assertTrue(self.foundry.takes_strategy(row), "the foundry owns this file version's admission")
+        self.assertEqual(self.house.enroll(), [])
+        self.assertEqual(len(self.foundry.strategy_cards()), 1, "one card per file version")
+        self.foundry.evaluate_all([card["id"]])
+        self.assertEqual(self.foundry.evaluations()[card["id"]]["outcome"], "passed")
+        self.assertEqual(self.foundry.evaluations()[card["id"]]["strategy"], "majors-fixed")
+        self.assertIn(card["id"], {c["id"] for c in self.foundry.inventory()})
+        self.seated()
+        self.clock.advance(601)
+        child = self.house._refill(self.rules)
+        self.assertIsNotNone(child)
+        self.assertEqual((child.founder, child.family, child.specialty), ("majors-fixed", "fam", self.DESK))
+        self.assertEqual(self.house.evaluator.rung(child.id), 1, "seated on paper by its own replay pass")
+        route = self.house.ledger.get(f"birth-route:{child.id}").payload
+        self.assertEqual((route["route"], route["evidence"]["strategy"], route["evidence"]["replay_passed"]), ("repair", "majors-fixed", True))
+        self.assertIn("Merton, as engineer", self.house.ledger.last("agent.born", agent=child.id).payload["reason"])
+        self.assertEqual(self.foundry.born()[card["id"]].id, child.id)
+        self.assertEqual(self.foundry.inventory(), [])
+        self.assertEqual(self.house.enroll(), [], "born once: its founder is the strategy's name")
+
+    def test_a_corrected_child_that_fails_replay_never_takes_a_seat(self):
+        self.merged("majors-idle", IDLE)
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.assertEqual(self.house.enroll(), [])
+        card = self.foundry.strategy_cards()["majors-idle"]
+        self.foundry.evaluate_all([card["id"]])
+        outcome = self.foundry.evaluations()[card["id"]]
+        self.assertEqual((outcome["outcome"], outcome["strategy"]), ("failed", "majors-idle"))
+        self.seated()
+        self.clock.advance(601)
+        self.assertIsNone(self.house._refill(self.rules))
+        self.assertEqual(self.house.enroll(), [])
+        self.assertEqual([a.founder for a in self.house.registry.agents.values() if a.founder == "majors-idle"], [])
+
+    def test_a_row_the_foundry_cannot_place_keeps_the_old_path(self):
+        row = self.merged("majors-odd", "NEEDS = dict(venue='alpaca')\nPARAMS = {}\n\ndef decide(ctx):\n    return {}\n")
+        self.assertFalse(self.foundry.takes_strategy(row), "no literal NEEDS: the House's own probe judges it")
+        self.assertFalse(self.foundry.takes_strategy({**row, "repair": None}), "an architect's design is not a repair")
 
 
 class Labels(FoundryCase):

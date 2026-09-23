@@ -306,7 +306,8 @@ class Spend(LabCase):
         self.lab.evaluate_batch()
         with patch.object(self.house, "frontier_tier", return_value="earned"):
             self.assertFalse(self.lab.mutate_llm())
-            self.assertIn("tier", self.lab.open())
+            self.assertIn("tier", self.lab.refusal)
+            self.assertEqual(self.lab.open(), "")  # the tier closes the paid calls, never the lab (C2, Sept 23, 2026)
         self.house.pacer.may_spend = lambda kind: kind != "openai"
         self.assertFalse(self.lab.mutate_llm())
         self.assertEqual(self.luna.asked, [])
@@ -902,6 +903,135 @@ class Wiring(LabCase):
         with patch.object(self.lab, "tick") as tick:
             self.house.tick()
         tick.assert_called_once()
+        health = json.loads((self.house.root / "health.json").read_text(encoding="utf-8"))
+        self.assertEqual(health["lab"]["waiting_seat"]["count"], 0)  # the lab's own line in health.json (Sept 23, 2026)
+        self.assertIn("closed_since", health["lab"])
+
+
+class BelowTheAllTier(LabCase):
+    """C2 (Sept 23, 2026): only Luna and Sol spend OpenAI. At the "earned" and "audits" tiers the lab
+    still seeds, breeds parameter children, evaluates batches on the lab box (Sail time) and
+    graduates; the paid phases are skipped with the tier's reason on record, and every `_ask` is
+    refused. Measured that day: the House's OpenAI line was to fall under the reserve at about
+    20:30Z, and `open()` would have stopped the whole lab with it."""
+
+    def test_the_lab_keeps_breeding_evaluating_and_graduating_below_the_all_tier(self):
+        self.seated("sawtooth", KNOB)
+        with patch.object(self.house, "frontier_tier", return_value="earned"):
+            self.assertEqual(self.lab.open(), "")
+            self.lab.seed(force=True)
+            out = self.lab.step()
+            self.house.wait()
+        self.assertGreaterEqual(out["evaluated"], 2)
+        self.assertGreaterEqual(out["archived"], 1)
+        self.assertEqual(out["calls"], 0)
+        self.assertEqual((self.luna.asked, self.sol.asked), ([], []))
+        self.assertGreaterEqual(self.lab._q("SELECT COUNT(*) AS n FROM candidates WHERE origin='param'")[0]["n"], 1)
+        born = [a for a in self.house.registry.living() if str(a.founder or "").startswith("lab:")]
+        self.assertEqual(len(born), 1)
+        self.assertEqual(born[0].specialty, DESK)
+        self.assertEqual(self.lab.refusal, "the OpenAI tier is 'earned'")
+        stats = self.lab.stats()
+        self.assertEqual(stats["llm"]["paused"], "the OpenAI tier is 'earned'")
+        self.assertGreaterEqual(stats["llm"]["skipped"]["luna"], 1)
+        self.assertEqual(stats["llm"]["skipped"]["sol"], 0)
+        self.assertEqual(self.lab.health()["llm"], stats["llm"])
+        # "audits" too: the tick schedules a step, and a paid call is refused with the tier's reason.
+        with patch.object(self.house, "frontier_tier", return_value="audits"):
+            self.assertEqual(self.lab.open(), "")
+            self.assertFalse(self.lab.mutate_llm())
+            self.assertEqual(self.lab.refusal, "the OpenAI tier is 'audits'")
+            self.assertFalse(self.lab.leap())
+            with patch.object(self.lab, "step") as step:
+                self.assertTrue(self.lab.tick(open_for_business=True))
+                self.house.wait()
+            step.assert_called_once()
+        self.assertEqual((self.luna.asked, self.sol.asked), ([], []))
+        # Back at "all" the paid phases run again and the record says so.
+        self.assertTrue(self.lab.mutate_llm())
+        self.assertIsNone(self.lab.stats()["llm"]["paused"])
+
+
+class Invariants(LabCase):
+    """Workstream B (Sept 23, 2026): the floor tells the owner itself when the lab has been closed for
+    half an hour and when a graduate has waited six hours for a seat, each once per condition, and
+    the lab's health line carries both."""
+
+    def alerts(self, level=None):
+        return [e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert") if level is None or e.payload["level"] == level]
+
+    def test_a_lab_closed_for_half_an_hour_is_told_once_and_so_is_its_reopening(self):
+        def closed():
+            return [a for a in self.alerts("warning") if "the Alpha Lab has been closed" in a]
+        with patch.object(self.house, "paused", return_value={"reason": "test"}):
+            self.assertFalse(self.lab.tick(open_for_business=True))
+            self.clock.advance(29 * 60)
+            self.assertFalse(self.lab.tick(open_for_business=True))
+            self.assertEqual(closed(), [])
+            self.assertEqual(self.lab.health()["closed_minutes"], 29.0)
+            self.clock.advance(2 * 60)
+            self.assertFalse(self.lab.tick(open_for_business=True))
+            self.assertEqual(len(closed()), 1)
+            self.assertIn("maintenance pause", closed()[0])
+            self.assertIn("31 minutes", closed()[0])
+            self.clock.advance(3600)
+            self.assertFalse(self.lab.tick(open_for_business=True))
+            self.assertEqual(len(closed()), 1)  # once per closing, not every tick
+            # A restart does not reset the since-when: it is in the lab's own store.
+            self.lab.close()
+            self.lab = Lab(self.house, box=self.box, mutator=self.luna, leaper=self.sol)
+            self.house.lab = self.lab
+            self.addCleanup(self.lab.close)
+            self.assertEqual(self.lab.health()["closed_minutes"], 91.0)
+            self.assertFalse(self.lab.tick(open_for_business=True))
+            self.assertEqual(len(closed()), 1)
+        with patch.object(self.lab, "step") as step:
+            self.assertTrue(self.lab.tick(open_for_business=True))
+            self.house.wait()
+        step.assert_called_once()
+        opened = [a for a in self.alerts("info") if "the Alpha Lab is open again" in a]
+        self.assertEqual(len(opened), 1)
+        self.assertIn("91 minutes", opened[0])
+        self.assertEqual(self.lab.health()["closed_minutes"], 0)
+        self.assertIsNone(self.lab.health()["closed_since"])
+        # The House not being open for business closes the lab as any other refusal does.
+        self.assertFalse(self.lab.tick(open_for_business=False))
+        self.assertIsNotNone(self.lab.health()["closed_since"])
+
+    def test_a_graduate_waiting_six_hours_for_a_seat_is_told_once(self):
+        def told():
+            return [a for a in self.alerts("warning") if "for a seat" in a]
+        ident = self.queue(KNOB, origin="luna")
+        self.lab.evaluate_batch()
+        self.niche.max_members = 1
+        self.seated("resident", IDLE)
+        with patch.object(self.house, "_weakest", return_value=None), patch.object(self.lab, "step"):
+            self.assertEqual(self.lab.graduate()[0]["state"], "waiting_seat")
+            waiting = self.lab.health()["waiting_seat"]
+            self.assertEqual((waiting["count"], waiting["graduates"][0]["candidate"], waiting["graduates"][0]["niche"]), (1, ident, DESK))
+            self.clock.advance(5 * 3600 + 50 * 60)
+            self.assertTrue(self.lab.tick(open_for_business=True))
+            self.house.wait()
+            self.assertEqual(told(), [])
+            # Asked again for a seat: the table's `at` moves, the wait does not.
+            self.assertEqual(self.lab.graduate()[0]["state"], "waiting_seat")
+            self.clock.advance(20 * 60)
+            self.assertTrue(self.lab.tick(open_for_business=True))
+            self.house.wait()
+            self.assertEqual(len(told()), 1)
+            self.assertIn(ident[:12], told()[0])
+            self.assertIn(DESK, told()[0])
+            self.assertIn("6.2 hours", told()[0])
+            self.clock.advance(3600)
+            self.assertTrue(self.lab.tick(open_for_business=True))
+            self.house.wait()
+            self.assertEqual(len(told()), 1)  # once per graduate
+        self.assertEqual(self.lab.health()["waiting_seat"]["longest_hours"], 7.2)
+        self.assertEqual(self.lab.stats()["waiting_seat"], {"count": 1, "longest_hours": 7.2})
+        with patch.object(self.house, "_weakest", return_value=self.house.registry.get("resident")):
+            self.assertEqual(self.lab.graduate()[0]["state"], "born")
+        self.assertEqual(self.lab.health()["waiting_seat"]["count"], 0)
+        self.assertEqual(self.lab.stats()["waiting_seat"], {"count": 0, "longest_hours": 0})
 
 
 if __name__ == "__main__":

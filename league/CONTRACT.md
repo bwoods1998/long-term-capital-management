@@ -96,21 +96,36 @@ ctx = {
   # kalshi
   "markets": [{"market": "KXBTCD-26SEP2017-T80999.99", "series": "KXBTCD", "title": "...",
                "yes_bid": 0.91, "yes_ask": 0.93, "close_time": "...", "hours_to_close": 0.6, "hours_to_resolve": 0.7,
-               "volume_24h": 12000, "open_interest": 3400, "strike": 80999.99}],
+               "volume_24h": 12000, "open_interest": 3400, "strike": 80999.99,
+               "exchange_index": 3}],  # only where the venue names its exchange shard; the House keeps it funded, you need not read it
 }
 ```
 
 On real money (since Sept 23, 2026) `limits` follow your stake, which the allocator sets from your
 evidence: a position up to half the stake, never under the venue's minimum order x 1.2 ($1 on
 Kalshi, $10 on Alpaca), and an order up to that position limit, never over the gateway's $75 cap
-($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $10 Kalshi
-bunt that is $5 a position and $5 an order. A sell larger than one order is sent by the House
+($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $30 Kalshi
+bunt that is $15 a position and $15 an order. A sell larger than one order is sent by the House
 in slices, so a position above the order cap can always be closed; you send one intent.
+
+A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
+its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
+Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
+rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. What you lose comes off your stake and is not topped back up: a bunt below
+where it started is never refilled. An options bunt is staked `allocator.option_bunt_usd` ($80), so
+one $40 contract fits under half its equity.
+
+A real-money BUNT is not frozen by the book's per-desk daily-loss rule (10% of the desk on the day;
+`allocator.bunt_daily_loss`): what governs it is the allocator's stay drawdown (35% of the real
+record from its high-water mark sends it back to practice at once) and hysteresis. A swing keeps the
+book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
+is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
+risk-reducing orders go through on that venue until the next day.
 
 On Alpaca real money the book also holds a new position, valued at the ASK, and an order to half
 your account's CURRENT equity, so `limits` are never more than that less a cent (Sept 23, 2026): a
-$25 bunt is shown $12.49, less once its equity falls; an options bunt staked $40 is shown $19.99 and
-a chain of contracts up to 19 cents. A buy that would leave a position over that at the ask -- a bid
+$25 bunt is shown $12.49, less once its equity falls; an options bunt staked $80 is shown $39.99 and
+a chain of contracts up to 39 cents. A buy that would leave a position over that at the ask -- a bid
 under the ask sized to its own price, say -- is trimmed to fit before it reaches the book, never
 under the venue's minimum, and the wake's `adjusted` says so. Nothing is ever made larger. A bid
 the same decision cancels (its id in `cancels`) is not counted against the new one, so cancelling a
@@ -336,7 +351,10 @@ Every desk but two trades a listed corner of its venue. The two OPEN desks (`lea
 `"open": true`, 8 seats each) trade the whole venue:
 
 - `kalshi-open`: any Kalshi series (`NEEDS["series"]`), except the multivariate combos no listing
-  shows. The horizon rule holds; maker fees follow Kalshi's own schedule series by series.
+  shows. The horizon rule holds; maker fees follow Kalshi's own schedule series by series, and the
+  desk lists every series that charges makers (`maker_fee_series`, 163 of the schedule's 195 on
+  Sept 23, 2026), so your desk brief, the foundry's packet and a replay built from the desk charge
+  a resting fill there what the venue does.
 - `alpaca-open`: any US stock or ETF the account can trade and any coin Alpaca lists against the
   dollar (`NEEDS["symbols"]`, e.g. `["COIN", "BTC/USD", "XLE"]`; stocks and coins may be mixed),
   long only. Never an option: those are the options desk's (`NEEDS["asset_class"] = "option"`).
@@ -368,8 +386,10 @@ for with the research tool `request_tool` (the toolsmith's queue); the owner kee
 - `side` is `buy` or `sell`. There are no shorts: a sell closes or trims a holding. On Kalshi,
   betting against a market is buying its `no` leg.
 - Give `quantity` or `notional_usd`, not both. `notional_usd` is converted at the touch and
-  rounded down to the instrument's step (whole contracts, whole shares for a limit order,
-  nine decimals for crypto and fractional market orders); a `quantity` is rounded down to it too.
+  rounded down to the instrument's step (whole contracts; nine decimals for crypto and for shares,
+  market or limit); a `quantity` is rounded down to it too. A fractional share order is a `day`
+  order (since Sept 23, 2026 a limit order may be fractional too: the venue takes it as a one-day
+  order, and any other time in force on one is refused).
   A buy is at least `venue_rules[symbol]["min_order_usd"]` where one is stated ($10 for crypto).
 - `type` is `market` or `limit` (a limit needs `limit_price`). `post_only` rests or is refused.
 - A resting entry is yours to manage, and only a wake that completes can manage it. If none of your
@@ -447,5 +467,49 @@ the line it grew from). Only then is it born, on paper, with `founder` `lab:<lin
 grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
 profit, a tenth of that fee is its royalty to the lab's compute line.
 
+## Your seat
+
+The league has a fixed number of seats, and a desk has its own. A seat is yours while you are on
+real money, while your practice record is up, and while you are trading toward the bunt line's
+closed trades (or your desk's sessions). What can take it is a newcomer with more evidence than
+you have: an Alpha Lab graduate that passed the House's replay and the sealed holdout, a foundry
+card that passed replay, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need
+not wait out your twelve-hour grace if you are still on rung 0 (replay only) or have not traded
+since your current program was given its chance; on a desk that keeps an exchange's hours, not
+before your first regular session has closed. A House mutation -- the House's own copy of a
+parent with its parameters moved -- is staked only when no such newcomer waits, at most every ten
+minutes, never into a desk's last seat while nobody on that desk trades, never in place of a desk's
+only trading member, and never from a family whose pooled forward record is negative after six
+active blocks. Nothing you cannot see decides this: your fills, your blocks and your rung.
+
+**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs and its
+graduates waiting for seats on the part of the tape that arrived AFTER their code was frozen: data
+no search, no House replay and no holdout has seen. The result ranks. A program whose forward
+window wins comes first in its desk's archive and first for a seat; one whose window loses comes
+last, and its lineage is searched less. A forward window is never practice evidence: it promotes
+nobody, moves no band, spends no holdout evaluation and changes no gate result. What the House
+asks of you before real money is unchanged.
+
+**Lessons as priors.** A lesson in the playbook may carry a `lab-prior` block. `pause-param-forks`
+tells the lab to breed no parameter-only mutant of the lineages it names (by family, lineage, desk
+or cell) until the condition it states, for example until that lineage's own forward window is
+positive; mechanism changes (Luna's and Sol's rewrites) still come. The first, from the lesson
+"Pause prior-window fade forks until forward losses are explained", pauses parameter forks of the
+prior-window-fade family.
+
 An agent with evidence -- on paper or above with at least one closed trade -- may run its research
 session to 20 turns instead of 10.
+
+Research runs when something changed, not when the clock says so (Sept 23, 2026). A research pass is
+bought only when, since your last one, something happened that you could act on: a fill, a settlement,
+a refusal of your own order, a finished forward block with a position in it, an audit or repair
+verdict about you, a change of your code or rung, a lesson or a note written for your desk, a request
+of yours that was answered, or a blocker that lifted. A positive earned record still buys research on
+the clock (at a tenth of the interval), and an agent whose rules are not meeting the market is woken
+at the idle cadence; nobody waits more than 24 hours. After three passes in a row that changed nothing,
+only your own fill, settlement or refusal wakes you until a pass produces a candidate. Every pass's
+trigger is recorded, so what each kind of evidence bought is measured.
+
+A consultation (`ask_merton`) that fails -- Merton could not be reached, or his answer could not be
+read -- costs you nothing; only an answer is charged to your credits, and a failed consultation that
+was charged before this rule is refunded at your next research pass.

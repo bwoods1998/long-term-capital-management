@@ -97,3 +97,17 @@ class BuntLine(HouseCase):
         agent = self.seated()
         with patch.object(allocator, "enabled", return_value=False):
             self.assertIsNone(self.house.standing_of(agent.id)["bunt_line"])
+
+
+class OneLossTrialText(HouseCase):
+    """The rules tell a bunt what the study measured on Sept 23, 2026: one lost position over about
+    15% of a fresh stake (1 - hysteresis) sends it back to paper."""
+
+    def test_the_rules_name_the_one_loss_trial_and_its_share(self):
+        import json
+        from league.constitution import CONSTITUTION
+        from league.rules import rules_text
+        text = rules_text(json.load(open("league/game.json")))
+        share = 1 - float(CONSTITUTION["allocator"]["hysteresis"])
+        self.assertIn("ONE-LOSS TRIAL", text)
+        self.assertIn(f"about {share:.0%} of your stake", text)

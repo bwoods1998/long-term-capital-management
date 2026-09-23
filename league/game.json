@@ -1,5 +1,5 @@
 {
-  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py.",
+  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py. Sept 23, 2026 (the seat market follows evidence): economy.losing_family_min_blocks (6) is the pooled active forward blocks after which a family with a negative record is not bred again by a House mutation, parameter fork or revival (analyst B: 44 births followed evidence deaths in two families, every family with two forward-tested passes negative); economy.seat_waiters_warning (8) is the number of newcomers waiting for seats past which, after an hour, the House warns.",
   "economy": {
     "epoch_seconds": 21600,
     "daily_pool_usd": "0.50",
@@ -25,7 +25,9 @@
     "displace_after_epochs": 2,
     "displace_trading_after_sessions": 3,
     "line_exhausted_trials": 15,
-    "explore_every": 5
+    "explore_every": 5,
+    "losing_family_min_blocks": 6,
+    "seat_waiters_warning": 8
   },
   "bounds": {
     "daily_pool_usd": [
@@ -93,15 +95,19 @@
       "winner_share": 0.1,
       "loser_multiple": 8,
       "loser_min_observations": 5,
-      "unproven_multiple": 3,
-      "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry."
+      "unproven_multiple": 6,
+      "_about_sept23": "Sept 23, 2026: 84% of research sessions since 21:10Z Sept 22 ended by abstaining, most of them by agents with no record. With the burst's base interval at 15 minutes (turbo research_minutes), an agent with no earned record researches every 45 minutes (unproven_multiple), a winner every 1.5 minutes (winner_share), a loser every 2 hours (loser_multiple); the money moves to the foundry.",
+      "_about_sept23_pacing": "Sept 23, 2026, 16:41 UTC (C3 pacing): an agent with no earned record researches every 6 intervals (90 minutes at the 15-minute burst interval; was 45 minutes): 82-84% of such sessions abstained on Sept 22, and the paced OpenAI line goes first to agents with a record and to audits."
     },
     "gate": {
       "_about": "Sept 22, 2026 overnight v0: after `after` empty passes in a row (no candidate, no replay, no Merton strategy) and nothing new on the agent's record, the interval doubles per further empty pass up to max_factor; sample_percent of skipped windows still run so misses stay measurable.",
+      "_about_sept23_evidence": "Sept 23, 2026 (the learn-and-unblock run, S3/C3; league/research_gate.py rules 6 and 7). Measured 00:00Z Sept 22 to 16:28Z Sept 23: 90.3% of 7,532 research sessions abstained (rung 0: 95.5%), abstentions cost $112.80 of the $147.44 research spend (about $82 a day), 41% of the gate's runs were `clock` or `backoff_elapsed`, and half the hand-read abstentions said nothing had changed since the last pass. clock_runs `winners_and_idle`: a session is due only on a trigger (a fill, settlement, refusal, active block, audit or repair verdict, code or rung change, a lesson or note for its desk, a fulfilled request, a lifted blocker); a winner (positive earned record, already at winner_share of the interval) and an idle agent (at the idle cadence) still run on the clock; the max_skip_hours heartbeat and the sample stay. abstain_lock_after 3: after three abstaining sessions in a row an agent researches only on a settlement, a fill or a refusal until a session produces a candidate. `all` / 0 restore the Sept 22 rule. Every research.gate row carries `trigger` and `record`, and `python -m league.research_gate LEDGER` prices each trigger (by_trigger).",
       "enabled": true,
       "after": 2,
       "max_factor": 8,
-      "sample_percent": 10
+      "sample_percent": 10,
+      "clock_runs": "winners_and_idle",
+      "abstain_lock_after": 3
     }
   },
   "horizon": {
@@ -177,10 +183,19 @@
     "mutation_min_per_day": 2,
     "card_ttl_hours": 24,
     "_about_sept23": "Sept 23, 2026 (the owner: a 24/7 swarm; 'do 1-5 right now fully'): the first GPT-6 Sol call wrote 4 cards for $0.128 and one was on paper 43 s later, while agent research cost about $1 per replay-passing candidate. So the foundry gets more of the budget ($40 a window, a call every 10 minutes), half of its calls go to the fast-evidence desks (hourly, around the clock) whose low pass rates never win the evidence route, cards may queue for replay (max_pending_cards) instead of holding the next call, and Merton is told to prefer hourly programs where a desk allows them.",
-    "fast_desks": ["alpaca-crypto-majors", "alpaca-crypto-alts", "kalshi-crypto-15m", "kalshi-crypto-strikes", "alpaca-index-etfs", "alpaca-megacaps"],
+    "fast_desks": [
+      "alpaca-crypto-majors",
+      "alpaca-crypto-alts",
+      "kalshi-crypto-15m",
+      "alpaca-index-etfs",
+      "alpaca-megacaps"
+    ],
     "fast_share": 0.5,
     "prefer_horizon": "hour",
     "max_pending_cards": 8,
+    "_about_sept23c": "Sept 23, 2026 (the learn-and-unblock run, S3/C3: the foundry follows yield). Measured since Sept 22 13:30Z: the foundry was the only paid source to reach real money (108 cards for $8.48, 33 replay passes, 27 born, 2 on rung 2; $0.26 a replay pass) and the practice loss engine: foundry-born agents were -$272.96 of the -$361 kalshi-shadow loss, two BTC-strike cards -$113.68 in ten settlements, kalshi-crypto-strikes -10.3% an active block (40 born, 2 replay passes ever), kalshi-crypto-15m -1.9% a block with taker entries at 182 bps. So kalshi-crypto-strikes leaves fast_desks; a desk whose foundry-born agents are negative over fast_lane_min_blocks (6) active blocks (league/hypotheses.py desk_forward, from eval.block rows) gets no fast-lane call until one family there is positive over fast_lane_reopen_blocks (3), and the open fast desks are ranked by that yield before the rotation; the exploration share is unchanged; the brief tells Merton that kalshi-crypto-15m needs maker entries and that a binary position above 15% of the stake is a one-loss trial. The foundry runs at the `earned` frontier tier (it is the best yield per dollar) and stops only at `audits`, as before.",
+    "fast_lane_min_blocks": 6,
+    "fast_lane_reopen_blocks": 3,
     "_about_sept23b": "Sept 23, 2026 (the owner's north star: a swarm that trades 24/7 and compounds). Measured 01:39-02:10Z: 4 of 8 GPT-6 Sol cards passed replay at about $0.03 a card, the best yield in the league, but the foundry never exploited what already works. The only mechanism with real-money profit (Kalshi daily favourites bought as a maker: mullins-2 and mullins-6 on weather, hawkins-19 on commodities, all live) was never offered to a desk where it had not been tried, and 12 of the 16 merged repairs failed replay, so self-improvement was fixing bugs, not finding edges. The fast route sent every fast call to the best-scored fast desk, the index-ETF desk, so the 24/7 crypto desks got no cards. Now up to transfer_share of calls take a family with an earned forward record (real money first) to the best-scored desk of its venue where it was never tried, and Merton adapts its mechanism there; the fast route rotates to the fast desk with the fewest recent cards; every packet carries the league's edge map (winning_mechanisms). Precedence: transfer, fast, exploration, else evidence; with 0.3, 0.5 and 0.2 that is about 27%, 45%, 18% and 9% of calls (the evidence route had about 36% before transfers).",
     "transfer_share": 0.3
   },
@@ -203,7 +218,7 @@
   "lab": {
     "_about": "The Alpha Lab (league/lab.py), Sept 23, 2026, the north-star build: a MAP-Elites archive of strategy programs searched in batches on the lab box (league/labbox.py). Seeds are the living agents' programs, the foundry's cards and the founders; children are parameter mutants of the archive's elites and Luna's mutations and crossovers, with a Sol leap every leap_every Luna calls. Fitness is out-of-sample growth after fees on the first search_fraction of the House's own replay tape; the fittest gate-passing program of a cell is replayed by the House on the whole tape (and by the sealed holdout on the history store) and born on paper, at most max_births_per_hour. OpenAI spend is its own line (budget_usd_per_hour, plus royalties: royalty_share of a graduate's performance fee), inside the campaign allowance and only while the frontier tier is 'all'. It runs only where league/config.json names a lab box.",
     "enabled": true,
-    "budget_usd_per_hour": "1.50",
+    "budget_usd_per_hour": "0.75",
     "box_usd_per_hour": "0.20",
     "batch_size": 32,
     "param_children": 48,
@@ -217,6 +232,7 @@
     "submit_max": 8,
     "royalty_share": "0.10",
     "luna_model": "gpt-6-luna",
-    "sol_model": "gpt-6-sol"
+    "sol_model": "gpt-6-sol",
+    "_about_sept23_pacing": "Sept 23, 2026, 16:41 UTC (C3 pacing, the learn-and-unblock run): the lab's Luna seeds and Sol leaps share the paced September OpenAI line, so the lab's own LLM line is $0.75 an hour until the month resets on Oct 1; parameter children, batch replay on the lab box and graduation spend no OpenAI and are unchanged."
   }
 }

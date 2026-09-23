@@ -7,6 +7,7 @@ from unittest.mock import patch
 from ltcm.broker import Instrument, UnknownOutcome, VenueUnavailable
 
 from league.book import Book, BookError, Intent, Limits, allocate, market_key, yes_space
+from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.ledger import HOUSE, Ledger
 from league.tests.fakes import Clock, FakeBroker, iso
@@ -267,13 +268,25 @@ class PaperBookTest(BookCase):
         again = self.book.submit([self.intent("a1", BTC, "buy", "0.0001")])[0]  # would hold $16
         self.assertEqual(again.status, "refused")
 
-    def test_whole_shares_for_an_equity_limit_order(self):
-        self.seat("a1")
-        self.broker.set_quote(SPY, "50.00", "50.02")
-        bad = self.book.submit([self.intent("a1", SPY, "buy", "0.5", order_type="limit", limit_price="49.90")])[0]
-        self.assertEqual(bad.status, "refused")
-        good = self.book.submit([self.intent("a1", SPY, "buy", "1", order_type="limit", limit_price="49.90")])[0]
-        self.assertEqual(good.status, "resting")
+    def test_a_fractional_equity_limit_order_is_a_day_order(self):
+        """A7 (Sept 23, 2026): a $25 stock bunt rests a fractional bid at the touch, as a `day` order; a
+        limit order was whole shares before, so no bunt could rest a bid on a share over $12.50."""
+        self.seat("a1", usd="25", position="12.5", order="12.5")
+        self.broker.set_quote(SPY, "49.98", "50.00")
+        bid = self.intent("a1", SPY, "buy", "0.25", order_type="limit", limit_price="49.98")  # $12.495 at the bid
+        self.assertEqual(bid.time_in_force, "day")
+        self.assertEqual(self.book.check(bid, self.broker.quote(SPY), iso(self.clock)), [])
+        self.assertEqual(self.book.submit([bid])[0].status, "resting")
+        self.assertEqual((self.broker.submitted[-1].quantity, self.broker.submitted[-1].time_in_force), (D("0.25"), "day"))
+        gtc = self.intent("a1", SPY, "buy", "0.1", order_type="limit", limit_price="49.90", time_in_force="gtc")
+        self.assertIn("a fractional share order must be a day order, not gtc (the venue takes no other)",
+                      self.book.check(gtc, self.broker.quote(SPY), iso(self.clock)))
+        self.assertEqual(self.book.submit([gtc])[0].status, "refused")
+        whole = self.intent("a1", SPY, "buy", "1", order_type="limit", limit_price="49.90", time_in_force="gtc")
+        self.assertNotIn("day order", " ".join(self.book.check(whole, self.broker.quote(SPY), iso(self.clock))))  # not the rule
+        crypto = self.intent("a1", BTC, "buy", "0.0001", order_type="limit", limit_price="70000", time_in_force="gtc")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.assertNotIn("day order", " ".join(self.book.check(crypto, self.broker.quote(BTC), iso(self.clock))))
 
     def test_a_resting_order_blocks_an_order_that_would_hit_it(self):
         self.seat("maker")
@@ -986,6 +999,109 @@ class KalshiBookTest(BookCase):
         outcomes = {out.intent_id: out for out in self.book.submit(intents)}
         self.assertEqual([outcomes[i.id].status for i in intents], ["filled", "filled", "refused"])
         self.assertIn("settle together", outcomes[intents[-1].id].detail)
+
+
+class DailyLossRulesTest(BookCase):
+    """The owner's revision of Sept 23, 2026 ~16:00 UTC (constitution `allocator.bunt_daily_loss` and
+    `allocator.real_halt`): a real-money bunt is governed by the allocator's stay drawdown, not the
+    book's per-desk daily loss, and the real book's halt is 8% of the venue's grant capital."""
+
+    venue = "kalshi"
+    family = "kalshi"
+    real = True
+    cash = "500"
+    WEATHER = "KXHIGHNY-26SEP20-B80"  # another cluster: the crypto cluster's cap must not be what refuses
+
+    def setUp(self):
+        super().setUp()
+        self.bands: dict[str, str] = {}
+        self.basis: list = [D("517.75")]  # the Kalshi grant's capital
+        # The event concentration caps read the grant's capital, as the House gives the real Kalshi book.
+        self.book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=True, clock=self.clock,
+                         band_of=lambda agent: self.bands.get(agent), halt_basis_usd=lambda: self.basis[0],
+                         event_capital_budget=lambda: D("517.75"))
+        self.book.reconcile()
+        for ticker in ("KXBTCD-26SEP2017-T80999", "KXBTCD-26SEP2018-T80999", "KXBTCD-26SEP2019-T80999", self.WEATHER):
+            self.broker.set_quote(event(ticker=ticker), "0.50", "0.52")
+
+    def reasons(self, agent, ticker, quantity):
+        instrument = event(ticker=ticker)
+        return self.book.check(self.intent(agent, instrument, "buy", quantity), self.broker.quote(instrument), iso(self.clock))
+
+    def lose(self, agent, ticker, quantity, mark):
+        """Buy at the ask, then mark the holding down: a loss on the day, inside the same day."""
+        out = self.book.submit([self.intent(agent, event(ticker=ticker), "buy", quantity)])[0]
+        self.assertEqual(out.status, "filled", out.detail)
+        self.book.marks[event(ticker=ticker).key] = D(mark)
+
+    def test_a_real_bunt_down_on_the_day_is_not_frozen_but_a_swing_still_is(self):
+        self.seat("a1", usd="10", position="5", order="5")
+        self.bands["a1"] = "bunt"
+        self.lose("a1", "KXBTCD-26SEP2017-T80999", "5", "0.20")  # about 17% of the stake, on the day
+        self.assertGreaterEqual(-self.book._day_pnl("a1", iso(self.clock)) / D(10), D("0.15"))
+        self.assertFalse([r for r in self.reasons("a1", self.WEATHER, "1") if "daily loss" in r])
+        self.assertEqual(self.book.risk_lines("a1")["desk_daily_loss_rule"], "stay_drawdown")
+        self.bands["a1"] = "swing"
+        self.assertTrue([r for r in self.reasons("a1", self.WEATHER, "1") if r.startswith("desk daily loss")])
+        self.assertEqual(self.book.risk_lines("a1")["desk_daily_loss_pct"], 0.10)
+        self.bands["a1"] = "bunt"
+        with patch.dict(CONSTITUTION["allocator"], {"bunt_daily_loss": "book"}):
+            self.assertTrue([r for r in self.reasons("a1", self.WEATHER, "1") if r.startswith("desk daily loss")])
+        with patch.dict(CONSTITUTION["allocator"]):
+            CONSTITUTION["allocator"].pop("bunt_daily_loss")  # the key absent: the book's rule, as before
+            self.assertTrue([r for r in self.reasons("a1", self.WEATHER, "1") if r.startswith("desk daily loss")])
+        book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=True, clock=self.clock,
+                    event_capital_budget=lambda: D("517.75"))  # no House facts: the book's own rules
+        book.limits["a1"] = Limits(D(5), D(5))
+        book.marks.update(self.book.marks)
+        book.day_open.update(self.book.day_open)
+        instrument = event(ticker=self.WEATHER)
+        self.assertTrue([r for r in book.check(self.intent("a1", instrument, "buy", "1"), self.broker.quote(instrument), iso(self.clock))
+                         if r.startswith("desk daily loss")])
+
+    def test_the_real_halt_is_a_share_of_the_venues_grant_capital_not_of_the_staked_sum(self):
+        self.seat("a1", usd="200", position="60", order="60")
+        self.seat("a2", usd="25", position="12.5", order="12.5")
+        lost = ("KXBTCD-26SEP2017-T80999", "KXBTCD-26SEP2018-T80999", self.WEATHER)  # three markets: one is capped at 10% of the floor
+        for ticker in lost:
+            self.lose("a1", ticker, "35", "0.30")
+        loss = -sum((self.book._day_pnl(a, iso(self.clock)) for a in ("a1", "a2")), D(0))
+        self.assertTrue(D("0.08") * D(225) < loss < D("0.08") * D("517.75"), loss)  # over 8% of the stakes, under 8% of the grant
+        self.assertFalse([r for r in self.reasons("a2", "KXBTCD-26SEP2019-T80999", "5") if "floor daily loss" in r])
+        lines = self.book.risk_lines("a2")
+        self.assertEqual((lines["halt_basis"], lines["halt_basis_usd"], lines["halt_pct"]), ("venue_grant_capital", 517.75, 0.08))
+        self.basis[0] = D("1017.75")  # the combined envelope is never the basis of one venue's halt: the book takes what it is given
+        self.assertFalse([r for r in self.reasons("a2", "KXBTCD-26SEP2019-T80999", "5") if "floor daily loss" in r])
+        self.basis[0] = D("517.75")
+        for ticker in lost:
+            self.book.marks[event(ticker=ticker).key] = D("0.02")
+        loss = -sum((self.book._day_pnl(a, iso(self.clock)) for a in ("a1", "a2")), D(0))
+        self.assertGreater(loss, D("0.08") * D("517.75"))
+        halted = [r for r in self.reasons("a2", "KXBTCD-26SEP2019-T80999", "5") if r.startswith("floor daily loss")]
+        self.assertEqual(len(halted), 1, halted)
+        self.assertIn("$517.75", halted[0])
+        for ticker in lost:
+            self.book.marks[event(ticker=ticker).key] = D("0.30")
+        with patch.dict(CONSTITUTION["allocator"]["real_halt"], {"basis": "staked"}):  # the old basis, by the key
+            self.assertTrue([r for r in self.reasons("a2", "KXBTCD-26SEP2019-T80999", "5") if r.startswith("floor daily loss")])
+        self.basis[0] = None  # no grant names the venue: the old basis
+        self.assertTrue([r for r in self.reasons("a2", "KXBTCD-26SEP2019-T80999", "5") if r.startswith("floor daily loss")])
+        self.assertEqual(self.book.risk_lines("a2")["halt_basis"], "staked_accounts")
+
+
+class PracticeDailyLossTest(BookCase):
+    def test_a_practice_book_keeps_both_rules_whatever_the_house_says(self):
+        self.book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=False, clock=self.clock,
+                         band_of=lambda agent: "bunt", halt_basis_usd=lambda: D("100000"))
+        self.seat("a1", usd="200", position="100", order="75")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.assertEqual(self.book.submit([self.intent("a1", BTC, "buy", "0.0005")])[0].status, "filled")  # $40
+        self.book.marks[BTC.key] = D("40000")  # down $20 on the day: 10% of the desk, and of the practice floor
+        reasons = self.book.check(self.intent("a1", BTC, "buy", "0.0002"), self.broker.quote(BTC), iso(self.clock))
+        self.assertTrue([r for r in reasons if r.startswith("desk daily loss")], reasons)
+        self.assertFalse([r for r in reasons if "floor daily loss" in r], reasons)  # the halt never reached a practice book
+        lines = self.book.risk_lines("a1")
+        self.assertEqual((lines["desk_daily_loss_rule"], lines["desk_daily_loss_pct"], lines["halt_basis"]), ("book", 0.10, "staked_accounts"))
 
 
 class CrossRecoveryTest(unittest.TestCase):

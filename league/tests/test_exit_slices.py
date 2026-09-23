@@ -577,14 +577,34 @@ class EquitySlices(SliceCase):
         self.assertEqual(len(self.sells()), 2)  # two $8 orders: the $10 minimum is Alpaca crypto's alone
         self.assertEqual(self.held(self.instrument), 0)
 
-    def test_one_whole_share_worth_more_than_the_cap_goes_as_one_unit(self):
+    def test_one_share_worth_more_than_the_cap_is_sold_in_fractional_slices_at_a_limit_too(self):
+        """Until A7 (Sept 23, 2026) a limit order was whole shares, so one share worth more than the cap
+        went as one unit at a limit; now it is sliced under the cap as a market exit always was."""
         self.seat()
         self.broker.set_quote(self.instrument, "65.00", "65.01")
         self.buy(self.instrument, "1")  # $71.51 on the gateway's pricing
         self.broker.set_quote(self.instrument, "90.00", "90.01")
         sell = self.intent("a1", self.instrument, "sell", "1", order_type="limit", limit_price="89.00")
         self.assertEqual(self.book.submit([sell])[0].status, "filled")
-        self.assertEqual([o.quantity for o, _, _ in self.sells()], [D("1")])
+        self.assertEqual([o.quantity for o, _, _ in self.sells()], [D("0.5"), D("0.5")])
+        self.assertTrue(all(o.time_in_force == "day" for o, _, _ in self.sells()))
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_a_gtc_limit_exit_over_the_cap_is_cut_on_whole_shares_since_a_fractional_order_is_a_day_order(self):
+        """Review of A7 (Sept 23, 2026): a whole-share gtc limit sell is legal (only a fractional order
+        must be a day order), but sliced on the fractional grid a 2-share exit at $95 went out as three
+        0.67-share gtc slices, which Alpaca, the adapter and this book's own `check` on the next pass
+        all refuse: the exit could never complete. A gtc equity exit is cut on whole shares, one unit
+        worth more than the cap going as one order (an exit, which the gateway lets through)."""
+        self.seat()
+        self.broker.set_quote(self.instrument, "65.00", "65.01")
+        self.buy(self.instrument, "1", "1")
+        self.broker.set_quote(self.instrument, "90.00", "90.01")
+        sell = self.intent("a1", self.instrument, "sell", "2", order_type="limit", limit_price="95.00", time_in_force="gtc")
+        self.assertEqual(self.book.check(sell, self.broker.quote(self.instrument), iso(self.clock)), [])
+        self.assertEqual(self.book.submit([sell])[0].status, "resting")
+        sent = [(o.quantity, o.time_in_force) for o, _, _ in self.sells()]
+        self.assertEqual(sent, [(D("1"), "gtc"), (D("1"), "gtc")])
         self.assertTrue(self.book.reconcile().ok)
 
 

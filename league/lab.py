@@ -49,7 +49,40 @@ its `lab_submit`) is judged against every trial on that line, as the agent's own
 Spend: OpenAI through the lab's own line (`budget_usd_per_hour`, plus royalties), inside the House's
 campaign allowance (every call reserves through the same metered `Frontier` client and its spend
 guard) and only while the frontier tier is "all"; the lab box's Sail time is recorded as it runs and
-stops with the Sail allowance.
+stops with the Sail allowance. Only Luna and Sol spend OpenAI: below the "all" tier they are skipped
+(`breed`, `_llm_pause`) and the rest of the loop -- seeds, parameter children, batches on the lab
+box, graduation -- goes on (Sept 23, 2026, C2: `open()` used to stop the whole lab with the tier,
+which the House's OpenAI line was to fall under that evening with the month resetting on Oct 1).
+
+The lab watches itself (`_watch`, on every tick, Sept 23, 2026): closed for longer than
+`closed_alert_minutes` it says so once (a warning naming the refusal, an info when it works again;
+the since-when lives in `meta`, so a restart does not reset it), and a graduate that has waited for a
+seat longer than `seat_wait_alert_hours` is named once. `health()` is the lab's line in health.json.
+
+**Forward windows (S2, Sept 23, 2026).** Every `forward_every_minutes` the lab replays its archived
+elites and its graduates waiting for seats (`forward_windows`) on tape data that arrived AFTER their
+code was frozen: the tape is cut at the hour after the candidate's evaluation (or its graduation),
+so no search, no House replay and no holdout has seen a step of it. Replay fills, on the lab box's
+lane, bounded per run. The record (`forward` table, one row per candidate and run, never the
+archive's fitness) RANKS: seats (`forward_score`, which the House's seat market reads), the archive's
+cell ordering (`elites`: a program whose forward window wins comes before every untested one, one
+whose window loses after them) and the breeding weights (`lineage_weights`: a lineage whose forward
+record loses gets fewer children). It never counts as practice evidence, never promotes anyone,
+never writes to the ledger's `eval.*` or `holdout.*` kinds and never changes a gate result. The
+study behind it (Sept 23, 17:05Z): replay did not predict practice (0 of 20 passes positive after
+6 active blocks, Spearman -0.68), so new data ranks and old data only admits.
+
+The floor feeds back the same way: a born graduate's practice and real record (the allocator's
+board) moves its lineage's search share, within the documented bounds of `lineage_weights`. And
+the teacher's lessons are priors (`priors`): a lesson may carry a ```lab-prior``` block naming a
+family, lineage, desk or cell and a rule, and the lab honours it (`pause-param-forks` breeds no
+parameter mutant of the named lineages until their forward window is positive).
+
+Tapes are keyed by what they depend on (`tape_key`: NEEDS without `style`, `parameter_rules`,
+`wake_minutes` and `max_hours_to_close`), since Sept 23, 2026: keyed by the whole NEEDS, every
+Luna child (which always differs from its parent in `style`, and usually in `parameter_rules`)
+looked like a tape of its own, cost one of the step's few tape builds and never reached a batch
+while its parent's tape sat in the cache: 0 of 394 LLM-written children were ever evaluated.
 
 What the agents get (`league/researcher.py`): `lab_query` (the archive and leaderboard for their
 desk, and their own submissions' results) and `lab_submit` (queue up to `submit_max` programs for
@@ -112,6 +145,26 @@ DEFAULTS: dict[str, Any] = {
     "seed_every_minutes": 60,
     "max_queue": 600,
     "stats_every_minutes": 10,
+    # The lab's own invariants (Sept 23, 2026): one warning when it has been closed this long, one
+    # when a graduate has waited this long for a seat.
+    "closed_alert_minutes": 30,
+    "seat_wait_alert_hours": 6,
+    # Forward windows (S2, Sept 23, 2026): every `forward_every_minutes`, at most
+    # `forward_candidates_per_run` archived elites and waiting graduates (least recently scored
+    # first) are replayed on tape data that arrived after their code was frozen, on the lab box, for
+    # at most `forward_box_seconds` of its time a run; a live tape the lab builds for the forward
+    # window (the deep-replay Alpaca desks, whose House tape is history) covers the last
+    # `forward_days` days and is rebuilt at most once a run. A forward record ranks only with
+    # `forward_min_active_blocks` active blocks; the floor's practice record counts from
+    # `forward_min_trades` closed trades. Cost, from the box's measured rates that day (11 candidates
+    # a second on Kalshi tapes, 1.7 on crypto) and windows a tenth of a search tape: 48 candidates
+    # are some 5-30 box-seconds an hour, under a cent of Sail at $0.20 an hour.
+    "forward_every_minutes": 60,
+    "forward_candidates_per_run": 48,
+    "forward_box_seconds": 90,
+    "forward_days": 7,
+    "forward_min_active_blocks": 3,
+    "forward_min_trades": 3,
     "luna_model": "gpt-6-luna",
     "luna_effort": "low",
     "luna_max_output_tokens": 12000,
@@ -129,9 +182,17 @@ CORR_LABELS = ("na", "negative", "low", "medium", "high")
 #: Where a candidate stands. `queued` waits for the box; the rest are final for that version.
 STATUSES = ("queued", "evaluated", "failed", "invalid", "blocked")
 
-#: Queue order: an agent's own submissions first, then seeds (the archive needs its first elites),
-#: then children.
-PRIORITY = {"agent": 0, "seed": 1, "param": 2, "luna": 2, "sol": 2}
+#: Queue order: an agent's own submissions first, then seeds (the archive needs its first elites)
+#: and the LLM-written children beside them, then parameter mutants. Sept 23, 2026: at priority 2
+#: behind the parameter mutants, which share their elite's tape and arrive in dozens, none of the
+#: lab's 394 Luna and Sol children was evaluated in its first six hours.
+PRIORITY = {"agent": 0, "seed": 1, "param": 2, "luna": 1, "sol": 1}
+#: The origins a third of every batch is reserved for (`_next_batch`), when any are queued: the
+#: programs someone wrote, against the free mutants of what is already in the archive.
+RESERVED_ORIGINS = ("agent", "luna", "sol")
+#: NEEDS keys the House's tape never depends on (`House.tape_for` reads none of them): two programs
+#: that differ only here replay on one tape, and are cached and batched as one (`tape_key`).
+TAPE_KEY_IGNORED = ("style", "parameter_rules", "wake_minutes", "max_hours_to_close")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -160,6 +221,10 @@ CREATE TABLE IF NOT EXISTS graduations(
     candidate TEXT PRIMARY KEY, niche TEXT NOT NULL, lineage TEXT NOT NULL, line TEXT NOT NULL,
     family TEXT NOT NULL, state TEXT NOT NULL, agent TEXT, at REAL NOT NULL, detail TEXT NOT NULL,
     needs TEXT, params TEXT);
+CREATE TABLE IF NOT EXISTS forward(
+    candidate TEXT NOT NULL, at REAL NOT NULL, window_start REAL NOT NULL, window_end REAL NOT NULL,
+    tape_id TEXT NOT NULL, ok INTEGER NOT NULL, blocks INTEGER NOT NULL, active_blocks INTEGER NOT NULL,
+    log_growth REAL, mean_log_growth REAL, trades INTEGER, error TEXT, PRIMARY KEY(candidate, at));
 """
 
 
@@ -172,6 +237,11 @@ class SealedTape(LabError):
 
 
 # ---------------------------------------------------------------------------------- pure helpers
+
+def _iso(epoch: float) -> str:
+    """An epoch as the ledger writes times, to the second."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
 
 def static_literal(code: str, name: str) -> dict[str, Any] | None:
     """A module-level `NAME = {...}` literal read WITHOUT running the file, or None."""
@@ -294,6 +364,63 @@ def search_tape(tape: Mapping[str, Any], fraction: float) -> dict[str, Any]:
     steps = list(tape.get("steps") or [])
     cut = max(2, int(len(steps) * max(0.1, min(1.0, float(fraction)))))
     return {**dict(tape), "steps": steps[:cut]}
+
+
+def tape_key(needs: Mapping[str, Any]) -> str:
+    """What decides a program's tape: its NEEDS without the keys the tape never depends on."""
+    return json.dumps({k: v for k, v in dict(needs).items() if k not in TAPE_KEY_IGNORED}, sort_keys=True)
+
+
+def forward_cut(tape: Mapping[str, Any], cut: float) -> dict[str, Any] | None:
+    """The forward window of a tape: only the steps strictly after `cut` (an epoch), so a replay of
+    it sees no step any search, replay or holdout saw. On an Alpaca tape the bars of the steps
+    before the cut become warm-up history (the last `replay.MAX_BARS` a symbol), so the first
+    decision sees the same bars a live wake would; a Kalshi tape's observed bars and feeds are
+    whole series the engine slices by time and stay as they are. None when no step follows the
+    cut: there is no forward data yet. The House's cached tape is never mutated."""
+    from .replay import MAX_BARS
+
+    before, after = [], []
+    for step in tape.get("steps") or []:
+        stamp = _ts(step.get("t")) if isinstance(step, Mapping) else None
+        (after if stamp is not None and stamp > cut else before).append(step)
+    if not after:
+        return None
+    out = {k: v for k, v in dict(tape).items() if k != "steps"}
+    out["steps"] = after
+    if str(tape.get("venue") or "") == "alpaca":
+        warm: dict[str, list[dict[str, Any]]] = {s: list(rows or []) for s, rows in (tape.get("warmup_bars") or {}).items()}
+        for step in before:
+            for symbol, bar in (step.get("bars") or {}).items():
+                if isinstance(bar, Mapping):
+                    warm.setdefault(str(symbol), []).append({**bar, "t": bar.get("t") or step.get("t")})
+        out["warmup_bars"] = {s: rows[-MAX_BARS:] for s, rows in warm.items()}
+    out["forward_cut"] = _iso(cut)
+    return out
+
+
+PRIOR_BLOCK = re.compile(r"```lab-prior\s*\n(.*?)```", re.S)
+PRIOR_RULES = ("pause-param-forks",)
+
+
+def parse_priors(text: str) -> list[dict[str, Any]]:
+    """The lab priors a lesson carries: each ```lab-prior``` block is one JSON object with a `rule`
+    (`pause-param-forks`), what it names (`family`, a substring of the House family the lineage
+    grew from; `lineage`, a lab lineage; `niche`, a desk; `cell`, a cell prefix) and `until`
+    (`forward-positive`, a `YYYY-MM-DD` day, or nothing: for good). Blocks that are not that are
+    ignored, never an error: a lesson is prose first."""
+    out = []
+    for raw in PRIOR_BLOCK.findall(str(text or "")):
+        try:
+            prior = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(prior, dict) or prior.get("rule") not in PRIOR_RULES:
+            continue
+        if not any(prior.get(k) for k in ("family", "lineage", "niche", "cell")):
+            continue
+        out.append({k: (str(v) if v is not None else None) for k, v in prior.items()})
+    return out
 
 
 def folds_of(result: Mapping[str, Any], tape: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -471,9 +598,26 @@ class Lab:
         self._weights: tuple[float, dict[str, float]] | None = None
         self._rng = random.Random(int(house.clock()))
         self.refusal = ""
+        #: Why Luna and Sol are being skipped ('' when they are asked), and the phases skipped since
+        #: this process started: what `stats` and `health` show for the paid work (C2, Sept 23, 2026).
+        self._llm_paused = ""
+        self._skipped: dict[str, Any] = {"luna": 0, "sol": 0, "since": now_iso(house.clock)}
+        self._watch_error = ""
+        #: Forward windows (S2): the live tapes the lab builds for them, the last run's numbers, and
+        #: the priors' pauses counted since this process started. The record itself is in the store.
+        self._forward_tapes: dict[str, tuple[float, str, dict[str, Any]]] = {}
+        self._forward_last: dict[str, Any] | None = None
+        self._forward_error = ""
+        self._priors: tuple[float, list[dict[str, Any]]] | None = None
+        self._prior_skips: dict[str, int] = {}
         if self._meta("fee_cursor") is None:
             # A graduate cannot exist before the lab, so no older fee can owe it a royalty.
             self._set_meta("fee_cursor", str(house.ledger.head()[0]))
+        # Queued rows keep the priority they were admitted with, so a change of `PRIORITY` reaches
+        # the queue only if it is re-keyed here (Sept 23, 2026: 394 Luna and Sol children sat
+        # queued at the old priority 2). Every stored priority comes from `PRIORITY`, so this is safe.
+        for origin, priority in PRIORITY.items():
+            self._x("UPDATE candidates SET priority=? WHERE status='queued' AND origin=? AND priority!=?", (priority, origin, priority))
 
     # ------------------------------------------------------------------ store
     def _q(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
@@ -556,7 +700,9 @@ class Lab:
     # ---------------------------------------------------------------- cadence
     def open(self) -> str:
         """'' when the lab may work now, else why not. The House being stopped, paused, deploying
-        or out of Sail allowance stops it, and so does an OpenAI tier below "all"."""
+        or out of Sail allowance stops it, and so does a failed lab box. The OpenAI tier does not:
+        the lab's search runs on Sail time, and only its Luna and Sol calls are the tier's
+        (`_llm_pause`; C2, Sept 23, 2026)."""
         house = self.house
         if not self.settings.get("enabled"):
             return "disabled in game.json"
@@ -576,24 +722,111 @@ class Lab:
             return "the Sail meter has stopped the floor"
         if self.box_down():
             return "the lab box failed a batch in the last five minutes"
-        tier = house.frontier_tier()
-        if tier != "all":
-            return f"the OpenAI tier is {tier!r}"
         return ""
 
     def tick(self, *, open_for_business: bool) -> bool:
-        """Called from `House.tick`: schedules one bounded `step` on a background lane. Never works
-        on the tick itself."""
+        """Called from `House.tick`: schedules one bounded `step` on a background lane, and runs the
+        lab's own watch (`_watch`). Never works on the tick itself."""
         if not open_for_business:
             self.refusal = "the House is not open for business"
+            self._watch(self.refusal)
             return False
         job = self.house._jobs.get(LAB_JOB)
         if job is not None and job.is_alive():
+            self._watch(None)  # a step is running: the lab is not closed, whatever `refusal` says of its paid calls
             return False
         self.refusal = self.open()
+        self._watch(self.refusal)
         if self.refusal:
             return False
         return bool(self.house._background(LAB_JOB, self.step))
+
+    # ----------------------------------------------------------------- watch
+    def _watch(self, closed: str | None) -> None:
+        """The lab's two invariants (Sept 23, 2026), checked on every tick and each told once: closed
+        for longer than `closed_alert_minutes` (`closed` is why, '' when it works now, None when a
+        step is running and the question is not asked), and a graduate waiting for a seat longer than
+        `seat_wait_alert_hours`. Never raises into the tick (`House.tick` calls `tick` bare); a
+        failure is told once per distinct message."""
+        try:
+            if closed is not None:
+                self._watch_closed(closed)
+            self._watch_waiting()
+        except Exception as exc:  # noqa: BLE001 - the watch must never take the tick down
+            text = f"the lab's watch failed ({type(exc).__name__}: {str(exc)[:160]})"
+            if text != self._watch_error:
+                self._watch_error = text
+                self.house.alert("warning", text)
+
+    def _watch_closed(self, refusal: str) -> None:
+        """Since when the lab has been closed is `meta` `closed_since` (a restart does not reset it:
+        a deploy's own minutes closed count), `closed_told` once the warning went out."""
+        now = self._now()
+        since = self._meta("closed_since")
+        if refusal:
+            if since is None:
+                self._set_meta("closed_since", str(now))
+                return
+            minutes = (now - float(since)) / 60
+            if minutes >= float(self.settings["closed_alert_minutes"]) and self._meta("closed_told") is None:
+                self._set_meta("closed_told", str(now))
+                self.house.alert("warning", f"the Alpha Lab has been closed for {minutes:.0f} minutes (since {_iso(float(since))}): {refusal}")
+            return
+        if since is None:
+            return
+        told = self._meta("closed_told")
+        self._x("DELETE FROM meta WHERE key IN ('closed_since', 'closed_told')")
+        if told is not None:
+            self.house.alert("info", f"the Alpha Lab is open again after {(now - float(since)) / 60:.0f} minutes closed")
+
+    def _watch_waiting(self) -> None:
+        """One warning per graduate that has waited `seat_wait_alert_hours` for a seat (`meta`
+        `seat_told:<candidate>` keeps it to one across restarts)."""
+        limit = float(self.settings["seat_wait_alert_hours"])
+        for row in self.waiting():
+            if row["hours"] < limit or self._meta(f"seat_told:{row['candidate']}") is not None:
+                continue
+            self._set_meta(f"seat_told:{row['candidate']}", str(self._now()))
+            self.house.alert("warning", f"the Alpha Lab graduate {row['line']} ({row['candidate'][:12]}, {row['niche']}) has waited "
+                                        f"{row['hours']:.1f} hours for a seat: {row['detail']}")
+
+    def waiting(self) -> list[dict[str, Any]]:
+        """Graduates that passed the House's replay and wait for a seat (`waiting_seat`: their desk or
+        the league is full of agents that have earned their seats), longest wait first. The wait is
+        counted from the ledger's `lab.graduate:<id>:passed` row, written once: the table's `at`
+        moves at every retry (`graduate` asks again every ten minutes)."""
+        from .house import _epoch
+
+        now = self._now()
+        out = []
+        for row in self._q("SELECT candidate, niche, line, at, detail FROM graduations WHERE state='passed' AND detail LIKE '%earned their seats%'"):
+            passed = self.house.ledger.get(f"lab.graduate:{row['candidate']}:passed")
+            since = _epoch(passed.at) if passed is not None else float(row["at"])
+            out.append({"candidate": row["candidate"], "line": row["line"], "niche": row["niche"], "since": _iso(since),
+                        "hours": round(max(0.0, now - since) / 3600, 1), "detail": row["detail"],
+                        "forward": self.forward_score(row["candidate"])})
+        return sorted(out, key=lambda r: -r["hours"])
+
+    def health(self) -> dict[str, Any]:
+        """The lab's line in health.json (`House._health`, every tick): whether it may work now and
+        why not, since when it has been closed, the paid phases skipped and why, the graduates waiting
+        for seats. Cheap (a few small queries), and never raises."""
+        try:
+            since = self._meta("closed_since")
+            waiting = self.waiting()
+            return {
+                "refusal": self.refusal or None,
+                "closed_since": _iso(float(since)) if since is not None else None,
+                "closed_minutes": round((self._now() - float(since)) / 60, 1) if since is not None else 0,
+                "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
+                "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0,
+                                 "graduates": [{k: r[k] for k in ("candidate", "line", "niche", "since", "hours", "forward")} for r in waiting[:8]]},
+                "queued": self.queued(),
+                "born_total": int(self._q("SELECT COUNT(*) AS n FROM graduations WHERE state='born'")[0]["n"]),
+                "forward": self.forward_stats(),
+            }
+        except Exception as exc:  # noqa: BLE001 - health is written on the tick
+            return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
     def step(self) -> dict[str, Any]:
         """One bounded pass: seed, breed, evaluate in batches until `step_seconds`, graduate,
@@ -623,6 +856,8 @@ class Lab:
                 out["archived"] += done["archived"]
             if not self.open():
                 out["graduations"] = self.graduate()
+            if not self.open():
+                out["forward"] = self.forward_windows()
         except Exception as exc:  # noqa: BLE001 - the lab must never take a lane or the tick down
             self.house.alert("warning", f"the lab's step failed ({type(exc).__name__}: {str(exc)[:200]})")
             out["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
@@ -644,7 +879,7 @@ class Lab:
         count = 0
         for row in self._q("SELECT needs FROM candidates WHERE status='queued'"):
             try:
-                count += json.dumps(json.loads(row["needs"]), sort_keys=True) in fresh
+                count += tape_key(json.loads(row["needs"])) in fresh
             except (TypeError, ValueError):
                 continue
         return count
@@ -758,8 +993,9 @@ class Lab:
     def _search_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """(lab tape id, search tape) for these NEEDS: the House's own tape for them, with the same
         input checks its replay makes, never one that reaches the sealed holdout, cut to its first
-        `search_fraction`."""
-        key = json.dumps(needs, sort_keys=True)
+        `search_fraction`. Keyed by `tape_key` (Sept 23, 2026): a Luna child that differs from its
+        parent only in `style` or `parameter_rules` is the parent's tape, not a build of its own."""
+        key = tape_key(needs)
         hit = self._tapes.get(key)
         if hit is not None and self._now() - hit[0] < 6 * 3600:  # the House rebuilds its own tapes daily
             return hit[1], hit[2]
@@ -768,7 +1004,6 @@ class Lab:
             raise LabError(failed[1])
         if self._tapes_built >= int(self.settings["max_tapes_per_step"]):
             raise TimeoutError("the step's tape budget is spent")
-        self._tapes_built += 1
         house = self.house
         with house._tape_lock:
             cached = set(house._tapes)
@@ -778,6 +1013,10 @@ class Lab:
                 start, end = house._live_window(needs)
                 house._require_feeds(needs, wanted, house.feeds.coverage(wanted, start, end) if house.feeds is not None else {})
             tape_id, tape = house.tape_for(needs)
+            if tape_id not in cached:
+                # Only a tape the House had to build counts against the step's budget: one it already
+                # held (an agent's replay built it, or a sibling's search) costs a copy, not a build.
+                self._tapes_built += 1
             if wanted:
                 house._require_feeds(needs, wanted, tape.get("feeds_coverage") or {})
             observed = needs.get("observe") or {}
@@ -808,9 +1047,19 @@ class Lab:
         return ident, cut
 
     # --------------------------------------------------------------- evaluate
-    def evaluate_batch(self) -> dict[str, Any] | None:
-        """One batch on the lab box: the queue's front, grouped by the tape they need. None when
-        nothing could be evaluated."""
+    def _next_batch(self) -> tuple[str, dict[str, Any], list[sqlite3.Row]] | None:
+        """(lab tape id, search tape, the rows to evaluate) of the next batch: the queue's front,
+        grouped by the tape they need, one tape a batch. None when nothing is ready.
+
+        Every other batch serves the largest group ready (below). Its tape must get built too: the
+        step builds at most `max_tapes_per_step` new tapes, and in queue order they all went to seeds
+        (one row a tape), so after a restart emptied the cache the children's tapes were never built
+        and no child was evaluated (Sept 23, 12:08-12:21Z: 104 evaluated, all seeds or submissions,
+        500 children queued). On those turns the rows are visited largest group first -- after the
+        rows of the reserved origins (an agent's submissions, Luna's and Sol's programs), whose tapes
+        are built before anyone else's, and a third of the batch is theirs when any wait on the
+        chosen tape (Sept 23, 2026: in six hours 1,358 parameter mutants were evaluated and none of
+        the 394 LLM-written children)."""
         settings = self.settings
         size = int(settings["batch_size"])
         # A wide look: rows whose tape is not built yet are passed over (at most `max_tapes_per_step` new
@@ -818,23 +1067,18 @@ class Lab:
         rows = self._q("SELECT * FROM candidates WHERE status='queued' ORDER BY priority, created LIMIT ?", (size * 16,))
         if not rows:
             return None
-        # Every other batch serves the largest group ready (below). Its tape must get built too: the
-        # step builds at most `max_tapes_per_step` new tapes, and in queue order they all went to seeds
-        # (one row a tape), so after a restart emptied the cache the children's tapes were never built
-        # and no child was evaluated (Sept 23, 12:08-12:21Z: 104 evaluated, all seeds or submissions,
-        # 500 children queued). On those turns the rows are visited largest group first.
         self._batch_turn = getattr(self, "_batch_turn", 0) + 1
         largest_turn = int(rows[0]["priority"]) != 0 and self._batch_turn % 2 == 0
         if largest_turn:
             def needs_key(row: sqlite3.Row) -> str:
                 try:
-                    return json.dumps(json.loads(row["needs"]), sort_keys=True)
+                    return tape_key(json.loads(row["needs"]))
                 except (TypeError, ValueError):
                     return str(row["needs"])
             sizes: dict[str, int] = {}
             for row in rows:
                 sizes[needs_key(row)] = sizes.get(needs_key(row), 0) + 1
-            rows = sorted(rows, key=lambda row: -sizes[needs_key(row)])
+            rows = sorted(rows, key=lambda row: (row["origin"] not in RESERVED_ORIGINS, -sizes[needs_key(row)]))
         groups: dict[str, list[sqlite3.Row]] = {}  # in the order of each tape's first ready row
         tapes: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -867,8 +1111,19 @@ class Lab:
             tape_id = first
         else:
             tape_id = max(groups, key=lambda key: len(groups[key]))
-        chosen = groups[tape_id][:size]
-        tape = tapes[tape_id]
+        group = groups[tape_id]
+        reserved = [r for r in group if r["origin"] in RESERVED_ORIGINS][: max(1, size // 3)]
+        taken = {r["id"] for r in reserved}
+        chosen = (reserved + [r for r in group if r["id"] not in taken])[:size]
+        return tape_id, tapes[tape_id], chosen
+
+    def evaluate_batch(self) -> dict[str, Any] | None:
+        """One batch on the lab box (`_next_batch`). None when nothing could be evaluated."""
+        settings = self.settings
+        picked = self._next_batch()
+        if picked is None:
+            return None
+        tape_id, tape, chosen = picked
         row1 = CONSTITUTION["rungs"]["1"]
         limits = {"max_position_usd": float(row1["max_position_usd"]), "max_order_usd": float(row1["max_order_usd"])}
         started = time.monotonic()
@@ -904,6 +1159,10 @@ class Lab:
         by_id = {str(r.get("id")): r for r in results or [] if isinstance(r, Mapping)}
         counts = {"candidates": 0, "ok": 0, "eligible": 0, "gate": 0, "archived": 0}
         live = self._live_series(tape.get("horizon") or chosen[0]["horizon"])
+        # Whether this tape is the history store's development window is kept with each result: the
+        # graduation's holdout question (`_deep`) must not depend on a tape cache of six entries.
+        source = tape.get("source") if isinstance(tape.get("source"), Mapping) else {}
+        tape_source = "history-dev" if source.get("window") else "live"
         infrastructure = 0
         for row in chosen:
             result = by_id.get(row["id"])
@@ -925,7 +1184,7 @@ class Lab:
                     (status, self._now(), tape_id, None if scored["ok"] else str(result.get("error") or "")[:300],
                      int(scored["eligible"]), int(scored["gate"]), scored["fitness"], scored["trades"],
                      scored["trades_per_day"], corr, cell if scored["eligible"] else None,
-                     json.dumps(_summary(result, scored), default=str), row["id"]))
+                     json.dumps({**_summary(result, scored), "tape_source": tape_source}, default=str), row["id"]))
             if scored["eligible"] and self._place(cell, row["niche"], row["id"], float(scored["fitness"])):
                 counts["archived"] += 1
         box_usd = Decimal(str(self.settings["box_usd_per_hour"])) * Decimal(str(round(seconds, 3))) / Decimal(3600)
@@ -998,27 +1257,29 @@ class Lab:
 
     # ------------------------------------------------------------------ breed
     def lineage_weights(self) -> dict[str, float]:
-        """How much search each lineage gets: doubled for each graduate earning forward (or paying
-        royalties), halved for each that lost or died, between 1/8 and 8, times one plus its royalties."""
+        """How much search each lineage gets: two to the power of a score clamped to [-3, 3] (so
+        between 1/8 and 8), times one plus its royalties. The score, within these bounds: each born
+        graduate adds its floor record (`_floor_score`: +1 or -1 for its practice record, +1 or -1
+        again for its real one, -1 for a death that was not redundancy), each lineage its own
+        forward windows (`lineage_forward`, S2, Sept 23, 2026: +1 when the pooled window wins,
+        -1 when it loses), and royalties +1. A lineage whose graduates or windows lose is searched
+        less; one that earns is searched more; nothing here moves anyone's rung or band."""
         now = self._now()
         if self._weights is not None and now - self._weights[0] < 600:
             return self._weights[1]
+        min_trades = int(self.settings["forward_min_trades"])
         score_of: dict[str, int] = {}
         for row in self._q("SELECT lineage, agent FROM graduations WHERE state='born' AND agent IS NOT NULL"):
             agent = self.house.registry.get(row["agent"])
             if agent is None:
                 continue
-            delta = 0
-            if not agent.alive:
-                delta = 0 if agent.cause in ("redundant",) else -1
-            else:
-                try:
-                    standing = self.house.standing_of(agent.id)
-                except Exception:  # noqa: BLE001 - an unreadable record moves nothing
-                    standing = {}
-                growth, seen = float(standing.get("earned_growth") or 0.0), int(standing.get("earned_observations") or 0)
-                delta = 1 if seen > 0 and growth > 0 else -1 if seen >= 5 and growth < 0 else 0
-            score_of[row["lineage"]] = score_of.get(row["lineage"], 0) + delta
+            score_of[row["lineage"]] = score_of.get(row["lineage"], 0) + self._floor_score(agent, min_trades)
+        for row in self._q("SELECT DISTINCT c.lineage AS lineage FROM forward f JOIN candidates c ON c.id = f.candidate"):
+            record = self.lineage_forward(row["lineage"])
+            if record["positive"] is True:
+                score_of[row["lineage"]] = score_of.get(row["lineage"], 0) + 1
+            elif record["positive"] is False and float(record["log_growth"]) < 0:
+                score_of[row["lineage"]] = score_of.get(row["lineage"], 0) - 1
         royalties: dict[str, Decimal] = {}
         for entry in self.house.ledger.iter(kinds="lab.royalty"):
             lineage = str(entry.payload.get("lineage") or "")
@@ -1030,10 +1291,53 @@ class Lab:
         self._weights = (now, weights)
         return weights
 
+    def _floor_score(self, agent: Any, min_trades: int) -> int:
+        """What one born graduate adds to its lineage's search score, in [-2, 2]: from the
+        allocator's board when it has read the agent's evidence (practice: W_paper above or below 1
+        after `min_trades` closed trades; real money: W_real above or below 1 after a real trade),
+        else from its standing; a dead graduate -1 unless it died redundant."""
+        if not agent.alive:
+            return 0 if agent.cause in ("redundant",) else -1
+        evidence = None
+        try:
+            board = getattr(self.house, "allocator", None)
+            row = (board.board().get("agents") or {}).get(agent.id) if board is not None else None
+            evidence = row.get("evidence") if isinstance(row, Mapping) else None
+        except Exception:  # noqa: BLE001 - a board that cannot be read moves nothing
+            evidence = None
+        if isinstance(evidence, Mapping):
+            delta = 0
+            trades, real_trades = int(evidence.get("trades") or 0), int(evidence.get("real_trades") or 0)
+            w_paper, w_real = float(evidence.get("W_paper") or 1.0), float(evidence.get("W_real") or 1.0)
+            if trades >= min_trades:
+                delta += 1 if w_paper > 1.0 else -1 if w_paper < 1.0 else 0
+            if real_trades >= 1:
+                delta += 1 if w_real > 1.0 else -1 if w_real < 1.0 else 0
+            return delta
+        try:
+            standing = self.house.standing_of(agent.id)
+        except Exception:  # noqa: BLE001 - an unreadable record moves nothing
+            standing = {}
+        growth, seen = float(standing.get("earned_growth") or 0.0), int(standing.get("earned_observations") or 0)
+        return 1 if seen > 0 and growth > 0 else -1 if seen >= 5 and growth < 0 else 0
+
     def elites(self, niche: str | None = None) -> list[sqlite3.Row]:
+        """The archive's elites, ranked: a program whose forward window wins (`forward_score`)
+        before every program without a record, those by their fitness on the search tape, and a
+        program whose forward window loses after them all (S2, Sept 23, 2026). The order decides
+        who graduates first and what an agent is shown first; fitness itself never moves."""
         sql = ("SELECT a.cell, a.fitness AS elite_fitness, a.replaced, c.* FROM archive a JOIN candidates c ON c.id = a.candidate"
                + (" WHERE a.niche=?" if niche else "") + " ORDER BY a.fitness DESC")
-        return self._q(sql, (niche,) if niche else ())
+        rows = self._q(sql, (niche,) if niche else ())
+        scores = self.forward_scores()
+
+        def rank(row: sqlite3.Row) -> tuple[int, float]:
+            forward = scores.get(row["id"])
+            if forward is None:
+                return 1, -float(row["elite_fitness"])
+            return (0 if forward > 0 else 2), -forward
+
+        return sorted(rows, key=rank)
 
     def _pick_parent(self, niche: str | None = None) -> sqlite3.Row | None:
         rows = [r for r in self.elites(niche) if self._desk(r["niche"]) is not None]
@@ -1055,6 +1359,12 @@ class Lab:
             parent = self._pick_parent()
             if parent is None:
                 break
+            paused = self.paused(parent)
+            if paused:
+                # A lesson's prior: no parameter-only fork of this lineage (its Luna and Sol
+                # children, which change the mechanism, still come).
+                self._prior_skips[paused] = self._prior_skips.get(paused, 0) + 1
+                continue
             params = json.loads(parent["params"])
             needs = json.loads(parent["needs"])
             try:
@@ -1075,7 +1385,16 @@ class Lab:
             return 0
         luna_since_sol = int(self._q("SELECT COUNT(*) AS n FROM calls WHERE kind='luna' AND at > "
                                      "COALESCE((SELECT MAX(at) FROM calls WHERE kind='sol'), 0)")[0]["n"])
-        if luna_since_sol >= int(settings["leap_every"]):
+        kind = "sol" if luna_since_sol >= int(settings["leap_every"]) else "luna"
+        # Below the "all" tier (or with the House's OpenAI allowance closed) no packet is built and
+        # no client asked: the phase is skipped on the record, and the step's time goes to parameter
+        # children and batches (C2, Sept 23, 2026). `_ask` refuses for the same reasons regardless.
+        self._llm_paused = self._llm_pause()
+        if self._llm_paused:
+            self._skipped[kind] += 1
+            self.refusal = self._llm_paused
+            return 0
+        if kind == "sol":
             return int(self.leap())
         return int(self.mutate_llm())
 
@@ -1106,14 +1425,23 @@ class Lab:
         size = len(json.dumps({"input": [system, user]}).encode("utf-8")) + 4096
         return (Decimal(size) * rates[0] + Decimal(int(max_output_tokens)) * rates[1]) / Decimal(1_000_000)
 
-    def _llm_refusal(self, client: Any, hold: Decimal) -> str:
+    def _llm_pause(self) -> str:
+        """Why no Luna or Sol call may be made now, whatever the call: an OpenAI tier below "all"
+        (`House.frontier_tier`) or the House's OpenAI allowance closed. '' when one may be tried."""
         house = self.house
-        if client is None:
-            return "no model client"
-        if house.frontier_tier() != "all":
-            return f"the OpenAI tier is {house.frontier_tier()!r}"
+        tier = house.frontier_tier()
+        if tier != "all":
+            return f"the OpenAI tier is {tier!r}"
         if not house.pacer.may_spend("openai"):
             return "the House's OpenAI allowance is closed"
+        return ""
+
+    def _llm_refusal(self, client: Any, hold: Decimal) -> str:
+        if client is None:
+            return "no model client"
+        pause = self._llm_pause()
+        if pause:
+            return pause
         base, royalties = self.room()
         if hold > base + royalties:
             return f"the lab's line has ${base + royalties:.4f} left this hour and the call may cost ${hold:.4f}"
@@ -1126,7 +1454,9 @@ class Lab:
         refusal = self._llm_refusal(client, hold)
         if refusal:
             self.refusal = refusal
+            self._llm_paused = self._llm_pause()  # the tier or the allowance; '' when it was this call's own client or hold
             return None
+        self._llm_paused = ""  # a call is being made: the paid phases are not paused
         base, _ = self.room()
         ident = f"lab-{kind}:{self._now():.6f}:{self._rng.random():.6f}"
         answer = None
@@ -1489,7 +1819,15 @@ class Lab:
         return self._birth(row["id"])
 
     def _deep(self, row: Mapping[str, Any]) -> bool:
-        """Was this candidate searched on the history store's development window?"""
+        """Was this candidate searched on the history store's development window? Its own result
+        says (`tape_source`, kept at evaluation since Sept 23, 2026, so a restart or the tape cache's
+        turnover cannot lose the answer); older rows fall back to the cache and the desk's rule."""
+        try:
+            source = (json.loads(row["summary"] or "{}") or {}).get("tape_source")
+        except (TypeError, ValueError, KeyError, IndexError):
+            source = None
+        if source in ("history-dev", "live"):
+            return source == "history-dev"
         for _, tape_id, tape in self._tapes.values():
             if tape_id == row["tape_id"]:
                 return bool((tape.get("source") or {}).get("window"))
@@ -1579,13 +1917,13 @@ class Lab:
         if niche is None or niche.dormant:
             return None, self._record(row, "refused", "its desk is closed", line=line, family=family)
         if sum(1 for a in living if a.specialty == niche.id) >= niche.max_members:
-            displaced = house._weakest(rules, specialty=niche.id)
+            displaced = house._weakest(rules, specialty=niche.id, evidenced=True)
             if displaced is None:
                 return None, self._record(row, "waiting_seat", "its desk is full of agents that have earned their seats",
                                           line=line, family=family, table_state="passed")
             return displaced, None
         if len(living) >= int(rules["max_population"]):
-            displaced = house._weakest(rules)
+            displaced = house._weakest(rules, evidenced=True)
             if displaced is None:
                 return None, self._record(row, "waiting_seat", "the league is full of agents that have earned their seats",
                                           line=line, family=family, table_state="passed")
@@ -1627,9 +1965,9 @@ class Lab:
                 house.economy.grant(child.id, rules["endowment_usd"], "endowment", id=f"endow:{child.id}")
             living = house.registry.living()
             if niche is not None and sum(1 for a in living if a.specialty == niche.id) > niche.max_members:
-                displaced = house._weakest(rules, specialty=niche.id, exclude=[child.id])
+                displaced = house._weakest(rules, specialty=niche.id, exclude=[child.id], evidenced=True)
             elif len(living) > int(rules["max_population"]):
-                displaced = house._weakest(rules, exclude=[child.id])
+                displaced = house._weakest(rules, exclude=[child.id], evidenced=True)
         if seated and child.alive:
             if house.evaluator.rung(child.id) < 1:
                 house.evaluator.seat(child.id, 1, f"an Alpha Lab graduate: candidate {ident} passed the House's replay before birth, on its own line")
@@ -1677,6 +2015,262 @@ class Lab:
             self._set_meta("fee_cursor", str(last))
             self._weights = None
         return paid
+
+    # --------------------------------------------------------------- forward
+    def forward_due(self, limit: int) -> list[sqlite3.Row]:
+        """The archived elites and the graduates waiting for seats whose forward window is next:
+        never scored first, then least recently scored (the table decides, so a restart resumes)."""
+        rows = self._q("SELECT c.*, MAX(f.at) AS scored FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
+                       " WHERE c.status='evaluated' AND c.id IN (SELECT candidate FROM archive UNION SELECT candidate FROM graduations"
+                       " WHERE state='passed') GROUP BY c.id ORDER BY (scored IS NULL) DESC, scored, c.evaluated LIMIT ?", (int(limit),))
+        return [r for r in rows if self._desk(r["niche"]) is not None]
+
+    def _frozen_at(self, row: Mapping[str, Any]) -> float:
+        """When this candidate's code was frozen: its evaluation, or its graduation's pass (the
+        House's replay, whose tape ended no later) when it has one. Nothing after it was seen."""
+        from .house import _epoch
+
+        frozen = float(row["evaluated"] or row["created"])
+        passed = self.house.ledger.get(f"lab.graduate:{row['id']}:passed")
+        if passed is not None:
+            frozen = max(frozen, _epoch(passed.at))
+        return frozen
+
+    def _forward_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """(tape id, tape) a forward window is cut from: the House's own tape for these NEEDS, with
+        the same seal (`check_dev_only`), except on the desks the House replays on the history store
+        (Alpaca, no live feed, not options), whose House tape is 2025: there the lab builds the live
+        tape of the last `forward_days` days through the House's own data adapter, as `House.tape_for`
+        builds a live one, once a run."""
+        from .agents import niche_of
+
+        house = self.house
+        venue, horizon, _ = niche_of(needs)
+        option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
+        wanted = house._feeds_wanted(needs)
+        if not (venue == "alpaca" and bool(house.settings.deep_replay) and not option and not wanted):
+            tape_id, tape = house.tape_for(needs)
+            check_dev_only(tape, house.holdout_window)
+            return tape_id, tape
+        if needs.get("options_features"):
+            raise LabError("no live tape carries options features for a forward window")
+        if getattr(house, "alpaca_data", None) is None:
+            raise LabError("no Alpaca data adapter to build a live tape from")
+        key = tape_key(needs)
+        hit = self._forward_tapes.get(key)
+        if hit is not None and self._now() - hit[0] < float(self.settings["forward_every_minutes"]) * 60:
+            return hit[1], hit[2]
+        end = self._now()
+        start = end - float(self.settings["forward_days"]) * 86400
+        watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
+        symbols = sorted(str(s) for s in (needs.get("symbols") or []))[:12]
+        symbols = sorted(set(symbols) | {str(s) for s in (watched.get("symbols") or [])[:6]})
+        timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
+        warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
+        tape = house.alpaca_data.tape(symbols, timeframe, start=now_iso(lambda: start), end=now_iso(lambda: end), horizon=horizon,
+                                      warmup_bars=warmup)
+        check_dev_only(tape, house.holdout_window)
+        ident = f"live:alpaca:{','.join(symbols)}:{timeframe}:{warmup}:{horizon}:{_iso(end)}"
+        if len(self._forward_tapes) >= 8:
+            self._forward_tapes.pop(next(iter(self._forward_tapes)))
+        self._forward_tapes[key] = (self._now(), ident, tape)
+        return ident, tape
+
+    def _forward_warn(self, text: str) -> None:
+        if text != self._forward_error:
+            self._forward_error = text
+            self.house.alert("warning", text)
+
+    def forward_windows(self, *, force: bool = False) -> dict[str, Any] | None:
+        """One forward-window run (S2, Sept 23, 2026), every `forward_every_minutes`: the due
+        elites and waiting graduates (`forward_due`) are replayed on the lab box on the steps of
+        their tape that came after their code was frozen (`forward_cut`, at the hour after the
+        freeze, so one batch serves every candidate frozen in that hour), and each gets one row of
+        the `forward` table. Bounded: `forward_candidates_per_run` candidates, `forward_box_seconds`
+        of box time. What it never does: write to the ledger, touch a candidate's fitness, gate or
+        cell, the archive, the holdout or anyone's rung. The stamp `forward_at` is set after the
+        run, so a run a crash interrupts is run again next step, least recently scored first."""
+        settings = self.settings
+        every = float(settings["forward_every_minutes"]) * 60
+        if not force and self._now() - float(self._meta("forward_at") or 0) < every:
+            return None
+        out: dict[str, Any] = {"candidates": 0, "scored": 0, "batches": 0, "seconds": 0.0, "skipped": {}}
+        started = time.monotonic()
+        row1 = CONSTITUTION["rungs"]["1"]
+        limits = {"max_position_usd": float(row1["max_position_usd"]), "max_order_usd": float(row1["max_order_usd"])}
+        groups: dict[tuple[str, float], list[sqlite3.Row]] = {}
+        for row in self.forward_due(int(settings["forward_candidates_per_run"])):
+            try:
+                key = tape_key(json.loads(row["needs"]))
+            except (TypeError, ValueError):
+                continue
+            out["candidates"] += 1
+            cut = math.ceil(self._frozen_at(row) / 3600.0) * 3600.0
+            groups.setdefault((key, cut), []).append(row)
+
+        def skip(why: str, n: int) -> None:
+            out["skipped"][why] = out["skipped"].get(why, 0) + n
+
+        for (key, cut), rows in groups.items():
+            if time.monotonic() - started >= float(settings["forward_box_seconds"]):
+                skip("the run's box seconds are spent", len(rows))
+                continue
+            if self.open():
+                skip("the lab closed", len(rows))
+                continue
+            try:
+                base_id, base = self._forward_tape(json.loads(rows[0]["needs"]))
+            except LabError as exc:
+                skip(str(exc)[:80], len(rows))
+                continue
+            except Exception as exc:  # noqa: BLE001 - no tape is no window, never a crash of the step
+                self._forward_warn(f"the lab could not build a forward tape ({type(exc).__name__}: {str(exc)[:160]})")
+                skip("no tape", len(rows))
+                continue
+            tape = forward_cut(base, cut)
+            if tape is None:
+                skip("no forward data yet", len(rows))
+                continue
+            steps = tape["steps"]
+            ident = "fwd:" + hashlib.sha256(f"{base_id}|{cut}|{steps[0].get('t')}|{steps[-1].get('t')}|{len(steps)}".encode()).hexdigest()[:24]
+            batch = [{"id": r["id"], "code": r["code"], "params": {}} for r in rows]
+            try:
+                results = self.box.evaluate(batch, ident, tape, stake=float(row1["stake_usd"]), limits=limits, timeout=float(settings["timeout"]))
+            except Exception as exc:  # noqa: BLE001 - the box's failure, never a record against anyone
+                self._forward_warn(f"the lab box could not run a forward window ({type(exc).__name__}: {str(exc)[:160]})")
+                skip("the lab box failed", len(rows))
+                break
+            by_id = {str(r.get("id")): r for r in results or [] if isinstance(r, Mapping)}
+            end = _ts(steps[-1].get("t")) or self._now()
+            for r in rows:
+                result = by_id.get(r["id"])
+                if result is None or str(result.get("error") or "").startswith("not evaluated"):
+                    skip("not evaluated", 1)
+                    continue
+                self._record_forward(r["id"], result, cut, end, ident)
+                out["scored"] += 1
+            out["batches"] += 1
+        out["seconds"] = round(time.monotonic() - started, 3)
+        out["at"] = now_iso(self.house.clock)
+        self._set_meta("forward_at", str(self._now()))
+        self._forward_last = out
+        self._weights = None
+        return out
+
+    def _record_forward(self, candidate: str, result: Mapping[str, Any], start: float, end: float, tape_id: str) -> None:
+        blocks = [b for b in (result.get("blocks") or []) if isinstance(b, Mapping)]
+        growth = [float(b.get("log_growth") or 0.0) for b in blocks]
+        ok = bool(result.get("ok"))
+        self._x("INSERT OR REPLACE INTO forward(candidate, at, window_start, window_end, tape_id, ok, blocks, active_blocks, log_growth,"
+                " mean_log_growth, trades, error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (candidate, self._now(), start, end, tape_id, int(ok), len(blocks), sum(1 for b in blocks if b.get("active")),
+                 round(math.fsum(growth), 12) if growth else None, round(math.fsum(growth) / len(growth), 12) if growth else None,
+                 int(result.get("trades") or 0), None if ok else str(result.get("error") or "")[:300]))
+
+    def forward_record(self, candidate: str) -> dict[str, Any] | None:
+        """The candidate's latest forward window, or None: `window_start`/`window_end` (epochs),
+        `blocks`, `active_blocks`, `log_growth`, `mean_log_growth`, `trades`, `ok`, `error`, `at`."""
+        rows = self._q("SELECT * FROM forward WHERE candidate=? ORDER BY at DESC LIMIT 1", (candidate,))
+        return dict(rows[0]) if rows else None
+
+    def forward_score(self, candidate: str) -> float | None:
+        """The candidate's forward record as a rank: its mean log growth per block on data that came
+        after its code was frozen, or None without `forward_min_active_blocks` active blocks of
+        it. A number to sort by (the House's seat market reads it), never practice evidence and
+        never a promotion."""
+        row = self.forward_record(candidate)
+        if row is None or not row["ok"] or row["mean_log_growth"] is None:
+            return None
+        if int(row["active_blocks"]) < int(self.settings["forward_min_active_blocks"]):
+            return None
+        return float(row["mean_log_growth"])
+
+    def forward_scores(self) -> dict[str, float]:
+        """`forward_score` for every candidate with one, in one query."""
+        floor = int(self.settings["forward_min_active_blocks"])
+        rows = self._q("SELECT f.candidate, f.ok, f.active_blocks, f.mean_log_growth FROM forward f"
+                       " JOIN (SELECT candidate, MAX(at) AS at FROM forward GROUP BY candidate) m ON m.candidate = f.candidate AND m.at = f.at")
+        return {r["candidate"]: float(r["mean_log_growth"]) for r in rows
+                if r["ok"] and r["mean_log_growth"] is not None and int(r["active_blocks"]) >= floor}
+
+    def lineage_forward(self, lineage: str) -> dict[str, Any]:
+        """A lineage's pooled forward record: the latest window of each of its candidates.
+        `positive` is None until the pool has `forward_min_active_blocks` active blocks."""
+        rows = self._q("SELECT f.blocks, f.active_blocks, f.log_growth FROM forward f"
+                       " JOIN (SELECT candidate, MAX(at) AS at FROM forward GROUP BY candidate) m ON m.candidate = f.candidate AND m.at = f.at"
+                       " JOIN candidates c ON c.id = f.candidate WHERE c.lineage=? AND f.ok=1", (lineage,))
+        active = sum(int(r["active_blocks"]) for r in rows)
+        growth = math.fsum(float(r["log_growth"] or 0.0) for r in rows)
+        return {"candidates": len(rows), "blocks": sum(int(r["blocks"]) for r in rows), "active_blocks": active,
+                "log_growth": round(growth, 12),
+                "positive": None if active < int(self.settings["forward_min_active_blocks"]) else growth > 0}
+
+    def forward_stats(self) -> dict[str, Any]:
+        """The forward windows' line in `lab.stats` and health.json: the last run, how many
+        candidates carry a record, how many rank (and win), and the priors in force."""
+        at = self._meta("forward_at")
+        records = int(self._q("SELECT COUNT(DISTINCT candidate) AS n FROM forward")[0]["n"])
+        scores = self.forward_scores()
+        return {"last_run_at": _iso(float(at)) if at else None, "last_run": self._forward_last, "records": records,
+                "ranked": len(scores), "positive": sum(1 for s in scores.values() if s > 0),
+                "priors": {"active": sorted({str(p.get("title")) for p in self.priors()}), "skipped": dict(self._prior_skips)}}
+
+    # ---------------------------------------------------------------- priors
+    def priors(self) -> list[dict[str, Any]]:
+        """The lab priors in force (S2, Sept 23, 2026): every ```lab-prior``` block in the latest
+        text of each lesson in the ledger's playbook (`playbook.entry`, which `House.learn` writes
+        from `league/playbook/*.md`, once per lesson and again when its text changes), each with the
+        lesson's title. Read at most every ten minutes."""
+        now = self._now()
+        if self._priors is not None and now - self._priors[0] < 600:
+            return self._priors[1]
+        latest: dict[str, str] = {}
+        for entry in self.house.ledger.iter(kinds="playbook.entry"):
+            latest[str(entry.payload.get("title"))] = str(entry.payload.get("text") or "")
+        out = []
+        for title, text in latest.items():
+            out.extend({**prior, "title": title} for prior in parse_priors(text))
+        self._priors = (now, out)
+        return out
+
+    def _family_of(self, lineage: str) -> str:
+        """The House family the lab lineage grew from ('' for a Sol leap)."""
+        registry = self.house.registry
+        for ident in self._origin(lineage):
+            agent = registry.get(ident)
+            if agent is not None:
+                return str(agent.family or "")
+        return ""
+
+    def _prior_matches(self, prior: Mapping[str, Any], row: Mapping[str, Any]) -> bool:
+        if prior.get("lineage") and prior["lineage"] != row["lineage"]:
+            return False
+        if prior.get("niche") and prior["niche"] != row["niche"]:
+            return False
+        if prior.get("cell") and not str(row["cell"] or "").startswith(str(prior["cell"])):
+            return False
+        if prior.get("family") and str(prior["family"]).lower() not in self._family_of(row["lineage"]).lower():
+            return False
+        return True
+
+    def _prior_lifted(self, prior: Mapping[str, Any], lineage: str) -> bool:
+        until = str(prior.get("until") or "")
+        if until == "forward-positive":
+            return self.lineage_forward(lineage)["positive"] is True
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", until):
+            return _iso(self._now())[:10] >= until
+        return False
+
+    def paused(self, row: Mapping[str, Any]) -> str | None:
+        """Why no parameter mutant of this elite is bred now: the title of the lesson whose
+        `pause-param-forks` prior names its lineage (by family, lineage, desk or cell) and has not
+        been lifted (`until`), or None."""
+        for prior in self.priors():
+            if prior.get("rule") != "pause-param-forks":
+                continue
+            if self._prior_matches(prior, row) and not self._prior_lifted(prior, row["lineage"]):
+                return str(prior.get("title"))
+        return None
 
     # ------------------------------------------------------------- researchers
     def _brief(self, row: Mapping[str, Any]) -> dict[str, Any]:
@@ -1763,6 +2357,8 @@ class Lab:
         origin = {r["origin"]: r["n"] for r in self._q("SELECT origin, COUNT(*) AS n FROM candidates WHERE created>=? GROUP BY origin", (since,))}
         coverage = {r["niche"]: r["n"] for r in self._q("SELECT niche, COUNT(*) AS n FROM archive GROUP BY niche")}
         evaluated = int(batch["n"] or 0)
+        waiting = self.waiting()
+        closed = self._meta("closed_since")
         return {
             "window_seconds": window, "batches": int(batch["b"] or 0), "evaluated": evaluated,
             "per_hour": round(evaluated * 3600.0 / window, 1),
@@ -1778,6 +2374,13 @@ class Lab:
                                               "royalty_balance_usd": format(self.royalty_balance(), "f")},
             "born_total": int(self._q("SELECT COUNT(*) AS n FROM graduations WHERE state='born'")[0]["n"]),
             "refusal": self.refusal or None,
+            # Sept 23, 2026: the paid phases skipped and why (C2), since when the lab has been closed,
+            # and the graduates waiting for seats (the two invariants), as `health()` shows them.
+            "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
+            "closed_since": _iso(float(closed)) if closed is not None else None,
+            "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0},
+            # S2 (Sept 23, 2026): the forward windows' last run and records, and the priors in force.
+            "forward": self.forward_stats(),
         }
 
     def publish(self, *, force: bool = False) -> dict[str, Any] | None:

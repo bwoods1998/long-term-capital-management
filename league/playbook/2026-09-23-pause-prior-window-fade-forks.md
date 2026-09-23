@@ -31,3 +31,11 @@ This is not a verdict against the entire niche: spot-impulse-lag has +0.004669 o
 ## How to judge the next attempt
 
 Require distinct forward completed exposures, with after-fee results and unresolved positions reported separately. Follow the House's applicable gates; its completed-exposure path requires at least ten episodes. Shared contracts across siblings are not independent confirmations. Another development pass, a renamed child, or zero-growth blocks do not resolve this failure.
+
+## Lab prior
+
+The Alpha Lab reads this block (`league/lab.py` `priors`, Sept 23, 2026): no parameter-only fork of a lineage grown from this family until the lineage's own forward window is positive. Luna's and Sol's rewrites, which change the mechanism, still come.
+
+```lab-prior
+{"rule": "pause-param-forks", "family": "prior-window-fade", "until": "forward-positive"}
+```

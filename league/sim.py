@@ -428,9 +428,11 @@ class SimBroker:
             raise RejectedOrder(f"instrument venue {instrument.venue!r} is not {self.venue!r}")
         if instrument.asset_class not in ASSET_CLASSES:
             raise RejectedOrder(f"{self.venue} (simulated) trades equities and crypto, not {instrument.asset_class}")
-        whole = intent.quantity == intent.quantity.to_integral_value()
-        if instrument.asset_class == "equity" and intent.order_type == "limit" and not whole:
-            raise RejectedOrder("fractional shares are for market orders; a limit order is whole shares")
+        # Sept 23, 2026 (A7): a fractional equity limit order is taken, as Alpaca takes it, as a `day`
+        # order; any other time in force on a fractional share order is refused, as the venue would.
+        fractional = intent.quantity != intent.quantity.to_integral_value()
+        if instrument.asset_class == "equity" and fractional and str(intent.time_in_force) != "day":
+            raise RejectedOrder(f"a fractional share order must be a day order, not {intent.time_in_force} (the venue takes no other)")
         if intent.quantity != intent.quantity.quantize(QTY_PLACES):
             raise RejectedOrder("a quantity has at most nine decimals")
 
