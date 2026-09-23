@@ -215,7 +215,23 @@ CONSTITUTION: dict[str, Any] = {
     # had never traded, 93 agents on paper.
     "allocator": {
         "enabled": True,
-        "evidence": {"paper_weight": 0.5, "alpaca_paper_haircut_bps": 10},
+        # A8, the learn-and-unblock run (Sept 23, 2026 ~22:00 UTC; the table's row: "per asset class,
+        # each from at least 30 measured fills of that class, never below 2 bps a side"): the Alpaca
+        # practice haircut is charged by each fill's asset class, at the optimism measured on that
+        # class's own practice fills against the order's reference at intent time (the touch for a
+        # market order, the limit for a limit order), because real Alpaca fills are too few to be the
+        # benchmark (2 crypto at 0.0 bps, 0 equity, 0 option). Measured on the 21:36Z snapshot, fills
+        # since Sept 21 (docs/research/queries/2026-09-23/A8-haircut.py and .out), + adverse, - better:
+        #   crypto 368 fills, $12,148: notional-weighted mean -3.13 bps (buys -0.01, sells -6.63);
+        #   equity 136 fills, $4,005: -0.21 (buys -0.17, sells -0.26), at the touch;
+        #   option  46 fills, $982: -21.15 (buys -15.10, sells -32.84; a few limits filled far through).
+        # Each class is charged the larger of the aggregate and the round-trip reading (half of the
+        # buys' plus the sells' optimism: both fills of a position overstate it), rounded up to a
+        # whole bp, never below 2: crypto 3.32 -> 4, equity 0.22 -> 2, option 23.97 -> 24. Options are
+        # TIGHTENED from 10 (evidence honesty cuts both ways); crypto and stocks are loosened to what
+        # was measured, since 10 a side was 3x crypto's optimism and 50x the stocks'. A plain number
+        # still charges every class (the rollback form), and a class not named pays the largest rate.
+        "evidence": {"paper_weight": 0.5, "alpaca_paper_haircut_bps": {"crypto": 4, "equity": 2, "option": 24}},
         # 1.01, not the plan's 1.03 (its bounds are 1.0-1.25): measured on the floor at 06:45 UTC,
         # paper agents size a few percent of their $200 purse, so no paper agent without real money
         # had E >= 1.03 (paper +6.1%) and the bunt -- a cheap real test by design -- would have seated
@@ -341,4 +357,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '52c6c7e547fbaee0cbb701521bd860b604c7e62686c88b23911cc2e475195292'
+PINNED_DIGEST = '34adf385c77230c0ceafbac328d576ef80620aafd37c26b7f656fefcb1bd7c20'

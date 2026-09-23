@@ -41,10 +41,13 @@ from __future__ import annotations
 import copy
 import dataclasses
 import hashlib
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -483,6 +486,14 @@ class Book:
         self.seen_intents: set[str] = set()
         self.marks: dict[str, Decimal] = {}  # instrument key -> last liquidation mark
         self.day_open: dict[str, tuple[str, Decimal]] = {}  # agent -> (day, equity at its start)
+        #: agent -> (day, equity when the opening was taken, the ledger's head then): what is persisted
+        #: (`_day_open_path`) so a restart does not forget the day's loss; `day_open` is this plus the
+        #: day's stakes since.
+        self._day_open_taken: dict[str, tuple[str, Decimal, int]] = {}
+        self._day_open_dirty = False
+        #: Agents whose opening was restored from the file and whose holdings are not yet marked in this
+        #: process (`_day_pnl` quotes them once before comparing; review of #211, Sept 23, 2026).
+        self._day_open_unmarked: set[str] = set()
         self.orders_today: dict[tuple[str, str], int] = {}
         # Ledger replay is not a fresh venue check. A restart must not clear a mismatch
         # and permit an entry before the first reconciliation of this process.
@@ -520,6 +531,7 @@ class Book:
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
+        self._restore_day_open()  # after the fold, which adjusts no opening: none exists yet
         self._finish_crosses()
 
     # ----------------------------------------------------------------- folding
@@ -1019,14 +1031,92 @@ class Book:
             expires_at=intent.expires_at,
         )
 
-    def _day_pnl(self, agent: str, now: str) -> Decimal:
-        day = now[:10]
-        equity = self.equity(agent)
-        opened = self.day_open.get(agent)
-        if opened is None or opened[0] != day:
-            self.day_open[agent] = (day, equity)
-            return ZERO
-        return equity - opened[1]
+    def _day_pnl(self, agent: str, now: str, *, save: bool = True) -> Decimal:
+        with self._lock:
+            day = now[:10]
+            if agent in self._day_open_unmarked:
+                # A restored opening was taken at liquidation marks, but marks live in memory only and
+                # the startup reconcile quotes only a position that differs from the venue: until the
+                # first mark pass (up to `mark_every_seconds` after a restart) a holding would be valued
+                # at cost against it, so a winner read as the day's loss (a false halt) and a loser's
+                # loss, or just the spread, was hidden (review of #211, Sept 23, 2026). Quote each
+                # unmarked holding once, as the mark pass would, before comparing.
+                self._day_open_unmarked.discard(agent)
+                for key, holding in list(self._account(agent).holdings.items()):
+                    if key not in self.marks:
+                        self._quote(holding.instrument)
+            equity = self.equity(agent)
+            opened = self.day_open.get(agent)
+            if opened is None or opened[0] != day:
+                self.day_open[agent] = (day, equity)
+                # The ledger's head as the opening is taken: every stake after it adjusts the opening
+                # (`_apply`), and a restart replays exactly those (`_restore_day_open`).
+                self._day_open_taken[agent] = (day, equity, self.ledger.head()[0])
+                self._day_open_dirty = True
+                if save:
+                    self._save_day_open()
+                return ZERO
+            return equity - opened[1]
+
+    # ------------------------------------------------------- the day's opening, across a restart
+    # Sept 23, 2026 (the #198 review; pre-existing): each account's start-of-day equity lived in memory
+    # only, so a House restart mid-day forgot the day's loss, and both the per-desk daily-loss rule and
+    # the real book's halt began again from the restart's equity: a real account down 6% of the halt's
+    # basis was given the whole 8% again. No ledger row holds the opening (the first check of the day
+    # takes it; `book.mark` rows are the mark pass's, at other moments), and a new ledger kind is
+    # `league/ledger.py`'s, so the opening is kept in a small JSON per book beside the ledger (the
+    # House's root): the equity when it was taken and the ledger's head then. It is written when an
+    # opening is taken, never when a stake adjusts one: at construction, after the fold, every
+    # `book.stake` row of this book for that agent after that head and on that day is replayed exactly
+    # as `_apply` adjusted the opening live, so a crash between a stake and a write can neither lose
+    # nor repeat the adjustment. Another day's openings are dropped; an unreadable file is the old
+    # behaviour (a fresh opening at the next check), never a crash.
+    def _day_open_path(self) -> Path | None:
+        path = getattr(self.ledger, "path", None)
+        return Path(path).parent / f"day_open.{self.name}.json" if path else None
+
+    def _save_day_open(self) -> None:
+        """Write the newest day's openings, when one was taken since the last write."""
+        with self._lock:
+            if not self._day_open_dirty:
+                return
+            path = self._day_open_path()
+            day = max((taken[0] for taken in self._day_open_taken.values()), default=None)
+            if path is None or day is None:
+                self._day_open_dirty = False
+                return
+            self._day_open_taken = {a: taken for a, taken in self._day_open_taken.items() if taken[0] == day}
+            rows = {a: {"equity": text(equity), "seq": seq} for a, (_, equity, seq) in sorted(self._day_open_taken.items())}
+            tmp = path.with_name(path.name + ".tmp")
+            try:
+                tmp.write_text(json.dumps({"book": self.name, "day": day, "open": rows}, sort_keys=True))
+                os.replace(tmp, path)
+            except OSError:
+                return  # still dirty: the next opening taken writes again
+            self._day_open_dirty = False
+
+    def _restore_day_open(self) -> None:
+        """Today's openings from `_day_open_path`, each with the day's stakes since it was taken."""
+        path = self._day_open_path()
+        if path is None or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text())
+            day = str(data["day"])
+            taken = {str(a): (money(row["equity"]), int(row["seq"])) for a, row in dict(data["open"]).items()}
+        except (OSError, ValueError, TypeError, KeyError, ArithmeticError):
+            return
+        if data.get("book") != self.name or day != now_iso(self.clock)[:10] or not taken:
+            return
+        opened = {a: equity for a, (equity, _) in taken.items()}
+        for entry in self.ledger.iter(kinds="book.stake", after=min(seq for _, seq in taken.values())):
+            if entry.agent in taken and entry.payload.get("book") == self.name and entry.seq > taken[entry.agent][1] \
+                    and entry.at[:10] == day:
+                opened[entry.agent] += money(entry.payload["usd"])
+        for agent, (equity, seq) in taken.items():
+            self._day_open_taken[agent] = (day, equity, seq)
+            self.day_open[agent] = (day, opened[agent])
+            self._day_open_unmarked.add(agent)
 
     def check(self, intent: Intent, quote: Quote | None, now: str, *, pending: Sequence[tuple[Intent, Quote]] = ()) -> list[str]:
         """Every reason this intent may not trade. Empty means it may."""
@@ -1057,7 +1147,8 @@ class Book:
         capabilities = set(self.broker.capabilities()) - {"short"}  # the live account cannot short
         equity = self.equity(intent.agent)
         floor_equity = self.total_equity()
-        floor_daily_pnl = sum((self._day_pnl(a, now) for a in list(self.accounts)), ZERO)
+        floor_daily_pnl = sum((self._day_pnl(a, now, save=False) for a in list(self.accounts)), ZERO)
+        self._save_day_open()  # one write for every opening just taken, not one an account
         event_floor_capital = self.event_floor_capital()
         halt_basis = self.halt_basis()
         if halt_basis is not None:
