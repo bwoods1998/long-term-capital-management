@@ -641,6 +641,54 @@ session, Z alive but no wake). Hours by class, of 48:
   wall off exits (64 + 2); capacity for the winners.
 - Requests: see blocker 10.
 
+## 3a. Refresh at 21:36Z: what the first four hours after Deploy A showed
+
+A second snapshot (21:36Z; `queries/2026-09-23/R-1.py` and its output) and the box's live health,
+read after Deploy A (17:34Z: the daily-loss keys, bunts that keep what they make, $30 Kalshi bunts,
+swing line 1.25, `kappa` 2, the shard funder, the lab off the OpenAI tier).
+
+- **Winners compound now.** mullins-2 was lent $24.75 at the first pass (17:36Z) toward $34.84 and
+  holds $29.86 of a $35.64 target at W_real 1.188, E 1.208, 10 real trades: 0.04 below the 1.25
+  swing line, which two or three more winning favourites reach.
+- **Blocker 1 is confirmed at $30.** Three agents reached real money in four hours (18:49Z,
+  20:07Z, 21:02Z, all $30 Kalshi bunts); the first was the lab's first graduate, huang-l23cdb7. It
+  won $6.64, lost $7.32 and kept entering (the book's 10% daily rule no longer freezes a bunt), then
+  hysteresis demoted it at E 0.735 and its last position settled at −$7.84: positions of 24-26% of
+  the stake, over the 15% line the rules now name. Inside this run's table nothing more can be
+  done; the owner decision stands (hysteresis only after settlements, or a 15% event-book
+  position share).
+- **The practice floor turned positive:** kalshi-shadow +$99.76 since 16:28Z (sports +$74.01 on 18
+  evening settlements, strikes +$26.75, 15-minute crypto −$4.45) and alpaca-paper +$12.05. Five
+  hours is not a regime; it is the first positive window in the study's data.
+- **Real money since Deploy A:** Kalshi 9 fills ($59.59 notional), 5 settlements, −$7.35 realized
+  (the lab graduate's two losses against mullins-2's and huang-h51fdd3-2's wins). Alpaca: still no
+  agent at the bunt line (the best Alpaca record is E 1.0097 on one trade).
+- **The stock session after the deploy** (17:34-20:00Z): the ETF desk woke 336 times, wrote 38
+  intents and filled 18; megacaps 216 wakes and 19 intents; after the close 20 of the agents' own
+  market orders were refused. No agent sent an equity limit order, so the fractional limit path
+  (A7) has no live instance yet.
+- **The lab does not bind on throughput, it binds on seats.** 673 candidates were evaluated since
+  16:28Z (67-183 an hour; the deploy's restart emptied the tape cache), 124 Luna children in all by
+  21:36Z, graduations 6 born, 28 passed and waiting, 27 rationed, 13 failed the House replay.
+  Building tapes on the lab box (the plan's S4) would add candidates nobody can seat; the seat
+  market (Deploy B) is the unblock.
+- **Compute:** the OpenAI House line fell under the $20 reserve at about 20:50Z; the tier is
+  "earned" and the lab kept evaluating with its Luna calls skipped on the record. Sail $80.15 at
+  21:14Z.
+- **Correction to blocker 8's evidence:** the Sept 22 "8.4 dark hours" were a pause file left
+  through a restart followed by a slow wake drain (5 of 12 desks in the first 17 minutes), not a
+  defect in the pause itself; the "dead agents waking" (607 refusals) and the options desk's
+  "market orders" (125) were the House's own wind-downs, fixed on Sept 22. The ledger showed it
+  (PR #203's diagnosis).
+- **A measurement the plan's A8 row asks for.** The practice haircut per asset class can be set
+  from measured fills: the practice fills measured against the quote at intent time number 320
+  crypto (2-5 bps better than the touch), 82 equity (at the touch, −0.2 bps) and 42 option
+  (median 0, mean −29 bps: a few fills far through the limit) (`B-8.py`; re-measured on the 21:36Z
+  snapshot in `A8-haircut.py`). The study's first reading required 30 real fills per class; the
+  proposal behind A8 measured practice fills at the quote, and real Alpaca fills (2 crypto, 0
+  equity) cannot be the benchmark. Deploy C sets each class to its measured optimism, never below
+  2 bps: equity 2, crypto 5, options 30 (tightened).
+
 ## 4. What the study could not answer
 
 - **Does E at promotion predict real results?** n = 10 promotions, 6 with a settled real trade. Thirty
