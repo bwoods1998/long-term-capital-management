@@ -3446,6 +3446,8 @@ class House:
         return {
             'rung': rung, 'credits_usd': format(self.economy.balance(agent.id), 'f'),
             'blocks': len(self.evaluator.blocks(agent.id)),
+            # How far its own evidence is from real money, as the allocator measured it (read only).
+            'bunt_line': self.bunt_line(agent),
             'last_trial': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.trial', agent=agent.id)))), None),
             'last_look': next((e.payload for e in reversed(list(self.ledger.iter(kinds='eval.verdict', agent=agent.id))) if e.payload.get('decision') in ('look', 'episode-look')), None),
             'can_fork': self.economy.can_fork(agent.id), 'recent_trades': self._recent_trades(agent.id),
@@ -3823,7 +3825,55 @@ class House:
         return {'rung': row.rung, 'active_blocks': row.active_blocks,
                 'mean_growth': row.mean_growth, 'niche': agent.niche,
                 'earned_observations': row.score_observations, 'earned_growth': row.score_growth,
-                'earned_rung': row.score_rung}
+                'earned_rung': row.score_rung, 'bunt_line': self.bunt_line(agent)}
+
+    def bunt_line(self, agent: Agent) -> dict[str, Any] | None:
+        """How far this agent's own evidence is from real money: its E, W_paper and closed trades as
+        the allocator measured them at its last pass, against the constitution's bunt line. Read
+        only -- nothing here moves a band, and the line is the constitution's, quoted, never set.
+        None while the allocator is off.
+
+        Sept 23, 2026: the best stock agent (scholes-21) was at E 0.9987 on 4 closed trades, $4.53
+        short, and no stock or options agent could see that. rules.py states the line; this is the
+        agent's own position against it."""
+        if not allocator_module.enabled():
+            return None
+        r = allocator_module.rules()
+        at, trades_needed = float(r["bunt_at"]), int(r["bunt_min_trades"])
+        settled_needed = int(r.get("bunt_min_settled") or 0)
+        weight = float((r.get("evidence") or {}).get("paper_weight", 0.5))
+        board = self.allocator.board()
+        row = (board.get("agents") or {}).get(agent.id) or {}
+        ev = row.get("evidence")
+        out: dict[str, Any] = {"band": row.get("band"), "bunt_at": at, "bunt_min_trades": trades_needed,
+                               **({"bunt_min_settled": settled_needed} if agent.venue == "kalshi" else {})}
+        if not ev:
+            return {**out, "measured": False,
+                    "note": "The allocator reads evidence from rung 1 (paper) on, at every mark pass; there is none for you yet."}
+        e, w_paper, w_real = float(ev["E"]), float(ev["W_paper"]), float(ev["W_real"])
+        trades, settled = int(ev.get("trades") or 0), int(ev.get("settled") or 0)
+        short = max(0, trades_needed - trades)
+        if agent.venue == "kalshi" and settled_needed:
+            short = min(short, max(0, settled_needed - settled))
+        # E = W_paper ** weight x W_real, so with the real record as it stands the line is this W_paper.
+        needed = (at / w_real) ** (1.0 / weight) if weight > 0 and w_real > 0 else math.inf
+        gain = max(0.0, needed / w_paper - 1.0) if w_paper > 0 else math.inf
+        paper = self.books.get(PRACTICE_BOOK[agent.venue])
+        equity = float(paper.equity(agent.id)) if paper is not None and agent.id in paper.accounts else None
+        out.update(measured=True, measured_at=board.get("at"), E=e, W_paper=w_paper, W_real=w_real,
+                   closed_trades=trades, **({"settled": settled} if agent.venue == "kalshi" else {}),
+                   e_short=round(max(0.0, at - e), 6), trades_short=short,
+                   w_paper_needed=round(needed, 6) if math.isfinite(needed) else None,
+                   paper_gain_needed_pct=round(100 * gain, 4) if math.isfinite(gain) else None,
+                   paper_gain_needed_usd=(round(gain * equity, 2) if equity is not None and math.isfinite(gain) else None),
+                   at_the_line=bool(e >= at and short == 0),
+                   note=("W_paper is after the practice haircut, and more trading pays more of it; the dollars are "
+                         "the gain on your paper equity now that would put E on the line. Crossing it is judged by "
+                         "the allocator at its next pass, as for everyone; nothing here changes the line."))
+        if row.get("band") in ("bunt", "swing", "star"):
+            # Already on real money: the line it now has to hold is the bunt line with hysteresis.
+            out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6))
+        return out
 
     def standings(self) -> list[Standing]:
         """Every living agent's standing. Inside a tick, on the tick's own thread, the table is built
