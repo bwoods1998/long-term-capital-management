@@ -407,3 +407,25 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   - **New defect seen:** the daily backup of the House box failed three times ("sailbox api 503:
     prepare checkpoint"). Sail's API refused the checkpoint; the next check is whether a later
     attempt succeeds.
+- 21:36Z — **the refresh snapshot** (`ledger.sqlite` to 21:36:30Z, `lab.sqlite`), taken with
+  sqlite's backup API and downloaded; the box's temporary copies were removed. The study's refresh
+  section 3a is written from it (`queries/2026-09-23/R-1.py`). The Sail-side backup errors
+  resolved themselves: the House retried, and the 21:28Z attempt finished at 21:32Z with no alert.
+- 21:36Z — **Wave 2 launched, trimmed to what the Done list needs** (the usage-limit gap cost 3.7
+  hours): W2-money (the run's second and last digest change: A8, the practice haircut per asset
+  class from measured fills; a bunt lent less than today's base is lent up to it, never refilling
+  losses, because meriwether-h2d625d sat at $10 against a $30 target at W_real 0.9978; the day's
+  opening equity survives a restart). W2-house (the wake skip and the agents' pause and size-down
+  tools) is not built in this run: its brief is kept for the next build.
+- 21:45Z — **the adversarial review of #203 (order path)** finished on `w1-bugs/review`
+  (`ca05a98`): one major confirmed and fixed (a buy closed as never-arrived freed its reserved cash
+  while the book still asked the venue, so a second buy could pass and a revived fill leave the
+  agent 96% invested against the 50% cap: the buy's cash now stays reserved for the recheck
+  window, and a dead agent's sweep takes free cash only). Two of its follow-ups were applied at
+  once on `w1-bugs/followups` (`5a02e8e`), because both bear on Deploy C itself: the wake stamps
+  are written under the state lock (a new key added while `_save_state` serializes could raise
+  "dictionary changed size during iteration"), and a real book whose only problem is an order
+  whose outcome is still unknown raises a warning, not an error (an error inside a deploy's
+  watch rolls a good release back). Left as recorded follow-ups: re-reading settlements after a
+  revived fill on a settled market (rare; pre-PR it froze too), re-snapping a re-priced post-only
+  order to a coarser price band (the venue rejects it as before), and a docstring.
