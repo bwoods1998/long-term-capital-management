@@ -173,4 +173,22 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 - 10:46Z — the lab started: 212 seeds queued. The first batch (10:51Z) evaluated 2 candidates at
   0.33 per box-second. Early batches are tape-bound: each seed carries its own NEEDS, so its own
   tape, and the lab builds 4 tapes a step on the House box and keeps 6.
+- 10:53:26Z — Deploy 3's watchdog watch passed (exit 0). The in-box updater later picked up
+  Merton's #172 (a new strategy file).
+- 10:55-11:10Z — **Diagnosing slow ticks and a slow lab on the live floor** (py-spy on the House):
+  - Ticks went 70 → 88 → 109 → 191 s. About 80% of the tick thread was in `House.standings()`:
+    displacement, the refill and the foundry each re-ranked all 96 agents with several ledger
+    scans apiece. That is not the lab. **PR #173:** one standings table per tick.
+  - The lab evaluated 21 candidates in 11 minutes, 1-6 a batch. 191 seeds were queued, each on its
+    own tape (4 tapes are built a step), and the step bred only when fewer than a batch were queued
+    at all, so the elites whose tapes were built got no children. **Same PR:** the lab breeds while
+    fewer than a batch wait on built tapes, with 48 parameter children a breed (was 16).
+  - **The best paper agent was blocked by an audit veto over a label.** huang-h6d3302 (E 1.037,
+    W_paper 1.075, 13 settlements; above the 1.01 bunt line) had a stale "barren" pre-audit flag,
+    so it was audited before its bunt. At 09:32Z the auditor vetoed it for "unexplained zero-fee
+    taker executions". Five of its 14 fills were resting Kalshi limit orders that filled later and
+    paid the maker's fee ($0), but `Book._liquidity` labels every non-post-only limit as a taker.
+    The money was right and the label was wrong. **PR #174** fixes the label (with a test that
+    fails without the fix). The veto's cooldown (about 22 h) stands: it was a real audit and is
+    not overridden.
 
