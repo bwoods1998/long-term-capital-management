@@ -198,9 +198,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .options_history import OptionsHistory, gateway_get
         house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(paper), ledger=house.ledger, clock=house.clock)
     if config.get("feeds", True) and not canary:
-        # Live sports scoreboards and perpetual funding / open interest (league/feeds.py): public,
-        # keyless hosts already on the House box's allowlist, recorded with their receive times on a
-        # lane of their own. Agents ask for them in NEEDS["feeds"]; replay uses them once recorded.
+        # Live sports scoreboards and perpetual funding / open interest, and Deribit's DVOL and OKX's
+        # settled funding as backfilled point-in-time history (league/feeds.py): public, keyless hosts
+        # already on the House box's allowlist, recorded on a lane of their own. Agents ask for them
+        # in NEEDS["feeds"]; replay uses the live ones once recorded, the backfilled ones at once.
         from .feeds import FeedRecorder
         house.feeds = FeedRecorder(house, root / "feeds.sqlite")
     # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned

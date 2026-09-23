@@ -627,6 +627,13 @@ dynamism revisions followed that evening:
   gate's blocks; until then the replay is refused as unsupported input and not counted as a trial.
   Nothing is backfilled, so the first hourly strategies can qualify about a day after the recorder
   starts, and daily ones after about three weeks.
+- **Point-in-time crypto history** (`league/feeds.py`, Sept 23, 2026): two more feeds for the 24/7
+  crypto desks. `vol` is Deribit's DVOL (implied vol, BTC and ETH) as hourly candles stamped at
+  their close; `funding` is OKX's settled funding per coin, stamped at settlement, with 24-hour and
+  7-day averages and a 30-day z-score from rates settled at or before it. Both are backfilled from
+  the venues' own history over the replay window (60 days, and the lookback of their derived
+  fields), paced and resumable on the feeds lane, with each row's stamp and source recorded, so a
+  strategy that declares them is replayed at once rather than after a day of recording.
 - **Order-path guards in the House**, built beside this revision: a buy asked under Alpaca's $10
   crypto minimum is refused as a House refusal the strategy can read, one floored just under it is
   raised a step, limit prices are put on the venue's grid (a coin's only when the venue states its

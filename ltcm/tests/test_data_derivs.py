@@ -97,6 +97,46 @@ class DvolTests(DerivativesCase):
             self.derivs(self.transport({DVOL: {"jsonrpc": "2.0", "error": {"code": 1}}})).dvol("BTC")
 
 
+class HistoryTests(DerivativesCase):
+    """The paginated history league/feeds.py backfills from (Sept 23, 2026): unlike the snapshot
+    helpers, these raise when the venue fails, so a failed poll is never read as an empty one."""
+
+    def test_dvol_candles_are_a_range_oldest_first_with_the_continuation(self):
+        answer = {"jsonrpc": "2.0", "result": {"data": [[1789704000000, 34.26, 34.38, 34.19, 34.37], [1789700400000, 33.81, 34.32, 33.77, 34.26],
+                                                        [1789707600000, 34.37, 34.38, 34.16, "bad"], [0, 1, 1, 1, 1]],
+                                               "continuation": 1789700399999}}
+        transport = self.transport({DVOL: answer})
+        rows, more = self.derivs(transport).dvol_candles("btc", 1789600000000, 1789704000000)
+        self.assertEqual(rows, [{"t_ms": 1789700400000, "open": 33.81, "high": 34.32, "low": 33.77, "close": 34.26},
+                                {"t_ms": 1789704000000, "open": 34.26, "high": 34.38, "low": 34.19, "close": 34.37}])
+        self.assertEqual(more, 1789700399999)
+        self.assertEqual(transport.last["query"], {"currency": "BTC", "resolution": "3600", "start_timestamp": "1789600000000",
+                                                   "end_timestamp": "1789704000000"})
+        self.assertEqual(self.derivs().dvol_candles("BTC", 1, 2)[1], None)  # the whole range came back
+        with self.assertRaises(TransportError):
+            self.derivs(self.transport({DVOL: TransportError("dns")})).dvol_candles("BTC", 1, 2)
+        with self.assertRaises(DataError):
+            self.derivs(self.transport({DVOL: {"jsonrpc": "2.0", "error": {"code": 1}}})).dvol_candles("BTC", 1, 2)
+
+    def test_okx_settled_funding_pages_back_and_prefers_the_realized_rate(self):
+        answer = {"code": "0", "msg": "", "data": [
+            {"instId": "BTC-USDT-SWAP", "fundingRate": "0.0002", "realizedRate": "0.00019", "fundingTime": "1789689600000"},
+            {"instId": "BTC-USDT-SWAP", "fundingRate": "0.0001", "fundingTime": "1789660800000"},
+            {"instId": "BTC-USDT-SWAP", "fundingRate": "0.0001", "fundingTime": "x"}]}
+        transport = self.transport({OKX_HISTORY: answer})
+        rows = self.derivs(transport).okx_funding_settled("btc", after_ms=1789700000000, limit=500)
+        self.assertEqual(rows, [{"time_ms": 1789689600000, "rate": 0.00019, "funding_rate": 0.0002, "realized_rate": 0.00019},
+                                {"time_ms": 1789660800000, "rate": 0.0001, "funding_rate": 0.0001, "realized_rate": None}])
+        self.assertEqual(transport.last["query"], {"instId": "BTC-USDT-SWAP", "limit": "100", "after": "1789700000000"})
+        self.derivs(transport).okx_funding_settled("ETH")  # the newest page: no cursor
+        self.assertEqual(transport.last["query"], {"instId": "ETH-USDT-SWAP", "limit": "100"})
+        with self.assertRaises(DataError) as caught:
+            self.derivs(self.transport({OKX_HISTORY: {"code": "51001", "data": [], "msg": "Instrument ID does not exist"}})).okx_funding_settled("ZZZ")
+        self.assertIn("okx code 51001", str(caught.exception))
+        with self.assertRaises(TransportError):
+            self.derivs(self.transport({OKX_HISTORY: TransportError("refused")})).okx_funding_settled("BTC")
+
+
 class FundingTests(DerivativesCase):
     def test_funding_reads_all_three_venues(self):
         transport = self.transport()

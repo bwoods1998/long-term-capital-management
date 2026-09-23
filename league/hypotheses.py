@@ -136,6 +136,11 @@ REPLAY_VIEW = {
     "alpaca": "bars: closed bars, oldest first, up to NEEDS.bars.limit; quotes: {bid, ask} ONLY, derived from the bar with the "
               "tape's half-spread -- there is NO quote timestamp `t` in replay, so a staleness check must treat a missing `t` as fresh",
     "kalshi": "markets: the rows the contract lists, with hours_to_close; watched symbols arrive as observed.bars only",
+    # Sept 23, 2026: two point-in-time histories a replay can use at once (league/feeds.py).
+    "feeds": "only when NEEDS['feeds'] declares them: ctx['feeds'][feed][key], the latest row whose t is at or before the step. "
+             "vol (Deribit DVOL for BTC and ETH, hourly candles stamped at their close) and funding (OKX settled funding per "
+             "coin, stamped at settlement) are backfilled over the replay window, so they are replayable now; sports and perps "
+             "are recorded live only. A key may be absent: use it only when present",
     "absent_in_replay": ["quotes[...].t", "recent_order_outcomes", "event_risk"],
     "rule": "Code that REQUIRES a field replay does not supply never trades on replay and cannot pass. Use such fields only when present.",
 }
