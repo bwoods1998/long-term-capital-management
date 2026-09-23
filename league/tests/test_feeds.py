@@ -1,16 +1,23 @@
-"""Live feeds: ESPN scoreboards and perpetual funding, recorded with the House's receive time.
+"""Feeds: ESPN scoreboards and perpetual funding recorded with the House's receive time, and
+Deribit's DVOL and OKX's settled funding as backfilled point-in-time history.
 
 Sept 22, 2026: 43 agents had asked for live sports scores and 32 for perp funding or open
 interest, and nothing in the league supplied either. These tests hold the recorder to its three
 rules -- point in time, nothing fabricated, unchanged content stored once -- and the House to its
 hooks: `ctx["feeds"]` only when declared, a replay only once the feeds are recorded long enough
 (and no trial before), a lane of its own that runs while paused, and a block in health.json.
+
+Sept 23, 2026: every Alpaca crypto strategy failed replay after fees and the live feeds could not
+be replayed for a day. `vol` and `funding` are fetched as history, each row stamped when it became
+final: the tests below hold the backfill to that stamp, to resuming without fetching a page twice,
+to derived fields that read only the past, and a strategy that declares them to a replay at once.
 """
 
 import json
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +27,7 @@ from league.feeds import FeedRecorder, request_feed, requested
 from league.ledger import Ledger
 from league.replay import run_replay
 from league.tests.test_house import BUYER, HouseCase
+from ltcm.data.derivs import zscore
 from ltcm.tests import test_data_derivs as derivs
 from ltcm.tests.fakes import Clock, FakeTransport, TransportError
 from ltcm.tests.test_data_sports import EPL, EPL_JSON, HOST, NFL, SCOREBOARD_JSON
@@ -320,6 +328,395 @@ class Requests(StoreCase):
         self.assertIn("ctx['feeds']['sports']", answer["outcome"])
 
 
+# ------------------------------------------------------------------ the backfilled history feeds
+HOUR_MS = 3_600_000
+DVOL_URL = "https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=3600"
+FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate-history?instId=BTC-USDT-SWAP"
+
+
+def no_sleep(seconds):
+    return None
+
+
+def hours_of(query) -> set:
+    """The candle opens (ms) a DVOL request's range names."""
+    start, end = int(query["start_timestamp"]), int(query["end_timestamp"])
+    return set(range(-(-start // HOUR_MS) * HOUR_MS, end + 1, HOUR_MS))
+
+
+class Venues:
+    """A Deribit and an OKX that answer from a synthetic history the way their docs say they page:
+    Deribit the newest `cap` candles of the range asked (the one still open included) and a
+    continuation when it cut the range short; OKX the newest `limit` settlements before `after`.
+    Nothing before `since` exists, nothing after the clock, and OKX lists only `coins`."""
+
+    def __init__(self, clock, since="2026-06-01T00:00:00Z", *, cap=1000, coins=("BTC", "ETH", "SOL"), interval_hours=8):
+        self.clock, self.since_ms, self.cap, self.coins = clock, int(epoch(since) * 1000), cap, coins
+        self.interval_ms = interval_hours * HOUR_MS
+        self.served: list = []  # the candle opens each DVOL answer carried, in order
+
+    @staticmethod
+    def dvol(coin, open_ms):
+        """The close of the DVOL candle that opens at `open_ms`."""
+        return round((40.0 if coin == "BTC" else 60.0) + (open_ms // HOUR_MS % 97) * 0.13, 2)
+
+    @staticmethod
+    def rate(settled_ms):
+        """The rate settled at `settled_ms`: two periods in five sit at OKX's 0.01% floor."""
+        k = settled_ms // (8 * HOUR_MS) % 5
+        return 0.0001 if k < 2 else round(0.0001 + (k - 1) * 0.00003, 8)
+
+    def deribit(self, method, url, body):
+        query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+        coin, now_ms = query["currency"], int(self.clock() * 1000)
+        first = -(-max(int(query["start_timestamp"]), self.since_ms) // HOUR_MS) * HOUR_MS
+        opens = list(range(first, min(int(query["end_timestamp"]), now_ms) + 1, HOUR_MS))
+        more = None
+        if len(opens) > self.cap:
+            opens = opens[-self.cap:]
+            more = opens[0] - 1
+        self.served.append(opens)
+        data = [[t, self.dvol(coin, t - HOUR_MS), max(self.dvol(coin, t - HOUR_MS), self.dvol(coin, t)) + 0.2,
+                 min(self.dvol(coin, t - HOUR_MS), self.dvol(coin, t)) - 0.2, self.dvol(coin, t)] for t in opens]
+        return {"jsonrpc": "2.0", "result": {"data": data, "continuation": more}}
+
+    def okx(self, method, url, body):
+        query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+        coin = query["instId"].split("-")[0]
+        if coin not in self.coins:
+            return {"code": "51001", "data": [], "msg": "Instrument ID does not exist"}
+        top = int(self.clock() * 1000)
+        if "after" in query:
+            top = min(top, int(query["after"]) - 1)
+        at, data = top // self.interval_ms * self.interval_ms, []
+        while at >= self.since_ms and len(data) < min(int(query.get("limit") or 100), 100):
+            data.append({"instId": query["instId"], "fundingRate": str(self.rate(at)), "realizedRate": str(self.rate(at)),
+                         "fundingTime": str(at), "method": "current_period"})
+            at -= self.interval_ms
+        return {"code": "0", "data": data, "msg": ""}
+
+    def routes(self) -> dict:
+        return {derivs.DVOL: self.deribit, derivs.OKX_HISTORY: self.okx}
+
+    def transport(self) -> FakeTransport:
+        return FakeTransport(self.routes())
+
+
+class HistoryCase(StoreCase):
+    def setUp(self):
+        super().setUp()
+        self.clock.set("2026-09-22T12:34:56Z")
+        self.venues = Venues(self.clock)
+
+    def history(self, keys, transports=None, **kw):
+        kw.setdefault("sleep", no_sleep)
+        return self.recorder(keys, transports=transports if transports is not None else self.venues.transport(), **kw)
+
+    def stamps(self, store, feed, key="BTC") -> list:
+        return [at for (at,) in store.db.execute("SELECT received FROM snapshots WHERE feed = ? AND key = ? ORDER BY received", (feed, key))]
+
+
+class HistoryFeeds(HistoryCase):
+    def test_backfilled_rows_are_stamped_when_final_and_never_shown_before(self):
+        store = self.history({"vol": ["BTC"], "funding": ["BTC"]}, backfill_pages=50)
+        out = store.run()
+        self.assertEqual(out["failed"], [])
+        wanted = {"vol": ["BTC"], "funding": ["BTC"]}
+        now = store.latest(wanted, self.clock())
+        # At 12:34:56 the candle that opened at 12:00 is still open: the newest held closed at 12:00,
+        # and it is the candle that OPENED at 11:00. The newest settlement is 08:00's.
+        self.assertEqual((now["vol"]["BTC"]["t"], now["vol"]["BTC"]["close"], now["vol"]["BTC"]["hours"]),
+                         ("2026-09-22T12:00:00.000Z", Venues.dvol("BTC", int(epoch("2026-09-22T11:00:00Z") * 1000)), 1))
+        self.assertEqual((now["funding"]["BTC"]["t"], now["funding"]["BTC"]["rate"]),
+                         ("2026-09-22T08:00:00.000Z", Venues.rate(int(epoch("2026-09-22T08:00:00Z") * 1000))))
+        self.assertEqual(sorted(now["vol"]["BTC"]), ["change_24h", "close", "high", "hours", "low", "open", "t"])
+        self.assertEqual(sorted(now["funding"]["BTC"]), ["avg_24h", "avg_7d", "interval_hours", "rate", "t", "zscore_30d"])
+        self.assertLessEqual(max(self.stamps(store, "vol")), self.clock())  # a candle still open is never stored
+        # Never shown before it became final: a millisecond before a close, the candle before it.
+        self.assertEqual(store.latest(wanted, "2026-09-22T11:59:59.999Z")["vol"]["BTC"]["t"], "2026-09-22T11:00:00.000Z")
+        self.assertEqual(store.latest(wanted, "2026-09-22T07:59:59.999Z")["funding"]["BTC"]["t"], "2026-09-22T00:00:00.000Z")
+        # Every row is stamped at its close or its settlement, never with when it was fetched (kept as `started`).
+        rows = store.db.execute("SELECT received, started FROM snapshots").fetchall()
+        self.assertTrue(all(started >= received for received, started in rows))
+        vol, funding = self.stamps(store, "vol"), self.stamps(store, "funding")
+        self.assertTrue(all(at % 3600 == 0 for at in vol) and all(at % (8 * 3600) == 0 for at in funding))
+        self.assertEqual([b - a for a, b in zip(vol, vol[1:])], [3600.0] * (len(vol) - 1))  # no hole
+        # Two settlements at the same rate are two rows (the rate sits at OKX's floor for days), never one.
+        rates = [Venues.rate(int(at * 1000)) for at in funding]
+        self.assertTrue(any(a == b for a, b in zip(rates, rates[1:])))
+        self.assertEqual([b - a for a, b in zip(funding, funding[1:])], [8 * 3600.0] * (len(funding) - 1))
+        # The replay tape carries them by the same stamps, and a replay shows each from its t on.
+        code = '''
+from datetime import datetime
+
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "t", "symbols": ["BTC/USD"], "bars": {"timeframe": "5Min", "limit": 5},
+         "feeds": {"vol": ["BTC"], "funding": ["BTC"]}}
+PARAMS = {}
+
+def seconds(text):
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+
+def decide(ctx):
+    feeds = ctx.get("feeds") or {}
+    vol, funding = (feeds.get("vol") or {}).get("BTC"), (feeds.get("funding") or {}).get("BTC")
+    for row in (vol, funding):
+        if row is not None and seconds(row["t"]) > seconds(ctx["now"]):
+            raise ValueError("a row from the future")
+    seen = list((ctx.get("memory") or {}).get("seen") or [])
+    seen.append([ctx["now"], vol and vol["t"], funding and funding["t"]])
+    return {"intents": [], "memory": {"seen": seen}}
+'''
+        times = ["2026-09-21T23:59:59Z", "2026-09-22T00:00:00Z", "2026-09-22T00:30:00Z", "2026-09-22T07:59:59Z",
+                 "2026-09-22T08:00:00Z", "2026-09-22T12:34:56Z"]
+        tape = {"venue": "alpaca", "horizon": "hour", "step_seconds": 1,
+                "steps": [{"t": t, "bars": {"BTC/USD": {"o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 1.0}}} for t in times],
+                "feeds": store.series(wanted, "2026-09-21T22:00:00Z", self.clock(), 1)}
+        result = run_replay(code, {}, tape, stake=100.0, audit=True)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["final_memory"]["seen"], [
+            [times[0], "2026-09-21T23:00:00.000Z", "2026-09-21T16:00:00.000Z"],
+            [times[1], "2026-09-22T00:00:00.000Z", "2026-09-22T00:00:00.000Z"],
+            [times[2], "2026-09-22T00:00:00.000Z", "2026-09-22T00:00:00.000Z"],
+            [times[3], "2026-09-22T07:00:00.000Z", "2026-09-22T00:00:00.000Z"],
+            [times[4], "2026-09-22T08:00:00.000Z", "2026-09-22T08:00:00.000Z"],
+            [times[5], "2026-09-22T12:00:00.000Z", "2026-09-22T08:00:00.000Z"]])
+
+    def test_the_backfill_reaches_its_target_and_resumes_without_fetching_a_page_twice(self):
+        venues = Venues(self.clock, cap=100)  # Deribit's pages cut short: every range pages on a continuation
+        fake = venues.transport()
+        wanted = {"vol": ["BTC"], "funding": ["BTC"]}
+        store = self.history(wanted, transports=fake, backfill_pages=3)
+        store.run()  # the newest page of each, then three pages of backfill
+        first = store.coverage(wanted)
+        self.assertFalse(first["vol"]["BTC"]["backfill"]["complete"])
+        self.assertEqual(first["vol"]["BTC"]["backfill"]["pages"], 3)
+        held = min(self.stamps(store, "vol"))
+        asked = len(fake.calls)
+        store.close()
+        # A restart -- a new release builds a new recorder over the same store -- goes on from the
+        # oldest row held: its first backfill request asks for nothing at or after it.
+        again = self.history(wanted, transports=fake, backfill_pages=3)
+        self.assertEqual(again.coverage(wanted)["vol"]["BTC"]["backfill"]["pages"], 3)  # read back from `backfills`
+        again.run()
+        tail = [c["query"] for c in fake.calls[asked:] if "currency" in c["query"] and hours_of(c["query"]) and max(hours_of(c["query"])) < held * 1000]
+        self.assertTrue(tail)
+        self.assertLess(max(hours_of(tail[0])), held * 1000 - HOUR_MS)  # not even the oldest candle held (it opened an hour before)
+        for _ in range(40):
+            if not again._backfill_pending():
+                break
+            self.clock.advance(61)
+            again.run()
+        self.assertFalse(again._backfill_pending())
+        # Every candle older than the first page came back from the venue exactly once, restart or not.
+        first = min(venues.served[0])
+        older = [hour for page in venues.served for hour in page if hour < first]
+        self.assertGreater(len(older), 1000)
+        self.assertEqual(len(older), len(set(older)))
+        # OKX's pages go back by `after`, each from the oldest settlement held, never the same twice.
+        afters = [int(c["query"]["after"]) for c in fake.calls if "instId" in c["query"] and "after" in c["query"]]
+        self.assertGreaterEqual(len(afters), 2)
+        self.assertEqual(afters, sorted(set(afters), reverse=True))
+        # Both reached their targets -- 60 days and the lookback of their derived fields (a day, 30
+        # days) before the first pass -- with no hole, and say where they came from.
+        state = again.coverage(wanted)
+        began = epoch("2026-09-22T12:34:56Z")
+        for feed, step, days in (("vol", 3600.0, 61), ("funding", 8 * 3600.0, 90)):
+            row = state[feed]["BTC"]["backfill"]
+            stamps = self.stamps(again, feed)
+            self.assertTrue(row["complete"] and not row["exhausted"], row)
+            self.assertEqual((row["source"], row["rows"], row["since"], row["target"]),
+                             (DVOL_URL if feed == "vol" else FUNDING_URL, len(stamps), feeds.stamp(stamps[0]), feeds.stamp(began - days * 86400)))
+            self.assertTrue(0 <= stamps[0] - (began - days * 86400) < step)  # the first row at or after the target
+            self.assertEqual({b - a for a, b in zip(stamps, stamps[1:])}, {step})
+        self.assertEqual(again.db.execute("SELECT COUNT(*) FROM backfills WHERE done = 1").fetchone()[0], 2)
+
+    def test_a_venue_with_nothing_older_ends_the_backfill_there(self):
+        young = Venues(self.clock, since="2026-09-01T00:00:00Z")  # a coin listed three weeks ago
+        store = self.history({"vol": ["BTC"], "funding": ["BTC"]}, transports=young.transport(), backfill_pages=50)
+        store.run()
+        state = store.coverage({"vol": ["BTC"], "funding": ["BTC"]})
+        for feed in ("vol", "funding"):
+            self.assertTrue(state[feed]["BTC"]["backfill"]["complete"])
+            self.assertTrue(state[feed]["BTC"]["backfill"]["exhausted"])
+        self.assertEqual(state["vol"]["BTC"]["first_ok"], "2026-09-01T01:00:00.000Z")  # the first candle's close
+        self.assertEqual(state["funding"]["BTC"]["first_ok"], "2026-09-01T00:00:00.000Z")
+        self.assertFalse(store._backfill_pending())
+        calls = len(store._fetcher("vol").transport.calls)
+        self.clock.advance(120)
+        store.run()
+        self.assertEqual(len(store._fetcher("vol").transport.calls), calls)  # an exhausted venue is not asked again
+
+    def test_derived_fields_read_only_rows_at_or_before_their_own(self):
+        store = self.history({"vol": ["BTC"], "funding": ["BTC", "SOL"]})
+        t0 = epoch("2026-08-01T00:00:00Z")
+        closes = [50.0 + (i * 7 % 11) for i in range(72)]
+        store._store_history("vol", "BTC", [(t0 + 3600 * (i + 1), {"open": c, "high": c, "low": c, "close": c, "hours": 1})
+                                            for i, c in enumerate(closes)], fetched=self.clock())
+        wanted = {"vol": ["BTC"]}
+        view = store.series(wanted, t0, t0 + 72 * 3600, 3600)["vol"]["BTC"]
+        self.assertEqual(len(view), 72)
+        self.assertEqual([row["change_24h"] for row in view[:24]], [None] * 24)  # nothing held 24 hours before
+        self.assertEqual([row["change_24h"] for row in view[24:27]],
+                         [round(closes[24] - closes[0], 6), round(closes[25] - closes[1], 6), round(closes[26] - closes[2], 6)])
+        self.assertEqual(store.latest(wanted, t0 + 30 * 3600)["vol"]["BTC"], view[29])
+        # A later row, however extreme, changes nothing before it.
+        store._store_history("vol", "BTC", [(t0 + 73 * 3600, {"open": 999.0, "high": 999.0, "low": 999.0, "close": 999.0, "hours": 1})],
+                             fetched=self.clock())
+        self.assertEqual(store.series(wanted, t0, t0 + 73 * 3600, 3600)["vol"]["BTC"][:72], view)
+        # Funding every eight hours for 40 days: each field reads its own window of rows at or before it.
+        rates = [0.0001 * (1 + (i * 5 % 9) / 10) for i in range(120)]
+        settle = [t0 + 8 * 3600 * i for i in range(120)]
+        store._store_history("funding", "BTC", [(at, {"rate": r}) for at, r in zip(settle, rates)], fetched=self.clock())
+        rows = store.series({"funding": ["BTC"]}, t0 - 1, settle[-1], 3600)["funding"]["BTC"]
+        self.assertEqual(len(rows), 120)
+        self.assertEqual({row["interval_hours"] for row in rows}, {8})
+        mean = lambda xs: round(sum(xs) / len(xs), 10)  # noqa: E731
+        self.assertEqual([row["avg_24h"] for row in rows[:3]], [None] * 3)  # the history does not reach back a day
+        self.assertEqual(rows[3]["avg_24h"], mean(rates[1:4]))
+        self.assertEqual([row["avg_7d"] for row in rows[:21]], [None] * 21)
+        self.assertEqual(rows[21]["avg_7d"], mean(rates[1:22]))
+        self.assertEqual([row["zscore_30d"] for row in rows[:90]], [None] * 90)
+        self.assertEqual(rows[100]["zscore_30d"], zscore(rates[100], rates[10:100]))
+        self.assertEqual(rows[100]["avg_24h"], mean(rates[98:101]))
+        self.assertEqual(store.latest({"funding": ["BTC"]}, settle[100] + 1)["funding"]["BTC"], rows[100])
+        store._store_history("funding", "BTC", [(settle[-1] + 8 * 3600, {"rate": 0.05})], fetched=self.clock())
+        self.assertEqual(store.series({"funding": ["BTC"]}, t0 - 1, settle[-1] + 8 * 3600, 3600)["funding"]["BTC"][:120], rows)
+        # A coin that settles every four hours says so.
+        store._store_history("funding", "SOL", [(t0 + 4 * 3600 * i, {"rate": 0.0001}) for i in range(5)], fetched=self.clock())
+        self.assertEqual([row["interval_hours"] for row in store.series({"funding": ["SOL"]}, t0 - 1, t0 + 86400, 60)["funding"]["SOL"]],
+                         [8, 4, 4, 4, 4])
+
+    def test_a_venue_that_is_down_is_a_failed_poll_and_a_warning_at_most_hourly(self):
+        down = FakeTransport(default=TransportError("the host is down"))
+        store = self.history({"vol": ["BTC", "ETH"], "funding": ["BTC"]}, transports=down)
+        out = store.run()
+        self.assertEqual(sorted({(feed, key) for feed, key, _ in out["failed"]}), [("funding", "BTC"), ("vol", "BTC"), ("vol", "ETH")])
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 0)  # nothing fabricated
+        self.assertEqual(store.db.execute("SELECT COUNT(*), SUM(ok) FROM polls").fetchone(), (5, 0))  # three polls, two pages
+        self.assertEqual(store.latest({"vol": ["BTC"], "funding": ["BTC"]}, self.clock()), {})
+        self.assertEqual(sorted(text.split(" polls failed")[0].rsplit(" ", 1)[1] for _, text in self.alerts), ["funding", "vol"])
+        self.assertIn("feeds: 2 of 2 vol polls failed", " ".join(text for _, text in self.alerts))  # one warning a feed
+        row = store.coverage({"vol": ["BTC"]})["vol"]["BTC"]
+        self.assertIsNone(row["first_ok"])
+        self.assertIn("the host is down", row["last_error"])
+        self.assertTrue(row["backfill"]["pending"])  # a replay that needs it waits; it is not missing data
+        self.clock.advance(61)
+        self.assertFalse(store.due())  # a venue that failed is not asked again every minute, backfill included
+        self.clock.advance(240)
+        self.assertTrue(store.due())  # but in five minutes, not at the next hour
+        store.run()
+        self.assertEqual(len(self.alerts), 2)  # not again within the hour
+        self.clock.advance(3600)
+        store.run()
+        self.assertEqual(len(self.alerts), 4)
+        self.assertTrue(all(level == "warning" for level, _ in self.alerts))  # never "error": that rolls a release back
+        # When the venue answers again, the history comes in as if nothing had happened.
+        store._fetchers.clear()
+        store._transports = self.venues.transport()
+        self.clock.advance(3600)
+        self.assertEqual(store.run()["failed"], [])
+        self.assertEqual(store.latest({"vol": ["BTC"]}, self.clock())["vol"]["BTC"]["t"], "2026-09-22T14:00:00.000Z")
+
+    def test_a_coin_okx_does_not_list_is_unavailable_and_asked_again_hours_later(self):
+        fake = self.venues.transport()
+        store = self.history({"funding": ["BTC", "DOGE"]}, transports=fake, backfill_pages=50)
+        out = store.run()
+        self.assertEqual([(feed, key) for feed, key, _ in out["failed"]], [("funding", "DOGE")])
+        self.assertIn("okx code 51001", out["failed"][0][2])
+        entry = store.coverage({"funding": ["DOGE"]})["funding"]["DOGE"]
+        self.assertIsNone(entry["first_ok"])
+        self.assertFalse(entry["backfill"]["pending"])  # unavailable, not waiting: never guessed, never a zero row
+        self.assertFalse(store._backfill_pending())
+        doge = lambda: sum(1 for call in fake.calls if call["query"].get("instId") == "DOGE-USDT-SWAP")  # noqa: E731
+        asked = doge()
+        self.clock.advance(1800)
+        self.assertEqual(store.run()["failed"], [])
+        self.assertEqual(doge(), asked)
+        self.clock.advance(6 * 3600)
+        store.run()
+        self.assertEqual(doge(), asked + 1)
+
+    def test_live_polls_follow_the_hour_and_an_outage_leaves_no_hole(self):
+        store = self.history({"vol": ["BTC"], "funding": ["BTC"]}, backfill_pages=50)
+        store.run()
+        health = store.health()
+        self.assertEqual((health["vol"]["next_due"], health["funding"]["next_due"]), ("2026-09-22T13:01:30.000Z", "2026-09-22T13:01:30.000Z"))
+        self.assertEqual(health["vol"]["backfill"], {"complete": 1, "in_progress": [], "unlisted": []})
+        self.clock.set("2026-09-22T13:01:29Z")
+        self.assertFalse(store.due())
+        self.clock.set("2026-09-22T13:01:30Z")
+        self.assertTrue(store.due())
+        self.assertEqual(store.run()["polled"], ["vol", "funding"])
+        self.assertEqual(store.latest({"vol": ["BTC"]}, self.clock())["vol"]["BTC"]["t"], "2026-09-22T13:00:00.000Z")
+        self.assertEqual(store.health()["funding"]["next_due"], "2026-09-22T13:31:30.000Z")
+        # Down three days: the next pass pages back to the newest row held, so the history has no hole.
+        self.clock.set("2026-09-25T13:05:00Z")
+        store.run()
+        vol, funding = self.stamps(store, "vol"), self.stamps(store, "funding")
+        self.assertEqual((feeds.stamp(vol[-1]), feeds.stamp(funding[-1])), ("2026-09-25T13:00:00.000Z", "2026-09-25T08:00:00.000Z"))
+        self.assertEqual({b - a for a, b in zip(vol, vol[1:])}, {3600.0})
+        self.assertEqual({b - a for a, b in zip(funding, funding[1:])}, {8 * 3600.0})
+
+    def test_a_backfill_pass_gives_way_when_a_live_poll_falls_due(self):
+        venues = Venues(self.clock, cap=100)
+        fake = FakeTransport({**venues.routes(), **{key: value for key, value in transport().routes.items() if key != derivs.DVOL}})
+        # Each pause between pages is 200 seconds of the House's clock: the perps poll falls due
+        # (every 300 seconds) during the second, and the pass stops there.
+        store = self.recorder({"perps": ["BTC"], "vol": ["BTC"]}, transports=fake, sleep=lambda seconds: self.clock.advance(200),
+                              backfill_pages=50)
+        out = store.run()
+        self.assertEqual(out["polled"], ["perps", "vol", "backfill:vol:BTC", "backfill:vol:BTC"])
+        self.assertTrue(store.due())
+        self.assertEqual(store.run()["polled"][:2], ["perps", "backfill:vol:BTC"])  # the live poll first, then on from there
+
+    def test_coverage_counts_the_backfilled_span_and_says_where_it_came_from(self):
+        store = self.history({"vol": ["BTC"], "funding": ["BTC"]}, backfill_pages=50)
+        store.run()
+        now = self.clock()
+        window = store.coverage({"vol": ["BTC"], "funding": ["BTC"]}, now - 49 * 86400, now)
+        self.assertEqual((window["vol"]["BTC"]["covered_seconds"], window["funding"]["BTC"]["covered_seconds"]), (49 * 86400.0, 49 * 86400.0))
+        self.assertEqual(window["vol"]["BTC"]["backfill"]["source"], DVOL_URL)
+        self.assertEqual(window["funding"]["BTC"]["backfill"]["source"], FUNDING_URL)
+        # A hole in the rows is not covered: the rows are the record, not the polls.
+        store.db.execute("DELETE FROM snapshots WHERE feed = 'vol' AND received > ? AND received < ?", (now - 10 * 86400, now - 9 * 86400))
+        store.db.commit()
+        self.assertEqual(store.coverage({"vol": ["BTC"]}, now - 49 * 86400, now)["vol"]["BTC"]["covered_seconds"],
+                         49 * 86400.0 - 86400.0 + 2 * 3600.0 - 3600.0)
+        rows = {e.payload["feed"]: e.payload for e in self.ledger.iter(kinds="data.coverage")}
+        self.assertEqual(sorted(rows), ["funding", "vol"])
+        self.assertEqual((rows["vol"]["status"], rows["vol"]["backfill"]["BTC"]["source"]), ("current", DVOL_URL))
+        self.assertIn("stamped at its close", rows["vol"]["point_in_time"])
+
+    def test_needs_feeds_accept_vol_and_funding_known_keys_only(self):
+        self.assertEqual(requested({"vol": ["btc", "XBT", "ETH-USD", "SOL", "BTCDVOL", "eth"], "funding": ["btc/usd", "PEPE", "sol", "XBT"]}),
+                         {"vol": ["BTC", "ETH"], "funding": ["BTC", "SOL"]})
+        self.assertEqual(len(requested({"funding": sorted(feeds.known_perps())})["funding"]), 6)
+        self.assertEqual(requested({"vol": ["DOGE"]}), {})  # no DVOL but BTC's and ETH's
+        strikes = niches.load()["kalshi-crypto-strikes"]
+        out = niches.constrain({"venue": "kalshi", "horizon": "hour", "series": ["KXBTCD"],
+                                "feeds": {"vol": ["BTC", "SOL"], "funding": ["btc", "hype"], "perps": ["BTC"]}}, strikes)
+        self.assertEqual(out["feeds"], {"vol": ["BTC"], "funding": ["BTC", "HYPE"], "perps": ["BTC"]})
+        self.assertEqual({name: request_feed(name) for name in (
+            "deribit_dvol", "btc_implied_volatility", "okx_funding_rate_history", "historical_funding_rates", "settled_funding_rates",
+            "perp_funding_rates", "equity_implied_volatility_surface", "historical_scores", "kalshi_open_interest_history")},
+            {"deribit_dvol": "vol", "btc_implied_volatility": "vol", "okx_funding_rate_history": "funding",
+             "historical_funding_rates": "funding", "settled_funding_rates": "funding", "perp_funding_rates": "perps",
+             "equity_implied_volatility_surface": None, "historical_scores": None, "kalshi_open_interest_history": None})
+
+    def test_requests_for_the_history_are_answered_once_it_is_held(self):
+        commons = Commons(self.ledger, clock=self.clock)
+        why = "the strategy prices strikes against implied vol and funding extremes"
+        ids = {name: commons.request_tool("carry-1", name, why)["queued"] for name in ("deribit_dvol_history", "okx_funding_rate_history")}
+        store = self.history({"vol": ["BTC"], "funding": ["BTC"]}, backfill_pages=50)
+        self.assertEqual(store.fulfil_requests(commons), [])
+        store.run()
+        self.assertEqual(sorted(store.fulfil_requests(commons)), sorted(ids.values()))
+        answers = [e.payload["outcome"] for e in self.ledger.iter(kinds="tool.fulfilled")]
+        self.assertTrue(any("ctx['feeds']['vol']" in text and "replayed at once" in text for text in answers))
+        self.assertTrue(any("ctx['feeds']['funding']" in text and "zscore_30d" in text for text in answers))
+
+
 # ------------------------------------------------------------------------------ in the House
 FEED_READER = '''
 from datetime import datetime
@@ -348,12 +745,117 @@ def decide(ctx):
 '''
 
 
+VOL_READER = '''
+from datetime import datetime
+
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "vol-reader", "symbols": ["BTC/USD"],
+         "bars": {"timeframe": "5Min", "limit": 10}, "wake_minutes": 5, "feeds": {"vol": ["btc"]}}
+PARAMS = {}
+
+
+def seconds(text):
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+
+
+def decide(ctx):
+    memory = dict(ctx.get("memory") or {})
+    row = ((ctx.get("feeds") or {}).get("vol") or {}).get("BTC")
+    if row is not None:
+        now = seconds(ctx["now"])
+        if seconds(row["t"]) > now:
+            raise ValueError("a candle from the future")
+        if now - seconds(row["t"]) >= 3600:
+            raise ValueError("not the newest closed candle")
+        memory["seen"] = int(memory.get("seen") or 0) + 1
+        pairs = list(memory.get("pairs") or [])
+        if len(pairs) < 3 and (not pairs or pairs[-1][1] != row["t"]):
+            pairs.append([ctx["now"], row["t"], row["close"], row["change_24h"]])
+        memory["pairs"] = pairs
+    return {"intents": [], "memory": memory}
+'''
+
+
 class InTheHouse(HouseCase):
-    def attach(self, keys, transports=None) -> FeedRecorder:
-        recorder = FeedRecorder(self.house, Path(self.dir.name) / "feeds.sqlite", transports, keys=keys)
+    def attach(self, keys, transports=None, **kw) -> FeedRecorder:
+        recorder = FeedRecorder(self.house, Path(self.dir.name) / "feeds.sqlite", transports, keys=keys, **kw)
         self.house.feeds = recorder
         self.addCleanup(recorder.close)  # also when a test takes it off the House
         return recorder
+
+    def test_a_strategy_declaring_vol_replays_as_soon_as_the_backfill_covers_its_window(self):
+        self.clock.now = epoch("2026-09-12T12:00:00Z")
+        recorder = self.attach({"vol": ["BTC"]}, transports=Venues(self.clock).transport(), sleep=no_sleep)
+        agent = self.house.spawn("reader", "test-family", VOL_READER, reason="test")
+        self.assertEqual(agent.needs["feeds"], {"vol": ["BTC"]})
+        # Before the first pass nothing is held and the backfill is due: unsupported input, and a
+        # wait -- not a trial, and not a line blocked on missing data.
+        with self.assertRaises(ValueError) as caught:
+            self.house._run_replay(agent, agent.code, agent.needs, agent.params)
+        self.assertTrue(str(caught.exception).startswith("unsupported input: feeds being backfilled: vol BTC"), str(caught.exception))
+        self.assertEqual(self.house._replay_own(agent), {"agent": agent.id, "skipped": "waiting for recorded feeds"})
+        texts = [e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertFalse(any("replay could not run" in text for text in texts))
+        self.assertEqual((self.house.ledger.count(kinds="experiment.started"), self.house.ledger.count(kinds="eval.trial")), (0, 0))
+        # One pass -- the newest page, then the backfill -- and the replay runs: no twenty hours of recording to wait for.
+        self.assertEqual(recorder.run()["failed"], [])
+        key, tape = self.house.tape_for(agent.needs)
+        self.assertTrue(key.startswith("alpaca:") and key.endswith(':feeds:{"vol":["BTC"]}:ready'), key)
+        window = tape["feeds_coverage"]["vol"]["BTC"]
+        self.assertEqual(window["covered_seconds"], 21 * 86400.0)  # the whole live window of an hourly Alpaca strategy
+        self.assertTrue(window["backfill"]["complete"])
+        # The House's longest window of an hourly or Kalshi daily strategy is 49 days: 60 days back
+        # (49 and a week, at least 60), and a day more for change_24h.
+        self.assertEqual(recorder.backfill_days(), 60.0)
+        self.assertEqual(window["backfill"]["since"], "2026-07-13T12:00:00.000Z")
+        result = run_replay(agent.code, {}, tape, stake=200.0, audit=True)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["errors"], 0)  # never a candle from the future, always the newest closed one
+        memory = result["final_memory"]
+        self.assertEqual(memory["seen"], len(tape["steps"]))
+        opened = int(epoch("2026-09-09T23:00:00Z") * 1000)
+        self.assertEqual(memory["pairs"][0], ["2026-09-10T00:00:00Z", "2026-09-10T00:00:00.000Z", Venues.dvol("BTC", opened),
+                                              round(Venues.dvol("BTC", opened) - Venues.dvol("BTC", opened - 24 * HOUR_MS), 6)])
+        run, _ = self.house._run_replay(agent, agent.code, agent.needs, agent.params)
+        self.assertTrue(run["ok"], run)
+        self.assertEqual(self.house.ledger.count(kinds="experiment.started"), 1)
+        # A House whose store holds no vol and does not poll it: missing data, which is not a wait.
+        other = FeedRecorder(self.house, Path(self.dir.name) / "other.sqlite", keys={"perps": ["BTC"]})
+        self.addCleanup(other.close)
+        self.house.feeds = other
+        with self.assertRaises(ValueError) as caught:
+            self.house._run_replay(agent, agent.code, agent.needs, agent.params)
+        self.assertTrue(str(caught.exception).startswith("unsupported input: feeds not recorded: vol BTC"), str(caught.exception))
+
+    def test_research_and_the_foundry_are_told_the_history_is_replayable_now(self):
+        from league.hypotheses import REPLAY_VIEW
+
+        self.clock.now = epoch("2026-09-12T12:00:00Z")
+        recorder = self.attach({"vol": ["BTC", "ETH"], "funding": ["BTC"]}, transports=Venues(self.clock).transport(), sleep=no_sleep)
+        agent = self.seated()
+        before = self.house.research_capabilities(agent)["observations"]
+        self.assertEqual((before["feeds"]["vol"]["backfill_in_progress"], before["feeds"]["vol"]["replayable_now"]),
+                         (["BTC", "ETH"], {"hour": [], "day": []}))
+        self.assertNotIn("replayable_history", before)
+        recorder.run()
+        observed = self.house.research_capabilities(agent)["observations"]
+        vol, funding = observed["feeds"]["vol"], observed["feeds"]["funding"]
+        self.assertEqual((vol["backfill_complete"], vol["backfill_in_progress"]), (["BTC", "ETH"], []))
+        self.assertEqual(vol["backfilled_since"], {"BTC": "2026-07-13T12:00:00.000Z", "ETH": "2026-07-13T12:00:00.000Z"})
+        self.assertEqual((vol["recording_since"], funding["backfilled_since"]), ("2026-07-13T12:00:00.000Z", {"BTC": "2026-06-14T16:00:00.000Z"}))
+        self.assertEqual(vol["replayable_now"], {"hour": ["BTC", "ETH"], "day": ["BTC", "ETH"]})
+        self.assertEqual(funding["replayable_now"], {"hour": ["BTC"], "day": ["BTC"]})
+        self.assertIn("stamped at its close", vol["point_in_time"])
+        self.assertIn("replayed at once", observed["feeds"]["replay"])
+        self.assertEqual(observed["replayable_history"]["funding"]["replayable_now"], {"hour": ["BTC"], "day": ["BTC"]})
+        # replay_coverage for a candidate that reads them says a replay may use them now, and from where they came.
+        needs = {**agent.needs, "feeds": {"vol": ["BTC"], "funding": ["BTC"]}}
+        coverage = self.house.research_coverage(agent, needs)
+        self.assertTrue(coverage["feeds"]["replay_ready"], coverage)
+        self.assertEqual(coverage["feeds"]["coverage"]["vol"]["BTC"]["backfill"]["source"], DVOL_URL)
+        self.assertEqual(coverage["feeds"]["coverage"]["funding"]["BTC"]["backfill"]["source"], FUNDING_URL)
+        self.assertIn("backfilled over the replay window", coverage["feeds"]["note"])
+        # And the foundry's packet carries what a replay step sees of them.
+        self.assertIn("replayable now", REPLAY_VIEW["feeds"])
 
     def history(self, recorder, first: str, last: str, every: float = 300.0, offset: float = 137.4) -> list[float]:
         """Successful BTC polls from `first` to `last`, received `offset` seconds into each interval."""

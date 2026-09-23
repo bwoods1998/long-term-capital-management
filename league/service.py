@@ -70,6 +70,31 @@ def gateway_kill_switch(gateway_url: str, token_source: Callable[[], str], *, tt
     return engaged
 
 
+def evidence_weight_of(house: House, *, ttl: float = 300.0) -> Callable[[Any], float]:
+    """How a repair's turn follows the forward record of the agents it concerns (`Engineer.
+    _by_evidence`): x3 when one of them holds real money or has an earning record, x0.5 when every
+    one is dead or still on replay, x1 otherwise (and for a House-level job that names no agent).
+    Standings are read at most every `ttl` seconds: the engineer steps every two minutes."""
+    cache: dict[str, Any] = {"at": float("-inf"), "rows": {}}
+
+    def weight(agents: Any) -> float:
+        now = house.clock()
+        if now - cache["at"] >= ttl:
+            cache["rows"] = {s.agent: s for s in house.standings()}
+            cache["at"] = now
+        names = [str(a) for a in agents or []]
+        if not names:
+            return 1.0
+        rows = [cache["rows"].get(name) for name in names]
+        if any(row is not None and (row.rung >= 2 or (row.score_observations > 0 and row.score_growth > 0)) for row in rows):
+            return 3.0
+        if all(row is None or row.rung == 0 for row in rows):
+            return 0.5
+        return 1.0
+
+    return weight
+
+
 def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
     """The repair worklist's worker, wired to the House's own ledger, frontier client and forge.
     It spends only while the day's OpenAI allowance is open and the frontier tier still pays for
@@ -90,6 +115,7 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
 
     worklist = Worklist(house.ledger, clock=house.clock)
     return Engineer(frontier, forge, house.ledger, worklist, clock=house.clock, code_of=code_of,
+                    evidence_weight=evidence_weight_of(house),
                     may_spend=lambda: house.pacer.may_spend("openai") and house.frontier_tier() != "audits",
                     sources=Sources(house.ledger, worklist, niche_of=niche_of), summary_path=Path(house.root) / "repairs.json",
                     inbox=Path(house.root) / "repairs-inbox")
@@ -198,9 +224,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .options_history import OptionsHistory, gateway_get
         house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(paper), ledger=house.ledger, clock=house.clock)
     if config.get("feeds", True) and not canary:
-        # Live sports scoreboards and perpetual funding / open interest (league/feeds.py): public,
-        # keyless hosts already on the House box's allowlist, recorded with their receive times on a
-        # lane of their own. Agents ask for them in NEEDS["feeds"]; replay uses them once recorded.
+        # Live sports scoreboards and perpetual funding / open interest, and Deribit's DVOL and OKX's
+        # settled funding as backfilled point-in-time history (league/feeds.py): public, keyless hosts
+        # already on the House box's allowlist, recorded on a lane of their own. Agents ask for them
+        # in NEEDS["feeds"]; replay uses the live ones once recorded, the backfilled ones at once.
         from .feeds import FeedRecorder
         house.feeds = FeedRecorder(house, root / "feeds.sqlite")
     # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned

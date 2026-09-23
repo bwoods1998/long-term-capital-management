@@ -680,6 +680,34 @@ class RegistryCollisions(Base):
         self.assertEqual(out.getvalue(), "::error title=league.ci refused::the test suite failed:%0AFAIL: x (100%25)\n")
 
 
+class RepairsFollowEvidence(unittest.TestCase):
+    """Sept 23, 2026: twelve of sixteen merged repairs failed replay once born. The paid queue now
+    puts the repairs of agents with real money or an earning record ahead of repairs of code that
+    has no forward evidence (priority x `evidence_weight`); requested jobs stay first."""
+
+    def job(self, key, agents, *, occurrences=1, sources=("triage",)):
+        from league.worklist import Job
+        return Job(key=key, kind="strategy_defect", summary=key, source=sources[0], sources=set(sources),
+                   agents=set(agents), occurrences=occurrences, first_at="2026-09-23T00:00:00Z")
+
+    def test_an_earning_agents_repair_goes_before_a_higher_priority_repair_of_a_dead_line(self):
+        weights = {"winner": 3.0, "ghost": 0.5}
+        engineer = Engineer(None, None, None, None, settings={},
+                            evidence_weight=lambda agents: max((weights.get(a, 1.0) for a in agents), default=1.0))
+        dead = self.job("dead-line", ["ghost"], occurrences=4)       # priority 4 x 0.5 = 2
+        earning = self.job("earning", ["winner"], occurrences=1)      # priority 1 x 3 = 3
+        asked = self.job("drill", [], sources=("synthetic",))         # requested: always first
+        order = [j.key for j in engineer._by_evidence([dead, earning, asked])]
+        self.assertEqual(order, ["drill", "earning", "dead-line"])
+
+    def test_a_weight_that_cannot_be_read_leaves_priority_in_charge(self):
+        def broken(agents):
+            raise RuntimeError("standings unavailable")
+        engineer = Engineer(None, None, None, None, settings={}, evidence_weight=broken)
+        low, high = self.job("low", ["a"]), self.job("high", ["b"], occurrences=3)
+        self.assertEqual([j.key for j in engineer._by_evidence([low, high])], ["high", "low"])
+
+
 class TheInbox(Base):
     def test_an_operator_report_is_filed_once_and_a_bad_file_is_set_aside(self):
         inbox = self.root / "inbox"
@@ -749,7 +777,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
-from league.tests.test_house import HouseCase  # noqa: E402
+from league.tests.test_house import BUYER, HouseCase  # noqa: E402
+
+
+class EvidenceWeightOfTheHouse(HouseCase):
+    def test_real_money_and_earning_records_weigh_three_replay_only_half(self):
+        from league.service import evidence_weight_of
+        live, paper, replay = self.seated("live"), self.seated("paper"), self.house.spawn("replay", "test-family", BUYER, reason="test")
+        self.house.evaluator.promote(live.id, 2, "test")
+        weight = evidence_weight_of(self.house)
+        self.assertEqual(weight([live.id, replay.id]), 3.0)
+        self.assertEqual(weight([paper.id]), 1.0)
+        self.assertEqual(weight([replay.id, "long-dead"]), 0.5)
+        self.assertEqual(weight([]), 1.0)
 
 
 class WiredIntoTheHouse(HouseCase):

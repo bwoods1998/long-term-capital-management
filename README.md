@@ -79,10 +79,10 @@ What is measured is after-cost log growth in hour/day blocks or completed portfo
 
 | Rung | Where it trades | Stake and limits | What moves it up |
 |---|---|---|---|
-| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 10 closed trades and 20 blocks, and positive mean growth over at least 8 out-of-sample tail blocks (reused development data, not independent forward evidence). An Alpaca program whose inputs are in the history store replays on deep history and must pass the sealed holdout too, which is rationed to three evaluations a lineage. The seat it wins costs nothing but compute, and paper is the real out-of-sample test, so there is no multiple-testing penalty here: the gates that spend money (the screen, the audit, the scaled rung's bound) come later. Owner revision of Sept 22, 2026: the deflated Sharpe against the agent's own line (0.5) had deadlocked whole desks, since each failed trial raised the bar for the next; it was 0.75 and 30 blocks before Sept 21, and 20 closed trades before Sept 22. When these rules change, every rung-0 agent gets one fresh replay under them |
-| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 4 active hourly blocks (2 daily, or 1 on Kalshi once 3 of its trades have settled on this rung), **or 10 completed portfolio exposures**, with at least 3 closed trades, growth above zero (the block in progress counted) and a drawdown under 15% over the last 30 blocks; only while real money is on, the owner's grant allows it, the capital envelope has room for its stake (below) and no audit veto's cooldown is running. **Then the micro stake at once, and Merton's audit after it** (owner revision of Sept 23, 2026): a veto sends the agent back to paper. An agent with a known defect (a red pre-audit, or a merged corrected child of its code) is still audited first. The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's 15% and death's 30% it could be neither promoted nor killed. Death still reads the whole stay |
-| 2. Micro-real | the real Kalshi and Alpaca accounts | $60 stake, $30 a position, $30 an order, one option contract up to $40 ($25 / $10 / $10 / $20 before the Sept 21 learning surge); down 20% since promotion, or vetoed by the audit that follows promotion, returns it to paper | **5 active blocks or 10 completed portfolio exposures**, at least 3 closed trades of real fills, and a one-sided lower confidence bound on mean growth above zero (its own, or its family's pooled real-money record when its own growth is above zero) |
-| 3. Scaled | the real accounts | half of Kelly on the lower bound of its growth (a quarter before the Sept 21 learning surge): never under the $60 micro stake, never over 40% of the venue's cash; a position and an order up to half the stake, never under the micro rung's $30 and never above $60 (four fifths of the gateway's $75 cap, so one order can close a position that has gained a quarter) | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
+| 0. Replay | nowhere: its code is walked over recorded history in its own sealed box | none | at least 10 closed trades and 20 blocks, and mean growth above -0.05% a block over at least 8 out-of-sample tail blocks (reused development data, not independent forward evidence; above zero until the owner's swing-and-bunt revision of Sept 23, 2026, because replay had been the pessimist and a near-breakeven idea is cheapest judged forward on paper). An Alpaca program whose inputs are in the history store replays on deep history and must pass the sealed holdout too, which is rationed to three evaluations a lineage. The seat it wins costs nothing but compute, and paper is the real out-of-sample test, so there is no multiple-testing penalty here: the gates that spend money (the screen, the audit, the scaled rung's bound) come later. Owner revision of Sept 22, 2026: the deflated Sharpe against the agent's own line (0.5) had deadlocked whole desks, since each failed trial raised the bar for the next; it was 0.75 and 30 blocks before Sept 21, and 20 closed trades before Sept 22. When these rules change, every rung-0 agent gets one fresh replay under them |
+| 1. Paper | Alpaca's paper account; a Kalshi shadow book that reads live quotes and fills conservatively | $200 stake, $100 a position, $75 an order (the live account's limits, not the paper account's $100,000) | a **screen**, not a bound: 3 active hourly blocks (1 finished active day for a daily program), **or 10 completed portfolio exposures**, with at least 3 closed trades, growth above zero (the block in progress counted) and a drawdown under 25% over the last 30 blocks (4 hourly, 2 daily and 15% until the owner's swing-and-bunt revision of Sept 23, 2026: the micro rung is where an unproven idea bunts); only while real money is on, the owner's grant allows it, the capital envelope has room for its stake (below) and no audit veto's cooldown is running. **Then the micro stake at once, and Merton's audit after it** (owner revision of Sept 23, 2026): a veto sends the agent back to paper. An agent with a known defect (a red pre-audit, or a merged corrected child of its code) is still audited first. The drawdown is a trailing window because `max_drawdown` is a running maximum and never falls: read over a whole stay, one bad afternoon barred an agent from real money for the rest of its life, and between the screen's limit and death's (then 15% and 30%) it could be neither promoted nor killed. Death still reads the whole stay |
+| 2. Micro-real | the real Kalshi and Alpaca accounts | $60 stake, $30 a position, $30 an order, one option contract up to $40 ($25 / $10 / $10 / $20 before the Sept 21 learning surge); down 20% since promotion, or vetoed by the audit that follows promotion, returns it to paper | **3 active blocks or 10 completed portfolio exposures**, at least 3 closed trades of real fills, and a one-sided lower 80% confidence bound on mean growth above zero (its own, or its family's pooled real-money record, with members counted after 5 active blocks, when its own growth is above zero). Promotion spends `promotion_alpha` 0.20 across looks every 3 active blocks; death keeps alpha 0.05 (owner's swing-and-bunt revision of Sept 23, 2026: 5 blocks, 0.05 and a 10-block family member before) |
+| 3. Scaled | the real accounts | FULL Kelly on the lower bound of its growth, so the swing grows with the evidence (the owner's swing-and-bunt revision of Sept 23, 2026; half from the Sept 21 learning surge, a quarter before): never under the $60 micro stake, never over 60% of the venue's cash (40% before); a position and an order up to half the stake, never under the micro rung's $30 and never above $60 (four fifths of the gateway's $75 cap, so one order can close a position that has gained a quarter) | nothing: it is resized every epoch, and a drift alarm sends it back down a rung |
 
 These are rung ceilings. Event concentration can be tighter: a new live agent's $60 stake gives
 it an $18 single-market cap on Kalshi (30% of its own equity). The shared cap uses the existing funded venue authorization,
@@ -265,7 +265,7 @@ credit floor waited on paper. Credits cannot be created by an agent; every grant
 House row on the ledger. These dials live in [`league/game.json`](league/game.json), inside bounds
 the same file lists.
 
-**Death.** Credits at zero; a 30% drawdown; an upper confidence bound on growth below zero after 20
+**Death.** Credits at zero; a 40% drawdown (30% until Sept 23, 2026: full Kelly on a lower bound draws down a third in ordinary luck); an upper confidence bound on growth below zero after 20
 active blocks or 10 completed exposures; on paper, the fast deaths above; on rung 0, 72 hours
 (twelve six-hour epochs) without passing replay; **stuck and broke** -- thirty wakes
 in a row with a live market in front of it and nothing done, and too little left to research its
@@ -422,15 +422,22 @@ Since Sept 22, 2026 two more workers use the same route and guards:
   rejection test. Replay admits a card before it gets a seat. It writes on GPT-6 Sol at high
   effort. Since Sept 23, 2026 it may call every 10 minutes within $40 a 24-hour window (it was
   every 15 minutes and $20).
-  - Up to half its calls go to the hourly, around-the-clock desks in `fast_desks`: both Alpaca
-    crypto desks, both Kalshi crypto desks, index ETFs and megacaps. Their low replay pass rates
-    had kept them off the evidence route.
-  - Up to a fifth go to the least-explored desk, and the rest to the desk the evidence favours.
+  - Up to 30% of its calls port a proven mechanism (`transfer_share`, from Sept 23, 2026): a
+    family with an earned forward record, real money first, goes to the best-scored desk of its
+    venue where it has never been tried, and Merton is asked to adapt that mechanism there. It
+    sees the mechanism in words, never the other agent's code.
+  - Up to half go to the hourly, around-the-clock desks in `fast_desks`: both Alpaca crypto
+    desks, both Kalshi crypto desks, index ETFs and megacaps. Their low replay pass rates had
+    kept them off the evidence route. Since Sept 23, 2026 the route rotates to the fast desk with
+    the fewest recent cards; before, every such call went to the index-ETF desk.
+  - Up to a fifth go to the least-explored desk, and the rest to the desk the evidence favours
+    (routes are offered in that order; with these dials about 27%, 45%, 18% and 9% of calls).
   - Up to 8 cards may wait for replay before the next call (`max_pending_cards`). Only its own
     call in flight holds it up, not another Merton role.
   - Its packet carries horizon guidance (prefer hourly, which reaches the paper screen soonest),
-    forward results by family on the desk, and the Kalshi maker fee: a quarter of the taker
-    formula on the series that charge makers.
+    forward results by family on the desk, the league's edge map (`winning_mechanisms`: the
+    best forward records on every desk and what died on the forward evidence), and the Kalshi
+    maker fee: a quarter of the taker formula on the series that charge makers.
 - **The repair engineer** (`league/engineer.py`) takes the top job of the repair queue
   (`league/worklist.py`) and patches it by pull request. When CI refuses a patch, it revises
   against CI's own failure text, at most three times and within a per-job ceiling. A strategy
@@ -627,6 +634,13 @@ dynamism revisions followed that evening:
   gate's blocks; until then the replay is refused as unsupported input and not counted as a trial.
   Nothing is backfilled, so the first hourly strategies can qualify about a day after the recorder
   starts, and daily ones after about three weeks.
+- **Point-in-time crypto history** (`league/feeds.py`, Sept 23, 2026): two more feeds for the 24/7
+  crypto desks. `vol` is Deribit's DVOL (implied vol, BTC and ETH) as hourly candles stamped at
+  their close; `funding` is OKX's settled funding per coin, stamped at settlement, with 24-hour and
+  7-day averages and a 30-day z-score from rates settled at or before it. Both are backfilled from
+  the venues' own history over the replay window (60 days, and the lookback of their derived
+  fields), paced and resumable on the feeds lane, with each row's stamp and source recorded, so a
+  strategy that declares them is replayed at once rather than after a day of recording.
 - **Order-path guards in the House**, built beside this revision: a buy asked under Alpaca's $10
   crypto minimum is refused as a House refusal the strategy can read, one floored just under it is
   raised a step, limit prices are put on the venue's grid (a coin's only when the venue states its

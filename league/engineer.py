@@ -40,7 +40,7 @@ import json
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from . import ci
 from .frontier import MODEL_CEILINGS, FrontierError
@@ -143,7 +143,7 @@ class Engineer:
                  settings: Mapping[str, Any] | None = None, may_spend: Callable[[], bool] = lambda: True,
                  code_of: Callable[[str], Mapping[str, Any] | None] = lambda agent: None, repo: Path = REPO,
                  evidence: Callable[[], Mapping[str, Any]] = lambda: {}, sources: Any = None, summary_path: Path | None = None,
-                 inbox: Path | None = None):
+                 inbox: Path | None = None, evidence_weight: Callable[[Iterable[str]], float] = lambda agents: 1.0):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
@@ -161,6 +161,8 @@ class Engineer:
         #: A directory where the owner (or `scripts/repair_drill.py`) drops a request file; the
         #: House, the ledger's only writer, turns each into a report on its next step.
         self.inbox = Path(inbox) if inbox else None
+        #: How much the forward record of a job's agents raises or lowers its turn (`_by_evidence`).
+        self.evidence_weight = evidence_weight
         self._last_step = float("-inf")
         self._last_call: float | None = None
         self._asked = False
@@ -248,7 +250,7 @@ class Engineer:
             if moved:
                 out["advanced"].append({"key": job.key, "state": moved})
         out["decided"] = []
-        for job in self.worklist.queue(("revising", "admitted")):
+        for job in self._by_evidence(self.worklist.queue(("revising", "admitted"))):
             self._asked = False
             result = self._attempt(job)
             if result is None:
@@ -260,6 +262,22 @@ class Engineer:
                 continue
             out["attempted"] = {"key": job.key, "state": result}
             break
+
+    def _by_evidence(self, jobs: list[Job]) -> list[Job]:
+        """The paid queue in the order worth paying for: priority x the forward record of the agents
+        a job concerns (`evidence_weight`). Measured Sept 23, 2026: twelve of the sixteen repairs
+        merged since Sept 22 failed replay once born -- a correct fix to the execution of a strategy
+        with no edge buys nothing -- while the agents with real-money or earning records waited
+        behind them. Requested jobs (operator, synthetic) keep their place at the front."""
+        requested = {"operator", "synthetic"}
+
+        def weight(job: Job) -> float:
+            try:
+                return float(self.evidence_weight(sorted(job.agents)))
+            except Exception:  # noqa: BLE001 - an unreadable record leaves the job where priority put it
+                return 1.0
+
+        return sorted(jobs, key=lambda j: (not (j.sources & requested), -(j.priority() * weight(j)), j.first_at, j.key))
 
     # ----------------------------------------------------------------------- one attempt
     def _scripted(self, job: Job) -> bool:

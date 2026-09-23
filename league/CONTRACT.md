@@ -191,10 +191,12 @@ a zero: a replay of a strategy that asks for features of a symbol the House has 
 refused as unsupported input (not a trial), and the House's daily options job backfills the
 symbols living strategies ask for.
 
-### Live feeds: sports scoreboards and perpetual funding (`NEEDS["feeds"]`)
+### Feeds: sports scoreboards, perpetual funding, implied vol and settled funding (`NEEDS["feeds"]`)
 
 ```python
-NEEDS["feeds"] = {"sports": ["nfl", "mlb"], "perps": ["BTC", "ETH"]}   # either or both, at most six keys each
+NEEDS["feeds"] = {"sports": ["nfl", "mlb"], "perps": ["BTC", "ETH"],   # recorded live
+                  "vol": ["BTC", "ETH"], "funding": ["BTC", "SOL"]}    # point-in-time history, backfilled
+# any of them, at most six keys each
 ```
 
 adds `ctx["feeds"]`, on any venue and whatever your specialty (you may not trade any of it):
@@ -218,6 +220,10 @@ ctx["feeds"] = {
                     "kraken": {"symbol": "PF_XBTUSD", "rate": 1.33e-05, "next_rate": 2.44e-05, "rate_abs": 1.035,
                                "open_interest": 2166.65, "mark": 77595.1, "index": 77585.88, "interval_hours": 1},
                     "dvol": 34.37, "funding_z": 1.2, "funding_history_n": 30}},
+  "vol": {"BTC": {"t": "2026-09-22T12:00:00.000Z", "open": 34.26, "high": 34.38, "low": 34.19, "close": 34.37,
+                  "hours": 1, "change_24h": -1.12}},
+  "funding": {"BTC": {"t": "2026-09-22T08:00:00.000Z", "rate": 4.07e-05, "interval_hours": 8,
+                      "avg_24h": 5.1e-05, "avg_7d": 6.3e-05, "zscore_30d": -0.8}},
 }
 ```
 
@@ -234,24 +240,51 @@ ctx["feeds"] = {
   rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
   OKX's rate against its last 30 settlements. Rates are per interval: annualize as
   `rate * 8760 / interval_hours`. A venue that did not answer is `None` in the row.
+- **vol**: Deribit's DVOL -- the market's 30-day implied volatility, in annualized percent -- for
+  `BTC` and `ETH` (no other coin has one): one row per COMPLETED hourly candle, stamped `t` at its
+  close. The candle that opened at 11:00 is the row stamped 12:00, and a candle still open is never
+  shown. `change_24h` is `close` minus the close of the candle that closed 24 hours earlier (`None`
+  when the House does not hold it). Polled 90 seconds after every hour. A Kalshi crypto strike is an
+  option on spot: with the spot's bars from `NEEDS["observe"]` (`BTC/USD`) and this implied vol a
+  strategy can price a strike and bid only where its model clears the ask and the fee.
+- **funding**: OKX's settled perpetual funding for the coins the crypto desks trade
+  (`<COIN>-USDT-SWAP`): one row per settlement, stamped `t` at its `fundingTime` (00:00, 08:00 and
+  16:00 UTC on OKX's usual 8-hour interval). `rate` is the settled rate for the interval (OKX's
+  `realizedRate` where it sends one, else its `fundingRate`); `interval_hours` is the hours since
+  the settlement before it (8 unless the history shows a shorter interval); `avg_24h` and `avg_7d`
+  are the mean rates settled in the 24 hours / 7 days up to and including this one; `zscore_30d` is
+  this rate against the rates settled in the 30 days before it. Each reads only rates settled at or
+  before `t`, and is `None` until the history reaches back over its whole window. Polled every 30
+  minutes. Funding extremes are the classic crowding signal of a market that never closes.
 
-`t` is when the House RECEIVED the row. Content that has not changed since the last poll is not
-stored again, so `t` is when that content was first received; judge a game by its own `status`,
-`start` and `clock`. A key with nothing recorded is **absent**: that means unavailable, never
-zero. Names the House does not record are dropped from your NEEDS. Your code must also work when
-`ctx["feeds"]` is absent, as it is on a House without the recorder.
+For `sports` and `perps`, `t` is when the House RECEIVED the row. Content that has not changed
+since the last poll is not stored again, so `t` is when that content was first received; judge a
+game by its own `status`, `start` and `clock`. For `vol` and `funding`, `t` is when the value
+became FINAL -- a candle's close, a rate's settlement -- which is the first moment anyone could
+know it; a candle or a rate already held is never stored again. A key with nothing recorded is
+**absent**: that means unavailable, never zero. Names the House does not record are dropped from
+your NEEDS. Your code must also work when `ctx["feeds"]` is absent, as it is on a House without
+the recorder.
 
-**Replay.** These feeds are recorded live and never backfilled (ESPN is never asked for a past
-date: its old boards carry final scores). A replay tape carries the recorded rows point in time:
-each step sees the row received last at or before it, never a later one, at most one row a step
-(a long window is sampled more coarsely, never ahead). Before recording began there is nothing:
-early steps see no `ctx["feeds"]` rows at all. So a strategy that declares feeds is replayed only
-once every declared key has been recorded for the replay gate's `min_blocks` blocks of its horizon
-(twenty hours for an hourly strategy, twenty days for a daily one); until then its replay is
-refused as unsupported input, which is not a trial, while live wakes are handed the feeds at once.
-`replay_coverage` reports each key's coverage and whether a replay may use it yet, and
-`runtime_status` says what is recorded and since when. An Alpaca strategy that declares feeds is
-replayed on the recent live tape, never on the development window of the history store.
+**Replay.** A replay tape carries the rows point in time: each step sees the row stamped last at
+or before it, never a later one, at most one row a step (a long window is sampled more coarsely,
+never ahead). `sports` and `perps` are recorded live and never backfilled (ESPN is never asked for
+a past date: its old boards carry final scores), so before recording began there is nothing, and
+early steps see no rows at all. A strategy that declares them is replayed only once every declared
+key has been recorded for the replay gate's `min_blocks` blocks of its horizon (twenty hours for an
+hourly strategy, twenty days for a daily one); until then its replay is refused as unsupported
+input, which is not a trial, while live wakes are handed the feeds at once. `vol` and `funding` are
+different: the House backfills them from the venues' own history -- Deribit's candles, OKX's
+settled rates -- over the replay window (60 days by default, plus a day and 30 days of history for their
+derived fields), stamping each backfilled row exactly as a live one, never with when it was
+fetched. That history is point in time, so it counts as recorded: a strategy that declares only
+`vol` and `funding` is replayed at once. While a backfill is still coming in (the first minutes
+after a House first records them, or while a venue is down) such a replay waits, which is not a
+trial. `runtime_status` says what is recorded and since when (for `vol` and `funding`:
+`backfilled_since` and `replayable_now`), and `replay_coverage` reports each key's coverage,
+whether a replay may use it yet, and for a backfilled key the endpoint it came from. An Alpaca
+strategy that declares feeds is replayed on the recent live tape, never on the development window
+of the history store.
 
 ## What you may watch but not trade
 

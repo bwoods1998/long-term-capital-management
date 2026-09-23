@@ -113,7 +113,7 @@ class PersistentAuthorization(PhaseCase):
         with patch.dict(CONSTITUTION['ladder']['replay'], min_deflated_sharpe=.3), \
                 patch.dict(CONSTITUTION['ladder']['paper_death'], max_loss=.05):
             self.assertTrue(guard.allows_live(3))
-        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=3):
+        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=CONSTITUTION['ladder']['paper']['min_active_blocks'] + 1):
             self.assertFalse(guard.allows_live(2))  # the screen that promotes to money is a money rule
 
     def test_a_legacy_whole_constitution_grant_holds_only_while_money_rules_are_unchanged(self):
@@ -139,7 +139,7 @@ class PersistentAuthorization(PhaseCase):
     def test_the_owner_ratifies_a_grant_under_revised_money_rules_without_new_capital(self):
         guard, _ = self.expired()
         live = guard.activate_live_trading('earned', CAPITAL)
-        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=3):
+        with patch.dict(CONSTITUTION['ladder']['paper'], min_active_blocks=CONSTITUTION['ladder']['paper']['min_active_blocks'] + 1):
             self.assertFalse(guard.live_trading()['active'])
             with self.assertRaises(CampaignClosed):
                 guard.ratify_live_trading('someone-else')

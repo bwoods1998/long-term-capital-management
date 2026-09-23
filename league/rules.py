@@ -33,6 +33,13 @@ def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None =
                  "  the observed returns." if float(ladder['replay'].get('min_deflated_sharpe') or 0) > 0 else
                  "NO deflated-Sharpe minimum: trials in your line do not raise the bar for a paper seat\n"
                  "  (the multiple-testing penalty applies where money is at stake). Every replay still counts as a trial.")
+    floor = float(ladder['replay'].get('min_oos_growth', 0.0))
+    oos_text = ("positive growth on the historical last third" if floor == 0 else
+                f"growth above {floor:+.2%} a block on the historical last third (near breakeven is enough: a paper\n"
+                "  seat is free, and forward fills judge you there)")
+    up_alpha = float(ladder.get('promotion_alpha', ladder['alpha']))
+    kelly = float(rungs['3']['kelly_fraction'])
+    kelly_text = "FULL Kelly" if kelly == 1 else f"{kelly:g} of Kelly"
     paper = ladder['paper']
     settled = paper.get('settled_day') or {}
     settled_text = (f", or ONE finished active day on Kalshi once {settled['min_settled_trades']} of your trades have settled on this rung"
@@ -70,8 +77,8 @@ Raw profit over a few trades is luck; what counts is a confidence bound on mean 
 
 THE LADDER.
 - Rung 0, replay. Your code is run over recorded history by a mechanical simulator with
-  conservative fills. You pass with at least {ladder['replay']['min_trades']} closed trades, {ladder['replay']['min_blocks']} blocks, positive growth on the
-  historical last third, and {deflation} A failed candidate does not prove its whole strategy family impossible.
+  conservative fills. You pass with at least {ladder['replay']['min_trades']} closed trades, {ladder['replay']['min_blocks']} blocks, {oos_text},
+  and {deflation} A failed candidate does not prove its whole strategy family impossible.
   Spend replays on falsifiable changes whose results can change a decision. A historical tail
   that you have already inspected is development data; only fresh unseen observations test
   whether a selected improvement generalizes. Never reset lineage to erase selection history.
@@ -86,12 +93,12 @@ THE LADDER.
   {tuition['max_agents']} agents hold micro-real money at once, with each full stake and abandoned positions reserved
   under the ${tuition['max_loss_usd']} loss budget. Available headroom can therefore allow fewer seats. At the loss line the rung closes.
 - Rung 2, micro-real. Real money: ${rungs['2']['stake_usd']} stake, ${rungs['2']['max_position_usd']} a position. You move up when, after {ladder['micro']['min_active_blocks']} active blocks
-  and {ladder['min_closed_trades']} closed trades, the lower {100 - ladder['alpha'] * 100:.0f}% bound on your mean block growth is above zero (alpha is spent
+  and {ladder['min_closed_trades']} closed trades, the lower {100 - up_alpha * 100:.0f}% bound on your mean block growth is above zero (alpha is spent
   across looks, so being looked at often buys nothing). If nearly all your trades win, you must
   also clear a bound on your loss rate: one big loss you have not seen yet is assumed. A small edge
   is proved across a family sooner than alone: if your own growth is above zero and the pooled
   real-money record of your family ({ladder['family']['min_members']} or more members) clears the same bound, you move up on theirs.
-- Rung 3, scaled. {rungs['3']['kelly_fraction']:g} of Kelly on the LOWER bound of your growth, up to {rungs['3']['max_share_of_venue']:.0%} of the venue's cash. Decay sends you back down.
+- Rung 3, scaled. {kelly_text} on the LOWER bound of your growth, up to {rungs['3']['max_share_of_venue']:.0%} of the venue's cash. Decay sends you back down.
 - Death on PAPER comes fast: down {ladder['paper_death']['max_loss']:.0%} or more after {ladder['paper_death']['min_active_blocks']} active blocks, or not above where
   you started after {ladder['paper_death']['unprofitable_blocks']}. A paper seat is free and scarce; a loser gives it back.
 - Death: an upper bound on your growth below zero after {ladder['death']['min_active_blocks']} active blocks, a drawdown of {ladder['death']['max_drawdown']:.0%},
@@ -102,6 +109,20 @@ THE LADDER.
   The dead leave a post-mortem in the playbook.
 
 {faster}
+SWING BIG WHEN YOU SEE THE BALL; BUNT WHEN YOU DON'T. The owner's rule, after Druckenmiller, and
+the ladder is built on it. While your edge is unproven, BUNT: small positions, many of them, fast
+exits -- every closed trade is evidence, and evidence is what moves you. The screen to real money
+is short on purpose ({paper['min_active_blocks']} hourly blocks or {paper.get('min_active_blocks_day', paper['min_active_blocks'])} day, a record above zero, a drawdown under
+{paper['max_drawdown']:.0%}), and the micro rung is itself a bunt: ${rungs['2']['stake_usd']} of real money. When you SEE the ball --
+your own measured edge on this setup is large and your record confirms it -- SWING: size the
+trade to the conviction, up to the rung's caps, instead of trading every signal the same size.
+Write that into your code: position size should grow with the edge your signal measures and
+shrink toward the minimum when it is weak. Growth is scored in LOG terms, so over-betting is
+punished as surely as timidity: the right size is the Kelly size, and it is large only when the
+edge is large and steady. At rung 3 the House does this for you: your stake is {kelly_text} on the
+lower bound of your real-money growth, so a thin record gets a small stake and a strong one a big
+swing. The owner accepts the volatility; what he will not pay for is an agent that swings blind
+or never swings at all.
 LIVE ALLOCATION. The limits above describe the base game. research_context gives the actual
 campaign activation, remaining live tuition and promotion status. A prepared live pilot may
 allow more micro seats and bounded scaling inside one aggregate experiment envelope. Promotion

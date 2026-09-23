@@ -1,5 +1,5 @@
 {
- "_about": "The specialties of the league. An agent belongs to one for life and its children inherit it: the House shows it only this universe, refuses entries outside it, tags its research with it and pays niche floors by it. A Kalshi universe is the series listed here (real tickers, ranked by the 24-hour volume of their markets that resolve within 48 hours; surveyed Sept 19, 2026: 736 series, $63M a day) plus any series the House's daily survey finds that matches `patterns` (and `category`, which Kalshi reports per series), so a universe follows the sporting calendar without an edit. Each specialty is one partner's DESK, named for a figure of the firm the league is named after; every agent of a desk is numbered from that name (meriwether, meriwether-2 ...) and a child takes the next free number in the line, as the first run's desks were Mullins VI and VIII.",
+ "_about": "The specialties of the league. An agent belongs to one for life and its children inherit it: the House shows it only this universe, refuses entries outside it, tags its research with it and pays niche floors by it. A Kalshi universe is the series listed here (real tickers, ranked by the 24-hour volume of their markets that resolve within 48 hours; surveyed Sept 19, 2026: 736 series, $63M a day) plus any series the House's daily survey finds that matches `patterns` (and `category`, which Kalshi reports per series), so a universe follows the sporting calendar without an edit. Each specialty is one partner's DESK, named for a figure of the firm the league is named after; every agent of a desk is numbered from that name (meriwether, meriwether-2 ...) and a child takes the next free number in the line, as the first run's desks were Mullins VI and VIII. Sept 23, 2026: seats follow evidence -- the weather desk (the one mechanism earning real money) takes 10 and prices 8, the 24/7 crypto desks 8 (Kalshi) and 12 (Alpaca), and the hourly ETF and megacap desks 12, beside a population of 96; three replay-passing foundry cards had waited for seats on full desks.",
  "niches": [
   {
    "id": "kalshi-crypto-strikes",
@@ -46,7 +46,7 @@
    "category": "Crypto",
    "desk": "hilibrand",
    "desk_note": "Larry Hilibrand, the arbitrageur who pressed the firm's one measured edge hardest",
-   "max_members": 6
+   "max_members": 8
   },
   {
    "id": "kalshi-crypto-15m",
@@ -92,7 +92,7 @@
    "category": "Crypto",
    "desk": "huang",
    "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm",
-   "max_members": 6
+   "max_members": 8
   },
   {
    "id": "kalshi-weather",
@@ -170,7 +170,8 @@
    ],
    "category": "Climate and Weather",
    "desk": "mullins",
-   "desk_note": "David Mullins, Vice Chairman of the Federal Reserve before he joined"
+   "desk_note": "David Mullins, Vice Chairman of the Federal Reserve before he joined",
+   "max_members": 10
   },
   {
    "id": "kalshi-sports",
@@ -180,7 +181,7 @@
    ],
    "title": "Sports results on Kalshi: winners, spreads and totals in every league",
    "category": "Sports",
-   "max_members": 10,
+   "max_members": 12,
    "patterns": [
     "^KX[A-Z0-9]+(GAME|MATCH|FIGHT|SPREAD|TOTAL|TEAMTOTAL|BTTS|MAP|TOTALMAPS|1H|1HSPREAD|1HTOTAL|1Q|1QSPREAD|1QTOTAL|F5|F5TOTAL|RFI|ADVANCE)$"
    ],
@@ -497,7 +498,8 @@
     "^KX(NFL|NCAAF|NBA|WNBA|MLB|NHL|EPL|LALIGA|SERIEA|MLS)[A-Z0-9]*(TD|FIRSTTD|ANYTD|REC|RECYDS|RSHYDS|RSHATT|PASSYDS|PASSTDS|HR|KS|HIT|OUTS|GOAL|PTS|REB|AST|3PT|SOG)$"
    ],
    "desk": "hufschmid",
-   "desk_note": "Hans Hufschmid, who worked the thin and awkward corners of the book"
+   "desk_note": "Hans Hufschmid, who worked the thin and awkward corners of the book",
+   "max_members": 6
   },
   {
    "id": "kalshi-prices",
@@ -561,7 +563,8 @@
     "^KX(WTI|BRENT|NATGAS|GOLD|SILVER|EURUSD|USDJPY|GBPUSD|INX|NASDAQ100)[A-Z]?$"
    ],
    "desk": "hawkins",
-   "desk_note": "Greg Hawkins, the arbitrageur who worked the slow, published numbers"
+   "desk_note": "Greg Hawkins, the arbitrageur who worked the slow, published numbers",
+   "max_members": 8
   },
   {
    "id": "kalshi-attention",
@@ -649,7 +652,7 @@
    ],
    "desk": "rosenfeld",
    "desk_note": "Eric Rosenfeld, the relative-value man who left Harvard for Salomon's arbitrage desk",
-   "max_members": 8
+   "max_members": 12
   },
   {
    "id": "alpaca-crypto-alts",
@@ -705,7 +708,7 @@
    ],
    "desk": "haghani",
    "desk_note": "Victor Haghani, who ran the firm's book in London where the spreads were widest",
-   "max_members": 8
+   "max_members": 12
   },
   {
    "id": "alpaca-index-etfs",
@@ -751,7 +754,7 @@
    ],
    "desk": "scholes",
    "desk_note": "Myron Scholes, Nobel 1997, whose formula priced the options the equity desks live on",
-   "max_members": 8
+   "max_members": 12
   },
   {
    "id": "alpaca-megacaps",
@@ -809,7 +812,7 @@
    ],
    "desk": "mcentee",
    "desk_note": "James McEntee, the old-school bond trader who traded on feel and not on models",
-   "max_members": 8
+   "max_members": 12
   },
   {
    "id": "alpaca-options",

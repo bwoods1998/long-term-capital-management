@@ -49,7 +49,7 @@
     ],
     "max_population": [
       8,
-      64
+      128
     ],
     "min_population": [
       4,
@@ -173,7 +173,9 @@
     "fast_desks": ["alpaca-crypto-majors", "alpaca-crypto-alts", "kalshi-crypto-15m", "kalshi-crypto-strikes", "alpaca-index-etfs", "alpaca-megacaps"],
     "fast_share": 0.5,
     "prefer_horizon": "hour",
-    "max_pending_cards": 8
+    "max_pending_cards": 8,
+    "_about_sept23b": "Sept 23, 2026 (the owner's north star: a swarm that trades 24/7 and compounds). Measured 01:39-02:10Z: 4 of 8 GPT-6 Sol cards passed replay at about $0.03 a card, the best yield in the league, but the foundry never exploited what already works. The only mechanism with real-money profit (Kalshi daily favourites bought as a maker: mullins-2 and mullins-6 on weather, hawkins-19 on commodities, all live) was never offered to a desk where it had not been tried, and 12 of the 16 merged repairs failed replay, so self-improvement was fixing bugs, not finding edges. The fast route sent every fast call to the best-scored fast desk, the index-ETF desk, so the 24/7 crypto desks got no cards. Now up to transfer_share of calls take a family with an earned forward record (real money first) to the best-scored desk of its venue where it was never tried, and Merton adapts its mechanism there; the fast route rotates to the fast desk with the fewest recent cards; every packet carries the league's edge map (winning_mechanisms). Precedence: transfer, fast, exploration, else evidence; with 0.3, 0.5 and 0.2 that is about 27%, 45%, 18% and 9% of calls (the evidence route had about 36% before transfers).",
+    "transfer_share": 0.3
   },
   "consult": {
     "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits, and what it must have DONE to be allowed to. Frontier intelligence is the scarcest thing on the floor: it is the prize for trading well, never a rebate for existing. An agent that has not traded is served by Merton's own roles -- the architect who writes strategies, the toolsmith who builds what the queue asks for, the teacher who writes the lessons -- which cost it nothing and reach the whole firm.",

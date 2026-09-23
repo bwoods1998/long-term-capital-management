@@ -6,8 +6,14 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+from league.constitution import CONSTITUTION
+from league.economy import load_game
 from league.frontier import Answer
-from league.hypotheses import Foundry, card_id
+from league.house import House, Settings
+from league.hypotheses import DEFAULTS, SEED_WHY, Foundry, card_id
+from league.sandbox import LocalSandbox
+from league.seeds import load as seed_code
+from league.tests.fakes import FakeBroker
 from league.tests.test_house import IDLE, HouseCase
 
 D = Decimal
@@ -32,6 +38,47 @@ def decide(ctx):
 '''
 
 UNSAFE = "import os\n\ndef decide(ctx):\n    return {}\n"
+
+#: The same program on the index-ETF, megacaps and crypto-alts desks.
+ETF = PASSER.replace('"symbols": ["BTC/USD"]', '"symbols": ["SPY"]').replace("sawtooth", "etf")
+MEGACAP = PASSER.replace('"symbols": ["BTC/USD"]', '"symbols": ["AAPL"]').replace("sawtooth", "megacap")
+
+#: A daily Kalshi program on the weather desk, and the same on the sports and prices desks. It never
+#: trades: the transfer tests write its forward record by hand.
+WEATHER = '''
+NEEDS = {"venue": "kalshi", "horizon": "day", "style": "favorites", "series": ["KXHIGHNY"], "max_hours_to_close": 30,
+         "wake_minutes": 60}
+PARAMS = {}
+
+def decide(ctx):
+    return {"intents": [], "thought": "rest a bid on the favourite"}
+'''
+SPORTS = WEATHER.replace('"KXHIGHNY"', '"KXNFLGAME"')
+PRICES = WEATHER.replace('"KXHIGHNY"', '"KXAAAGASW"')
+
+
+def reference_routes(n, shares, window=10):
+    """The route order `Foundry.allocate` documents, when every route always has a desk to offer:
+    transfer, fast, exploration, each within its share of the last `window` calls, else evidence."""
+    routes = []
+    for _ in range(n):
+        recent = routes[-window:]
+        routes.append(next((route for route in ("transfer", "fast", "exploration")
+                            if shares.get(route) and (recent.count(route) + 1) / (len(recent) + 1) <= shares[route] + 1e-9), "evidence"))
+    return routes
+
+
+def strings(value):
+    """Every string inside a packet, keys included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from strings(item)
 
 
 def candidate(name, mechanism, code):
@@ -213,6 +260,10 @@ class Allocation(FoundryCase):
         self.assertFalse(scores["alpaca-options"].eligible)
 
     def test_the_exploration_share_holds(self):
+        # The exploration route alone. (Until Sept 23, 2026 this also passed with game.json's fast
+        # share on, because its best desk is a fast desk and the fast route then stopped altogether;
+        # it now rotates over the other fast desks: see FastEvidence and Transfer.)
+        self.house.game["hypotheses"] = {**self.house.game.get("hypotheses", {}), "fast_share": 0, "transfer_share": 0}
         self.trial("nobody", "x", passed=False)
         routes = []
         for n in range(20):
@@ -259,6 +310,50 @@ class FastEvidence(FoundryCase):
         self.assertEqual({d for d, r in routes if r == "fast"}, {self.DESK})
         self.assertEqual({d for d, r in routes if r == "evidence"}, {"alpaca-index-etfs"})
 
+    def test_the_fast_route_rotates_so_every_fast_desk_is_written_for(self):
+        """Sept 23, 2026: the fast route always took the best-scored fast desk (the index-ETF desk),
+        and the 24/7 crypto desks, whose pass rates are near zero, never got a card."""
+        etfs = [self.house.spawn("scholes", "etf-family", ETF, reason="test") for _ in range(4)]
+        for n, agent in enumerate(etfs * 3):
+            self.trial(agent.id, "etf-family", passed=n % 2 == 0)  # the index-ETF desk scores best: the evidence route's
+        megacap = self.house.spawn("mcentee", "megacap-family", MEGACAP, reason="test")
+        self.trial(megacap.id, "megacap-family", passed=True)      # megacaps scores above both crypto desks
+        for n in range(2):                                         # and the majors desk already has two cards
+            card = {"id": f"old{n}", "niche": self.DESK, "line_id": f"rosenfeld-ho{n}", "model": "m", "code_sha256": "x"}
+            self.house.ledger.append("hypothesis.card", {**card, "mechanism": f"old {n}", "created_epoch": self.clock()}, id=f"hypothesis.card:old{n}")
+            self.foundry._outcome(card, "failed", "0 closed trades, 20 needed")
+        fast = [self.DESK, "alpaca-crypto-alts", "alpaca-megacaps"]
+        self.settings(fast_desks=fast, fast_share=1.0, exploration_share=0, transfer_share=0)
+        picks = []
+        for _ in range(7):
+            desk, route, reason = self.foundry.allocate(fresh=True)
+            self.assertEqual(route, "fast")
+            picks.append(desk.niche)
+            self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0",
+                                                     "allocation": {"desk": desk.niche, "route": route}})
+        # The fewest recent cards first, the better score between equals; a call that wrote no card counts as one.
+        self.assertEqual(picks, ["alpaca-megacaps", "alpaca-crypto-alts", "alpaca-megacaps", "alpaca-crypto-alts",
+                                 "alpaca-megacaps", "alpaca-crypto-alts", self.DESK])
+        self.assertEqual({desk: self.foundry._recent_cards()[desk] for desk in fast}, {desk: 3 for desk in fast})
+        self.assertIn("fewest recent cards", reason)
+
+    def test_the_fast_route_still_rotates_when_the_best_desk_is_a_fast_desk(self):
+        """Until Sept 23, 2026 the fast route stopped altogether whenever the evidence route's desk was
+        itself a fast desk; the other fast desks then got nothing. Now it rotates over the rest."""
+        etfs = [self.house.spawn("scholes", "etf-family", ETF, reason="test") for _ in range(4)]
+        for n, agent in enumerate(etfs * 3):
+            self.trial(agent.id, "etf-family", passed=n % 2 == 0)
+        self.settings(fast_desks=["alpaca-index-etfs", self.DESK], fast_share=0.5, exploration_share=0, transfer_share=0)
+        routes = []
+        for _ in range(10):
+            desk, route, _ = self.foundry.allocate(fresh=True)
+            routes.append((desk.niche, route))
+            self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0",
+                                                     "allocation": {"desk": desk.niche, "route": route}})
+        self.assertEqual({d for d, r in routes if r == "fast"}, {self.DESK})
+        self.assertEqual({d for d, r in routes if r == "evidence"}, {"alpaca-index-etfs"})
+        self.assertEqual(sum(1 for _, r in routes if r == "fast"), 5)
+
     def test_cards_may_queue_for_replay_and_another_role_does_not_hold_the_foundry(self):
         import threading
 
@@ -281,11 +376,213 @@ class FastEvidence(FoundryCase):
         self.earn(winner)
         packet = self.foundry.packet(self.DESK)
         self.assertEqual(packet["horizon_guidance"]["prefer"], "hour")
-        self.assertIn("4 active hourly blocks", packet["horizon_guidance"]["paper_screen"]["hour"])
+        hours = CONSTITUTION["ladder"]["paper"]["min_active_blocks"]  # 3 since swing and bunt (Sept 23, 2026)
+        self.assertIn(f"{hours} active hourly blocks", packet["horizon_guidance"]["paper_screen"]["hour"])
         rows = packet["forward_on_this_desk"]
         self.assertEqual((rows[0]["members"], rows[0]["on_paper"], rows[0]["earning"]), (1, 1, 1))
         self.assertIn("quarter of the taker", packet["fees"]["kalshi_maker"])
         self.assertEqual(packet["fees"]["alpaca_crypto"]["round_trip"]["taker_taker"], 0.005)
+
+
+class Transfer(FoundryCase):
+    """Sept 23, 2026: the foundry never exploited what already works. The only mechanism with
+    real-money profit (Kalshi daily favourites bought as a maker, on weather and commodities) was
+    never offered to a desk where it had not been tried, and the packet showed only this desk's
+    forward results. Up to `transfer_share` of calls now port a proven mechanism, in words."""
+
+    def new_house(self, **kw):
+        # A Kalshi paper book as well, so that a Kalshi family can earn a forward record.
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        kw.setdefault("game", game)
+        return House(
+            Path(self.dir.name) / "house", brokers={"alpaca-paper": self.broker, "alpaca": FakeBroker("alpaca", cash="500"),
+                                                    "kalshi-shadow": FakeBroker("kalshi-shadow", family="kalshi")},
+            sandbox=LocalSandbox(Path(self.dir.name) / "boxes"), alpaca_data=self.data, clock=self.clock,
+            settings=Settings(mark_every_seconds=0, research=False), **kw,
+        )
+
+    def settings(self, **kw):
+        self.house.game["hypotheses"] = {**self.house.game.get("hypotheses", {}), **kw}
+        self.foundry = Foundry(self.house, self.frontier)
+        self.house.hypotheses = self.foundry
+
+    def member(self, name, family, code, *, specialty=None, rung=1, why=None):
+        agent = self.house.spawn(name, family, code, reason=why or f"{family}: a program of the transfer tests", specialty=specialty)
+        self.house.evaluator.seat(agent.id, 1, "test")
+        if rung >= 2:
+            self.house.evaluator.promote(agent.id, 2, "test: real money")
+        self.house._state["tried"][agent.id] = agent.code_sha256
+        return agent
+
+    def earn_on(self, agent, book, growth=0.004, n=3):
+        for i in range(n):
+            self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": growth, "active": True,
+                                                    "book": book, "block": f"b{i}"}, agent=agent.id)
+
+    def routes(self, n):
+        """n allocations, each recorded as a call that ported nothing (so no pair is ever tried)."""
+        out = []
+        for _ in range(n):
+            desk, route, _ = self.foundry.allocate(fresh=True)
+            out.append((desk.niche, route))
+            self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0",
+                                                     "allocation": {"desk": desk.niche, "route": route}})
+        return out
+
+    def test_an_earning_family_goes_to_every_untried_desk_of_its_venue_and_never_where_it_has_lived(self):
+        self.settings(transfer_share=1.0, fast_share=0, exploration_share=0)
+        weather = self.member("mullins", "weather-favorites", WEATHER, specialty="kalshi-weather",
+                              why="resting maker bids on daily weather favourites above 90 cents")
+        self.earn_on(weather, "kalshi-shadow", growth=0.01)
+        # The family has lived on two other Kalshi desks: it died on sports, and it sits on prices with no record.
+        gone = self.member("meriwether", "weather-favorites", SPORTS, specialty="kalshi-sports")
+        self.house.kill(gone, "evidence", "test: not profitable on paper")
+        self.member("hawkins", "weather-favorites", PRICES, specialty="kalshi-prices")
+        kalshi = {n.id for n in self.house.niches.values() if n.venue == "kalshi"}
+        order = [d.niche for d in self.foundry.desk_scores() if d.eligible and d.niche in kalshi]
+        picks = []
+        for _ in range(len(kalshi)):
+            desk, route, reason = self.foundry.allocate(fresh=True)
+            if route != "transfer":
+                break
+            self.assertIn("weather-favorites earns forward on kalshi-weather", reason)
+            picks.append(desk.niche)
+            out = self.foundry.run(desk.niche, route, reason)  # the call itself marks the desk as tried
+            self.house.wait()
+            self.assertTrue(out["cards"])
+            self.assertTrue(all(self.foundry.cards()[c]["transfer"] == {"family": "weather-favorites", "desk": "kalshi-weather"}
+                                for c in out["cards"]))
+        untried = kalshi - {"kalshi-weather", "kalshi-sports", "kalshi-prices"}
+        self.assertEqual(picks, [n for n in order if n in untried], "each untried Kalshi desk once, the best-scored first")
+        self.assertEqual(route, "evidence", "with every Kalshi desk tried, the call goes on to the next route")
+        allocation = self.house.ledger.last("merton.pass").payload["allocation"]
+        self.assertEqual((allocation["route"], allocation["transfer"]), ("transfer", {"family": "weather-favorites", "desk": "kalshi-weather"}))
+
+    def test_real_money_is_ported_first_and_each_venue_keeps_to_its_own_desks(self):
+        self.settings(transfer_share=1.0, fast_share=0, exploration_share=0)
+        etf = self.member("scholes", "etf-family", ETF)
+        self.earn_on(etf, "alpaca-paper", n=12)  # more evidence, on paper
+        weather = self.member("mullins", "weather-favorites", WEATHER, specialty="kalshi-weather", rung=2)
+        self.earn_on(weather, "kalshi-shadow", growth=0.01, n=2)  # less, on real money (the shadow book stands in here)
+        rows = self.foundry.forward_families()
+        self.assertEqual([(r["family"], r["desk"], r["real_money"], r["record_on"]) for r in rows],
+                         [("weather-favorites", "kalshi-weather", True, "real money"), ("etf-family", "alpaca-index-etfs", False, "paper")])
+        self.assertAlmostEqual(rows[0]["growth_per_block"], 0.01)  # per day block of a daily program
+        desk, route, _ = self.foundry.allocate(fresh=True)
+        self.assertEqual((route, self.house.niches[desk.niche].venue), ("transfer", "kalshi"))
+        # Once the Kalshi record has been offered to every Kalshi desk, the Alpaca one goes to Alpaca desks only.
+        for niche in self.house.niches.values():
+            if niche.venue == "kalshi":
+                self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0", "cards": [], "allocation": {
+                    "desk": niche.id, "route": "transfer", "transfer": {"family": "weather-favorites", "desk": "kalshi-weather"}}})
+        desk, route, reason = self.foundry.allocate(fresh=True)
+        self.assertEqual((route, self.house.niches[desk.niche].venue), ("transfer", "alpaca"))
+        self.assertNotEqual(desk.niche, "alpaca-index-etfs")
+        self.assertIn("etf-family", reason)
+        self.assertEqual(self.foundry.transfer_for(desk.niche)["family"], "etf-family")
+        # A call that failed before Merton answered tried nothing.
+        self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0", "error": True, "allocation": {
+            "desk": desk.niche, "route": "transfer", "transfer": {"family": "etf-family", "desk": "alpaca-index-etfs"}}})
+        self.assertNotIn(desk.niche, self.foundry._tried()["etf-family"])
+
+    def test_the_packet_ports_a_mechanism_and_maps_the_league_in_words_never_code(self):
+        self.rules.update(newcomer_seconds=600, max_population=20)
+        founder = self.house.found(["crypto-reversion"])[0]  # a founding seed: its words are the seed's `why`
+        self.earn(founder, n=5)
+        self.call()                                           # the sawtooth card passes replay on the majors desk
+        self.clock.advance(601)
+        child = self.house._refill(self.rules)                # and is born from its card
+        self.earn(child)
+        doomed = self.member("mcentee", "megacap-drift", MEGACAP, why="buy megacaps that gap down at the open")
+        self.house.kill(doomed, "evidence", "not profitable on paper after 15 active blocks (-3.0%)")
+        self.settings(transfer_share=1.0, fast_share=0, exploration_share=0)
+        desk, route, reason = self.foundry.allocate(fresh=True)
+        self.assertEqual(route, "transfer")
+        self.assertNotEqual(desk.niche, self.DESK)
+        self.foundry.run(desk.niche, route, reason)
+        self.house.wait()
+        asked = self.frontier.asked[-1]
+        shown = asked["user"]
+        ported = shown["transfer"]
+        self.assertEqual((ported["family"], ported["from_desk"], ported["mechanism"], ported["mechanism_from"]),
+                         ("crypto-reversion", self.DESK, SEED_WHY["crypto-reversion"], "founding seed crypto-reversion"))
+        self.assertEqual((ported["forward_record"]["observations"], ported["forward_record"]["real_money"]), (5, False))
+        self.assertEqual(ported["earning_agents"], [founder.id])
+        edge = shown["winning_mechanisms"]
+        words = {row["family"]: row["mechanism"] for row in edge["earning"]}
+        card = next(c for c in self.foundry.cards().values() if c["name"] == "sawtooth")
+        self.assertEqual(words, {"crypto-reversion": SEED_WHY["crypto-reversion"], child.family: card["mechanism"]})
+        self.assertEqual([row["family"] for row in edge["earning"]], ["crypto-reversion", child.family])  # more evidence first
+        self.assertEqual(len(edge["failed_forward"]), 1)
+        self.assertIn("megacap-drift on alpaca-megacaps: 1 died on the forward evidence on paper", edge["failed_forward"][0])
+        self.assertIn("gap down at the open", edge["failed_forward"][0])
+        # Words, never code: no line of any agent's program, or of the founding seed, is in the packet.
+        text = "\n".join(strings(shown))
+        programs = [a.code for a in self.house.registry.agents.values()] + [seed_code("crypto-reversion")]
+        for line in {line.strip() for code in programs for line in code.splitlines()}:
+            if len(line) > 24:
+                self.assertNotIn(line, text)
+        self.assertNotIn("def decide", text)
+        brief = " ".join(asked["system"].split())
+        self.assertIn("Write at least half of the batch as adaptations of `transfer.mechanism`", brief)
+        self.assertIn("are binary options on spot", brief)
+        # The founder ideas are the seeds' own words (niches.json founders carry none).
+        self.assertEqual(self.foundry.packet(self.DESK)["founder_ideas"]["crypto-reversion"], SEED_WHY["crypto-reversion"])
+        # Only a transfer call carries a transfer section; the edge map is in every packet.
+        plain = self.foundry.packet(desk.niche)
+        self.assertNotIn("transfer", plain)
+        self.assertEqual(plain["winning_mechanisms"]["earning"], edge["earning"])
+        self.assertIn(desk.niche, self.foundry._tried()["crypto-reversion"])
+
+    def test_the_shares_hold_over_the_window_in_their_order(self):
+        etf = self.member("scholes", "etf-family", ETF)
+        self.earn_on(etf, "alpaca-paper")  # a proven family, so that a transfer always has somewhere to go
+        fast = [self.DESK, "alpaca-crypto-alts"]
+        self.settings(transfer_share=0.3, fast_share=0.5, exploration_share=0.2, fast_desks=fast)
+        calls = self.routes(40)
+        routes = [route for _, route in calls]
+        shares = {"transfer": 0.3, "fast": 0.5, "exploration": 0.2}
+        self.assertEqual(routes, reference_routes(40, shares))
+        # A share counts against the calls so far plus this one: transfer is first due at the fourth call.
+        self.assertEqual(routes[:4], ["evidence", "fast", "evidence", "transfer"])
+        for start in range(len(routes) - 9):
+            window = routes[start:start + 10]
+            for route, share in shares.items():
+                self.assertLessEqual(window.count(route), round(share * 10), (start, route, window))
+        self.assertTrue({"transfer", "fast", "exploration", "evidence"} <= set(routes))
+        self.assertTrue(all(self.house.niches[d].venue == "alpaca" and d != "alpaca-index-etfs" for d, r in calls if r == "transfer"))
+        self.assertLessEqual({d for d, r in calls if r == "fast"}, set(fast))
+        self.assertEqual({d for d, r in calls if r == "evidence"}, {"alpaca-index-etfs"})
+
+    def test_shares_adding_up_to_more_than_the_window_are_scaled_down(self):
+        self.settings(transfer_share=0.6, fast_share=0.6, exploration_share=0.3)
+        self.assertEqual({k: round(v, 9) for k, v in self.foundry.shares().items()}, {"transfer": 0.4, "fast": 0.4, "exploration": 0.2})
+        self.assertEqual(load_game()["hypotheses"]["transfer_share"], 0.3)
+        self.settings(transfer_share=0.3, fast_share=0.5, exploration_share=0.2)
+        self.assertEqual(self.foundry.shares(), {"transfer": 0.3, "fast": 0.5, "exploration": 0.2})
+
+    def test_with_no_transfer_share_nothing_is_ported_and_the_routes_are_as_before(self):
+        self.assertEqual(DEFAULTS["transfer_share"], 0)
+        etf = self.member("scholes", "etf-family", ETF)
+        self.earn_on(etf, "alpaca-paper")
+        # An older game file, without the dial.
+        older = {k: v for k, v in self.house.game["hypotheses"].items() if k not in ("transfer_share", "_about_sept23b")}
+        self.house.game["hypotheses"] = {**older, "fast_desks": [self.DESK, "alpaca-crypto-alts"]}
+        self.foundry = Foundry(self.house, self.frontier)
+        self.house.hypotheses = self.foundry
+        self.assertEqual(self.foundry.shares()["transfer"], 0)
+        routes = [route for _, route in self.routes(20)]
+        self.assertEqual(routes, reference_routes(20, {"fast": 0.5, "exploration": 0.2}))
+        out = self.foundry.run("alpaca-crypto-alts", "fast", "test")
+        self.house.wait()
+        shown = self.frontier.asked[-1]["user"]
+        self.assertNotIn("transfer", shown)
+        self.assertEqual([row["family"] for row in shown["winning_mechanisms"]["earning"]], ["etf-family"])
+        self.assertNotIn("transfer", self.house.ledger.last("merton.pass").payload["allocation"])
+        self.assertTrue(out["cards"])
+        self.assertTrue(all(self.foundry.cards()[c]["transfer"] is None for c in out["cards"]))
 
 
 class Retirement(FoundryCase):

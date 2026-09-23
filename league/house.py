@@ -193,7 +193,7 @@ class House:
         self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.options_history: Any = None  # set by the service: listed-option history (`league/options_history.py`)
-        self.feeds: Any = None  # set by the service: live sports scoreboards and perp funding, recorded (`league/feeds.py`)
+        self.feeds: Any = None  # set by the service: scoreboards, perp funding, DVOL and settled funding (`league/feeds.py`)
         self._feeds_waiting: dict[str, float] = {}  # agent -> when it was last said its replay waits for recorded feeds
         self._feed_requests_at = 0.0  # when the tool requests the feeds answer were last looked at
         self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
@@ -383,6 +383,74 @@ class House:
             self._state["replay_rules"] = key
         if retried:
             self.alert("info", f"the replay rules changed: {len(retried)} agent(s) on rung 0 get one fresh replay under them")
+        self._revive_near_misses()
+
+    #: How an agent that never left rung 0 may have died without its code being judged unfit.
+    REVIVABLE_CAUSES = ("never qualified", "displaced", "stuck", "credits")
+
+    def _revive_near_misses(self, *, within_seconds: float = 2 * 86400, limit: int = 12) -> list[str]:
+        """When the replay gate loosens its out-of-sample floor, bring back, once, the code of agents
+        that died on rung 0 in the last two days after a replay whose ONLY failure was out-of-sample
+        growth the new floor admits: a newcomer on the same line, with the same parameters, where the
+        league and its desk have seats (never more than half the league's free seats). It is on rung 0
+        and replayed like any newcomer, so today's tape decides, not the old verdict; its lineage is
+        kept, holdout budget and all.
+
+        Swing and bunt, Sept 23, 2026: 38 of 148 replays from 21:00Z Sept 22 to 03:20Z failed by less
+        than the new floor allows. Most were hourly Alpaca crypto -- the only strategies that trade the
+        Alpaca account around the clock, where one agent of thirty was a crypto agent -- and their
+        agents had died on rung 0 before the rules moved."""
+        floor = float(CONSTITUTION["ladder"]["replay"].get("min_oos_growth", 0.0))
+        if floor >= 0:
+            return []
+        rules = self.game["economy"]
+        living = self.registry.living()
+        budget = min(limit, (int(rules["max_population"]) - len(living)) // 2)
+        if budget <= 0:
+            return []
+        now = self.clock()
+        recent = [a for a in reversed(self.registry.dead())  # the most recent deaths first
+                  if a.cause in self.REVIVABLE_CAUSES and a.died_at and now - _epoch(a.died_at) <= within_seconds]
+        if not recent:
+            return []
+        wanted = {a.id for a in recent}
+        last_trial: dict[str, Mapping[str, Any]] = {}
+        for entry in self.ledger.iter(kinds="eval.trial"):
+            if entry.agent in wanted:
+                last_trial[entry.agent] = entry.payload
+        # A strategy is its code AND its parameters: a line's mutations share code and differ in params.
+        same = lambda a: (a.code_sha256, json.dumps(a.params or {}, sort_keys=True))  # noqa: E731
+        running = {same(a) for a in living}
+        revived: list[str] = []
+        for agent in recent:
+            if len(revived) >= budget:
+                break
+            trial = last_trial.get(agent.id) or {}
+            reasons, oos = list(trial.get("reasons") or []), trial.get("oos_mean_log_growth")
+            if self.evaluator.max_rung(agent.id) > 0 or not reasons or oos is None \
+                    or not all(str(r).startswith("out-of-sample growth is not above") for r in reasons):
+                continue
+            # Exactly zero is a program that sat the out-of-sample stretch out, which the floor does not admit.
+            if not floor < float(oos) < 0 or same(agent) in running:
+                continue
+            niche = self.niches.get(agent.specialty or "")
+            if niche is None or niche.dormant or self.members(niche.id) >= niche.max_members:
+                continue
+            running.add(same(agent))
+            try:
+                child = self.spawn(agent.line or agent.name, agent.family, agent.code, parent=agent.id, params=agent.params,
+                                   endowment=rules["endowment_usd"], specialty=niche.id,
+                                   reason=(f"revived under the loosened replay gate: {agent.id} died on rung 0 ({agent.cause}) after a "
+                                           f"replay that failed only on out-of-sample growth ({float(oos):+.4%} a block), which the "
+                                           f"floor of {floor:+.3%} a block now admits; it is replayed afresh on today's tape"))
+            except ValueError as exc:
+                self.alert("info", f"{agent.id}: not revived under the loosened replay gate ({str(exc)[:160]})")
+                continue
+            revived.append(child.id)
+        if revived:
+            self.alert("info", f"the replay gate loosened: {len(revived)} strateg{'y' if len(revived) == 1 else 'ies'} that died on "
+                               f"rung 0 by less than the new out-of-sample floor were born again ({', '.join(revived)})")
+        return revived
 
     def _save_state(self) -> None:
         # The write under the lock too: the audit job saves from its own thread (it persists the
@@ -1325,8 +1393,9 @@ class House:
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
         wanted = self._feeds_wanted(needs)
-        # The history store holds no option chains, and no recorded live feed reaches back into its
-        # development window: a strategy that reads either is replayed on the live tape.
+        # The history store holds no option chains, and no feed reaches back into its development
+        # window (the backfilled vol and funding cover the live window): a strategy that reads either
+        # is replayed on the live tape.
         if venue == "alpaca" and self.settings.deep_replay and not option and not wanted:
             deep = self._deep_tape(needs)
             if deep is not None:
@@ -1427,16 +1496,22 @@ class House:
         return feeds_module.requested(needs.get("feeds")) if isinstance(needs.get("feeds"), Mapping) else {}
 
     def _feeds_shortfall(self, needs: Mapping[str, Any], wanted: Mapping[str, Sequence[str]], coverage: Mapping[str, Any]) -> str:
-        """Why the recorded feeds cannot carry a replay of these NEEDS; '' when they can. They are
-        recorded live and never backfilled, so every declared key must cover the replay gate's
-        `min_blocks` blocks of the strategy's horizon inside the window (20 on Sept 22, 2026: twenty
-        hours of recording for an hourly strategy, twenty days for a daily one) before a replay can
-        judge a strategy that reads them."""
+        """Why the recorded feeds cannot carry a replay of these NEEDS; '' when they can. Every
+        declared key must cover the replay gate's `min_blocks` blocks of the strategy's horizon inside
+        the window (20 on Sept 22, 2026: twenty hours for an hourly strategy, twenty days for a daily
+        one) before a replay can judge a strategy that reads it. `sports` and `perps` are recorded
+        live and never backfilled, so that is twenty blocks of recording; `vol` and `funding` are
+        point-in-time history backfilled over the window (Sept 23, 2026), so they cover it as soon as
+        the backfill is in -- and a key still waiting for its first page is a wait, not missing data."""
         horizon = "day" if str(needs.get("horizon") or "") == "day" else "hour"
         block = 86400.0 if horizon == "day" else 3600.0
         need = int(CONSTITUTION["ladder"]["replay"]["min_blocks"])
         rows = [(feed, key, ((coverage or {}).get(feed) or {}).get(key) or {}) for feed, keys in wanted.items() for key in keys]
         missing = [f"{feed} {key}" for feed, key, row in rows if not row.get("first_ok")]
+        filling = [f"{feed} {key}" for feed, key, row in rows if not row.get("first_ok") and (row.get("backfill") or {}).get("pending")]
+        if missing and filling == missing:
+            return (f"{feeds_module.BACKFILLING}: " + ", ".join(filling) + " -- the House is fetching their point-in-time history "
+                    "(league/feeds.py), and the replay runs once it is in. A live wake is handed ctx['feeds'] as soon as a row is.")
         if missing:
             polled = {feed: (self.feeds.keys(feed) if self.feeds is not None else []) for feed in feeds_module.FEEDS}
             return ("unsupported input: feeds not recorded: " + ", ".join(missing) + "; the House records "
@@ -1689,10 +1764,11 @@ class House:
         try:
             result, tape_id = self._run_replay(agent, agent.code, agent.needs, agent.params)
         except Exception as exc:  # noqa: BLE001 - no tape or no box: try again next wake
-            if str(exc).startswith(feeds_module.WAITING):
-                # Recorded feeds that do not span the replay gate yet are a wait, not a defect: said once
-                # a day an agent, and never as "replay could not run", which the foundry counts against
-                # the line as missing data (`hypotheses._retire_unrunnable`: five such hours retire it).
+            if str(exc).startswith((feeds_module.WAITING, feeds_module.BACKFILLING)):
+                # Recorded feeds that do not span the replay gate yet, or a backfill not yet in, are a
+                # wait, not a defect: said once a day an agent, and never as "replay could not run",
+                # which the foundry counts against the line as missing data
+                # (`hypotheses._retire_unrunnable`: five such hours retire it).
                 if self.clock() - self._feeds_waiting.get(agent.id, float("-inf")) >= 86400:
                     self._feeds_waiting[agent.id] = self.clock()
                     self.alert("info", f"{agent.id}: its replay waits for recorded feeds ({str(exc)[:200]})")
@@ -3063,6 +3139,18 @@ class House:
             shipped = {'sports': 'live sports score feed', 'perps': 'perpetual funding/open-interest feed'}
             gone = {text for feed, text in shipped.items() if (described.get(feed) or {}).get('recording_since')}
             result['observations']['not_supplied'] = [x for x in result['observations'].get('not_supplied') or [] if x not in gone]
+            # The two backfilled histories (Sept 23, 2026), said plainly: a strategy that reads them can
+            # be replayed now, which no live-recorded feed can offer on its first day.
+            history = {feed: {'backfilled_since': (described.get(feed) or {}).get('backfilled_since'),
+                              'replayable_now': (described.get(feed) or {}).get('replayable_now')}
+                       for feed in feeds_module.HISTORY_FEEDS if (described.get(feed) or {}).get('recording')}
+            if history:
+                result['observations']['replayable_history'] = {
+                    **history,
+                    'note': 'vol (Deribit DVOL, BTC and ETH, hourly candles stamped at their close) and funding (OKX settled '
+                            'funding per coin, stamped at settlement, with avg_24h, avg_7d, zscore_30d) are point-in-time '
+                            'history backfilled over the replay window: declare NEEDS["feeds"] = {"vol": [...], "funding": [...]} '
+                            'and a replay can judge the strategy now. Row shapes: observations.feeds and the contract.'}
         return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -3091,7 +3179,9 @@ class House:
                 # because the store has not fetched these inputs yet (not a fact about the market).
                 history = ({'tape': 'development window before the sealed holdout', **dict(tape.get('source') or {})}
                            if query.startswith('deep:') else {'tape': 'live recent tape',
-                                                             'why': 'recorded live feeds reach back only to when recording began' if wanted
+                                                             'why': 'no feed reaches back into the history store\'s development window '
+                                                                    '(sports and perps are recorded live; vol and funding are backfilled '
+                                                                    'over the live replay window)' if wanted
                                                              else 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
             feeds = None
             if wanted:
@@ -3100,8 +3190,12 @@ class House:
                     'unsupported input: this House records no live feeds'
                 feeds = {'requested': wanted, 'coverage': tape.get('feeds_coverage'), 'replay_ready': not short,
                          **({'blocked_by': short} if short else {}),
-                         'note': 'Rows are recorded live with their receive time and replayed point in time; nothing before recording '
-                                 'began exists. A live wake is handed ctx["feeds"] whether or not a replay may use them yet.'}
+                         'note': 'Every row is replayed point in time by its t. sports and perps rows are recorded live with their '
+                                 'receive time, and nothing before recording began exists. vol and funding rows are point-in-time '
+                                 'history, stamped when each value became final (a DVOL candle at its close, a funding rate at its '
+                                 'settlement) and backfilled over the replay window (coverage.<feed>.<key>.backfill says from where '
+                                 'and since when), so they are replayable as soon as the backfill is in. A live wake is handed '
+                                 'ctx["feeds"] whether or not a replay may use them yet.'}
             return {'query': query, **tape_coverage(tape), 'effective_needs': effective, **({'history': history} if history else {}),
                     **({'feeds': feeds} if feeds else {}),
                     'proposed_inputs': needs is not None,

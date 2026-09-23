@@ -1,10 +1,11 @@
 """Rung 3 sizing, and the standing capital recommendation for the owner.
 
 **Sizing.** An agent on rung 3 has real fills behind a lower confidence bound on its growth. Its
-stake is a quarter of Kelly on that LOWER bound, never on the point estimate: with block returns
-of mean m and variance v on its present stake S, full Kelly would scale the stake by m / v; the
-House uses 0.25 x m_lower / v, where m_lower is the one-sided lower bound the ladder already
-computed. The result is clamped: never below the micro stake, never above a fixed share of the
+stake is `rungs.3.kelly_fraction` of Kelly on that LOWER bound, never on the point estimate: with
+block returns of mean m and variance v on its present stake S, full Kelly would scale the stake by
+m / v; the House uses fraction x m_lower / v, where m_lower is the one-sided lower bound the ladder
+already computed. Since the owner's swing-and-bunt revision (Sept 23, 2026) the fraction is 1: full
+Kelly on the lower bound, so the size of the swing follows the strength of the evidence. The result is clamped: never below the micro stake, never above a fixed share of the
 venue's cash, and every order still meets the gateway's $75 cap. An agent whose lower bound is at
 or below zero is sized back to the micro stake, and the drift monitor may send it down a rung.
 
@@ -36,14 +37,17 @@ def kelly_stake(growth: list[float], present_stake: Decimal, venue_cash: Decimal
     rules = CONSTITUTION["rungs"]["3"]
     floor = Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"])
     ceiling = (venue_cash * Decimal(str(rules["max_share_of_venue"]))).quantize(CENT, rounding=ROUND_DOWN)
-    bounds = stats.mean_bounds(growth, alpha if alpha is not None else float(CONSTITUTION["ladder"]["alpha"]))
+    ladder = CONSTITUTION["ladder"]
+    bounds = stats.mean_bounds(growth, alpha if alpha is not None else float(ladder.get("promotion_alpha", ladder["alpha"])))
     numbers: dict[str, Any] = {"blocks": len(growth), "floor_usd": str(floor), "ceiling_usd": str(ceiling)}
     if bounds is None or bounds["sd"] <= 0:
         return floor, {**numbers, "reason": "no bounded record yet"}
-    lcb, basis = bounds["lcb"], "a quarter of Kelly on the lower bound"
+    share = float(rules["kelly_fraction"])
+    label = "full Kelly" if share == 1 else f"{share:g} of Kelly"
+    lcb, basis = bounds["lcb"], f"{label} on the lower bound"
     if lcb <= 0 and family_lcb is not None and family_lcb > 0 and bounds["mean"] > 0:
-        lcb, basis = min(family_lcb, bounds["mean"]), "a quarter of Kelly on its family's lower bound"
-    fraction = stats.quarter_kelly(lcb, bounds["sd"] ** 2, fraction=float(rules["kelly_fraction"]), cap=1e9)
+        lcb, basis = min(family_lcb, bounds["mean"]), f"{label} on its family's lower bound"
+    fraction = stats.quarter_kelly(lcb, bounds["sd"] ** 2, fraction=share, cap=1e9)
     numbers.update(mean=bounds["mean"], lcb=bounds["lcb"], sized_on=lcb, variance=bounds["sd"] ** 2, scale=fraction)
     if fraction <= 0:
         return floor, {**numbers, "reason": "the lower bound on its growth is not above zero"}

@@ -42,7 +42,7 @@ def validate(p):
 
 
 TURBO_RANGES = {'research_minutes': (3, 180), 'research_workers': (1, 32), 'replay_workers': (1, 12),
-                'newcomer_seconds': (60, 3600), 'max_population': (12, 64), 'luna_fraction': (0, 1),
+                'newcomer_seconds': (60, 3600), 'max_population': (12, 128), 'luna_fraction': (0, 1),
                 'endowment_usd': (0.25, 10)}
 
 

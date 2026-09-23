@@ -87,14 +87,15 @@ class DailyScreenGrace(HouseCase):
                                                 "end_equity": 99.0, "flow": 0.0, "log_growth": -0.01, "active": True},
                                  agent=agent.id)
 
-    def test_a_trading_daily_agent_keeps_its_seat_until_two_days_have_closed(self):
+    def test_a_trading_daily_agent_keeps_its_seat_until_the_screens_days_have_closed(self):
+        from league.constitution import CONSTITUTION
+        days = int(CONSTITUTION["ladder"]["paper"]["min_active_blocks_day"])  # 1 since swing and bunt (2 before)
         agent = self.daily("weather")
         self.fill(agent)
         self.clock.advance(self.grace + 1)
-        self.assertIsNone(self.house._weakest(self.rules))
-        self.closed_day(agent, "2026-09-21")
-        self.assertIsNone(self.house._weakest(self.rules))
-        self.closed_day(agent, "2026-09-22")
+        for n in range(days):
+            self.assertIsNone(self.house._weakest(self.rules))
+            self.closed_day(agent, f"2026-09-{21 + n}")
         self.assertEqual(self.house._weakest(self.rules).id, agent.id)
 
     def test_a_daily_agent_that_never_traded_keeps_the_plain_grace(self):
@@ -103,9 +104,11 @@ class DailyScreenGrace(HouseCase):
         self.assertEqual(self.house._weakest(self.rules).id, agent.id)
 
     def test_the_protection_ends_a_day_after_the_screen_could_have_looked(self):
+        from league.constitution import CONSTITUTION
+        days = int(CONSTITUTION["ladder"]["paper"]["min_active_blocks_day"])
         agent = self.daily("stuck")
         self.fill(agent)
-        self.clock.advance(3 * 86400 - 60)
+        self.clock.advance((days + 1) * 86400 - 60)
         self.assertIsNone(self.house._weakest(self.rules))
         self.clock.advance(61)
         self.assertEqual(self.house._weakest(self.rules).id, agent.id)
@@ -131,6 +134,45 @@ class ReplayRulesChange(HouseCase):
         self.house._state["tried"][young.id] = young.code_sha256
         self.house._replay_rules_changed()
         self.assertEqual(self.house._state["tried"][young.id], young.code_sha256)
+
+    def near_miss(self, name, *, oos=-0.0003, reasons=("out-of-sample growth is not above zero",), cause="never qualified"):
+        agent = self.house.spawn(name, "test-family", BUYER, reason="a test agent")
+        self.house.ledger.append("eval.trial", {"family": "test-family", "passed": False, "reasons": list(reasons),
+                                                "oos_mean_log_growth": oos, "code_sha256": agent.code_sha256}, agent=agent.id)
+        self.house.kill(agent, cause, "a test death")
+        return agent
+
+    def revive(self):
+        self.house._state["replay_rules"] = "an-older-gate"
+        self.house._replay_rules_changed()
+        return [a for a in self.house.registry.living() if a.parent]
+
+    def test_a_near_miss_that_died_on_rung_zero_is_born_again_once_under_a_looser_floor(self):
+        """Swing and bunt, Sept 23, 2026: code that failed replay only by out-of-sample growth the new
+        floor admits gets one new life on its line, and today's tape decides."""
+        from league.constitution import CONSTITUTION
+        self.assertLess(CONSTITUTION["ladder"]["replay"]["min_oos_growth"], -0.0003)
+        dead = self.near_miss("haghani")
+        born = self.revive()
+        self.assertEqual([(a.parent, a.code, a.params) for a in born], [(dead.id, dead.code, dead.params)])
+        self.assertEqual(self.house.evaluator.rung(born[0].id), 0)
+        self.assertIn("revived under the loosened replay gate", self.house.ledger.last("agent.born").payload.get("reason", ""))
+        self.house._replay_rules_changed()  # the same rules again: nobody new
+        self.assertEqual(len([a for a in self.house.registry.living() if a.parent]), 1)
+
+    def test_a_lines_mutations_are_distinct_strategies_and_a_twin_comes_back_once(self):
+        first, second = self.near_miss("haghani"), self.near_miss("haghani")
+        self.house.registry.agents[second.id].params = {"notional": 25.0}
+        twin = self.near_miss("haghani")
+        self.assertEqual(twin.params, first.params)
+        self.assertEqual(sorted(a.parent for a in self.revive()), sorted([twin.id, second.id]))
+
+    def test_only_a_pure_out_of_sample_near_miss_of_a_fair_death_comes_back(self):
+        self.near_miss("flat", oos=0.0)                       # sat the out-of-sample stretch out
+        self.near_miss("deep", oos=-0.0009)                   # below the floor
+        self.near_miss("thin", reasons=("out-of-sample growth is not above zero", "8 closed trades, 10 needed"))
+        self.near_miss("replaced", cause="superseded")        # its code was corrected
+        self.assertEqual(self.revive(), [])
 
     def test_a_new_house_has_no_old_verdict_to_revisit(self):
         from league.house import _replay_rules_key

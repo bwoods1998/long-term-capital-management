@@ -35,7 +35,17 @@ CONSTITUTION: dict[str, Any] = {
         # One-sided error rate for every promotion and every statistical death, spent across
         # looks as alpha * 6 / (pi^2 k^2) so that looking often can never buy a false pass.
         "alpha": 0.05,
-        "look_every_active_blocks": 5,
+        # Owner revision, Sept 23, 2026 ~03:10 UTC, "swing big when you see the ball, bunt when you
+        # don't" ("im okay losing every penny in my accounts ... when youre seeing the ball well you
+        # should take big swings and bunts when you arent and the agents should feel the same way
+        # from our game design"). Promotion to SCALED size (rung 2 -> 3, the agent's own bound, its
+        # completed exposures and its family's pooled record) spends this error budget; death keeps
+        # `alpha`. A false pass costs a Kelly stake sized on the same lower bound -- a weak bound buys
+        # a small stake, a strong one a big swing -- and drift, `micro_demotion` and death still send
+        # it down. Measured Sept 23 03:15 UTC: no agent had ever reached rung 3; three held rung 2.
+        "promotion_alpha": 0.20,
+        # Same revision: 5 -> 3, so a live record is read, and can swing, sooner.
+        "look_every_active_blocks": 3,
         # The screen's drawdown is read over this many most recent blocks, not the whole stay: a
         # lifetime high-water mark never falls, and one bad afternoon would otherwise bar an agent
         # from real money for the rest of its life. Death still reads the whole stay.
@@ -64,7 +74,14 @@ CONSTITUTION: dict[str, Any] = {
         # raised the bar for the next, and its agents stopped trying. Of the 786 replays from Sept 20
         # 21:20 to Sept 22 21:20, 38 agents passed at the old values (5 on Alpaca desks); 157 would
         # have at these (54 on Alpaca desks).
-        "replay": {"min_trades": 10, "min_blocks": 20, "min_deflated_sharpe": 0.0, "min_oos_blocks": 8},
+        # Owner revision, Sept 23, 2026 ~03:10 UTC ("more risk and speed and exploration and
+        # experimentation ... in the low and risk free rungs"): out-of-sample growth need only be
+        # above `min_oos_growth` a block, not above zero. Replay has been the pessimist: haghani's
+        # hourly crypto reversion made +7.4% over 70 blocks of paper while its children's replays
+        # read -0.02% to -0.05% a block. A near-breakeven idea gets a free paper seat, where
+        # forward fills judge it, and `paper_death` takes the seat back from a loser.
+        "replay": {"min_trades": 10, "min_blocks": 20, "min_deflated_sharpe": 0.0, "min_oos_blocks": 8,
+                   "min_oos_growth": -0.0005},
         # Rung 1 -> 2: a SCREEN, then the frontier audit. Not a confidence bound: a bound strict
         # enough to mean something needs hundreds of trades (the first run's one measured edge
         # could not pass it in a month), and what it would protect is a $25 stake. The loss of the
@@ -99,7 +116,13 @@ CONSTITUTION: dict[str, Any] = {
         #     `micro_demotion`, drift, the capital envelope and the bound for rung 3 are unchanged.
         # The screen also counts the block in progress (the evaluator, same date): a daily screen
         # that read only finished days passed hawkins while that morning's settlements had lost $15.50.
-        "paper": {"gate": "screen", "min_active_blocks": 4, "min_active_blocks_day": 2, "max_drawdown": 0.15,
+        # Owner revision, Sept 23, 2026 ~03:10 UTC (swing and bunt): the micro rung is where an
+        # unproven idea BUNTS -- $60 of real money, $30 a position -- so the screen in front of it
+        # asks less: 3 hourly blocks (was 4), 1 finished day (was 2; the screen needs no bound, and
+        # a day with nothing settled is still a day of marks), and a recent drawdown under 25% (was
+        # 15%: a volatile record that is up is what the owner asked to see tried). The frontier audit
+        # after promotion, `micro_demotion` and the capital envelope are unchanged.
+        "paper": {"gate": "screen", "min_active_blocks": 3, "min_active_blocks_day": 1, "max_drawdown": 0.25,
                   "settled_day": {"min_active_blocks": 1, "min_settled_trades": 3}, "audit": "after"},
         # Rung 2 -> 3: real fills at $1 to $10 a position, and the confidence bound, because
         # this is the gate that protects real size. Promotion spends its own alpha: the looks
@@ -107,7 +130,9 @@ CONSTITUTION: dict[str, Any] = {
         # Owner-requested accelerated experiment, Sept 20: remove the 30-hour minimum.
         # Five active blocks retain the conventional route. The completed-exposure route below
         # has no elapsed-time minimum; both routes share the original promotion error budget.
-        "micro": {"gate": "bound", "min_active_blocks": 5},
+        # Swing and bunt (Sept 23, 2026 ~03:10 UTC): 5 -> 3 active blocks before the first bound,
+        # which is read at `promotion_alpha`.
+        "micro": {"gate": "bound", "min_active_blocks": 3},
         # Kept at 10: at 5 the qualifying record was too short a reference for drift, and a fresh
         # promotion was demoted as "decayed" within minutes in the ladder's own integration test.
         "completed_exposures": {"min_episodes": 10, "look_every_episodes": 5, "promotion_alpha_share": 0.5},
@@ -116,9 +141,15 @@ CONSTITUTION: dict[str, Any] = {
         # positive but not yet decisive may be scaled on its family's pooled real-money record:
         # one series, the mean growth of the family's rung-2 agents block by block, tested at its
         # own alpha with its own looks.
-        "family": {"alpha": 0.05, "min_members": 2, "min_member_active_blocks": 10},
+        # Swing and bunt (Sept 23, 2026 ~03:10 UTC): a mechanism several live agents are winning with
+        # is the clearest sight of the ball the league gets. Its pooled record is read at the
+        # promotion budget (0.05 -> 0.20), and a member counts after 5 active blocks (was 10).
+        "family": {"alpha": 0.20, "min_members": 2, "min_member_active_blocks": 5},
         # Death at any rung above 0: evidence that growth is negative, or the stake is going.
-        "death": {"min_active_blocks": 20, "max_drawdown": 0.30},
+        # Swing and bunt (Sept 23, 2026 ~03:10 UTC): 0.30 -> 0.40. Full Kelly on a lower bound
+        # (rung 3 below) draws down a third or more in ordinary luck; a big swing must not be killed
+        # for its variance alone. The statistical death test and drift are unchanged.
+        "death": {"min_active_blocks": 20, "max_drawdown": 0.40},
         # Owner revision, Sept 21, 2026: losers on PAPER die fast, because a paper seat is the
         # scarcest free thing the league has. After `min_active_blocks`, a paper record down
         # `max_loss` or more from where it started dies; after `unprofitable_blocks`, any record
@@ -160,7 +191,11 @@ CONSTITUTION: dict[str, Any] = {
         # Learning surge (owner, Sept 21, 2026 ~00:00 UTC: "it's obviously going to require some additional
         # risk taking and volatility which I'm willing to accept"): a PROVEN edge (positive lower bound)
         # compounds at half of Kelly on that bound, up to 40% of the venue's cash (a quarter and 25%).
-        "3": {"max_order_usd": "75", "kelly_fraction": 0.5, "max_share_of_venue": 0.4},
+        # Swing and bunt (owner, Sept 23, 2026 ~03:10 UTC: "when youre seeing the ball well you should
+        # take big swings"): FULL Kelly on the lower bound (was half), up to 60% of the venue's cash
+        # (was 40%). Sizing stays on the LOWER bound, never the point estimate, so a thin record still
+        # buys a small stake: the swing grows with the evidence. Every order still meets the gateway's cap.
+        "3": {"max_order_usd": "75", "kelly_fraction": 1.0, "max_share_of_venue": 0.6},
     },
 }
 
@@ -203,4 +238,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '0f9a8f7e3bf67a801332ff496c4ddfff561e0d33b4bc22237cf7f6c75cee9c46'
+PINNED_DIGEST = '64a206c6c9dc2c672b3339ed29113e7fe6f55ddfc0d369ec16d3c43663eab761'

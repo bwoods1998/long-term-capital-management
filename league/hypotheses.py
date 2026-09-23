@@ -17,15 +17,22 @@ One foundry pass:
    how often its inputs were actually there. How EMPTY a desk is does not enter the score; a desk
    with no open seat is merely ineligible. A bounded share of passes (`exploration_share`, 20%)
    goes instead to the least-explored eligible desk, so an early winner cannot starve every new
-   direction.
+   direction. Two more bounded routes come first (Sept 23, 2026; `allocate` has the precedence):
+   `transfer_share` of calls port a mechanism that earns forward to a desk of its venue where it
+   was never tried (`forward_families`), and `fast_share` rotate over the hourly, around-the-clock
+   `fast_desks`.
 2. **Ask.** When a seat is actually open, the frontier tier still pays for code work, the day's
    OpenAI allowance and the foundry's own window budget have room, and the last call is at least
    `call_minutes` old, Merton (the frontier model, through the same metered gateway client every
    other pass uses) is shown the desk's definition, the data that really exists, the fee model,
-   the replay gate, what failed there and what is retired, and asked for 3-4 distinct candidates.
+   the replay gate, what failed there and what is retired, the league's edge map
+   (`winning_mechanisms`: what earns forward on any desk, and what died on the forward evidence)
+   and, on a transfer call, the mechanism being ported, and asked for 3-4 distinct candidates.
    Each is a `hypothesis.card` (mechanism, data, edge after costs, horizon, rejection evidence)
    plus a whole strategy file. It is never shown a tape, a holdout or any replay's per-step data:
-   only development-replay SUMMARIES that the researchers already see.
+   only development-replay SUMMARIES that the researchers already see -- and never another
+   agent's code: a mechanism travels as words (a card's mechanism, a founding seed's `why`, the
+   purpose a program was born with).
 3. **Admit.** Each card's code is checked statically, then replayed through the House's own
    candidate replay (`House._candidate_replay`: the sealed NEEDS probe, the specialty's
    constraints, parameter validation, a counted `eval.trial`). A card is its own line -- a new
@@ -65,8 +72,9 @@ from typing import Any, Mapping, Sequence
 from .agents import Agent, niche_of
 from .constitution import CONSTITUTION
 from .ledger import now_iso
+from .seeds import SEEDS
 
-PROMPT_VERSION = "foundry-2026-09-23.1"
+PROMPT_VERSION = "foundry-2026-09-23.3"
 ROLE = "foundry"
 TASK_CALL = "hypothesis.foundry"
 TASK_EVALUATE = "hypothesis.evaluate"
@@ -115,7 +123,22 @@ DEFAULTS: dict[str, Any] = {
     "fast_share": 0.0,
     "prefer_horizon": "",
     "max_pending_cards": 0,
+    # Sept 23, 2026 (the owner's north star: a swarm that compounds what works): up to
+    # `transfer_share` of recent calls take a family with an earned forward record to a desk of its
+    # venue where it has never been tried, and ask Merton to adapt its mechanism there. 0 is off.
+    "transfer_share": 0.0,
 }
+
+#: The bounded routes of `allocate`, in the order they are offered a call; `evidence` takes the rest.
+ROUTES = ("transfer", "fast", "exploration")
+
+#: A founding seed's stated reason, by seed name (`league/seeds`): the words a founder's family is
+#: described in. `league/niches.json` founders name a seed and carry no `why` of their own.
+SEED_WHY = {row["name"]: str(row.get("why") or "") for row in SEEDS}
+
+#: How a parameter mutation's birth is explained (`House.fork`, the House's refill, the foundry's
+#: evidence mutation). Such a child runs its parent's program, so its mechanism is its parent's.
+_MUTATION_REASONS = ("a parameter mutation", "a House-staked valid mutation", "an evidence-driven House mutation")
 
 #: Words that say a candidate's replay could not run because an INPUT was missing, not because the
 #: idea failed. (`House._run_replay` raises "unsupported input: ..." for missing observed bars.)
@@ -136,6 +159,11 @@ REPLAY_VIEW = {
     "alpaca": "bars: closed bars, oldest first, up to NEEDS.bars.limit; quotes: {bid, ask} ONLY, derived from the bar with the "
               "tape's half-spread -- there is NO quote timestamp `t` in replay, so a staleness check must treat a missing `t` as fresh",
     "kalshi": "markets: the rows the contract lists, with hours_to_close; watched symbols arrive as observed.bars only",
+    # Sept 23, 2026: two point-in-time histories a replay can use at once (league/feeds.py).
+    "feeds": "only when NEEDS['feeds'] declares them: ctx['feeds'][feed][key], the latest row whose t is at or before the step. "
+             "vol (Deribit DVOL for BTC and ETH, hourly candles stamped at their close) and funding (OKX settled funding per "
+             "coin, stamped at settlement) are backfilled over the replay window, so they are replayable now; sports and perps "
+             "are recorded live only. A key may be absent: use it only when present",
     "absent_in_replay": ["quotes[...].t", "recent_order_outcomes", "event_risk"],
     "rule": "Code that REQUIRES a field replay does not supply never trades on replay and cannot pass. Use such fields only when present.",
 }
@@ -153,6 +181,7 @@ a REASON to work, each stated so that the evidence can reject it.
 Rules.
 - Write exactly `batch.candidates` candidates, each a DIFFERENT MECHANISM: a different reason the edge
   exists (who is on the other side, what structural fact pays you), not one rule with other numbers.
+  (A `transfer` batch is the one exception, below.)
 - Stay inside `desk`: NEEDS.venue is `desk.venue`, NEEDS.horizon is one of `desk.horizons`, and NEEDS
   names series (Kalshi) or symbols (Alpaca) from `desk.universe` only. A program whose NEEDS sit
   outside the desk is refused before it runs.
@@ -164,13 +193,37 @@ Rules.
   crypto a taker round trip costs 0.50% and a maker round trip 0.30%: rest post_only limits for entry
   AND exit unless the edge per trade clearly clears the taker cost. Most crypto replays on this league
   have failed out-of-sample growth by less than the fee.
+- Kalshi crypto strike and fifteen-minute markets (`kalshi-crypto-strikes`, `kalshi-crypto-15m`) are
+  binary options on spot. A strategy may watch the coin's Alpaca spot bars through
+  NEEDS["observe"]["symbols"] (e.g. "BTC/USD"; on a Kalshi replay tape they arrive as
+  ctx["observed"]["bars"] only, at NEEDS.bars.timeframe, default 1Hour) and, where `data` lists
+  them, the recorded feeds through NEEDS["feeds"]. Price the binary from spot and volatility over
+  the time left, and bid as a maker only where the model clears the ask plus fees. Most Kalshi
+  crypto series charge makers nothing (`desk.maker_fee_series` lists the exceptions).
 - Prefer `horizon_guidance.prefer` where the desk allows it: an hourly program is judged on hourly
   blocks and can reach the paper screen in hours; a daily one waits days for the same evidence.
 - Read `forward_on_this_desk`: what has actually made money forward here, on paper and real money.
+- Read `winning_mechanisms`: the league's edge map. `earning` is the best forward records on any desk
+  (real money first), each mechanism in words; `failed_forward` is what died on the forward evidence.
+  A mechanism that earns on one desk may carry to this one; one that died forward is a warning.
+- When the packet has a `transfer` section, the House is porting a proven mechanism: it earns forward
+  on `transfer.from_desk` (`transfer.forward_record`) and has never been tried on this desk. Write at
+  least half of the batch as adaptations of `transfer.mechanism` to THIS desk's markets, data, fees and
+  horizons. They share its reason for the edge, so make each a distinct expression of it (other
+  markets, timing, entry or exit), and each is still a falsifiable card with its own `rejection` test;
+  say in `mechanism` what carries over and what might not. You see its mechanism in words, never code.
 - It must TRADE on the replay tape: `replay_gate` needs at least min_trades closed trades and
-  min_blocks blocks within `replay_window`, positive out-of-sample growth, and a deflated Sharpe at
-  least min_deflated_sharpe. A program that never fires cannot pass; one that trades noise after fees
-  will not either. Most replays fail: be specific rather than hopeful.
+  min_blocks blocks within `replay_window`, out-of-sample growth above min_oos_growth a block (zero
+  when it is not stated), and a deflated Sharpe at least min_deflated_sharpe. A program that never
+  fires cannot pass; one that trades noise after fees will not either. Be specific rather than hopeful.
+- Size by conviction. The owner's rule, after Druckenmiller: swing big when you see the ball, bunt
+  when you don't. Every program should scale its position with the edge its signal measures -- the
+  minimum useful size when the signal is marginal (a bunt: cheap evidence, many closed trades), up to
+  `limits` when the modelled edge is large and the setup has paid before -- never one fixed size for
+  every signal. Growth is scored in log terms, so the right size is near Kelly: large only when the
+  edge is large relative to its variance. Say in `edge_after_costs` how the size follows the edge.
+- The owner accepts volatility for speed and discovery: prefer bold, distinct mechanisms that trade
+  often enough to be judged within days over timid ones that barely fire.
 - Respect `horizon_rule` and `limits`. No shorts, no leverage; exits are always allowed.
 - Read `replay_view`: replay does not supply everything a live wake does (quotes there have no
   timestamp). A program that requires a missing field never trades on replay and cannot pass.
@@ -254,6 +307,7 @@ class Foundry:
         self.refusal = ""
         self._scores: tuple[float, list[DeskScore]] | None = None
         self._allocation: tuple[float, Any] | None = None
+        self._edge: tuple[float, dict[str, Any]] | None = None
         self._memo: dict[str, tuple[int, Any]] = {}
         state = self._state()
         if "birth_cursor" not in state:
@@ -505,6 +559,137 @@ class Foundry:
         self._scores = (now, out)
         return out
 
+    # ------------------------------------------------------ forward evidence
+    def forward_families(self) -> list[dict[str, Any]]:
+        """Every family with an earned forward record on a desk, best evidence first: a living member
+        whose House standing has `score_observations > 0` and `score_growth > 0`. One row per family
+        AND desk, since a family can live on more than one desk and a transfer comes from the desk
+        where it earns. Real money first (an earning member on rung 2 or above), then by earned
+        observations, then by growth per block. Cached for five minutes with the edge map."""
+        return self._edge_fold()["families"]
+
+    def winning_mechanisms(self) -> dict[str, Any]:
+        """The league's edge map, in every packet (Sept 23, 2026: the packet showed only this desk's
+        forward results, so a mechanism that earned real money on one desk was never offered to
+        another): the top eight forward records and the families that died on the forward evidence."""
+        fold = self._edge_fold()
+        keys = ("family", "desk", "venue", "horizon", "members", "with_a_record", "earning", "best_rung", "real_money",
+                "record_on", "observations", "growth_per_block")
+        out: dict[str, Any] = {
+            "earning": [{**{k: row[k] for k in keys}, "mechanism": row["mechanism"][:500]} for row in fold["families"][:8]],
+            "failed_forward": fold["failed"],
+            "note": ("A forward record is the House's own standing of a living agent: earned observations (a finished "
+                     "day counts as the paper screen counts it) and after-cost log growth, here per block of the family's "
+                     "horizon. real_money: an earning member trades real money now; record_on: whether the record itself was "
+                     "earned on real money or on paper. Mechanisms are in words -- a card's mechanism, a founding seed's why, "
+                     "the purpose a program was born with -- never code."),
+        }
+        if fold.get("error"):
+            out["error"] = fold["error"]
+        return out
+
+    def _edge_fold(self, *, fresh: bool = False) -> dict[str, Any]:
+        now = self._now()
+        if not fresh and self._edge is not None and now - self._edge[0] < 300:
+            return self._edge[1]
+        try:
+            fold = self._build_edge()
+        except Exception as exc:  # noqa: BLE001 - the House's tick asks for an allocation: no transfer beats no tick
+            fold = {"families": [], "failed": [], "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        self._edge = (now, fold)
+        return fold
+
+    def _build_edge(self) -> dict[str, Any]:
+        house = self.house
+        groups: dict[tuple[str, str], list[tuple[Agent, Any]]] = {}
+        for s in house.standings():
+            agent = house.registry.get(s.agent)
+            if agent is not None and agent.specialty in house.niches:
+                groups.setdefault((agent.family, agent.specialty), []).append((agent, s))
+        families = []
+        for (family, desk), members in groups.items():
+            earning = [(a, s) for a, s in members if s.score_observations > 0 and s.score_growth > 0]
+            if not earning:
+                continue
+            observations = sum(int(s.score_observations) for _, s in earning)
+            # `score_growth` is the reward rate, log growth per HOUR (House._reward_evidence); a block of
+            # a daily program is 24 of them.
+            per_block = sum(float(s.score_growth) * (24 if a.horizon == "day" else 1) * int(s.score_observations)
+                            for a, s in earning) / observations
+            ranked = sorted(earning, key=lambda pair: (-pair[1].rung, -pair[1].score_observations * pair[1].score_growth, pair[0].id))
+            lead = ranked[0][0]
+            words, origin = self._mechanism(lead)
+            families.append({
+                "family": family, "desk": desk, "venue": house.niches[desk].venue, "horizon": lead.horizon,
+                "members": len(members), "rungs": sorted((int(s.rung) for _, s in members), reverse=True),
+                "with_a_record": sum(1 for _, s in members if s.score_observations > 0), "earning": len(earning),
+                "agents": [a.id for a, _ in ranked][:4], "best_rung": max(int(s.rung) for _, s in earning),
+                "real_money": any(s.rung >= 2 for _, s in earning),
+                "record_on": "real money" if any(s.score_rung >= 2 for _, s in earning) else "paper",
+                "observations": observations, "growth_per_block": round(per_block, 6),
+                "mechanism": words[:1500], "mechanism_from": origin,
+            })
+        families.sort(key=lambda r: (not r["real_money"], -r["observations"], -r["growth_per_block"], r["family"], r["desk"]))
+        return {"families": families, "failed": self._failed_forward(), "error": None}
+
+    def _failed_forward(self, limit: int = 10) -> list[str]:
+        """One line per family and desk whose agents died on the forward evidence (the House's `evidence`
+        death: a paper or real-money verdict, never replay, credits or displacement), most deaths first."""
+        house = self.house
+        rungs: dict[str, int] = {}
+        for entry in house.ledger.iter(kinds="agent.postmortem"):
+            if entry.payload.get("cause") == "evidence":
+                found = re.search(r" died on rung (\d+) of evidence", str(entry.payload.get("text") or ""))
+                if found:
+                    rungs[entry.agent] = int(found.group(1))
+        groups: dict[tuple[str, str], dict[str, Any]] = {}
+        for entry in house.ledger.iter(kinds="agent.died"):
+            agent = house.registry.get(entry.agent)
+            if entry.payload.get("cause") != "evidence" or agent is None or not agent.specialty:
+                continue
+            row = groups.setdefault((agent.family, agent.specialty), {"deaths": 0, "rungs": set()})
+            row["deaths"] += 1
+            row["rungs"].add(rungs.get(agent.id, 1))
+            row.update(at=entry.at, detail=str(entry.payload.get("detail") or ""), agent=agent)
+        lines = []
+        for (family, desk), row in sorted(groups.items(), key=lambda kv: (kv[1]["deaths"], kv[1]["at"]), reverse=True)[:limit]:
+            where = " and ".join(name for name, hit in (("paper", 1 in row["rungs"]), ("real money", max(row["rungs"]) >= 2)) if hit)
+            words = self._mechanism(row["agent"])[0]
+            lines.append(f"{family} on {desk}: {row['deaths']} died on the forward evidence on {where}, the last on "
+                         f"{row['at'][:10]} ({row['detail'][:140] or 'no reason recorded'})"
+                         + (f"; mechanism: {words[:160]}" if words else ""))
+        return lines
+
+    def _mechanism(self, agent: Agent) -> tuple[str, str]:
+        """(words, where they came from): what an agent's program does, stated where that program was
+        written -- its card's `mechanism`, the purpose it was adopted or born with (an architect's why,
+        a research candidate's purpose), its founding seed's `why` -- walking up past parameter
+        mutations, which run their parent's program. Never the code."""
+        house = self.house
+        seeds = {f.get("key"): f.get("seed") for niche in house.niches.values() for f in niche.founders}
+        current, seen = agent, set()
+        while current is not None and current.id not in seen:
+            seen.add(current.id)
+            founder = str(current.founder or "")
+            if founder.startswith("card:"):
+                card = self.cards().get(founder[5:]) or {}
+                if card.get("mechanism"):
+                    return str(card["mechanism"]), f"hypothesis card {founder[5:]}"
+            adopted = house.ledger.last("agent.strategy", agent=current.id)
+            if adopted is not None and str(adopted.payload.get("reason") or "").strip():
+                return str(adopted.payload["reason"]).strip(), f"the strategy {current.id} adopted"
+            seed = seeds.get(founder) if current.parent is None else None
+            if seed and SEED_WHY.get(seed):
+                return SEED_WHY[seed], f"founding seed {seed}"
+            parent = house.registry.get(current.parent) if current.parent else None
+            if parent is None or parent.code_sha256 != current.code_sha256:
+                born = house.ledger.get(f"born:{current.id}")
+                reason = str((born.payload if born is not None else {}).get("reason") or "").strip()
+                if reason and not reason.startswith(_MUTATION_REASONS):
+                    return reason, f"the birth of {current.id}"
+            current = parent
+        return "", "not recorded"
+
     def _seat_available(self, desk: DeskScore, weakest: dict[str | None, bool]) -> bool:
         rules = self.house.game["economy"]
         if desk.open_seats > 0 and len(self.house.registry.living()) < int(rules["max_population"]):
@@ -519,9 +704,28 @@ class Foundry:
     def allocate(self, *, fresh: bool = False) -> tuple[DeskScore, str, str] | None:
         """(desk, route, reason) for the next foundry call, or None when no desk can take a newcomer.
 
-        route is `evidence` (the best-scored desk with a seat) or `exploration` (the eligible desk
-        with the fewest recent cards, then the fewest trials), taken for at most
-        `exploration_share` of the last `exploration_window` calls."""
+        Four routes, offered the call in this order. The three bounded ones are counted over the
+        same window, the last `exploration_window` calls, and each takes a call only while its own
+        calls stay within its share of that window. None can grow past its share, so while the
+        shares add up to one or less each keeps its own (an earlier route only takes a call first),
+        and one that is due but has no desk to offer passes the call on without using its turn.
+
+        1. `transfer` (`transfer_share`): a family with an earned forward record (`forward_families`,
+           real money first) goes to the best-scored desk of its venue where it has never been tried.
+        2. `fast` (`fast_share`): of the `fast_desks` other than the evidence route's desk (which that
+           route already serves), the one with the fewest recent cards, then the best score: a rotation,
+           so every around-the-clock desk is written for. Until Sept 23, 2026 it was always the
+           best-scored fast desk (the index-ETF desk), and it stopped altogether whenever the best desk
+           was itself a fast desk.
+        3. `exploration` (`exploration_share`): the eligible desk with the fewest recent cards, then the
+           fewest trials, other than the best.
+        4. `evidence`: the best-scored desk with a seat takes every call no bounded route is due for.
+
+        Shares adding up to more than the whole window are scaled down in proportion (`shares`), so one
+        large dial cannot silently take the turns of the routes after it. With game.json's 0.3, 0.5 and
+        0.2 the window rule gives transfer, fast, exploration and evidence about 27%, 45%, 18% and 9% of
+        calls (simulated over 2,000 calls with every route able to take its turn); the evidence route
+        keeps the calls left when all three are at their share."""
         now = self._now()
         if not fresh and self._allocation is not None and now - self._allocation[0] < 300:
             return self._allocation[1]
@@ -556,22 +760,105 @@ class Foundry:
             return None
         settings = self.settings
         window = [c.get("allocation") or {} for c in self.calls()[-int(settings["exploration_window"]):]]
-        explored = sum(1 for a in window if a.get("route") == "exploration")
-        share = float(settings["exploration_share"])
+        shares = self.shares()
+        taken = {route: sum(1 for a in window if a.get("route") == route) for route in ROUTES}
+
+        def due(route: str) -> bool:
+            return shares[route] > 0 and (taken[route] + 1) / (len(window) + 1) <= shares[route] + 1e-9
+
         best = desks[0]
-        fast = [d for d in desks if d.niche in set(settings.get("fast_desks") or [])]
-        fast_share = float(settings.get("fast_share") or 0)
-        fast_calls = sum(1 for a in window if a.get("route") == "fast")
-        if fast and best not in fast and fast_share > 0 and (fast_calls + 1) / (len(window) + 1) <= fast_share + 1e-9:
-            pick = fast[0]
-            return pick, "fast", (f"fast-evidence share: {fast_calls} of the last {len(window)} calls went to hourly, "
-                                  f"around-the-clock desks; {pick.niche} scores best of them ({pick.score:.4f}): {pick.why}")
-        if share > 0 and (explored + 1) / (len(window) + 1) <= share + 1e-9:
+        if due("transfer"):
+            picked = self._transfer_pick(desks)
+            if picked is not None:
+                source, pick = picked
+                return pick, "transfer", (
+                    f"transfer share: {taken['transfer']} of the last {len(window)} calls ported a proven mechanism; "
+                    f"{source['family']} earns forward on {source['desk']} ({source['earning']} of {source['members']} "
+                    f"members earning, {source['observations']} observations, {source['growth_per_block']:+.5f} a "
+                    f"{source['horizon']} block, {'on real money' if source['real_money'] else 'on paper'}) and has never "
+                    f"been tried on {pick.niche}, the best-scored untried {source['venue']} desk ({pick.score:.4f})")
+        fast_desks = set(settings.get("fast_desks") or [])
+        fast = [d for d in desks if d.niche in fast_desks and d.niche != best.niche]
+        if fast and due("fast"):
+            recent = self._recent_cards()
+            pick = min(fast, key=lambda d: (recent.get(d.niche, 0), -d.score, d.niche))
+            return pick, "fast", (f"fast-evidence share: {taken['fast']} of the last {len(window)} calls went to hourly, "
+                                  f"around-the-clock desks; {pick.niche} has the fewest recent cards of them "
+                                  f"({recent.get(pick.niche, 0)}), score {pick.score:.4f}: {pick.why}")
+        if due("exploration"):
             others = [d for d in desks if d.niche != best.niche] or desks
             pick = min(others, key=lambda d: (d.cards, d.trials, d.niche))
-            return pick, "exploration", (f"exploration share: {explored} of the last {len(window)} calls explored; "
+            return pick, "exploration", (f"exploration share: {taken['exploration']} of the last {len(window)} calls explored; "
                                          f"{pick.niche} has {pick.cards} recent cards and {pick.trials} trials")
         return best, "evidence", f"highest evidence score {best.score:.4f}: {best.why}"
+
+    def shares(self) -> dict[str, float]:
+        """The bounded routes' shares of the call window. Shares adding up to more than one are scaled
+        down in proportion: taken in order at face value, the first dials would leave the later routes
+        nothing (the House's game designer may move these dials; they have no bounds)."""
+        settings = self.settings
+        shares = {route: min(max(float(settings.get(f"{route}_share") or 0), 0.0), 1.0) for route in ROUTES}
+        total = sum(shares.values())
+        return {route: share / total for route, share in shares.items()} if total > 1 else shares
+
+    def _recent_cards(self) -> dict[str, int]:
+        """Cards written for each desk inside the evidence window, read from the ledger as it stands
+        (the desk scores are five minutes old), a call that wrote no card counting as one: a desk whose
+        calls keep failing must not keep the fast route's turn."""
+        since = now_iso(lambda: self._now() - float(self.settings["evidence_days"]) * 86400)
+        out: dict[str, int] = {}
+        for card in self.cards().values():
+            if card.get("niche") and card.get("_at", "") >= since:
+                out[card["niche"]] = out.get(card["niche"], 0) + 1
+        for call in self.calls():
+            desk = (call.get("allocation") or {}).get("desk")
+            if desk and not call.get("cards") and call.get("_at", "") >= since:
+                out[desk] = out.get(desk, 0) + 1
+        return out
+
+    # ---------------------------------------------------------------- transfer
+    def _tried(self) -> dict[str, set[str]]:
+        """Family -> the desks where it has been tried: every desk an agent of it ever lived on, and
+        every desk a transfer of it was already written for (a transfer call that returned, whatever
+        it wrote, and any card that call wrote). A call that failed before Merton answered tried nothing."""
+        def build():
+            out: dict[str, set[str]] = {}
+            for agent in list(self.house.registry.agents.values()):
+                if agent.specialty:
+                    out.setdefault(agent.family, set()).add(agent.specialty)
+            for call in self.calls():
+                allocation = call.get("allocation") or {}
+                source = allocation.get("transfer") or {}
+                if allocation.get("route") == "transfer" and source.get("family") and allocation.get("desk") and not call.get("error"):
+                    out.setdefault(str(source["family"]), set()).add(str(allocation["desk"]))
+            for card in self.cards().values():
+                source = card.get("transfer") or {}
+                if source.get("family") and card.get("niche"):
+                    out.setdefault(str(source["family"]), set()).add(str(card["niche"]))
+            return out
+        return self._folded("tried", build)
+
+    def _transfer_pick(self, desks: Sequence[DeskScore]) -> tuple[dict[str, Any], DeskScore] | None:
+        """(source, desk): the best forward record (`forward_families` order) that has an eligible
+        desk of its own venue where its family was never tried, and the best-scored such desk."""
+        tried = self._tried()
+        for source in self.forward_families():
+            home = tried.get(source["family"], set())
+            pick = next((d for d in desks if d.niche not in home and self.house.niches[d.niche].venue == source["venue"]), None)
+            if pick is not None:
+                return source, pick
+        return None
+
+    def transfer_for(self, niche_id: str) -> dict[str, Any] | None:
+        """The forward record a transfer call to this desk ports: the best one of the desk's venue whose
+        family was never tried here. Given the same standings this is the source `_transfer_pick` chose
+        for the desk (every better record has no untried eligible desk at all)."""
+        niche = self.house.niches.get(niche_id)
+        if niche is None:
+            return None
+        tried = self._tried()
+        return next((source for source in self.forward_families()
+                     if source["venue"] == niche.venue and niche_id not in tried.get(source["family"], set())), None)
 
     def _blocked_desks(self) -> set[str]:
         """Desks with an open foundry repair report: no more cards until it is verified."""
@@ -723,9 +1010,10 @@ class Foundry:
                 self.house._background("merton:foundry", self.run, picked[0].niche, picked[1], picked[2])
 
     # ------------------------------------------------------------------ packet
-    def packet(self, niche_id: str) -> dict[str, Any]:
+    def packet(self, niche_id: str, *, transfer: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """What Merton is shown for one desk. Summaries of development replays only: no tape, no
-        holdout, no other agent's code."""
+        holdout, no other agent's code. `transfer`, on a transfer call, is the forward record being
+        ported here (`transfer_for`): the packet then says what it is and what it earned, in words."""
         house = self.house
         niche = house.niches[niche_id]
         horizon = niche.horizons[0]
@@ -753,7 +1041,8 @@ class Foundry:
                 row["reasons"][key] = row["reasons"].get(key, 0) + 1
         seeds = {}
         for founder in niche.founders:
-            seeds[founder.get("seed")] = founder.get("why") or ""
+            # niches.json founders name a seed and carry no `why`: until Sept 23, 2026 every value here was "".
+            seeds[founder.get("seed")] = founder.get("why") or SEED_WHY.get(str(founder.get("seed")), "")
         failed = []
         for row in sorted(families.values(), key=lambda r: -r["trials"]):
             if row["passes"]:
@@ -773,7 +1062,18 @@ class Foundry:
         replay_days = (house.settings.kalshi_replay_days * 7 if horizon == "day" else house.settings.kalshi_replay_days) \
             if niche.venue == "kalshi" else (house.settings.replay_days * (6 if horizon == "day" else 1))
         row = CONSTITUTION["rungs"]["1"]
+        ported = {} if transfer is None else {"transfer": {
+            "family": transfer["family"], "from_desk": transfer["desk"], "venue": transfer["venue"], "horizon": transfer["horizon"],
+            "forward_record": {k: transfer[k] for k in ("members", "rungs", "with_a_record", "earning", "observations",
+                                                        "growth_per_block", "best_rung", "real_money", "record_on")},
+            "earning_agents": list(transfer["agents"]),
+            "mechanism": transfer["mechanism"], "mechanism_from": transfer["mechanism_from"],
+            "never_tried_here": f"no agent of {transfer['family']} has lived on {niche_id}, and no transfer of it was written for it",
+            "ask": ("Write at least half of the batch as adaptations of this mechanism to this desk's markets, data, fees and "
+                    "horizons, each a distinct expression of it and a falsifiable card with its own rejection test."),
+        }}
         return {
+            **ported,
             "batch": {"candidates": max(3, min(int(self.settings["candidates"]), 4)), "prompt_version": PROMPT_VERSION},
             "desk": {"id": niche.id, "title": niche.title, "venue": niche.venue, "horizons": list(niche.horizons),
                      "asset_class": niche.asset_class, "universe": list(niche.universe[:24]), "brief": niche.brief[:3000],
@@ -792,6 +1092,7 @@ class Foundry:
                      "replay_fills": "market orders at the touch; resting limits fill only when a later step trades strictly through them"},
             "horizon_guidance": self._horizon_guidance(niche),
             "forward_on_this_desk": self._forward_on_desk(niche_id),
+            "winning_mechanisms": self.winning_mechanisms(),
             "replay_gate": dict(CONSTITUTION["ladder"]["replay"]),
             "replay_view": REPLAY_VIEW,
             "replay_window": {"days": replay_days, "step": "Kalshi day tapes step every 30 minutes; hour tapes every 5 minutes; Alpaca at NEEDS.bars.timeframe"},
@@ -864,12 +1165,16 @@ class Foundry:
 
         house = self.house
         settings = self.settings
-        packet = self.packet(niche_id)
+        source = self.transfer_for(niche_id) if route == "transfer" else None
+        packet = self.packet(niche_id, transfer=source)
         system = FOUNDRY_BRIEF + "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT_PATH.read_text(encoding="utf-8")
         user = json.dumps(packet, default=str, sort_keys=True)
         inputs = hashlib.sha256((system + "\n" + user).encode("utf-8")).hexdigest()
         call = f"foundry:{inputs[:12]}:{int(self._now())}"
-        allocation = {"desk": niche_id, "route": route, "reason": reason[:500]}
+        allocation: dict[str, Any] = {"desk": niche_id, "route": route, "reason": reason[:500]}
+        ported = {"family": source["family"], "desk": source["desk"]} if source is not None else None
+        if route == "transfer":
+            allocation["transfer"] = ported  # what `_tried` reads: this family has now been tried on this desk
         answer = None
         try:
             answer = self.frontier.ask(system=system, user=user, agent="merton-foundry",
@@ -888,13 +1193,14 @@ class Foundry:
         retired = self.retired()
         links = self.links()
         for index, raw in enumerate(listed[:4]):
-            card, problem = self._card(raw, niche_id, call, answer, known, retired, links)
+            card, problem = self._card(raw, niche_id, call, answer, known, retired, links, transfer=ported)
             if card is None:
                 refused.append(problem)
                 continue
             written.append(card)
         cost = format(answer.cost_usd, "f")
-        summary = (f"{len(written)} hypothesis cards for {niche_id} ({route}); "
+        summary = (f"{len(written)} hypothesis cards for {niche_id} ({route}"
+                   + (f" of {ported['family']} from {ported['desk']}" if ported else "") + "); "
                    + (f"{len(refused)} refused before replay; " if refused else "") + str(parsed.get("summary") or "")[:600])
         house.ledger.append("merton.pass", {"role": ROLE, "at_epoch": self._now(), "summary": summary[:1500], "cost_usd": cost,
                                             "files": 0, "cards": [c["id"] for c in written], "refused": [str(r)[:200] for r in refused][:6],
@@ -908,8 +1214,10 @@ class Foundry:
         return {"call": call, "cards": [c["id"] for c in written], "refused": refused, "cost_usd": cost}
 
     def _card(self, raw: Any, niche_id: str, call: str, answer: Any, known: Mapping[str, Any],
-              retired: Mapping[str, Any], links: Mapping[str, set[str]]) -> tuple[dict[str, Any] | None, str]:
-        """Record one candidate as a card, or say why it was refused before any replay."""
+              retired: Mapping[str, Any], links: Mapping[str, set[str]], *,
+              transfer: Mapping[str, Any] | None = None) -> tuple[dict[str, Any] | None, str]:
+        """Record one candidate as a card, or say why it was refused before any replay. `transfer`
+        ({family, desk}) marks a card written on a transfer call: that family is then tried here."""
         from .safety import CodeRefused, check_code
 
         if not isinstance(raw, dict):
@@ -939,6 +1247,7 @@ class Foundry:
             "author": "merton", "lineage": [line], "parent_card": None, "created_for": call,
             "name": name, "line_id": line, "family": family, "created_epoch": self._now(),
             "model": getattr(answer, "model", None), "prompt_version": PROMPT_VERSION,
+            "transfer": dict(transfer) if transfer else None,
             "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(), "_code": code,
         }
         self.house.ledger.append("hypothesis.card", payload, id=f"hypothesis.card:{ident}")
