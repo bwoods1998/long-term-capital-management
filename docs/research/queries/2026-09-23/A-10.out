@@ -1,0 +1,16 @@
+cards 108 by model Counter({'gpt-6-sol': 76, 'gpt-6-astra': 32}) transfer 12
+born from cards: 27
+eval.trial agents not born: 104 trials 104 passed 26
+card lines: 108
+unborn trial agents matching a card line: 79 trials=79 passed=6
+sample unborn trial agents: [('mullins-h6aed49', [1, 1]), ('mullins-h86aade', [1, 0]), ('mullins-haa1b05', [1, 0]), ('mullins-h01ba61', [1, 0]), ('meriwether-hd41349', [1, 0]), ('meriwether-h8cc7cf', [1, 0]), ('meriwether-h57e7da', [1, 0]), ('meriwether-hb1ee97', [1, 0]), ('meriwether-h49a163', [1, 0]), ('meriwether-h032f3f', [1, 0]), ('meriwether-h0e70da', [1, 0]), ('meriwether-h3f43cd', [1, 0])]
+  kalshi-sports          cards= 20 born= 4 trialed_unborn=16 (passed 0) untrialed=0
+  kalshi-crypto-15m      cards= 20 born= 6 trialed_unborn=12 (passed 1) untrialed=2
+  alpaca-index-etfs      cards= 12 born= 3 trialed_unborn= 9 (passed 1) untrialed=0
+  alpaca-crypto-majors   cards= 12 born= 5 trialed_unborn= 7 (passed 2) untrialed=0
+  kalshi-crypto-strikes  cards= 12 born= 2 trialed_unborn=10 (passed 0) untrialed=0
+  alpaca-megacaps        cards= 12 born= 4 trialed_unborn= 8 (passed 0) untrialed=0
+  kalshi-attention       cards=  8 born= 1 trialed_unborn= 7 (passed 0) untrialed=0
+  alpaca-crypto-alts     cards=  8 born= 2 trialed_unborn= 6 (passed 1) untrialed=0
+  kalshi-weather         cards=  4 born= 0 trialed_unborn= 4 (passed 1) untrialed=0
+cards by hour: [('2026-09-22T15', 4), ('2026-09-22T18', 4), ('2026-09-22T19', 8), ('2026-09-22T20', 8), ('2026-09-22T22', 4), ('2026-09-22T23', 8), ('2026-09-23T01', 4), ('2026-09-23T02', 16), ('2026-09-23T03', 20), ('2026-09-23T04', 8), ('2026-09-23T05', 12), ('2026-09-23T06', 12)]

@@ -1,0 +1,32 @@
+## 24h: births 111 (4.6/h) by class {'house-mutation': 36, 'agent-fork': 10, 'foundry': 27, 'repair': 16, 'architect': 10, 'house-revival': 11, 'lab': 1}
+      deaths 79 (3.3/h) by cause {'displaced': 55, 'superseded': 7, 'redundant': 15, 'evidence': 2}; displaced at r0 32, at r1 23; displaced with fills 19
+      deaths by desk: {'kalshi-sports-props': 3, 'kalshi-prices': 2, 'kalshi-attention': 6, 'alpaca-crypto-alts': 19, 'kalshi-sports': 8, 'alpaca-index-etfs': 2, 'kalshi-crypto-strikes': 6, 'alpaca-crypto-majors': 12, 'kalshi-crypto-15m': 6, 'alpaca-megacaps': 8, 'kalshi-weather': 1, 'alpaca-options': 6}
+## 12h: births 39 (3.2/h) by class {'house-mutation': 11, 'agent-fork': 2, 'foundry': 15, 'architect': 9, 'repair': 1, 'lab': 1}
+      deaths 29 (2.4/h) by cause {'displaced': 19, 'evidence': 2, 'superseded': 2, 'redundant': 6}; displaced at r0 6, at r1 13; displaced with fills 11
+      deaths by desk: {'kalshi-sports': 2, 'alpaca-index-etfs': 2, 'kalshi-crypto-strikes': 2, 'alpaca-megacaps': 5, 'alpaca-options': 6, 'kalshi-sports-props': 1, 'kalshi-attention': 1, 'kalshi-crypto-15m': 2, 'alpaca-crypto-alts': 5, 'alpaca-crypto-majors': 3}
+## 6h: births 9 (1.5/h) by class {'architect': 6, 'lab': 1, 'foundry': 1, 'house-mutation': 1}
+      deaths 9 (1.5/h) by cause {'displaced': 7, 'evidence': 2}; displaced at r0 0, at r1 7; displaced with fills 5
+      deaths by desk: {'kalshi-sports': 1, 'alpaca-megacaps': 1, 'kalshi-sports-props': 1, 'kalshi-crypto-15m': 2, 'alpaca-crypto-alts': 3, 'kalshi-crypto-strikes': 1}
+## desk occupancy vs max_members; graduates waiting (lab passed) per desk; displacements in 24h per desk -> hours per seat turnover
+  kalshi-crypto-strikes  members=  2/8  waiting_lab= 0 unborn_merged_PRs=0  displaced_24h=  5 (0.21/h) -> expected wait for a graduate 0.0 h (queue 0 / turnover)
+  kalshi-crypto-15m      members=  7/8  waiting_lab= 3 unborn_merged_PRs=0  displaced_24h=  5 (0.21/h) -> expected wait for a graduate 14.4 h (queue 3 / turnover)
+  kalshi-weather         members= 10/10  waiting_lab= 2 unborn_merged_PRs=0  displaced_24h=  1 (0.04/h) -> expected wait for a graduate 48.0 h (queue 2 / turnover)
+  kalshi-sports          members= 12/12  waiting_lab= 4 unborn_merged_PRs=1  displaced_24h=  8 (0.33/h) -> expected wait for a graduate 15.0 h (queue 5 / turnover)
+  kalshi-sports-props    members=  5/6  waiting_lab= 0 unborn_merged_PRs=1  displaced_24h=  3 (0.12/h) -> expected wait for a graduate 8.0 h (queue 1 / turnover)
+  kalshi-prices          members=  8/8  waiting_lab= 0 unborn_merged_PRs=1  displaced_24h=  2 (0.08/h) -> expected wait for a graduate 12.0 h (queue 1 / turnover)
+  kalshi-attention       members=  2/None  waiting_lab= 2 unborn_merged_PRs=0  displaced_24h=  5 (0.21/h) -> expected wait for a graduate 9.6 h (queue 2 / turnover)
+  alpaca-crypto-majors   members=  8/12  waiting_lab= 2 unborn_merged_PRs=0  displaced_24h=  4 (0.17/h) -> expected wait for a graduate 12.0 h (queue 2 / turnover)
+  alpaca-crypto-alts     members= 14/12  waiting_lab= 3 unborn_merged_PRs=0  displaced_24h= 10 (0.42/h) -> expected wait for a graduate 7.2 h (queue 3 / turnover)
+  alpaca-index-etfs      members= 12/12  waiting_lab= 2 unborn_merged_PRs=2  displaced_24h=  2 (0.08/h) -> expected wait for a graduate 48.0 h (queue 4 / turnover)
+  alpaca-megacaps        members=  8/12  waiting_lab= 2 unborn_merged_PRs=0  displaced_24h=  4 (0.17/h) -> expected wait for a graduate 12.0 h (queue 2 / turnover)
+  alpaca-options         members=  8/8  waiting_lab= 0 unborn_merged_PRs=1  displaced_24h=  6 (0.25/h) -> expected wait for a graduate 4.0 h (queue 1 / turnover)
+  kalshi-open            members=  0/8  waiting_lab= 0 unborn_merged_PRs=0  displaced_24h=  0 (0.00/h) -> expected wait for a graduate n/a (queue 0 / turnover)
+  alpaca-open            members=  0/8  waiting_lab= 0 unborn_merged_PRs=0  displaced_24h=  0 (0.00/h) -> expected wait for a graduate n/a (queue 0 / turnover)
+  league: 96 / 96; lab graduates waiting 20 ; displacements 24h 55 (2.3/h)
+## who gets the freed seats? births 24h by class vs lab graduates born 24h
+   {'house-mutation': 36, 'agent-fork': 10, 'foundry': 27, 'repair': 16, 'architect': 10, 'house-revival': 11, 'lab': 1}
+## grace: displaced agents' age at death (h), by rung, 24h: median, p10, p90
+  r0: n=32 median=19.8 p10=4.0 p90=20.9
+  r1: n=22 median=21.6 p10=12.0 p90=47.6
+## what displaced agents in 24h had done: trials, passed, fills, active blocks (from eval.block), compute spent (from death detail)
+  n=55 median trials=2 with fills=19 compute spent: sum=$0.00 median=$0.00 (n with figure 0)

@@ -1,0 +1,26 @@
+=== (a) hours with rows but 0 wakes, whole ledger
+9 hours: [('2026-09-21T12', 951), ('2026-09-21T13', 920), ('2026-09-22T08', 912), ('2026-09-22T09', 945), ('2026-09-22T10', 943), ('2026-09-22T11', 955), ('2026-09-22T12', 960), ('2026-09-22T13', 859), ('2026-09-22T14', 1039)]
+kinds in 09-22T08..14: [('book.mark', 4672), ('book.reconciled', 256), ('agent.intent', 192), ('book.refused', 192), ('eval.drift', 64), ('floor.mark', 64), ('book.settle', 32), ('book.order', 28), ('ops.job', 24), ('ops.budget', 23), ('book.fill', 21), ('eval.block', 6)]
+last wake before hole / first after: ('2026-09-22T07:05:29.434Z',) ('2026-09-22T15:28:11.176Z',)
+ops.alert/ops.job in hole (sample): []
+ops.job kinds in hole: [('{"job":"update:1790084658.634395","key":"update","queued_sec', 1), ('{"job":"update:1790082799.497329","key":"update","queued_sec', 1), ('{"job":"update:1790080944.089796","key":"update","queued_sec', 1), ('{"job":"update:1790079078.595021","key":"update","queued_sec', 1), ('{"job":"update:1790077220.731701","key":"update","queued_sec', 1), ('{"job":"update:1790075418.677506","key":"update","queued_sec', 1)]
+
+=== (b) inactive spells
+spells: 820 resumed by a wake: 699
+by reason (count, total hours, median h):
+   missing_data       n= 118 hours=   423.4 median=1.4
+   paused             n=  64 hours=   357.7 median=0.9
+   abstained          n= 137 hours=   184.7 median=0.2
+   None               n= 299 hours=   149.4 median=0.1
+   provider_failure   n=  42 hours=   101.5 median=0.5
+   market_closed      n= 113 hours=    18.4 median=0.0
+   order_rejected     n=  47 hours=    11.2 median=0.2
+agent-hours inactive in last 48h by reason: {'missing_data': 423.4, 'paused': 357.7, 'abstained': 184.7, None: 149.4, 'provider_failure': 101.5, 'market_closed': 18.4, 'order_rejected': 11.2}
+by desk: {'alpaca-crypto-alts': 190.2, 'alpaca-megacaps': 188.6, 'kalshi-crypto-strikes': 171.1, 'kalshi-sports-props': 138.1, 'alpaca-crypto-majors': 129.4, 'kalshi-attention': 127.2, 'kalshi-crypto-15m': 110.6, 'kalshi-prices': 72.8, 'alpaca-options': 51.4, 'kalshi-sports': 25.7, 'kalshi-weather': 23.2, 'alpaca-index-etfs': 18.0}
+living agent-hours in window: 3383.2  inactive share: 36.8 %
+
+=== inactive at snapshot end (no wake after the inactive row, agent alive)
+alive: 96  inactive now: 4
+   2 ('alpaca-crypto-alts', 'order_rejected') [('haghani-56', '09-23T16:16', 0.2), ('haghani-46', '09-23T16:21', 0.1)]
+   1 ('alpaca-options', None) [('krasker-13', '09-23T16:09', 0.3)]
+   1 ('alpaca-index-etfs', None) [('scholes-28', '09-23T16:21', 0.1)]

@@ -288,18 +288,29 @@ class HouseTest(HouseCase):
 
     def test_a_dead_agents_option_is_sold_at_the_bid_not_refused_as_a_market_order(self):
         """Sept 22, 2026: dead options agents' exits were refused twelve times in eight minutes as
-        'an option order must be a limit order'."""
+        'an option order must be a limit order'. Since Sept 23 the sale also waits for the regular
+        session, as a stock's does (`WindDownAtTheOpen`): an option's bid is stale or gone at night."""
         from league.book import Intent
         agent = self.seated()
         self.house.seat(agent)  # its stake, as its first wake would give it
         book = self.house.books["alpaca-paper"]
         option = instrument_for("alpaca-paper", {"occ": "F271015C00013000"})
+        self.clock.now = WindDownAtTheOpen.IN_SESSION
+        self.broker.clock_iso = now_iso(self.clock)
         self.broker.set_quote(option, "0.40", "0.44")
         book.limits[agent.id] = Limits(D("100"), D("75"), asset_classes=("option",))
         out = book.submit([Intent.new(agent=agent.id, instrument=option, side="buy", quantity=D("1"), order_type="limit",
                                       limit_price=D("0.44"), reason="test", created_at=now_iso(self.clock), nonce="opt")])[0]
         self.assertEqual(out.status, "filled", out.detail)
+        self.clock.now = WindDownAtTheOpen.NIGHT
+        self.broker.clock_iso = now_iso(self.clock)
         self.house.kill(agent, "credits", "a test death")
+        refused = [e.payload for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+        self.assertEqual(refused, [])
+        self.assertTrue(book.account(agent.id).holdings)  # held for the open, not sent into a shut session
+        self.clock.now = WindDownAtTheOpen.NEXT_OPEN
+        self.broker.clock_iso = now_iso(self.clock)
+        self.house._release_wind_downs()
         refused = [e.payload for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
         self.assertEqual(refused, [])
         self.assertEqual(book.account(agent.id).holdings, {})
@@ -676,3 +687,190 @@ class StandingsMemo(HouseCase):
             self.assertEqual(len(calls), 8)  # outside a tick: fresh every time
         self.house.tick()
         self.assertIsNone(self.house._standings_memo)  # the memo never outlives its tick
+
+
+class WindDownAtTheOpen(HouseCase):
+    """Sept 22-23, 2026: 576 'market orders outside regular hours' and 116 'an option order must
+    be a limit order' refusals in a day, every one the House winding down a dead agent's stock or
+    option on every mark pass through the night. A stock's or an option's wind-down sale now waits
+    for its market to open; a coin's is placed at once, as before."""
+
+    STOCK = BUYER.replace('"symbols": ["BTC/USD"]', '"symbols": ["SPY"]').replace("test-buyer", "test-stock")
+    IN_SESSION = 1789047300.0  # 2026-09-10T13:35:00Z, a Thursday, the regular session open
+    NIGHT = 1789092000.0  # 2026-09-11T02:00:00Z
+    NEXT_OPEN = 1789133405.0  # 2026-09-11T13:30:05Z
+
+    def at(self, moment):
+        """Move the clock, and the venue's quote stamps with it (the book refuses a stale quote)."""
+        self.clock.now = moment
+        self.broker.clock_iso = now_iso(self.clock)
+
+    def holding_stock(self):
+        from league.book import Intent
+        agent = self.seated("stock", self.STOCK)
+        self.house.seat(agent)
+        book = self.house.books["alpaca-paper"]
+        spy = instrument_for("alpaca-paper", {"symbol": "SPY"})
+        self.broker.set_quote(spy, "50.00", "50.10")
+        book.limits[agent.id] = Limits(D("100"), D("75"), asset_classes=("equity",))
+        self.at(self.IN_SESSION)
+        out = book.submit([Intent.new(agent=agent.id, instrument=spy, side="buy", quantity=D("1"), order_type="limit",
+                                      limit_price=D("50.10"), reason="test", created_at=now_iso(self.clock), nonce="spy")])[0]
+        self.assertEqual(out.status, "filled", out.detail)
+        self.assertTrue(book.account(agent.id).holdings)
+        return agent, book, spy
+
+    def refusals(self, agent):
+        return [e.payload["reasons"] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+
+    def held_alerts(self):
+        return [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "for the open" in e.payload["text"]]
+
+    def test_a_dead_stock_agents_position_waits_for_the_open_and_is_sold_at_the_bell(self):
+        agent, book, spy = self.holding_stock()
+        self.at(self.NIGHT)
+        self.house.kill(agent, "credits", "a test death")
+        self.assertFalse(self.house.registry.get(agent.id).alive)
+        self.assertTrue(book.account(agent.id).holdings)  # not sold: the session is shut
+        self.assertEqual(self.refusals(agent), [])  # and no refused order says so on every pass
+        self.assertEqual(self.house._state["wind_down_held"][agent.id]["alpaca-paper"][spy.key]["quantity"], "1")
+        self.assertEqual([a["level"] for a in self.held_alerts()], ["info"])
+        self.at(self.NIGHT + 301)
+        self.house.tick()  # a mark pass in the night: still held, still nothing refused, told once
+        self.assertTrue(book.account(agent.id).holdings)
+        self.assertEqual(self.refusals(agent), [])
+        self.assertEqual(len(self.held_alerts()), 1)
+        self.at(self.NEXT_OPEN)
+        self.house.tick()
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertEqual(self.refusals(agent), [])
+        self.assertNotIn(agent.id, self.house._state.get("wind_down_held") or {})
+        self.assertTrue(book.reconcile().ok)
+
+    def test_the_held_sale_is_placed_at_the_bell_not_at_the_next_mark_pass(self):
+        agent, book, spy = self.holding_stock()
+        self.at(self.NIGHT)
+        self.house.kill(agent, "credits", "a test death")
+        self.at(self.NEXT_OPEN)
+        self.house._release_wind_downs()  # what the tick calls before the mark pass
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertEqual(self.refusals(agent), [])
+        self.house._release_wind_downs()  # once a session: nothing left to place, nothing raised
+
+    def test_the_hold_survives_a_restart(self):
+        agent, book, spy = self.holding_stock()
+        self.at(self.NIGHT)
+        self.house.kill(agent, "credits", "a test death")
+        self.house.close(wait=None)
+        self.house = self.new_house()
+        book = self.house.books["alpaca-paper"]
+        self.assertIn(spy.key, self.house._state["wind_down_held"][agent.id]["alpaca-paper"])
+        self.assertTrue(book.account(agent.id).holdings)
+        self.at(self.NEXT_OPEN)
+        self.house.tick()
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertEqual(self.refusals(agent), [])
+        self.assertEqual(len(self.held_alerts()), 1)  # told once, before the restart
+
+    def test_a_dead_crypto_agents_position_is_sold_at_once_at_night(self):
+        agent = self.seated()
+        self.at(self.NIGHT)
+        self.house.tick()  # it buys BTC/USD
+        book = self.house.books["alpaca-paper"]
+        self.assertTrue(book.account(agent.id).holdings)
+        self.house.kill(agent, "credits", "a test death")
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertEqual(self.house._state.get("wind_down_held") or {}, {})
+        self.assertEqual(self.held_alerts(), [])
+
+
+class FloorInvariants(HouseCase):
+    """Workstream B, Sept 23, 2026: the floor finds the next blocker itself. Two cheap checks over
+    the ledger's new rows, each an ops warning once per condition."""
+
+    def wake(self, agent, *, offered, intents=0, ago=0.0):
+        at = now_iso(lambda: self.clock() - ago)
+        self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": intents, "dropped": [],
+                                                "cancels": 0, "offered": offered}, agent=agent.id, at=at)
+
+    def warnings(self, text):
+        return [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if e.payload["level"] == "warning" and text in e.payload["text"]]
+
+    def test_a_desk_offered_markets_for_an_hour_with_no_intent_is_told_once_an_hour(self):
+        agent = self.seated()
+        other = self.seated("other", SELLER_FIRST)
+        for ago in (3000, 1800, 600):
+            self.wake(agent, offered=3, ago=ago)
+        self.house._floor_invariants()
+        told = self.warnings("alpaca-crypto-majors: offered markets on 3 wakes")
+        self.assertEqual(len(told), 1)
+        self.assertIn(agent.id, told[0]["text"])
+        self.assertNotIn(other.id, told[0]["text"])  # it did not wake; the wakes that saw markets are named
+        self.clock.advance(301)
+        self.wake(agent, offered=4)
+        self.house._floor_invariants()
+        self.assertEqual(len(self.warnings("alpaca-crypto-majors: offered markets")), 1)  # once an hour
+        self.clock.advance(3600)
+        for ago in (3000, 1800, 600):
+            self.wake(other, offered=2, ago=ago)
+        self.house._floor_invariants()
+        self.assertEqual(len(self.warnings("alpaca-crypto-majors: offered markets")), 2)
+        state = self.house._state["invariants"]
+        self.assertGreater(state["cursor"], 0)  # the next pass starts where this one stopped
+        self.assertTrue(all(self.clock() - row[0] <= 3600 for rows in state["wakes"].values() for row in rows))  # older than an hour is dropped
+
+    def test_a_desk_that_wrote_an_intent_or_saw_nothing_is_not_quiet(self):
+        agent = self.seated()
+        for ago in (3000, 1800):
+            self.wake(agent, offered=3, ago=ago)
+        self.wake(agent, offered=3, intents=1, ago=600)
+        self.house._floor_invariants()
+        self.assertEqual(self.warnings("offered markets"), [])
+        self.clock.advance(3601)
+        for ago in (3000, 1800, 600):
+            self.wake(agent, offered=0, ago=ago)  # a shut market: doing nothing was right
+        self.house._floor_invariants()
+        self.assertEqual(self.warnings("offered markets"), [])
+        self.clock.advance(3601)
+        for ago in (3000, 1800, 600):
+            self.wake(agent, offered=3, ago=ago)
+        self.house.ledger.append("agent.intent", {"book": "alpaca-paper", "symbol": "BTC/USD", "side": "buy"}, agent=agent.id)
+        self.house._floor_invariants()
+        self.assertEqual(self.warnings("offered markets"), [])
+
+    def test_a_real_money_bunt_frozen_by_a_daily_loss_rule_is_told_once_a_day(self):
+        agent = self.seated()
+        self.house.evaluator.seat(agent.id, 2, "a bunt")
+        reason = "desk daily loss 12.0% reached limit 10%; only risk-reducing orders allowed"
+        refused = {"book": "alpaca", "intent_id": "x", "reasons": [reason]}
+        self.house.ledger.append("book.refused", refused, agent=agent.id)
+        self.house._floor_invariants()
+        told = self.warnings("frozen by a daily-loss rule")
+        self.assertEqual(len(told), 1)
+        self.assertIn(agent.id, told[0]["text"])
+        self.assertIn(reason, told[0]["text"])
+        self.assertIn("on alpaca", told[0]["text"])
+        self.clock.advance(301)
+        self.house.ledger.append("book.refused", refused, agent=agent.id)
+        self.house.ledger.append("book.refused", {**refused, "book": "alpaca-paper"}, agent=agent.id)  # practice: not a bunt
+        self.house._floor_invariants()
+        self.assertEqual(len(self.warnings("frozen by a daily-loss rule")), 1)  # once a day
+        self.clock.advance(86400)
+        self.house.ledger.append("book.refused", refused, agent=agent.id)
+        self.house._floor_invariants()
+        self.assertEqual(len(self.warnings("frozen by a daily-loss rule")), 2)
+
+    def test_a_paper_agents_daily_loss_refusal_is_not_a_frozen_bunt(self):
+        agent = self.seated()  # rung 1: the book's daily rule is its rule
+        self.house.ledger.append("book.refused", {"book": "alpaca", "intent_id": "x", "reasons": ["desk daily loss 12.0% reached limit 10%"]}, agent=agent.id)
+        self.house._floor_invariants()
+        self.assertEqual(self.warnings("frozen by a daily-loss rule"), [])
+
+    def test_the_checks_run_off_the_tick_from_a_saved_cursor(self):
+        agent = self.seated()
+        self.house.tick()
+        first = self.house._state["invariants"]["cursor"]
+        self.assertGreater(first, 0)
+        self.clock.advance(301)
+        self.house.tick()
+        self.assertGreaterEqual(self.house._state["invariants"]["cursor"], first)

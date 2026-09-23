@@ -1,0 +1,111 @@
+fill attribution check (agent col is house?, source): {(False, 'venue'): 788, (True, 'dust'): 276, (False, 'repair'): 1, (True, 'venue-fee'): 24, (False, 'dust'): 2, (False, 'cross'): 2, (True, 'cross-house'): 2}
+legend: T=fills R=refused(no fill) I=intent only(no fill) O=offered-no-intent N=woke,nothing offered Z=agents alive,no wake -=no agents
+hour(UTC)        Kstrk  K15m   Kwx  Kspt Kprop  Kprc  Katt  Amaj  Aalt  Aetf Amega  Aopt Kopen Aopen
+09-21T17        I     T     T     O     O     R     O     Z     I     Z     O     O     -     -
+09-21T18        T     T     T     O     O     R     O     Z     T     Z     O     O     -     -
+09-21T19        Z     T     T     O     O     R     O     Z     T     Z     T     T     -     -
+09-21T20        Z     R     T     T     O     R     O     Z     T     Z     N     N     -     -
+09-21T21        Z     T     T     T     O     R     O     Z     R     Z     N     N     -     -
+09-21T22        Z     T     O     T     O     R     O     Z     T     Z     N     N     -     -
+09-21T23        Z     T     T     T     O     R     O     Z     T     Z     N     N     -     -
+09-22T00        Z     O     T     O     O     R     O     Z     T     N     N     N     -     -
+09-22T01        Z     T     T     I     O     R     O     Z     T     N     N     N     -     -
+09-22T02        Z     O     T     T     O     R     O     Z     T     N     N     N     -     -
+09-22T03        Z     T     I     I     I     R     O     Z     T     N     Z     R     -     -
+09-22T04        Z     O     T     T     I     T     O     Z     T     N     Z     R     -     -
+09-22T05        Z     T     T     I     N     I     O     Z     T     N     Z     R     -     -
+09-22T06        Z     O     T     T     N     T     O     Z     T     N     Z     R     -     -
+09-22T07        Z     Z     T     O     Z     T     Z     Z     T     Z     Z     R     -     -
+09-22T08        Z     Z     Z     Z     Z     T     Z     Z     T     Z     Z     R     -     -
+09-22T09        Z     Z     Z     Z     Z     Z     Z     Z     R     Z     Z     R     -     -
+09-22T10        Z     Z     Z     Z     Z     Z     Z     Z     R     Z     Z     R     -     -
+09-22T11        Z     Z     T     Z     Z     Z     Z     Z     R     Z     Z     R     -     -
+09-22T12        Z     Z     Z     Z     Z     Z     Z     Z     R     Z     Z     R     -     -
+09-22T13        Z     Z     Z     Z     Z     Z     Z     Z     R     Z     Z     R     -     -
+09-22T14        Z     Z     Z     Z     Z     Z     Z     Z     R     Z     Z     R     -     -
+09-22T15        Z     Z     T     T     I     T     O     Z     T     O     Z     T     -     -
+09-22T16        Z     Z     T     T     O     T     O     Z     T     O     Z     T     -     -
+09-22T17        Z     Z     T     T     I     T     O     Z     I     O     Z     R     -     -
+09-22T18        Z     Z     I     T     I     I     O     Z     I     O     Z     T     -     -
+09-22T19        Z     Z     T     T     I     O     O     Z     T     T     Z     T     -     -
+09-22T20        Z     Z     T     T     I     O     O     Z     T     N     Z     I     -     -
+09-22T21        Z     Z     T     T     I     I     O     Z     T     N     Z     N     -     -
+09-22T22        Z     Z     T     T     I     I     O     Z     T     N     N     N     -     -
+09-22T23        Z     Z     T     T     I     I     O     Z     T     N     N     N     -     -
+09-23T00        Z     Z     T     T     I     I     O     Z     T     N     N     N     -     -
+09-23T01        Z     Z     T     T     T     T     Z     Z     I     N     N     N     -     -
+09-23T02        Z     O     T     T     T     T     Z     Z     -     N     N     N     -     -
+09-23T03        Z     O     T     T     I     T     Z     Z     Z     N     N     N     -     -
+09-23T04        Z     T     I     T     I     I     O     O     T     N     R     I     -     -
+09-23T05        O     T     T     T     O     T     O     T     T     N     N     N     -     -
+09-23T06        T     T     T     T     O     T     O     T     T     R     N     I     -     -
+09-23T07        T     T     T     T     O     I     O     I     T     R     N     N     -     -
+09-23T08        I     T     T     T     I     I     O     O     T     R     N     N     -     -
+09-23T09        I     T     T     T     I     T     O     O     T     R     N     N     -     -
+09-23T10        I     T     I     T     I     T     O     O     T     R     R     N     -     -
+09-23T11        T     T     T     T     I     I     O     T     T     R     N     N     -     -
+09-23T12        I     T     T     I     I     I     N     T     T     R     N     N     -     -
+09-23T13        T     T     T     T     I     I     O     I     T     T     T     T     -     -
+09-23T14        T     T     T     T     I     O     O     T     T     T     T     T     -     -
+09-23T15        T     T     T     T     I     I     O     T     T     T     T     T     -     -
+09-23T16        O     T     O     O     I     T     O     O     T     O     T     T     -     -
+
+=== per desk: hours by class (of 48 )
+kalshi-crypto-strikes  {'T': 7, 'I': 5, 'O': 2, 'Z': 34}
+kalshi-crypto-15m      {'T': 22, 'R': 1, 'O': 6, 'Z': 19}
+kalshi-weather         {'T': 36, 'I': 4, 'O': 2, 'Z': 6}
+kalshi-sports          {'T': 31, 'I': 4, 'O': 6, 'Z': 7}
+kalshi-sports-props    {'T': 2, 'I': 22, 'O': 14, 'N': 2, 'Z': 8}
+kalshi-prices          {'T': 15, 'R': 11, 'I': 13, 'O': 3, 'Z': 6}
+kalshi-attention       {'O': 36, 'N': 1, 'Z': 11}
+alpaca-crypto-majors   {'T': 6, 'I': 2, 'O': 5, 'Z': 35}
+alpaca-crypto-alts     {'T': 35, 'R': 7, 'I': 4, 'Z': 1, '-': 1}
+alpaca-index-etfs      {'T': 4, 'R': 7, 'O': 5, 'N': 17, 'Z': 15}
+alpaca-megacaps        {'T': 5, 'R': 2, 'O': 2, 'N': 20, 'Z': 19}
+alpaca-options         {'T': 9, 'R': 13, 'I': 3, 'O': 2, 'N': 21}
+kalshi-open            {'-': 48}
+alpaca-open            {'-': 48}
+
+=== per desk totals last 48h
+kalshi-crypto-strikes  {'wakes': 209, 'ok': 209, 'offered_wakes': 208, 'offered_sum': 7218, 'intents_w': 32, 'wake_practice': 209, 'intents': 32, 'orders': 131, 'fills': 15, 'barren': 139}
+kalshi-crypto-15m      {'wakes': 1277, 'ok': 1277, 'offered_wakes': 1256, 'offered_sum': 5441, 'intents_w': 174, 'barren': 1019, 'wake_real': 153, 'wake_practice': 1124, 'intents': 174, 'orders': 587, 'intents_real': 19, 'orders_real': 49, 'fills': 67, 'shut': 109, 'fills_real': 8, 'refused': 19}
+kalshi-weather         {'wakes': 254, 'ok': 254, 'offered_wakes': 232, 'offered_sum': 10463, 'intents_w': 196, 'wake_practice': 205, 'intents': 196, 'orders': 824, 'fills': 74, 'wake_real': 49, 'intents_real': 39, 'orders_real': 155, 'fills_real': 23, 'barren': 14, 'refused': 5, 'shut': 5}
+kalshi-sports          {'wakes': 735, 'ok': 735, 'offered_wakes': 735, 'offered_sum': 62312, 'intents_w': 239, 'barren': 173, 'wake_practice': 728, 'intents': 239, 'orders': 957, 'fills': 140, 'wake_real': 7, 'intents_real': 5, 'orders_real': 16, 'fills_real': 3}
+kalshi-sports-props    {'wakes': 218, 'ok': 218, 'offered_wakes': 184, 'offered_sum': 20064, 'intents_w': 139, 'barren': 86, 'wake_practice': 218, 'intents': 139, 'orders': 555, 'shut': 91, 'fills': 6}
+kalshi-prices          {'wakes': 195, 'ok': 195, 'offered_wakes': 195, 'offered_sum': 12905, 'intents_w': 179, 'wake_practice': 180, 'intents': 179, 'refused': 34, 'orders': 613, 'fills': 52, 'wake_real': 15, 'intents_real': 11, 'orders_real': 45, 'fills_real': 3}
+kalshi-attention       {'wakes': 67, 'ok': 67, 'offered_wakes': 63, 'offered_sum': 533, 'intents_w': 0, 'barren': 66, 'wake_practice': 67, 'shut': 11, 'orders': 1}
+alpaca-crypto-majors   {'wakes': 589, 'ok': 589, 'offered_wakes': 589, 'offered_sum': 1031, 'intents_w': 23, 'barren': 272, 'wake_practice': 589, 'intents': 23, 'orders': 102, 'fills': 18, 'refused': 2}
+alpaca-crypto-alts     {'wakes': 622, 'ok': 622, 'offered_wakes': 622, 'offered_sum': 3993, 'intents_w': 682, 'wake_practice': 597, 'intents': 1130, 'orders': 2744, 'fills': 292, 'refused': 545, 'barren': 133, 'wake_real': 25, 'intents_real': 16, 'orders_real': 26, 'fills_real': 2}
+alpaca-index-etfs      {'wakes': 1390, 'ok': 1390, 'intents_w': 31, 'shut': 869, 'wake_practice': 1390, 'offered_wakes': 313, 'offered_sum': 1500, 'barren': 262, 'intents': 615, 'orders': 195, 'fills': 39, 'refused': 576}
+alpaca-megacaps        {'wakes': 650, 'ok': 650, 'offered_wakes': 167, 'offered_sum': 1547, 'intents_w': 48, 'barren': 74, 'shut': 541, 'wake_practice': 650, 'intents': 48, 'orders': 218, 'fills': 45, 'refused': 3}
+alpaca-options         {'wakes': 514, 'ok': 514, 'offered_wakes': 140, 'offered_sum': 1152, 'intents_w': 39, 'barren': 86, 'shut': 270, 'wake_practice': 514, 'intents': 356, 'orders': 210, 'fills': 42, 'refused': 314}
+kalshi-open            {}
+alpaca-open            {}
+
+=== uncovered hours (no desk with fills or intents) and which desks were offered
+
+=== per hour-of-day (UTC), all 48h: desks with fills / intents / offered-no-intent
+00 {'Z': 5, 'O': 5, 'T': 5, 'R': 1, 'N': 6, '-': 4, 'I': 2}
+01 {'Z': 6, 'T': 7, 'I': 2, 'O': 2, 'R': 1, 'N': 6, '-': 4}
+02 {'Z': 5, 'O': 4, 'T': 7, 'R': 1, 'N': 6, '-': 5}
+03 {'Z': 7, 'T': 5, 'I': 4, 'R': 2, 'O': 2, 'N': 4, '-': 4}
+04 {'Z': 4, 'O': 4, 'T': 7, 'I': 5, 'N': 2, 'R': 2, '-': 4}
+05 {'Z': 3, 'T': 9, 'I': 2, 'N': 5, 'O': 4, 'R': 1, '-': 4}
+06 {'Z': 3, 'O': 4, 'T': 11, 'N': 3, 'R': 2, '-': 4, 'I': 1}
+07 {'Z': 7, 'T': 8, 'O': 3, 'R': 2, '-': 4, 'I': 2, 'N': 2}
+08 {'Z': 9, 'T': 6, 'R': 2, '-': 4, 'I': 3, 'O': 2, 'N': 2}
+09 {'Z': 10, 'R': 3, '-': 4, 'I': 2, 'T': 5, 'O': 2, 'N': 2}
+10 {'Z': 10, 'R': 4, '-': 4, 'I': 3, 'T': 4, 'O': 2, 'N': 1}
+11 {'Z': 9, 'T': 7, 'R': 3, '-': 4, 'I': 2, 'O': 1, 'N': 2}
+12 {'Z': 10, 'R': 3, '-': 4, 'I': 4, 'T': 4, 'N': 3}
+13 {'Z': 10, 'R': 2, '-': 4, 'T': 8, 'I': 3, 'O': 1}
+14 {'Z': 10, 'R': 2, '-': 4, 'T': 9, 'I': 1, 'O': 2}
+15 {'Z': 4, 'T': 14, 'I': 3, 'O': 3, '-': 4}
+16 {'Z': 4, 'T': 10, 'O': 9, '-': 4, 'I': 1}
+17 {'I': 4, 'T': 5, 'O': 7, 'R': 2, 'Z': 6, '-': 4}
+18 {'T': 6, 'O': 7, 'R': 1, 'Z': 6, '-': 4, 'I': 4}
+19 {'Z': 7, 'T': 10, 'O': 5, 'R': 1, '-': 4, 'I': 1}
+20 {'Z': 7, 'R': 2, 'T': 6, 'O': 4, 'N': 3, '-': 4, 'I': 2}
+21 {'Z': 7, 'T': 6, 'O': 3, 'R': 2, 'N': 4, '-': 4, 'I': 2}
+22 {'Z': 6, 'T': 6, 'O': 4, 'R': 1, 'N': 5, '-': 4, 'I': 2}
+23 {'Z': 6, 'T': 7, 'O': 3, 'R': 1, 'N': 5, '-': 4, 'I': 2}

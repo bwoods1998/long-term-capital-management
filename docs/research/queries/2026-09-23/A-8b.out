@@ -1,0 +1,31 @@
+## book.settle sample
+   huang-h427345 2026-09-23T15:01:04.118Z {"book":"kalshi","cost":"2.54600000","instrument":{"asset_class":"event","currency":"USD","expiry":null,"market_id":"KXBTC15M-26SEP231100-00","multiplier":"1","right":"no","strike":null,"symbol":"KXBTC15M-26SEP231100-00","venue":"kalshi"},"opened_at":"2026-09-23T14:48:47.919Z","payout":"0.00000000","pnl":"-2.54600000","quantity":"4","real_money":true,"reason":"Fade completed-window BTC order flow after the fifteen-minute reference resets; ignore the unreliable displayed volume field and cap the ask including taker fees.","result":"yes"}
+   mullins-6 2026-09-23T14:31:54.755Z {"book":"kalshi","cost":"9.30000000","instrument":{"asset_class":"event","currency":"USD","expiry":null,"market_id":"KXRAIN-26SEP22-SATX","multiplier":"1","right":"no","strike":null,"symbol":"KXRAIN-26SEP22-SATX","venue":"kalshi"},"opened_at":"2026-09-23T03:19:07.620Z","payout":"10.00000000","pnl":"0.70000000","quantity":"10","real_money":true,"reason":"Resting post-only NO bid at 0.93; favourite in target band, integer strike or rain, 3.0h to close, bins skipped.","result":"no"}
+  keys {'book': 481, 'cost': 481, 'instrument': 481, 'opened_at': 481, 'payout': 481, 'pnl': 481, 'quantity': 481, 'real_money': 481, 'reason': 481, 'result': 481}
+  kalshi-shadow  settles= 460 realized= -604.23 fees=0.00 | 24h n=166 realized=-392.99
+  kalshi         settles=  21 realized=   +2.15 fees=0.00 | 24h n=10 realized=+0.53
+## real kalshi settles per agent: n, realized, class, desk
+  mullins-2              n= 10 realized=  +4.89 seed           kalshi-weather
+  mullins-6              n=  2 realized=  +1.00 house-mutation kalshi-weather
+  huang-6                n=  7 realized=  +0.33 house-mutation kalshi-crypto-15m
+  huang-h51fdd3-2        n=  1 realized=  -1.52 house-mutation kalshi-crypto-15m
+  huang-h427345          n=  1 realized=  -2.55 foundry        kalshi-crypto-15m
+## floor.mark real_account_equity series (first, then every ~6h, last)
+  2026-09-19T21:13 real_equity=1017.3551 venues=[('alpaca', '500.0000'), ('kalshi', '517.3551')]
+  2026-09-20T03:18 real_equity=1017.3551 venues=[('alpaca', '500.0000'), ('kalshi', '517.3551')]
+  2026-09-20T09:20 real_equity=1017.3551 venues=[('alpaca', '500.0000'), ('kalshi', '517.3551')]
+  2026-09-20T15:21 real_equity=1017.3551 venues=[('alpaca', '500.0000'), ('kalshi', '517.3551')]
+  2026-09-20T21:26 real_equity=1017.3551 venues=[('alpaca', '500.0000'), ('kalshi', '517.3551')]
+  2026-09-21T03:30 real_equity=1017.3551 venues=[('alpaca', '500.0000'), ('kalshi', '517.3551')]
+  2026-09-21T09:32 real_equity=1017.7551 venues=[('alpaca', '500.0000'), ('kalshi', '517.7551')]
+  2026-09-21T15:35 real_equity=1017.7551 venues=[('alpaca', '500.0000'), ('kalshi', '517.7551')]
+  2026-09-21T21:38 real_equity=1019.0462 venues=[('alpaca', '500.0000'), ('kalshi', '519.0462')]
+  2026-09-22T03:44 real_equity=1012.4033 venues=[('alpaca', '500.0000'), ('kalshi', '512.4033')]
+  2026-09-22T09:49 real_equity=1013.4069 venues=[('alpaca', '500.0000'), ('kalshi', '513.4069')]
+  2026-09-22T15:54 real_equity=1014.0433 venues=[('alpaca', '500.0000'), ('kalshi', '514.0433')]
+  2026-09-22T21:56 real_equity=1015.7433 venues=[('alpaca', '500.0000'), ('kalshi', '515.7433')]
+  2026-09-23T03:56 real_equity=1016.5433 venues=[('alpaca', '500.0000'), ('kalshi', '516.5433')]
+  2026-09-23T10:00 real_equity=1016.8633 venues=[('alpaca', '500.0000'), ('kalshi', '516.8633')]
+  2026-09-23T16:04 real_equity=1014.0368 venues=[('alpaca', '499.5000'), ('kalshi', '514.5368')]
+  2026-09-23T16:22 real_equity=1014.9968 venues=[('alpaca', '499.5000'), ('kalshi', '515.4968')]
+## performance fees granted (credit.grant reason like 'performance fee'): (8, 0.92)

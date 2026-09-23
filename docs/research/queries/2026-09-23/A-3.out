@@ -1,0 +1,89 @@
+## lab window: 09-23T10:46 -> 09-23T16:27 hours 5.7
+## candidates by origin: n, evaluated, eligible, gate-passed, archived(elite), median fitness of gate-passers
+  param    n= 1497 evaluated= 1358 eligible= 1269 gate=1079  gate/eval=0.79  median_fit_gate=0.000359270586
+  luna     n=  372 evaluated=    0 eligible=    0 gate=   0  gate/eval=0.00  median_fit_gate=None
+  seed     n=  270 evaluated=  203 eligible=  127 gate=  87  gate/eval=0.43  median_fit_gate=6.609994e-06
+  sol      n=   22 evaluated=    0 eligible=    0 gate=   0  gate/eval=0.00  median_fit_gate=None
+  agent    n=   22 evaluated=   22 eligible=    9 gate=   7  gate/eval=0.32  median_fit_gate=0.000619820064
+## candidates by status: [('blocked', 3), ('evaluated', 1580), ('queued', 600)]
+## candidates by niche: n, gate [('alpaca-index-etfs', 441, 272), ('kalshi-sports', 319, 105), ('alpaca-megacaps', 309, 177), ('kalshi-crypto-15m', 240, 162), ('kalshi-weather', 237, 167), ('alpaca-crypto-alts', 194, 118), ('alpaca-crypto-majors', 171, 124), ('kalshi-crypto-strikes', 127, 2), ('kalshi-attention', 104, 46), ('alpaca-open', 14, 0), ('kalshi-sports-props', 14, 0), ('kalshi-prices', 13, 0)]
+## archive (elites): (30, 9) by niche [('alpaca-crypto-alts', 3), ('alpaca-crypto-majors', 3), ('alpaca-index-etfs', 5), ('alpaca-megacaps', 6), ('kalshi-attention', 2), ('kalshi-crypto-15m', 3), ('kalshi-crypto-strikes', 3), ('kalshi-sports', 3), ('kalshi-weather', 2)]
+## calls by kind/model: n, written, refused, $cost, $royalty; per hour over last 24h
+   ('luna', 'gpt-6-luna', 63, 372, 5, 0.235, 0.0, 0)
+   ('sol', 'gpt-6-sol', 6, 22, 2, 0.653, 0.0, 0)
+  last 24h calls: (69, 0.889, 394)  $/h 0.037  $/written 0.0023
+  calls first/last: 09-23T11:21 09-23T16:17
+## batches: n, candidates, ok, eligible, gate, archived, seconds, sail_usd
+   (293, 1580, 1580, 1405, 1173, 163, 1370.0, 0.076)  sec/candidate 0.87  $sail/candidate 5e-05
+  last 24h: (293, 1580, 1173, 1370.0, 0.076)
+## graduations by state: [('born', 1), ('holdout_rationed', 14), ('passed', 20), ('replay_failed', 5)]
+## graduations detail (state, niche, origin via candidates, at, detail)
+  09-23T11:29 holdout_rationed alpaca-megacaps      ('agent', 0.001765587003, 49)            agent=None | the lab lineage agent:mcentee-31 has spent its 3 sealed-holdout evaluations
+  09-23T12:54 holdout_rationed alpaca-index-etfs    ('param', 0.000445660517, 367)           agent=None | the lab lineage agent:scholes-21 has spent its 3 sealed-holdout evaluations
+  09-23T12:59 born             kalshi-crypto-15m    ('param', 0.013534165671, 198)           agent=huang-l23cdb7 | born as huang-l23cdb7
+  09-23T12:59 holdout_rationed alpaca-megacaps      ('param', 5.3650214e-05, 18)             agent=None | the lab lineage agent:mcentee-30 has spent its 3 sealed-holdout evaluations
+  09-23T13:15 holdout_rationed alpaca-megacaps      ('param', 0.002063990686, 49)            agent=None | the lab lineage agent:mcentee-31 has spent its 3 sealed-holdout evaluations
+  09-23T13:21 replay_failed    kalshi-sports        ('param', 0.009769733249, 15)            agent=None | out-of-sample growth is not above -0.050% a block
+  09-23T13:27 replay_failed    kalshi-sports        ('param', 0.014020119706, 12)            agent=None | out-of-sample growth is not above -0.050% a block
+  09-23T13:53 replay_failed    kalshi-weather       ('param', 0.010574841326, 31)            agent=None | out-of-sample growth is not above -0.050% a block
+  09-23T14:29 holdout_rationed alpaca-index-etfs    ('param', 0.000504230235, 367)           agent=None | the lab lineage agent:scholes-21 has spent its 3 sealed-holdout evaluations
+  09-23T14:38 holdout_rationed alpaca-megacaps      ('param', 5.5957988e-05, 18)             agent=None | the lab lineage agent:mcentee-30 has spent its 3 sealed-holdout evaluations
+  09-23T14:44 holdout_rationed alpaca-megacaps      ('param', 0.002418592615, 49)            agent=None | the lab lineage agent:mcentee-31 has spent its 3 sealed-holdout evaluations
+  09-23T14:54 holdout_rationed alpaca-index-etfs    ('param', 3.8914421e-05, 116)            agent=None | the lab lineage agent:scholes-20 has spent its 3 sealed-holdout evaluations
+  09-23T15:09 holdout_rationed alpaca-crypto-majors ('param', -0.000147492179, 335)          agent=None | the lab lineage agent:rosenfeld-35 has spent its 3 sealed-holdout evaluations
+  09-23T15:15 holdout_rationed alpaca-index-etfs    ('param', 0.000553156043, 367)           agent=None | the lab lineage agent:scholes-21 has spent its 3 sealed-holdout evaluations
+  09-23T15:35 replay_failed    kalshi-crypto-15m    ('param', 0.051866946675, 90)            agent=None | out-of-sample growth is not above -0.050% a block
+  09-23T15:43 replay_failed    kalshi-sports        ('param', 0.014390617367, 13)            agent=None | out-of-sample growth is not above -0.050% a block
+  09-23T15:54 holdout_rationed alpaca-megacaps      ('param', 0.002830167167, 49)            agent=None | the lab lineage agent:mcentee-31 has spent its 3 sealed-holdout evaluations
+  09-23T16:12 holdout_rationed alpaca-crypto-majors ('param', -1.4490095e-05, 19)            agent=None | the line rosenfeld-h76403a has spent 2 of its 3 sealed-holdout evaluations and rosenfeld-h76403a lives on it: its last 1 stay with the living line's o
+  09-23T16:17 passed           kalshi-sports        ('param', 0.005283760989, 52)            agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-sports        ('param', 0.006058450018, 23)            agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-crypto-15m    ('agent', 0.000619820064, 28)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-attention     ('param', 0.014743105131, 38)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-attention     ('param', 0.009125934718, 30)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-weather       ('param', 0.02463959742, 93)             agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-sports        ('param', 0.009589434533, 47)            agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-weather       ('param', 0.027085563501, 101)           agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-sports        ('param', 0.010866060019, 48)            agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           alpaca-megacaps      ('agent', 0.000281247246, 166)           agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 passed           alpaca-index-etfs    ('param', 1.7793146e-05, 25)             agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           alpaca-crypto-alts   ('param', 8.72067e-07, 30)               agent=None | its desk is full of agents that have earned their seats
+  09-23T16:17 passed           alpaca-crypto-majors ('param', -3.1245086e-05, 16)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 passed           alpaca-crypto-majors ('param', -2.7052028e-05, 16)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 passed           kalshi-crypto-15m    ('param', 0.020030347668, 13)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:17 holdout_rationed alpaca-crypto-majors ('param', -0.000146357563, 334)          agent=None | the lab lineage agent:rosenfeld-35 has spent its 3 sealed-holdout evaluations
+  09-23T16:20 passed           alpaca-crypto-alts   ('param', -0.000103678787, 17)           agent=None | its desk is full of agents that have earned their seats
+  09-23T16:20 passed           alpaca-megacaps      ('agent', 4.0635828e-05, 92)             agent=None | the league is full of agents that have earned their seats
+  09-23T16:22 passed           alpaca-crypto-alts   ('param', 1.141817e-05, 31)              agent=None | its desk is full of agents that have earned their seats
+  09-23T16:22 passed           alpaca-index-etfs    ('param', 1.7858767e-05, 24)             agent=None | its desk is full of agents that have earned their seats
+  09-23T16:22 passed           kalshi-crypto-15m    ('param', 0.025321685705, 13)            agent=None | the league is full of agents that have earned their seats
+  09-23T16:22 holdout_rationed alpaca-crypto-alts   ('param', -0.000246877862, 364)          agent=None | the line haghani-34 has spent 2 of its 3 sealed-holdout evaluations and haghani-39 lives on it: its last 1 stay with the living line's own forks
+## ledger lab.graduate events by state and hour
+   ('2026-09-23T11', 'holdout_rationed') 1
+   ('2026-09-23T12', 'born') 1
+   ('2026-09-23T12', 'holdout_rationed') 2
+   ('2026-09-23T12', 'passed') 1
+   ('2026-09-23T12', 'waiting_seat') 1
+   ('2026-09-23T13', 'holdout_rationed') 1
+   ('2026-09-23T13', 'passed') 4
+   ('2026-09-23T13', 'replay_failed') 3
+   ('2026-09-23T13', 'waiting_seat') 4
+   ('2026-09-23T14', 'holdout_rationed') 4
+   ('2026-09-23T14', 'passed') 4
+   ('2026-09-23T14', 'waiting_seat') 4
+   ('2026-09-23T15', 'holdout_rationed') 3
+   ('2026-09-23T15', 'passed') 8
+   ('2026-09-23T15', 'replay_failed') 2
+   ('2026-09-23T15', 'waiting_seat') 8
+   ('2026-09-23T16', 'holdout_rationed') 3
+   ('2026-09-23T16', 'passed') 4
+   ('2026-09-23T16', 'waiting_seat') 4
+## holdout.access: n by agent class/outcome (payload keys)
+  keys {'agent': 76, 'lineage': 76, 'state': 76, 'version': 76, 'window': 76, 'coarse': 38}
+  by desk-prefix [('haghani', 38), ('scholes', 16), ('mcentee', 12), ('rosenfeld', 10)]
+  sample mcentee-40 2026-09-23T16:28:25.501Z {'agent': 'mcentee-40', 'coarse': "{'passed': True, 'return_pct': 4, 'trades': '50+'}", 'lineage': 'mcentee-40', 'state': 'evaluated', 'version': '8d5b2cb26fb4b8b7e27925f4', 'window': "['2025-11-14', '2026-05-15']"}
+  sample haghani-59 2026-09-23T16:28:02.871Z {'agent': 'haghani-59', 'coarse': "{'passed': True, 'return_pct': -37, 'trades': '50+'}", 'lineage': 'haghani-59', 'state': 'evaluated', 'version': '2097638c55d705daeee958dd', 'window': "['2025-11-14', '2026-05-15']"}
+## lab.stats last row
+   2026-09-23T16:17:47.450Z {"batches":64,"born_total":1,"calls":{"luna":{"calls":14,"refused":0,"written":84},"sol":{"calls":2,"refused":0,"written":8}},"candidates_per_box_second":1.314,"coverage":{"by_desk":{"alpaca-crypto-alts":3,"alpaca-crypto-majors":3,"alpaca-index-etfs":5,"alpaca-megacaps":5,"kalshi-attention":2,"kalshi-crypto-15m":3,"kalshi-crypto-strikes":3,"kalshi-sports":3,"kalshi-weather":2},"cells":29},"evaluated":321,"pass_rates":{"eligible":0.8785,"gate":0.7508,"ran":1.0},"per_hour":321.0,"queued":603,"refusal":null,"spend":{"openai_usd":"0.270761","royalty_balance_usd":"0","sail_usd_estimate":"0.0136"},"stages":{"archived":37,"eligible":282,"gate":241,"graduations":{"holdout_rationed":3,"passed":19,"replay_failed":2},"ran":321,"written":{"agent":2,"luna":84,"param":224,"seed":3,"sol":8}},"window_seconds":3600.0}
+## lab.stats: sum over rows of evaluated, born_total, openai_usd, sail
+   {'evaluated': 6338, 'openai': 3.4762669999999996, 'sail': 0.30729999999999996, 'rows': 25, 'window_h': 25.0}

@@ -1,0 +1,132 @@
+
+====================================================================================================
+TOP 5 PRACTICE (W_paper, >=3 trades)
+
+--- huang-h51fdd3-2 | kalshi kalshi-crypto-15m | family crypto-15m-doge-flat-spot-no | horizon hour | origin house | band bunt stake 11.52 | Wp 1.0520 Wr 0.8480 E 0.8698 trades 4 real 1
+    style: flat-spot-no-bias | params {'flat_15m_max': 0.0011, 'no_ask_max': 0.44776} | born 09-23T04:05 | parent huang-h51fdd3
+    born reason: a parameter mutation of its parent
+    practice: {'fills': 4, 'closed': 4, 'pnl': 10.4, 'days': 0.09, 'per_day': 44.95, 'hold_h': 0.1, 'maker': '4/4', 'size_med': 5.2, 'size_share': '2.6%', 'ret_med': '+94.10%', 'win': '3/4', 'settled': 4, 'fees': 0.0, 'symbols': [('KXDOGE15M-', 1), ('KXETH15M-2', 1), ('KXXRP15M-2', 1)]}
+    real: {'fills': 1, 'closed': 1, 'pnl': -1.52, 'days': 0.04, 'per_day': 24.0, 'hold_h': 0.08, 'maker': '1/1', 'size_med': 1.52, 'size_share': '13.2%', 'ret_med': '-100.00%', 'win': '0/1', 'settled': 1, 'fees': 0.0, 'symbols': [('KXDOGE15M-', 1)]}
+
+--- mullins-2 | kalshi kalshi-weather | family weather-favorites | horizon day | origin house | band bunt stake 5.11 | Wp 1.0345 Wr 1.1578 E 1.1776 trades 11 real 10
+    style: favorites-no | params {'bid_max': 0.97, 'bid_min': 0.9, 'max_hours': 30.0, 'max_open': 6, 'max_spread': 0.03, 'min_hours': 1.0, 'min_volume_24h': 1000, 'notional_usd': 10.0, 'requote_minutes': 180} | born 09-19T21:13 | parent None
+    born reason: The same edge on the NO leg: when YES asks 10 cents or less NO is the favourite, NO beat YES at most prices in 72M trades, and buyers of 10-cent contr
+    doc: A finite float, or the default for anything else (None, text, NaN).
+    practice: {'fills': 11, 'closed': 11, 'pnl': 6.9, 'days': 2.61, 'per_day': 4.21, 'hold_h': 19.23, 'maker': '11/11', 'size_med': 9.7, 'size_share': '4.8%', 'ret_med': '+7.53%', 'win': '11/11', 'settled': 11, 'fees': 0.0, 'symbols': [('KXHIGHMIA-', 4), ('KXHIGHTATL', 3), ('KXHIGHLAX-', 2)]}
+    real: {'fills': 16, 'closed': 10, 'pnl': 4.89, 'days': 1.64, 'per_day': 6.08, 'hold_h': 13.38, 'maker': '16/16', 'size_med': 6.75, 'size_share': '67.5%', 'ret_med': '+4.17%', 'win': '10/10', 'settled': 10, 'fees': 0.0, 'symbols': [('KXRAIN-26S', 6), ('KXHIGHTATL', 4), ('KXHIGHLAX-', 3)]}
+
+--- mullins-6 | kalshi kalshi-weather | family weather-favorites | horizon day | origin house | band bunt stake 36.70 | Wp 1.0285 Wr 1.0383 E 1.0530 trades 11 real 2
+    style: favorites-no | params {'bid_max': 0.97, 'bid_min': 0.9, 'max_hours': 12.0, 'max_open': 6, 'max_spread': 0.03, 'min_hours': 0.937403, 'min_volume_24h': 1000, 'notional_usd': 10.0, 'requote_minutes': 180, 'skip_half_strike_bins': True} | born 09-21T03:12 | parent mullins-3
+    born reason: a parameter mutation of its parent
+    practice: {'fills': 11, 'closed': 11, 'pnl': 5.7, 'days': 2.4, 'per_day': 4.58, 'hold_h': 15.65, 'maker': '11/11', 'size_med': 9.7, 'size_share': '4.8%', 'ret_med': '+4.17%', 'win': '11/11', 'settled': 11, 'fees': 0.0, 'symbols': [('KXRAIN-26S', 10), ('KXHIGHMIA-', 1)]}
+    real: {'fills': 7, 'closed': 2, 'pnl': 1.0, 'days': 0.53, 'per_day': 3.74, 'hold_h': 11.81, 'maker': '7/7', 'size_med': 9.3, 'size_share': '25.3%', 'ret_med': '+5.31%', 'win': '2/2', 'settled': 2, 'fees': 0.0, 'symbols': [('KXHIGHLAX-', 3), ('KXRAIN-26S', 2), ('KXHIGHCHI-', 1)]}
+
+--- meriwether-h2d625d | kalshi kalshi-sports | family sports-central-run-under | horizon day | origin foundry | band bunt stake 10 | Wp 1.0269 Wr 0.9953 E 1.0086 trades 7 real 0
+    style: central-run-entertainmen | params {'end_buffer': 5.0, 'entry_ceiling': 30.0, 'lot_count': 20, 'spread_ceiling': 0.025, 'ticket_budget': 15.0, 'touch_ceiling': 0.6, 'touch_floor': 0.38} | born 09-22T20:59 | parent None
+    born reason: hypothesis card 2d625d0aa5678d3e (Merton, foundry foundry:077acbab0a99:1790110460): Recreational baseball bettors may buy scoring exposure partly for 
+    practice: {'fills': 28, 'closed': 7, 'pnl': 7.19, 'days': 0.6, 'per_day': 11.63, 'hold_h': 5.03, 'maker': '0/28', 'size_med': 10.1, 'size_share': '5.0%', 'ret_med': '+64.37%', 'win': '4/7', 'settled': 7, 'fees': 4.73, 'symbols': [('KXMLBTOTAL', 28)]}
+    real: {'fills': 3, 'closed': 0, 'pnl': 0, 'days': 0.04, 'per_day': 0.0, 'hold_h': None, 'maker': '0/3', 'size_med': 2.7, 'size_share': '27.0%', 'ret_med': None, 'win': '0/0', 'settled': 0, 'fees': 0.13, 'symbols': [('KXMLBTOTAL', 3)]}
+
+--- mullins-13 | kalshi kalshi-weather | family weather-favorites | horizon day | origin house | band paper stake None | Wp 1.0125 Wr 1.0000 E 1.0062 trades 4 real 0
+    style: favorites-no-rain-only | params {'bid_max': 0.97, 'bid_min': 0.9, 'max_hours': 30.0, 'max_open': 6, 'max_spread': 0.03, 'min_hours': 0.937403, 'min_volume_24h': 1000, 'notional_usd': 10.0, 'requote_minutes': 180, 'skip_half_strike_bins': True} | born 09-22T15:48 | parent mullins-6
+    born reason: Test the falsifiable Jev-supported hypothesis that excluding temperature markets and trading only rain favourites improves the passed mixed-weather ma
+    practice: {'fills': 7, 'closed': 4, 'pnl': 2.5, 'days': 0.73, 'per_day': 5.44, 'hold_h': 16.04, 'maker': '7/7', 'size_med': 9.7, 'size_share': '4.8%', 'ret_med': '+7.03%', 'win': '4/4', 'settled': 4, 'fees': 0.0, 'symbols': [('KXRAIN-26S', 7)]}
+
+====================================================================================================
+REAL RECORDS (W_real)
+
+--- mullins-2 | kalshi kalshi-weather | family weather-favorites | horizon day | origin house | band bunt stake 5.11 | Wp 1.0345 Wr 1.1578 E 1.1776 trades 11 real 10
+    style: favorites-no | params {'bid_max': 0.97, 'bid_min': 0.9, 'max_hours': 30.0, 'max_open': 6, 'max_spread': 0.03, 'min_hours': 1.0, 'min_volume_24h': 1000, 'notional_usd': 10.0, 'requote_minutes': 180} | born 09-19T21:13 | parent None
+    born reason: The same edge on the NO leg: when YES asks 10 cents or less NO is the favourite, NO beat YES at most prices in 72M trades, and buyers of 10-cent contr
+    doc: A finite float, or the default for anything else (None, text, NaN).
+    practice: {'fills': 11, 'closed': 11, 'pnl': 6.9, 'days': 2.61, 'per_day': 4.21, 'hold_h': 19.23, 'maker': '11/11', 'size_med': 9.7, 'size_share': '4.8%', 'ret_med': '+7.53%', 'win': '11/11', 'settled': 11, 'fees': 0.0, 'symbols': [('KXHIGHMIA-', 4), ('KXHIGHTATL', 3), ('KXHIGHLAX-', 2)]}
+    real: {'fills': 16, 'closed': 10, 'pnl': 4.89, 'days': 1.64, 'per_day': 6.08, 'hold_h': 13.38, 'maker': '16/16', 'size_med': 6.75, 'size_share': '67.5%', 'ret_med': '+4.17%', 'win': '10/10', 'settled': 10, 'fees': 0.0, 'symbols': [('KXRAIN-26S', 6), ('KXHIGHTATL', 4), ('KXHIGHLAX-', 3)]}
+
+--- mullins-6 | kalshi kalshi-weather | family weather-favorites | horizon day | origin house | band bunt stake 36.70 | Wp 1.0285 Wr 1.0383 E 1.0530 trades 11 real 2
+    style: favorites-no | params {'bid_max': 0.97, 'bid_min': 0.9, 'max_hours': 12.0, 'max_open': 6, 'max_spread': 0.03, 'min_hours': 0.937403, 'min_volume_24h': 1000, 'notional_usd': 10.0, 'requote_minutes': 180, 'skip_half_strike_bins': True} | born 09-21T03:12 | parent mullins-3
+    born reason: a parameter mutation of its parent
+    practice: {'fills': 11, 'closed': 11, 'pnl': 5.7, 'days': 2.4, 'per_day': 4.58, 'hold_h': 15.65, 'maker': '11/11', 'size_med': 9.7, 'size_share': '4.8%', 'ret_med': '+4.17%', 'win': '11/11', 'settled': 11, 'fees': 0.0, 'symbols': [('KXRAIN-26S', 10), ('KXHIGHMIA-', 1)]}
+    real: {'fills': 7, 'closed': 2, 'pnl': 1.0, 'days': 0.53, 'per_day': 3.74, 'hold_h': 11.81, 'maker': '7/7', 'size_med': 9.3, 'size_share': '25.3%', 'ret_med': '+5.31%', 'win': '2/2', 'settled': 2, 'fees': 0.0, 'symbols': [('KXHIGHLAX-', 3), ('KXRAIN-26S', 2), ('KXHIGHCHI-', 1)]}
+
+--- meriwether-h2d625d | kalshi kalshi-sports | family sports-central-run-under | horizon day | origin foundry | band bunt stake 10 | Wp 1.0269 Wr 0.9953 E 1.0086 trades 7 real 0
+    style: central-run-entertainmen | params {'end_buffer': 5.0, 'entry_ceiling': 30.0, 'lot_count': 20, 'spread_ceiling': 0.025, 'ticket_budget': 15.0, 'touch_ceiling': 0.6, 'touch_floor': 0.38} | born 09-22T20:59 | parent None
+    born reason: hypothesis card 2d625d0aa5678d3e (Merton, foundry foundry:077acbab0a99:1790110460): Recreational baseball bettors may buy scoring exposure partly for 
+    practice: {'fills': 28, 'closed': 7, 'pnl': 7.19, 'days': 0.6, 'per_day': 11.63, 'hold_h': 5.03, 'maker': '0/28', 'size_med': 10.1, 'size_share': '5.0%', 'ret_med': '+64.37%', 'win': '4/7', 'settled': 7, 'fees': 4.73, 'symbols': [('KXMLBTOTAL', 28)]}
+    real: {'fills': 3, 'closed': 0, 'pnl': 0, 'days': 0.04, 'per_day': 0.0, 'hold_h': None, 'maker': '0/3', 'size_med': 2.7, 'size_share': '27.0%', 'ret_med': None, 'win': '0/0', 'settled': 0, 'fees': 0.13, 'symbols': [('KXMLBTOTAL', 3)]}
+
+--- hawkins-19 | kalshi kalshi-prices | family prices-favorites | horizon day | origin house | band bunt stake 27.48 | Wp 1.0060 Wr 0.9920 E 0.9950 trades 5 real 0
+    style: favorites-daily | params {'bid_max': 0.97, 'bid_min': 0.9, 'max_hours': 40.0, 'max_open': 6, 'max_spread': 0.027643, 'min_hours': 1.0, 'min_volume_24h': 500, 'notional_usd': 10.0, 'requote_minutes': 180} | born 09-22T05:43 | parent hawkins
+    born reason: a House-staked valid mutation of hawkins: open desks with more room were tried first; the league was 63 of 64
+    doc: A finite float, or the default for anything else (None, text, NaN).
+    practice: {'fills': 6, 'closed': 5, 'pnl': 2.3, 'days': 0.7, 'per_day': 7.1, 'hold_h': 7.09, 'maker': '6/6', 'size_med': 9.65, 'size_share': '4.8%', 'ret_med': '+4.17%', 'win': '5/5', 'settled': 5, 'fees': 0.0, 'symbols': [('KXWTI-26SE', 3), ('KXGOLDD-26', 3)]}
+    real: {'fills': 3, 'closed': 0, 'pnl': 0, 'days': 0.31, 'per_day': 0.0, 'hold_h': None, 'maker': '3/3', 'size_med': 9.3, 'size_share': '33.8%', 'ret_med': None, 'win': '0/0', 'settled': 0, 'fees': 0.0, 'symbols': [('KXWTI-26SE', 2), ('KXGOLDD-26', 1)]}
+
+--- haghani-37 | alpaca alpaca-crypto-alts | family crypto-alts-reversion | horizon hour | origin house | band paper stake None | Wp 0.9855 Wr 0.9798 E 0.9726 trades 5 real 1
+    style: maker-reversion | params {'k': 2.0, 'max_hold_hours': 24, 'min_edge_pct': 0.8, 'notional_usd': 40.0, 'replace_pct': 0.2, 'stop_pct': 3.0, 'window': 32} | born 09-23T03:54 | parent haghani-36
+    born reason: revived under the loosened replay gate: haghani-36 died on rung 0 (displaced) after a replay that failed only on out-of-sample growth (-0.0343% a bloc
+    doc: A finite float, or the default for anything else (None, text, NaN).
+    practice: {'fills': 11, 'closed': 5, 'pnl': -1.36, 'days': 0.41, 'per_day': 12.16, 'hold_h': 0.23, 'maker': '0/11', 'size_med': 40.0, 'size_share': '20.0%', 'ret_med': '+0.63%', 'win': '3/5', 'settled': 0, 'fees': 0.52, 'symbols': [('SOL-USD', 2), ('LINK-USD', 2), ('LTC-USD', 1)]}
+    real: {'fills': 2, 'closed': 1, 'pnl': -0.51, 'days': 0.12, 'per_day': 8.32, 'hold_h': 2.88, 'maker': '0/2', 'size_med': 12.0, 'size_share': '120.0%', 'ret_med': '-4.20%', 'win': '0/1', 'settled': 0, 'fees': 0.03, 'symbols': [('LTC-USD', 1)]}
+
+--- huang-h51fdd3-2 | kalshi kalshi-crypto-15m | family crypto-15m-doge-flat-spot-no | horizon hour | origin house | band bunt stake 11.52 | Wp 1.0520 Wr 0.8480 E 0.8698 trades 4 real 1
+    style: flat-spot-no-bias | params {'flat_15m_max': 0.0011, 'no_ask_max': 0.44776} | born 09-23T04:05 | parent huang-h51fdd3
+    born reason: a parameter mutation of its parent
+    practice: {'fills': 4, 'closed': 4, 'pnl': 10.4, 'days': 0.09, 'per_day': 44.95, 'hold_h': 0.1, 'maker': '4/4', 'size_med': 5.2, 'size_share': '2.6%', 'ret_med': '+94.10%', 'win': '3/4', 'settled': 4, 'fees': 0.0, 'symbols': [('KXDOGE15M-', 1), ('KXETH15M-2', 1), ('KXXRP15M-2', 1)]}
+    real: {'fills': 1, 'closed': 1, 'pnl': -1.52, 'days': 0.04, 'per_day': 24.0, 'hold_h': 0.08, 'maker': '1/1', 'size_med': 1.52, 'size_share': '13.2%', 'ret_med': '-100.00%', 'win': '0/1', 'settled': 1, 'fees': 0.0, 'symbols': [('KXDOGE15M-', 1)]}
+
+--- huang-h427345 | kalshi kalshi-crypto-15m | family crypto-15m-prior-window-reset | horizon hour | origin foundry | band paper stake None | Wp 0.9839 Wr 0.7454 E 0.7394 trades 10 real 1
+    style: prior-window-reset-volume-agnostic | params {'max_ask': 0.58, 'max_spread': 0.06, 'min_move': 0.0011, 'notional_usd': 24.0} | born 09-23T03:14 | parent None
+    born reason: hypothesis card 4273450f9c308a1f (Merton, foundry foundry:a3f9a1d3a65b:1790133099): A large BTC move in the completed fifteen-minute window can attrac
+    practice: {'fills': 11, 'closed': 10, 'pnl': -9.67, 'days': 0.45, 'per_day': 22.37, 'hold_h': 0.16, 'maker': '0/11', 'size_med': 21.07, 'size_share': '10.5%', 'ret_med': '-32.78%', 'win': '5/10', 'settled': 10, 'fees': 7.61, 'symbols': [('KXBTC15M-2', 11)]}
+    real: {'fills': 1, 'closed': 1, 'pnl': -2.55, 'days': 0.04, 'per_day': 24.0, 'hold_h': 0.2, 'maker': '0/1', 'size_med': 2.48, 'size_share': '24.8%', 'ret_med': '-100.00%', 'win': '0/1', 'settled': 1, 'fees': 0.07, 'symbols': [('KXBTC15M-2', 1)]}
+
+====================================================================================================
+WORST 5 ON BOARD (W_paper, >=3 trades)
+
+--- hilibrand-h6ca596 | kalshi kalshi-crypto-strikes | family crypto-strikes-vol-shock-upside | horizon hour | origin foundry | band paper stake None | Wp 0.6982 Wr 1.0000 E 0.8356 trades 3 real 0
+    style: vol-shock-upside | params {'kelly_scale': 0.6, 'min_edge': 0.012, 'vol_jump': 1.0} | born 09-23T05:43 | parent None
+    born reason: hypothesis card 6ca596cfdcfbf33d (Merton, foundry foundry:9ab51224c798:1790139621): A completed rise in Deribit’s implied-volatility index may precede
+    practice: {'fills': 3, 'closed': 3, 'pnl': -60.37, 'days': 0.04, 'per_day': 72.0, 'hold_h': 0.51, 'maker': '3/3', 'size_med': 15.77, 'size_share': '7.9%', 'ret_med': '-100.00%', 'win': '0/3', 'settled': 3, 'fees': 0.0, 'symbols': [('KXBTC-26SE', 2), ('KXBTCD-26S', 1)]}
+
+--- meriwether-hadd32b | kalshi kalshi-sports | family sports-runline-leverage-tax | horizon day | origin foundry | band paper stake None | Wp 0.8312 Wr 1.0000 E 0.9117 trades 7 real 0
+    style: baseball-runline-leverag | params {'end_buffer': 5.0, 'entry_ceiling': 30.0, 'lot_count': 20, 'spread_ceiling': 0.025, 'ticket_budget': 15.0, 'touch_ceiling': 0.67, 'touch_floor': 0.45} | born 09-22T21:02 | parent None
+    born reason: hypothesis card add32b3f1ab6a299 (Merton, foundry foundry:077acbab0a99:1790110460): Baseball bettors seeking a larger payout may substitute a team's m
+    practice: {'fills': 22, 'closed': 7, 'pnl': -29.12, 'days': 0.51, 'per_day': 13.73, 'hold_h': 5.26, 'maker': '0/22', 'size_med': 12.4, 'size_share': '6.2%', 'ret_med': '-100.00%', 'win': '3/7', 'settled': 7, 'fees': 3.52, 'symbols': [('KXMLBSPREA', 22)]}
+
+--- huang-h6d3302-2 | kalshi kalshi-crypto-15m | family crypto-15m-eth-prior-window-fad | horizon hour | origin house | band paper stake None | Wp 0.9197 Wr 1.0000 E 0.9590 trades 6 real 0
+    style: prior-window-fade | params {'prior_move_min': 0.001732, 'quiet_max': 0.0009} | born 09-23T04:04 | parent huang-h6d3302
+    born reason: a parameter mutation of its parent
+    practice: {'fills': 6, 'closed': 6, 'pnl': -16.06, 'days': 0.36, 'per_day': 16.56, 'hold_h': 0.18, 'maker': '0/6', 'size_med': 4.16, 'size_share': '2.1%', 'ret_med': '-100.00%', 'win': '1/6', 'settled': 6, 'fees': 0.54, 'symbols': [('KXETH15M-2', 6)]}
+
+--- meriwether-39 | kalshi kalshi-sports | family sports-favorites | horizon day | origin house | band paper stake None | Wp 0.9224 Wr 1.0000 E 0.9604 trades 6 real 0
+    style: pre-game-deep-favorite-m | params {'bid_max': 0.98, 'bid_min': 0.9, 'max_hours': 30.0, 'max_open': 6, 'max_spread': 0.04, 'min_hours': 2.0, 'min_volume_24h': 5000, 'notional_usd': 10.0} | born 09-22T20:10 | parent meriwether-25
+    born reason: Submit a falsifiable execution improvement based on the specialist evidence and Jev split: keep pre-game post-only deep-favourite bids, but restrict t
+    practice: {'fills': 6, 'closed': 6, 'pnl': -15.51, 'days': 0.54, 'per_day': 11.19, 'hold_h': 1.45, 'maker': '6/6', 'size_med': 9.6, 'size_share': '4.8%', 'ret_med': '+7.53%', 'win': '4/6', 'settled': 6, 'fees': 0.01, 'symbols': [('KXCS2GAME-', 3), ('KXWNBAGAME', 2), ('KXWNBATOTA', 1)]}
+
+--- krasker-6 | alpaca alpaca-options | family options-pullback | horizon day | origin repair | band paper stake None | Wp 0.9345 Wr 1.0000 E 0.9667 trades 3 real 0
+    style: options-pullback-iv-rv-gated | params {'exit_days': 2, 'exit_mean_days': 5, 'max_chase_floor': 0.02, 'max_chase_sigma': 2.5, 'max_days': 30, 'max_iv_rv': 1.6, 'max_open': 2, 'max_spread_pct': 20.0, 'min_days': 3, 'min_premium': 0.05, 'notional_usd': 20.0, 'requote_minutes': 30, 'rsi_entry': 45.0, 'rsi_high': 55.0, 'rv_window': 20, 'stop_pct': 35.0, 'take_profit_pct': 33.331888, 'target_delta': 0.5, 'trend_days': 5} | born 09-22T03:20 | parent krasker-3
+    born reason: Propose a surgical execution repair: prioritize the OCC contract in held positions and open orders so exits target the actual option rather than the u
+    practice: {'fills': 8, 'closed': 3, 'pnl': -12.0, 'days': 1.02, 'per_day': 2.94, 'hold_h': 20.87, 'maker': '0/8', 'size_med': 14.0, 'size_share': '7.0%', 'ret_med': '-35.71%', 'win': '0/3', 'settled': 0, 'fees': 0.0, 'symbols': [('T', 2), ('RIVN', 2), ('SNAP', 1)]}
+
+====================================================================================================
+WORST 5 LIFETIME PRACTICE P&L (incl. dead):
+
+--- hilibrand-hc4567e | kalshi kalshi-crypto-strikes | family crypto-strikes-downside-insurance-s | origin foundry | died 2026-09-23T16:02:35.788Z evidence | P&L $-93.45
+    born reason: hypothesis card c4567e323f23c7b2 (Merton, foundry foundry:ee1df3e208e0:1790143953): Crypto holders seeking discrete crash protection may overpay for N
+    practice: {'fills': 9, 'closed': 9, 'pnl': -93.45, 'days': 0.35, 'per_day': 25.82, 'hold_h': 0.65, 'maker': '9/9', 'size_med': 19.2, 'size_share': '9.6%', 'ret_med': '-100.00%', 'win': '4/9', 'settled': 9, 'fees': 0.0, 'symbols': [('KXBTCD-26S', 6), ('KXETHD-26S', 3)]}
+
+--- hilibrand-h6ca596 | kalshi kalshi-crypto-strikes | family crypto-strikes-vol-shock-upside | origin foundry | died None None | P&L $-60.37
+    born reason: hypothesis card 6ca596cfdcfbf33d (Merton, foundry foundry:9ab51224c798:1790139621): A completed rise in Deribit’s implied-volatility index may precede
+    practice: {'fills': 3, 'closed': 3, 'pnl': -60.37, 'days': 0.04, 'per_day': 72.0, 'hold_h': 0.51, 'maker': '3/3', 'size_med': 15.77, 'size_share': '7.9%', 'ret_med': '-100.00%', 'win': '0/3', 'settled': 3, 'fees': 0.0, 'symbols': [('KXBTC-26SE', 2), ('KXBTCD-26S', 1)]}
+
+--- huang-4 | kalshi kalshi-crypto-15m | family crypto-15m-favorites | origin house | died 2026-09-21T03:49:10.898Z displaced | P&L $-46.56
+    born reason: Fix the 12-wake idle: buy the favourite leg on BOTH sides (YES and NO), drop the 1177 volume floor that excludes the altcoins where favourites actuall
+    practice: {'fills': 52, 'closed': 52, 'pnl': -46.56, 'days': 0.71, 'per_day': 73.01, 'hold_h': 0.1, 'maker': '52/52', 'size_med': 9.59, 'size_share': '4.8%', 'ret_med': '+9.05%', 'win': '43/52', 'settled': 52, 'fees': 0.0, 'symbols': [('KXDOGE15M-', 11), ('KXETH15M-2', 8), ('KXHYPE15M-', 7)]}
+
+--- huang-h51fdd3 | kalshi kalshi-crypto-15m | family crypto-15m-doge-flat-spot-no | origin foundry | died 2026-09-23T14:03:24.494Z evidence | P&L $-38.28
+    born reason: hypothesis card 51fdd3e25f78c55e (Merton, foundry foundry:f34ed73698d6:1790132320): Retail demand to bet that DOGE goes up may leave its NO leg cheap 
+    practice: {'fills': 6, 'closed': 6, 'pnl': -38.28, 'days': 0.36, 'per_day': 16.68, 'hold_h': 0.15, 'maker': '1/6', 'size_med': 5.7, 'size_share': '2.9%', 'ret_med': '-100.00%', 'win': '0/6', 'settled': 6, 'fees': 1.48, 'symbols': [('KXDOGE15M-', 6)]}
+
+--- huang-7 | kalshi kalshi-crypto-15m | family crypto-15m-favorites | origin house | died 2026-09-22T06:04:38.159Z evidence | P&L $-33.55
+    born reason: Fork gate for the spot-informed favorites maker v2: add a live spot read against each 15-min market's strike (observe BTC/ETH/SOL/XRP/DOGE, 5Min bars 
+    practice: {'fills': 11, 'closed': 11, 'pnl': -33.55, 'days': 1.01, 'per_day': 10.94, 'hold_h': 0.13, 'maker': '0/11', 'size_med': 10.25, 'size_share': '5.1%', 'ret_med': '-100.00%', 'win': '4/11', 'settled': 11, 'fees': 4.2, 'symbols': [('KXXRP15M-2', 6), ('KXETH15M-2', 3), ('KXSOL15M-2', 2)]}

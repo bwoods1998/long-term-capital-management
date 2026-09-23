@@ -1,0 +1,76 @@
+refusals last 48h: 1498
+by (book,desk): [(('alpaca-paper', 'alpaca-index-etfs'), 576), (('alpaca-paper', 'alpaca-crypto-alts'), 535), (('alpaca-paper', 'alpaca-options'), 314), (('kalshi-shadow', 'kalshi-prices'), 34), (('kalshi-shadow', 'kalshi-crypto-15m'), 16), (('alpaca', 'alpaca-crypto-alts'), 10), (('kalshi', 'kalshi-weather'), 4), (('kalshi', 'kalshi-crypto-15m'), 3), (('alpaca-paper', 'alpaca-megacaps'), 3), (('alpaca-paper', 'alpaca-crypto-majors'), 2), (('kalshi-shadow', 'kalshi-weather'), 1)]
+
+=== reasons by desk
+kalshi-prices 34
+     34 this market is expected to resolve in N hours; entries must resolve within N
+alpaca-crypto-alts 548
+     422 haghani-N has no seat on the alpaca-paper book
+     64 a market order here could trade against the House's own resting order
+     43 a $X buy is below the venue minimum of $X an order (Alpaca refuses a crypto order under $X); size it at $X or 
+     10 position would be N% of desk equity, cap N%
+     3 the alpaca-paper book is frozen until it reconciles: cash differs by -N
+     3 order notional N exceeds N% of desk equity
+     2 this price would trade against the House's own resting order; re-price or wait
+     1 gross exposure would be N% of desk equity, cap N%
+kalshi-crypto-15m 22
+     9 limit price is N through the ask of N
+     5 the House already holds or bids the no leg of this market; one account cannot hold both
+     3 the House already holds or bids the yes leg of this market; one account cannot hold both
+     3 desk daily loss N% reached limit N%; only risk-reducing orders allowed
+     1 KXXRP15M-26SEP211645-N would put N at risk on one market, cap N (N% of desk equity)
+     1 KXXRP15M-26SEP211700-N would put N at risk on one market, cap N (N% of desk equity)
+alpaca-options 326
+     170 krasker-N has no seat on the alpaca-paper book
+     125 an option order must be a limit order
+     15 krasker has no seat on the alpaca-paper book
+     9 market orders outside regular hours are not permitted
+     3 limit price deviates N% from reference
+     1 asset class equity not in mandate
+     1 sell exceeds position and shorting is not permitted (you hold N PUT on this market; sell at most that on the s
+     1 an exit must reduce an existing position without reversing it
+kalshi-weather 5
+     5 this market is expected to resolve in N hours; entries must resolve within N
+alpaca-megacaps 4
+     3 market orders outside regular hours are not permitted
+     1 the quote is 14515s old
+alpaca-index-etfs 576
+     576 market orders outside regular hours are not permitted
+alpaca-crypto-majors 2
+     2 a market order here could trade against the House's own resting order
+
+=== top reasons by hour of day (UTC)
+00 24 [('haghani-N has no seat on the alpaca-paper book', 20), ('this market is expected to resolve in N hours; entries must resolve within N', 4)]
+01 25 [('haghani-N has no seat on the alpaca-paper book', 20), ('this market is expected to resolve in N hours; entries must resolve within N', 5)]
+02 26 [('haghani-N has no seat on the alpaca-paper book', 22), ('this market is expected to resolve in N hours; entries must resolve within N', 4)]
+03 40 [('haghani-N has no seat on the alpaca-paper book', 20), ('market orders outside regular hours are not permitted', 8), ('an option order must be a limit order', 8)]
+04 44 [('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 10), ('this market is expected to resolve in N hours; entries must resolve within N', 4)]
+05 37 [('haghani-N has no seat on the alpaca-paper book', 20), ('krasker-N has no seat on the alpaca-paper book', 10), ('a $X buy is below the venue minimum of $X an order (Alpaca refuses a crypto order under $X); size it at $X or ', 5)]
+06 78 [('market orders outside regular hours are not permitted', 44), ('haghani-N has no seat on the alpaca-paper book', 18), ('krasker-N has no seat on the alpaca-paper book', 9)]
+07 111 [('market orders outside regular hours are not permitted', 76), ('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 11)]
+08 129 [('market orders outside regular hours are not permitted', 88), ('haghani-N has no seat on the alpaca-paper book', 20), ('krasker-N has no seat on the alpaca-paper book', 10)]
+09 131 [('market orders outside regular hours are not permitted', 88), ('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 11)]
+10 119 [('market orders outside regular hours are not permitted', 74), ('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 11)]
+11 134 [('market orders outside regular hours are not permitted', 88), ('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 11)]
+12 115 [('market orders outside regular hours are not permitted', 80), ('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 11)]
+13 78 [('market orders outside regular hours are not permitted', 40), ('haghani-N has no seat on the alpaca-paper book', 20), ('krasker-N has no seat on the alpaca-paper book', 10)]
+14 63 [("a market order here could trade against the House's own resting order", 29), ('haghani-N has no seat on the alpaca-paper book', 22), ('krasker-N has no seat on the alpaca-paper book', 11)]
+15 63 [('haghani-N has no seat on the alpaca-paper book', 20), ("a market order here could trade against the House's own resting order", 13), ('krasker-N has no seat on the alpaca-paper book', 10)]
+16 90 [('krasker-N has no seat on the alpaca-paper book', 45), ('haghani-N has no seat on the alpaca-paper book', 18), ('an option order must be a limit order', 12)]
+17 68 [('an option order must be a limit order', 66), ('this market is expected to resolve in N hours; entries must resolve within N', 2)]
+18 31 [('an option order must be a limit order', 30), ('this market is expected to resolve in N hours; entries must resolve within N', 1)]
+19 6 [('the alpaca-paper book is frozen until it reconciles: cash differs by -N', 3), ('limit price deviates N% from reference', 2), ('this market is expected to resolve in N hours; entries must resolve within N', 1)]
+20 30 [("a market order here could trade against the House's own resting order", 19), ('haghani-N has no seat on the alpaca-paper book', 8), ('this market is expected to resolve in N hours; entries must resolve within N', 1)]
+21 24 [('haghani-N has no seat on the alpaca-paper book', 20), ('this market is expected to resolve in N hours; entries must resolve within N', 4)]
+22 28 [('haghani-N has no seat on the alpaca-paper book', 22), ('this market is expected to resolve in N hours; entries must resolve within N', 6)]
+23 23 [('haghani-N has no seat on the alpaca-paper book', 20), ('this market is expected to resolve in N hours; entries must resolve within N', 3)]
+
+=== shard mentions (any kind, any time)
+book.order 2 ('2026-09-23T12:58:27.168Z', 'house', '{"book":"kalshi","broker_order_id":null,"instrument":{"asset_class":"event","currency":"USD","expiry":null,"market_id":"KXMLBTOTAL-26SEP231840STLPIT-8","multiplier":"1","right":"no","strike":null,"symbol":"KXMLBTOTAL-26SEP231840STLPIT-8","venue":"kalshi"},"limit_price":"0.54","liquidity":"taker","order_id":"ord-e9cc14f7143bd9d4dd6b11a0af5db9d4","order_type":"limit","post_only":false,"quantity":"5"')
+agent.research 3 ('2026-09-23T13:19:36.886Z', 'meriwether-h2d625d', '{"session":"research:meriwether-h2d625d:0c662aa2386b4a0fba75d5989fa327a0","text":"2026-09-23 13:19 UTC: markets_now shows no open positions or orders, $10 cash/equity, and $3 max per position/order; the deployed view still exposes KXMLBTOTAL markets. Standing records a rejected live buy with exchange HTTP 404 insufficient_shard_balance, not a House risk refusal. The old rule and unverified pregame')
+repair.reported 1 ('2026-09-23T13:37:26.105Z', 'house', '{"agents":["meriwether-h2d625d"],"all_agents":1,"evidence":[{"agent":"meriwether-h2d625d","at":"2026-09-23T13:19:36.886Z","excerpt":"2026-09-23 13:19 UTC: markets_now shows no open positions or orders, $10 cash/equity, and $3 max per position/order; the deployed view still exposes KXMLBTOTAL markets. Standing records a rejected live buy with exchange HTTP 404 insufficient_shard_balance, not a Hous')
+
+=== insufficient_shard_balance rows by day
+('agent.research', '2026-09-23', 'kalshi-sports') 3
+('book.order', '2026-09-23', 'house') 2
+('repair.reported', '2026-09-23', 'house') 1
