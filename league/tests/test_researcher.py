@@ -397,6 +397,39 @@ class Hiring(ResearchCase):
         self.assertIn('answer', self.tool_output(1))
         self.assertEqual(len(self.merton.seen), 1)
 
+    def test_a_failed_consultation_charges_the_agent_nothing(self):
+        """Sept 23, 2026: 21 of 60 consultations errored (refused, or an unreadable answer) and the
+        agents paid anyway, $19 for 39 answers. The House's cost stays on Merton's own row."""
+        failed = self.FakeMerton({"answer": "Merton returned an unreadable answer (no JSON).", "code": "", "confidence": "low", "error": True}, cost="0.73")
+        before = self.economy.balance(self.parent.id)
+        r, out = self.hire(merton=failed)
+        reply = self.tool_output(1)
+        self.assertIn("not charged", reply["error"])
+        self.assertEqual((reply["cost_usd"], reply["charged"]), ("0", False))
+        self.assertEqual(self.economy.balance(self.parent.id), before - D("0.02"), "only its own two model turns were paid for")
+        self.assertEqual([e for e in self.ledger.iter(kinds="credit.charge", agent=self.parent.id) if e.payload["what"] == "merton's time"], [])
+        row = [e.payload for e in self.ledger.iter(kinds="agent.research", agent=self.parent.id) if e.payload.get("tool") == "merton"][-1]
+        self.assertEqual((row["error"], row["charged"], row["cost_usd"], row["house_cost_usd"]), (True, False, "0", "0.73"))
+        self.assertEqual(out.cost_usd, D("0.02"), "the pass's own two turns, and none of Merton's time")
+
+    def test_a_failed_consultation_charged_before_the_rule_is_refunded_once(self):
+        # As `_consult` wrote it until Sept 23, 2026: the charge, then the row with the failure's words.
+        self.economy.charge(self.parent.id, D("0.40"), "merton's time", detail={"session": "s0"}, id="merton:s0")
+        self.ledger.append("agent.research", {"tool": "merton", "session": "s0", "at_epoch": self.clock() - 3600, "question": "q",
+                                              "answer": "Merton could not be reached (frontier call refused: HTTP 402).",
+                                              "confidence": "low", "cost_usd": "0.40", "wrote_code": False}, agent=self.parent.id)
+        self.ledger.append("agent.research", {"tool": "merton", "session": "s-fine", "at_epoch": self.clock() - 3000, "question": "q",
+                                              "answer": "A real answer.", "confidence": "high", "cost_usd": "0.50", "wrote_code": False}, agent=self.parent.id)
+        before = self.economy.balance(self.parent.id)
+        self.researcher([]).research(self.parent, {}, session="s1")
+        grants = [e.payload for e in self.ledger.iter(kinds="credit.grant", agent=self.parent.id) if "refund" in e.payload["reason"]]
+        self.assertEqual([D(g["usd"]) for g in grants], [D("0.40")])
+        self.assertIn("s0", grants[0]["reason"])
+        self.assertEqual(self.economy.balance(self.parent.id), before + D("0.40") - D("0.01"))
+        self.researcher([]).research(self.parent, {}, session="s2")
+        self.assertEqual(len([e for e in self.ledger.iter(kinds="credit.grant", agent=self.parent.id) if "refund" in e.payload["reason"]]), 1,
+                         "a refund is written once, by its session's id")
+
     def test_he_is_shown_its_trades_and_where_its_replays_won_and_lost(self):
         """His brief says he is shown the agent's own trades and where its replays won and lost. Until
         Sept 22, 2026 the packet held neither: no trades, and a replay `digest` field that trial rows

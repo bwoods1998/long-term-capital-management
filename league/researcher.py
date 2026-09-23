@@ -320,6 +320,10 @@ class Researcher:
         job = self.jobs.get(session) if self.jobs else None
         state = job['checkpoint'] if job else None
         if state is None:
+            try:
+                self.refund_failed_consults(agent)
+            except Exception as exc:  # noqa: BLE001 - a refund that cannot be read never costs a research pass
+                self.ledger.append('ops.alert', {'level': 'warning', 'text': f'consult refund check failed for {agent.id}: {type(exc).__name__}: {str(exc)[:160]}'})
             settings = self.provider.settings_for(agent, self.settings) if hasattr(self.provider, 'settings_for') else dict(self.settings)
             settings = self._evidence_turns(agent, settings)
             tools = TOOLS[:-1] + LAB_TOOLS + TOOLS[-1:] if self.lab is not None else TOOLS
@@ -618,6 +622,17 @@ class Researcher:
             # from, over Merton's name and the agent's: a request with a theorist behind it.
             self.commons.request_tool(agent.id, asked_for["name"], f"Merton, for {agent.id}: {asked_for['description']}")
         cost = Decimal(str(reply.get("cost_usd") or 0))
+        if reply.get("error"):
+            # Sept 23, 2026: a consultation the frontier refused or answered unreadably is not the
+            # agent's to pay for. Measured on the production ledger: 21 of 60 consultations errored
+            # and the agents were still charged -- $19 for 39 answers. The House's own cost stays on
+            # the `merton.pass` row (the pacer's record); the agent's row says it was not charged.
+            self.ledger.append("agent.research", {"tool": "merton", "session": session, "at_epoch": self.clock(),
+                                                  "question": question[:600], "answer": str(reply.get("answer") or "")[:2000],
+                                                  "confidence": reply.get("confidence"), "cost_usd": "0", "house_cost_usd": format(cost, "f"),
+                                                  "wrote_code": False, "error": True, "charged": False}, agent=agent.id)
+            return {"error": f"the consultation failed and you were not charged: {str(reply.get('answer') or '')[:300]}",
+                    "cost_usd": "0", "charged": False, "note": "ask again later; the cooldown counts this attempt"}
         if cost > 0:
             self.economy.charge(agent.id, cost, "merton's time", detail={"session": session}, id=f"merton:{session}")
             out.cost_usd += cost
@@ -699,6 +714,36 @@ class Researcher:
                                               "items": len(texts), "cost_usd": format(charge, "f"),
                                               **({"split": result["split"]} if "split" in result else {})}, agent=agent.id)
         return result
+
+    def refund_failed_consults(self, agent: Agent) -> list[str]:
+        """Reverse what a failed consultation charged before Sept 23, 2026, once per session.
+
+        Until then `_consult` charged the agent whatever the House paid, even when Merton "could
+        not be reached" or "returned an unreadable answer" (the words `Merton.consult` writes on
+        the row). Each such charge (`credit.charge` id `merton:<session>`) is reversed by one
+        `credit.grant` (id `merton-refund:<session>`, so a restart cannot refund twice) naming the
+        failed consultation. Called at the start of every research pass: cheap (one bounded read
+        of the agent's own rows), and it reaches agents that never consult again."""
+        refunded = []
+        for entry in self.ledger.read(kinds="agent.research", agent=agent.id, limit=400, newest=True):
+            p = entry.payload
+            if p.get("tool") != "merton" or p.get("charged") is False:
+                continue
+            answer = str(p.get("answer") or "")
+            failed = bool(p.get("error")) or answer.startswith(("Merton could not be reached", "Merton returned an unreadable answer"))
+            session = str(p.get("session") or "")
+            if not failed or not session:
+                continue
+            try:
+                amount = Decimal(str(p.get("cost_usd") or 0))
+            except ArithmeticError:
+                continue
+            if amount <= 0 or self.ledger.get(f"merton:{session}") is None or self.ledger.get(f"merton-refund:{session}") is not None:
+                continue
+            self.economy.grant(agent.id, amount, f"refund of the failed consultation in session {session}: {answer[:120]}",
+                               id=f"merton-refund:{session}")
+            refunded.append(session)
+        return refunded
 
     def _last_consult(self, agent: Agent) -> float | None:
         """When this agent last hired him. Its own record, so a question it could not afford or
